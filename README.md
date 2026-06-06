@@ -131,6 +131,8 @@ cargo run -p cortex-cli -- mount tests/mounts/cortexfs
 
 `tests/mounts/cortexfs` 只用于仓库内集成测试，不是实机推荐安装目录。
 
+已挂载实例不会热更新。开发期以 Git commit 作为唯一刷新边界；要观察新 ABI，需要在提交后重建并重新挂载。
+
 查看挂载树：
 
 ```bash

@@ -52,6 +52,33 @@ fn projection_exposes_ctx_home_alias_for_user_space() -> fuse3::Result<()> {
             .is_some(),
         "CTX_HOME must expose the user's thread namespace"
     );
+    assert_eq!(
+        fs.lookup_path(["home", "1000", "tools", "list"])
+            .and_then(crate::Node::content),
+        Some("filesystem.read\nmcp.local-fs.read_file\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["home", "1000", "mcp", "servers_list"])
+            .and_then(crate::Node::content),
+        Some("local-fs\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["home", "1000", "skills", "enabled"])
+            .and_then(crate::Node::content),
+        Some("cortexfs-test\n")
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "memory", "semantic"])
+            .is_some(),
+        "CTX_HOME must expose the user's memory layers"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "exports", "formats"])
+            .and_then(crate::Node::content)
+            .is_some_and(|formats| formats.contains("conversations.jsonl")
+                && formats.contains("tool_calls.jsonl")),
+        "CTX_HOME must expose training-friendly export formats"
+    );
     Ok(())
 }
 
