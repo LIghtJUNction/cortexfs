@@ -235,9 +235,14 @@ fn projection_exposes_shared_collaboration_space() {
         Some("open\n")
     );
     assert!(
+        fs.lookup_path(["shared", "project-a", "collab", "blackboard", "artifact"])
+            .is_some(),
+        "blackboard artifact directory must be the primary namespace"
+    );
+    assert!(
         fs.lookup_path(["shared", "project-a", "collab", "blackboard", "artifacts"])
             .is_some(),
-        "blackboard artifacts directory must exist"
+        "blackboard artifacts directory remains a compatibility namespace"
     );
     assert_eq!(
         fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "owner"])

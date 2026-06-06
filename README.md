@@ -150,9 +150,9 @@ cargo run -p cortex-cli -- mount tests/mounts/cortexfs
 mnt=tests/mounts/cortexfs
 
 cat "$mnt/status"
-cat "$mnt/cap/formats"
-cat "$mnt/cap/providers"
-cat "$mnt/cap/tools"
+cat "$mnt/cap/format"
+cat "$mnt/cap/provider"
+cat "$mnt/cap/tool"
 find "$mnt" -maxdepth 2 -type f | sort
 ```
 

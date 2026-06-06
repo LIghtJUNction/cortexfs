@@ -290,7 +290,7 @@ fn export_filters_rebuild_conversation_view_by_provider() -> fuse3::Result<()> {
 
     let filters = fs
         .tree
-        .path_inode(&["spaces", "users", "1000", "export", "filters"])
+        .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     {
         let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
@@ -407,7 +407,7 @@ fn export_filters_reject_invalid_values() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let filters = fs
         .tree
-        .path_inode(&["spaces", "users", "1000", "export", "filters"])
+        .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let provider = runtime

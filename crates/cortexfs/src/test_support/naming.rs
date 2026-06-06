@@ -209,6 +209,69 @@ fn home_thread_and_export_use_singular_primary_directories() {
 }
 
 #[test]
+fn cap_index_files_use_singular_primary_names() {
+    let fs = CortexFs::new();
+
+    for (primary, compat) in [
+        ("format", "formats"),
+        ("provider", "providers"),
+        ("model", "models"),
+        ("skill", "skills"),
+        ("tool", "tools"),
+    ] {
+        assert!(
+            fs.lookup_path(["cap", primary]).is_some(),
+            "cap/{primary} must be the primary capability index"
+        );
+        assert!(
+            fs.lookup_path(["cap", compat]).is_some(),
+            "cap/{compat} remains a compatibility capability index"
+        );
+    }
+}
+
+#[test]
+fn nested_collection_names_use_singular_primary_directories() {
+    let fs = CortexFs::new();
+
+    for (primary, compat) in [
+        (
+            &["home", "1000", "export", "filter"][..],
+            &["home", "1000", "export", "filters"][..],
+        ),
+        (
+            &["home", "1000", "thread", "demo", "tool-loop", "limit"][..],
+            &["home", "1000", "thread", "demo", "tool-loop", "limits"][..],
+        ),
+        (
+            &["shared", "project-a", "collab", "blackboard", "artifact"][..],
+            &["shared", "project-a", "collab", "blackboard", "artifacts"][..],
+        ),
+        (&["vector", "store"][..], &["vector", "stores"][..]),
+        (&["vector", "index"][..], &["vector", "indexes"][..]),
+        (
+            &["db", "postgres", "migration"][..],
+            &["db", "postgres", "migrations"][..],
+        ),
+        (
+            &["db", "postgres", "pool"][..],
+            &["db", "postgres", "pools"][..],
+        ),
+    ] {
+        assert!(
+            fs.tree.path_inode(primary).is_some(),
+            "{} must be the primary namespace",
+            primary.join("/")
+        );
+        assert!(
+            fs.tree.path_inode(compat).is_some(),
+            "{} remains a compatibility namespace",
+            compat.join("/")
+        );
+    }
+}
+
+#[test]
 fn agent_helper_capability_views_use_singular_primary_directories() {
     let fs = CortexFs::new();
 
@@ -248,6 +311,8 @@ fn provider_config_uses_short_url_directory() -> fuse3::Result<()> {
     let provider = crate::default_provider_id();
     let url = fs.path_inode(["provider", provider, "url"])?;
 
+    assert!(fs.lookup_path(["provider", provider, "format"]).is_some());
+    assert!(fs.lookup_path(["providers", provider, "formats"]).is_some());
     assert!(fs.lookup_path(["provider", provider, "url"]).is_some());
     assert!(fs.lookup_path(["providers", provider, "url"]).is_some());
     assert!(

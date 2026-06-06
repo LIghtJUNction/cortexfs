@@ -92,23 +92,41 @@ impl NodeTreeBuilder {
         self.add_file(unix, "status", "daemon_required\n");
     }
 
-    pub fn build_design_projection(mut self) -> StaticTree {
-        self.add_file(ROOT_INODE, "status", STATUS_TEXT);
+    fn add_cap_projection(&mut self) -> Inode {
         let capabilities = self.add_dir(ROOT_INODE, "cap");
+        self.add_file(
+            capabilities,
+            "format",
+            "openai.chat\nopenai.responses\nanthropic.messages\ngoogle.generate_content\n",
+        );
         self.add_file(
             capabilities,
             "formats",
             "openai.chat\nopenai.responses\nanthropic.messages\ngoogle.generate_content\n",
         );
+        self.add_owned_file(capabilities, "provider", provider_list());
         self.add_owned_file(capabilities, "providers", provider_list());
+        self.add_owned_file(capabilities, "model", global_model_list());
         self.add_owned_file(capabilities, "models", global_model_list());
         self.add_file(capabilities, "mcp", "local-fs\n");
+        self.add_file(capabilities, "skill", "cortexfs-test\n");
         self.add_file(capabilities, "skills", "cortexfs-test\n");
+        self.add_owned_file(
+            capabilities,
+            "tool",
+            newline_join(cortex_tools::GLOBAL_TOOLS),
+        );
         self.add_owned_file(
             capabilities,
             "tools",
             newline_join(cortex_tools::GLOBAL_TOOLS),
         );
+        capabilities
+    }
+
+    pub fn build_design_projection(mut self) -> StaticTree {
+        self.add_file(ROOT_INODE, "status", STATUS_TEXT);
+        let capabilities = self.add_cap_projection();
         self.add_local_api_projection(ROOT_INODE);
 
         let formats = self.add_dir(ROOT_INODE, "format");
@@ -308,6 +326,7 @@ impl NodeTreeBuilder {
         self.add_file(provider, "context", "local:provider_r:provider_t:s0\n");
         self.add_file(provider, "family", projection.family);
         self.add_file(provider, "name", projection.name);
+        self.add_owned_file(provider, "format", newline_list(projection.formats.iter()));
         self.add_owned_file(provider, "formats", newline_list(projection.formats.iter()));
         let url = self.add_dir(provider, "url");
         self.add_file(url, "default", projection.base_url);
@@ -390,7 +409,9 @@ impl NodeTreeBuilder {
         );
         self.add_file(exports, "redaction", "policy\n");
         self.add_file(exports, "dedupe", "fingerprint\n");
-        self.add_dir(exports, "filters");
+        let filter = self.add_dir(exports, "filter");
+        let filters_compat = self.add_dir(exports, "filters");
+        self.attach_children_alias(filters_compat, filter);
         let exports_compat = self.add_dir(user, "exports");
         self.attach_children_alias(exports_compat, exports);
         self.add_space_convert_projection(user);
@@ -520,7 +541,9 @@ impl NodeTreeBuilder {
             "{\"agent\":\"helper\",\"note\":\"project collaboration space initialized\"}\n",
         );
         self.add_file(blackboard, "state", "open\n");
-        self.add_dir(blackboard, "artifacts");
+        let artifact = self.add_dir(blackboard, "artifact");
+        let artifacts_compat = self.add_dir(blackboard, "artifacts");
+        self.attach_children_alias(artifacts_compat, artifact);
     }
 
     fn add_collab_tasks_projection(&mut self, collab: Inode) {
@@ -669,10 +692,12 @@ impl NodeTreeBuilder {
         self.add_file(control, "cancel", "unsupported\n");
         let tool_loop = self.add_dir(thread, "tool-loop");
         self.add_file(tool_loop, "state", "idle\n");
-        let limits = self.add_dir(tool_loop, "limits");
-        self.add_file(limits, "max_steps", "64\n");
-        self.add_file(limits, "max_time_ms", "300000\n");
-        self.add_file(limits, "max_cost_usd", "0.10\n");
+        let limit = self.add_dir(tool_loop, "limit");
+        self.add_file(limit, "max_steps", "64\n");
+        self.add_file(limit, "max_time_ms", "300000\n");
+        self.add_file(limit, "max_cost_usd", "0.10\n");
+        let limits_compat = self.add_dir(tool_loop, "limits");
+        self.attach_children_alias(limits_compat, limit);
         let tool_control = self.add_dir(tool_loop, "control");
         self.add_file(tool_control, "continue", "unsupported\n");
         self.add_file(tool_control, "pause", "unsupported\n");
@@ -850,7 +875,7 @@ impl NodeTreeBuilder {
     fn add_vector_projection(&mut self, parent: Inode) {
         let vector = self.add_dir(parent, "vector");
         self.add_file(vector, "context", "local:vector_r:vector_index_t:s0\n");
-        let stores = self.add_dir(vector, "stores");
+        let stores = self.add_dir(vector, "store");
         self.add_file(stores, "count", "4\n");
         self.add_file(stores, "list", "local\npgvector\nqdrant\nmilvus\n");
         for store in ["local", "qdrant", "milvus"] {
@@ -865,7 +890,11 @@ impl NodeTreeBuilder {
         self.add_file(pgvector, "distance", "cosine\n");
         self.add_file(pgvector, "collections", "\n");
         self.add_file(pgvector, "refresh", "unsupported\n");
-        self.add_dir(vector, "indexes");
+        let stores_compat = self.add_dir(vector, "stores");
+        self.attach_children_alias(stores_compat, stores);
+        let index = self.add_dir(vector, "index");
+        let indexes_compat = self.add_dir(vector, "indexes");
+        self.attach_children_alias(indexes_compat, index);
     }
 
     fn add_databases_projection(&mut self, databases: Inode) {
@@ -878,8 +907,12 @@ impl NodeTreeBuilder {
         self.add_file(postgres, "status", "disabled\n");
         let dsn = self.add_dir(postgres, "dsn");
         self.add_file(dsn, "default", "\n");
-        self.add_dir(postgres, "migrations");
-        self.add_dir(postgres, "pools");
+        let migration = self.add_dir(postgres, "migration");
+        let migrations_compat = self.add_dir(postgres, "migrations");
+        self.attach_children_alias(migrations_compat, migration);
+        let pool = self.add_dir(postgres, "pool");
+        let pools_compat = self.add_dir(postgres, "pools");
+        self.attach_children_alias(pools_compat, pool);
     }
 
     fn add_audit_projection(&mut self, parent: Inode) {

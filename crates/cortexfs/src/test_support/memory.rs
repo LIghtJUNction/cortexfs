@@ -83,19 +83,25 @@ fn assert_memory_projection(fs: &CortexFs) -> fuse3::Result<()> {
 
 fn assert_vector_projection(fs: &CortexFs) -> fuse3::Result<()> {
     assert_eq!(
-        fs.lookup_path(["vector", "stores", "pgvector", "distance"])
+        fs.lookup_path(["vector", "store", "pgvector", "distance"])
             .and_then(crate::Node::content),
         Some("cosine\n")
     );
     assert_eq!(
-        fs.lookup_path(["vector", "stores", "count"])
+        fs.lookup_path(["vector", "store", "count"])
             .and_then(crate::Node::content),
         Some("4\n")
     );
     assert_eq!(
-        fs.lookup_path(["vector", "stores", "list"])
+        fs.lookup_path(["vector", "store", "list"])
             .and_then(crate::Node::content),
         Some("local\npgvector\nqdrant\nmilvus\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["vector", "stores", "list"])
+            .and_then(crate::Node::content),
+        Some("local\npgvector\nqdrant\nmilvus\n"),
+        "vector/stores remains a compatibility namespace"
     );
     assert_eq!(
         fs.lookup_path(["vector", "context"])
@@ -103,7 +109,7 @@ fn assert_vector_projection(fs: &CortexFs) -> fuse3::Result<()> {
         Some("local:vector_r:vector_index_t:s0\n")
     );
     assert!(
-        fs.lookup_path(["vector", "stores", "pgvector", "refresh"])
+        fs.lookup_path(["vector", "store", "pgvector", "refresh"])
             .and_then(crate::Node::content)
             .is_some(),
         "pgvector refresh keeps a static ABI path"
@@ -111,21 +117,21 @@ fn assert_vector_projection(fs: &CortexFs) -> fuse3::Result<()> {
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert_eq!(
         runtime
-            .node(fs.path_inode(["vector", "stores", "pgvector", "enabled"])?)
+            .node(fs.path_inode(["vector", "store", "pgvector", "enabled"])?)
             .and_then(crate::Node::content),
         Some("0\n"),
         "pgvector enabled is runtime-backed"
     );
     assert_eq!(
         runtime
-            .node(fs.path_inode(["vector", "stores", "pgvector", "status"])?)
+            .node(fs.path_inode(["vector", "store", "pgvector", "status"])?)
             .and_then(crate::Node::content),
         Some("disabled\n"),
         "pgvector status is runtime-backed"
     );
     assert_eq!(
         runtime
-            .node(fs.path_inode(["vector", "stores", "pgvector", "collections"])?)
+            .node(fs.path_inode(["vector", "store", "pgvector", "collections"])?)
             .and_then(crate::Node::content),
         Some("\n"),
         "pgvector collections is runtime-backed"
@@ -176,10 +182,10 @@ fn assert_database_projection(fs: &CortexFs) -> fuse3::Result<()> {
 #[test]
 fn pgvector_store_enabled_and_refresh_update_runtime_view() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let enabled = fs.path_inode(["vector", "stores", "pgvector", "enabled"])?;
-    let status = fs.path_inode(["vector", "stores", "pgvector", "status"])?;
-    let collections = fs.path_inode(["vector", "stores", "pgvector", "collections"])?;
-    let refresh = fs.path_inode(["vector", "stores", "pgvector", "refresh"])?;
+    let enabled = fs.path_inode(["vector", "store", "pgvector", "enabled"])?;
+    let status = fs.path_inode(["vector", "store", "pgvector", "status"])?;
+    let collections = fs.path_inode(["vector", "store", "pgvector", "collections"])?;
+    let refresh = fs.path_inode(["vector", "store", "pgvector", "refresh"])?;
     let dsn = fs
         .tree
         .path_inode(crate::POSTGRES_DSN_DIR_PATH)
@@ -219,7 +225,7 @@ fn pgvector_store_enabled_and_refresh_update_runtime_view() -> fuse3::Result<()>
     assert_eq!(fs.node_content(collections)?, "memory_semantic\n");
     assert_eq!(
         fs.node_content(fs.control_file_inode("last_control")?)?,
-        "vector/stores/pgvector/refresh\n"
+        "vector/store/pgvector/refresh\n"
     );
     let audit = fs.node_content(fs.audit_events_inode()?)?;
     assert!(audit.contains("\"format\":\"vector.store.pgvector\""));
@@ -232,8 +238,8 @@ fn pgvector_store_enabled_and_refresh_update_runtime_view() -> fuse3::Result<()>
 #[test]
 fn pgvector_store_control_nodes_reject_invalid_writes() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let enabled = fs.path_inode(["vector", "stores", "pgvector", "enabled"])?;
-    let refresh = fs.path_inode(["vector", "stores", "pgvector", "refresh"])?;
+    let enabled = fs.path_inode(["vector", "store", "pgvector", "enabled"])?;
+    let refresh = fs.path_inode(["vector", "store", "pgvector", "refresh"])?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
 
     assert!(runtime.write(enabled, 0, b"true\n").is_err());
