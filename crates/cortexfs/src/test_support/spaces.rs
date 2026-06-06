@@ -64,7 +64,7 @@ fn projection_exposes_home_uid_alias_for_user_space() -> fuse3::Result<()> {
         Some("filesystem.read\nmcp.local-fs.read_file\n")
     );
     assert_eq!(
-        fs.lookup_path(["home", "1000", "mcp", "servers_list"])
+        fs.lookup_path(["home", "1000", "mcp", "servers", "list"])
             .and_then(crate::Node::content),
         Some("local-fs\n")
     );
@@ -113,12 +113,12 @@ fn projection_exposes_space_capability_and_maintenance_indexes() {
         Some("filesystem.read\nmcp.local-fs.read_file\n")
     );
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "mcp", "servers_count"])
+        fs.lookup_path(["spaces", "users", "1000", "mcp", "servers", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "mcp", "tools_list"])
+        fs.lookup_path(["spaces", "users", "1000", "mcp", "tools", "list"])
             .and_then(crate::Node::content),
         Some("local-fs.read_file\n")
     );

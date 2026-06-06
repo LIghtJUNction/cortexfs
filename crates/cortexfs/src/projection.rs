@@ -360,6 +360,12 @@ impl NodeTreeBuilder {
 
     fn add_space_mcp_projection(&mut self, user: Inode) {
         let mcp = self.add_dir(user, "mcp");
+        let servers = self.add_dir(mcp, "servers");
+        self.add_file(servers, "count", "1\n");
+        self.add_file(servers, "list", "local-fs\n");
+        let tools = self.add_dir(mcp, "tools");
+        self.add_file(tools, "count", "1\n");
+        self.add_file(tools, "list", "local-fs.read_file\n");
         self.add_file(mcp, "servers_count", "1\n");
         self.add_file(mcp, "servers_list", "local-fs\n");
         self.add_file(mcp, "tools_count", "1\n");
