@@ -97,9 +97,9 @@ impl RuntimeState {
         offset: u64,
         data: &[u8],
     ) -> fuse3::Result<Option<u32>> {
-        if let Some(provider) = self.provider_for_base_url_current_inode(inode) {
+        if let Some(provider) = self.provider_for_url_current_inode(inode) {
             return self
-                .write_provider_base_url_current(provider, offset, data)
+                .write_provider_url_current(provider, offset, data)
                 .map(Some);
         }
         if let Some(provider) = self.provider_for_enabled_current_inode(inode) {
@@ -125,7 +125,7 @@ impl RuntimeState {
         Ok(None)
     }
 
-    fn write_provider_base_url_current(
+    fn write_provider_url_current(
         &mut self,
         provider: &str,
         offset: u64,
@@ -134,15 +134,15 @@ impl RuntimeState {
         if offset != 0 {
             return Err(libc::EINVAL.into());
         }
-        let base_url = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
-        let trimmed = base_url.trim();
+        let url = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
+        let trimmed = url.trim();
         if !trimmed.is_empty()
             && !trimmed.starts_with("http://")
             && !trimmed.starts_with("https://")
         {
             return Err(libc::EINVAL.into());
         }
-        let Some(inodes) = self.provider_base_url.get(provider).copied() else {
+        let Some(inodes) = self.provider_url.get(provider).copied() else {
             return Err(libc::EINVAL.into());
         };
         let current = if trimmed.is_empty() {
@@ -320,13 +320,11 @@ impl RuntimeState {
             .find_map(|(&provider, &refresh_inode)| (refresh_inode == inode).then_some(provider))
     }
 
-    fn provider_for_base_url_current_inode(&self, inode: Inode) -> Option<&'static str> {
-        self.provider_base_url
-            .iter()
-            .find_map(|(&provider, inodes)| {
-                (inodes.current == Some(inode) || inodes.compat_current == Some(inode))
-                    .then_some(provider)
-            })
+    fn provider_for_url_current_inode(&self, inode: Inode) -> Option<&'static str> {
+        self.provider_url.iter().find_map(|(&provider, inodes)| {
+            (inodes.current == Some(inode) || inodes.compat_current == Some(inode))
+                .then_some(provider)
+        })
     }
 
     fn provider_for_enabled_current_inode(&self, inode: Inode) -> Option<&'static str> {

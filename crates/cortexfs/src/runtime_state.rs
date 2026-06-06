@@ -176,7 +176,7 @@ pub struct RuntimeState {
     pub(crate) postgres_dsn_current_inode: Option<Inode>,
     pub(crate) postgres_dsn_effective_inode: Option<Inode>,
     pub(crate) postgres_dsn_source_inode: Option<Inode>,
-    pub(crate) provider_base_url: BTreeMap<&'static str, ProviderConfigInodes>,
+    pub(crate) provider_url: BTreeMap<&'static str, ProviderConfigInodes>,
     pub(crate) provider_enabled: BTreeMap<&'static str, ProviderConfigInodes>,
     pub(crate) provider_health_check: BTreeMap<&'static str, Inode>,
     pub(crate) provider_health_status: BTreeMap<&'static str, Inode>,

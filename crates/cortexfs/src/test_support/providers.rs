@@ -11,13 +11,13 @@ fn provider_runtime_files_follow_specs() -> fuse3::Result<()> {
     let primary = crate::PROVIDER_SPECS
         .first()
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let primary_base_url = fs.provider_child_dir_inode(primary.id, "url")?;
+    let primary_url = fs.provider_child_dir_inode(primary.id, "url")?;
     let primary_enabled = fs.provider_child_dir_inode(primary.id, "enabled")?;
     let primary_health = fs.provider_child_dir_inode(primary.id, "health")?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert_eq!(
         runtime
-            .lookup_child(primary_base_url, "effective")
+            .lookup_child(primary_url, "effective")
             .and_then(crate::Node::content),
         Some(primary.default_base_url)
     );
@@ -58,11 +58,11 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
     let compatible = crate::PROVIDER_SPECS
         .get(1)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let compatible_base_url = fs.provider_child_dir_inode(compatible.id, "url")?;
+    let compatible_url = fs.provider_child_dir_inode(compatible.id, "url")?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert_eq!(
         runtime
-            .lookup_child(compatible_base_url, "effective")
+            .lookup_child(compatible_url, "effective")
             .and_then(crate::Node::content),
         Some(compatible.default_base_url)
     );
@@ -518,25 +518,25 @@ fn secondary_provider_config_updates_effective_values() -> fuse3::Result<()> {
     let provider = crate::PROVIDER_SPECS
         .get(1)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let base_url = fs.provider_child_dir_inode(provider.id, "url")?;
+    let url = fs.provider_child_dir_inode(provider.id, "url")?;
     let enabled = fs.provider_child_dir_inode(provider.id, "enabled")?;
     let health = fs.provider_child_dir_inode(provider.id, "health")?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
 
-    let base_url_current = runtime
-        .lookup_child(base_url, "current")
+    let url_current = runtime
+        .lookup_child(url, "current")
         .map(crate::Node::inode)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    runtime.write(base_url_current, 0, b"https://relay.example.test/v1\n")?;
+    runtime.write(url_current, 0, b"https://relay.example.test/v1\n")?;
     assert_eq!(
         runtime
-            .lookup_child(base_url, "effective")
+            .lookup_child(url, "effective")
             .and_then(crate::Node::content),
         Some("https://relay.example.test/v1\n")
     );
     assert_eq!(
         runtime
-            .lookup_child(base_url, "source")
+            .lookup_child(url, "source")
             .and_then(crate::Node::content),
         Some("current\n")
     );
@@ -567,27 +567,27 @@ fn secondary_provider_config_updates_effective_values() -> fuse3::Result<()> {
 }
 
 #[test]
-fn primary_provider_base_url_current_updates_effective_and_source() -> fuse3::Result<()> {
+fn primary_provider_url_current_updates_effective_and_source() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let provider = crate::PROVIDER_SPECS
         .first()
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let base_url = fs.provider_child_dir_inode(provider.id, "url")?;
+    let url = fs.provider_child_dir_inode(provider.id, "url")?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let current = runtime
-        .lookup_child(base_url, "current")
+        .lookup_child(url, "current")
         .map(crate::Node::inode)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     runtime.write(current, 0, b"http://127.0.0.1:11435\n")?;
     assert_eq!(
         runtime
-            .lookup_child(base_url, "effective")
+            .lookup_child(url, "effective")
             .and_then(crate::Node::content),
         Some("http://127.0.0.1:11435\n")
     );
     assert_eq!(
         runtime
-            .lookup_child(base_url, "source")
+            .lookup_child(url, "source")
             .and_then(crate::Node::content),
         Some("current\n")
     );
