@@ -2249,7 +2249,7 @@ impl RuntimeState {
         if let Some(inode) = inode {
             self.update_dynamic_file(inode, value);
         }
-        self.refresh_conversations_export();
+        self.refresh_training_exports();
         self.append_audit("exports.filters", "current", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }

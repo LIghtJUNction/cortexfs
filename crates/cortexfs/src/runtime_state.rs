@@ -8,7 +8,7 @@ use crate::execution::{FsExecutionPlane, default_execution_plane};
 use crate::runtime_parents::RuntimeParents;
 use crate::runtime_types::{
     AgentTask, ApiRouteInodes, ClusterTask, ConversationExportRow, MemoryItem, PendingResponse,
-    PreferencePair, PromptRender, ProviderConfigInodes, UserModelAccessInodes,
+    PreferencePair, PromptRender, ProviderConfigInodes, TrainingExportRow, UserModelAccessInodes,
 };
 use crate::{DYNAMIC_INODE_BASE, Node};
 
@@ -77,6 +77,8 @@ pub struct RuntimeState {
     pub(crate) audit_tool_calls: usize,
     pub(crate) audit_agent_tasks: usize,
     pub(crate) conversation_rows: Vec<ConversationExportRow>,
+    pub(crate) tool_call_rows: Vec<TrainingExportRow>,
+    pub(crate) agent_trace_rows: Vec<TrainingExportRow>,
     pub(crate) conversations_export_inode: Option<Inode>,
     pub(crate) sft_export_inode: Option<Inode>,
     pub(crate) preference_export_inode: Option<Inode>,

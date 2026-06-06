@@ -164,6 +164,67 @@ fn filesystem_read_tool_invoke_materializes_response_after_drain() -> fuse3::Res
 }
 
 #[test]
+fn export_agent_filter_rebuilds_tool_and_agent_trace_views() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.create_staged_thread_request(
+        "tool-filter-source.tmp",
+        "{\"messages\":[{\"role\":\"user\",\"content\":\"filter visible\"}]}\n",
+    )?;
+    fs.submit_thread_request("tool-filter-source.tmp", "tool-filter-source.req.json")?;
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    fs.create_staged_tool_request(
+        "filter-read.tmp",
+        "{\"path\":\"home/1000/thread/demo/messages.jsonl\"}\n",
+    )?;
+    fs.submit_tool_request("filter-read.tmp", "filter-read.req.json")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let tool_calls = fs.export_file_inode("tool_calls.jsonl")?;
+    let agent_traces = fs.export_file_inode("agent_traces.jsonl")?;
+    assert!(fs.node_content(tool_calls)?.contains("filter visible"));
+    assert!(fs.node_content(agent_traces)?.contains("filter visible"));
+
+    let filter = fs
+        .tree
+        .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let agent = runtime
+            .lookup_child(filter, "agent")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(agent, 0, b"other-agent\n")?;
+    }
+    assert_eq!(fs.node_content(tool_calls)?, crate::EMPTY_TEXT);
+    assert_eq!(fs.node_content(agent_traces)?, crate::EMPTY_TEXT);
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let agent = runtime
+            .lookup_child(filter, "agent")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(agent, 0, b"helper\n")?;
+    }
+    assert!(fs.node_content(tool_calls)?.contains("filter visible"));
+    assert!(fs.node_content(agent_traces)?.contains("filter visible"));
+    assert!(
+        fs.node_content(fs.audit_events_inode()?)?
+            .contains("\"format\":\"exports.filters\"")
+    );
+    Ok(())
+}
+
+#[test]
 fn tool_submit_is_not_blocked_by_provider_model_gate() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let provider = crate::PROVIDER_SPECS

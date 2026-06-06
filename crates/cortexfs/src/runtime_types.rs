@@ -119,6 +119,28 @@ pub struct ConversationExportRow {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
+pub struct TrainingExportRow {
+    pub line: String,
+    pub time: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub agent: Option<String>,
+    pub subject: Option<String>,
+    pub space: Option<String>,
+    pub failed: bool,
+}
+
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct TrainingExportMetadata {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub agent: Option<String>,
+    pub subject: Option<String>,
+    pub space: Option<String>,
+    pub failed: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RouteMetadata {
     pub provider: String,
     pub model: String,
