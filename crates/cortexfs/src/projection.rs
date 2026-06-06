@@ -781,6 +781,7 @@ impl NodeTreeBuilder {
         let worker = self.add_dir(workers, "local-worker");
         self.add_file(worker, "state", "idle\n");
         self.add_file(worker, "heartbeat", "\n");
+        self.add_file(worker, "cap", "fuse\nprovider.registry\nlocal_runtime\n");
         self.add_file(
             worker,
             "capabilities",
@@ -1001,6 +1002,7 @@ impl NodeTreeBuilder {
         self.add_dir(server, "env");
         self.add_file(server, "status", "configured\n");
         self.add_file(server, "pid", "\n");
+        self.add_file(server, "cap", "tools\nresources\nprompts\n");
         self.add_file(server, "capabilities", "tools\nresources\nprompts\n");
         let control = self.add_dir(server, "control");
         for file in ["start", "stop", "restart", "reload"] {

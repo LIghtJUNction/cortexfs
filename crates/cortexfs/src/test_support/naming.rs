@@ -391,3 +391,29 @@ fn shared_collab_uses_singular_primary_directories() {
             .is_some()
     );
 }
+
+#[test]
+fn local_capability_files_use_cap_as_primary_name() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["cluster", "local", "worker", "local-worker", "cap"])
+            .is_some(),
+        "cluster/local/worker/<id>/cap must be the primary capability file"
+    );
+    assert!(
+        fs.lookup_path(["mcp", "server", "local-fs", "cap"])
+            .is_some(),
+        "mcp/server/<id>/cap must be the primary capability file"
+    );
+    assert!(
+        fs.lookup_path(["cluster", "local", "worker", "local-worker", "capabilities"])
+            .is_some(),
+        "cluster/local/worker/<id>/capabilities remains a compatibility capability file"
+    );
+    assert!(
+        fs.lookup_path(["mcp", "server", "local-fs", "capabilities"])
+            .is_some(),
+        "mcp/server/<id>/capabilities remains a compatibility capability file"
+    );
+}

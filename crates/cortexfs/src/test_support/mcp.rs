@@ -110,9 +110,15 @@ fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
         Some("local:mcp_r:mcp_server_t:s0\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "server", "local-fs", "capabilities"])
+        fs.lookup_path(["mcp", "server", "local-fs", "cap"])
             .and_then(crate::Node::content),
         Some("tools\nresources\nprompts\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["mcp", "server", "local-fs", "capabilities"])
+            .and_then(crate::Node::content),
+        Some("tools\nresources\nprompts\n"),
+        "mcp server capabilities remains a compatibility file"
     );
     assert_eq!(
         fs.lookup_path(["mcp", "tool", "local-fs.read_file", "permissions"])
