@@ -26,7 +26,7 @@ fn projection_exposes_helper_agent_profile_runtime_and_socket() -> fuse3::Result
         Some(crate::LOCAL_AGENT_CONTEXT_TEXT)
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "profile", "default_model", "provider"])
+        fs.lookup_path(["agents", "helper", "profile", "model", "provider"])
             .and_then(crate::Node::content),
         Some(format!("{}\n", crate::default_provider_id()).as_str())
     );
@@ -87,17 +87,17 @@ fn projection_exposes_helper_agent_profile_runtime_and_socket() -> fuse3::Result
         Some("filesystem.read\nmcp.local-fs.read_file\n")
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers_count"])
+        fs.lookup_path(["agents", "helper", "mcp", "servers", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers_list"])
+        fs.lookup_path(["agents", "helper", "mcp", "servers", "list"])
             .and_then(crate::Node::content),
         Some("local-fs\n")
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "mcp", "enabled_servers"])
+        fs.lookup_path(["agents", "helper", "mcp", "servers", "enabled"])
             .and_then(crate::Node::content),
         Some("local-fs\n")
     );

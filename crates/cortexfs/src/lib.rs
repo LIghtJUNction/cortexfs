@@ -1450,12 +1450,25 @@ impl RuntimeState {
         let base_url_effective =
             self.add_dynamic_file(parents.base_url, "effective", default_base_url);
         let base_url_source = self.add_dynamic_file(parents.base_url, "source", "default\n");
+        let (compat_current, compat_effective, compat_source) =
+            parents
+                .base_url_compat
+                .map_or((None, None, None), |base_url_compat| {
+                    (
+                        Some(self.add_dynamic_file(base_url_compat, "current", default_base_url)),
+                        Some(self.add_dynamic_file(base_url_compat, "effective", default_base_url)),
+                        Some(self.add_dynamic_file(base_url_compat, "source", "default\n")),
+                    )
+                });
         self.provider_base_url.insert(
             provider,
             ProviderConfigInodes {
                 current: Some(base_url_current),
                 effective: Some(base_url_effective),
                 source: Some(base_url_source),
+                compat_current,
+                compat_effective,
+                compat_source,
                 status: None,
             },
         );
@@ -1476,6 +1489,9 @@ impl RuntimeState {
                 current: Some(enabled_current),
                 effective: Some(enabled_effective),
                 source: Some(enabled_source),
+                compat_current: None,
+                compat_effective: None,
+                compat_source: None,
                 status: Some(status),
             },
         );

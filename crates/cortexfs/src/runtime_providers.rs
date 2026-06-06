@@ -161,12 +161,21 @@ impl RuntimeState {
             self.update_dynamic_file(inode, current.clone());
         }
         if let Some(inode) = inodes.effective {
-            self.update_dynamic_file(inode, current);
+            self.update_dynamic_file(inode, current.clone());
         }
         if let Some(inode) = inodes.source {
             self.update_dynamic_file(inode, source);
         }
-        let audit_format = format!("provider.{provider}.base_url");
+        if let Some(inode) = inodes.compat_current {
+            self.update_dynamic_file(inode, current.clone());
+        }
+        if let Some(inode) = inodes.compat_effective {
+            self.update_dynamic_file(inode, current);
+        }
+        if let Some(inode) = inodes.compat_source {
+            self.update_dynamic_file(inode, source);
+        }
+        let audit_format = format!("provider.{provider}.url");
         self.append_audit(&audit_format, "current", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
@@ -314,7 +323,10 @@ impl RuntimeState {
     fn provider_for_base_url_current_inode(&self, inode: Inode) -> Option<&'static str> {
         self.provider_base_url
             .iter()
-            .find_map(|(&provider, inodes)| (inodes.current == Some(inode)).then_some(provider))
+            .find_map(|(&provider, inodes)| {
+                (inodes.current == Some(inode) || inodes.compat_current == Some(inode))
+                    .then_some(provider)
+            })
     }
 
     fn provider_for_enabled_current_inode(&self, inode: Inode) -> Option<&'static str> {

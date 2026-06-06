@@ -224,7 +224,9 @@ fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, Provide
     PROVIDER_SPECS
         .iter()
         .filter_map(|provider| {
-            let base_url = tree.path_inode_owned(&provider_child_path(provider.id, "base_url"))?;
+            let base_url = tree.path_inode_owned(&provider_child_path(provider.id, "url"))?;
+            let base_url_compat =
+                tree.path_inode_owned(&provider_child_path(provider.id, "base_url"));
             let enabled = tree.path_inode_owned(&provider_child_path(provider.id, "enabled"))?;
             let health = tree.path_inode_owned(&provider_child_path(provider.id, "health"))?;
             let models = tree.path_inode_owned(&provider_child_path(provider.id, "models"))?;
@@ -233,6 +235,7 @@ fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, Provide
                 provider.id,
                 ProviderRuntimeParents {
                     base_url,
+                    base_url_compat,
                     enabled,
                     health,
                     models,

@@ -11,7 +11,7 @@ fn provider_runtime_files_follow_specs() -> fuse3::Result<()> {
     let primary = crate::PROVIDER_SPECS
         .first()
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let primary_base_url = fs.provider_child_dir_inode(primary.id, "base_url")?;
+    let primary_base_url = fs.provider_child_dir_inode(primary.id, "url")?;
     let primary_enabled = fs.provider_child_dir_inode(primary.id, "enabled")?;
     let primary_health = fs.provider_child_dir_inode(primary.id, "health")?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
@@ -58,7 +58,7 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
     let compatible = crate::PROVIDER_SPECS
         .get(1)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let compatible_base_url = fs.provider_child_dir_inode(compatible.id, "base_url")?;
+    let compatible_base_url = fs.provider_child_dir_inode(compatible.id, "url")?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert_eq!(
         runtime
@@ -518,7 +518,7 @@ fn secondary_provider_config_updates_effective_values() -> fuse3::Result<()> {
     let provider = crate::PROVIDER_SPECS
         .get(1)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let base_url = fs.provider_child_dir_inode(provider.id, "base_url")?;
+    let base_url = fs.provider_child_dir_inode(provider.id, "url")?;
     let enabled = fs.provider_child_dir_inode(provider.id, "enabled")?;
     let health = fs.provider_child_dir_inode(provider.id, "health")?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
@@ -561,7 +561,7 @@ fn secondary_provider_config_updates_effective_values() -> fuse3::Result<()> {
     drop(runtime);
 
     let audit = fs.node_content(fs.audit_events_inode()?)?;
-    assert!(audit.contains(&format!("\"format\":\"provider.{}.base_url\"", provider.id)));
+    assert!(audit.contains(&format!("\"format\":\"provider.{}.url\"", provider.id)));
     assert!(audit.contains(&format!("\"format\":\"provider.{}.enabled\"", provider.id)));
     Ok(())
 }
@@ -572,7 +572,7 @@ fn primary_provider_base_url_current_updates_effective_and_source() -> fuse3::Re
     let provider = crate::PROVIDER_SPECS
         .first()
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let base_url = fs.provider_child_dir_inode(provider.id, "base_url")?;
+    let base_url = fs.provider_child_dir_inode(provider.id, "url")?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let current = runtime
         .lookup_child(base_url, "current")
@@ -594,7 +594,7 @@ fn primary_provider_base_url_current_updates_effective_and_source() -> fuse3::Re
     drop(runtime);
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
-            .contains(&format!("\"format\":\"provider.{}.base_url\"", provider.id))
+            .contains(&format!("\"format\":\"provider.{}.url\"", provider.id))
     );
     Ok(())
 }

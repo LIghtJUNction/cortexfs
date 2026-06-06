@@ -245,12 +245,16 @@ impl NodeTreeBuilder {
         self.add_file(provider, "family", projection.family);
         self.add_file(provider, "name", projection.name);
         self.add_owned_file(provider, "formats", newline_list(projection.formats.iter()));
+        let url = self.add_dir(provider, "url");
+        self.add_file(url, "default", projection.base_url);
         let base_url = self.add_dir(provider, "base_url");
         self.add_file(base_url, "default", projection.base_url);
         if !projection.runtime_base_url {
-            self.add_file(base_url, "current", projection.base_url);
-            self.add_file(base_url, "effective", projection.base_url);
-            self.add_file(base_url, "source", "default\n");
+            for parent in [url, base_url] {
+                self.add_file(parent, "current", projection.base_url);
+                self.add_file(parent, "effective", projection.base_url);
+                self.add_file(parent, "source", "default\n");
+            }
         }
         self.add_file(provider, "auth_scheme", projection.auth_scheme);
         self.add_file(provider, "account_type", projection.account_type);
@@ -580,6 +584,15 @@ impl NodeTreeBuilder {
         self.add_file(profile, "name", "helper\n");
         self.add_file(profile, "description", "Default local helper agent\n");
         self.add_file(profile, "system_prompt", EMPTY_TEXT);
+        let model = self.add_dir(profile, "model");
+        self.add_owned_file(model, "provider", format!("{}\n", default_provider_id()));
+        self.add_owned_file(
+            model,
+            "model",
+            default_model_for_provider(default_provider_id())
+                .map_or_else(|| "\n".to_owned(), |model| format!("{model}\n")),
+        );
+        self.add_file(model, "format", "openai.chat\n");
         let default_model = self.add_dir(profile, "default_model");
         self.add_owned_file(
             default_model,
@@ -627,6 +640,10 @@ impl NodeTreeBuilder {
             newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
         let mcp = self.add_dir(helper, "mcp");
+        let servers = self.add_dir(mcp, "servers");
+        self.add_file(servers, "count", "1\n");
+        self.add_file(servers, "list", "local-fs\n");
+        self.add_file(servers, "enabled", "local-fs\n");
         self.add_file(mcp, "servers_count", "1\n");
         self.add_file(mcp, "servers_list", "local-fs\n");
         self.add_file(mcp, "enabled_servers", "local-fs\n");
