@@ -4,11 +4,12 @@ use crate::{
     DEFAULT_BATCH_FORMAT, DEFAULT_THREAD_FORMAT, DEMO_THREAD_INBOX_PATH,
     EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH, FEEDBACK_PREFERENCE_INBOX_PATH,
     FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL, FILESYSTEM_READ_TOOL_INBOX_PATH,
-    FILESYSTEM_READ_TOOL_OUTBOX_PATH, MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
-    MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH, MCP_PROMPT_RENDER_FORMAT,
-    MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH,
-    MEMORY_ITEM_FORMAT, MEMORY_SEMANTIC_INBOX_PATH, PREFERENCE_PAIR_FORMAT,
-    SHARED_PROJECT_A_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_LOCK_LEASES_PATH, TOOL_FORMAT,
+    FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_USER_HOME_PREFIX, LOCAL_USER_ID,
+    MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH, MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH,
+    MCP_PROMPT_RENDER_FORMAT, MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH,
+    MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_ITEM_FORMAT, MEMORY_SEMANTIC_INBOX_PATH,
+    PREFERENCE_PAIR_FORMAT, SHARED_PROJECT_A_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_LOCK_LEASES_PATH,
+    TOOL_FORMAT,
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -51,6 +52,13 @@ pub struct CollabLockLocation {
 
 impl SubmissionLocation {
     pub fn from_path(path: &[String]) -> Option<Self> {
+        let canonical_path;
+        let path = if is_local_user_home_path(path) {
+            canonical_path = canonical_user_space_path(path)?;
+            canonical_path.as_slice()
+        } else {
+            path
+        };
         Self::from_api_path(path)
             .or_else(|| Self::from_batch_path(path))
             .or_else(|| Self::from_thread_path(path))
@@ -321,6 +329,28 @@ impl SubmissionLocation {
             _ => None,
         }
     }
+}
+
+fn is_local_user_home_path(path: &[String]) -> bool {
+    path.len() >= LOCAL_USER_HOME_PREFIX.len()
+        && path
+            .iter()
+            .zip(LOCAL_USER_HOME_PREFIX)
+            .all(|(actual, expected)| actual == expected)
+}
+
+fn canonical_user_space_path(path: &[String]) -> Option<Vec<String>> {
+    if !is_local_user_home_path(path) {
+        return None;
+    }
+    let mut canonical = Vec::with_capacity(path.len().saturating_add(1));
+    canonical.extend([
+        "spaces".to_owned(),
+        "users".to_owned(),
+        LOCAL_USER_ID.to_owned(),
+    ]);
+    canonical.extend(path.iter().skip(LOCAL_USER_HOME_PREFIX.len()).cloned());
+    Some(canonical)
 }
 
 impl CollabClaimLocation {

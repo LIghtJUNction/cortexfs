@@ -95,6 +95,46 @@ fn rename_to_req_json_queues_request_and_writes_fingerprint() -> fuse3::Result<(
 }
 
 #[test]
+fn ctx_home_api_inbox_queues_request() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let inbox = fs
+        .tree
+        .path_inode(&["home", "1000", "api", "openai.chat", "inbox"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let submission = fs.api_submission(inbox).ok_or(libc::EINVAL)?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let inode = runtime.create_staged(inbox, "openai.chat", "ctx-home.tmp")?;
+        runtime.write(inode, 0, b"{\"messages\":[]}\n")?;
+        runtime.submit(
+            inbox,
+            "ctx-home.tmp",
+            inbox,
+            "ctx-home.req.json",
+            submission,
+        )?;
+    }
+
+    let outbox = fs
+        .tree
+        .path_inode(&["spaces", "users", "1000", "api", "openai.chat", "outbox"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(
+        fs.runtime
+            .lock()
+            .map_err(|_error| libc::EIO)?
+            .lookup_child(outbox, "ctx-home.route.json")
+            .is_some(),
+        "CTX_HOME submissions must use the canonical user outbox"
+    );
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("queue_depth")?)?,
+        "1\n"
+    );
+    Ok(())
+}
+
+#[test]
 fn api_submit_is_denied_when_current_route_is_not_allowed() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let provider = crate::PROVIDER_SPECS

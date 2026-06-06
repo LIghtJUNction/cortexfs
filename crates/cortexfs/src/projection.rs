@@ -149,6 +149,8 @@ impl NodeTreeBuilder {
         let users = self.add_dir(spaces, "users");
         let user = self.add_dir(users, LOCAL_USER_ID);
         self.add_user_space(user);
+        let home = self.add_dir(ROOT_INODE, "home");
+        self.attach_child_alias(home, user);
         self.add_dir(spaces, "groups");
         let shared = self.add_dir(spaces, "shared");
         self.add_shared_space_projection(shared);
@@ -997,6 +999,10 @@ impl NodeTreeBuilder {
         if let Some(parent_node) = self.nodes.get_mut(&parent) {
             parent_node.children.push(child);
         }
+    }
+
+    fn attach_child_alias(&mut self, parent: Inode, child: Inode) {
+        self.attach_child(parent, child);
     }
 
     fn allocate_inode(&mut self) -> Inode {
