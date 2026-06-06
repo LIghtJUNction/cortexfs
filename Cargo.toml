@@ -1,9 +1,14 @@
 [workspace]
 members = [
+    "crates/cortex-agents",
     "crates/cortex-cli",
     "crates/cortex-core",
+    "crates/cortex-mcp",
+    "crates/cortex-memory",
     "crates/cortex-providers",
+    "crates/cortex-skills",
     "crates/cortex-store",
+    "crates/cortex-tools",
     "crates/cortexd",
     "crates/cortexfs",
 ]
