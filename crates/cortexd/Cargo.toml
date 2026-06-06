@@ -1,0 +1,19 @@
+[package]
+name = "cortexd"
+description = "CortexFS daemon for routing, policy, cache, audit, and provider execution."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+cortex-core = { path = "../cortex-core" }
+cortex-providers = { path = "../cortex-providers" }
+cortex-store = { path = "../cortex-store" }
+
+[lints]
+workspace = true

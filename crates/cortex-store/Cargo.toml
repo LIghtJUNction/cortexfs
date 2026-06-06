@@ -1,0 +1,17 @@
+[package]
+name = "cortex-store"
+description = "CortexFS storage, cache, and audit persistence."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+cortex-core = { path = "../cortex-core" }
+
+[lints]
+workspace = true

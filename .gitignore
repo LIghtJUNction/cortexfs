@@ -1,0 +1,17 @@
+# Rust build output
+/target/
+
+# Local-only design notes
+/docs/DESIGN.md
+
+# Local FUSE integration-test mount tree.
+# Keep the mountpoint itself in git, but never upload files materialized by the
+# mounted filesystem.
+/tests/mounts/cortexfs/**
+!/tests/mounts/cortexfs/
+
+# Local test/runtime scratch data
+/.cortexfs/
+/tmp/
+*.log
+*.pid
