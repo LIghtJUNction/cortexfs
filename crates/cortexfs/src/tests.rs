@@ -20,6 +20,8 @@ mod mcp;
 mod memory;
 #[path = "test_support/mount_options.rs"]
 mod mount_options;
+#[path = "test_support/naming.rs"]
+mod naming;
 #[path = "test_support/providers.rs"]
 mod providers;
 #[path = "test_support/skills.rs"]

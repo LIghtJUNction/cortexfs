@@ -145,11 +145,11 @@ impl NodeTreeBuilder {
         let models = self.add_dir(ROOT_INODE, "models");
         self.add_global_models_index(models);
 
+        let home = self.add_dir(ROOT_INODE, "home");
         let spaces = self.add_dir(ROOT_INODE, "spaces");
         let users = self.add_dir(spaces, "users");
         let user = self.add_dir(users, LOCAL_USER_ID);
         self.add_user_space(user);
-        let home = self.add_dir(ROOT_INODE, "home");
         self.attach_child_alias(home, user);
         self.add_dir(spaces, "groups");
         let shared = self.add_dir(spaces, "shared");
