@@ -16,6 +16,7 @@ mod runtime_providers;
 mod runtime_state;
 mod runtime_threads;
 mod runtime_types;
+mod runtime_vector;
 mod submission;
 mod text;
 pub(crate) mod tree;
@@ -1177,6 +1178,7 @@ impl RuntimeState {
     }
 
     fn attach_provider_runtime_files(&mut self, parents: &RuntimeParents) {
+        self.add_vector_runtime_files(parents);
         if let Some(postgres_dsn_parent) = parents.postgres_dsn {
             self.add_postgres_dsn_runtime_files(postgres_dsn_parent);
         }
@@ -1491,6 +1493,7 @@ impl RuntimeState {
             || Some(inode) == self.cluster_rebalance_inode
             || Some(inode) == self.cluster_drain_inode
             || Some(inode) == self.cluster_pause_inode
+            || Some(inode) == self.pgvector_refresh_inode
             || self
                 .provider_health_check
                 .values()
@@ -1535,6 +1538,8 @@ impl RuntimeState {
             || Some(inode) == self.cluster_rebalance_inode
             || Some(inode) == self.cluster_drain_inode
             || Some(inode) == self.cluster_pause_inode
+            || Some(inode) == self.pgvector_enabled_inode
+            || Some(inode) == self.pgvector_refresh_inode
             || Some(inode) == self.postgres_dsn_current_inode
             || self
                 .provider_base_url
@@ -1635,6 +1640,33 @@ impl RuntimeState {
         offset: u64,
         data: &[u8],
     ) -> fuse3::Result<Option<u32>> {
+        if let Some(result) = self.write_core_runtime_control(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_space_runtime_control(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_thread_runtime_control(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_agent_cluster_runtime_control(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_storage_runtime_control(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_provider_config(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        Ok(None)
+    }
+
+    fn write_core_runtime_control(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
         if inode == self.drain_inode {
             return self.write_drain(offset, data).map(Some);
         }
@@ -1659,6 +1691,15 @@ impl RuntimeState {
         if let Some(result) = self.write_export_filter(inode, offset, data)? {
             return Ok(Some(result));
         }
+        Ok(None)
+    }
+
+    fn write_space_runtime_control(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
         if Some(inode) == self.user_allowed_providers_inode {
             return self.write_user_allowed_providers(offset, data).map(Some);
         }
@@ -1678,6 +1719,15 @@ impl RuntimeState {
         if Some(inode) == self.user_models_refresh_inode {
             return self.write_user_models_refresh(offset, data).map(Some);
         }
+        Ok(None)
+    }
+
+    fn write_thread_runtime_control(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
         if Some(inode) == self.thread_continue_inode {
             return self
                 .write_thread_control("continue", "running", offset, data)
@@ -1711,6 +1761,15 @@ impl RuntimeState {
         if let Some(result) = self.write_mcp_runtime_control(inode, offset, data)? {
             return Ok(Some(result));
         }
+        Ok(None)
+    }
+
+    fn write_agent_cluster_runtime_control(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
         if Some(inode) == self.agent_helper_start_inode {
             return self
                 .write_agent_control("start", "running", offset, data)
@@ -1746,11 +1805,23 @@ impl RuntimeState {
                 .write_cluster_control("pause", "paused", offset, data)
                 .map(Some);
         }
+        Ok(None)
+    }
+
+    fn write_storage_runtime_control(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
+        if Some(inode) == self.pgvector_enabled_inode {
+            return self.write_pgvector_enabled(offset, data).map(Some);
+        }
+        if Some(inode) == self.pgvector_refresh_inode {
+            return self.write_pgvector_refresh(offset, data).map(Some);
+        }
         if Some(inode) == self.postgres_dsn_current_inode {
             return self.write_postgres_dsn_current(offset, data).map(Some);
-        }
-        if let Some(result) = self.write_provider_config(inode, offset, data)? {
-            return Ok(Some(result));
         }
         Ok(None)
     }
