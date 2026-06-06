@@ -77,6 +77,55 @@ impl RuntimeState {
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
+    pub fn write_tool_loop_limit(
+        &mut self,
+        inode: fuse3::Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
+        if Some(inode) == self.tool_loop_max_steps_inode {
+            return self
+                .write_tool_loop_limit_value(inode, "max_steps", offset, data, parse_positive_u64)
+                .map(Some);
+        }
+        if Some(inode) == self.tool_loop_max_time_ms_inode {
+            return self
+                .write_tool_loop_limit_value(inode, "max_time_ms", offset, data, parse_positive_u64)
+                .map(Some);
+        }
+        if Some(inode) == self.tool_loop_max_cost_usd_inode {
+            return self
+                .write_tool_loop_limit_value(
+                    inode,
+                    "max_cost_usd",
+                    offset,
+                    data,
+                    parse_non_negative_decimal,
+                )
+                .map(Some);
+        }
+        Ok(None)
+    }
+
+    fn write_tool_loop_limit_value(
+        &mut self,
+        inode: fuse3::Inode,
+        name: &str,
+        offset: u64,
+        data: &[u8],
+        validate: fn(&str) -> fuse3::Result<()>,
+    ) -> fuse3::Result<u32> {
+        if offset != 0 {
+            return Err(libc::EINVAL.into());
+        }
+        let value = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
+        let value = value.trim();
+        validate(value)?;
+        self.update_dynamic_file(inode, format!("{value}\n"));
+        self.append_audit("tool-loop.demo.limits", name, "configured");
+        u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
     pub fn write_agent_control(
         &mut self,
         command_name: &str,
@@ -222,4 +271,34 @@ impl RuntimeState {
         self.append_audit("cluster.local.control", command_name, next_state);
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
+}
+
+fn parse_positive_u64(value: &str) -> fuse3::Result<()> {
+    if value.parse::<u64>().is_ok_and(|number| number > 0) {
+        Ok(())
+    } else {
+        Err(libc::EINVAL.into())
+    }
+}
+
+fn parse_non_negative_decimal(value: &str) -> fuse3::Result<()> {
+    if value.is_empty() {
+        return Err(libc::EINVAL.into());
+    }
+    let mut parts = value.split('.');
+    let Some(whole) = parts.next() else {
+        return Err(libc::EINVAL.into());
+    };
+    if whole.is_empty() || !whole.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(libc::EINVAL.into());
+    }
+    if let Some(fractional) = parts.next()
+        && (fractional.is_empty() || !fractional.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return Err(libc::EINVAL.into());
+    }
+    if parts.next().is_some() {
+        return Err(libc::EINVAL.into());
+    }
+    Ok(())
 }

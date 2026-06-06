@@ -551,6 +551,10 @@ impl NodeTreeBuilder {
         self.add_file(control, "cancel", "unsupported\n");
         let tool_loop = self.add_dir(thread, "tool-loop");
         self.add_file(tool_loop, "state", "idle\n");
+        let limits = self.add_dir(tool_loop, "limits");
+        self.add_file(limits, "max_steps", "64\n");
+        self.add_file(limits, "max_time_ms", "300000\n");
+        self.add_file(limits, "max_cost_usd", "0.10\n");
         let tool_control = self.add_dir(tool_loop, "control");
         self.add_file(tool_control, "continue", "unsupported\n");
         self.add_file(tool_control, "pause", "unsupported\n");

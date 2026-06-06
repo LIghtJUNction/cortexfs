@@ -66,6 +66,15 @@ pub const DEMO_THREAD_TOOL_LOOP_CONTROL_PATH: &[&str] = &[
     "tool-loop",
     "control",
 ];
+pub const DEMO_THREAD_TOOL_LOOP_LIMITS_PATH: &[&str] = &[
+    "spaces",
+    "users",
+    "1000",
+    "threads",
+    "demo",
+    "tool-loop",
+    "limits",
+];
 pub const EXTERNAL_QQ_GROUP_THREAD_DIR_PATH: &[&str] = &[
     "spaces", "external", "qq", "groups", "888888", "threads", "demo",
 ];

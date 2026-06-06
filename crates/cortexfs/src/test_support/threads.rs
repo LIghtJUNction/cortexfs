@@ -51,6 +51,26 @@ fn projection_exposes_demo_thread_and_tool_loop_state() -> fuse3::Result<()> {
         .and_then(crate::Node::content),
         Some("idle\n")
     );
+    for (limit_name, expected) in [
+        ("max_steps", "64\n"),
+        ("max_time_ms", "300000\n"),
+        ("max_cost_usd", "0.10\n"),
+    ] {
+        assert_eq!(
+            fs.lookup_path([
+                "spaces",
+                "users",
+                "1000",
+                "threads",
+                "demo",
+                "tool-loop",
+                "limits",
+                limit_name,
+            ])
+            .and_then(crate::Node::content),
+            Some(expected)
+        );
+    }
     assert!(
         fs.lookup_path([
             "spaces",
@@ -65,6 +85,54 @@ fn projection_exposes_demo_thread_and_tool_loop_state() -> fuse3::Result<()> {
         .is_some(),
         "tool-loop control nodes must exist"
     );
+    Ok(())
+}
+
+#[test]
+fn demo_tool_loop_limit_nodes_update_values_and_audit() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+
+    for (limit_name, new_value) in [
+        ("max_steps", "128\n"),
+        ("max_time_ms", "600000\n"),
+        ("max_cost_usd", "0.25\n"),
+    ] {
+        let inode = fs.demo_tool_loop_limit_file_inode(limit_name)?;
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        assert_eq!(
+            runtime.write(inode, 0, new_value.as_bytes())?,
+            u32::try_from(new_value.len()).map_err(|_error| libc::EIO)?
+        );
+        drop(runtime);
+
+        assert_eq!(fs.node_content(inode)?, new_value);
+        let audit = fs.node_content(fs.audit_events_inode()?)?;
+        assert!(audit.contains("\"format\":\"tool-loop.demo.limits\""));
+        assert!(audit.contains(&format!("\"name\":\"{limit_name}\"")));
+        assert!(audit.contains("\"event\":\"configured\""));
+    }
+    Ok(())
+}
+
+#[test]
+fn demo_tool_loop_limit_nodes_reject_invalid_values() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let max_steps = fs.demo_tool_loop_limit_file_inode("max_steps")?;
+    let max_time_ms = fs.demo_tool_loop_limit_file_inode("max_time_ms")?;
+    let max_cost_usd = fs.demo_tool_loop_limit_file_inode("max_cost_usd")?;
+    let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+
+    assert!(runtime.write(max_steps, 0, b"0\n").is_err());
+    assert!(runtime.write(max_steps, 0, b"-1\n").is_err());
+    assert!(runtime.write(max_time_ms, 0, b"forever\n").is_err());
+    assert!(runtime.write(max_cost_usd, 0, b"-0.1\n").is_err());
+    assert!(runtime.write(max_cost_usd, 0, b"1.2.3\n").is_err());
+    assert!(runtime.write(max_cost_usd, 1, b"0.20\n").is_err());
+    drop(runtime);
+
+    assert_eq!(fs.node_content(max_steps)?, "64\n");
+    assert_eq!(fs.node_content(max_time_ms)?, "300000\n");
+    assert_eq!(fs.node_content(max_cost_usd)?, "0.10\n");
     Ok(())
 }
 
