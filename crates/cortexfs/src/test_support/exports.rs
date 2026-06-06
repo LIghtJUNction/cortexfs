@@ -177,6 +177,7 @@ fn conversation_export_uses_submission_time_route() -> fuse3::Result<()> {
 
     let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
     assert!(export.contains("\"request_id\":\"routed\""));
+    assert!(export.contains("\"time\":\"00000000000000000001\""));
     assert!(export.contains(&format!("\"route\":{{\"provider\":\"{}\"", provider.id)));
     assert!(!export.contains(&format!("\"route\":{{\"provider\":\"{}\"", alternate.id)));
     Ok(())
@@ -322,6 +323,67 @@ fn export_filters_rebuild_conversation_view_by_provider() -> fuse3::Result<()> {
 }
 
 #[test]
+fn export_filters_rebuild_conversation_view_by_time_range() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.create_staged_request("openai.chat", "first.tmp", "{\"messages\":[]}\n")?;
+    fs.submit_request("openai.chat", "first.tmp", "first.req.json")?;
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    fs.create_staged_request("openai.chat", "second.tmp", "{\"messages\":[]}\n")?;
+    fs.submit_request("openai.chat", "second.tmp", "second.req.json")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"first\""));
+    assert!(export.contains("\"time\":\"00000000000000000001\""));
+    assert!(export.contains("\"request_id\":\"second\""));
+    assert!(export.contains("\"time\":\"00000000000000000002\""));
+
+    let filters = fs
+        .tree
+        .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let from = runtime
+            .lookup_child(filters, "from")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(from, 0, b"2\n")?;
+        drop(runtime);
+    }
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(!export.contains("\"request_id\":\"first\""));
+    assert!(export.contains("\"request_id\":\"second\""));
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let from = runtime
+            .lookup_child(filters, "from")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        let to = runtime
+            .lookup_child(filters, "to")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(from, 0, b"\n")?;
+        runtime.write(to, 0, b"1\n")?;
+        drop(runtime);
+    }
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"first\""));
+    assert!(!export.contains("\"request_id\":\"second\""));
+    Ok(())
+}
+
+#[test]
 fn export_filters_reject_invalid_values() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let filters = fs
@@ -341,6 +403,10 @@ fn export_filters_reject_invalid_values() -> fuse3::Result<()> {
         .lookup_child(filters, "agent")
         .map(crate::Node::inode)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let from = runtime
+        .lookup_child(filters, "from")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
 
     assert_eq!(
         runtime.write(
@@ -356,6 +422,10 @@ fn export_filters_reject_invalid_values() -> fuse3::Result<()> {
     );
     assert_eq!(
         runtime.write(agent, 1, b"helper\n"),
+        Err(fuse3::Errno::from(libc::EINVAL))
+    );
+    assert_eq!(
+        runtime.write(from, 0, b"not-a-time\n"),
         Err(fuse3::Errno::from(libc::EINVAL))
     );
     let valid_provider = crate::default_provider_spec()?;

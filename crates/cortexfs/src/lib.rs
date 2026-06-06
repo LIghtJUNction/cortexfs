@@ -1307,6 +1307,9 @@ impl RuntimeState {
                 Some(self.add_dynamic_file(filters_parent, "subject", "\n"));
             self.export_filter_space_inode =
                 Some(self.add_dynamic_file(filters_parent, "space", "\n"));
+            self.export_filter_from_inode =
+                Some(self.add_dynamic_file(filters_parent, "from", "\n"));
+            self.export_filter_to_inode = Some(self.add_dynamic_file(filters_parent, "to", "\n"));
             self.export_filter_exclude_failed_inode =
                 Some(self.add_dynamic_file(filters_parent, "exclude_failed", "1\n"));
         }
@@ -1596,6 +1599,8 @@ impl RuntimeState {
             || Some(inode) == self.export_filter_agent_inode
             || Some(inode) == self.export_filter_subject_inode
             || Some(inode) == self.export_filter_space_inode
+            || Some(inode) == self.export_filter_from_inode
+            || Some(inode) == self.export_filter_to_inode
             || Some(inode) == self.export_filter_exclude_failed_inode
             || Some(inode) == self.user_allowed_providers_inode
             || Some(inode) == self.user_default_provider_inode
@@ -1980,6 +1985,16 @@ impl RuntimeState {
                 .write_export_filter_text(self.export_filter_space_inode, offset, data)
                 .map(Some);
         }
+        if Some(inode) == self.export_filter_from_inode {
+            return self
+                .write_export_filter_time(self.export_filter_from_inode, offset, data)
+                .map(Some);
+        }
+        if Some(inode) == self.export_filter_to_inode {
+            return self
+                .write_export_filter_time(self.export_filter_to_inode, offset, data)
+                .map(Some);
+        }
         if Some(inode) == self.export_filter_exclude_failed_inode {
             return self
                 .write_export_filter_exclude_failed(offset, data)
@@ -2060,6 +2075,20 @@ impl RuntimeState {
         data: &[u8],
     ) -> fuse3::Result<u32> {
         let value = normalize_export_filter_value(data)?;
+        self.write_export_filter_value(inode, offset, data, value)
+    }
+
+    fn write_export_filter_time(
+        &mut self,
+        inode: Option<Inode>,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<u32> {
+        let mut value = normalize_export_filter_value(data)?;
+        if !value.trim().is_empty() {
+            let time = value.trim().parse::<u64>().map_err(|_error| libc::EINVAL)?;
+            value = format!("{time:020}\n");
+        }
         self.write_export_filter_value(inode, offset, data, value)
     }
 

@@ -230,6 +230,8 @@ fn projection_exposes_space_exports_batch_feedback_and_control() -> fuse3::Resul
         "agent",
         "subject",
         "space",
+        "from",
+        "to",
         "exclude_failed",
     ] {
         assert!(runtime.lookup_child(filters, filter_file).is_some());
