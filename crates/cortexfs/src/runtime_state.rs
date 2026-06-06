@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::time::Instant;
 
 use cortex_providers::InMemoryProvider;
 use cortex_store::{InMemoryStore, RequestId};
@@ -116,6 +117,7 @@ pub struct RuntimeState {
     pub(crate) tool_loop_max_steps_inode: Option<Inode>,
     pub(crate) tool_loop_max_time_ms_inode: Option<Inode>,
     pub(crate) tool_loop_max_cost_usd_inode: Option<Inode>,
+    pub(crate) tool_loop_started_at: Option<Instant>,
     pub(crate) memory_query_inode: Option<Inode>,
     pub(crate) memory_results_inode: Option<Inode>,
     pub(crate) memory_semantic_items_inode: Option<Inode>,

@@ -166,6 +166,38 @@ fn demo_tool_loop_max_steps_limits_appended_steps() -> fuse3::Result<()> {
 }
 
 #[test]
+fn demo_tool_loop_max_time_limits_appended_steps() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let max_time_ms = fs.demo_tool_loop_limit_file_inode("max_time_ms")?;
+    let continue_control = fs.demo_tool_loop_control_file_inode("continue")?;
+    let pause_control = fs.demo_tool_loop_control_file_inode("pause")?;
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(max_time_ms, 0, b"1\n")?;
+        runtime.write(continue_control, 0, b"1\n")?;
+        runtime.tool_loop_started_at =
+            std::time::Instant::now().checked_sub(std::time::Duration::from_millis(2));
+        assert!(runtime.tool_loop_started_at.is_some());
+        runtime.write(pause_control, 0, b"1\n")?;
+    }
+
+    assert_eq!(
+        fs.node_content(fs.demo_tool_loop_runtime_file_inode("state")?)?,
+        "limit_exceeded\n"
+    );
+    let steps = fs.node_content(fs.demo_tool_loop_runtime_file_inode("steps.jsonl")?)?;
+    assert_eq!(steps.lines().count(), 1);
+    assert!(steps.contains("\"command\":\"continue\""));
+    assert!(!steps.contains("\"command\":\"pause\""));
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains("\"format\":\"tool-loop.demo.limits\""));
+    assert!(audit.contains("\"name\":\"max_time_ms\""));
+    assert!(audit.contains("\"event\":\"exceeded\""));
+    Ok(())
+}
+
+#[test]
 fn demo_thread_control_nodes_update_state_last_control_and_audit() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 

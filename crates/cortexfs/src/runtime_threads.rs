@@ -130,6 +130,13 @@ impl RuntimeState {
             self.append_audit("tool-loop.demo.limits", "max_steps", "exceeded");
             return;
         }
+        if self.tool_loop_max_time_exceeded() {
+            if let Some(state_inode) = self.tool_loop_state_inode {
+                self.update_dynamic_file(state_inode, "limit_exceeded\n");
+            }
+            self.append_audit("tool-loop.demo.limits", "max_time_ms", "exceeded");
+            return;
+        }
         let Some(content) = self.tool_loop_steps_content_mut(steps_inode) else {
             return;
         };
@@ -138,6 +145,9 @@ impl RuntimeState {
             return;
         };
         let _ = writeln!(content, "{{\"step\":{next_step},{rest}");
+        if self.tool_loop_started_at.is_none() {
+            self.tool_loop_started_at = Some(std::time::Instant::now());
+        }
     }
 
     fn tool_loop_max_steps_exceeded(&self, steps_inode: fuse3::Inode) -> bool {
@@ -155,6 +165,21 @@ impl RuntimeState {
             return false;
         };
         current_steps >= max_steps
+    }
+
+    fn tool_loop_max_time_exceeded(&self) -> bool {
+        let Some(started_at) = self.tool_loop_started_at else {
+            return false;
+        };
+        let Some(max_time_ms) = self
+            .tool_loop_max_time_ms_inode
+            .and_then(|inode| self.nodes.get(&inode))
+            .and_then(Node::content)
+            .and_then(|content| content.trim().parse::<u128>().ok())
+        else {
+            return false;
+        };
+        started_at.elapsed().as_millis() >= max_time_ms
     }
 
     fn tool_loop_steps_content_mut(&mut self, steps_inode: fuse3::Inode) -> Option<&mut String> {
