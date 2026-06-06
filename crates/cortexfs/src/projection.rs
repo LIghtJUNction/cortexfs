@@ -146,16 +146,22 @@ impl NodeTreeBuilder {
         self.add_global_models_index(models);
 
         let home = self.add_dir(ROOT_INODE, "home");
+        let group = self.add_dir(ROOT_INODE, "group");
+        let shared = self.add_dir(ROOT_INODE, "shared");
+        self.add_shared_space_projection(shared);
+        let ext = self.add_dir(ROOT_INODE, "ext");
+        self.add_external_space_projection(ext);
         let spaces = self.add_dir(ROOT_INODE, "spaces");
         let users = self.add_dir(spaces, "users");
         let user = self.add_dir(users, LOCAL_USER_ID);
         self.add_user_space(user);
         self.attach_child_alias(home, user);
-        self.add_dir(spaces, "groups");
-        let shared = self.add_dir(spaces, "shared");
-        self.add_shared_space_projection(shared);
-        let external = self.add_dir(spaces, "external");
-        self.add_external_space_projection(external);
+        let groups_compat = self.add_dir(spaces, "groups");
+        self.attach_children_alias(groups_compat, group);
+        let shared_compat = self.add_dir(spaces, "shared");
+        self.attach_children_alias(shared_compat, shared);
+        let external_compat = self.add_dir(spaces, "external");
+        self.attach_children_alias(external_compat, ext);
 
         let agents = self.add_dir(ROOT_INODE, "agents");
         self.add_file(agents, "count", "1\n");
@@ -494,27 +500,34 @@ impl NodeTreeBuilder {
 
     fn add_external_space_projection(&mut self, external: Inode) {
         let qq = self.add_dir(external, "qq");
-        let groups = self.add_dir(qq, "groups");
-        let group = self.add_dir(groups, "888888");
+        let group_dir = self.add_dir(qq, "group");
+        let groups_compat = self.add_dir(qq, "groups");
+        let group = self.add_dir(group_dir, "888888");
+        self.attach_child_alias(groups_compat, group);
         self.add_file(
             group,
             "context",
             "qq:group888888:object_r:group_thread_t:s0:c_qq,c_group888888\n",
         );
-        let subjects = self.add_dir(group, "subjects");
+        let subjects = self.add_dir(group, "subject");
+        let subjects_compat = self.add_dir(group, "subjects");
         let subject = self.add_dir(subjects, "123456");
+        self.attach_child_alias(subjects_compat, subject);
         self.add_file(subject, "display_name", "Alice\n");
         self.add_file(subject, "role", "member_r\n");
         self.add_file(subject, "permissions", "submit\nread\n");
         let quota = self.add_dir(subject, "quota");
         self.add_file(quota, "requests", "0\n");
-        let threads = self.add_dir(group, "threads");
-        self.add_external_group_thread(threads);
+        let threads = self.add_dir(group, "thread");
+        let threads_compat = self.add_dir(group, "threads");
+        let thread = self.add_external_group_thread(threads);
+        self.attach_child_alias(threads_compat, thread);
+        self.add_dir(group, "agent");
         self.add_dir(group, "agents");
         self.add_dir(group, "policy");
     }
 
-    fn add_external_group_thread(&mut self, threads: Inode) {
+    fn add_external_group_thread(&mut self, threads: Inode) -> Inode {
         let thread = self.add_dir(threads, "demo");
         self.add_file(
             thread,
@@ -527,6 +540,7 @@ impl NodeTreeBuilder {
         self.add_file(control, "continue", "unsupported\n");
         self.add_file(control, "pause", "unsupported\n");
         self.add_file(control, "cancel", "unsupported\n");
+        thread
     }
 
     fn add_space_api(&mut self, api: Inode) {
@@ -1034,6 +1048,15 @@ impl NodeTreeBuilder {
 
     fn attach_child_alias(&mut self, parent: Inode, child: Inode) {
         self.attach_child(parent, child);
+    }
+
+    fn attach_children_alias(&mut self, parent: Inode, source: Inode) {
+        let Some(source_node) = self.nodes.get(&source) else {
+            return;
+        };
+        for child in source_node.children().to_vec() {
+            self.attach_child(parent, child);
+        }
     }
 
     fn allocate_inode(&mut self) -> Inode {

@@ -295,42 +295,46 @@ fn projection_exposes_external_subject_and_audit_summary_shape() -> fuse3::Resul
 
     assert_eq!(
         fs.lookup_path([
-            "spaces",
-            "external",
+            "ext",
             "qq",
-            "groups",
+            "group",
             "888888",
-            "subjects",
+            "subject",
             "123456",
             "display_name"
         ])
         .and_then(crate::Node::content),
         Some("Alice\n")
     );
+    let direct_subject = fs
+        .tree
+        .path_inode(&["ext", "qq", "group", "888888", "subject", "123456"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let compat_subject = fs
+        .tree
+        .path_inode(&[
+            "spaces", "external", "qq", "groups", "888888", "subjects", "123456",
+        ])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_eq!(direct_subject, compat_subject);
     assert_eq!(
-        fs.lookup_path(["spaces", "external", "qq", "groups", "888888", "context"])
+        fs.lookup_path(["ext", "qq", "group", "888888", "context"])
             .and_then(crate::Node::content),
         Some("qq:group888888:object_r:group_thread_t:s0:c_qq,c_group888888\n")
     );
     assert!(
-        fs.lookup_path([
-            "spaces", "external", "qq", "groups", "888888", "threads", "demo", "inbox"
-        ])
-        .is_some(),
+        fs.lookup_path(["ext", "qq", "group", "888888", "thread", "demo", "inbox"])
+            .is_some(),
         "external group thread inbox must exist"
     );
     assert_eq!(
-        fs.lookup_path([
-            "spaces", "external", "qq", "groups", "888888", "threads", "demo", "io.sock"
-        ])
-        .map(crate::Node::kind),
+        fs.lookup_path(["ext", "qq", "group", "888888", "thread", "demo", "io.sock"])
+            .map(crate::Node::kind),
         Some(FileType::Socket)
     );
     let external_socket = fs
         .tree
-        .path_inode(&[
-            "spaces", "external", "qq", "groups", "888888", "threads", "demo", "io.sock",
-        ])
+        .path_inode(&["ext", "qq", "group", "888888", "thread", "demo", "io.sock"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(
         fs.node_content(external_socket).is_err(),

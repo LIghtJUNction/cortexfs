@@ -26,7 +26,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 已经具备的核心面：
 
-- FUSE 挂载树：`formats`、`providers`、`models`、`spaces`、`agents`、`clusters`、`mcp`、`skills`、`tools`、`memory`、`vector`、`databases`、`audit`、`control`。
+- FUSE 挂载树：`formats`、`providers`、`models`、`home`、`group`、`shared`、`ext`、`spaces`、`agents`、`clusters`、`mcp`、`skills`、`tools`、`memory`、`vector`、`databases`、`audit`、`control`。
 - API format：`openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
 - provider/model 发现：通过 `count`、`list`、`formats`、`url/*`、`enabled/*`、`health/*`、`models/*` 等小文本文件读取。
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json`，再由 `control/drain` 进入执行队列。
@@ -62,6 +62,9 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
   providers/
   models/
   home/
+  group/
+  shared/
+  ext/
   spaces/
   agents/
   clusters/
@@ -113,7 +116,7 @@ export CTX_HOME="/ctx/home/$(id -u)"
 
 `home/<uid>` 是用户入口。当前实现中它与内部用户投影指向同一个 inode，不复制第二棵树。通过 `$CTX_HOME` 提交请求、写 thread、读 memory，都会落到同一套队列、路由、审计和导出流。
 
-目录命名遵循 Linux 风格：普通名词、短路径、少别名。用户路径只使用 `/ctx/home/<uid>`；不提供 `/ctx/ctx_home` 这类额外发现节点。
+目录命名遵循 Linux 风格：普通名词、短路径、少别名。用户路径只使用 `/ctx/home/<uid>`；共享空间使用 `/ctx/shared/<name>`；外部平台身份使用 `/ctx/ext/<platform>/...`。不提供 `/ctx/ctx_home` 这类额外发现节点。
 
 示例：
 
@@ -125,6 +128,8 @@ export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
 如果要做多用户挂载，使用明确的多用户挂载模式，并按系统 FUSE 配置处理 `/ctx` 的 owner、group、mode 和 `allow_other` 策略。
+
+`spaces/` 保留为兼容和策略视图。新脚本应优先使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。
 
 ## 本地测试挂载
 
