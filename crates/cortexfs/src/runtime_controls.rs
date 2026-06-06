@@ -269,7 +269,7 @@ impl RuntimeState {
         }
         self.update_dynamic_file(
             self.last_control_inode,
-            format!("clusters/local/{command_name}\n"),
+            format!("cluster/local/{command_name}\n"),
         );
         self.append_audit("cluster.local.control", command_name, next_state);
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))

@@ -521,7 +521,7 @@ impl NodeTreeBuilder {
     }
 
     fn add_collab_tasks_projection(&mut self, collab: Inode) {
-        let tasks = self.add_dir(collab, "tasks");
+        let tasks = self.add_dir(collab, "task");
         let task = self.add_dir(tasks, "demo");
         self.add_file(
             task,
@@ -530,20 +530,24 @@ impl NodeTreeBuilder {
         );
         self.add_file(task, "owner", "agents/helper\n");
         self.add_file(task, "state", "open\n");
-        self.add_dir(task, "claims");
+        let claims = self.add_dir(task, "claim");
         self.add_file(
             task,
             "events.jsonl",
             "{\"event\":\"created\",\"agent\":\"helper\",\"state\":\"open\"}\n",
         );
         self.add_dir(task, "result");
+        let claims_compat = self.add_dir(task, "claims");
+        self.attach_children_alias(claims_compat, claims);
+        let tasks_compat = self.add_dir(collab, "tasks");
+        self.attach_child_alias(tasks_compat, task);
     }
 
     fn add_collab_handoffs_projection(&mut self, collab: Inode) {
-        let handoffs = self.add_dir(collab, "handoffs");
+        let handoffs = self.add_dir(collab, "handoff");
         let handoff = self.add_dir(handoffs, "demo");
         self.add_file(handoff, "from", "agents/helper\n");
-        self.add_file(handoff, "to", "clusters/local/workers/local-worker\n");
+        self.add_file(handoff, "to", "cluster/local/worker/local-worker\n");
         self.add_file(
             handoff,
             "summary.md",
@@ -551,24 +555,32 @@ impl NodeTreeBuilder {
         );
         self.add_file(handoff, "context_refs", "collab/blackboard/notes.jsonl\n");
         self.add_file(handoff, "state", "ready\n");
+        let handoffs_compat = self.add_dir(collab, "handoffs");
+        self.attach_child_alias(handoffs_compat, handoff);
     }
 
     fn add_collab_locks_projection(&mut self, collab: Inode) {
-        let locks = self.add_dir(collab, "locks");
-        self.add_dir(locks, "leases");
+        let locks = self.add_dir(collab, "lock");
+        let leases = self.add_dir(locks, "lease");
         let lock = self.add_dir(locks, "demo");
         self.add_file(lock, "owner", "agents/helper\n");
         self.add_file(lock, "lease_expires", "\n");
         self.add_file(lock, "state", "released\n");
+        let locks_compat = self.add_dir(collab, "locks");
+        let leases_compat = self.add_dir(locks_compat, "leases");
+        self.attach_children_alias(leases_compat, leases);
+        self.attach_child_alias(locks_compat, lock);
     }
 
     fn add_collab_decisions_projection(&mut self, collab: Inode) {
-        let decisions = self.add_dir(collab, "decisions");
+        let decisions = self.add_dir(collab, "decision");
         self.add_file(
             decisions,
             "000001.md",
             "# Decision 000001\n\nUse files as the stable collaboration ABI.\n",
         );
+        let decisions_compat = self.add_dir(collab, "decisions");
+        self.attach_children_alias(decisions_compat, decisions);
     }
 
     fn add_external_space_projection(&mut self, external: Inode) {
@@ -757,11 +769,13 @@ impl NodeTreeBuilder {
         let local = self.add_dir(clusters, "local");
         self.add_file(local, "context", "local:cluster_r:cluster_t:s0\n");
         self.add_file(local, "state", "idle\n");
-        let agents = self.add_dir(local, "agents");
+        let agents = self.add_dir(local, "agent");
         self.add_file(agents, "count", "1\n");
         self.add_file(agents, "list", "helper\n");
-        self.add_file(agents, "helper", "../agents/helper\n");
-        let workers = self.add_dir(local, "workers");
+        self.add_file(agents, "helper", "../agent/helper\n");
+        let agents_compat = self.add_dir(local, "agents");
+        self.attach_children_alias(agents_compat, agents);
+        let workers = self.add_dir(local, "worker");
         self.add_file(workers, "count", "1\n");
         self.add_file(workers, "list", "local-worker\n");
         let worker = self.add_dir(workers, "local-worker");
@@ -774,7 +788,9 @@ impl NodeTreeBuilder {
         );
         self.add_file(worker, "load", "0\n");
         self.add_file(worker, "current_task", "\n");
-        let queues = self.add_dir(local, "queues");
+        let workers_compat = self.add_dir(local, "workers");
+        self.attach_children_alias(workers_compat, workers);
+        let queues = self.add_dir(local, "queue");
         self.add_file(queues, "count", "1\n");
         self.add_file(queues, "list", "default\n");
         let default = self.add_dir(queues, "default");
@@ -782,7 +798,11 @@ impl NodeTreeBuilder {
         for directory in ["pending", "running", "done", "failed"] {
             self.add_dir(default, directory);
         }
-        self.add_dir(local, "tasks");
+        let queues_compat = self.add_dir(local, "queues");
+        self.attach_children_alias(queues_compat, queues);
+        let tasks = self.add_dir(local, "task");
+        let tasks_compat = self.add_dir(local, "tasks");
+        self.attach_children_alias(tasks_compat, tasks);
         let scheduler = self.add_dir(local, "scheduler");
         self.add_file(scheduler, "policy", "capabilities\n");
         self.add_dir(local, "policy");

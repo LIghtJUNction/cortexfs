@@ -19,9 +19,9 @@ fn assert_worker_runtime(
     ] {
         assert_eq!(
             fs.node_content(fs.path_inode([
-                "clusters",
+                "cluster",
                 "local",
-                "workers",
+                "worker",
                 "local-worker",
                 file,
             ])?)?,
@@ -37,54 +37,48 @@ fn projection_exposes_cluster_worker_and_queue_shape() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["clusters", "count"])
+        fs.lookup_path(["cluster", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "list"])
+        fs.lookup_path(["cluster", "list"])
             .and_then(crate::Node::content),
         Some("local\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "state"])
+        fs.lookup_path(["cluster", "local", "state"])
             .and_then(crate::Node::content),
         Some("idle\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "context"])
+        fs.lookup_path(["cluster", "local", "context"])
             .and_then(crate::Node::content),
         Some("local:cluster_r:cluster_t:s0\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "agents", "count"])
+        fs.lookup_path(["cluster", "local", "agent", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "agents", "list"])
+        fs.lookup_path(["cluster", "local", "agent", "list"])
             .and_then(crate::Node::content),
         Some("helper\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "workers", "count"])
+        fs.lookup_path(["cluster", "local", "worker", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "workers", "list"])
+        fs.lookup_path(["cluster", "local", "worker", "list"])
             .and_then(crate::Node::content),
         Some("local-worker\n")
     );
     assert_eq!(
-        fs.lookup_path([
-            "clusters",
-            "local",
-            "workers",
-            "local-worker",
-            "capabilities"
-        ])
-        .and_then(crate::Node::content),
+        fs.lookup_path(["cluster", "local", "worker", "local-worker", "capabilities"])
+            .and_then(crate::Node::content),
         Some("fuse\nprovider.registry\nlocal_runtime\n")
     );
     assert_worker_runtime(
@@ -97,36 +91,62 @@ fn projection_exposes_cluster_worker_and_queue_shape() -> fuse3::Result<()> {
         },
     )?;
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "queues", "count"])
+        fs.lookup_path(["cluster", "local", "queue", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "queues", "list"])
+        fs.lookup_path(["cluster", "local", "queue", "list"])
             .and_then(crate::Node::content),
         Some("default\n")
     );
     assert_eq!(
-        fs.lookup_path(["clusters", "local", "queues", "default", "states"])
+        fs.lookup_path(["cluster", "local", "queue", "default", "states"])
             .and_then(crate::Node::content),
         Some("pending\nrunning\ndone\nfailed\n")
     );
     for directory in ["pending", "running", "done", "failed"] {
         assert!(
-            fs.lookup_path(["clusters", "local", "queues", "default", directory])
+            fs.lookup_path(["cluster", "local", "queue", "default", directory])
                 .is_some(),
             "cluster queue state directory must exist"
         );
     }
     assert!(
-        fs.lookup_path(["clusters", "local", "tasks"]).is_some(),
+        fs.lookup_path(["cluster", "local", "task"]).is_some(),
         "cluster task namespace must exist"
     );
     assert!(
-        fs.lookup_path(["clusters", "local", "control", "rebalance"])
+        fs.lookup_path(["cluster", "local", "control", "rebalance"])
             .is_some(),
         "cluster rebalance control node must exist"
     );
+    assert_eq!(
+        fs.tree
+            .path_inode(&["cluster", "local"])
+            .zip(fs.tree.path_inode(&["clusters", "local"]))
+            .map(|(primary, compat)| primary == compat),
+        Some(true)
+    );
+    assert!(
+        fs.lookup_path(["cluster", "local", "worker", "local-worker"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["cluster", "local", "workers", "local-worker"])
+            .is_some(),
+        "cluster/local/workers remains a compatibility namespace"
+    );
+    assert!(
+        fs.lookup_path(["cluster", "local", "queue", "default"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["cluster", "local", "queues", "default"])
+            .is_some(),
+        "cluster/local/queues remains a compatibility namespace"
+    );
+    assert!(fs.lookup_path(["cluster", "local", "tasks"]).is_some());
     Ok(())
 }
 
@@ -151,7 +171,7 @@ fn cluster_control_nodes_update_state_last_control_and_audit() -> fuse3::Result<
         }
 
         assert_eq!(
-            fs.lookup_path(["clusters", "local", "state"])
+            fs.lookup_path(["cluster", "local", "state"])
                 .map(crate::Node::inode)
                 .map(|inode| fs.node_content(inode))
                 .transpose()?,
@@ -159,7 +179,7 @@ fn cluster_control_nodes_update_state_last_control_and_audit() -> fuse3::Result<
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("clusters/local/{control_name}\n")
+            format!("cluster/local/{control_name}\n")
         );
         let audit = fs.node_content(fs.audit_events_inode()?)?;
         assert!(audit.contains("\"format\":\"cluster.local.control\""));
@@ -214,35 +234,52 @@ fn projection_exposes_shared_collaboration_space() {
         "blackboard artifacts directory must exist"
     );
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "owner"])
+        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "owner"])
             .and_then(crate::Node::content),
         Some("agents/helper\n")
     );
     assert!(
-        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "claims"])
+        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "claim"])
             .is_some(),
         "collab task claims directory must exist"
     );
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "handoffs", "demo", "state"])
+        fs.lookup_path(["shared", "project-a", "collab", "handoff", "demo", "state"])
             .and_then(crate::Node::content),
         Some("ready\n")
     );
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "locks", "demo", "state"])
+        fs.lookup_path(["shared", "project-a", "collab", "lock", "demo", "state"])
             .and_then(crate::Node::content),
         Some("released\n")
     );
     assert!(
-        fs.lookup_path(["shared", "project-a", "collab", "locks", "leases"])
+        fs.lookup_path(["shared", "project-a", "collab", "lock", "lease"])
             .is_some(),
         "collab lock lease submission directory must exist"
     );
     assert!(
-        fs.lookup_path(["shared", "project-a", "collab", "decisions", "000001.md"])
+        fs.lookup_path(["shared", "project-a", "collab", "decision", "000001.md"])
             .is_some(),
         "collab decisions must be visible"
     );
+    for (primary, compat) in [
+        ("task", "tasks"),
+        ("handoff", "handoffs"),
+        ("lock", "locks"),
+        ("decision", "decisions"),
+    ] {
+        assert!(
+            fs.lookup_path(["shared", "project-a", "collab", primary])
+                .is_some(),
+            "shared collab/{primary} must be the primary namespace"
+        );
+        assert!(
+            fs.lookup_path(["shared", "project-a", "collab", compat])
+                .is_some(),
+            "shared collab/{compat} remains a compatibility namespace"
+        );
+    }
 }
 
 #[test]
@@ -250,21 +287,21 @@ fn projection_exposes_collab_handoff_context_refs() {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "handoffs", "demo", "from"])
+        fs.lookup_path(["shared", "project-a", "collab", "handoff", "demo", "from"])
             .and_then(crate::Node::content),
         Some("agents/helper\n")
     );
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "handoffs", "demo", "to"])
+        fs.lookup_path(["shared", "project-a", "collab", "handoff", "demo", "to"])
             .and_then(crate::Node::content),
-        Some("clusters/local/workers/local-worker\n")
+        Some("cluster/local/worker/local-worker\n")
     );
     assert!(
         fs.lookup_path([
             "shared",
             "project-a",
             "collab",
-            "handoffs",
+            "handoff",
             "demo",
             "summary.md"
         ])
@@ -277,7 +314,7 @@ fn projection_exposes_collab_handoff_context_refs() {
             "shared",
             "project-a",
             "collab",
-            "handoffs",
+            "handoff",
             "demo",
             "context_refs"
         ])
@@ -305,14 +342,14 @@ fn collab_task_claim_uses_atomic_rename_and_writes_events() -> fuse3::Result<()>
     );
     drop(runtime);
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "owner"])
+        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "owner"])
             .map(crate::Node::inode)
             .map(|inode| fs.node_content(inode))
             .transpose()?,
         Some("agents/helper\n".to_owned())
     );
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "state"])
+        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "state"])
             .map(crate::Node::inode)
             .map(|inode| fs.node_content(inode))
             .transpose()?,
@@ -324,7 +361,7 @@ fn collab_task_claim_uses_atomic_rename_and_writes_events() -> fuse3::Result<()>
             "shared",
             "project-a",
             "collab",
-            "tasks",
+            "task",
             "demo",
             "events.jsonl",
         ])
@@ -345,7 +382,7 @@ fn collab_task_claim_uses_atomic_rename_and_writes_events() -> fuse3::Result<()>
 #[test]
 fn collab_lock_lease_uses_atomic_rename_and_materializes_lock() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    fs.create_staged_collab_lock_lease("handoff.tmp", "clusters/local/workers/local-worker\n")?;
+    fs.create_staged_collab_lock_lease("handoff.tmp", "cluster/local/worker/local-worker\n")?;
     fs.submit_collab_lock_lease("handoff.tmp", "handoff.lease")?;
 
     let leases = fs
@@ -357,12 +394,12 @@ fn collab_lock_lease_uses_atomic_rename_and_materializes_lock() -> fuse3::Result
         runtime
             .lookup_child(leases, "handoff.lease")
             .and_then(crate::Node::content),
-        Some("clusters/local/workers/local-worker\n")
+        Some("cluster/local/worker/local-worker\n")
     );
     drop(runtime);
     let locks = fs
         .tree
-        .path_inode(&["shared", "project-a", "collab", "locks"])
+        .path_inode(&["shared", "project-a", "collab", "lock"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let lock = runtime
@@ -373,7 +410,7 @@ fn collab_lock_lease_uses_atomic_rename_and_materializes_lock() -> fuse3::Result
         runtime
             .lookup_child(lock, "owner")
             .and_then(crate::Node::content),
-        Some("clusters/local/workers/local-worker\n")
+        Some("cluster/local/worker/local-worker\n")
     );
     assert_eq!(
         runtime

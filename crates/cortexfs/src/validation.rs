@@ -61,7 +61,10 @@ pub fn normalize_collab_actor(body: &str) -> fuse3::Result<String> {
     let owner = body.trim();
     if matches!(
         owner,
-        "agents/helper" | "clusters/local/workers/local-worker"
+        "agent/helper"
+            | "agents/helper"
+            | "cluster/local/worker/local-worker"
+            | "clusters/local/workers/local-worker"
     ) {
         return Ok(owner.to_owned());
     }
