@@ -53,6 +53,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortex-agents"
+version = "0.1.0"
+
+[[package]]
 name = "cortex-cli"
 version = "0.1.0"
 dependencies = [
@@ -61,6 +65,14 @@ dependencies = [
 
 [[package]]
 name = "cortex-core"
+version = "0.1.0"
+
+[[package]]
+name = "cortex-mcp"
+version = "0.1.0"
+
+[[package]]
+name = "cortex-memory"
 version = "0.1.0"
 
 [[package]]
@@ -73,11 +85,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortex-skills"
+version = "0.1.0"
+
+[[package]]
 name = "cortex-store"
 version = "0.1.0"
 dependencies = [
  "cortex-core",
 ]
+
+[[package]]
+name = "cortex-tools"
+version = "0.1.0"
 
 [[package]]
 name = "cortexd"

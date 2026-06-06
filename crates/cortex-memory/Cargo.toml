@@ -1,0 +1,16 @@
+[package]
+name = "cortex-memory"
+description = "CortexFS memory, vector, and database integration primitives."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
