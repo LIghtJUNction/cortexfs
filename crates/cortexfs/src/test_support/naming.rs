@@ -82,3 +82,25 @@ fn home_directory_uses_uid_entries_without_index_files() -> fuse3::Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn home_mcp_indexes_use_directories_not_flat_underscore_names() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "servers", "count"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "servers", "list"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "tools", "count"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "tools", "list"])
+            .is_some()
+    );
+}
