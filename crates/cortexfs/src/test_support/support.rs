@@ -77,6 +77,22 @@ pub fn assert_model_metadata(
             .and_then(crate::Node::content),
         Some(provider.max_output_tokens)
     );
+
+    let mut cap = path.to_vec();
+    cap.push("cap".to_owned());
+    assert_eq!(
+        fs.lookup_path_owned(&cap).and_then(crate::Node::content),
+        Some(provider.model_capabilities)
+    );
+
+    let mut capabilities = path.to_vec();
+    capabilities.push("capabilities".to_owned());
+    assert_eq!(
+        fs.lookup_path_owned(&capabilities)
+            .and_then(crate::Node::content),
+        Some(provider.model_capabilities),
+        "model capabilities remains a compatibility file"
+    );
 }
 
 pub fn set_default_provider(

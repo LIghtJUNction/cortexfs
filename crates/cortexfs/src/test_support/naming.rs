@@ -417,3 +417,48 @@ fn local_capability_files_use_cap_as_primary_name() {
         "mcp/server/<id>/capabilities remains a compatibility capability file"
     );
 }
+
+#[test]
+fn model_metadata_uses_cap_as_primary_name() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let provider = crate::default_provider_spec()?;
+    let model_id = crate::provider_model_id(&provider);
+
+    assert!(
+        fs.lookup_path(["model", model_id.as_str(), "cap"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path([
+            "provider",
+            provider.id,
+            "model",
+            provider.default_model,
+            "cap"
+        ])
+        .is_some()
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "model", model_id.as_str(), "cap"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["model", model_id.as_str(), "capabilities"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path([
+            "provider",
+            provider.id,
+            "model",
+            provider.default_model,
+            "capabilities"
+        ])
+        .is_some()
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "model", model_id.as_str(), "capabilities"])
+            .is_some()
+    );
+    Ok(())
+}

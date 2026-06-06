@@ -1521,9 +1521,13 @@ impl RuntimeState {
         if let Some(spec) = provider_spec(provider) {
             self.add_dynamic_file(model_parent, "context_window", spec.context_window);
             self.add_dynamic_file(model_parent, "max_output_tokens", spec.max_output_tokens);
+            self.add_dynamic_file(model_parent, "cap", spec.model_capabilities);
+            self.add_dynamic_file(model_parent, "capabilities", spec.model_capabilities);
             if let Some(compat_parent) = compat_parent {
                 self.add_dynamic_file(compat_parent, "context_window", spec.context_window);
                 self.add_dynamic_file(compat_parent, "max_output_tokens", spec.max_output_tokens);
+                self.add_dynamic_file(compat_parent, "cap", spec.model_capabilities);
+                self.add_dynamic_file(compat_parent, "capabilities", spec.model_capabilities);
             }
         }
         let allowed = self.add_dynamic_file(model_parent, "allowed", "1\n");

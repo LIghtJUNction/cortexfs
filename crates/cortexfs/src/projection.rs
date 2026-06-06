@@ -277,6 +277,7 @@ impl NodeTreeBuilder {
         self.add_owned_file(model, "format", format!("{}\n", default_format(provider)));
         self.add_file(model, "context_window", provider.context_window);
         self.add_file(model, "max_output_tokens", provider.max_output_tokens);
+        self.add_file(model, "cap", provider.model_capabilities);
         self.add_file(model, "capabilities", provider.model_capabilities);
         self.add_file(model, "status", "ready\n");
     }
@@ -355,6 +356,7 @@ impl NodeTreeBuilder {
         self.add_owned_file(model, "format", format!("{}\n", default_format(spec)));
         self.add_file(model, "context_window", spec.context_window);
         self.add_file(model, "max_output_tokens", spec.max_output_tokens);
+        self.add_file(model, "cap", spec.model_capabilities);
         self.add_file(model, "capabilities", spec.model_capabilities);
         self.add_file(model, "status", "ready\n");
         let models_compat = self.add_dir(provider, "models");
@@ -491,6 +493,7 @@ impl NodeTreeBuilder {
         self.add_owned_file(model, "format", format!("{}\n", default_format(provider)));
         self.add_file(model, "context_window", provider.context_window);
         self.add_file(model, "max_output_tokens", provider.max_output_tokens);
+        self.add_file(model, "cap", provider.model_capabilities);
         self.add_file(model, "capabilities", provider.model_capabilities);
     }
 
