@@ -305,7 +305,7 @@ fn mcp_local_fs_tool_invokes_through_unified_tool_plane() -> fuse3::Result<()> {
     fs.create_staged_tool_request_at(
         crate::MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
         "mcp-read.tmp",
-        "{\"path\":\"spaces/users/1000/threads/demo/messages.jsonl\"}\n",
+        "{\"path\":\"home/1000/threads/demo/messages.jsonl\"}\n",
     )?;
     fs.submit_tool_request_at(
         crate::MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
@@ -382,7 +382,7 @@ fn mcp_prompt_render_materializes_prompt_after_drain() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     fs.create_staged_prompt_render(
         "render-001.tmp",
-        "{\"path\":\"spaces/users/1000/threads/demo/messages.jsonl\"}\n",
+        "{\"path\":\"home/1000/threads/demo/messages.jsonl\"}\n",
     )?;
     fs.submit_prompt_render("render-001.tmp", "render-001.req.json")?;
     assert_eq!(
@@ -417,9 +417,7 @@ fn mcp_prompt_render_materializes_prompt_after_drain() -> fuse3::Result<()> {
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(response.contains("\"prompt\":\"summarize-file\""));
-    assert!(
-        response.contains("Summarize the file at spaces/users/1000/threads/demo/messages.jsonl.")
-    );
+    assert!(response.contains("Summarize the file at home/1000/threads/demo/messages.jsonl."));
     drop(runtime);
     assert_eq!(
         fs.node_content(fs.control_file_inode("queue_depth")?)?,

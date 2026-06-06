@@ -2,7 +2,7 @@ use crate::runtime_types::{PendingResponse, ThreadUpdate};
 use crate::text::{
     assistant_content, external_display_name, external_subject, json_string, user_content,
 };
-use crate::{Node, NodeContent, RuntimeState};
+use crate::{LOCAL_USER_THREAD_DISPLAY_PATH, Node, NodeContent, RuntimeState};
 
 impl RuntimeState {
     pub fn update_thread_files(&mut self, update: ThreadUpdate<'_>) {
@@ -104,7 +104,7 @@ impl RuntimeState {
             self.episodic_item_count().saturating_add(1)
         );
         let content = format!(
-            "thread=spaces/users/1000/threads/demo\nformat={}\ntext={text}",
+            "thread={LOCAL_USER_THREAD_DISPLAY_PATH}\nformat={}\ntext={text}",
             pending.format
         );
         self.append_memory_layer_item("episodic", &id, &content, &pending.fingerprint);

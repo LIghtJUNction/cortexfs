@@ -246,7 +246,7 @@ fn demo_thread_control_nodes_update_state_last_control_and_audit() -> fuse3::Res
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("spaces/users/1000/threads/demo/{control_name}\n")
+            format!("home/1000/threads/demo/{control_name}\n")
         );
         let audit = fs.node_content(fs.audit_events_inode()?)?;
         assert!(audit.contains("\"format\":\"thread.demo.control\""));
@@ -276,7 +276,7 @@ fn demo_tool_loop_control_nodes_update_state_steps_and_audit() -> fuse3::Result<
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("spaces/users/1000/threads/demo/tool-loop/{control_name}\n")
+            format!("home/1000/threads/demo/tool-loop/{control_name}\n")
         );
         let steps = fs.node_content(fs.demo_tool_loop_runtime_file_inode("steps.jsonl")?)?;
         assert!(steps.contains("\"type\":\"control\""));
@@ -377,7 +377,7 @@ fn thread_inbox_submit_updates_messages_after_drain() -> fuse3::Result<()> {
         .lookup_child(episodic, "items.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(episodic_items.contains("thread=spaces/users/1000/threads/demo"));
+    assert!(episodic_items.contains("thread=home/1000/threads/demo"));
     assert!(episodic_items.contains("ping"));
     assert!(episodic_items.contains("cortexfs-ok"));
     drop(runtime);

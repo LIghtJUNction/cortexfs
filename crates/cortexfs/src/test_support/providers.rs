@@ -407,7 +407,7 @@ fn user_models_refresh_recomputes_space_access_routes_and_audit() -> fuse3::Resu
     );
     assert_eq!(
         fs.node_content(fs.control_file_inode("last_control")?)?,
-        "spaces/users/1000/models/refresh\n"
+        crate::LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT
     );
     let user_model = fs.user_model_dir_inode(primary)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
