@@ -35,7 +35,7 @@ pub const BATCH_INBOX_PATH: &[&str] = &["home", "1000", "batch", "inbox"];
 pub const BATCH_OUTBOX_PATH: &[&str] = &["home", "1000", "batch", "outbox"];
 pub const CONTROL_DIR_PATH: &[&str] = &["control"];
 pub const EXPORT_DIR_PATH: &[&str] = &["home", "1000", "export"];
-pub const EXPORT_FILTERS_DIR_PATH: &[&str] = &["home", "1000", "export", "filters"];
+pub const EXPORT_FILTERS_DIR_PATH: &[&str] = &["home", "1000", "export", "filter"];
 pub const FEEDBACK_PREFERENCE_INBOX_PATH: &[&str] =
     &["home", "1000", "feedback", "preference", "inbox"];
 pub const FEEDBACK_PREFERENCE_OUTBOX_PATH: &[&str] =
@@ -49,7 +49,7 @@ pub const DEMO_THREAD_TOOL_LOOP_STATE_PATH: &[&str] =
 pub const DEMO_THREAD_TOOL_LOOP_CONTROL_PATH: &[&str] =
     &["home", "1000", "thread", "demo", "tool-loop", "control"];
 pub const DEMO_THREAD_TOOL_LOOP_LIMITS_PATH: &[&str] =
-    &["home", "1000", "thread", "demo", "tool-loop", "limits"];
+    &["home", "1000", "thread", "demo", "tool-loop", "limit"];
 pub const EXTERNAL_QQ_GROUP_THREAD_DIR_PATH: &[&str] =
     &["ext", "qq", "group", "888888", "thread", "demo"];
 pub const EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH: &[&str] =

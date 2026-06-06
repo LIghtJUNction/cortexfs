@@ -130,7 +130,7 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         "format models compatibility path must expose the same index content"
     );
     assert_eq!(
-        fs.lookup_path(["cap", "models"])
+        fs.lookup_path(["cap", "model"])
             .and_then(crate::Node::content),
         Some(crate::global_model_list().as_str())
     );
@@ -177,13 +177,13 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         );
     }
     assert_eq!(
-        fs.lookup_path(["cap", "providers"])
+        fs.lookup_path(["cap", "provider"])
             .and_then(crate::Node::content),
         Some(crate::provider_list().as_str())
     );
     let capability_providers_inode = fs
         .tree
-        .path_inode(&["cap", "providers"])
+        .path_inode(&["cap", "provider"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert_eq!(fs.node_attr(capability_providers_inode)?.perm, 0o444);
     let chat_providers_list_inode = fs
@@ -206,7 +206,7 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         "skill trigger index must exist"
     );
     assert_eq!(
-        fs.lookup_path(["capabilities", "skills"])
+        fs.lookup_path(["capabilities", "skill"])
             .and_then(crate::Node::content),
         Some("cortexfs-test\n")
     );
@@ -215,7 +215,7 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         "tool projection must exist"
     );
     assert_eq!(
-        fs.lookup_path(["capabilities", "tools"])
+        fs.lookup_path(["capabilities", "tool"])
             .and_then(crate::Node::content),
         Some("shell.exec\nfilesystem.read\nmcp.local-fs.read_file\n")
     );

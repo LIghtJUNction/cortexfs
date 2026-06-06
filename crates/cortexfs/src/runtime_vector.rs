@@ -44,7 +44,7 @@ impl RuntimeState {
         if let Some(inode) = self.pgvector_refresh_inode {
             self.update_dynamic_file(inode, "1\n");
         }
-        self.update_dynamic_file(self.last_control_inode, "vector/stores/pgvector/refresh\n");
+        self.update_dynamic_file(self.last_control_inode, "vector/store/pgvector/refresh\n");
         self.append_audit("vector.store.pgvector", "refresh", "refreshed");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }

@@ -226,9 +226,15 @@ fn projection_exposes_provider_supported_formats_from_specs() {
     for provider in crate::PROVIDER_SPECS {
         let expected = crate::newline_list(provider.formats.iter());
         assert_eq!(
-            fs.lookup_path(["providers", provider.id, "formats"])
+            fs.lookup_path(["provider", provider.id, "format"])
                 .and_then(crate::Node::content),
             Some(expected.as_str())
+        );
+        assert_eq!(
+            fs.lookup_path(["providers", provider.id, "formats"])
+                .and_then(crate::Node::content),
+            Some(expected.as_str()),
+            "provider/<id>/formats remains a compatibility file"
         );
     }
 }
