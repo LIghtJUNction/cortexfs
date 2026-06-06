@@ -28,7 +28,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 - FUSE 挂载树：`formats`、`providers`、`models`、`spaces`、`agents`、`clusters`、`mcp`、`skills`、`tools`、`memory`、`vector`、`databases`、`audit`、`control`。
 - API format：`openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
-- provider/model 发现：通过 `count`、`list`、`formats`、`base_url/*`、`enabled/*`、`health/*`、`models/*` 等小文本文件读取。
+- provider/model 发现：通过 `count`、`list`、`formats`、`url/*`、`enabled/*`、`health/*`、`models/*` 等小文本文件读取。
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json`，再由 `control/drain` 进入执行队列。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
 - thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path。

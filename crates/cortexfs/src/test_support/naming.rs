@@ -104,3 +104,59 @@ fn home_mcp_indexes_use_directories_not_flat_underscore_names() {
             .is_some()
     );
 }
+
+#[test]
+fn provider_config_uses_short_url_directory() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let provider = crate::default_provider_id();
+    let url = fs.path_inode(["providers", provider, "url"])?;
+
+    assert!(fs.lookup_path(["providers", provider, "url"]).is_some());
+    assert!(
+        fs.lookup_path(["providers", provider, "url", "default"])
+            .is_some()
+    );
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert!(
+        runtime.lookup_child(url, "current").is_some(),
+        "runtime provider config must attach to providers/<id>/url"
+    );
+    drop(runtime);
+    Ok(())
+}
+
+#[test]
+fn agent_profile_uses_model_directory_for_default_selection() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["agents", "helper", "profile", "model", "provider"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["agents", "helper", "profile", "model", "model"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["agents", "helper", "profile", "model", "format"])
+            .is_some()
+    );
+}
+
+#[test]
+fn agent_mcp_indexes_use_directories_not_flat_underscore_names() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["agents", "helper", "mcp", "servers", "count"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["agents", "helper", "mcp", "servers", "list"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["agents", "helper", "mcp", "servers", "enabled"])
+            .is_some()
+    );
+}
