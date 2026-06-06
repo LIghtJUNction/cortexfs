@@ -54,24 +54,37 @@ fn projection_exposes_home_uid_alias_for_user_space() -> fuse3::Result<()> {
         "home/<uid> must expose the user's API inbox"
     );
     assert!(
-        fs.lookup_path(["home", "1000", "threads", "demo"])
-            .is_some(),
+        fs.lookup_path(["home", "1000", "thread", "demo"]).is_some(),
         "home/<uid> must expose the user's thread namespace"
     );
+    assert!(
+        fs.lookup_path(["home", "1000", "threads", "demo"])
+            .is_some(),
+        "home/<uid>/threads remains a compatibility namespace"
+    );
     assert_eq!(
-        fs.lookup_path(["home", "1000", "tools", "list"])
+        fs.lookup_path(["home", "1000", "tool", "list"])
             .and_then(crate::Node::content),
         Some("filesystem.read\nmcp.local-fs.read_file\n")
     );
+    assert!(fs.lookup_path(["home", "1000", "tools", "list"]).is_some());
     assert_eq!(
-        fs.lookup_path(["home", "1000", "mcp", "servers", "list"])
+        fs.lookup_path(["home", "1000", "mcp", "server", "list"])
             .and_then(crate::Node::content),
         Some("local-fs\n")
     );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "servers", "list"])
+            .is_some()
+    );
     assert_eq!(
-        fs.lookup_path(["home", "1000", "skills", "enabled"])
+        fs.lookup_path(["home", "1000", "skill", "enabled"])
             .and_then(crate::Node::content),
         Some("cortexfs-test\n")
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "skills", "enabled"])
+            .is_some()
     );
     assert!(
         fs.lookup_path(["home", "1000", "memory", "semantic"])

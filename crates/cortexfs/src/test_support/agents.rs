@@ -61,46 +61,6 @@ fn projection_exposes_helper_agent_profile_runtime_and_socket() -> fuse3::Result
             .and_then(crate::Node::content),
         Some("cortexfs-test\n")
     );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "skills", "count"])
-            .and_then(crate::Node::content),
-        Some("1\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "skills", "list"])
-            .and_then(crate::Node::content),
-        Some("cortexfs-test\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "tools", "count"])
-            .and_then(crate::Node::content),
-        Some("2\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "tools", "list"])
-            .and_then(crate::Node::content),
-        Some("filesystem.read\nmcp.local-fs.read_file\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "tools", "enabled"])
-            .and_then(crate::Node::content),
-        Some("filesystem.read\nmcp.local-fs.read_file\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers", "count"])
-            .and_then(crate::Node::content),
-        Some("1\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers", "list"])
-            .and_then(crate::Node::content),
-        Some("local-fs\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers", "enabled"])
-            .and_then(crate::Node::content),
-        Some("local-fs\n")
-    );
     assert!(
         fs.lookup_path(["agents", "helper", "inbox"]).is_some(),
         "agent file task inbox must exist"
@@ -123,6 +83,64 @@ fn projection_exposes_helper_agent_profile_runtime_and_socket() -> fuse3::Result
         "socket nodes are realtime endpoints, not regular files"
     );
     Ok(())
+}
+
+#[test]
+fn projection_exposes_helper_agent_capability_views() {
+    let fs = CortexFs::new();
+
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "skill", "count"])
+            .and_then(crate::Node::content),
+        Some("1\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "skill", "list"])
+            .and_then(crate::Node::content),
+        Some("cortexfs-test\n")
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "skills", "list"])
+            .is_some()
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "tool", "count"])
+            .and_then(crate::Node::content),
+        Some("2\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "tool", "list"])
+            .and_then(crate::Node::content),
+        Some("filesystem.read\nmcp.local-fs.read_file\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "tool", "enabled"])
+            .and_then(crate::Node::content),
+        Some("filesystem.read\nmcp.local-fs.read_file\n")
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "tools", "list"])
+            .is_some()
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "mcp", "server", "count"])
+            .and_then(crate::Node::content),
+        Some("1\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "mcp", "server", "list"])
+            .and_then(crate::Node::content),
+        Some("local-fs\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "mcp", "server", "enabled"])
+            .and_then(crate::Node::content),
+        Some("local-fs\n")
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "mcp", "servers", "enabled"])
+            .is_some()
+    );
 }
 
 #[test]
