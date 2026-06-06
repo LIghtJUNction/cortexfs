@@ -118,6 +118,7 @@ pub struct RuntimeState {
     pub(crate) tool_loop_max_time_ms_inode: Option<Inode>,
     pub(crate) tool_loop_max_cost_usd_inode: Option<Inode>,
     pub(crate) tool_loop_started_at: Option<Instant>,
+    pub(crate) tool_loop_cost_micros: u64,
     pub(crate) memory_query_inode: Option<Inode>,
     pub(crate) memory_results_inode: Option<Inode>,
     pub(crate) memory_semantic_items_inode: Option<Inode>,

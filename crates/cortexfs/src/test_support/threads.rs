@@ -198,6 +198,35 @@ fn demo_tool_loop_max_time_limits_appended_steps() -> fuse3::Result<()> {
 }
 
 #[test]
+fn demo_tool_loop_max_cost_limits_appended_steps() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let max_cost_usd = fs.demo_tool_loop_limit_file_inode("max_cost_usd")?;
+    let continue_control = fs.demo_tool_loop_control_file_inode("continue")?;
+    let pause_control = fs.demo_tool_loop_control_file_inode("pause")?;
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(max_cost_usd, 0, b"0.000001\n")?;
+        runtime.write(continue_control, 0, b"1\n")?;
+        runtime.write(pause_control, 0, b"1\n")?;
+    }
+
+    assert_eq!(
+        fs.node_content(fs.demo_tool_loop_runtime_file_inode("state")?)?,
+        "limit_exceeded\n"
+    );
+    let steps = fs.node_content(fs.demo_tool_loop_runtime_file_inode("steps.jsonl")?)?;
+    assert_eq!(steps.lines().count(), 1);
+    assert!(steps.contains("\"command\":\"continue\""));
+    assert!(!steps.contains("\"command\":\"pause\""));
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains("\"format\":\"tool-loop.demo.limits\""));
+    assert!(audit.contains("\"name\":\"max_cost_usd\""));
+    assert!(audit.contains("\"event\":\"exceeded\""));
+    Ok(())
+}
+
+#[test]
 fn demo_thread_control_nodes_update_state_last_control_and_audit() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 

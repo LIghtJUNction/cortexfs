@@ -137,6 +137,13 @@ impl RuntimeState {
             self.append_audit("tool-loop.demo.limits", "max_time_ms", "exceeded");
             return;
         }
+        if self.tool_loop_max_cost_exceeded() {
+            if let Some(state_inode) = self.tool_loop_state_inode {
+                self.update_dynamic_file(state_inode, "limit_exceeded\n");
+            }
+            self.append_audit("tool-loop.demo.limits", "max_cost_usd", "exceeded");
+            return;
+        }
         let Some(content) = self.tool_loop_steps_content_mut(steps_inode) else {
             return;
         };
@@ -148,6 +155,7 @@ impl RuntimeState {
         if self.tool_loop_started_at.is_none() {
             self.tool_loop_started_at = Some(std::time::Instant::now());
         }
+        self.tool_loop_cost_micros = self.tool_loop_cost_micros.saturating_add(1);
     }
 
     fn tool_loop_max_steps_exceeded(&self, steps_inode: fuse3::Inode) -> bool {
@@ -180,6 +188,18 @@ impl RuntimeState {
             return false;
         };
         started_at.elapsed().as_millis() >= max_time_ms
+    }
+
+    fn tool_loop_max_cost_exceeded(&self) -> bool {
+        let Some(max_cost_micros) = self
+            .tool_loop_max_cost_usd_inode
+            .and_then(|inode| self.nodes.get(&inode))
+            .and_then(Node::content)
+            .and_then(parse_usd_micros)
+        else {
+            return false;
+        };
+        self.tool_loop_cost_micros >= max_cost_micros
     }
 
     fn tool_loop_steps_content_mut(&mut self, steps_inode: fuse3::Inode) -> Option<&mut String> {
@@ -262,4 +282,19 @@ impl RuntimeState {
             .and_then(Node::content)
             .map_or(0, |content| content.lines().count())
     }
+}
+
+fn parse_usd_micros(value: &str) -> Option<u64> {
+    let value = value.trim();
+    let mut parts = value.split('.');
+    let whole = parts.next()?.parse::<u64>().ok()?;
+    let fractional = parts.next().unwrap_or_default();
+    if parts.next().is_some() || fractional.len() > 6 {
+        return None;
+    }
+    let mut micros = fractional.parse::<u64>().unwrap_or_default();
+    for _ in fractional.len()..6 {
+        micros = micros.saturating_mul(10);
+    }
+    whole.checked_mul(1_000_000)?.checked_add(micros)
 }
