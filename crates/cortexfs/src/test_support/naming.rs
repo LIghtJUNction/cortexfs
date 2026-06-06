@@ -210,3 +210,17 @@ fn agent_mcp_indexes_use_directories_not_flat_underscore_names() {
             .is_some()
     );
 }
+
+#[test]
+fn mcp_tool_uses_singular_primary_directory() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["mcp", "tool", "list"]).is_some(),
+        "mcp/tool must be the primary tool registry"
+    );
+    assert!(
+        fs.lookup_path(["mcp", "tools", "list"]).is_some(),
+        "mcp/tools remains a compatibility registry"
+    );
+}

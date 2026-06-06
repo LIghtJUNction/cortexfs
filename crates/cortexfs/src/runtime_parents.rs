@@ -13,7 +13,7 @@ use crate::abi::{
     MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH, POSTGRES_DSN_DIR_PATH, ROOT_INODE,
     USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH, USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
 };
-use crate::providers::{PROVIDER_SPECS, provider_child_path, user_model_path};
+use crate::providers::{PROVIDER_SPECS, provider_child_path, provider_model_id, user_model_path};
 use crate::runtime_types::ProviderRuntimeParents;
 use crate::tree::StaticTree;
 
@@ -74,7 +74,9 @@ pub struct RuntimeParents {
     pub user_routes: Option<Inode>,
     pub user_control: Option<Inode>,
     pub user_models: Option<Inode>,
+    pub user_models_compat: Option<Inode>,
     pub user_models_by_provider: BTreeMap<&'static str, Inode>,
+    pub user_models_compat_by_provider: BTreeMap<&'static str, Inode>,
     pub cluster_state: Option<Inode>,
     pub cluster_worker_state: Option<Inode>,
     pub cluster_worker_heartbeat: Option<Inode>,
@@ -184,7 +186,9 @@ impl RuntimeParents {
             user_routes: tree.path_inode(USER_ROUTES_DIR_PATH),
             user_control: tree.path_inode(USER_CONTROL_DIR_PATH),
             user_models: tree.path_inode(USER_MODELS_DIR_PATH),
+            user_models_compat: tree.path_inode(&["home", "1000", "models"]),
             user_models_by_provider: user_model_parents(tree),
+            user_models_compat_by_provider: user_model_compat_parents(tree),
             cluster_state: tree.path_inode(CLUSTER_LOCAL_STATE_PATH),
             cluster_worker_state: cluster_worker.state,
             cluster_worker_heartbeat: cluster_worker.heartbeat,
@@ -214,6 +218,22 @@ fn user_model_parents(tree: &StaticTree) -> BTreeMap<&'static str, Inode> {
         .collect()
 }
 
+fn user_model_compat_parents(tree: &StaticTree) -> BTreeMap<&'static str, Inode> {
+    PROVIDER_SPECS
+        .iter()
+        .filter_map(|provider| {
+            let path = vec![
+                "home".to_owned(),
+                "1000".to_owned(),
+                "models".to_owned(),
+                provider_model_id(provider),
+            ];
+            tree.path_inode_owned(&path)
+                .map(|inode| (provider.id, inode))
+        })
+        .collect()
+}
+
 fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, ProviderRuntimeParents> {
     PROVIDER_SPECS
         .iter()
@@ -222,7 +242,8 @@ fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, Provide
             let url_compat = tree.path_inode_owned(&provider_child_path(provider.id, "base_url"));
             let enabled = tree.path_inode_owned(&provider_child_path(provider.id, "enabled"))?;
             let health = tree.path_inode_owned(&provider_child_path(provider.id, "health"))?;
-            let models = tree.path_inode_owned(&provider_child_path(provider.id, "models"))?;
+            let models = tree.path_inode_owned(&provider_child_path(provider.id, "model"))?;
+            let models_compat = tree.path_inode_owned(&provider_child_path(provider.id, "models"));
             let secrets = tree.path_inode_owned(&provider_child_path(provider.id, "secrets"))?;
             Some((
                 provider.id,
@@ -232,6 +253,7 @@ fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, Provide
                     enabled,
                     health,
                     models,
+                    models_compat,
                     secrets,
                 },
             ))

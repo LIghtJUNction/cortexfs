@@ -78,14 +78,20 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
         Some(crate::provider_count().as_str())
     );
     assert_eq!(
-        fs.lookup_path(["providers", primary.id, "models", "count"])
+        fs.lookup_path(["provider", primary.id, "model", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["providers", primary.id, "models", "list"])
+        fs.lookup_path(["provider", primary.id, "model", "list"])
             .and_then(crate::Node::content),
         Some(format!("{}\n", primary.default_model).as_str())
+    );
+    assert_eq!(
+        fs.lookup_path(["providers", primary.id, "models", "count"])
+            .and_then(crate::Node::content),
+        Some("1\n"),
+        "provider models compatibility path must expose the same index content"
     );
     assert_eq!(
         fs.lookup_path(["providers", compatible.id, "family"])
@@ -93,15 +99,15 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
         Some(compatible.family)
     );
     assert_eq!(
-        fs.lookup_path(["providers", compatible.id, "models", "list"])
+        fs.lookup_path(["provider", compatible.id, "model", "list"])
             .and_then(crate::Node::content),
         Some(format!("{}\n", compatible.default_model).as_str())
     );
     assert_eq!(
         fs.lookup_path([
-            "providers",
+            "provider",
             compatible.id,
-            "models",
+            "model",
             compatible.default_model,
             "format"
         ])
@@ -110,9 +116,9 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
     );
     assert_eq!(
         fs.lookup_path([
-            "providers",
+            "provider",
             primary.id,
-            "models",
+            "model",
             primary.default_model,
             "format"
         ])
@@ -122,9 +128,9 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
     assert_model_metadata(
         &fs,
         &[
-            "providers".to_owned(),
+            "provider".to_owned(),
             primary.id.to_owned(),
-            "models".to_owned(),
+            "model".to_owned(),
             primary.default_model.to_owned(),
         ],
         primary,
@@ -132,9 +138,9 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
     assert_model_metadata(
         &fs,
         &[
-            "providers".to_owned(),
+            "provider".to_owned(),
             compatible.id.to_owned(),
-            "models".to_owned(),
+            "model".to_owned(),
             compatible.default_model.to_owned(),
         ],
         compatible,
@@ -154,7 +160,7 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
 
     assert_eq!(
         fs.lookup_path_owned(&[
-            "models".to_owned(),
+            "model".to_owned(),
             crate::provider_model_id(primary),
             "model".to_owned()
         ])
@@ -163,7 +169,7 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
     );
     assert_eq!(
         fs.lookup_path_owned(&[
-            "models".to_owned(),
+            "model".to_owned(),
             crate::provider_model_id(compatible),
             "provider".to_owned()
         ])
@@ -172,7 +178,7 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
     );
     assert_eq!(
         fs.lookup_path_owned(&[
-            "models".to_owned(),
+            "model".to_owned(),
             crate::provider_model_id(compatible),
             "model".to_owned()
         ])
@@ -180,28 +186,34 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
         Some(format!("{}\n", compatible.default_model).as_str())
     );
     assert_eq!(
-        fs.lookup_path(["models", "count"])
+        fs.lookup_path(["model", "count"])
             .and_then(crate::Node::content),
         Some(crate::global_model_count().as_str())
     );
     assert_eq!(
-        fs.lookup_path(["models", "list"])
+        fs.lookup_path(["model", "list"])
             .and_then(crate::Node::content),
         Some(crate::global_model_list().as_str())
     );
+    assert_eq!(
+        fs.lookup_path(["models", "list"])
+            .and_then(crate::Node::content),
+        Some(crate::global_model_list().as_str()),
+        "global models compatibility path must expose the same index content"
+    );
     assert_model_metadata(
         &fs,
-        &["models".to_owned(), crate::provider_model_id(primary)],
+        &["model".to_owned(), crate::provider_model_id(primary)],
         primary,
     );
     assert_model_metadata(
         &fs,
-        &["models".to_owned(), crate::provider_model_id(compatible)],
+        &["model".to_owned(), crate::provider_model_id(compatible)],
         compatible,
     );
     let model_list_inode = fs
         .tree
-        .path_inode(&["models", "list"])
+        .path_inode(&["model", "list"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert_eq!(fs.node_attr(model_list_inode)?.perm, 0o444);
     Ok(())
@@ -262,10 +274,10 @@ fn provider_models_refresh_updates_control_and_audit() -> fuse3::Result<()> {
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("providers/{}/models/refresh\n", provider.id)
+            format!("provider/{}/model/refresh\n", provider.id)
         );
         let audit = fs.node_content(fs.audit_events_inode()?)?;
-        assert!(audit.contains(&format!("\"format\":\"provider.{}.models\"", provider.id)));
+        assert!(audit.contains(&format!("\"format\":\"provider.{}.model\"", provider.id)));
         assert!(audit.contains("\"name\":\"refresh\""));
         assert!(audit.contains("\"event\":\"refreshed\""));
     }
@@ -430,7 +442,7 @@ fn user_models_refresh_recomputes_space_access_routes_and_audit() -> fuse3::Resu
     );
     assert!(!user_models_file_content(&fs, "list")?.contains(&crate::provider_model_id(primary)));
     let audit = fs.node_content(fs.audit_events_inode()?)?;
-    assert!(audit.contains("\"format\":\"space.users.1000.models\""));
+    assert!(audit.contains("\"format\":\"space.users.1000.model\""));
     assert!(audit.contains("\"name\":\"refresh\""));
     assert!(audit.contains("\"event\":\"refreshed\""));
     Ok(())
@@ -490,17 +502,20 @@ fn projection_exposes_space_model_access_view() -> fuse3::Result<()> {
             Some(provider.max_output_tokens)
         );
     }
+    let models_compat = fs
+        .tree
+        .path_inode(&["home", "1000", "models"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_eq!(
+        runtime
+            .lookup_child(models_compat, "list")
+            .and_then(crate::Node::content),
+        Some(crate::global_model_list().as_str()),
+        "user models compatibility path must expose the same index content"
+    );
     drop(runtime);
-    assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "models", "count"])
-            .and_then(crate::Node::content),
-        None
-    );
-    assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "models", "list"])
-            .and_then(crate::Node::content),
-        None
-    );
+    assert!(fs.lookup_path(["home", "1000", "model", "count"]).is_none());
+    assert!(fs.lookup_path(["home", "1000", "model", "list"]).is_none());
     assert_eq!(
         user_models_file_content(&fs, "count")?,
         crate::global_model_count()
@@ -509,6 +524,38 @@ fn projection_exposes_space_model_access_view() -> fuse3::Result<()> {
         user_models_file_content(&fs, "list")?,
         crate::global_model_list()
     );
+    Ok(())
+}
+
+#[test]
+fn user_models_compat_refresh_uses_primary_model_control_name() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let models_compat = fs
+        .tree
+        .path_inode(&["home", "1000", "models"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let refresh = {
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .lookup_child(models_compat, "refresh")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?
+    };
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        assert_eq!(runtime.write(refresh, 0, b"1\n")?, 2);
+        drop(runtime);
+    }
+
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("last_control")?)?,
+        crate::LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT
+    );
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains("\"format\":\"space.users.1000.model\""));
+    assert!(audit.contains("\"name\":\"refresh\""));
+    assert!(audit.contains("\"event\":\"refreshed\""));
     Ok(())
 }
 

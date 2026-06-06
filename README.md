@@ -28,7 +28,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 - FUSE 挂载树：`format`、`provider`、`model`、`home`、`group`、`shared`、`ext`、`space`、`agent`、`cluster`、`mcp`、`skill`、`tool`、`memory`、`vector`、`db`、`audit`、`control`。
 - API format：`openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
-- provider/model 发现：通过 `count`、`list`、`format`、`url/*`、`enabled/*`、`health/*`、`models/*` 等小文本文件读取。
+- provider/model 发现：通过 `count`、`list`、`format`、`url/*`、`enabled/*`、`health/*`、`model/*` 等小文本文件读取。
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json`，再由 `control/drain` 进入执行队列。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
 - thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path。
@@ -164,7 +164,7 @@ mnt=tests/mounts/cortexfs
 cat "$mnt/provider/count"
 cat "$mnt/provider/list"
 cat "$mnt/model/list"
-cat "$mnt/format/openai.chat/models/list"
+cat "$mnt/format/openai.chat/model/list"
 ```
 
 查询某个 Linux 用户实际可用的模型：
@@ -173,8 +173,8 @@ cat "$mnt/format/openai.chat/models/list"
 mnt=tests/mounts/cortexfs
 CTX_HOME="$mnt/home/$(id -u)"
 
-cat "$CTX_HOME/models/count"
-cat "$CTX_HOME/models/list"
+cat "$CTX_HOME/model/count"
+cat "$CTX_HOME/model/list"
 cat "$CTX_HOME/routes/openai.chat/provider"
 cat "$CTX_HOME/routes/openai.chat/model"
 cat "$CTX_HOME/routes/openai.chat/reason"
@@ -232,7 +232,7 @@ cat "$thread/fingerprint"
 cat "$thread/tool-loop/steps.jsonl"
 
 cat "$mnt/tool/list"
-cat "$mnt/mcp/tools/list"
+cat "$mnt/mcp/tool/list"
 cat "$mnt/skill/installed/cortexfs-test/SKILL.md"
 ```
 

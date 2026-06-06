@@ -477,7 +477,7 @@ impl CortexFs {
     #[cfg(test)]
     fn provider_models_file_inode(&self, provider: &str, name: &str) -> fuse3::Result<Inode> {
         ensure_provider(provider)?;
-        self.provider_child_file_inode(&provider_child_path(provider, "models"), name)
+        self.provider_child_file_inode(&provider_child_path(provider, "model"), name)
     }
 
     #[cfg(test)]
@@ -1199,8 +1199,20 @@ impl RuntimeState {
             self.user_models_refresh_inode =
                 Some(self.add_dynamic_file(user_models_parent, "refresh", ""));
         }
+        if let Some(user_models_parent) = parents.user_models_compat {
+            self.user_models_count_compat_inode =
+                Some(self.add_dynamic_file(user_models_parent, "count", "0\n"));
+            self.user_models_list_compat_inode =
+                Some(self.add_dynamic_file(user_models_parent, "list", ""));
+            self.user_models_refresh_compat_inode =
+                Some(self.add_dynamic_file(user_models_parent, "refresh", ""));
+        }
         for (&provider, &model_parent) in &parents.user_models_by_provider {
-            self.add_user_model_runtime_files(provider, model_parent);
+            let compat_parent = parents
+                .user_models_compat_by_provider
+                .get(provider)
+                .copied();
+            self.add_user_model_runtime_files(provider, model_parent, compat_parent);
         }
     }
 
@@ -1439,15 +1451,37 @@ impl RuntimeState {
         self.user_gc_inode = Some(self.add_dynamic_file(control_parent, "gc", ""));
     }
 
-    fn add_user_model_runtime_files(&mut self, provider: &'static str, model_parent: Inode) {
+    fn add_user_model_runtime_files(
+        &mut self,
+        provider: &'static str,
+        model_parent: Inode,
+        compat_parent: Option<Inode>,
+    ) {
         if let Some(spec) = provider_spec(provider) {
             self.add_dynamic_file(model_parent, "context_window", spec.context_window);
             self.add_dynamic_file(model_parent, "max_output_tokens", spec.max_output_tokens);
+            if let Some(compat_parent) = compat_parent {
+                self.add_dynamic_file(compat_parent, "context_window", spec.context_window);
+                self.add_dynamic_file(compat_parent, "max_output_tokens", spec.max_output_tokens);
+            }
         }
         let allowed = self.add_dynamic_file(model_parent, "allowed", "1\n");
         let reason = self.add_dynamic_file(model_parent, "reason", "ready\n");
-        self.user_model_access
-            .insert(provider, UserModelAccessInodes { allowed, reason });
+        let (compat_allowed, compat_reason) = compat_parent.map_or((None, None), |parent| {
+            (
+                Some(self.add_dynamic_file(parent, "allowed", "1\n")),
+                Some(self.add_dynamic_file(parent, "reason", "ready\n")),
+            )
+        });
+        self.user_model_access.insert(
+            provider,
+            UserModelAccessInodes {
+                allowed,
+                reason,
+                compat_allowed,
+                compat_reason,
+            },
+        );
     }
 
     fn add_postgres_dsn_runtime_files(&mut self, dsn_parent: Inode) {
@@ -1521,6 +1555,11 @@ impl RuntimeState {
             .insert(provider, next_rotation);
         let refresh = self.add_dynamic_file(parents.models, "refresh", "");
         self.provider_models_refresh.insert(provider, refresh);
+        if let Some(models_compat) = parents.models_compat {
+            let compat_refresh = self.add_dynamic_file(models_compat, "refresh", "");
+            self.provider_models_refresh_compat
+                .insert(provider, compat_refresh);
+        }
     }
 
     fn node(&self, inode: Inode) -> Option<&Node> {
@@ -1566,6 +1605,7 @@ impl RuntimeState {
             || Some(inode) == self.user_reload_inode
             || Some(inode) == self.user_gc_inode
             || Some(inode) == self.user_models_refresh_inode
+            || Some(inode) == self.user_models_refresh_compat_inode
             || Some(inode) == self.thread_continue_inode
             || Some(inode) == self.thread_pause_inode
             || Some(inode) == self.thread_cancel_inode
@@ -1597,6 +1637,10 @@ impl RuntimeState {
                 .provider_models_refresh
                 .values()
                 .any(|refresh_inode| *refresh_inode == inode)
+            || self
+                .provider_models_refresh_compat
+                .values()
+                .any(|refresh_inode| *refresh_inode == inode)
     }
 
     fn is_writable_dynamic_file(&self, inode: Inode) -> bool {
@@ -1616,6 +1660,7 @@ impl RuntimeState {
             || Some(inode) == self.user_reload_inode
             || Some(inode) == self.user_gc_inode
             || Some(inode) == self.user_models_refresh_inode
+            || Some(inode) == self.user_models_refresh_compat_inode
             || Some(inode) == self.thread_continue_inode
             || Some(inode) == self.thread_pause_inode
             || Some(inode) == self.thread_cancel_inode
@@ -1655,6 +1700,10 @@ impl RuntimeState {
                 .any(|rotate_inode| *rotate_inode == inode)
             || self
                 .provider_models_refresh
+                .values()
+                .any(|refresh_inode| *refresh_inode == inode)
+            || self
+                .provider_models_refresh_compat
                 .values()
                 .any(|refresh_inode| *refresh_inode == inode)
             || self
@@ -1813,6 +1862,9 @@ impl RuntimeState {
                 .map(Some);
         }
         if Some(inode) == self.user_models_refresh_inode {
+            return self.write_user_models_refresh(offset, data).map(Some);
+        }
+        if Some(inode) == self.user_models_refresh_compat_inode {
             return self.write_user_models_refresh(offset, data).map(Some);
         }
         Ok(None)

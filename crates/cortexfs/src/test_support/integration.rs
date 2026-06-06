@@ -109,34 +109,46 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["formats", "google.generate_content", "name"])
+        fs.lookup_path(["format", "google.generate_content", "name"])
             .and_then(crate::Node::content),
         Some("google.generate_content\n")
     );
     assert_eq!(
-        fs.lookup_path(["formats", "openai.chat", "models", "count"])
+        fs.lookup_path(["format", "openai.chat", "model", "count"])
             .and_then(crate::Node::content),
         Some(crate::model_count_for_format("openai.chat").as_str())
     );
     assert_eq!(
-        fs.lookup_path(["formats", "openai.chat", "models", "list"])
+        fs.lookup_path(["format", "openai.chat", "model", "list"])
             .and_then(crate::Node::content),
         Some(crate::model_list_for_format("openai.chat").as_str())
     );
     assert_eq!(
-        fs.lookup_path(["capabilities", "models"])
+        fs.lookup_path(["formats", "openai.chat", "models", "list"])
+            .and_then(crate::Node::content),
+        Some(crate::model_list_for_format("openai.chat").as_str()),
+        "format models compatibility path must expose the same index content"
+    );
+    assert_eq!(
+        fs.lookup_path(["cap", "models"])
             .and_then(crate::Node::content),
         Some(crate::global_model_list().as_str())
     );
     assert_eq!(
-        fs.lookup_path(["formats", "openai.chat", "providers", "count"])
+        fs.lookup_path(["format", "openai.chat", "provider", "count"])
             .and_then(crate::Node::content),
         Some(crate::provider_count_for_format("openai.chat").as_str())
     );
     assert_eq!(
-        fs.lookup_path(["formats", "openai.chat", "providers", "list"])
+        fs.lookup_path(["format", "openai.chat", "provider", "list"])
             .and_then(crate::Node::content),
         Some(crate::provider_list_for_format("openai.chat").as_str())
+    );
+    assert_eq!(
+        fs.lookup_path(["formats", "openai.chat", "providers", "list"])
+            .and_then(crate::Node::content),
+        Some(crate::provider_list_for_format("openai.chat").as_str()),
+        "format providers compatibility path must expose the same index content"
     );
     for format in [
         "openai.responses",
@@ -144,39 +156,39 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         "google.generate_content",
     ] {
         assert_eq!(
-            fs.lookup_path(["formats", format, "models", "count"])
+            fs.lookup_path(["format", format, "model", "count"])
                 .and_then(crate::Node::content),
             Some(crate::model_count_for_format(format).as_str())
         );
         assert_eq!(
-            fs.lookup_path(["formats", format, "models", "list"])
+            fs.lookup_path(["format", format, "model", "list"])
                 .and_then(crate::Node::content),
             Some(crate::model_list_for_format(format).as_str())
         );
         assert_eq!(
-            fs.lookup_path(["formats", format, "providers", "count"])
+            fs.lookup_path(["format", format, "provider", "count"])
                 .and_then(crate::Node::content),
             Some(crate::provider_count_for_format(format).as_str())
         );
         assert_eq!(
-            fs.lookup_path(["formats", format, "providers", "list"])
+            fs.lookup_path(["format", format, "provider", "list"])
                 .and_then(crate::Node::content),
             Some(crate::provider_list_for_format(format).as_str())
         );
     }
     assert_eq!(
-        fs.lookup_path(["capabilities", "providers"])
+        fs.lookup_path(["cap", "providers"])
             .and_then(crate::Node::content),
         Some(crate::provider_list().as_str())
     );
     let capability_providers_inode = fs
         .tree
-        .path_inode(&["capabilities", "providers"])
+        .path_inode(&["cap", "providers"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert_eq!(fs.node_attr(capability_providers_inode)?.perm, 0o444);
     let chat_providers_list_inode = fs
         .tree
-        .path_inode(&["formats", "openai.chat", "providers", "list"])
+        .path_inode(&["format", "openai.chat", "provider", "list"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert_eq!(fs.node_attr(chat_providers_list_inode)?.perm, 0o444);
     assert!(

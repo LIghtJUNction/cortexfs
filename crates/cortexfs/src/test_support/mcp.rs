@@ -16,14 +16,20 @@ fn projection_exposes_mcp_server_tool_resource_prompt_and_session() -> fuse3::Re
         Some("local-fs\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "tools", "count"])
+        fs.lookup_path(["mcp", "tool", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "tools", "list"])
+        fs.lookup_path(["mcp", "tool", "list"])
             .and_then(crate::Node::content),
         Some("local-fs.read_file\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["mcp", "tools", "list"])
+            .and_then(crate::Node::content),
+        Some("local-fs.read_file\n"),
+        "mcp tools compatibility path must expose the same index content"
     );
     assert_eq!(
         fs.lookup_path(["mcp", "resources", "count"])
@@ -84,12 +90,12 @@ fn projection_exposes_mcp_server_tool_resource_prompt_and_session() -> fuse3::Re
         Some("tools\nresources\nprompts\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "tools", "local-fs.read_file", "permissions"])
+        fs.lookup_path(["mcp", "tool", "local-fs.read_file", "permissions"])
             .and_then(crate::Node::content),
         Some("host.fs.read\n")
     );
     assert!(
-        fs.lookup_path(["mcp", "tools", "local-fs.read_file", "invoke", "inbox"])
+        fs.lookup_path(["mcp", "tool", "local-fs.read_file", "invoke", "inbox"])
             .is_some(),
         "mcp tool invoke inbox must exist"
     );

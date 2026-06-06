@@ -62,11 +62,14 @@ impl RuntimeState {
         if let Some(inode) = self.user_models_refresh_inode {
             self.update_dynamic_file(inode, "1\n");
         }
+        if let Some(inode) = self.user_models_refresh_compat_inode {
+            self.update_dynamic_file(inode, "1\n");
+        }
         self.update_dynamic_file(
             self.last_control_inode,
             LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT,
         );
-        self.append_audit("space.users.1000.models", "refresh", "refreshed");
+        self.append_audit("space.users.1000.model", "refresh", "refreshed");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
@@ -194,11 +197,14 @@ impl RuntimeState {
             return Err(libc::EINVAL.into());
         };
         self.update_dynamic_file(inode, "1\n");
+        if let Some(&inode) = self.provider_models_refresh_compat.get(provider) {
+            self.update_dynamic_file(inode, "1\n");
+        }
         self.update_dynamic_file(
             self.last_control_inode,
-            format!("providers/{provider}/models/refresh\n"),
+            format!("provider/{provider}/model/refresh\n"),
         );
-        let audit_format = format!("provider.{provider}.models");
+        let audit_format = format!("provider.{provider}.model");
         self.append_audit(&audit_format, "refresh", "refreshed");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
@@ -318,6 +324,11 @@ impl RuntimeState {
         self.provider_models_refresh
             .iter()
             .find_map(|(&provider, &refresh_inode)| (refresh_inode == inode).then_some(provider))
+            .or_else(|| {
+                self.provider_models_refresh_compat.iter().find_map(
+                    |(&provider, &refresh_inode)| (refresh_inode == inode).then_some(provider),
+                )
+            })
     }
 
     fn provider_for_url_current_inode(&self, inode: Inode) -> Option<&'static str> {
@@ -366,6 +377,12 @@ impl RuntimeState {
             };
             self.update_dynamic_file(inodes.allowed, allowed);
             self.update_dynamic_file(inodes.reason, reason);
+            if let Some(inode) = inodes.compat_allowed {
+                self.update_dynamic_file(inode, allowed);
+            }
+            if let Some(inode) = inodes.compat_reason {
+                self.update_dynamic_file(inode, reason);
+            }
         }
         self.refresh_user_model_index();
     }
@@ -379,7 +396,13 @@ impl RuntimeState {
         if let Some(inode) = self.user_models_count_inode {
             self.update_dynamic_file(inode, format!("{}\n", available.len()));
         }
+        if let Some(inode) = self.user_models_count_compat_inode {
+            self.update_dynamic_file(inode, format!("{}\n", available.len()));
+        }
         if let Some(inode) = self.user_models_list_inode {
+            self.update_dynamic_file(inode, newline_list(available.iter()));
+        }
+        if let Some(inode) = self.user_models_list_compat_inode {
             self.update_dynamic_file(inode, newline_list(available.iter()));
         }
     }

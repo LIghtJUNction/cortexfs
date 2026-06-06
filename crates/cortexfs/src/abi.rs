@@ -18,7 +18,7 @@ pub const LOCAL_USER_UID_TEXT: &str = "1000\n";
 pub const LOCAL_USER_HOME_PREFIX: &[&str] = &["home", "1000"];
 pub const LOCAL_USER_THREAD_DISPLAY_PATH: &str = "home/1000/threads/demo";
 pub const LOCAL_USER_THREAD_DISPLAY_TEXT: &str = "home/1000/threads/demo\n";
-pub const LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT: &str = "home/1000/models/refresh\n";
+pub const LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT: &str = "home/1000/model/refresh\n";
 pub const LOCAL_USER_CONTROL_DISPLAY_PREFIX: &str = "home/1000";
 pub const LOCAL_USER_SPACE_CONTEXT_TEXT: &str = "local:uid1000:object_r:user_space_t:s0\n";
 pub const LOCAL_USER_THREAD_CONTEXT_TEXT: &str = "local:uid1000:object_r:thread_t:s0\n";
@@ -82,7 +82,7 @@ pub const SHARED_PROJECT_A_LOCK_LEASES_PATH: &[&str] =
 pub const SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH: &[&str] =
     &["spaces", "shared", "project-a", "collab", "locks", "leases"];
 pub const POSTGRES_DSN_DIR_PATH: &[&str] = &["db", "postgres", "dsn"];
-pub const USER_MODELS_DIR_PATH: &[&str] = &["home", "1000", "models"];
+pub const USER_MODELS_DIR_PATH: &[&str] = &["home", "1000", "model"];
 pub const FILESYSTEM_READ_TOOL_INBOX_PATH: &[&str] =
     &["tool", "filesystem.read", "invoke", "inbox"];
 pub const FILESYSTEM_READ_TOOL_OUTBOX_PATH: &[&str] =
