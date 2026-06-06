@@ -14,6 +14,8 @@ pub struct ApiRouteInodes {
 pub struct UserModelAccessInodes {
     pub allowed: Inode,
     pub reason: Inode,
+    pub compat_allowed: Option<Inode>,
+    pub compat_reason: Option<Inode>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -23,6 +25,7 @@ pub struct ProviderRuntimeParents {
     pub enabled: Inode,
     pub health: Inode,
     pub models: Inode,
+    pub models_compat: Option<Inode>,
     pub secrets: Inode,
 }
 

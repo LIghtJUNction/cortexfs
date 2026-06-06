@@ -228,7 +228,7 @@ pub fn user_model_path(provider: &ProviderRuntimeSpec) -> Vec<String> {
     vec![
         "home".to_owned(),
         LOCAL_USER_ID.to_owned(),
-        "models".to_owned(),
+        "model".to_owned(),
         provider_model_id(provider),
     ]
 }

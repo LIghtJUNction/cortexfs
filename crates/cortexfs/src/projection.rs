@@ -245,16 +245,20 @@ impl NodeTreeBuilder {
         self.add_file(format, "request_suffix", projection.request_suffix);
         self.add_file(format, "response_suffix", projection.response_suffix);
         self.add_file(format, "schema.json", "{}\n");
-        let models = self.add_dir(format, "models");
+        let models = self.add_dir(format, "model");
         self.add_owned_file(models, "count", model_count_for_format(projection.name));
         self.add_owned_file(models, "list", model_list_for_format(projection.name));
-        let providers = self.add_dir(format, "providers");
+        let providers = self.add_dir(format, "provider");
         self.add_owned_file(
             providers,
             "count",
             provider_count_for_format(projection.name),
         );
         self.add_owned_file(providers, "list", provider_list_for_format(projection.name));
+        let models_compat = self.add_dir(format, "models");
+        self.attach_children_alias(models_compat, models);
+        let providers_compat = self.add_dir(format, "providers");
+        self.attach_children_alias(providers_compat, providers);
     }
 
     fn add_global_models_index(&mut self, parent: Inode) {
@@ -342,17 +346,19 @@ impl NodeTreeBuilder {
     }
 
     fn add_provider_models(&mut self, provider: Inode, spec: &ProviderRuntimeSpec) {
-        let models = self.add_dir(provider, "models");
-        self.add_file(models, "count", "1\n");
-        self.add_owned_file(models, "list", format!("{}\n", spec.default_model));
-        self.add_file(models, "refresh", "unsupported\n");
-        let model = self.add_dir(models, spec.default_model);
+        let model_index = self.add_dir(provider, "model");
+        self.add_file(model_index, "count", "1\n");
+        self.add_owned_file(model_index, "list", format!("{}\n", spec.default_model));
+        self.add_file(model_index, "refresh", "unsupported\n");
+        let model = self.add_dir(model_index, spec.default_model);
         self.add_owned_file(model, "name", format!("{}\n", spec.default_model));
         self.add_owned_file(model, "format", format!("{}\n", default_format(spec)));
         self.add_file(model, "context_window", spec.context_window);
         self.add_file(model, "max_output_tokens", spec.max_output_tokens);
         self.add_file(model, "capabilities", spec.model_capabilities);
         self.add_file(model, "status", "ready\n");
+        let models_compat = self.add_dir(provider, "models");
+        self.attach_children_alias(models_compat, model_index);
     }
 
     fn add_user_space(&mut self, user: Inode) {
@@ -392,11 +398,13 @@ impl NodeTreeBuilder {
         let threads = self.add_dir(user, "threads");
         self.add_file(threads, "count", THREAD_COUNT_TEXT);
         self.add_demo_thread(threads);
-        let models = self.add_dir(user, "models");
+        let models = self.add_dir(user, "model");
         self.add_file(models, "refresh", "unsupported\n");
         for provider in PROVIDER_SPECS {
             self.add_space_model(models, provider);
         }
+        let models_compat = self.add_dir(user, "models");
+        self.attach_children_alias(models_compat, models);
     }
 
     fn add_space_agents_projection(&mut self, user: Inode) {
@@ -857,7 +865,7 @@ impl NodeTreeBuilder {
     fn add_mcp_projection(&mut self, parent: Inode) {
         let mcp = self.add_dir(parent, "mcp");
         let servers = self.add_dir(mcp, "servers");
-        let tools = self.add_dir(mcp, "tools");
+        let tools = self.add_dir(mcp, "tool");
         let resources = self.add_dir(mcp, "resources");
         let prompts = self.add_dir(mcp, "prompts");
         let sessions = self.add_dir(mcp, "sessions");
@@ -877,6 +885,8 @@ impl NodeTreeBuilder {
         self.add_mcp_resource(resources);
         self.add_mcp_prompt(prompts);
         self.add_mcp_session(sessions);
+        let tools_compat = self.add_dir(mcp, "tools");
+        self.attach_children_alias(tools_compat, tools);
     }
 
     fn add_skills_projection(&mut self, skills: Inode) {
