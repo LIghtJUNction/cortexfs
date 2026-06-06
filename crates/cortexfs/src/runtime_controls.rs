@@ -213,7 +213,7 @@ impl RuntimeState {
         ));
         self.update_dynamic_file(
             self.last_control_inode,
-            format!("mcp/servers/{}/{}\n", effect.server_id, effect.command_name),
+            format!("mcp/server/{}/{}\n", effect.server_id, effect.command_name),
         );
         let audit_format = format!("mcp.server.{}.control", effect.server_id);
         self.append_audit(&audit_format, effect.command_name, effect.next_status);
@@ -236,7 +236,7 @@ impl RuntimeState {
         );
         self.update_dynamic_file(
             self.last_control_inode,
-            "mcp/resources/local-fs/workspace/refresh\n",
+            "mcp/resource/local-fs/workspace/refresh\n",
         );
         self.append_audit("mcp.resource.local-fs.workspace", "refresh", "refreshed");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))

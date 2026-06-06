@@ -2,18 +2,24 @@ use crate::CortexFs;
 use fuse3::FileType;
 
 #[test]
-fn projection_exposes_mcp_server_tool_resource_prompt_and_session() -> fuse3::Result<()> {
+fn projection_exposes_mcp_primary_and_compat_indexes() {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["mcp", "servers", "count"])
+        fs.lookup_path(["mcp", "server", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "servers", "list"])
+        fs.lookup_path(["mcp", "server", "list"])
             .and_then(crate::Node::content),
         Some("local-fs\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["mcp", "servers", "list"])
+            .and_then(crate::Node::content),
+        Some("local-fs\n"),
+        "mcp servers compatibility path must expose the same index content"
     );
     assert_eq!(
         fs.lookup_path(["mcp", "tool", "count"])
@@ -32,60 +38,79 @@ fn projection_exposes_mcp_server_tool_resource_prompt_and_session() -> fuse3::Re
         "mcp tools compatibility path must expose the same index content"
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "resources", "count"])
+        fs.lookup_path(["mcp", "resource", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "resources", "list"])
+        fs.lookup_path(["mcp", "resource", "list"])
             .and_then(crate::Node::content),
         Some("local-fs/workspace\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "prompts", "count"])
+        fs.lookup_path(["mcp", "resources", "list"])
+            .and_then(crate::Node::content),
+        Some("local-fs/workspace\n"),
+        "mcp resources compatibility path must expose the same index content"
+    );
+    assert_eq!(
+        fs.lookup_path(["mcp", "prompt", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "prompts", "list"])
+        fs.lookup_path(["mcp", "prompt", "list"])
             .and_then(crate::Node::content),
         Some("local-fs/summarize-file\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "sessions", "count"])
+        fs.lookup_path(["mcp", "prompts", "list"])
+            .and_then(crate::Node::content),
+        Some("local-fs/summarize-file\n"),
+        "mcp prompts compatibility path must expose the same index content"
+    );
+    assert_eq!(
+        fs.lookup_path(["mcp", "session", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "sessions", "list"])
+        fs.lookup_path(["mcp", "session", "list"])
             .and_then(crate::Node::content),
         Some("local-fs.demo\n")
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["mcp", "sessions", "local-fs.demo", "state"])?)?,
+        fs.lookup_path(["mcp", "sessions", "list"])
+            .and_then(crate::Node::content),
+        Some("local-fs.demo\n"),
+        "mcp sessions compatibility path must expose the same index content"
+    );
+}
+
+#[test]
+fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+
+    assert_eq!(
+        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "state"])?)?,
         "idle\n"
     );
     assert_eq!(
-        fs.node_content(fs.path_inode([
-            "mcp",
-            "sessions",
-            "local-fs.demo",
-            "transcript.jsonl"
-        ])?)?,
+        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?,
         ""
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "servers", "local-fs", "transport"])
+        fs.lookup_path(["mcp", "server", "local-fs", "transport"])
             .and_then(crate::Node::content),
         Some("stdio\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "servers", "local-fs", "context"])
+        fs.lookup_path(["mcp", "server", "local-fs", "context"])
             .and_then(crate::Node::content),
         Some("local:mcp_r:mcp_server_t:s0\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "servers", "local-fs", "capabilities"])
+        fs.lookup_path(["mcp", "server", "local-fs", "capabilities"])
             .and_then(crate::Node::content),
         Some("tools\nresources\nprompts\n")
     );
@@ -100,14 +125,14 @@ fn projection_exposes_mcp_server_tool_resource_prompt_and_session() -> fuse3::Re
         "mcp tool invoke inbox must exist"
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "resources", "local-fs", "workspace", "uri"])
+        fs.lookup_path(["mcp", "resource", "local-fs", "workspace", "uri"])
             .and_then(crate::Node::content),
         Some("file://workspace\n")
     );
     assert!(
         fs.lookup_path([
             "mcp",
-            "prompts",
+            "prompt",
             "local-fs",
             "summarize-file",
             "render",
@@ -122,16 +147,10 @@ fn projection_exposes_mcp_server_tool_resource_prompt_and_session() -> fuse3::Re
 #[test]
 fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let refresh = fs.path_inode(["mcp", "resources", "local-fs", "workspace", "refresh"])?;
+    let refresh = fs.path_inode(["mcp", "resource", "local-fs", "workspace", "refresh"])?;
 
     assert_eq!(
-        fs.node_content(fs.path_inode([
-            "mcp",
-            "resources",
-            "local-fs",
-            "workspace",
-            "content"
-        ])?)?,
+        fs.node_content(fs.path_inode(["mcp", "resource", "local-fs", "workspace", "content"])?)?,
         "workspace=available\nentries=0\n"
     );
     assert_eq!(fs.node_attr(refresh)?.perm, 0o222);
@@ -145,31 +164,22 @@ fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Resul
         drop(runtime);
     }
 
-    let content = fs.node_content(fs.path_inode([
-        "mcp",
-        "resources",
-        "local-fs",
-        "workspace",
-        "content",
-    ])?)?;
+    let content =
+        fs.node_content(fs.path_inode(["mcp", "resource", "local-fs", "workspace", "content"])?)?;
     assert!(content.contains("workspace=available\n"));
     assert!(content.contains("entries=1\n"));
     assert!(content.contains("refreshed=1\n"));
     assert_eq!(
-        fs.node_content(fs.path_inode(["mcp", "sessions", "local-fs.demo", "state"])?)?,
+        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "state"])?)?,
         "refreshed\n"
     );
-    let transcript = fs.node_content(fs.path_inode([
-        "mcp",
-        "sessions",
-        "local-fs.demo",
-        "transcript.jsonl",
-    ])?)?;
+    let transcript =
+        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
     assert!(transcript.contains("\"type\":\"resource_refresh\""));
     assert!(transcript.contains("\"resource\":\"local-fs/workspace\""));
     assert_eq!(
         fs.node_content(fs.control_file_inode("last_control")?)?,
-        "mcp/resources/local-fs/workspace/refresh\n"
+        "mcp/resource/local-fs/workspace/refresh\n"
     );
     let audit = fs.node_content(fs.audit_events_inode()?)?;
     assert!(audit.contains("\"format\":\"mcp.resource.local-fs.workspace\""));
@@ -181,7 +191,7 @@ fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Resul
 #[test]
 fn mcp_resource_refresh_rejects_invalid_input() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let refresh = fs.path_inode(["mcp", "resources", "local-fs", "workspace", "refresh"])?;
+    let refresh = fs.path_inode(["mcp", "resource", "local-fs", "workspace", "refresh"])?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
 
     assert!(runtime.write(refresh, 0, b"yes\n").is_err());
@@ -198,7 +208,7 @@ fn projection_exposes_mcp_control_and_session_socket_semantics() -> fuse3::Resul
         let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime
             .lookup_child(
-                fs.path_inode(["mcp", "servers", "local-fs", "control"])?,
+                fs.path_inode(["mcp", "server", "local-fs", "control"])?,
                 "reload",
             )
             .map(crate::Node::inode)
@@ -210,13 +220,13 @@ fn projection_exposes_mcp_control_and_session_socket_semantics() -> fuse3::Resul
         Err(fuse3::Errno::from(libc::EACCES))
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "sessions", "local-fs.demo", "io.sock"])
+        fs.lookup_path(["mcp", "session", "local-fs.demo", "io.sock"])
             .map(crate::Node::kind),
         Some(FileType::Socket)
     );
     let session_socket = fs
         .tree
-        .path_inode(&["mcp", "sessions", "local-fs.demo", "io.sock"])
+        .path_inode(&["mcp", "session", "local-fs.demo", "io.sock"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(
         fs.node_content(session_socket).is_err(),
@@ -230,7 +240,7 @@ fn mcp_server_control_nodes_update_status_pid_last_control_and_audit() -> fuse3:
     let fs = CortexFs::new();
     let control_dir = fs
         .tree
-        .path_inode(&["mcp", "servers", "local-fs", "control"])
+        .path_inode(&["mcp", "server", "local-fs", "control"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
 
     for (control_name, expected_status, expected_pid) in [
@@ -248,16 +258,16 @@ fn mcp_server_control_nodes_update_status_pid_last_control_and_audit() -> fuse3:
         drop(runtime);
 
         assert_eq!(
-            fs.node_content(fs.path_inode(["mcp", "servers", "local-fs", "status"])?)?,
+            fs.node_content(fs.path_inode(["mcp", "server", "local-fs", "status"])?)?,
             expected_status
         );
         assert_eq!(
-            fs.node_content(fs.path_inode(["mcp", "servers", "local-fs", "pid"])?)?,
+            fs.node_content(fs.path_inode(["mcp", "server", "local-fs", "pid"])?)?,
             expected_pid
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("mcp/servers/local-fs/{control_name}\n")
+            format!("mcp/server/local-fs/{control_name}\n")
         );
     }
 
@@ -267,12 +277,8 @@ fn mcp_server_control_nodes_update_status_pid_last_control_and_audit() -> fuse3:
     assert!(audit.contains("\"name\":\"reload\""));
     assert!(audit.contains("\"name\":\"restart\""));
     assert!(audit.contains("\"name\":\"stop\""));
-    let transcript = fs.node_content(fs.path_inode([
-        "mcp",
-        "sessions",
-        "local-fs.demo",
-        "transcript.jsonl",
-    ])?)?;
+    let transcript =
+        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
     assert!(transcript.contains("\"type\":\"server_control\""));
     assert!(transcript.contains("\"command\":\"start\""));
     assert!(transcript.contains("\"command\":\"stop\""));
@@ -284,7 +290,7 @@ fn mcp_server_control_nodes_reject_invalid_input() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let start = fs
         .tree
-        .path_inode(&["mcp", "servers", "local-fs", "control", "start"])
+        .path_inode(&["mcp", "server", "local-fs", "control", "start"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
 
@@ -371,12 +377,8 @@ fn mcp_local_fs_tool_invokes_through_unified_tool_plane() -> fuse3::Result<()> {
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"mcp.local-fs.read_file\"")
     );
-    let transcript = fs.node_content(fs.path_inode([
-        "mcp",
-        "sessions",
-        "local-fs.demo",
-        "transcript.jsonl",
-    ])?)?;
+    let transcript =
+        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
     assert!(transcript.contains("\"type\":\"tool_result\""));
     assert!(transcript.contains("\"tool\":\"mcp.local-fs.read_file\""));
     assert!(transcript.contains("\"request_id\":\"mcp-read\""));
@@ -433,12 +435,8 @@ fn mcp_prompt_render_materializes_prompt_after_drain() -> fuse3::Result<()> {
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"mcp.prompt.render\"")
     );
-    let transcript = fs.node_content(fs.path_inode([
-        "mcp",
-        "sessions",
-        "local-fs.demo",
-        "transcript.jsonl",
-    ])?)?;
+    let transcript =
+        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
     assert!(transcript.contains("\"type\":\"prompt_render\""));
     assert!(transcript.contains("\"prompt\":\"summarize-file\""));
     assert!(transcript.contains("\"request_id\":\"render-001\""));

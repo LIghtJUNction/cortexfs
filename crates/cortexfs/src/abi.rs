@@ -93,7 +93,7 @@ pub const MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH: &[&str] =
     &["tool", "mcp.local-fs.read_file", "invoke", "outbox"];
 pub const MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH: &[&str] = &[
     "mcp",
-    "prompts",
+    "prompt",
     "local-fs",
     "summarize-file",
     "render",
@@ -101,7 +101,7 @@ pub const MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH: &[&str] = &[
 ];
 pub const MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH: &[&str] = &[
     "mcp",
-    "prompts",
+    "prompt",
     "local-fs",
     "summarize-file",
     "render",

@@ -212,15 +212,23 @@ fn agent_mcp_indexes_use_directories_not_flat_underscore_names() {
 }
 
 #[test]
-fn mcp_tool_uses_singular_primary_directory() {
+fn mcp_indexes_use_singular_primary_directories() {
     let fs = CortexFs::new();
 
-    assert!(
-        fs.lookup_path(["mcp", "tool", "list"]).is_some(),
-        "mcp/tool must be the primary tool registry"
-    );
-    assert!(
-        fs.lookup_path(["mcp", "tools", "list"]).is_some(),
-        "mcp/tools remains a compatibility registry"
-    );
+    for (primary, compat) in [
+        ("server", "servers"),
+        ("tool", "tools"),
+        ("resource", "resources"),
+        ("prompt", "prompts"),
+        ("session", "sessions"),
+    ] {
+        assert!(
+            fs.lookup_path(["mcp", primary, "list"]).is_some(),
+            "mcp/{primary} must be the primary registry"
+        );
+        assert!(
+            fs.lookup_path(["mcp", compat, "list"]).is_some(),
+            "mcp/{compat} remains a compatibility registry"
+        );
+    }
 }
