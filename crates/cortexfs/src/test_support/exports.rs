@@ -286,6 +286,38 @@ fn export_filters_rebuild_conversation_view_by_provider() -> fuse3::Result<()> {
     assert!(export.contains("\"request_id\":\"alternate\""));
     assert!(!export.contains("\"request_id\":\"primary\""));
     assert!(export.contains(&format!("\"provider\":\"{}\"", alternate.id)));
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let agent = runtime
+            .lookup_child(filters, "agent")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        let space = runtime
+            .lookup_child(filters, "space")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(agent, 0, b"helper\n")?;
+        runtime.write(space, 0, b"home/1000\n")?;
+        drop(runtime);
+    }
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"alternate\""));
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let subject = runtime
+            .lookup_child(filters, "subject")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(subject, 0, b"qq:user:123456\n")?;
+        drop(runtime);
+    }
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(
+        export.is_empty(),
+        "subject filter must exclude rows without a subject"
+    );
     Ok(())
 }
 
@@ -305,6 +337,10 @@ fn export_filters_reject_invalid_values() -> fuse3::Result<()> {
         .lookup_child(filters, "exclude_failed")
         .map(crate::Node::inode)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let agent = runtime
+        .lookup_child(filters, "agent")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
 
     assert_eq!(
         runtime.write(
@@ -316,6 +352,10 @@ fn export_filters_reject_invalid_values() -> fuse3::Result<()> {
     );
     assert_eq!(
         runtime.write(exclude_failed, 0, b"true\n"),
+        Err(fuse3::Errno::from(libc::EINVAL))
+    );
+    assert_eq!(
+        runtime.write(agent, 1, b"helper\n"),
         Err(fuse3::Errno::from(libc::EINVAL))
     );
     let valid_provider = crate::default_provider_spec()?;

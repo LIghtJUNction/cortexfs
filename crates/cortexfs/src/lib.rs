@@ -1300,6 +1300,12 @@ impl RuntimeState {
                 Some(self.add_dynamic_file(filters_parent, "provider", "\n"));
             self.export_filter_model_inode =
                 Some(self.add_dynamic_file(filters_parent, "model", "\n"));
+            self.export_filter_agent_inode =
+                Some(self.add_dynamic_file(filters_parent, "agent", "\n"));
+            self.export_filter_subject_inode =
+                Some(self.add_dynamic_file(filters_parent, "subject", "\n"));
+            self.export_filter_space_inode =
+                Some(self.add_dynamic_file(filters_parent, "space", "\n"));
             self.export_filter_exclude_failed_inode =
                 Some(self.add_dynamic_file(filters_parent, "exclude_failed", "1\n"));
         }
@@ -1586,6 +1592,9 @@ impl RuntimeState {
             || Some(inode) == self.export_refresh_inode
             || Some(inode) == self.export_filter_provider_inode
             || Some(inode) == self.export_filter_model_inode
+            || Some(inode) == self.export_filter_agent_inode
+            || Some(inode) == self.export_filter_subject_inode
+            || Some(inode) == self.export_filter_space_inode
             || Some(inode) == self.export_filter_exclude_failed_inode
             || Some(inode) == self.user_allowed_providers_inode
             || Some(inode) == self.user_default_provider_inode
@@ -1955,6 +1964,21 @@ impl RuntimeState {
         if Some(inode) == self.export_filter_model_inode {
             return self.write_export_filter_model(offset, data).map(Some);
         }
+        if Some(inode) == self.export_filter_agent_inode {
+            return self
+                .write_export_filter_text(self.export_filter_agent_inode, offset, data)
+                .map(Some);
+        }
+        if Some(inode) == self.export_filter_subject_inode {
+            return self
+                .write_export_filter_text(self.export_filter_subject_inode, offset, data)
+                .map(Some);
+        }
+        if Some(inode) == self.export_filter_space_inode {
+            return self
+                .write_export_filter_text(self.export_filter_space_inode, offset, data)
+                .map(Some);
+        }
         if Some(inode) == self.export_filter_exclude_failed_inode {
             return self
                 .write_export_filter_exclude_failed(offset, data)
@@ -2026,6 +2050,16 @@ impl RuntimeState {
             return Err(libc::EINVAL.into());
         }
         self.write_export_filter_value(self.export_filter_model_inode, offset, data, value)
+    }
+
+    fn write_export_filter_text(
+        &mut self,
+        inode: Option<Inode>,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<u32> {
+        let value = normalize_export_filter_value(data)?;
+        self.write_export_filter_value(inode, offset, data, value)
     }
 
     fn write_export_filter_exclude_failed(
