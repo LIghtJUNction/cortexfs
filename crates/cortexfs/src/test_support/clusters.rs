@@ -77,9 +77,15 @@ fn projection_exposes_cluster_worker_and_queue_shape() -> fuse3::Result<()> {
         Some("local-worker\n")
     );
     assert_eq!(
-        fs.lookup_path(["cluster", "local", "worker", "local-worker", "capabilities"])
+        fs.lookup_path(["cluster", "local", "worker", "local-worker", "cap"])
             .and_then(crate::Node::content),
         Some("fuse\nprovider.registry\nlocal_runtime\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["cluster", "local", "worker", "local-worker", "capabilities"])
+            .and_then(crate::Node::content),
+        Some("fuse\nprovider.registry\nlocal_runtime\n"),
+        "worker capabilities remains a compatibility file"
     );
     assert_worker_runtime(
         &fs,
