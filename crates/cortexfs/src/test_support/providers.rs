@@ -501,6 +501,19 @@ fn projection_exposes_space_model_access_view() -> fuse3::Result<()> {
                 .and_then(crate::Node::content),
             Some(provider.max_output_tokens)
         );
+        assert_eq!(
+            runtime
+                .lookup_child(user_model, "cap")
+                .and_then(crate::Node::content),
+            Some(provider.model_capabilities)
+        );
+        assert_eq!(
+            runtime
+                .lookup_child(user_model, "capabilities")
+                .and_then(crate::Node::content),
+            Some(provider.model_capabilities),
+            "user model capabilities remains a compatibility file"
+        );
     }
     let models_compat = fs
         .tree
