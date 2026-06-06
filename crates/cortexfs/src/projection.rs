@@ -24,6 +24,7 @@ struct FormatProjection {
     content_type: &'static str,
     request_suffix: &'static str,
     response_suffix: &'static str,
+    schema: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -66,6 +67,18 @@ struct RootCompatAliases {
     tools: Inode,
     databases: Inode,
 }
+
+const OPENAI_CHAT_SCHEMA: &str = r#"{"type":"object","properties":{"model":{"type":"string"},"messages":{"type":"array","items":{"type":"object","required":["role","content"],"properties":{"role":{"type":"string"},"content":{"type":["string","array"]},"name":{"type":"string"},"tool_calls":{"type":"array"},"tool_call_id":{"type":"string"}}}},"stream":{"type":"boolean"},"temperature":{"type":"number"},"tools":{"type":"array"}},"required":["messages"]}
+"#;
+
+const OPENAI_RESPONSES_SCHEMA: &str = r#"{"type":"object","properties":{"model":{"type":"string"},"input":{},"instructions":{"type":"string"},"stream":{"type":"boolean"},"temperature":{"type":"number"},"tools":{"type":"array"}},"required":["input"]}
+"#;
+
+const ANTHROPIC_MESSAGES_SCHEMA: &str = r#"{"type":"object","properties":{"model":{"type":"string"},"messages":{"type":"array","items":{"type":"object","required":["role","content"],"properties":{"role":{"type":"string"},"content":{"type":["string","array"]}}}},"system":{"type":["string","array"]},"max_tokens":{"type":"integer"},"stream":{"type":"boolean"},"tools":{"type":"array"}},"required":["messages"]}
+"#;
+
+const GOOGLE_GENERATE_CONTENT_SCHEMA: &str = r#"{"type":"object","properties":{"model":{"type":"string"},"contents":{"type":"array","items":{"type":"object","properties":{"role":{"type":"string"},"parts":{"type":"array"}}}},"systemInstruction":{"type":"object"},"generationConfig":{"type":"object"},"tools":{"type":"array"}},"required":["contents"]}
+"#;
 
 impl NodeTreeBuilder {
     pub fn new() -> Self {
@@ -137,6 +150,7 @@ impl NodeTreeBuilder {
                 content_type: "application/json\n",
                 request_suffix: "*.req.json\n",
                 response_suffix: "*.resp.json\n",
+                schema: OPENAI_CHAT_SCHEMA,
             },
         );
         self.add_format(
@@ -146,6 +160,7 @@ impl NodeTreeBuilder {
                 content_type: "application/json\n",
                 request_suffix: "*.req.json\n",
                 response_suffix: "*.resp.json\n",
+                schema: OPENAI_RESPONSES_SCHEMA,
             },
         );
         self.add_format(
@@ -155,6 +170,7 @@ impl NodeTreeBuilder {
                 content_type: "application/json\n",
                 request_suffix: "*.req.json\n",
                 response_suffix: "*.resp.json\n",
+                schema: ANTHROPIC_MESSAGES_SCHEMA,
             },
         );
         self.add_format(
@@ -164,6 +180,7 @@ impl NodeTreeBuilder {
                 content_type: "application/json\n",
                 request_suffix: "*.req.json\n",
                 response_suffix: "*.resp.json\n",
+                schema: GOOGLE_GENERATE_CONTENT_SCHEMA,
             },
         );
 
@@ -262,7 +279,7 @@ impl NodeTreeBuilder {
         self.add_file(format, "content_type", projection.content_type);
         self.add_file(format, "request_suffix", projection.request_suffix);
         self.add_file(format, "response_suffix", projection.response_suffix);
-        self.add_file(format, "schema.json", "{}\n");
+        self.add_file(format, "schema.json", projection.schema);
         let models = self.add_dir(format, "model");
         self.add_owned_file(models, "count", model_count_for_format(projection.name));
         self.add_owned_file(models, "list", model_list_for_format(projection.name));
