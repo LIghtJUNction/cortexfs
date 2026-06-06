@@ -35,8 +35,9 @@ use std::sync::Mutex;
 pub(crate) use abi::{
     AGENT_HELPER_CONTROL_PATH, BATCH_DIR_PATH, CLUSTER_LOCAL_CONTROL_PATH, CLUSTER_TASKS_PATH,
     CONTROL_DIR_PATH, DEMO_THREAD_CONTROL_PATH, DEMO_THREAD_DIR_PATH,
-    DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_FILTERS_DIR_PATH,
-    EXPORTS_DIR_PATH, EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH,
+    DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
+    DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_FILTERS_DIR_PATH, EXPORTS_DIR_PATH,
+    EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH,
     MEMORY_SEARCH_DIR_PATH, POSTGRES_DSN_DIR_PATH, USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH,
     USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
 };
@@ -559,6 +560,19 @@ impl CortexFs {
     }
 
     #[cfg(test)]
+    fn demo_tool_loop_limit_file_inode(&self, name: &str) -> fuse3::Result<Inode> {
+        let limits = self
+            .tree
+            .path_inode(DEMO_THREAD_TOOL_LOOP_LIMITS_PATH)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        let runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .lookup_child(limits, name)
+            .map(Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)
+    }
+
+    #[cfg(test)]
     fn cluster_control_file_inode(&self, name: &str) -> fuse3::Result<Inode> {
         let control = self
             .tree
@@ -1042,6 +1056,9 @@ impl RuntimeState {
         if let Some(tool_loop_parent) = parents.tool_loop {
             self.add_tool_loop_runtime_files(tool_loop_parent);
         }
+        if let Some(limits_parent) = parents.tool_loop_limits {
+            self.add_tool_loop_limit_runtime_files(limits_parent);
+        }
         if let Some(state_inode) = parents.tool_loop_state {
             self.nodes.insert(
                 state_inode,
@@ -1243,6 +1260,21 @@ impl RuntimeState {
         inode
     }
 
+    fn replace_or_add_dynamic_file(
+        &mut self,
+        parent: Inode,
+        name: &'static str,
+        content: &'static str,
+    ) -> Inode {
+        if let Some(inode) = self.lookup_child(parent, name).map(Node::inode) {
+            self.nodes
+                .insert(inode, Node::dynamic_file(inode, name, content));
+            inode
+        } else {
+            self.add_dynamic_file(parent, name, content)
+        }
+    }
+
     fn add_dynamic_dir(&mut self, parent: Inode, name: impl Into<String>) -> Inode {
         let inode = self.allocate_inode();
         self.nodes.insert(inode, Node::dir(inode, name));
@@ -1315,6 +1347,15 @@ impl RuntimeState {
     fn add_tool_loop_runtime_files(&mut self, tool_loop_parent: Inode) {
         self.tool_loop_steps_inode =
             Some(self.add_dynamic_file(tool_loop_parent, "steps.jsonl", ""));
+    }
+
+    fn add_tool_loop_limit_runtime_files(&mut self, limits_parent: Inode) {
+        self.tool_loop_max_steps_inode =
+            Some(self.replace_or_add_dynamic_file(limits_parent, "max_steps", "64\n"));
+        self.tool_loop_max_time_ms_inode =
+            Some(self.replace_or_add_dynamic_file(limits_parent, "max_time_ms", "300000\n"));
+        self.tool_loop_max_cost_usd_inode =
+            Some(self.replace_or_add_dynamic_file(limits_parent, "max_cost_usd", "0.10\n"));
     }
 
     fn add_tool_loop_control_runtime_files(&mut self, control_parent: Inode) {
@@ -1773,6 +1814,9 @@ impl RuntimeState {
             return self
                 .write_tool_loop_control("cancel", "cancelled", offset, data)
                 .map(Some);
+        }
+        if let Some(result) = self.write_tool_loop_limit(inode, offset, data)? {
+            return Ok(Some(result));
         }
         if let Some(result) = self.write_mcp_runtime_control(inode, offset, data)? {
             return Ok(Some(result));
