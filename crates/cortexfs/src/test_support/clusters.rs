@@ -292,6 +292,65 @@ fn projection_exposes_shared_collaboration_space() {
 }
 
 #[test]
+fn projection_exposes_collab_handoff_context_refs() {
+    let fs = CortexFs::new();
+
+    assert_eq!(
+        fs.lookup_path([
+            "spaces",
+            "shared",
+            "project-a",
+            "collab",
+            "handoffs",
+            "demo",
+            "from"
+        ])
+        .and_then(crate::Node::content),
+        Some("agents/helper\n")
+    );
+    assert_eq!(
+        fs.lookup_path([
+            "spaces",
+            "shared",
+            "project-a",
+            "collab",
+            "handoffs",
+            "demo",
+            "to"
+        ])
+        .and_then(crate::Node::content),
+        Some("clusters/local/workers/local-worker\n")
+    );
+    assert!(
+        fs.lookup_path([
+            "spaces",
+            "shared",
+            "project-a",
+            "collab",
+            "handoffs",
+            "demo",
+            "summary.md"
+        ])
+        .and_then(crate::Node::content)
+        .is_some_and(|summary| summary.contains("Shared context")),
+        "handoff summary must be readable"
+    );
+    assert_eq!(
+        fs.lookup_path([
+            "spaces",
+            "shared",
+            "project-a",
+            "collab",
+            "handoffs",
+            "demo",
+            "context_refs"
+        ])
+        .and_then(crate::Node::content),
+        Some("collab/blackboard/notes.jsonl\n")
+    );
+}
+
+#[test]
 fn collab_task_claim_uses_atomic_rename_and_writes_events() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     fs.create_staged_collab_claim("helper.tmp", "agents/helper\n")?;
