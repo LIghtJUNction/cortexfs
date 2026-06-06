@@ -1,0 +1,22 @@
+[package]
+name = "cortex-providers"
+description = "CortexFS AI provider adapters."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+cortex-core = { path = "../cortex-core" }
+serde_json = "1.0.150"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json = "1.0.150"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

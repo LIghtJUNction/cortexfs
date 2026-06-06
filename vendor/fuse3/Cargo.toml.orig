@@ -1,0 +1,55 @@
+[package]
+name = "fuse3"
+version = "0.9.0"
+authors = ["Sherlock Holo <sherlockya@gmail.com>"]
+edition = "2024"
+readme = "README.md"
+keywords = ["fuse", "filesystem", "system", "bindings"]
+categories = ["api-bindings", "filesystem"]
+license = "MIT"
+repository = "https://github.com/Sherlock-Holo/fuse3"
+description = "FUSE user-space library async version implementation."
+rust-version = "1.91"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+members = [".", "examples"]
+
+[features]
+tokio-runtime = ["dep:tokio"]
+async-io-runtime = ["dep:async-fs", "dep:async-global-executor", "dep:async-lock", "dep:async-io", "dep:async-process", "futures-util/io"]
+file-lock = []
+unprivileged = ["nix/socket", "dep:which"]
+
+[dependencies]
+async-fs = { version = "2.2.0", optional = true }
+async-global-executor = { version = "3.1.0", optional = true }
+async-lock = { version = "3.4.2", optional = true }
+async-notify = "0.3"
+async-io = { version = "2.6.0", optional = true }
+async-process = { version = "2.5.0", optional = true }
+bytes = "1.11.1"
+futures-util = { version = "0.3.32", features = ["sink"] }
+libc = "0.2.183"
+nix = { version = "0.31.2", default-features = false, features = ["fs", "mount", "user"] }
+slab = "0.4.12"
+tracing = "0.1.44"
+trait-make = "0.1"
+which = { version = "8.0.2", optional = true }
+zerocopy = { version = "0.8.42", features = ["derive", "std"] }
+
+[dependencies.tokio]
+version = "1.50"
+features = ["fs", "rt", "sync", "net", "macros", "process", "time"]
+optional = true
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+features = ["file-lock", "unprivileged", "tokio-runtime"]
+targets = [
+  "i686-unknown-freebsd",
+  "i686-unknown-linux-gnu",
+  "x86_64-unknown-freebsd",
+  "x86_64-unknown-linux-gnu",
+]
