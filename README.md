@@ -61,6 +61,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
   formats/
   providers/
   models/
+  home/
   spaces/
   agents/
   clusters/
@@ -101,12 +102,21 @@ cargo build --locked --workspace
 
 `ctx` 可以理解为 `cortex` 的缩写，也可以理解为 `context` 的缩写。这个路径短、稳定、适合 shell 脚本、agent 进程和其他本地软件长期引用。
 
+每个 Linux 用户都有自己的 home 入口：
+
+```bash
+export CTX_HOME="/ctx/home/$(id -u)"
+```
+
+`$CTX_HOME` 类似 `/home/$USER`，但指向 CortexFS 内部的用户空间。比如 `$CTX_HOME/api`、`$CTX_HOME/threads`、`$CTX_HOME/memory`、`$CTX_HOME/exports` 分别对应当前用户可用的 API、对话、记忆和导出视图。
+
 示例：
 
 ```bash
 sudo mkdir -p /ctx
 sudo chown "$USER:$USER" /ctx
 cargo run -p cortex-cli -- mount /ctx
+export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
 如果要做多用户挂载，使用明确的多用户挂载模式，并按系统 FUSE 配置处理 `/ctx` 的 owner、group、mode 和 `allow_other` 策略。

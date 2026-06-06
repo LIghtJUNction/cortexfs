@@ -25,6 +25,37 @@ fn projection_exposes_space_api_inbox_outbox_for_each_format() {
 }
 
 #[test]
+fn projection_exposes_ctx_home_alias_for_user_space() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let canonical = fs
+        .tree
+        .path_inode(&["spaces", "users", "1000"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let home = fs
+        .tree
+        .path_inode(&["home", "1000"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+
+    assert_eq!(home, canonical);
+    assert_eq!(
+        fs.lookup_path(["home", "1000", "uid"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_USER_UID_TEXT)
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "api", "openai.chat", "inbox"])
+            .is_some(),
+        "CTX_HOME must expose the user's API inbox"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "threads", "demo"])
+            .is_some(),
+        "CTX_HOME must expose the user's thread namespace"
+    );
+    Ok(())
+}
+
+#[test]
 fn projection_exposes_space_capability_and_maintenance_indexes() {
     let fs = CortexFs::new();
 

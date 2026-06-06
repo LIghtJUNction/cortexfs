@@ -15,6 +15,7 @@ fn read_only_projection_exposes_proc_style_nodes() -> fuse3::Result<()> {
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("formats")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("providers")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("models")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("home")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("spaces")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("agents")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("clusters")).is_ok());

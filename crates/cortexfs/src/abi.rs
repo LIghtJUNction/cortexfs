@@ -15,6 +15,7 @@ pub const STATFS_NAME_LENGTH: u32 = 255;
 pub const DYNAMIC_INODE_BASE: Inode = 1_000_000;
 pub const LOCAL_USER_ID: &str = "1000";
 pub const LOCAL_USER_UID_TEXT: &str = "1000\n";
+pub const LOCAL_USER_HOME_PREFIX: &[&str] = &["home", "1000"];
 pub const LOCAL_USER_SPACE_CONTEXT_TEXT: &str = "local:uid1000:object_r:user_space_t:s0\n";
 pub const LOCAL_USER_THREAD_CONTEXT_TEXT: &str = "local:uid1000:object_r:thread_t:s0\n";
 pub const LOCAL_AGENT_CONTEXT_TEXT: &str = "local:uid1000:agent_r:agent_t:s0\n";
