@@ -224,7 +224,14 @@ fn projection_exposes_space_exports_batch_feedback_and_control() -> fuse3::Resul
         .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
-    for filter_file in ["provider", "model", "exclude_failed"] {
+    for filter_file in [
+        "provider",
+        "model",
+        "agent",
+        "subject",
+        "space",
+        "exclude_failed",
+    ] {
         assert!(runtime.lookup_child(filters, filter_file).is_some());
     }
     drop(runtime);

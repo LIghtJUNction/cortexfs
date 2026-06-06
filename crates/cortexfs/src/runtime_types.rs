@@ -105,6 +105,9 @@ pub struct ConversationExportRow {
     pub line: String,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub agent: Option<String>,
+    pub subject: Option<String>,
+    pub space: Option<String>,
     pub failed: bool,
 }
 

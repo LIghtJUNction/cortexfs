@@ -111,6 +111,9 @@ impl RuntimeState {
             line,
             provider,
             model,
+            agent: Some("helper".to_owned()),
+            subject: None,
+            space: Some("home/1000".to_owned()),
             failed: false,
         });
         self.refresh_conversations_export();
@@ -123,6 +126,9 @@ impl RuntimeState {
         };
         let provider_filter = self.export_filter_value(self.export_filter_provider_inode);
         let model_filter = self.export_filter_value(self.export_filter_model_inode);
+        let agent_filter = self.export_filter_value(self.export_filter_agent_inode);
+        let subject_filter = self.export_filter_value(self.export_filter_subject_inode);
+        let space_filter = self.export_filter_value(self.export_filter_space_inode);
         let exclude_failed =
             self.export_filter_value(self.export_filter_exclude_failed_inode) != "0";
         let mut rows = String::new();
@@ -134,6 +140,15 @@ impl RuntimeState {
                 continue;
             }
             if !model_filter.is_empty() && row.model.as_deref() != Some(model_filter) {
+                continue;
+            }
+            if !agent_filter.is_empty() && row.agent.as_deref() != Some(agent_filter) {
+                continue;
+            }
+            if !subject_filter.is_empty() && row.subject.as_deref() != Some(subject_filter) {
+                continue;
+            }
+            if !space_filter.is_empty() && row.space.as_deref() != Some(space_filter) {
                 continue;
             }
             let _ = writeln!(rows, "{}", row.line);
