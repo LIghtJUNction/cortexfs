@@ -49,6 +49,55 @@ fn projection_exposes_unified_tools_with_invoke_dirs() {
 }
 
 #[test]
+fn projection_exposes_tool_permissions_and_default_policy_allowlists() {
+    let fs = CortexFs::new();
+
+    assert_eq!(
+        fs.lookup_path(["tools", "shell.exec", "permissions"])
+            .and_then(crate::Node::content),
+        Some("host.shell.exec\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["tools", "filesystem.read", "permissions"])
+            .and_then(crate::Node::content),
+        Some("host.fs.read\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["tools", "mcp.local-fs.read_file", "permissions"])
+            .and_then(crate::Node::content),
+        Some("mcp.local-fs.read_file\nhost.fs.read\n")
+    );
+
+    let user_tools = fs
+        .lookup_path(["spaces", "users", "1000", "tools", "enabled"])
+        .and_then(crate::Node::content)
+        .unwrap_or_default();
+    let agent_tools = fs
+        .lookup_path(["agents", "helper", "policy", "allowed_tools"])
+        .and_then(crate::Node::content)
+        .unwrap_or_default();
+
+    for allowed in ["filesystem.read", "mcp.local-fs.read_file"] {
+        assert!(
+            user_tools.lines().any(|tool| tool == allowed),
+            "space policy must expose default allowed tool: {allowed}"
+        );
+        assert!(
+            agent_tools.lines().any(|tool| tool == allowed),
+            "agent policy must expose default allowed tool: {allowed}"
+        );
+    }
+    assert!(
+        !user_tools.lines().any(|tool| tool == "shell.exec"),
+        "shell.exec must be visible globally but not enabled in the default user space"
+    );
+    assert!(
+        !agent_tools.lines().any(|tool| tool == "shell.exec"),
+        "shell.exec must be visible globally but not allowed for the default agent"
+    );
+}
+
+#[test]
 fn filesystem_read_tool_invoke_materializes_response_after_drain() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     fs.create_staged_thread_request(
