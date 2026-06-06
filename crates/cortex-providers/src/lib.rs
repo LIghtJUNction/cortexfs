@@ -2,7 +2,7 @@
 
 use cortex_core::{ApiFormat, ModelId, ProviderId};
 use std::error::Error;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -291,7 +291,7 @@ impl Error for ProviderError {}
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
 /// Provider adapter boundary used by `cortexd`.
-pub trait Provider {
+pub trait Provider: Debug + Send + Sync {
     /// Provider identity.
     fn id(&self) -> &ProviderId;
 
@@ -306,6 +306,31 @@ pub trait Provider {
 
     /// Execute a native provider request.
     fn call(&self, request: ProviderRequest) -> ProviderResult<ProviderResponse>;
+}
+
+impl<T> Provider for Box<T>
+where
+    T: Provider + ?Sized,
+{
+    fn id(&self) -> &ProviderId {
+        self.as_ref().id()
+    }
+
+    fn formats(&self) -> &[ApiFormat] {
+        self.as_ref().formats()
+    }
+
+    fn health(&self) -> ProviderHealth {
+        self.as_ref().health()
+    }
+
+    fn models(&self) -> Vec<ProviderModel> {
+        self.as_ref().models()
+    }
+
+    fn call(&self, request: ProviderRequest) -> ProviderResult<ProviderResponse> {
+        self.as_ref().call(request)
+    }
 }
 
 /// Local Ollama provider adapter.

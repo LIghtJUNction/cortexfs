@@ -3,12 +3,14 @@ use crate::{
     provider_format_response, provider_response_for_format,
 };
 use cortex_core::{ApiFormat, ModelId, ProviderId};
-use cortex_providers::{InMemoryProvider, ProviderModel, ProviderResponse};
+use cortex_providers::{InMemoryProvider, Provider, ProviderModel, ProviderResponse};
 use cortex_store::InMemoryStore;
 use cortexd::ExecutionPlane;
 use std::str::FromStr;
 
-pub fn default_execution_plane() -> Option<ExecutionPlane<InMemoryStore, InMemoryProvider>> {
+pub type FsExecutionPlane = ExecutionPlane<InMemoryStore, Box<dyn Provider + Send + Sync>>;
+
+pub fn default_execution_plane() -> Option<FsExecutionPlane> {
     let provider_spec = in_memory_execution_provider_spec()?;
     let provider_id = ProviderId::new(provider_spec.id).ok()?;
     let mut models = Vec::new();
@@ -70,5 +72,8 @@ pub fn default_execution_plane() -> Option<ExecutionPlane<InMemoryStore, InMemor
             );
         }
     }
-    Some(ExecutionPlane::new(InMemoryStore::new(), provider))
+    Some(ExecutionPlane::new(
+        InMemoryStore::new(),
+        Box::new(provider),
+    ))
 }

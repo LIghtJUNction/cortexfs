@@ -54,8 +54,8 @@ pub struct CollabLockLocation {
 impl SubmissionLocation {
     pub fn from_path(path: &[String]) -> Option<Self> {
         let canonical_path;
-        let path = if is_local_user_home_path(path) {
-            canonical_path = canonical_user_space_path(path)?;
+        let path = if is_local_user_space_compat_path(path) {
+            canonical_path = canonical_user_home_path(path)?;
             canonical_path.as_slice()
         } else {
             path
@@ -333,25 +333,21 @@ impl SubmissionLocation {
     }
 }
 
-fn is_local_user_home_path(path: &[String]) -> bool {
-    path.len() >= LOCAL_USER_HOME_PREFIX.len()
-        && path
-            .iter()
-            .zip(LOCAL_USER_HOME_PREFIX)
-            .all(|(actual, expected)| actual == expected)
+fn is_local_user_space_compat_path(path: &[String]) -> bool {
+    matches!(
+        path,
+        [root, users, uid, ..]
+            if (root == "space" || root == "spaces") && users == "users" && uid == LOCAL_USER_ID
+    )
 }
 
-fn canonical_user_space_path(path: &[String]) -> Option<Vec<String>> {
-    if !is_local_user_home_path(path) {
+fn canonical_user_home_path(path: &[String]) -> Option<Vec<String>> {
+    if !is_local_user_space_compat_path(path) {
         return None;
     }
-    let mut canonical = Vec::with_capacity(path.len().saturating_add(1));
-    canonical.extend([
-        "spaces".to_owned(),
-        "users".to_owned(),
-        LOCAL_USER_ID.to_owned(),
-    ]);
-    canonical.extend(path.iter().skip(LOCAL_USER_HOME_PREFIX.len()).cloned());
+    let mut canonical = Vec::with_capacity(path.len().saturating_sub(1));
+    canonical.extend(LOCAL_USER_HOME_PREFIX.iter().map(ToString::to_string));
+    canonical.extend(path.iter().skip(3).cloned());
     Some(canonical)
 }
 

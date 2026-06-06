@@ -1,12 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
-use cortex_providers::InMemoryProvider;
-use cortex_store::{InMemoryStore, RequestId};
-use cortexd::ExecutionPlane;
+use cortex_store::RequestId;
 use fuse3::Inode;
 
-use crate::execution::default_execution_plane;
+use crate::execution::{FsExecutionPlane, default_execution_plane};
 use crate::runtime_parents::RuntimeParents;
 use crate::runtime_types::{
     AgentTask, ApiRouteInodes, ClusterTask, ConversationExportRow, MemoryItem, PendingResponse,
@@ -193,7 +191,7 @@ pub struct RuntimeState {
     pub(crate) provider_secret_next_rotation: BTreeMap<&'static str, Inode>,
     pub(crate) provider_models_refresh: BTreeMap<&'static str, Inode>,
     pub(crate) batch_count: usize,
-    pub(crate) plane: Option<ExecutionPlane<InMemoryStore, InMemoryProvider>>,
+    pub(crate) plane: Option<FsExecutionPlane>,
 }
 
 impl RuntimeState {

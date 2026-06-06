@@ -634,7 +634,7 @@ impl CortexFs {
     ) -> fuse3::Result<Inode> {
         let inbox = self
             .tree
-            .path_inode(&["spaces", "users", "1000", "api", format, "inbox"])
+            .path_inode(&["home", "1000", "api", format, "inbox"])
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
         let inode = runtime.create_staged(inbox, format, name)?;
@@ -665,11 +665,24 @@ impl CortexFs {
     ) -> fuse3::Result<()> {
         let inbox = self
             .tree
-            .path_inode(&["spaces", "users", "1000", "api", format, "inbox"])
+            .path_inode(&["home", "1000", "api", format, "inbox"])
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let submission = self.api_submission(inbox).ok_or(libc::EINVAL)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime.submit(inbox, staged_name, inbox, request_name, submission)
+    }
+
+    #[cfg(test)]
+    fn use_ollama_execution_plane(&self) -> fuse3::Result<()> {
+        let provider = cortex_providers::OllamaProvider::local_smollm2()
+            .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
+        let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.plane = Some(ExecutionPlane::new(
+            cortex_store::InMemoryStore::new(),
+            Box::new(provider),
+        ));
+        drop(runtime);
+        Ok(())
     }
 
     #[cfg(test)]
@@ -955,14 +968,10 @@ impl CortexFs {
             return None;
         }
         let outbox_parent = match location.scope {
-            SubmissionScope::Api => self.tree.path_inode(&[
-                "spaces",
-                "users",
-                "1000",
-                "api",
-                location.format,
-                "outbox",
-            ])?,
+            SubmissionScope::Api => {
+                self.tree
+                    .path_inode(&["home", "1000", "api", location.format, "outbox"])?
+            }
             SubmissionScope::Batch => self.tree.path_inode(BATCH_OUTBOX_PATH)?,
             SubmissionScope::Thread | SubmissionScope::ExternalThread => inbox,
             SubmissionScope::Tool => match location.tool {
