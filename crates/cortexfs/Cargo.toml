@@ -15,6 +15,7 @@ bytes.workspace = true
 cortex-core = { version = "0.1.0", path = "../cortex-core" }
 cortex-providers = { version = "0.1.0", path = "../cortex-providers" }
 cortex-store = { version = "0.1.0", path = "../cortex-store" }
+cortex-tools = { version = "0.1.0", path = "../cortex-tools" }
 cortexd = { version = "0.1.0", path = "../cortexd" }
 fuse3 = { workspace = true, features = ["tokio-runtime", "unprivileged"] }
 futures-util = "0.3.32"

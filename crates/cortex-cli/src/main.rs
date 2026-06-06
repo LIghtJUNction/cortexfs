@@ -113,7 +113,7 @@ impl StatusCommand {
     fn render() -> String {
         let uid = current_uid();
         format!(
-            "status=ready\nabi=cortexfs.design.v0\nplatform=linux\nrecommended_mount=/ctx\nctx_home=/ctx/home/{uid}\ndefault_test_mount=tests/mounts/cortexfs\nlive_test_provider=provider-neutral\nlive_test_model=smollm2:135m\n"
+            "status=ready\nabi=cortexfs.design.v0\nplatform=linux\nrecommended_mount=/ctx\nhome=/ctx/home/{uid}\ndefault_test_mount=tests/mounts/cortexfs\nlive_test_provider=provider-neutral\nlive_test_model=smollm2:135m\n"
         )
     }
 }
@@ -216,7 +216,7 @@ mod tests {
         assert!(status.contains("abi=cortexfs.design.v0\n"));
         assert!(status.contains("platform=linux\n"));
         assert!(status.contains("recommended_mount=/ctx\n"));
-        assert!(status.contains("ctx_home=/ctx/home/"));
+        assert!(status.contains("home=/ctx/home/"));
         assert!(status.contains("default_test_mount=tests/mounts/cortexfs\n"));
         assert!(status.contains("live_test_provider=provider-neutral\n"));
         assert!(status.contains("live_test_model=smollm2:135m\n"));

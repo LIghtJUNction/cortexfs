@@ -116,6 +116,7 @@ dependencies = [
  "cortex-core",
  "cortex-providers",
  "cortex-store",
+ "cortex-tools",
  "cortexd",
  "fuse3",
  "futures-util",

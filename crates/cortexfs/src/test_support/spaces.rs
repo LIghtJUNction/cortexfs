@@ -25,7 +25,7 @@ fn projection_exposes_space_api_inbox_outbox_for_each_format() {
 }
 
 #[test]
-fn projection_exposes_ctx_home_alias_for_user_space() -> fuse3::Result<()> {
+fn projection_exposes_home_uid_alias_for_user_space() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let canonical = fs
         .tree
@@ -37,20 +37,26 @@ fn projection_exposes_ctx_home_alias_for_user_space() -> fuse3::Result<()> {
         .ok_or_else(fuse3::Errno::new_not_exist)?;
 
     assert_eq!(home, canonical);
+    assert!(fs.lookup_path(["ctx_home"]).is_none());
+    assert!(fs.lookup_path(["home", "count"]).is_none());
+    assert!(fs.lookup_path(["home", "list"]).is_none());
+    assert!(fs.lookup_path(["home", "current"]).is_none());
     assert_eq!(
         fs.lookup_path(["home", "1000", "uid"])
             .and_then(crate::Node::content),
         Some(crate::LOCAL_USER_UID_TEXT)
     );
+    assert!(fs.lookup_path(["home", "1000", "home"]).is_none());
+    assert!(fs.lookup_path(["home", "1000", "space"]).is_none());
     assert!(
         fs.lookup_path(["home", "1000", "api", "openai.chat", "inbox"])
             .is_some(),
-        "CTX_HOME must expose the user's API inbox"
+        "home/<uid> must expose the user's API inbox"
     );
     assert!(
         fs.lookup_path(["home", "1000", "threads", "demo"])
             .is_some(),
-        "CTX_HOME must expose the user's thread namespace"
+        "home/<uid> must expose the user's thread namespace"
     );
     assert_eq!(
         fs.lookup_path(["home", "1000", "tools", "list"])
@@ -70,14 +76,14 @@ fn projection_exposes_ctx_home_alias_for_user_space() -> fuse3::Result<()> {
     assert!(
         fs.lookup_path(["home", "1000", "memory", "semantic"])
             .is_some(),
-        "CTX_HOME must expose the user's memory layers"
+        "home/<uid> must expose the user's memory layers"
     );
     assert!(
         fs.lookup_path(["home", "1000", "exports", "formats"])
             .and_then(crate::Node::content)
             .is_some_and(|formats| formats.contains("conversations.jsonl")
                 && formats.contains("tool_calls.jsonl")),
-        "CTX_HOME must expose training-friendly export formats"
+        "home/<uid> must expose training-friendly export formats"
     );
     Ok(())
 }

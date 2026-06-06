@@ -95,7 +95,7 @@ fn rename_to_req_json_queues_request_and_writes_fingerprint() -> fuse3::Result<(
 }
 
 #[test]
-fn ctx_home_api_inbox_queues_request() -> fuse3::Result<()> {
+fn home_uid_api_inbox_queues_request() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let inbox = fs
         .tree
@@ -104,13 +104,13 @@ fn ctx_home_api_inbox_queues_request() -> fuse3::Result<()> {
     let submission = fs.api_submission(inbox).ok_or(libc::EINVAL)?;
     {
         let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
-        let inode = runtime.create_staged(inbox, "openai.chat", "ctx-home.tmp")?;
+        let inode = runtime.create_staged(inbox, "openai.chat", "home-uid.tmp")?;
         runtime.write(inode, 0, b"{\"messages\":[]}\n")?;
         runtime.submit(
             inbox,
-            "ctx-home.tmp",
+            "home-uid.tmp",
             inbox,
-            "ctx-home.req.json",
+            "home-uid.req.json",
             submission,
         )?;
     }
@@ -123,9 +123,9 @@ fn ctx_home_api_inbox_queues_request() -> fuse3::Result<()> {
         fs.runtime
             .lock()
             .map_err(|_error| libc::EIO)?
-            .lookup_child(outbox, "ctx-home.route.json")
+            .lookup_child(outbox, "home-uid.route.json")
             .is_some(),
-        "CTX_HOME submissions must use the canonical user outbox"
+        "home/<uid> submissions must use the canonical user outbox"
     );
     assert_eq!(
         fs.node_content(fs.control_file_inode("queue_depth")?)?,
