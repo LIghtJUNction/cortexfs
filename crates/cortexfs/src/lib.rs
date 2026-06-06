@@ -1446,26 +1446,23 @@ impl RuntimeState {
     ) {
         let default_base_url =
             provider_spec(provider).map_or(EMPTY_TEXT, |spec| spec.default_base_url);
-        let base_url_current = self.add_dynamic_file(parents.base_url, "current", default_base_url);
-        let base_url_effective =
-            self.add_dynamic_file(parents.base_url, "effective", default_base_url);
-        let base_url_source = self.add_dynamic_file(parents.base_url, "source", "default\n");
+        let url_current = self.add_dynamic_file(parents.url, "current", default_base_url);
+        let url_effective = self.add_dynamic_file(parents.url, "effective", default_base_url);
+        let url_source = self.add_dynamic_file(parents.url, "source", "default\n");
         let (compat_current, compat_effective, compat_source) =
-            parents
-                .base_url_compat
-                .map_or((None, None, None), |base_url_compat| {
-                    (
-                        Some(self.add_dynamic_file(base_url_compat, "current", default_base_url)),
-                        Some(self.add_dynamic_file(base_url_compat, "effective", default_base_url)),
-                        Some(self.add_dynamic_file(base_url_compat, "source", "default\n")),
-                    )
-                });
-        self.provider_base_url.insert(
+            parents.url_compat.map_or((None, None, None), |url_compat| {
+                (
+                    Some(self.add_dynamic_file(url_compat, "current", default_base_url)),
+                    Some(self.add_dynamic_file(url_compat, "effective", default_base_url)),
+                    Some(self.add_dynamic_file(url_compat, "source", "default\n")),
+                )
+            });
+        self.provider_url.insert(
             provider,
             ProviderConfigInodes {
-                current: Some(base_url_current),
-                effective: Some(base_url_effective),
-                source: Some(base_url_source),
+                current: Some(url_current),
+                effective: Some(url_effective),
+                source: Some(url_source),
                 compat_current,
                 compat_effective,
                 compat_source,
@@ -1617,7 +1614,7 @@ impl RuntimeState {
             || Some(inode) == self.pgvector_refresh_inode
             || Some(inode) == self.postgres_dsn_current_inode
             || self
-                .provider_base_url
+                .provider_url
                 .values()
                 .any(|inodes| inodes.current == Some(inode))
             || self

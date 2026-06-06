@@ -18,8 +18,8 @@ pub struct UserModelAccessInodes {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ProviderRuntimeParents {
-    pub base_url: Inode,
-    pub base_url_compat: Option<Inode>,
+    pub url: Inode,
+    pub url_compat: Option<Inode>,
     pub enabled: Inode,
     pub health: Inode,
     pub models: Inode,
