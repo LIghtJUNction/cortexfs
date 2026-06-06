@@ -62,23 +62,10 @@ impl RuntimeState {
     }
 
     pub fn append_tool_loop_control_step(&mut self, command_name: &str, next_state: &str) {
-        use std::fmt::Write as _;
-        let Some(steps_inode) = self.tool_loop_steps_inode else {
-            return;
-        };
-        let Some(content) = self
-            .nodes
-            .get_mut(&steps_inode)
-            .and_then(|node| node.content.as_mut())
-            .and_then(NodeContent::as_dynamic_mut)
-        else {
-            return;
-        };
-        let next_step = content.lines().count().saturating_add(1);
-        let _ = writeln!(
-            content,
-            "{{\"step\":{next_step},\"type\":\"control\",\"command\":\"{command_name}\",\"state\":\"{next_state}\"}}"
+        let line = format!(
+            "{{\"type\":\"control\",\"command\":\"{command_name}\",\"state\":\"{next_state}\"}}"
         );
+        self.append_tool_loop_step(&line);
     }
 
     pub fn append_thread_messages(&mut self, pending: &PendingResponse, response_body: &str) {
@@ -124,24 +111,58 @@ impl RuntimeState {
     }
 
     fn append_tool_loop_model_step(&mut self, message: &str) {
+        let line = format!(
+            "{{\"type\":\"model\",\"message\":{}}}",
+            json_string(message)
+        );
+        self.append_tool_loop_step(&line);
+    }
+
+    fn append_tool_loop_step(&mut self, step_without_number: &str) {
         use std::fmt::Write as _;
         let Some(steps_inode) = self.tool_loop_steps_inode else {
             return;
         };
-        let Some(content) = self
-            .nodes
-            .get_mut(&steps_inode)
-            .and_then(|node| node.content.as_mut())
-            .and_then(NodeContent::as_dynamic_mut)
-        else {
+        if self.tool_loop_max_steps_exceeded(steps_inode) {
+            if let Some(state_inode) = self.tool_loop_state_inode {
+                self.update_dynamic_file(state_inode, "limit_exceeded\n");
+            }
+            self.append_audit("tool-loop.demo.limits", "max_steps", "exceeded");
+            return;
+        }
+        let Some(content) = self.tool_loop_steps_content_mut(steps_inode) else {
             return;
         };
         let next_step = content.lines().count().saturating_add(1);
-        let _ = writeln!(
-            content,
-            "{{\"step\":{next_step},\"type\":\"model\",\"message\":{}}}",
-            json_string(message),
-        );
+        let Some(rest) = step_without_number.strip_prefix('{') else {
+            return;
+        };
+        let _ = writeln!(content, "{{\"step\":{next_step},{rest}");
+    }
+
+    fn tool_loop_max_steps_exceeded(&self, steps_inode: fuse3::Inode) -> bool {
+        let current_steps = self
+            .nodes
+            .get(&steps_inode)
+            .and_then(Node::content)
+            .map_or(0, |content| content.lines().count());
+        let Some(max_steps) = self
+            .tool_loop_max_steps_inode
+            .and_then(|inode| self.nodes.get(&inode))
+            .and_then(Node::content)
+            .and_then(|content| content.trim().parse::<usize>().ok())
+        else {
+            return false;
+        };
+        current_steps >= max_steps
+    }
+
+    fn tool_loop_steps_content_mut(&mut self, steps_inode: fuse3::Inode) -> Option<&mut String> {
+        self.nodes
+            .get_mut(&steps_inode)?
+            .content
+            .as_mut()?
+            .as_dynamic_mut()
     }
 
     pub fn append_external_thread_messages(
