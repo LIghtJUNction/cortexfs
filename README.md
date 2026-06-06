@@ -303,7 +303,7 @@ cat "$exports/conversations.jsonl"
 
 ## Live Test
 
-仓库包含一个 ignored live test，用本机轻量模型 fixture 验证 provider 调用。它不依赖外部云 API。
+仓库包含 ignored live tests，用本机轻量模型 fixture 验证 provider adapter 和 daemon execution plane。它们不依赖外部云 API。
 
 当前 fixture：
 
@@ -323,10 +323,11 @@ ollama list
 ollama pull smollm2:135m
 ```
 
-运行 live test：
+运行 live tests：
 
 ```bash
 cargo test -p cortex-providers --test ollama_live --locked -- --ignored --nocapture
+cargo test -p cortexd --test ollama_live --locked -- --ignored --nocapture
 ```
 
 Ollama 只是当前本地 live-test fixture，不是 CortexFS 的特殊核心 provider。
