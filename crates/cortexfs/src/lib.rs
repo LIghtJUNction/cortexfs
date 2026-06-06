@@ -49,9 +49,11 @@ pub(crate) use abi::{
     EMPTY_TEXT, EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH, FEEDBACK_PREFERENCE_INBOX_PATH,
     FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL, FILESYSTEM_READ_TOOL_INBOX_PATH,
     FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_AGENT_CONTEXT_TEXT, LOCAL_API_ENDPOINTS_TEXT,
-    LOCAL_API_LISTEN_TEXT, LOCAL_API_PIPELINE_TEXT, LOCAL_API_SOCKET_TEXT, LOCAL_USER_HOME_PREFIX,
-    LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT, LOCAL_USER_SPACE_CONTEXT_TEXT,
-    LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_UID_TEXT, MAX_WRITE, MCP_LOCAL_FS_READ_TOOL,
+    LOCAL_API_LISTEN_TEXT, LOCAL_API_PIPELINE_TEXT, LOCAL_API_SOCKET_TEXT,
+    LOCAL_USER_CONTROL_DISPLAY_PREFIX, LOCAL_USER_HOME_PREFIX, LOCAL_USER_ID,
+    LOCAL_USER_MEMORY_SCOPE_TEXT, LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT,
+    LOCAL_USER_SPACE_CONTEXT_TEXT, LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_THREAD_DISPLAY_PATH,
+    LOCAL_USER_THREAD_DISPLAY_TEXT, LOCAL_USER_UID_TEXT, MAX_WRITE, MCP_LOCAL_FS_READ_TOOL,
     MCP_LOCAL_FS_READ_TOOL_INBOX_PATH, MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH,
     MCP_PROMPT_RENDER_FORMAT, MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH,
     MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_ITEM_FORMAT, MEMORY_SEMANTIC_DIR_PATH,
@@ -2443,7 +2445,7 @@ impl RuntimeState {
             self.update_dynamic_file(heartbeat_inode, "1\n");
         }
         if let Some(thread_inode) = self.agent_helper_runtime_current_thread_inode {
-            self.update_dynamic_file(thread_inode, "spaces/users/1000/threads/demo\n");
+            self.update_dynamic_file(thread_inode, LOCAL_USER_THREAD_DISPLAY_TEXT);
         }
         if let Some(task_inode) = self.agent_helper_runtime_current_task_inode {
             self.update_dynamic_file(task_inode, format!("{request_id}\n"));
@@ -2732,7 +2734,7 @@ impl RuntimeState {
             self.update_dynamic_file(heartbeat_inode, "2\n");
         }
         if let Some(thread_inode) = self.agent_helper_runtime_current_thread_inode {
-            self.update_dynamic_file(thread_inode, "spaces/users/1000/threads/demo\n");
+            self.update_dynamic_file(thread_inode, LOCAL_USER_THREAD_DISPLAY_TEXT);
         }
         if let Some(task_inode) = self.agent_helper_runtime_current_task_inode {
             self.update_dynamic_file(task_inode, format!("{}\n", request_id.as_str()));
@@ -2802,24 +2804,26 @@ impl RuntimeState {
         let normalized = path.trim_start_matches('/');
         match normalized {
             "status" => Ok(STATUS_TEXT.to_owned()),
-            "spaces/users/1000/threads/demo/messages.jsonl" => self
+            "home/1000/threads/demo/messages.jsonl"
+            | "spaces/users/1000/threads/demo/messages.jsonl" => self
                 .thread_messages_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "spaces/users/1000/threads/demo/latest.md" => self
+            "home/1000/threads/demo/latest.md" | "spaces/users/1000/threads/demo/latest.md" => self
                 .thread_latest_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "spaces/users/1000/threads/demo/fingerprint" => self
-                .thread_fingerprint_inode
-                .and_then(|inode| self.nodes.get(&inode))
-                .and_then(Node::content)
-                .map(ToOwned::to_owned)
-                .ok_or_else(fuse3::Errno::new_not_exist),
+            "home/1000/threads/demo/fingerprint" | "spaces/users/1000/threads/demo/fingerprint" => {
+                self.thread_fingerprint_inode
+                    .and_then(|inode| self.nodes.get(&inode))
+                    .and_then(Node::content)
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(fuse3::Errno::new_not_exist)
+            }
             "spaces/external/qq/groups/888888/threads/demo/messages.jsonl" => self
                 .external_thread_messages_inode
                 .and_then(|inode| self.nodes.get(&inode))

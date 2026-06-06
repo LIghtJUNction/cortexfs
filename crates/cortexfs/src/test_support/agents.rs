@@ -135,21 +135,21 @@ fn agent_helper_control_nodes_update_runtime_last_control_and_audit() -> fuse3::
             "running\n",
             "1234\n",
             "1\n",
-            "spaces/users/1000/threads/demo\n",
+            crate::LOCAL_USER_THREAD_DISPLAY_TEXT,
         ),
         (
             "pause",
             "paused\n",
             "1234\n",
             "1\n",
-            "spaces/users/1000/threads/demo\n",
+            crate::LOCAL_USER_THREAD_DISPLAY_TEXT,
         ),
         (
             "restart",
             "running\n",
             "1234\n",
             "1\n",
-            "spaces/users/1000/threads/demo\n",
+            crate::LOCAL_USER_THREAD_DISPLAY_TEXT,
         ),
         ("stop", "stopped\n", "\n", "\n", "\n"),
     ] {
@@ -250,7 +250,7 @@ fn agent_inbox_submit_drains_to_outbox_and_trace() -> fuse3::Result<()> {
     );
     assert_eq!(
         fs.node_content(fs.path_inode(["agents", "helper", "runtime", "current_thread"])?)?,
-        "spaces/users/1000/threads/demo\n"
+        crate::LOCAL_USER_THREAD_DISPLAY_TEXT
     );
 
     let drain = fs.control_file_inode("drain")?;
@@ -292,7 +292,7 @@ fn agent_inbox_submit_drains_to_outbox_and_trace() -> fuse3::Result<()> {
     );
     assert_eq!(
         fs.node_content(fs.path_inode(["agents", "helper", "runtime", "current_thread"])?)?,
-        "spaces/users/1000/threads/demo\n"
+        crate::LOCAL_USER_THREAD_DISPLAY_TEXT
     );
     let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
     assert!(agent_traces.contains("\"event\":\"task\""));

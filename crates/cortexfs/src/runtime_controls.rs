@@ -1,4 +1,7 @@
-use crate::{RuntimeState, validation::validate_control_write};
+use crate::{
+    LOCAL_USER_CONTROL_DISPLAY_PREFIX, LOCAL_USER_THREAD_DISPLAY_PATH,
+    LOCAL_USER_THREAD_DISPLAY_TEXT, RuntimeState, validation::validate_control_write,
+};
 
 #[derive(Clone, Copy)]
 pub struct McpServerControlEffect<'a> {
@@ -31,7 +34,7 @@ impl RuntimeState {
         validate_control_write(offset, data)?;
         self.update_dynamic_file(
             self.last_control_inode,
-            format!("spaces/{space}/{command_name}\n"),
+            space_control_display_path(space, command_name),
         );
         let audit_format = format!("space.{space}.control");
         self.append_audit(&audit_format, command_name, "control");
@@ -51,7 +54,7 @@ impl RuntimeState {
         }
         self.update_dynamic_file(
             self.last_control_inode,
-            format!("spaces/users/1000/threads/demo/{command_name}\n"),
+            format!("{LOCAL_USER_THREAD_DISPLAY_PATH}/{command_name}\n"),
         );
         self.append_audit("thread.demo.control", command_name, next_state);
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
@@ -71,7 +74,7 @@ impl RuntimeState {
         self.append_tool_loop_control_step(command_name, next_state);
         self.update_dynamic_file(
             self.last_control_inode,
-            format!("spaces/users/1000/threads/demo/tool-loop/{command_name}\n"),
+            format!("{LOCAL_USER_THREAD_DISPLAY_PATH}/tool-loop/{command_name}\n"),
         );
         self.append_audit("tool-loop.demo.control", command_name, next_state);
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
@@ -168,7 +171,7 @@ impl RuntimeState {
         if matches!(command_name, "start" | "restart")
             && let Some(thread_inode) = self.agent_helper_runtime_current_thread_inode
         {
-            self.update_dynamic_file(thread_inode, "spaces/users/1000/threads/demo\n");
+            self.update_dynamic_file(thread_inode, LOCAL_USER_THREAD_DISPLAY_TEXT);
         }
         if command_name == "stop"
             && let Some(thread_inode) = self.agent_helper_runtime_current_thread_inode
@@ -301,4 +304,11 @@ fn parse_non_negative_decimal(value: &str) -> fuse3::Result<()> {
         return Err(libc::EINVAL.into());
     }
     Ok(())
+}
+
+fn space_control_display_path(space: &str, command_name: &str) -> String {
+    if space == "users/1000" {
+        return format!("{LOCAL_USER_CONTROL_DISPLAY_PREFIX}/{command_name}\n");
+    }
+    format!("spaces/{space}/{command_name}\n")
 }

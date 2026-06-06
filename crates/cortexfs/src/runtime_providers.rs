@@ -5,8 +5,9 @@ use crate::validation::{
     allowed_provider_lines, normalize_allowed_providers, validate_control_write,
 };
 use crate::{
-    API_FORMATS, EMPTY_TEXT, Node, PROVIDER_SPECS, RuntimeState, configured_provider_ids,
-    default_provider_id, newline_list, provider_model_id, provider_spec, provider_supports_format,
+    API_FORMATS, EMPTY_TEXT, LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT, Node, PROVIDER_SPECS,
+    RuntimeState, configured_provider_ids, default_provider_id, newline_list, provider_model_id,
+    provider_spec, provider_supports_format,
 };
 
 impl RuntimeState {
@@ -63,7 +64,7 @@ impl RuntimeState {
         }
         self.update_dynamic_file(
             self.last_control_inode,
-            "spaces/users/1000/models/refresh\n",
+            LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT,
         );
         self.append_audit("space.users.1000.models", "refresh", "refreshed");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))

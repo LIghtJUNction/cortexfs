@@ -85,7 +85,7 @@ fn user_space_control_nodes_update_last_control_and_audit() -> fuse3::Result<()>
         }
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("spaces/users/1000/{control_name}\n")
+            format!("home/1000/{control_name}\n")
         );
         let audit = fs.node_content(fs.audit_events_inode()?)?;
         assert!(audit.contains("\"format\":\"space.users/1000.control\""));
