@@ -187,7 +187,7 @@ impl Node {
         self.is_dir()
             && matches!(
                 self.name.as_str(),
-                "inbox" | "pending" | "claims" | "leases"
+                "inbox" | "pending" | "claim" | "claims" | "lease" | "leases"
             )
     }
 }

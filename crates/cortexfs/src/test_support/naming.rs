@@ -329,3 +329,65 @@ fn mcp_indexes_use_singular_primary_directories() {
         );
     }
 }
+
+#[test]
+fn cluster_local_uses_singular_primary_directories() {
+    let fs = CortexFs::new();
+
+    for (primary, compat) in [
+        ("agent", "agents"),
+        ("worker", "workers"),
+        ("queue", "queues"),
+        ("task", "tasks"),
+    ] {
+        assert!(
+            fs.lookup_path(["cluster", "local", primary]).is_some(),
+            "cluster/local/{primary} must be the primary namespace"
+        );
+        assert!(
+            fs.lookup_path(["cluster", "local", compat]).is_some(),
+            "cluster/local/{compat} remains a compatibility namespace"
+        );
+    }
+
+    assert!(
+        fs.lookup_path(["cluster", "local", "worker", "local-worker"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["cluster", "local", "queue", "default"])
+            .is_some()
+    );
+}
+
+#[test]
+fn shared_collab_uses_singular_primary_directories() {
+    let fs = CortexFs::new();
+
+    for (primary, compat) in [
+        ("task", "tasks"),
+        ("handoff", "handoffs"),
+        ("lock", "locks"),
+        ("decision", "decisions"),
+    ] {
+        assert!(
+            fs.lookup_path(["shared", "project-a", "collab", primary])
+                .is_some(),
+            "shared/<name>/collab/{primary} must be the primary namespace"
+        );
+        assert!(
+            fs.lookup_path(["shared", "project-a", "collab", compat])
+                .is_some(),
+            "shared/<name>/collab/{compat} remains a compatibility namespace"
+        );
+    }
+
+    assert!(
+        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "claim"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["shared", "project-a", "collab", "lock", "lease"])
+            .is_some()
+    );
+}

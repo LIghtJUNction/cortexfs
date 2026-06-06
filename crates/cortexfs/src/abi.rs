@@ -67,7 +67,7 @@ pub const USER_POLICY_DIR_PATH: &[&str] = &["home", "1000", "policy"];
 pub const USER_ROUTES_DIR_PATH: &[&str] = &["home", "1000", "route"];
 pub const USER_CONTROL_DIR_PATH: &[&str] = &["home", "1000", "control"];
 pub const SHARED_PROJECT_A_DEMO_CLAIMS_PATH: &[&str] =
-    &["shared", "project-a", "collab", "tasks", "demo", "claims"];
+    &["shared", "project-a", "collab", "task", "demo", "claim"];
 pub const SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH: &[&str] = &[
     "spaces",
     "shared",
@@ -78,7 +78,7 @@ pub const SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH: &[&str] = &[
     "claims",
 ];
 pub const SHARED_PROJECT_A_LOCK_LEASES_PATH: &[&str] =
-    &["shared", "project-a", "collab", "locks", "leases"];
+    &["shared", "project-a", "collab", "lock", "lease"];
 pub const SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH: &[&str] =
     &["spaces", "shared", "project-a", "collab", "locks", "leases"];
 pub const POSTGRES_DSN_DIR_PATH: &[&str] = &["db", "postgres", "dsn"];
@@ -110,10 +110,9 @@ pub const MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH: &[&str] = &[
 pub const AGENT_HELPER_INBOX_PATH: &[&str] = &["agent", "helper", "inbox"];
 pub const AGENT_HELPER_OUTBOX_PATH: &[&str] = &["agent", "helper", "outbox"];
 pub const AGENT_HELPER_CONTROL_PATH: &[&str] = &["agent", "helper", "control"];
-pub const CLUSTER_TASK_PENDING_PATH: &[&str] =
-    &["cluster", "local", "queues", "default", "pending"];
-pub const CLUSTER_TASK_DONE_PATH: &[&str] = &["cluster", "local", "queues", "default", "done"];
-pub const CLUSTER_TASKS_PATH: &[&str] = &["cluster", "local", "tasks"];
+pub const CLUSTER_TASK_PENDING_PATH: &[&str] = &["cluster", "local", "queue", "default", "pending"];
+pub const CLUSTER_TASK_DONE_PATH: &[&str] = &["cluster", "local", "queue", "default", "done"];
+pub const CLUSTER_TASKS_PATH: &[&str] = &["cluster", "local", "task"];
 pub const CLUSTER_LOCAL_STATE_PATH: &[&str] = &["cluster", "local", "state"];
 pub const CLUSTER_LOCAL_CONTROL_PATH: &[&str] = &["cluster", "local", "control"];
 pub const DEFAULT_THREAD_FORMAT: &str = "openai.chat";
