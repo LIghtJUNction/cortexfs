@@ -86,7 +86,8 @@ impl RuntimeState {
         let Some(messages_inode) = self.thread_messages_inode else {
             return;
         };
-        let user_content = json_string(&user_content(&pending.request_body));
+        let user_text = user_content(&pending.request_body);
+        let user_content = json_string(&user_text);
         let assistant_text = assistant_content(response_body);
         let assistant_content = json_string(&assistant_text);
         let Some(content) = self
@@ -105,7 +106,21 @@ impl RuntimeState {
         if let Some(latest_inode) = self.thread_latest_inode {
             self.update_dynamic_file(latest_inode, format!("{assistant_text}\n"));
         }
+        self.append_thread_episodic_memory(pending, &user_text);
+        self.append_thread_episodic_memory(pending, &assistant_text);
         self.append_tool_loop_model_step(&assistant_text);
+    }
+
+    fn append_thread_episodic_memory(&mut self, pending: &PendingResponse, text: &str) {
+        let id = format!(
+            "thread-demo-{}",
+            self.episodic_item_count().saturating_add(1)
+        );
+        let content = format!(
+            "thread=spaces/users/1000/threads/demo\nformat={}\ntext={text}",
+            pending.format
+        );
+        self.append_memory_layer_item("episodic", &id, &content, &pending.fingerprint);
     }
 
     fn append_tool_loop_model_step(&mut self, message: &str) {
@@ -142,7 +157,8 @@ impl RuntimeState {
             external_subject(&pending.request_body).unwrap_or_else(|| "qq:user:123456".to_owned());
         let display_name =
             external_display_name(&pending.request_body).unwrap_or_else(|| "Alice".to_owned());
-        let user_content = json_string(&user_content(&pending.request_body));
+        let user_text = user_content(&pending.request_body);
+        let user_content = json_string(&user_text);
         let assistant_text = assistant_content(response_body);
         let assistant_content = json_string(&assistant_text);
         let Some(content) = self
@@ -166,5 +182,38 @@ impl RuntimeState {
         if let Some(latest_inode) = self.external_thread_latest_inode {
             self.update_dynamic_file(latest_inode, format!("{assistant_text}\n"));
         }
+        self.append_external_thread_episodic_memory(pending, &subject, &display_name, &user_text);
+        self.append_external_thread_episodic_memory(
+            pending,
+            &subject,
+            &display_name,
+            &assistant_text,
+        );
+    }
+
+    fn append_external_thread_episodic_memory(
+        &mut self,
+        pending: &PendingResponse,
+        subject: &str,
+        display_name: &str,
+        text: &str,
+    ) {
+        let id = format!(
+            "external-qq-demo-{}",
+            self.episodic_item_count().saturating_add(1)
+        );
+        let content = format!(
+            "thread=spaces/external/qq/groups/888888/threads/demo\nsubject={subject}\ndisplay_name={display_name}\nformat={}\ntext={text}",
+            pending.format
+        );
+        self.append_memory_layer_item("episodic", &id, &content, &pending.fingerprint);
+    }
+
+    fn episodic_item_count(&self) -> usize {
+        self.memory_layer_items
+            .episodic
+            .and_then(|inode| self.nodes.get(&inode))
+            .and_then(Node::content)
+            .map_or(0, |content| content.lines().count())
     }
 }

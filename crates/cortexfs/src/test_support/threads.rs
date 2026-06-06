@@ -214,6 +214,14 @@ fn thread_inbox_submit_updates_messages_after_drain() -> fuse3::Result<()> {
             .and_then(crate::Node::content),
         Some("idle\n")
     );
+    let episodic = fs.path_inode(["spaces", "users", "1000", "memory", "episodic"])?;
+    let episodic_items = runtime
+        .lookup_child(episodic, "items.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(episodic_items.contains("thread=spaces/users/1000/threads/demo"));
+    assert!(episodic_items.contains("ping"));
+    assert!(episodic_items.contains("cortexfs-ok"));
     drop(runtime);
     let steps = fs.node_content(fs.demo_tool_loop_runtime_file_inode("steps.jsonl")?)?;
     assert!(steps.contains("\"step\":1"));
@@ -294,6 +302,15 @@ fn external_thread_submit_preserves_subject_identity() -> fuse3::Result<()> {
         runtime.node(quota).and_then(crate::Node::content),
         Some("1\n")
     );
+    let episodic = fs.path_inode(["spaces", "users", "1000", "memory", "episodic"])?;
+    let episodic_items = runtime
+        .lookup_child(episodic, "items.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(episodic_items.contains("thread=spaces/external/qq/groups/888888/threads/demo"));
+    assert!(episodic_items.contains("subject=qq:user:123456"));
+    assert!(episodic_items.contains("display_name=Alice"));
+    assert!(episodic_items.contains("群里问题"));
     drop(runtime);
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
