@@ -221,3 +221,74 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn format_schema_files_expose_protocol_request_shapes() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+
+    assert_format_schema_requires(&fs, "openai.chat", "messages")?;
+    assert_format_schema_requires(&fs, "openai.responses", "input")?;
+    assert_format_schema_requires(&fs, "anthropic.messages", "messages")?;
+    assert_format_schema_requires(&fs, "google.generate_content", "contents")?;
+
+    let chat = format_schema(&fs, "openai.chat")?;
+    assert!(
+        schema_path(&chat, &["properties", "messages", "items", "required"])
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|required| required.iter().any(|field| field.as_str() == Some("role")))
+    );
+    assert!(
+        schema_path(&chat, &["properties", "messages", "items", "required"])
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|required| required
+                .iter()
+                .any(|field| field.as_str() == Some("content")))
+    );
+
+    let google = format_schema(&fs, "google.generate_content")?;
+    assert!(
+        schema_path(
+            &google,
+            &["properties", "contents", "items", "properties", "parts"]
+        )
+        .is_some_and(serde_json::Value::is_object)
+    );
+    Ok(())
+}
+
+fn assert_format_schema_requires(
+    fs: &CortexFs,
+    format: &str,
+    required_field: &str,
+) -> fuse3::Result<()> {
+    let schema = format_schema(fs, format)?;
+    assert_eq!(
+        schema.get("type").and_then(serde_json::Value::as_str),
+        Some("object")
+    );
+    assert!(
+        schema
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|required| required
+                .iter()
+                .any(|field| field.as_str() == Some(required_field))),
+        "{format} schema must require {required_field}"
+    );
+    Ok(())
+}
+
+fn format_schema(fs: &CortexFs, format: &str) -> fuse3::Result<serde_json::Value> {
+    let schema = fs
+        .lookup_path(["format", format, "schema.json"])
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    serde_json::from_str(schema).map_err(|_error| libc::EIO.into())
+}
+
+fn schema_path<'schema>(
+    schema: &'schema serde_json::Value,
+    path: &[&str],
+) -> Option<&'schema serde_json::Value> {
+    path.iter().try_fold(schema, |value, key| value.get(key))
+}
