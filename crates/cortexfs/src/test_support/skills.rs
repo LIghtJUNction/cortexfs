@@ -43,6 +43,28 @@ fn projection_exposes_installed_skill_and_indexes() {
     assert!(
         fs.lookup_path(["skills", "installed", "cortexfs-test", "references"])
             .is_some(),
-        "skill progressive disclosure directories must exist"
+        "skill references directory must exist"
+    );
+    for directory in ["scripts", "assets", "examples"] {
+        assert!(
+            fs.lookup_path(["skills", "installed", "cortexfs-test", directory])
+                .is_some(),
+            "skill progressive disclosure directory must exist: {directory}"
+        );
+    }
+    assert_eq!(
+        fs.lookup_path(["skills", "installed", "cortexfs-test", "permissions"])
+            .and_then(crate::Node::content),
+        Some("provider.test\nhost.fuse.mount\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agents", "helper", "policy", "allowed_skills"])
+            .and_then(crate::Node::content),
+        Some("cortexfs-test\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["spaces", "users", "1000", "skills", "enabled"])
+            .and_then(crate::Node::content),
+        Some("cortexfs-test\n")
     );
 }
