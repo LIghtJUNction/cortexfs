@@ -91,12 +91,34 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 cargo build --locked --workspace
 ```
 
-挂载：
+## 实机安装目录
+
+推荐实机挂载点：
+
+```text
+/ctx
+```
+
+`ctx` 可以理解为 `cortex` 的缩写，也可以理解为 `context` 的缩写。这个路径短、稳定、适合 shell 脚本、agent 进程和其他本地软件长期引用。
+
+示例：
+
+```bash
+sudo mkdir -p /ctx
+sudo chown "$USER:$USER" /ctx
+cargo run -p cortex-cli -- mount /ctx
+```
+
+如果要做多用户挂载，使用明确的多用户挂载模式，并按系统 FUSE 配置处理 `/ctx` 的 owner、group、mode 和 `allow_other` 策略。
+
+## 本地测试挂载
 
 ```bash
 mkdir -p tests/mounts/cortexfs
 cargo run -p cortex-cli -- mount tests/mounts/cortexfs
 ```
+
+`tests/mounts/cortexfs` 只用于仓库内集成测试，不是实机推荐安装目录。
 
 查看挂载树：
 
