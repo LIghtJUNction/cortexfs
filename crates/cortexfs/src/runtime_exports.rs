@@ -59,7 +59,7 @@ impl RuntimeState {
                 .unwrap_or_default();
             let _ = writeln!(
                 rows,
-                "{{\"messages\":[{{\"role\":\"user\",\"content\":{}}},{{\"role\":\"assistant\",\"content\":{}}}],\"source\":\"threads/demo/messages.jsonl\"}}",
+                "{{\"messages\":[{{\"role\":\"user\",\"content\":{}}},{{\"role\":\"assistant\",\"content\":{}}}],\"source\":\"thread/demo/messages.jsonl\"}}",
                 json_string(prompt),
                 json_string(completion),
             );

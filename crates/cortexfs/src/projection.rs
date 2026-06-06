@@ -375,7 +375,7 @@ impl NodeTreeBuilder {
         self.add_space_cache_projection(user);
         self.add_space_audit_projection(user);
         self.add_space_memory_projection(user);
-        let exports = self.add_dir(user, "exports");
+        let exports = self.add_dir(user, "export");
         self.add_file(
             exports,
             "formats",
@@ -384,11 +384,13 @@ impl NodeTreeBuilder {
         self.add_file(
             exports,
             "sources",
-            "threads/*/messages.jsonl\ntool-loop/steps.jsonl\napi inbox/outbox\naudit/events.jsonl\nmemory/episodic\nhuman feedback\n",
+            "thread/*/messages.jsonl\ntool-loop/steps.jsonl\napi inbox/outbox\naudit/events.jsonl\nmemory/episodic\nhuman feedback\n",
         );
         self.add_file(exports, "redaction", "policy\n");
         self.add_file(exports, "dedupe", "fingerprint\n");
         self.add_dir(exports, "filters");
+        let exports_compat = self.add_dir(user, "exports");
+        self.attach_children_alias(exports_compat, exports);
         self.add_space_convert_projection(user);
         let control = self.add_dir(user, "control");
         self.add_file(control, "reload", "unsupported\n");
@@ -397,9 +399,11 @@ impl NodeTreeBuilder {
         self.add_batch_projection(user);
         let api = self.add_dir(user, "api");
         self.add_space_api(api);
-        let threads = self.add_dir(user, "threads");
+        let threads = self.add_dir(user, "thread");
         self.add_file(threads, "count", THREAD_COUNT_TEXT);
-        self.add_demo_thread(threads);
+        let thread = self.add_demo_thread(threads);
+        let threads_compat = self.add_dir(user, "threads");
+        self.attach_child_alias(threads_compat, thread);
         let models = self.add_dir(user, "model");
         self.add_file(models, "refresh", "unsupported\n");
         for provider in PROVIDER_SPECS {
@@ -632,7 +636,7 @@ impl NodeTreeBuilder {
         self.add_dir(preference, "outbox");
     }
 
-    fn add_demo_thread(&mut self, threads: Inode) {
+    fn add_demo_thread(&mut self, threads: Inode) -> Inode {
         let thread = self.add_dir(threads, "demo");
         self.add_file(thread, "context", LOCAL_USER_THREAD_CONTEXT_TEXT);
         self.add_dir(thread, "inbox");
@@ -652,6 +656,7 @@ impl NodeTreeBuilder {
         self.add_file(tool_control, "continue", "unsupported\n");
         self.add_file(tool_control, "pause", "unsupported\n");
         self.add_file(tool_control, "cancel", "unsupported\n");
+        thread
     }
 
     fn add_helper_agent(&mut self, agents: Inode) {

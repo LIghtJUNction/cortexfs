@@ -79,7 +79,7 @@ fn projection_exposes_home_uid_alias_for_user_space() -> fuse3::Result<()> {
         "home/<uid> must expose the user's memory layers"
     );
     assert!(
-        fs.lookup_path(["home", "1000", "exports", "formats"])
+        fs.lookup_path(["home", "1000", "export", "formats"])
             .and_then(crate::Node::content)
             .is_some_and(|formats| formats.contains("conversations.jsonl")
                 && formats.contains("tool_calls.jsonl")),
@@ -174,32 +174,37 @@ fn projection_exposes_space_exports_batch_feedback_and_control() -> fuse3::Resul
     let fs = CortexFs::new();
 
     assert!(
+        fs.lookup_path(["spaces", "users", "1000", "export"])
+            .is_some(),
+        "export directory must exist"
+    );
+    assert!(
         fs.lookup_path(["spaces", "users", "1000", "exports"])
             .is_some(),
-        "exports directory must exist"
+        "exports remains a compatibility namespace"
     );
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "exports", "formats"])
+        fs.lookup_path(["spaces", "users", "1000", "export", "formats"])
             .and_then(crate::Node::content),
         Some(
             "conversations.jsonl\nsft.jsonl\npreference.jsonl\ntool_calls.jsonl\nagent_traces.jsonl\n"
         )
     );
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "exports", "dedupe"])
+        fs.lookup_path(["spaces", "users", "1000", "export", "dedupe"])
             .and_then(crate::Node::content),
         Some("fingerprint\n")
     );
     assert!(
-        fs.lookup_path(["spaces", "users", "1000", "exports", "sources"])
+        fs.lookup_path(["spaces", "users", "1000", "export", "sources"])
             .and_then(crate::Node::content)
-            .is_some_and(|sources| sources.contains("threads/*/messages.jsonl")
+            .is_some_and(|sources| sources.contains("thread/*/messages.jsonl")
                 && sources.contains("audit/events.jsonl")
                 && sources.contains("human feedback")),
         "export sources must document provenance"
     );
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "exports", "redaction"])
+        fs.lookup_path(["spaces", "users", "1000", "export", "redaction"])
             .and_then(crate::Node::content),
         Some("policy\n")
     );

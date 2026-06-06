@@ -86,7 +86,7 @@ impl RuntimeState {
                 }
                 let _ = writeln!(
                     results,
-                    "{{\"source\":\"threads/demo/messages.jsonl\",\"line\":{},\"score\":1.0,\"text\":{}}}",
+                    "{{\"source\":\"thread/demo/messages.jsonl\",\"line\":{},\"score\":1.0,\"text\":{}}}",
                     index.saturating_add(1),
                     json_string(line),
                 );

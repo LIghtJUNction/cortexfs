@@ -114,7 +114,7 @@ cargo run -p cortex-cli -- status
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-`$CTX_HOME` 类似 `/home/$USER`，但指向 CortexFS 内部的用户空间。比如 `$CTX_HOME/api`、`$CTX_HOME/threads`、`$CTX_HOME/memory`、`$CTX_HOME/exports` 分别对应当前用户可用的 API、对话、记忆和导出视图。
+`$CTX_HOME` 类似 `/home/$USER`，但指向 CortexFS 内部的用户空间。比如 `$CTX_HOME/api`、`$CTX_HOME/thread`、`$CTX_HOME/memory`、`$CTX_HOME/export` 分别对应当前用户可用的 API、对话、记忆和导出视图。
 
 `home/<uid>` 是用户入口。当前实现中它与内部用户投影指向同一个 inode，不复制第二棵树。通过 `$CTX_HOME` 提交请求、写 thread、读 memory，都会落到同一套队列、路由、审计和导出流。
 
@@ -224,7 +224,7 @@ find "$api/outbox" -name '*.resp.json' -print -exec jq . {} \;
 ```bash
 mnt=tests/mounts/cortexfs
 CTX_HOME="$mnt/home/$(id -u)"
-thread="$CTX_HOME/threads/demo"
+thread="$CTX_HOME/thread/demo"
 
 cat "$thread/messages.jsonl"
 cat "$thread/latest.md"
@@ -236,7 +236,7 @@ cat "$mnt/mcp/tool/list"
 cat "$mnt/skill/installed/cortexfs-test/SKILL.md"
 ```
 
-后续实时通信会使用 socket fast path，例如 `threads/<id>/io.sock`。socket 必须和文件式提交进入同一条内部管线：同一套 policy、route、secret resolve、store、audit 和 export，不能形成不可审计旁路。
+后续实时通信会使用 socket fast path，例如 `thread/<id>/io.sock`。socket 必须和文件式提交进入同一条内部管线：同一套 policy、route、secret resolve、store、audit 和 export，不能形成不可审计旁路。
 
 ## 安全模型
 
@@ -281,7 +281,7 @@ cat "$mnt/audit/cost"
 ```bash
 mnt=tests/mounts/cortexfs
 CTX_HOME="$mnt/home/$(id -u)"
-exports="$CTX_HOME/exports"
+exports="$CTX_HOME/export"
 
 cat "$exports/conversations.jsonl"
 cat "$exports/sft.jsonl"

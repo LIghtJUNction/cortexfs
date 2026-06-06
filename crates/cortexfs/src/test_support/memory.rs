@@ -272,7 +272,7 @@ fn memory_search_query_derives_results_from_thread_messages() -> fuse3::Result<(
         .lookup_child(search, "results.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(results.contains("\"source\":\"threads/demo/messages.jsonl\""));
+    assert!(results.contains("\"source\":\"thread/demo/messages.jsonl\""));
     assert!(results.contains("\"line\":1"));
     assert!(results.contains("remember cortexfs"));
     drop(runtime);
