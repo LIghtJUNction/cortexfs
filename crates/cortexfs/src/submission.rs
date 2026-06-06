@@ -2,14 +2,15 @@ use crate::{
     AGENT_HELPER_INBOX_PATH, AGENT_HELPER_OUTBOX_PATH, AGENT_TASK_FORMAT, API_FORMATS, API_PREFIX,
     BATCH_INBOX_PATH, BATCH_OUTBOX_PATH, CLUSTER_TASK_FORMAT, CLUSTER_TASK_PENDING_PATH,
     DEFAULT_BATCH_FORMAT, DEFAULT_THREAD_FORMAT, DEMO_THREAD_INBOX_PATH,
-    EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH, FEEDBACK_PREFERENCE_INBOX_PATH,
-    FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL, FILESYSTEM_READ_TOOL_INBOX_PATH,
-    FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_USER_HOME_PREFIX, LOCAL_USER_ID,
-    MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH, MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH,
-    MCP_PROMPT_RENDER_FORMAT, MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH,
-    MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_ITEM_FORMAT, MEMORY_SEMANTIC_INBOX_PATH,
-    PREFERENCE_PAIR_FORMAT, SHARED_PROJECT_A_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_LOCK_LEASES_PATH,
-    TOOL_FORMAT,
+    EXTERNAL_QQ_GROUP_THREAD_COMPAT_INBOX_PATH, EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH,
+    FEEDBACK_PREFERENCE_INBOX_PATH, FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL,
+    FILESYSTEM_READ_TOOL_INBOX_PATH, FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_USER_HOME_PREFIX,
+    LOCAL_USER_ID, MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
+    MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH, MCP_PROMPT_RENDER_FORMAT,
+    MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH,
+    MEMORY_ITEM_FORMAT, MEMORY_SEMANTIC_INBOX_PATH, PREFERENCE_PAIR_FORMAT,
+    SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH,
+    SHARED_PROJECT_A_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_LOCK_LEASES_PATH, TOOL_FORMAT,
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -143,12 +144,13 @@ impl SubmissionLocation {
     }
 
     fn from_external_thread_path(path: &[String]) -> Option<Self> {
-        if path.len() == EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH.len()
-            && path
-                .iter()
-                .zip(EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH)
-                .all(|(actual, expected)| actual == expected)
-        {
+        if path_eq_any(
+            path,
+            &[
+                EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH,
+                EXTERNAL_QQ_GROUP_THREAD_COMPAT_INBOX_PATH,
+            ],
+        ) {
             return Some(Self {
                 scope: SubmissionScope::ExternalThread,
                 format: DEFAULT_THREAD_FORMAT,
@@ -355,12 +357,13 @@ fn canonical_user_space_path(path: &[String]) -> Option<Vec<String>> {
 
 impl CollabClaimLocation {
     pub fn from_path(path: &[String]) -> Option<Self> {
-        if path.len() == SHARED_PROJECT_A_DEMO_CLAIMS_PATH.len()
-            && path
-                .iter()
-                .zip(SHARED_PROJECT_A_DEMO_CLAIMS_PATH)
-                .all(|(actual, expected)| actual == expected)
-        {
+        if path_eq_any(
+            path,
+            &[
+                SHARED_PROJECT_A_DEMO_CLAIMS_PATH,
+                SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH,
+            ],
+        ) {
             return Some(Self { task_id: "demo" });
         }
         None
@@ -369,14 +372,25 @@ impl CollabClaimLocation {
 
 impl CollabLockLocation {
     pub fn from_path(path: &[String]) -> Option<Self> {
-        if path.len() == SHARED_PROJECT_A_LOCK_LEASES_PATH.len()
-            && path
-                .iter()
-                .zip(SHARED_PROJECT_A_LOCK_LEASES_PATH)
-                .all(|(actual, expected)| actual == expected)
-        {
+        if path_eq_any(
+            path,
+            &[
+                SHARED_PROJECT_A_LOCK_LEASES_PATH,
+                SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH,
+            ],
+        ) {
             return Some(Self { scope: "shared" });
         }
         None
     }
+}
+
+fn path_eq_any(path: &[String], expected_paths: &[&[&str]]) -> bool {
+    expected_paths.iter().any(|expected_path| {
+        path.len() == expected_path.len()
+            && path
+                .iter()
+                .zip(*expected_path)
+                .all(|(actual, expected)| actual == expected)
+    })
 }

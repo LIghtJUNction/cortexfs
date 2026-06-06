@@ -192,101 +192,55 @@ fn projection_exposes_shared_collaboration_space() {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["spaces", "shared", "project-a", "context"])
+        fs.lookup_path(["shared", "project-a", "context"])
             .and_then(crate::Node::content),
         Some("local:shared_project_a:object_r:shared_space_t:s0:c_project_a\n")
     );
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "blackboard",
-            "state"
-        ])
-        .and_then(crate::Node::content),
+        fs.tree
+            .path_inode(&["shared", "project-a"])
+            .zip(fs.tree.path_inode(&["spaces", "shared", "project-a"]))
+            .map(|(direct, compat)| direct == compat),
+        Some(true)
+    );
+    assert_eq!(
+        fs.lookup_path(["shared", "project-a", "collab", "blackboard", "state"])
+            .and_then(crate::Node::content),
         Some("open\n")
     );
     assert!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "blackboard",
-            "artifacts"
-        ])
-        .is_some(),
+        fs.lookup_path(["shared", "project-a", "collab", "blackboard", "artifacts"])
+            .is_some(),
         "blackboard artifacts directory must exist"
     );
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "tasks",
-            "demo",
-            "owner"
-        ])
-        .and_then(crate::Node::content),
+        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "owner"])
+            .and_then(crate::Node::content),
         Some("agents/helper\n")
     );
     assert!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "tasks",
-            "demo",
-            "claims"
-        ])
-        .is_some(),
+        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "claims"])
+            .is_some(),
         "collab task claims directory must exist"
     );
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "handoffs",
-            "demo",
-            "state"
-        ])
-        .and_then(crate::Node::content),
+        fs.lookup_path(["shared", "project-a", "collab", "handoffs", "demo", "state"])
+            .and_then(crate::Node::content),
         Some("ready\n")
     );
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "locks",
-            "demo",
-            "state"
-        ])
-        .and_then(crate::Node::content),
+        fs.lookup_path(["shared", "project-a", "collab", "locks", "demo", "state"])
+            .and_then(crate::Node::content),
         Some("released\n")
     );
     assert!(
-        fs.lookup_path(["spaces", "shared", "project-a", "collab", "locks", "leases"])
+        fs.lookup_path(["shared", "project-a", "collab", "locks", "leases"])
             .is_some(),
         "collab lock lease submission directory must exist"
     );
     assert!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "decisions",
-            "000001.md"
-        ])
-        .is_some(),
+        fs.lookup_path(["shared", "project-a", "collab", "decisions", "000001.md"])
+            .is_some(),
         "collab decisions must be visible"
     );
 }
@@ -296,34 +250,17 @@ fn projection_exposes_collab_handoff_context_refs() {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "handoffs",
-            "demo",
-            "from"
-        ])
-        .and_then(crate::Node::content),
+        fs.lookup_path(["shared", "project-a", "collab", "handoffs", "demo", "from"])
+            .and_then(crate::Node::content),
         Some("agents/helper\n")
     );
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "handoffs",
-            "demo",
-            "to"
-        ])
-        .and_then(crate::Node::content),
+        fs.lookup_path(["shared", "project-a", "collab", "handoffs", "demo", "to"])
+            .and_then(crate::Node::content),
         Some("clusters/local/workers/local-worker\n")
     );
     assert!(
         fs.lookup_path([
-            "spaces",
             "shared",
             "project-a",
             "collab",
@@ -337,7 +274,6 @@ fn projection_exposes_collab_handoff_context_refs() {
     );
     assert_eq!(
         fs.lookup_path([
-            "spaces",
             "shared",
             "project-a",
             "collab",
@@ -369,33 +305,17 @@ fn collab_task_claim_uses_atomic_rename_and_writes_events() -> fuse3::Result<()>
     );
     drop(runtime);
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "tasks",
-            "demo",
-            "owner"
-        ])
-        .map(crate::Node::inode)
-        .map(|inode| fs.node_content(inode))
-        .transpose()?,
+        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "owner"])
+            .map(crate::Node::inode)
+            .map(|inode| fs.node_content(inode))
+            .transpose()?,
         Some("agents/helper\n".to_owned())
     );
     assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "shared",
-            "project-a",
-            "collab",
-            "tasks",
-            "demo",
-            "state"
-        ])
-        .map(crate::Node::inode)
-        .map(|inode| fs.node_content(inode))
-        .transpose()?,
+        fs.lookup_path(["shared", "project-a", "collab", "tasks", "demo", "state"])
+            .map(crate::Node::inode)
+            .map(|inode| fs.node_content(inode))
+            .transpose()?,
         Some("claimed\n".to_owned())
     );
     let events = fs
@@ -442,7 +362,7 @@ fn collab_lock_lease_uses_atomic_rename_and_materializes_lock() -> fuse3::Result
     drop(runtime);
     let locks = fs
         .tree
-        .path_inode(&["spaces", "shared", "project-a", "collab", "locks"])
+        .path_inode(&["shared", "project-a", "collab", "locks"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let lock = runtime

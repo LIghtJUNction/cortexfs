@@ -80,14 +80,15 @@ pub const DEMO_THREAD_TOOL_LOOP_LIMITS_PATH: &[&str] = &[
     "tool-loop",
     "limits",
 ];
-pub const EXTERNAL_QQ_GROUP_THREAD_DIR_PATH: &[&str] = &[
-    "spaces", "external", "qq", "groups", "888888", "threads", "demo",
-];
-pub const EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH: &[&str] = &[
+pub const EXTERNAL_QQ_GROUP_THREAD_DIR_PATH: &[&str] =
+    &["ext", "qq", "group", "888888", "thread", "demo"];
+pub const EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH: &[&str] =
+    &["ext", "qq", "group", "888888", "thread", "demo", "inbox"];
+pub const EXTERNAL_QQ_GROUP_THREAD_COMPAT_INBOX_PATH: &[&str] = &[
     "spaces", "external", "qq", "groups", "888888", "threads", "demo", "inbox",
 ];
 pub const EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH: &[&str] = &[
-    "spaces", "external", "qq", "groups", "888888", "subjects", "123456", "quota", "requests",
+    "ext", "qq", "group", "888888", "subject", "123456", "quota", "requests",
 ];
 pub const MEMORY_SEARCH_DIR_PATH: &[&str] = &["spaces", "users", "1000", "memory", "search"];
 pub const MEMORY_SEMANTIC_DIR_PATH: &[&str] = &["spaces", "users", "1000", "memory", "semantic"];
@@ -96,7 +97,9 @@ pub const MEMORY_SEMANTIC_INBOX_PATH: &[&str] =
 pub const USER_POLICY_DIR_PATH: &[&str] = &["spaces", "users", "1000", "policy"];
 pub const USER_ROUTES_DIR_PATH: &[&str] = &["spaces", "users", "1000", "routes"];
 pub const USER_CONTROL_DIR_PATH: &[&str] = &["spaces", "users", "1000", "control"];
-pub const SHARED_PROJECT_A_DEMO_CLAIMS_PATH: &[&str] = &[
+pub const SHARED_PROJECT_A_DEMO_CLAIMS_PATH: &[&str] =
+    &["shared", "project-a", "collab", "tasks", "demo", "claims"];
+pub const SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH: &[&str] = &[
     "spaces",
     "shared",
     "project-a",
@@ -106,6 +109,8 @@ pub const SHARED_PROJECT_A_DEMO_CLAIMS_PATH: &[&str] = &[
     "claims",
 ];
 pub const SHARED_PROJECT_A_LOCK_LEASES_PATH: &[&str] =
+    &["shared", "project-a", "collab", "locks", "leases"];
+pub const SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH: &[&str] =
     &["spaces", "shared", "project-a", "collab", "locks", "leases"];
 pub const POSTGRES_DSN_DIR_PATH: &[&str] = &["databases", "postgres", "dsn"];
 pub const USER_MODELS_DIR_PATH: &[&str] = &["spaces", "users", "1000", "models"];
