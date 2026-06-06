@@ -77,12 +77,15 @@ impl RuntimeState {
         let response = json_string(response_body);
         let (subject, space) = export_subject_and_space(pending);
         let metadata = export_metadata_json(subject.as_deref());
+        self.export_seq = self.export_seq.saturating_add(1);
+        let time = format!("{:020}", self.export_seq);
         let (line, provider, model) = pending.route.as_ref().map_or_else(
             || {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
+                        time,
                         pending.format,
                         pending.fingerprint,
                         json_string(space),
@@ -97,8 +100,9 @@ impl RuntimeState {
             |route| {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
+                        time,
                         pending.format,
                         pending.fingerprint,
                         json_string(space),
@@ -116,6 +120,7 @@ impl RuntimeState {
         );
         self.conversation_rows.push(ConversationExportRow {
             line,
+            time,
             provider,
             model,
             agent: Some("helper".to_owned()),
@@ -136,6 +141,8 @@ impl RuntimeState {
         let agent_filter = self.export_filter_value(self.export_filter_agent_inode);
         let subject_filter = self.export_filter_value(self.export_filter_subject_inode);
         let space_filter = self.export_filter_value(self.export_filter_space_inode);
+        let from_filter = self.export_filter_value(self.export_filter_from_inode);
+        let to_filter = self.export_filter_value(self.export_filter_to_inode);
         let exclude_failed =
             self.export_filter_value(self.export_filter_exclude_failed_inode) != "0";
         let mut rows = String::new();
@@ -156,6 +163,12 @@ impl RuntimeState {
                 continue;
             }
             if !space_filter.is_empty() && row.space.as_deref() != Some(space_filter) {
+                continue;
+            }
+            if !from_filter.is_empty() && row.time.as_str() < from_filter {
+                continue;
+            }
+            if !to_filter.is_empty() && row.time.as_str() > to_filter {
                 continue;
             }
             let _ = writeln!(rows, "{}", row.line);

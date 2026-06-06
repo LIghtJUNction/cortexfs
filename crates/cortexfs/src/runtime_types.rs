@@ -103,6 +103,7 @@ pub struct PendingResponse {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConversationExportRow {
     pub line: String,
+    pub time: String,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub agent: Option<String>,

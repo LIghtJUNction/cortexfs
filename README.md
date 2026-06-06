@@ -288,7 +288,18 @@ cat "$exports/tool_calls.jsonl"
 cat "$exports/agent_traces.jsonl"
 ```
 
-导出格式以 JSONL 为主，方便后续转成 SFT、preference、tool-call trace 和 agent trace 训练数据。
+导出格式以 JSONL 为主，方便后续转成 SFT、preference、tool-call trace 和 agent trace 训练数据。`conversations.jsonl` 行包含 request、route、agent、space、subject、fingerprint 和 `time` 元数据。
+
+过滤导出视图：
+
+```bash
+printf 'helper\n' > "$exports/filters/agent"
+printf 'home/1000\n' > "$exports/filters/space"
+printf '2\n' > "$exports/filters/from"
+cat "$exports/conversations.jsonl"
+```
+
+当前过滤节点包括 `provider`、`model`、`agent`、`subject`、`space`、`from`、`to` 和 `exclude_failed`。`from`/`to` 使用导出行的固定宽度 `time` 值；写入普通十进制数会由运行时规范化。
 
 ## Live Test
 
