@@ -864,11 +864,11 @@ impl NodeTreeBuilder {
 
     fn add_mcp_projection(&mut self, parent: Inode) {
         let mcp = self.add_dir(parent, "mcp");
-        let servers = self.add_dir(mcp, "servers");
+        let servers = self.add_dir(mcp, "server");
         let tools = self.add_dir(mcp, "tool");
-        let resources = self.add_dir(mcp, "resources");
-        let prompts = self.add_dir(mcp, "prompts");
-        let sessions = self.add_dir(mcp, "sessions");
+        let resources = self.add_dir(mcp, "resource");
+        let prompts = self.add_dir(mcp, "prompt");
+        let sessions = self.add_dir(mcp, "session");
 
         self.add_file(servers, "count", "1\n");
         self.add_file(servers, "list", "local-fs\n");
@@ -885,8 +885,16 @@ impl NodeTreeBuilder {
         self.add_mcp_resource(resources);
         self.add_mcp_prompt(prompts);
         self.add_mcp_session(sessions);
+        let servers_compat = self.add_dir(mcp, "servers");
+        self.attach_children_alias(servers_compat, servers);
         let tools_compat = self.add_dir(mcp, "tools");
         self.attach_children_alias(tools_compat, tools);
+        let resources_compat = self.add_dir(mcp, "resources");
+        self.attach_children_alias(resources_compat, resources);
+        let prompts_compat = self.add_dir(mcp, "prompts");
+        self.attach_children_alias(prompts_compat, prompts);
+        let sessions_compat = self.add_dir(mcp, "sessions");
+        self.attach_children_alias(sessions_compat, sessions);
     }
 
     fn add_skills_projection(&mut self, skills: Inode) {

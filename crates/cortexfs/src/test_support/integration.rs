@@ -192,7 +192,7 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert_eq!(fs.node_attr(chat_providers_list_inode)?.perm, 0o444);
     assert!(
-        fs.lookup_path(["mcp", "servers"]).is_some(),
+        fs.lookup_path(["mcp", "server"]).is_some(),
         "mcp server namespace must exist"
     );
     assert_eq!(

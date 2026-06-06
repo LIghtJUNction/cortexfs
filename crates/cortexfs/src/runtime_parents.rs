@@ -288,27 +288,27 @@ fn cluster_worker_runtime_parents(tree: &StaticTree) -> ClusterWorkerRuntimePare
 
 fn mcp_runtime_parents(tree: &StaticTree) -> McpRuntimeParents {
     McpRuntimeParents {
-        local_fs_status: tree.path_inode(&["mcp", "servers", "local-fs", "status"]),
-        local_fs_pid: tree.path_inode(&["mcp", "servers", "local-fs", "pid"]),
-        local_fs_control: tree.path_inode(&["mcp", "servers", "local-fs", "control"]),
+        local_fs_status: tree.path_inode(&["mcp", "server", "local-fs", "status"]),
+        local_fs_pid: tree.path_inode(&["mcp", "server", "local-fs", "pid"]),
+        local_fs_control: tree.path_inode(&["mcp", "server", "local-fs", "control"]),
         workspace_content: tree.path_inode(&[
             "mcp",
-            "resources",
+            "resource",
             "local-fs",
             "workspace",
             "content",
         ]),
         workspace_refresh: tree.path_inode(&[
             "mcp",
-            "resources",
+            "resource",
             "local-fs",
             "workspace",
             "refresh",
         ]),
-        session_state: tree.path_inode(&["mcp", "sessions", "local-fs.demo", "state"]),
+        session_state: tree.path_inode(&["mcp", "session", "local-fs.demo", "state"]),
         session_transcript: tree.path_inode(&[
             "mcp",
-            "sessions",
+            "session",
             "local-fs.demo",
             "transcript.jsonl",
         ]),
