@@ -90,10 +90,10 @@ impl NodeTreeBuilder {
         self.add_owned_file(capabilities, "models", global_model_list());
         self.add_file(capabilities, "mcp", "local-fs\n");
         self.add_file(capabilities, "skills", "cortexfs-test\n");
-        self.add_file(
+        self.add_owned_file(
             capabilities,
             "tools",
-            "shell.exec\nfilesystem.read\nmcp.local-fs.read_file\n",
+            newline_join(cortex_tools::GLOBAL_TOOLS),
         );
         self.add_local_api_projection(ROOT_INODE);
 
@@ -346,11 +346,15 @@ impl NodeTreeBuilder {
     fn add_space_tools_projection(&mut self, user: Inode) {
         let tools = self.add_dir(user, "tools");
         self.add_file(tools, "count", "2\n");
-        self.add_file(tools, "list", "filesystem.read\nmcp.local-fs.read_file\n");
-        self.add_file(
+        self.add_owned_file(
+            tools,
+            "list",
+            newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
+        );
+        self.add_owned_file(
             tools,
             "enabled",
-            "filesystem.read\nmcp.local-fs.read_file\n",
+            newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
     }
 
@@ -592,10 +596,10 @@ impl NodeTreeBuilder {
         self.add_file(runtime, "current_thread", "\n");
         self.add_file(runtime, "current_task", "\n");
         let policy = self.add_dir(helper, "policy");
-        self.add_file(
+        self.add_owned_file(
             policy,
             "allowed_tools",
-            "filesystem.read\nmcp.local-fs.read_file\n",
+            newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
         self.add_file(policy, "allowed_skills", "cortexfs-test\n");
         self.add_file(policy, "allowed_mcp_servers", "local-fs\n");
@@ -606,11 +610,15 @@ impl NodeTreeBuilder {
         self.add_file(skills, "enabled", "cortexfs-test\n");
         let tools = self.add_dir(helper, "tools");
         self.add_file(tools, "count", "2\n");
-        self.add_file(tools, "list", "filesystem.read\nmcp.local-fs.read_file\n");
-        self.add_file(
+        self.add_owned_file(
+            tools,
+            "list",
+            newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
+        );
+        self.add_owned_file(
             tools,
             "enabled",
-            "filesystem.read\nmcp.local-fs.read_file\n",
+            newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
         let mcp = self.add_dir(helper, "mcp");
         self.add_file(mcp, "servers_count", "1\n");
@@ -801,45 +809,41 @@ impl NodeTreeBuilder {
     fn add_tools_projection(&mut self, parent: Inode) {
         let tools = self.add_dir(parent, "tools");
         self.add_file(tools, "count", "3\n");
-        self.add_file(
-            tools,
-            "list",
-            "shell.exec\nfilesystem.read\nmcp.local-fs.read_file\n",
-        );
+        self.add_owned_file(tools, "list", newline_join(cortex_tools::GLOBAL_TOOLS));
         self.add_tool(
             tools,
             ToolProjection {
-                id: "shell.exec",
+                id: cortex_tools::SHELL_EXEC_TOOL,
                 name: "shell.exec\n",
                 description: "Run an authorized shell command through cortexd\n",
                 kind: "native\n",
                 input_schema: "{\"type\":\"object\",\"required\":[\"command\"],\"properties\":{\"command\":{\"type\":\"string\"}}}\n",
                 output_schema: "{\"type\":\"object\",\"properties\":{\"status\":{\"type\":\"integer\"},\"stdout\":{\"type\":\"string\"},\"stderr\":{\"type\":\"string\"}}}\n",
-                permissions: "host.shell.exec\n",
+                permissions: cortex_tools::HOST_SHELL_EXEC_PERMISSION_TEXT,
             },
         );
         self.add_tool(
             tools,
             ToolProjection {
-                id: "filesystem.read",
+                id: cortex_tools::FILESYSTEM_READ_TOOL,
                 name: "filesystem.read\n",
                 description: "Read an authorized local file through cortexd\n",
                 kind: "native\n",
                 input_schema: "{\"type\":\"object\",\"required\":[\"path\"],\"properties\":{\"path\":{\"type\":\"string\"}}}\n",
                 output_schema: "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\"},\"mime_type\":{\"type\":\"string\"}}}\n",
-                permissions: "host.fs.read\n",
+                permissions: cortex_tools::HOST_FS_READ_PERMISSION_TEXT,
             },
         );
         self.add_tool(
             tools,
             ToolProjection {
-                id: "mcp.local-fs.read_file",
+                id: cortex_tools::MCP_LOCAL_FS_READ_TOOL,
                 name: "local-fs.read_file\n",
                 description: "Unified projection of the local-fs MCP read_file tool\n",
                 kind: "mcp\n",
                 input_schema: "{\"type\":\"object\",\"required\":[\"path\"],\"properties\":{\"path\":{\"type\":\"string\"}}}\n",
                 output_schema: "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\"}}}\n",
-                permissions: "mcp.local-fs.read_file\nhost.fs.read\n",
+                permissions: cortex_tools::MCP_LOCAL_FS_READ_TOOL_PERMISSIONS_TEXT,
             },
         );
     }
@@ -881,7 +885,11 @@ impl NodeTreeBuilder {
             "output_schema.json",
             "{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\"}}}\n",
         );
-        self.add_file(tool, "permissions", "host.fs.read\n");
+        self.add_file(
+            tool,
+            "permissions",
+            cortex_tools::HOST_FS_READ_PERMISSION_TEXT,
+        );
         self.add_invoke_dirs(tool);
     }
 
@@ -1020,4 +1028,10 @@ fn concat_name(name: &'static str) -> &'static str {
         "google.generate_content" => "google.generate_content\n",
         _ => "\n",
     }
+}
+
+fn newline_join(values: &[&str]) -> String {
+    let mut content = values.join("\n");
+    content.push('\n');
+    content
 }

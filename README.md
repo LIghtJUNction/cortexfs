@@ -32,7 +32,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json`，再由 `control/drain` 进入执行队列。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
 - thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path。
-- 多用户空间：`spaces/users/<uid>/...` 是权限、模型可见性、路由、记忆、审计和导出的边界。
+- 多用户空间：`home/<uid>/...` 是权限、模型可见性、路由、记忆、审计和导出的边界。
 - 外部主体模型：为 QQ 群友、机器人平台用户等非 Linux 用户预留 `external subject` 身份上下文。
 - 记忆与导出：分层记忆、JSONL 导出、训练数据友好的对话和 tool trace 投影。
 - 本地 live test：使用本机轻量模型 fixture 验证 provider 调用，不依赖云 API。
@@ -111,6 +111,10 @@ export CTX_HOME="/ctx/home/$(id -u)"
 
 `$CTX_HOME` 类似 `/home/$USER`，但指向 CortexFS 内部的用户空间。比如 `$CTX_HOME/api`、`$CTX_HOME/threads`、`$CTX_HOME/memory`、`$CTX_HOME/exports` 分别对应当前用户可用的 API、对话、记忆和导出视图。
 
+`home/<uid>` 是用户入口。当前实现中它与内部用户投影指向同一个 inode，不复制第二棵树。通过 `$CTX_HOME` 提交请求、写 thread、读 memory，都会落到同一套队列、路由、审计和导出流。
+
+目录命名遵循 Linux 风格：普通名词、短路径、少别名。用户路径只使用 `/ctx/home/<uid>`；不提供 `/ctx/ctx_home` 这类额外发现节点。
+
 示例：
 
 ```bash
@@ -160,13 +164,13 @@ cat "$mnt/formats/openai.chat/models/list"
 
 ```bash
 mnt=tests/mounts/cortexfs
-uid="$(id -u)"
+CTX_HOME="$mnt/home/$(id -u)"
 
-cat "$mnt/spaces/users/$uid/models/count"
-cat "$mnt/spaces/users/$uid/models/list"
-cat "$mnt/spaces/users/$uid/routes/openai.chat/provider"
-cat "$mnt/spaces/users/$uid/routes/openai.chat/model"
-cat "$mnt/spaces/users/$uid/routes/openai.chat/reason"
+cat "$CTX_HOME/models/count"
+cat "$CTX_HOME/models/list"
+cat "$CTX_HOME/routes/openai.chat/provider"
+cat "$CTX_HOME/routes/openai.chat/model"
+cat "$CTX_HOME/routes/openai.chat/reason"
 ```
 
 ## 文件式 API 调用
@@ -175,8 +179,8 @@ CortexFS 的文件式提交规则是：普通 `write()` 只写入内容，不触
 
 ```bash
 mnt=tests/mounts/cortexfs
-uid="$(id -u)"
-api="$mnt/spaces/users/$uid/api/openai.chat"
+CTX_HOME="$mnt/home/$(id -u)"
+api="$CTX_HOME/api/openai.chat"
 
 printf '%s\n' '{"messages":[{"role":"user","content":"Reply with cortexfs-ok"}]}' \
   > "$api/inbox/001.tmp"
@@ -212,8 +216,8 @@ find "$api/outbox" -name '*.resp.json' -print -exec jq . {} \;
 
 ```bash
 mnt=tests/mounts/cortexfs
-uid="$(id -u)"
-thread="$mnt/spaces/users/$uid/threads/demo"
+CTX_HOME="$mnt/home/$(id -u)"
+thread="$CTX_HOME/threads/demo"
 
 cat "$thread/messages.jsonl"
 cat "$thread/latest.md"
@@ -269,8 +273,8 @@ cat "$mnt/audit/cost"
 
 ```bash
 mnt=tests/mounts/cortexfs
-uid="$(id -u)"
-exports="$mnt/spaces/users/$uid/exports"
+CTX_HOME="$mnt/home/$(id -u)"
+exports="$CTX_HOME/exports"
 
 cat "$exports/conversations.jsonl"
 cat "$exports/sft.jsonl"
