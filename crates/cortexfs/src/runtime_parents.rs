@@ -44,8 +44,12 @@ pub struct RuntimeParents {
     pub tool_loop: Option<Inode>,
     pub tool_loop_state: Option<Inode>,
     pub tool_loop_control: Option<Inode>,
+    pub memory_working: Option<Inode>,
+    pub memory_episodic: Option<Inode>,
     pub memory_search: Option<Inode>,
     pub memory_semantic: Option<Inode>,
+    pub memory_procedural: Option<Inode>,
+    pub memory_profile: Option<Inode>,
     pub mcp_local_fs_status: Option<Inode>,
     pub mcp_local_fs_pid: Option<Inode>,
     pub mcp_local_fs_control: Option<Inode>,
@@ -105,36 +109,6 @@ struct AgentRuntimeParents {
 
 impl RuntimeParents {
     pub fn from_tree(tree: &StaticTree) -> Self {
-        let user_models_by_provider = PROVIDER_SPECS
-            .iter()
-            .filter_map(|provider| {
-                tree.path_inode_owned(&user_model_path(provider))
-                    .map(|inode| (provider.id, inode))
-            })
-            .collect();
-        let provider_parents = PROVIDER_SPECS
-            .iter()
-            .filter_map(|provider| {
-                let base_url =
-                    tree.path_inode_owned(&provider_child_path(provider.id, "base_url"))?;
-                let enabled =
-                    tree.path_inode_owned(&provider_child_path(provider.id, "enabled"))?;
-                let health = tree.path_inode_owned(&provider_child_path(provider.id, "health"))?;
-                let models = tree.path_inode_owned(&provider_child_path(provider.id, "models"))?;
-                let secrets =
-                    tree.path_inode_owned(&provider_child_path(provider.id, "secrets"))?;
-                Some((
-                    provider.id,
-                    ProviderRuntimeParents {
-                        base_url,
-                        enabled,
-                        health,
-                        models,
-                        secrets,
-                    },
-                ))
-            })
-            .collect();
         let mcp = mcp_runtime_parents(tree);
         let agent = agent_runtime_parents(tree);
         let cluster_worker = cluster_worker_runtime_parents(tree);
@@ -154,8 +128,18 @@ impl RuntimeParents {
             tool_loop: tree.path_inode(DEMO_THREAD_TOOL_LOOP_PATH),
             tool_loop_state: tree.path_inode(DEMO_THREAD_TOOL_LOOP_STATE_PATH),
             tool_loop_control: tree.path_inode(DEMO_THREAD_TOOL_LOOP_CONTROL_PATH),
+            memory_working: tree.path_inode(&["spaces", "users", "1000", "memory", "working"]),
+            memory_episodic: tree.path_inode(&["spaces", "users", "1000", "memory", "episodic"]),
             memory_search: tree.path_inode(MEMORY_SEARCH_DIR_PATH),
             memory_semantic: tree.path_inode(MEMORY_SEMANTIC_DIR_PATH),
+            memory_procedural: tree.path_inode(&[
+                "spaces",
+                "users",
+                "1000",
+                "memory",
+                "procedural",
+            ]),
+            memory_profile: tree.path_inode(&["spaces", "users", "1000", "memory", "profile"]),
             mcp_local_fs_status: mcp.local_fs_status,
             mcp_local_fs_pid: mcp.local_fs_pid,
             mcp_local_fs_control: mcp.local_fs_control,
@@ -203,7 +187,7 @@ impl RuntimeParents {
             user_routes: tree.path_inode(USER_ROUTES_DIR_PATH),
             user_control: tree.path_inode(USER_CONTROL_DIR_PATH),
             user_models: tree.path_inode(USER_MODELS_DIR_PATH),
-            user_models_by_provider,
+            user_models_by_provider: user_model_parents(tree),
             cluster_state: tree.path_inode(CLUSTER_LOCAL_STATE_PATH),
             cluster_worker_state: cluster_worker.state,
             cluster_worker_heartbeat: cluster_worker.heartbeat,
@@ -217,9 +201,42 @@ impl RuntimeParents {
             pgvector_collections: tree.path_inode(&["vector", "stores", "pgvector", "collections"]),
             pgvector_refresh: tree.path_inode(&["vector", "stores", "pgvector", "refresh"]),
             postgres_dsn: tree.path_inode(POSTGRES_DSN_DIR_PATH),
-            provider_parents,
+            provider_parents: provider_runtime_parents(tree),
         }
     }
+}
+
+fn user_model_parents(tree: &StaticTree) -> BTreeMap<&'static str, Inode> {
+    PROVIDER_SPECS
+        .iter()
+        .filter_map(|provider| {
+            tree.path_inode_owned(&user_model_path(provider))
+                .map(|inode| (provider.id, inode))
+        })
+        .collect()
+}
+
+fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, ProviderRuntimeParents> {
+    PROVIDER_SPECS
+        .iter()
+        .filter_map(|provider| {
+            let base_url = tree.path_inode_owned(&provider_child_path(provider.id, "base_url"))?;
+            let enabled = tree.path_inode_owned(&provider_child_path(provider.id, "enabled"))?;
+            let health = tree.path_inode_owned(&provider_child_path(provider.id, "health"))?;
+            let models = tree.path_inode_owned(&provider_child_path(provider.id, "models"))?;
+            let secrets = tree.path_inode_owned(&provider_child_path(provider.id, "secrets"))?;
+            Some((
+                provider.id,
+                ProviderRuntimeParents {
+                    base_url,
+                    enabled,
+                    health,
+                    models,
+                    secrets,
+                },
+            ))
+        })
+        .collect()
 }
 
 fn agent_runtime_parents(tree: &StaticTree) -> AgentRuntimeParents {

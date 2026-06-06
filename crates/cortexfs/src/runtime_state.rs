@@ -43,6 +43,15 @@ struct McpRuntimeInodes {
     session_transcript: Option<Inode>,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MemoryLayerInodes {
+    pub working: Option<Inode>,
+    pub episodic: Option<Inode>,
+    pub semantic: Option<Inode>,
+    pub procedural: Option<Inode>,
+    pub profile: Option<Inode>,
+}
+
 #[derive(Debug, Default)]
 pub struct RuntimeState {
     pub(crate) nodes: BTreeMap<Inode, Node>,
@@ -107,6 +116,7 @@ pub struct RuntimeState {
     pub(crate) memory_query_inode: Option<Inode>,
     pub(crate) memory_results_inode: Option<Inode>,
     pub(crate) memory_semantic_items_inode: Option<Inode>,
+    pub(crate) memory_layer_items: MemoryLayerInodes,
     pub(crate) mcp_local_fs_status_inode: Option<Inode>,
     pub(crate) mcp_local_fs_pid_inode: Option<Inode>,
     pub(crate) mcp_local_fs_start_inode: Option<Inode>,
