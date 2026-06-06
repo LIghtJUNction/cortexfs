@@ -153,6 +153,7 @@ pub struct RuntimeState {
     pub(crate) collab_locks_parent: Option<Inode>,
     pub(crate) user_allowed_providers_inode: Option<Inode>,
     pub(crate) user_default_provider_inode: Option<Inode>,
+    pub(crate) user_default_provider_compat_inode: Option<Inode>,
     pub(crate) user_reload_inode: Option<Inode>,
     pub(crate) user_gc_inode: Option<Inode>,
     pub(crate) user_models_refresh_inode: Option<Inode>,

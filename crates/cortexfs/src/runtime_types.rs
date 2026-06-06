@@ -8,6 +8,9 @@ pub struct ApiRouteInodes {
     pub provider: Inode,
     pub model: Inode,
     pub reason: Inode,
+    pub compat_provider: Option<Inode>,
+    pub compat_model: Option<Inode>,
+    pub compat_reason: Option<Inode>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]

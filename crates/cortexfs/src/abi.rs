@@ -64,7 +64,7 @@ pub const MEMORY_SEARCH_DIR_PATH: &[&str] = &["home", "1000", "memory", "search"
 pub const MEMORY_SEMANTIC_DIR_PATH: &[&str] = &["home", "1000", "memory", "semantic"];
 pub const MEMORY_SEMANTIC_INBOX_PATH: &[&str] = &["home", "1000", "memory", "semantic", "inbox"];
 pub const USER_POLICY_DIR_PATH: &[&str] = &["home", "1000", "policy"];
-pub const USER_ROUTES_DIR_PATH: &[&str] = &["home", "1000", "routes"];
+pub const USER_ROUTES_DIR_PATH: &[&str] = &["home", "1000", "route"];
 pub const USER_CONTROL_DIR_PATH: &[&str] = &["home", "1000", "control"];
 pub const SHARED_PROJECT_A_DEMO_CLAIMS_PATH: &[&str] =
     &["shared", "project-a", "collab", "tasks", "demo", "claims"];

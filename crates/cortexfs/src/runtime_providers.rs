@@ -50,8 +50,11 @@ impl RuntimeState {
         if let Some(inode) = self.user_default_provider_inode {
             self.update_dynamic_file(inode, format!("{provider}\n"));
         }
+        if let Some(inode) = self.user_default_provider_compat_inode {
+            self.update_dynamic_file(inode, format!("{provider}\n"));
+        }
         self.refresh_user_routes();
-        self.append_audit("space.users.1000.routes", "default_provider", "configured");
+        self.append_audit("space.users.1000.route", "default_provider", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
@@ -453,6 +456,15 @@ impl RuntimeState {
         self.update_dynamic_file(inodes.provider, format!("{}\n", route.provider));
         self.update_dynamic_file(inodes.model, format!("{}\n", route.model));
         self.update_dynamic_file(inodes.reason, format!("{}\n", route.reason));
+        if let Some(inode) = inodes.compat_provider {
+            self.update_dynamic_file(inode, format!("{}\n", route.provider));
+        }
+        if let Some(inode) = inodes.compat_model {
+            self.update_dynamic_file(inode, format!("{}\n", route.model));
+        }
+        if let Some(inode) = inodes.compat_reason {
+            self.update_dynamic_file(inode, format!("{}\n", route.reason));
+        }
     }
 
     pub fn current_route(&self, format: &str) -> (&str, &str, &str) {

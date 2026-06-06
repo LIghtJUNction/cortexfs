@@ -1267,7 +1267,62 @@ fn user_default_provider_updates_route_and_audit() -> fuse3::Result<()> {
     drop(runtime);
 
     let audit = fs.node_content(fs.audit_events_inode()?)?;
-    assert!(audit.contains("\"format\":\"space.users.1000.routes\""));
+    assert!(audit.contains("\"format\":\"space.users.1000.route\""));
     assert!(!audit.contains(crate::invalid_provider_id()));
+    Ok(())
+}
+
+#[test]
+fn user_routes_compat_default_provider_writes_primary_route() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let default = crate::default_provider_spec()?;
+    let alternate = crate::alternate_provider_spec(&default)?;
+    let route = fs
+        .tree
+        .path_inode(crate::USER_ROUTES_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let routes_compat = fs
+        .tree
+        .path_inode(&["home", "1000", "routes"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    let default_provider = runtime
+        .lookup_child(routes_compat, "default_provider")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+
+    runtime.write(
+        default_provider,
+        0,
+        format!("{}\n", alternate.id).as_bytes(),
+    )?;
+
+    assert_eq!(
+        runtime
+            .lookup_child(route, "default_provider")
+            .and_then(crate::Node::content),
+        Some(format!("{}\n", alternate.id).as_str())
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(routes_compat, "default_provider")
+            .and_then(crate::Node::content),
+        Some(format!("{}\n", alternate.id).as_str())
+    );
+    assert_openai_chat_route(
+        &runtime,
+        route,
+        format!("{}\n", alternate.id).as_str(),
+        provider_model_text(alternate.id).as_str(),
+        "ready\n",
+    )?;
+    assert_openai_chat_route(
+        &runtime,
+        routes_compat,
+        format!("{}\n", alternate.id).as_str(),
+        provider_model_text(alternate.id).as_str(),
+        "ready\n",
+    )?;
+    drop(runtime);
     Ok(())
 }
