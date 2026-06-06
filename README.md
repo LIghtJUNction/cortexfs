@@ -90,6 +90,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 ```bash
 cargo build --locked --workspace
+cargo run -p cortex-cli -- status
 ```
 
 ## 实机安装目录

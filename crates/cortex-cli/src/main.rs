@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use std::io::Write as _;
 use std::path::PathBuf;
 
 fn main() -> std::process::ExitCode {
@@ -16,6 +17,12 @@ fn main() -> std::process::ExitCode {
 #[expect(clippy::print_stderr, reason = "CLI errors must be visible to users")]
 fn print_error(error: &CliError) {
     eprintln!("{error}");
+}
+
+fn print_output(output: &str) -> Result<(), CliError> {
+    std::io::stdout()
+        .write_all(output.as_bytes())
+        .map_err(CliError::Io)
 }
 
 /// Top-level `CortexFS` CLI command.
@@ -102,6 +109,30 @@ impl MountCommand {
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct StatusCommand;
 
+impl StatusCommand {
+    fn render() -> String {
+        let uid = current_uid();
+        format!(
+            "status=ready\nabi=cortexfs.design.v0\nplatform=linux\nrecommended_mount=/ctx\nctx_home=/ctx/home/{uid}\ndefault_test_mount=tests/mounts/cortexfs\nlive_test_provider=provider-neutral\nlive_test_model=smollm2:135m\n"
+        )
+    }
+}
+
+fn current_uid() -> u32 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| parse_effective_uid(&status))
+        .unwrap_or_default()
+}
+
+fn parse_effective_uid(status: &str) -> Option<u32> {
+    let line = status.lines().find(|line| line.starts_with("Uid:"))?;
+    let mut fields = line.split_whitespace();
+    let _label = fields.next()?;
+    let _real_uid = fields.next()?;
+    fields.next()?.parse().ok()
+}
+
 /// Unsupported command.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UnknownCommand {
@@ -123,6 +154,8 @@ pub enum CliError {
     UnknownCommand(String),
     /// The FUSE projection returned an error.
     Mount(cortexfs::MountError),
+    /// Writing CLI output failed.
+    Io(std::io::Error),
 }
 
 impl std::fmt::Display for CliError {
@@ -131,6 +164,7 @@ impl std::fmt::Display for CliError {
             Self::NotImplemented(command) => write!(f, "{command} is not implemented"),
             Self::UnknownCommand(ref command) => write!(f, "unknown command: {command}"),
             Self::Mount(ref error) => error.fmt(f),
+            Self::Io(ref error) => write!(f, "I/O error: {error}"),
         }
     }
 }
@@ -158,7 +192,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
             cortexfs::mount(&config)?;
             Ok(())
         }
-        Command::Status(_command) => Ok(()),
+        Command::Status(_command) => print_output(&StatusCommand::render()),
         Command::Unknown(command) => Err(CliError::UnknownCommand(command.name)),
     }
 }
@@ -172,6 +206,27 @@ mod tests {
     #[test]
     fn parser_defaults_to_status_without_arguments() {
         assert_eq!(Command::parse([]), Command::Status(StatusCommand));
+    }
+
+    #[test]
+    fn status_renders_stable_discovery_fields() {
+        let status = StatusCommand::render();
+
+        assert!(status.contains("status=ready\n"));
+        assert!(status.contains("abi=cortexfs.design.v0\n"));
+        assert!(status.contains("platform=linux\n"));
+        assert!(status.contains("recommended_mount=/ctx\n"));
+        assert!(status.contains("ctx_home=/ctx/home/"));
+        assert!(status.contains("default_test_mount=tests/mounts/cortexfs\n"));
+        assert!(status.contains("live_test_provider=provider-neutral\n"));
+        assert!(status.contains("live_test_model=smollm2:135m\n"));
+    }
+
+    #[test]
+    fn parses_effective_uid_from_proc_status() {
+        let status = "Name:\tcortex\nUid:\t1000\t2000\t3000\t4000\n";
+
+        assert_eq!(super::parse_effective_uid(status), Some(2000));
     }
 
     #[test]
