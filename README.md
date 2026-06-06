@@ -15,8 +15,8 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 它把不同生态拆成两层：
 
-- `formats/`：协议形状，例如 `openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
-- `providers/`：后端实例，例如官方账号、中转站、兼容 OpenAI 格式的厂商、本地推理运行时或未来的 adapter。
+- `format/`：协议形状，例如 `openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
+- `provider/`：后端实例，例如官方账号、中转站、兼容 OpenAI 格式的厂商、本地推理运行时或未来的 adapter。
 
 现实中 Kimi、MiniMax、中转站、本地模型服务可能都支持 OpenAI-compatible API；CortexFS 不把厂商品牌硬编码成核心路径，而是让 provider 声明自己支持哪些 format、模型、账号类型、健康状态和路由策略。
 
@@ -26,9 +26,9 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 已经具备的核心面：
 
-- FUSE 挂载树：`formats`、`providers`、`models`、`home`、`group`、`shared`、`ext`、`spaces`、`agents`、`clusters`、`mcp`、`skills`、`tools`、`memory`、`vector`、`databases`、`audit`、`control`。
+- FUSE 挂载树：`format`、`provider`、`model`、`home`、`group`、`shared`、`ext`、`space`、`agent`、`cluster`、`mcp`、`skill`、`tool`、`memory`、`vector`、`db`、`audit`、`control`。
 - API format：`openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
-- provider/model 发现：通过 `count`、`list`、`formats`、`url/*`、`enabled/*`、`health/*`、`models/*` 等小文本文件读取。
+- provider/model 发现：通过 `count`、`list`、`format`、`url/*`、`enabled/*`、`health/*`、`models/*` 等小文本文件读取。
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json`，再由 `control/drain` 进入执行队列。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
 - thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path。
@@ -56,27 +56,29 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 ```text
 /
   status
-  capabilities/
+  cap/
   api/
-  formats/
-  providers/
-  models/
+  format/
+  provider/
+  model/
   home/
   group/
   shared/
   ext/
-  spaces/
-  agents/
-  clusters/
+  space/
+  agent/
+  cluster/
   mcp/
-  skills/
-  tools/
+  skill/
+  tool/
   memory/
   vector/
-  databases/
+  db/
   audit/
   control/
 ```
+
+旧的 `capabilities/`、`formats/`、`providers/`、`models/`、`spaces/`、`agents/`、`clusters/`、`skills/`、`tools/`、`databases/` 是兼容入口。新脚本应使用短名单数入口。
 
 小文件约定：
 
@@ -129,7 +131,7 @@ export CTX_HOME="/ctx/home/$(id -u)"
 
 如果要做多用户挂载，使用明确的多用户挂载模式，并按系统 FUSE 配置处理 `/ctx` 的 owner、group、mode 和 `allow_other` 策略。
 
-`spaces/` 保留为兼容和策略视图。新脚本应优先使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。
+`space/` 是策略视图；`spaces/` 只作为兼容入口保留。新脚本应优先使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。
 
 ## 本地测试挂载
 
@@ -148,9 +150,9 @@ cargo run -p cortex-cli -- mount tests/mounts/cortexfs
 mnt=tests/mounts/cortexfs
 
 cat "$mnt/status"
-cat "$mnt/capabilities/formats"
-cat "$mnt/capabilities/providers"
-cat "$mnt/capabilities/tools"
+cat "$mnt/cap/formats"
+cat "$mnt/cap/providers"
+cat "$mnt/cap/tools"
 find "$mnt" -maxdepth 2 -type f | sort
 ```
 
@@ -159,10 +161,10 @@ find "$mnt" -maxdepth 2 -type f | sort
 ```bash
 mnt=tests/mounts/cortexfs
 
-cat "$mnt/providers/count"
-cat "$mnt/providers/list"
-cat "$mnt/models/list"
-cat "$mnt/formats/openai.chat/models/list"
+cat "$mnt/provider/count"
+cat "$mnt/provider/list"
+cat "$mnt/model/list"
+cat "$mnt/format/openai.chat/models/list"
 ```
 
 查询某个 Linux 用户实际可用的模型：
@@ -229,9 +231,9 @@ cat "$thread/latest.md"
 cat "$thread/fingerprint"
 cat "$thread/tool-loop/steps.jsonl"
 
-cat "$mnt/tools/list"
+cat "$mnt/tool/list"
 cat "$mnt/mcp/tools/list"
-cat "$mnt/skills/installed/cortexfs-test/SKILL.md"
+cat "$mnt/skill/installed/cortexfs-test/SKILL.md"
 ```
 
 后续实时通信会使用 socket fast path，例如 `threads/<id>/io.sock`。socket 必须和文件式提交进入同一条内部管线：同一套 policy、route、secret resolve、store、audit 和 export，不能形成不可审计旁路。
@@ -328,6 +330,7 @@ ollama pull smollm2:135m
 ```bash
 cargo test -p cortex-providers --test ollama_live --locked -- --ignored --nocapture
 cargo test -p cortexd --test ollama_live --locked -- --ignored --nocapture
+cargo test -p cortexfs ollama_live_request_drains_through_cortexfs_file_pipeline --locked -- --ignored --nocapture
 ```
 
 Ollama 只是当前本地 live-test fixture，不是 CortexFS 的特殊核心 provider。

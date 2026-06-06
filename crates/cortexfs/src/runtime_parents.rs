@@ -131,18 +131,12 @@ impl RuntimeParents {
             tool_loop_state: tree.path_inode(DEMO_THREAD_TOOL_LOOP_STATE_PATH),
             tool_loop_control: tree.path_inode(DEMO_THREAD_TOOL_LOOP_CONTROL_PATH),
             tool_loop_limits: tree.path_inode(DEMO_THREAD_TOOL_LOOP_LIMITS_PATH),
-            memory_working: tree.path_inode(&["spaces", "users", "1000", "memory", "working"]),
-            memory_episodic: tree.path_inode(&["spaces", "users", "1000", "memory", "episodic"]),
+            memory_working: tree.path_inode(&["home", "1000", "memory", "working"]),
+            memory_episodic: tree.path_inode(&["home", "1000", "memory", "episodic"]),
             memory_search: tree.path_inode(MEMORY_SEARCH_DIR_PATH),
             memory_semantic: tree.path_inode(MEMORY_SEMANTIC_DIR_PATH),
-            memory_procedural: tree.path_inode(&[
-                "spaces",
-                "users",
-                "1000",
-                "memory",
-                "procedural",
-            ]),
-            memory_profile: tree.path_inode(&["spaces", "users", "1000", "memory", "profile"]),
+            memory_procedural: tree.path_inode(&["home", "1000", "memory", "procedural"]),
+            memory_profile: tree.path_inode(&["home", "1000", "memory", "profile"]),
             mcp_local_fs_status: mcp.local_fs_status,
             mcp_local_fs_pid: mcp.local_fs_pid,
             mcp_local_fs_control: mcp.local_fs_control,
@@ -203,7 +197,7 @@ impl RuntimeParents {
             pgvector_status: tree.path_inode(&["vector", "stores", "pgvector", "status"]),
             pgvector_collections: tree.path_inode(&["vector", "stores", "pgvector", "collections"]),
             pgvector_refresh: tree.path_inode(&["vector", "stores", "pgvector", "refresh"]),
-            postgres_status: tree.path_inode(&["databases", "postgres", "status"]),
+            postgres_status: tree.path_inode(&["db", "postgres", "status"]),
             postgres_dsn: tree.path_inode(POSTGRES_DSN_DIR_PATH),
             provider_parents: provider_runtime_parents(tree),
         }
@@ -247,21 +241,21 @@ fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, Provide
 
 fn agent_runtime_parents(tree: &StaticTree) -> AgentRuntimeParents {
     AgentRuntimeParents {
-        state: tree.path_inode(&["agents", "helper", "runtime", "state"]),
-        pid: tree.path_inode(&["agents", "helper", "runtime", "pid"]),
-        heartbeat: tree.path_inode(&["agents", "helper", "runtime", "heartbeat"]),
-        current_thread: tree.path_inode(&["agents", "helper", "runtime", "current_thread"]),
-        current_task: tree.path_inode(&["agents", "helper", "runtime", "current_task"]),
+        state: tree.path_inode(&["agent", "helper", "runtime", "state"]),
+        pid: tree.path_inode(&["agent", "helper", "runtime", "pid"]),
+        heartbeat: tree.path_inode(&["agent", "helper", "runtime", "heartbeat"]),
+        current_thread: tree.path_inode(&["agent", "helper", "runtime", "current_thread"]),
+        current_task: tree.path_inode(&["agent", "helper", "runtime", "current_task"]),
     }
 }
 
 fn cluster_worker_runtime_parents(tree: &StaticTree) -> ClusterWorkerRuntimeParents {
     ClusterWorkerRuntimeParents {
-        state: tree.path_inode(&["clusters", "local", "workers", "local-worker", "state"]),
-        heartbeat: tree.path_inode(&["clusters", "local", "workers", "local-worker", "heartbeat"]),
-        load: tree.path_inode(&["clusters", "local", "workers", "local-worker", "load"]),
+        state: tree.path_inode(&["cluster", "local", "workers", "local-worker", "state"]),
+        heartbeat: tree.path_inode(&["cluster", "local", "workers", "local-worker", "heartbeat"]),
+        load: tree.path_inode(&["cluster", "local", "workers", "local-worker", "load"]),
         current_task: tree.path_inode(&[
-            "clusters",
+            "cluster",
             "local",
             "workers",
             "local-worker",

@@ -53,6 +53,20 @@ struct ToolProjection {
     permissions: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct RootCompatAliases {
+    capabilities: Inode,
+    formats: Inode,
+    providers: Inode,
+    models: Inode,
+    spaces: Inode,
+    agents: Inode,
+    clusters: Inode,
+    skills: Inode,
+    tools: Inode,
+    databases: Inode,
+}
+
 impl NodeTreeBuilder {
     pub fn new() -> Self {
         let mut nodes = BTreeMap::new();
@@ -80,7 +94,7 @@ impl NodeTreeBuilder {
 
     pub fn build_design_projection(mut self) -> StaticTree {
         self.add_file(ROOT_INODE, "status", STATUS_TEXT);
-        let capabilities = self.add_dir(ROOT_INODE, "capabilities");
+        let capabilities = self.add_dir(ROOT_INODE, "cap");
         self.add_file(
             capabilities,
             "formats",
@@ -97,7 +111,7 @@ impl NodeTreeBuilder {
         );
         self.add_local_api_projection(ROOT_INODE);
 
-        let formats = self.add_dir(ROOT_INODE, "formats");
+        let formats = self.add_dir(ROOT_INODE, "format");
         self.add_format(
             formats,
             FormatProjection {
@@ -135,14 +149,14 @@ impl NodeTreeBuilder {
             },
         );
 
-        let providers = self.add_dir(ROOT_INODE, "providers");
+        let providers = self.add_dir(ROOT_INODE, "provider");
         self.add_owned_file(providers, "count", provider_count());
         self.add_owned_file(providers, "list", provider_list());
         for provider in PROVIDER_SPECS {
             self.add_configured_provider(providers, provider);
         }
 
-        let models = self.add_dir(ROOT_INODE, "models");
+        let models = self.add_dir(ROOT_INODE, "model");
         self.add_global_models_index(models);
 
         let home = self.add_dir(ROOT_INODE, "home");
@@ -151,7 +165,7 @@ impl NodeTreeBuilder {
         self.add_shared_space_projection(shared);
         let ext = self.add_dir(ROOT_INODE, "ext");
         self.add_external_space_projection(ext);
-        let spaces = self.add_dir(ROOT_INODE, "spaces");
+        let spaces = self.add_dir(ROOT_INODE, "space");
         let users = self.add_dir(spaces, "users");
         let user = self.add_dir(users, LOCAL_USER_ID);
         self.add_user_space(user);
@@ -163,26 +177,65 @@ impl NodeTreeBuilder {
         let external_compat = self.add_dir(spaces, "external");
         self.attach_children_alias(external_compat, ext);
 
-        let agents = self.add_dir(ROOT_INODE, "agents");
+        let agents = self.add_dir(ROOT_INODE, "agent");
         self.add_file(agents, "count", "1\n");
         self.add_file(agents, "list", "helper\n");
         self.add_helper_agent(agents);
-        self.add_clusters_projection(ROOT_INODE);
+        let clusters = self.add_dir(ROOT_INODE, "cluster");
+        self.add_clusters_projection(clusters);
         self.add_mcp_projection(ROOT_INODE);
-        self.add_skills_projection(ROOT_INODE);
-        self.add_tools_projection(ROOT_INODE);
+        let skills = self.add_dir(ROOT_INODE, "skill");
+        self.add_skills_projection(skills);
+        let tools = self.add_dir(ROOT_INODE, "tool");
+        self.add_tools_projection(tools);
         self.add_global_memory_projection(ROOT_INODE);
         self.add_vector_projection(ROOT_INODE);
-        self.add_databases_projection(ROOT_INODE);
+        let databases = self.add_dir(ROOT_INODE, "db");
+        self.add_databases_projection(databases);
         self.add_audit_projection(ROOT_INODE);
         let control = self.add_dir(ROOT_INODE, "control");
         self.add_file(control, "version", "0.1.0\n");
         self.add_file(control, "abi", "cortexfs.design.v0\n");
+        self.add_root_compat_aliases(RootCompatAliases {
+            capabilities,
+            formats,
+            providers,
+            models,
+            spaces,
+            agents,
+            clusters,
+            skills,
+            tools,
+            databases,
+        });
         let paths = build_path_index(&self.nodes);
         StaticTree {
             nodes: self.nodes,
             paths,
         }
+    }
+
+    fn add_root_compat_aliases(&mut self, aliases: RootCompatAliases) {
+        let capabilities = self.add_dir(ROOT_INODE, "capabilities");
+        self.attach_children_alias(capabilities, aliases.capabilities);
+        let formats = self.add_dir(ROOT_INODE, "formats");
+        self.attach_children_alias(formats, aliases.formats);
+        let providers = self.add_dir(ROOT_INODE, "providers");
+        self.attach_children_alias(providers, aliases.providers);
+        let models = self.add_dir(ROOT_INODE, "models");
+        self.attach_children_alias(models, aliases.models);
+        let spaces = self.add_dir(ROOT_INODE, "spaces");
+        self.attach_children_alias(spaces, aliases.spaces);
+        let agents = self.add_dir(ROOT_INODE, "agents");
+        self.attach_children_alias(agents, aliases.agents);
+        let clusters = self.add_dir(ROOT_INODE, "clusters");
+        self.attach_children_alias(clusters, aliases.clusters);
+        let skills = self.add_dir(ROOT_INODE, "skills");
+        self.attach_children_alias(skills, aliases.skills);
+        let tools = self.add_dir(ROOT_INODE, "tools");
+        self.attach_children_alias(tools, aliases.tools);
+        let databases = self.add_dir(ROOT_INODE, "databases");
+        self.attach_children_alias(databases, aliases.databases);
     }
 
     fn add_format(&mut self, parent: Inode, projection: FormatProjection) {
@@ -672,8 +725,7 @@ impl NodeTreeBuilder {
         self.add_socket(helper, "io.sock");
     }
 
-    fn add_clusters_projection(&mut self, parent: Inode) {
-        let clusters = self.add_dir(parent, "clusters");
+    fn add_clusters_projection(&mut self, clusters: Inode) {
         self.add_file(clusters, "count", "1\n");
         self.add_file(clusters, "list", "local\n");
         let local = self.add_dir(clusters, "local");
@@ -766,8 +818,7 @@ impl NodeTreeBuilder {
         self.add_dir(vector, "indexes");
     }
 
-    fn add_databases_projection(&mut self, parent: Inode) {
-        let databases = self.add_dir(parent, "databases");
+    fn add_databases_projection(&mut self, databases: Inode) {
         self.add_file(databases, "context", "local:database_r:database_t:s0\n");
         self.add_file(databases, "count", "2\n");
         self.add_file(databases, "list", "sqlite\npostgres\n");
@@ -828,8 +879,7 @@ impl NodeTreeBuilder {
         self.add_mcp_session(sessions);
     }
 
-    fn add_skills_projection(&mut self, parent: Inode) {
-        let skills = self.add_dir(parent, "skills");
+    fn add_skills_projection(&mut self, skills: Inode) {
         let registry = self.add_dir(skills, "registry");
         self.add_file(registry, "count", "1\n");
         self.add_file(registry, "list", "cortexfs-test\n");
@@ -843,8 +893,7 @@ impl NodeTreeBuilder {
         self.add_file(by_domain, "cortexfs", "cortexfs-test\n");
     }
 
-    fn add_tools_projection(&mut self, parent: Inode) {
-        let tools = self.add_dir(parent, "tools");
+    fn add_tools_projection(&mut self, tools: Inode) {
         self.add_file(tools, "count", "3\n");
         self.add_owned_file(tools, "list", newline_join(cortex_tools::GLOBAL_TOOLS));
         self.add_tool(

@@ -11,7 +11,7 @@ fn staged_request_write_does_not_create_outbox_response() -> fuse3::Result<()> {
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let outbox = fs
         .tree
-        .path_inode(&["spaces", "users", "1000", "api", "openai.chat", "outbox"])
+        .path_inode(&["home", "1000", "api", "openai.chat", "outbox"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
 
     let inode = fs.create_staged_request("openai.chat", "001.tmp", "{\"messages\":[]}\n")?;
@@ -316,6 +316,69 @@ fn control_drain_materializes_queued_response() -> fuse3::Result<()> {
     assert!(usage.contains("drained=1\n"));
     assert!(usage.contains("errors=0\n"));
     assert!(usage.contains("denied=0\n"));
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires local Ollama with smollm2:135m"]
+fn ollama_live_request_drains_through_cortexfs_file_pipeline() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.use_ollama_execution_plane()?;
+    fs.create_staged_request(
+        "openai.chat",
+        "ollama-live.tmp",
+        "{\"model\":\"smollm2:135m\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: cortexfs-ok\"}]}\n",
+    )?;
+    fs.submit_request("openai.chat", "ollama-live.tmp", "ollama-live.req.json")?;
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("queue_depth")?)?,
+        "1\n"
+    );
+
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let outbox = fs
+        .tree
+        .path_inode(&["spaces", "users", "1000", "api", "openai.chat", "outbox"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let response = fs
+        .runtime
+        .lock()
+        .map_err(|_error| libc::EIO)?
+        .lookup_child(outbox, "ollama-live.resp.json")
+        .and_then(crate::Node::content)
+        .map(ToOwned::to_owned)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let body = serde_json::from_str::<serde_json::Value>(&response).map_err(|_error| libc::EIO)?;
+    let model = body
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let content = body
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    assert!(model.starts_with("smollm2"), "unexpected model: {model:?}");
+    assert!(!content.trim().is_empty(), "Ollama returned empty content");
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("queue_depth")?)?,
+        "0\n"
+    );
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("last_drained")?)?,
+        "ollama-live\n"
+    );
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"ollama-live\""));
+    assert!(export.contains("smollm2:135m"));
     Ok(())
 }
 

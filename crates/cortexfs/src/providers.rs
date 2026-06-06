@@ -221,17 +221,12 @@ pub fn provider_model_id(provider: &ProviderRuntimeSpec) -> String {
 }
 
 pub fn provider_child_path(provider: &str, child: &str) -> Vec<String> {
-    vec![
-        "providers".to_owned(),
-        provider.to_owned(),
-        child.to_owned(),
-    ]
+    vec!["provider".to_owned(), provider.to_owned(), child.to_owned()]
 }
 
 pub fn user_model_path(provider: &ProviderRuntimeSpec) -> Vec<String> {
     vec![
-        "spaces".to_owned(),
-        "users".to_owned(),
+        "home".to_owned(),
         LOCAL_USER_ID.to_owned(),
         "models".to_owned(),
         provider_model_id(provider),

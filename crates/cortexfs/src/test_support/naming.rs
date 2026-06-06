@@ -3,26 +3,36 @@ use std::ffi::OsStr;
 
 const ROOT_ABI_NAMES: &[&str] = &[
     "status",
-    "capabilities",
+    "cap",
     "api",
-    "formats",
-    "providers",
-    "models",
+    "format",
+    "provider",
+    "model",
     "home",
     "group",
     "shared",
     "ext",
+    "space",
+    "agent",
+    "cluster",
+    "mcp",
+    "skill",
+    "tool",
+    "memory",
+    "vector",
+    "db",
+    "audit",
+    "control",
+    "capabilities",
+    "formats",
+    "providers",
+    "models",
     "spaces",
     "agents",
     "clusters",
-    "mcp",
     "skills",
     "tools",
-    "memory",
-    "vector",
     "databases",
-    "audit",
-    "control",
 ];
 
 const FORBIDDEN_ROOT_ALIASES: &[&str] = &[
@@ -57,6 +67,42 @@ fn root_names_are_plain_abi_entries_without_helper_aliases() -> fuse3::Result<()
             "root ABI must not expose convenience alias {alias}"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn short_root_names_are_primary_and_plural_names_are_compat() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+
+    for (primary, compat) in [
+        ("cap", "capabilities"),
+        ("format", "formats"),
+        ("provider", "providers"),
+        ("model", "models"),
+        ("space", "spaces"),
+        ("agent", "agents"),
+        ("cluster", "clusters"),
+        ("skill", "skills"),
+        ("tool", "tools"),
+        ("db", "databases"),
+    ] {
+        assert!(
+            fs.lookup_child(ROOT_INODE, OsStr::new(primary)).is_ok(),
+            "missing primary root ABI entry {primary}"
+        );
+        assert!(
+            fs.lookup_child(ROOT_INODE, OsStr::new(compat)).is_ok(),
+            "missing compatibility root ABI entry {compat}"
+        );
+    }
+
+    let provider = crate::default_provider_id();
+    let primary = fs.path_inode(["provider", provider])?;
+    let compat = fs.path_inode(["providers", provider])?;
+    assert_eq!(
+        primary, compat,
+        "provider compat path must point at the same inode"
+    );
     Ok(())
 }
 
@@ -112,17 +158,18 @@ fn home_mcp_indexes_use_directories_not_flat_underscore_names() {
 fn provider_config_uses_short_url_directory() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let provider = crate::default_provider_id();
-    let url = fs.path_inode(["providers", provider, "url"])?;
+    let url = fs.path_inode(["provider", provider, "url"])?;
 
+    assert!(fs.lookup_path(["provider", provider, "url"]).is_some());
     assert!(fs.lookup_path(["providers", provider, "url"]).is_some());
     assert!(
-        fs.lookup_path(["providers", provider, "url", "default"])
+        fs.lookup_path(["provider", provider, "url", "default"])
             .is_some()
     );
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert!(
         runtime.lookup_child(url, "current").is_some(),
-        "runtime provider config must attach to providers/<id>/url"
+        "runtime provider config must attach to provider/<id>/url"
     );
     drop(runtime);
     Ok(())
@@ -133,15 +180,15 @@ fn agent_profile_uses_model_directory_for_default_selection() {
     let fs = CortexFs::new();
 
     assert!(
-        fs.lookup_path(["agents", "helper", "profile", "model", "provider"])
+        fs.lookup_path(["agent", "helper", "profile", "model", "provider"])
             .is_some()
     );
     assert!(
-        fs.lookup_path(["agents", "helper", "profile", "model", "model"])
+        fs.lookup_path(["agent", "helper", "profile", "model", "model"])
             .is_some()
     );
     assert!(
-        fs.lookup_path(["agents", "helper", "profile", "model", "format"])
+        fs.lookup_path(["agent", "helper", "profile", "model", "format"])
             .is_some()
     );
 }
@@ -151,15 +198,15 @@ fn agent_mcp_indexes_use_directories_not_flat_underscore_names() {
     let fs = CortexFs::new();
 
     assert!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers", "count"])
+        fs.lookup_path(["agent", "helper", "mcp", "servers", "count"])
             .is_some()
     );
     assert!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers", "list"])
+        fs.lookup_path(["agent", "helper", "mcp", "servers", "list"])
             .is_some()
     );
     assert!(
-        fs.lookup_path(["agents", "helper", "mcp", "servers", "enabled"])
+        fs.lookup_path(["agent", "helper", "mcp", "servers", "enabled"])
             .is_some()
     );
 }
