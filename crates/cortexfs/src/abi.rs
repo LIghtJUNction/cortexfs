@@ -16,8 +16,8 @@ pub const DYNAMIC_INODE_BASE: Inode = 1_000_000;
 pub const LOCAL_USER_ID: &str = "1000";
 pub const LOCAL_USER_UID_TEXT: &str = "1000\n";
 pub const LOCAL_USER_HOME_PREFIX: &[&str] = &["home", "1000"];
-pub const LOCAL_USER_THREAD_DISPLAY_PATH: &str = "home/1000/threads/demo";
-pub const LOCAL_USER_THREAD_DISPLAY_TEXT: &str = "home/1000/threads/demo\n";
+pub const LOCAL_USER_THREAD_DISPLAY_PATH: &str = "home/1000/thread/demo";
+pub const LOCAL_USER_THREAD_DISPLAY_TEXT: &str = "home/1000/thread/demo\n";
 pub const LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT: &str = "home/1000/model/refresh\n";
 pub const LOCAL_USER_CONTROL_DISPLAY_PREFIX: &str = "home/1000";
 pub const LOCAL_USER_SPACE_CONTEXT_TEXT: &str = "local:uid1000:object_r:user_space_t:s0\n";
@@ -34,22 +34,22 @@ pub const BATCH_DIR_PATH: &[&str] = &["home", "1000", "batch"];
 pub const BATCH_INBOX_PATH: &[&str] = &["home", "1000", "batch", "inbox"];
 pub const BATCH_OUTBOX_PATH: &[&str] = &["home", "1000", "batch", "outbox"];
 pub const CONTROL_DIR_PATH: &[&str] = &["control"];
-pub const EXPORTS_DIR_PATH: &[&str] = &["home", "1000", "exports"];
-pub const EXPORT_FILTERS_DIR_PATH: &[&str] = &["home", "1000", "exports", "filters"];
+pub const EXPORT_DIR_PATH: &[&str] = &["home", "1000", "export"];
+pub const EXPORT_FILTERS_DIR_PATH: &[&str] = &["home", "1000", "export", "filters"];
 pub const FEEDBACK_PREFERENCE_INBOX_PATH: &[&str] =
     &["home", "1000", "feedback", "preference", "inbox"];
 pub const FEEDBACK_PREFERENCE_OUTBOX_PATH: &[&str] =
     &["home", "1000", "feedback", "preference", "outbox"];
-pub const DEMO_THREAD_DIR_PATH: &[&str] = &["home", "1000", "threads", "demo"];
-pub const DEMO_THREAD_CONTROL_PATH: &[&str] = &["home", "1000", "threads", "demo", "control"];
-pub const DEMO_THREAD_INBOX_PATH: &[&str] = &["home", "1000", "threads", "demo", "inbox"];
-pub const DEMO_THREAD_TOOL_LOOP_PATH: &[&str] = &["home", "1000", "threads", "demo", "tool-loop"];
+pub const DEMO_THREAD_DIR_PATH: &[&str] = &["home", "1000", "thread", "demo"];
+pub const DEMO_THREAD_CONTROL_PATH: &[&str] = &["home", "1000", "thread", "demo", "control"];
+pub const DEMO_THREAD_INBOX_PATH: &[&str] = &["home", "1000", "thread", "demo", "inbox"];
+pub const DEMO_THREAD_TOOL_LOOP_PATH: &[&str] = &["home", "1000", "thread", "demo", "tool-loop"];
 pub const DEMO_THREAD_TOOL_LOOP_STATE_PATH: &[&str] =
-    &["home", "1000", "threads", "demo", "tool-loop", "state"];
+    &["home", "1000", "thread", "demo", "tool-loop", "state"];
 pub const DEMO_THREAD_TOOL_LOOP_CONTROL_PATH: &[&str] =
-    &["home", "1000", "threads", "demo", "tool-loop", "control"];
+    &["home", "1000", "thread", "demo", "tool-loop", "control"];
 pub const DEMO_THREAD_TOOL_LOOP_LIMITS_PATH: &[&str] =
-    &["home", "1000", "threads", "demo", "tool-loop", "limits"];
+    &["home", "1000", "thread", "demo", "tool-loop", "limits"];
 pub const EXTERNAL_QQ_GROUP_THREAD_DIR_PATH: &[&str] =
     &["ext", "qq", "group", "888888", "thread", "demo"];
 pub const EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH: &[&str] =

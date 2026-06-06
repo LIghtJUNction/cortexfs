@@ -23,12 +23,31 @@ fn export_refresh_derives_sft_from_thread_messages() -> fuse3::Result<()> {
     }
 
     let sft = fs.node_content(fs.export_file_inode("sft.jsonl")?)?;
-    assert!(sft.contains("\"source\":\"threads/demo/messages.jsonl\""));
+    assert!(sft.contains("\"source\":\"thread/demo/messages.jsonl\""));
     assert!(sft.contains("\"role\":\"user\",\"content\":\"train me\""));
     assert!(sft.contains("\"role\":\"assistant\",\"content\":\"cortexfs-ok\""));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"exports\"")
+    );
+    Ok(())
+}
+
+#[test]
+fn export_compat_path_exposes_runtime_files() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let primary = fs.export_file_inode("conversations.jsonl")?;
+    let compat_parent = fs.path_inode(["home", "1000", "exports"])?;
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    let compat = runtime
+        .lookup_child(compat_parent, "conversations.jsonl")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    drop(runtime);
+
+    assert_eq!(
+        primary, compat,
+        "export compatibility path must expose the same runtime inode"
     );
     Ok(())
 }
@@ -271,7 +290,7 @@ fn export_filters_rebuild_conversation_view_by_provider() -> fuse3::Result<()> {
 
     let filters = fs
         .tree
-        .path_inode(&["spaces", "users", "1000", "exports", "filters"])
+        .path_inode(&["spaces", "users", "1000", "export", "filters"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     {
         let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
@@ -388,7 +407,7 @@ fn export_filters_reject_invalid_values() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let filters = fs
         .tree
-        .path_inode(&["spaces", "users", "1000", "exports", "filters"])
+        .path_inode(&["spaces", "users", "1000", "export", "filters"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let provider = runtime

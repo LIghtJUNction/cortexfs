@@ -113,7 +113,7 @@ fn filesystem_read_tool_invoke_materializes_response_after_drain() -> fuse3::Res
 
     fs.create_staged_tool_request(
         "read-001.tmp",
-        "{\"path\":\"home/1000/threads/demo/messages.jsonl\"}\n",
+        "{\"path\":\"home/1000/thread/demo/messages.jsonl\"}\n",
     )?;
     fs.submit_tool_request("read-001.tmp", "read-001.req.json")?;
     let outbox = fs
@@ -148,7 +148,7 @@ fn filesystem_read_tool_invoke_materializes_response_after_drain() -> fuse3::Res
         .lookup_child(outbox, "read-001.resp.json")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(response.contains("\"path\":\"home/1000/threads/demo/messages.jsonl\""));
+    assert!(response.contains("\"path\":\"home/1000/thread/demo/messages.jsonl\""));
     assert!(response.contains("tool visible"));
     drop(runtime);
     let tool_calls = fs.node_content(fs.export_file_inode("tool_calls.jsonl")?)?;

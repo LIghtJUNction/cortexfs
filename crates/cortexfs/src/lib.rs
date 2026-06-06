@@ -36,7 +36,7 @@ pub(crate) use abi::{
     AGENT_HELPER_CONTROL_PATH, BATCH_DIR_PATH, CLUSTER_LOCAL_CONTROL_PATH, CLUSTER_TASKS_PATH,
     CONTROL_DIR_PATH, DEMO_THREAD_CONTROL_PATH, DEMO_THREAD_DIR_PATH,
     DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
-    DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_FILTERS_DIR_PATH, EXPORTS_DIR_PATH,
+    DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_DIR_PATH, EXPORT_FILTERS_DIR_PATH,
     EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH,
     MEMORY_SEARCH_DIR_PATH, POSTGRES_DSN_DIR_PATH, USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH,
     USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
@@ -592,7 +592,7 @@ impl CortexFs {
     fn export_file_inode(&self, name: &str) -> fuse3::Result<Inode> {
         let exports = self
             .tree
-            .path_inode(EXPORTS_DIR_PATH)
+            .path_inode(EXPORT_DIR_PATH)
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime
@@ -1040,6 +1040,7 @@ impl RuntimeState {
         self.refresh_audit_usage();
         if let Some(exports_parent) = parents.exports {
             self.add_exports_runtime_files(exports_parent, parents.export_filters);
+            self.add_exports_runtime_aliases(parents);
         }
         self.add_control_runtime_files(parents.control);
         self.attach_queue_runtime_files(parents);
@@ -1306,6 +1307,10 @@ impl RuntimeState {
         inode
     }
 
+    fn attach_runtime_child_alias(&mut self, parent: Inode, child: Inode) {
+        self.parent_children.entry(parent).or_default().push(child);
+    }
+
     fn add_exports_runtime_files(&mut self, exports_parent: Inode, filters_parent: Option<Inode>) {
         self.conversations_export_inode =
             Some(self.add_dynamic_file(exports_parent, "conversations.jsonl", ""));
@@ -1333,6 +1338,45 @@ impl RuntimeState {
             self.export_filter_to_inode = Some(self.add_dynamic_file(filters_parent, "to", "\n"));
             self.export_filter_exclude_failed_inode =
                 Some(self.add_dynamic_file(filters_parent, "exclude_failed", "1\n"));
+        }
+    }
+
+    fn add_exports_runtime_aliases(&mut self, parents: &RuntimeParents) {
+        if let Some(exports_compat) = parents.exports_compat
+            && Some(exports_compat) != parents.exports
+        {
+            for inode in [
+                self.conversations_export_inode,
+                self.sft_export_inode,
+                self.preference_export_inode,
+                self.tool_calls_export_inode,
+                self.agent_traces_export_inode,
+                self.export_refresh_inode,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                self.attach_runtime_child_alias(exports_compat, inode);
+            }
+        }
+        if let Some(filters_compat) = parents.export_filters_compat
+            && Some(filters_compat) != parents.export_filters
+        {
+            for inode in [
+                self.export_filter_provider_inode,
+                self.export_filter_model_inode,
+                self.export_filter_agent_inode,
+                self.export_filter_subject_inode,
+                self.export_filter_space_inode,
+                self.export_filter_from_inode,
+                self.export_filter_to_inode,
+                self.export_filter_exclude_failed_inode,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                self.attach_runtime_child_alias(filters_compat, inode);
+            }
         }
     }
 
@@ -2963,26 +3007,33 @@ impl RuntimeState {
         let normalized = path.trim_start_matches('/');
         match normalized {
             "status" => Ok(STATUS_TEXT.to_owned()),
-            "home/1000/threads/demo/messages.jsonl"
+            "home/1000/thread/demo/messages.jsonl"
+            | "spaces/users/1000/thread/demo/messages.jsonl"
+            | "home/1000/threads/demo/messages.jsonl"
             | "spaces/users/1000/threads/demo/messages.jsonl" => self
                 .thread_messages_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "home/1000/threads/demo/latest.md" | "spaces/users/1000/threads/demo/latest.md" => self
+            "home/1000/thread/demo/latest.md"
+            | "spaces/users/1000/thread/demo/latest.md"
+            | "home/1000/threads/demo/latest.md"
+            | "spaces/users/1000/threads/demo/latest.md" => self
                 .thread_latest_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "home/1000/threads/demo/fingerprint" | "spaces/users/1000/threads/demo/fingerprint" => {
-                self.thread_fingerprint_inode
-                    .and_then(|inode| self.nodes.get(&inode))
-                    .and_then(Node::content)
-                    .map(ToOwned::to_owned)
-                    .ok_or_else(fuse3::Errno::new_not_exist)
-            }
+            "home/1000/thread/demo/fingerprint"
+            | "spaces/users/1000/thread/demo/fingerprint"
+            | "home/1000/threads/demo/fingerprint"
+            | "spaces/users/1000/threads/demo/fingerprint" => self
+                .thread_fingerprint_inode
+                .and_then(|inode| self.nodes.get(&inode))
+                .and_then(Node::content)
+                .map(ToOwned::to_owned)
+                .ok_or_else(fuse3::Errno::new_not_exist),
             "spaces/external/qq/groups/888888/threads/demo/messages.jsonl" => self
                 .external_thread_messages_inode
                 .and_then(|inode| self.nodes.get(&inode))

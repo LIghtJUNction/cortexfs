@@ -169,6 +169,28 @@ fn home_route_uses_singular_primary_directory() {
 }
 
 #[test]
+fn home_thread_and_export_use_singular_primary_directories() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["home", "1000", "thread"]).is_some(),
+        "home/<uid>/thread must be the primary thread namespace"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "threads"]).is_some(),
+        "home/<uid>/threads remains a compatibility namespace"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "export"]).is_some(),
+        "home/<uid>/export must be the primary export namespace"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "exports"]).is_some(),
+        "home/<uid>/exports remains a compatibility namespace"
+    );
+}
+
+#[test]
 fn provider_config_uses_short_url_directory() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let provider = crate::default_provider_id();
