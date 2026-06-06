@@ -2,7 +2,8 @@ use cortex_store::RequestId;
 use fuse3::Inode;
 
 use crate::runtime_types::{AgentTask, ConversationExportRow, PendingResponse};
-use crate::text::json_string;
+use crate::submission::SubmissionScope;
+use crate::text::{external_subject, json_string};
 use crate::{Node, NodeContent, RuntimeState};
 
 impl RuntimeState {
@@ -74,14 +75,18 @@ impl RuntimeState {
     ) {
         let request = json_string(&pending.request_body);
         let response = json_string(response_body);
+        let (subject, space) = export_subject_and_space(pending);
+        let metadata = export_metadata_json(subject.as_deref());
         let (line, provider, model) = pending.route.as_ref().map_or_else(
             || {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
                         pending.format,
                         pending.fingerprint,
+                        json_string(space),
+                        metadata,
                         request,
                         response,
                     ),
@@ -92,10 +97,12 @@ impl RuntimeState {
             |route| {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
                         pending.format,
                         pending.fingerprint,
+                        json_string(space),
+                        metadata,
                         json_string(&route.provider),
                         json_string(&route.model),
                         json_string(&route.reason),
@@ -112,8 +119,8 @@ impl RuntimeState {
             provider,
             model,
             agent: Some("helper".to_owned()),
-            subject: None,
-            space: Some("home/1000".to_owned()),
+            subject,
+            space: Some(space.to_owned()),
             failed: false,
         });
         self.refresh_conversations_export();
@@ -302,5 +309,22 @@ impl RuntimeState {
             json_string(response_body),
             task.fingerprint,
         );
+    }
+}
+
+fn export_metadata_json(subject: Option<&str>) -> String {
+    subject.map_or_else(String::new, |subject| {
+        format!("\"subject\":{},", json_string(subject))
+    })
+}
+
+fn export_subject_and_space(pending: &PendingResponse) -> (Option<String>, &'static str) {
+    if pending.scope == SubmissionScope::ExternalThread {
+        (
+            external_subject(&pending.request_body),
+            "spaces/external/qq/groups/888888",
+        )
+    } else {
+        (None, "home/1000")
     }
 }

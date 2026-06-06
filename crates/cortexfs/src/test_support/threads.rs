@@ -470,6 +470,31 @@ fn external_thread_submit_preserves_subject_identity() -> fuse3::Result<()> {
     assert!(episodic_items.contains("display_name=Alice"));
     assert!(episodic_items.contains("群里问题"));
     drop(runtime);
+
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"qq-turn\""));
+    assert!(export.contains("qq:user:123456"));
+    let filters = fs
+        .tree
+        .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let subject = runtime
+            .lookup_child(filters, "subject")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        let space = runtime
+            .lookup_child(filters, "space")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(subject, 0, b"qq:user:123456\n")?;
+        runtime.write(space, 0, b"spaces/external/qq/groups/888888\n")?;
+        drop(runtime);
+    }
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"qq-turn\""));
+    assert!(export.contains("qq:user:123456"));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"name\":\"qq-turn.req.json\"")
