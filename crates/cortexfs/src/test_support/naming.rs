@@ -137,20 +137,38 @@ fn home_mcp_indexes_use_directories_not_flat_underscore_names() {
     let fs = CortexFs::new();
 
     assert!(
-        fs.lookup_path(["home", "1000", "mcp", "servers", "count"])
+        fs.lookup_path(["home", "1000", "mcp", "server", "count"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "server", "list"])
             .is_some()
     );
     assert!(
         fs.lookup_path(["home", "1000", "mcp", "servers", "list"])
+            .is_some(),
+        "home/<uid>/mcp/servers remains a compatibility namespace"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "tool", "count"])
             .is_some()
     );
     assert!(
-        fs.lookup_path(["home", "1000", "mcp", "tools", "count"])
+        fs.lookup_path(["home", "1000", "mcp", "tool", "list"])
             .is_some()
     );
     assert!(
         fs.lookup_path(["home", "1000", "mcp", "tools", "list"])
-            .is_some()
+            .is_some(),
+        "home/<uid>/mcp/tools remains a compatibility namespace"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "servers_count"])
+            .is_none()
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "mcp", "tools_count"])
+            .is_none()
     );
 }
 
@@ -172,21 +190,55 @@ fn home_route_uses_singular_primary_directory() {
 fn home_thread_and_export_use_singular_primary_directories() {
     let fs = CortexFs::new();
 
+    for (primary, compat) in [
+        ("agent", "agents"),
+        ("skill", "skills"),
+        ("tool", "tools"),
+        ("thread", "threads"),
+        ("export", "exports"),
+    ] {
+        assert!(
+            fs.lookup_path(["home", "1000", primary]).is_some(),
+            "home/<uid>/{primary} must be the primary namespace"
+        );
+        assert!(
+            fs.lookup_path(["home", "1000", compat]).is_some(),
+            "home/<uid>/{compat} remains a compatibility namespace"
+        );
+    }
+}
+
+#[test]
+fn agent_helper_capability_views_use_singular_primary_directories() {
+    let fs = CortexFs::new();
+
     assert!(
-        fs.lookup_path(["home", "1000", "thread"]).is_some(),
-        "home/<uid>/thread must be the primary thread namespace"
+        fs.lookup_path(["agent", "helper", "skill", "list"])
+            .is_some(),
+        "agent/<id>/skill must be the primary skill namespace"
     );
     assert!(
-        fs.lookup_path(["home", "1000", "threads"]).is_some(),
-        "home/<uid>/threads remains a compatibility namespace"
+        fs.lookup_path(["agent", "helper", "skills", "list"])
+            .is_some(),
+        "agent/<id>/skills remains a compatibility namespace"
     );
     assert!(
-        fs.lookup_path(["home", "1000", "export"]).is_some(),
-        "home/<uid>/export must be the primary export namespace"
+        fs.lookup_path(["agent", "helper", "tool", "list"])
+            .is_some(),
+        "agent/<id>/tool must be the primary tool namespace"
     );
     assert!(
-        fs.lookup_path(["home", "1000", "exports"]).is_some(),
-        "home/<uid>/exports remains a compatibility namespace"
+        fs.lookup_path(["agent", "helper", "tools", "list"])
+            .is_some(),
+        "agent/<id>/tools remains a compatibility namespace"
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "thread"]).is_some(),
+        "agent/<id>/thread must be the primary thread namespace"
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "threads"]).is_some(),
+        "agent/<id>/threads remains a compatibility namespace"
     );
 }
 
@@ -234,16 +286,25 @@ fn agent_mcp_indexes_use_directories_not_flat_underscore_names() {
     let fs = CortexFs::new();
 
     assert!(
-        fs.lookup_path(["agent", "helper", "mcp", "servers", "count"])
+        fs.lookup_path(["agent", "helper", "mcp", "server", "count"])
             .is_some()
     );
     assert!(
-        fs.lookup_path(["agent", "helper", "mcp", "servers", "list"])
+        fs.lookup_path(["agent", "helper", "mcp", "server", "list"])
+            .is_some()
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "mcp", "server", "enabled"])
             .is_some()
     );
     assert!(
         fs.lookup_path(["agent", "helper", "mcp", "servers", "enabled"])
-            .is_some()
+            .is_some(),
+        "agent/<id>/mcp/servers remains a compatibility namespace"
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "mcp", "servers_count"])
+            .is_none()
     );
 }
 

@@ -414,46 +414,52 @@ impl NodeTreeBuilder {
     }
 
     fn add_space_agents_projection(&mut self, user: Inode) {
+        let agent = self.add_dir(user, "agent");
+        self.add_file(agent, "count", "1\n");
+        self.add_file(agent, "list", "helper\n");
+        self.add_file(agent, "enabled", "helper\n");
         let agents = self.add_dir(user, "agents");
-        self.add_file(agents, "count", "1\n");
-        self.add_file(agents, "list", "helper\n");
-        self.add_file(agents, "enabled", "helper\n");
+        self.attach_children_alias(agents, agent);
     }
 
     fn add_space_tools_projection(&mut self, user: Inode) {
-        let tools = self.add_dir(user, "tools");
-        self.add_file(tools, "count", "2\n");
+        let tool = self.add_dir(user, "tool");
+        self.add_file(tool, "count", "2\n");
         self.add_owned_file(
-            tools,
+            tool,
             "list",
             newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
         self.add_owned_file(
-            tools,
+            tool,
             "enabled",
             newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
+        let tools = self.add_dir(user, "tools");
+        self.attach_children_alias(tools, tool);
     }
 
     fn add_space_mcp_projection(&mut self, user: Inode) {
         let mcp = self.add_dir(user, "mcp");
-        let servers = self.add_dir(mcp, "servers");
-        self.add_file(servers, "count", "1\n");
-        self.add_file(servers, "list", "local-fs\n");
-        let tools = self.add_dir(mcp, "tools");
-        self.add_file(tools, "count", "1\n");
-        self.add_file(tools, "list", "local-fs.read_file\n");
-        self.add_file(mcp, "servers_count", "1\n");
-        self.add_file(mcp, "servers_list", "local-fs\n");
-        self.add_file(mcp, "tools_count", "1\n");
-        self.add_file(mcp, "tools_list", "local-fs.read_file\n");
+        let server = self.add_dir(mcp, "server");
+        self.add_file(server, "count", "1\n");
+        self.add_file(server, "list", "local-fs\n");
+        let server_compat = self.add_dir(mcp, "servers");
+        self.attach_children_alias(server_compat, server);
+        let tool = self.add_dir(mcp, "tool");
+        self.add_file(tool, "count", "1\n");
+        self.add_file(tool, "list", "local-fs.read_file\n");
+        let tool_compat = self.add_dir(mcp, "tools");
+        self.attach_children_alias(tool_compat, tool);
     }
 
     fn add_space_skills_projection(&mut self, user: Inode) {
+        let skill = self.add_dir(user, "skill");
+        self.add_file(skill, "count", "1\n");
+        self.add_file(skill, "list", "cortexfs-test\n");
+        self.add_file(skill, "enabled", "cortexfs-test\n");
         let skills = self.add_dir(user, "skills");
-        self.add_file(skills, "count", "1\n");
-        self.add_file(skills, "list", "cortexfs-test\n");
-        self.add_file(skills, "enabled", "cortexfs-test\n");
+        self.attach_children_alias(skills, skill);
     }
 
     fn add_space_cache_projection(&mut self, user: Inode) {
@@ -705,32 +711,37 @@ impl NodeTreeBuilder {
         self.add_file(policy, "allowed_skills", "cortexfs-test\n");
         self.add_file(policy, "allowed_mcp_servers", "local-fs\n");
         self.add_file(policy, "memory_scope", LOCAL_USER_MEMORY_SCOPE_TEXT);
+        let skill = self.add_dir(helper, "skill");
+        self.add_file(skill, "count", "1\n");
+        self.add_file(skill, "list", "cortexfs-test\n");
+        self.add_file(skill, "enabled", "cortexfs-test\n");
         let skills = self.add_dir(helper, "skills");
-        self.add_file(skills, "count", "1\n");
-        self.add_file(skills, "list", "cortexfs-test\n");
-        self.add_file(skills, "enabled", "cortexfs-test\n");
-        let tools = self.add_dir(helper, "tools");
-        self.add_file(tools, "count", "2\n");
+        self.attach_children_alias(skills, skill);
+        let tool = self.add_dir(helper, "tool");
+        self.add_file(tool, "count", "2\n");
         self.add_owned_file(
-            tools,
+            tool,
             "list",
             newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
         self.add_owned_file(
-            tools,
+            tool,
             "enabled",
             newline_join(cortex_tools::DEFAULT_ALLOWED_TOOLS),
         );
+        let tools = self.add_dir(helper, "tools");
+        self.attach_children_alias(tools, tool);
         let mcp = self.add_dir(helper, "mcp");
+        let server = self.add_dir(mcp, "server");
+        self.add_file(server, "count", "1\n");
+        self.add_file(server, "list", "local-fs\n");
+        self.add_file(server, "enabled", "local-fs\n");
         let servers = self.add_dir(mcp, "servers");
-        self.add_file(servers, "count", "1\n");
-        self.add_file(servers, "list", "local-fs\n");
-        self.add_file(servers, "enabled", "local-fs\n");
-        self.add_file(mcp, "servers_count", "1\n");
-        self.add_file(mcp, "servers_list", "local-fs\n");
-        self.add_file(mcp, "enabled_servers", "local-fs\n");
+        self.attach_children_alias(servers, server);
         self.add_dir(helper, "memory");
-        self.add_dir(helper, "threads");
+        let thread = self.add_dir(helper, "thread");
+        let threads = self.add_dir(helper, "threads");
+        self.attach_children_alias(threads, thread);
         self.add_dir(helper, "inbox");
         self.add_dir(helper, "outbox");
         let control = self.add_dir(helper, "control");
