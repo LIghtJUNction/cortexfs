@@ -1055,9 +1055,7 @@ impl RuntimeState {
         if let Some(memory_search_parent) = parents.memory_search {
             self.add_memory_search_runtime_files(memory_search_parent);
         }
-        if let Some(memory_semantic_parent) = parents.memory_semantic {
-            self.add_memory_semantic_runtime_files(memory_semantic_parent);
-        }
+        self.add_memory_layer_runtime_files(parents);
         self.add_mcp_runtime_files(parents);
         self.add_agent_runtime_files(parents);
         self.add_collab_runtime_files(parents);
@@ -1326,9 +1324,23 @@ impl RuntimeState {
         self.memory_results_inode = Some(self.add_dynamic_file(search_parent, "results.jsonl", ""));
     }
 
-    fn add_memory_semantic_runtime_files(&mut self, semantic_parent: Inode) {
-        self.memory_semantic_items_inode =
-            Some(self.add_dynamic_file(semantic_parent, "items.jsonl", ""));
+    fn add_memory_layer_runtime_files(&mut self, parents: &RuntimeParents) {
+        self.memory_layer_items.working = parents
+            .memory_working
+            .map(|parent| self.add_dynamic_file(parent, "items.jsonl", ""));
+        self.memory_layer_items.episodic = parents
+            .memory_episodic
+            .map(|parent| self.add_dynamic_file(parent, "items.jsonl", ""));
+        self.memory_layer_items.semantic = parents
+            .memory_semantic
+            .map(|parent| self.add_dynamic_file(parent, "items.jsonl", ""));
+        self.memory_semantic_items_inode = self.memory_layer_items.semantic;
+        self.memory_layer_items.procedural = parents
+            .memory_procedural
+            .map(|parent| self.add_dynamic_file(parent, "items.jsonl", ""));
+        self.memory_layer_items.profile = parents
+            .memory_profile
+            .map(|parent| self.add_dynamic_file(parent, "items.jsonl", ""));
     }
 
     fn add_user_policy_runtime_files(&mut self, policy_parent: Inode) {

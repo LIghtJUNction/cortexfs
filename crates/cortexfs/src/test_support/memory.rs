@@ -70,6 +70,13 @@ fn assert_memory_projection(fs: &CortexFs) -> fuse3::Result<()> {
         runtime.lookup_child(semantic, "items.jsonl").is_some(),
         "semantic memory items file must be runtime-backed"
     );
+    for layer in ["working", "episodic", "procedural", "profile"] {
+        let parent = fs.path_inode(["spaces", "users", "1000", "memory", layer])?;
+        assert!(
+            runtime.lookup_child(parent, "items.jsonl").is_some(),
+            "{layer} memory items file must be runtime-backed"
+        );
+    }
     drop(runtime);
     Ok(())
 }
@@ -247,6 +254,49 @@ fn memory_search_query_derives_results_from_thread_messages() -> fuse3::Result<(
     assert!(results.contains("\"line\":1"));
     assert!(results.contains("remember cortexfs"));
     drop(runtime);
+    assert!(
+        fs.node_content(fs.audit_events_inode()?)?
+            .contains("\"format\":\"memory.search\"")
+    );
+    Ok(())
+}
+
+#[test]
+fn memory_search_indexes_runtime_backed_non_semantic_layers() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let search = fs
+        .tree
+        .path_inode(crate::MEMORY_SEARCH_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+
+    let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    runtime.append_memory_layer_item(
+        "working",
+        "working-001",
+        "working cortexfs scratchpad",
+        "fnv1a64:working",
+    );
+    runtime.append_memory_layer_item(
+        "profile",
+        "profile-001",
+        "profile cortexfs preference",
+        "fnv1a64:profile",
+    );
+    let query = runtime
+        .lookup_child(search, "query")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    runtime.write(query, 0, b"cortexfs")?;
+    let results = runtime
+        .lookup_child(search, "results.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(results.contains("\"source\":\"memory/working/items.jsonl\""));
+    assert!(results.contains("working cortexfs scratchpad"));
+    assert!(results.contains("\"source\":\"memory/profile/items.jsonl\""));
+    assert!(results.contains("profile cortexfs preference"));
+    drop(runtime);
+
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"memory.search\"")
