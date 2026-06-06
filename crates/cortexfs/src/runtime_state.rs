@@ -152,6 +152,10 @@ pub struct RuntimeState {
     pub(crate) mcp_prompt_render_outbox_parent: Option<Inode>,
     pub(crate) cluster_tasks_parent: Option<Inode>,
     pub(crate) cluster_done_parent: Option<Inode>,
+    pub(crate) pgvector_enabled_inode: Option<Inode>,
+    pub(crate) pgvector_status_inode: Option<Inode>,
+    pub(crate) pgvector_collections_inode: Option<Inode>,
+    pub(crate) pgvector_refresh_inode: Option<Inode>,
     pub(crate) postgres_dsn_current_inode: Option<Inode>,
     pub(crate) postgres_dsn_effective_inode: Option<Inode>,
     pub(crate) postgres_dsn_source_inode: Option<Inode>,
@@ -221,6 +225,10 @@ impl RuntimeState {
             mcp_prompt_render_outbox_parent: parents.mcp_prompt_render_outbox,
             cluster_tasks_parent: cluster.tasks_parent,
             cluster_done_parent: cluster.done_parent,
+            pgvector_enabled_inode: parents.pgvector_enabled,
+            pgvector_status_inode: parents.pgvector_status,
+            pgvector_collections_inode: parents.pgvector_collections,
+            pgvector_refresh_inode: parents.pgvector_refresh,
             plane: default_execution_plane(),
             ..Self::default()
         }

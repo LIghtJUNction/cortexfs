@@ -78,6 +78,10 @@ pub struct RuntimeParents {
     pub cluster_control: Option<Inode>,
     pub cluster_tasks: Option<Inode>,
     pub cluster_done: Option<Inode>,
+    pub pgvector_enabled: Option<Inode>,
+    pub pgvector_status: Option<Inode>,
+    pub pgvector_collections: Option<Inode>,
+    pub pgvector_refresh: Option<Inode>,
     pub postgres_dsn: Option<Inode>,
     pub provider_parents: BTreeMap<&'static str, ProviderRuntimeParents>,
 }
@@ -208,6 +212,10 @@ impl RuntimeParents {
             cluster_control: tree.path_inode(CLUSTER_LOCAL_CONTROL_PATH),
             cluster_tasks: tree.path_inode(CLUSTER_TASKS_PATH),
             cluster_done: tree.path_inode(CLUSTER_TASK_DONE_PATH),
+            pgvector_enabled: tree.path_inode(&["vector", "stores", "pgvector", "enabled"]),
+            pgvector_status: tree.path_inode(&["vector", "stores", "pgvector", "status"]),
+            pgvector_collections: tree.path_inode(&["vector", "stores", "pgvector", "collections"]),
+            pgvector_refresh: tree.path_inode(&["vector", "stores", "pgvector", "refresh"]),
             postgres_dsn: tree.path_inode(POSTGRES_DSN_DIR_PATH),
             provider_parents,
         }
