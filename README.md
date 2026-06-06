@@ -175,9 +175,9 @@ CTX_HOME="$mnt/home/$(id -u)"
 
 cat "$CTX_HOME/model/count"
 cat "$CTX_HOME/model/list"
-cat "$CTX_HOME/routes/openai.chat/provider"
-cat "$CTX_HOME/routes/openai.chat/model"
-cat "$CTX_HOME/routes/openai.chat/reason"
+cat "$CTX_HOME/route/openai.chat/provider"
+cat "$CTX_HOME/route/openai.chat/model"
+cat "$CTX_HOME/route/openai.chat/reason"
 ```
 
 ## 文件式 API 调用

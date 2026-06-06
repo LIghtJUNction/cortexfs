@@ -1186,7 +1186,7 @@ impl RuntimeState {
             self.add_user_policy_runtime_files(user_policy_parent);
         }
         if let Some(user_routes_parent) = parents.user_routes {
-            self.add_user_routes_runtime_files(user_routes_parent);
+            self.add_user_routes_runtime_files(user_routes_parent, parents.user_routes_compat);
         }
         if let Some(user_control_parent) = parents.user_control {
             self.add_user_control_runtime_files(user_control_parent);
@@ -1429,18 +1429,35 @@ impl RuntimeState {
         ));
     }
 
-    fn add_user_routes_runtime_files(&mut self, routes_parent: Inode) {
+    fn add_user_routes_runtime_files(
+        &mut self,
+        routes_parent: Inode,
+        compat_parent: Option<Inode>,
+    ) {
         self.user_default_provider_inode = Some(self.add_dynamic_file_owned(
             routes_parent,
             "default_provider",
             format!("{}\n", default_provider_id()),
         ));
+        if let Some(compat_parent) = compat_parent {
+            self.user_default_provider_compat_inode = Some(self.add_dynamic_file_owned(
+                compat_parent,
+                "default_provider",
+                format!("{}\n", default_provider_id()),
+            ));
+        }
         for format in API_FORMATS {
             let route = self.add_dynamic_dir(routes_parent, format);
+            let compat_route = compat_parent.map(|parent| self.add_dynamic_dir(parent, format));
             let inodes = ApiRouteInodes {
                 provider: self.add_dynamic_file(route, "provider", "\n"),
                 model: self.add_dynamic_file(route, "model", "\n"),
                 reason: self.add_dynamic_file(route, "reason", "unsupported_format\n"),
+                compat_provider: compat_route
+                    .map(|route| self.add_dynamic_file(route, "provider", "\n")),
+                compat_model: compat_route.map(|route| self.add_dynamic_file(route, "model", "\n")),
+                compat_reason: compat_route
+                    .map(|route| self.add_dynamic_file(route, "reason", "unsupported_format\n")),
             };
             self.user_routes.insert(format, inodes);
         }
@@ -1657,6 +1674,7 @@ impl RuntimeState {
             || Some(inode) == self.export_filter_exclude_failed_inode
             || Some(inode) == self.user_allowed_providers_inode
             || Some(inode) == self.user_default_provider_inode
+            || Some(inode) == self.user_default_provider_compat_inode
             || Some(inode) == self.user_reload_inode
             || Some(inode) == self.user_gc_inode
             || Some(inode) == self.user_models_refresh_inode
@@ -1849,6 +1867,9 @@ impl RuntimeState {
             return self.write_user_allowed_providers(offset, data).map(Some);
         }
         if Some(inode) == self.user_default_provider_inode {
+            return self.write_user_default_provider(offset, data).map(Some);
+        }
+        if Some(inode) == self.user_default_provider_compat_inode {
             return self.write_user_default_provider(offset, data).map(Some);
         }
         if Some(inode) == self.user_reload_inode {

@@ -365,7 +365,9 @@ impl NodeTreeBuilder {
         self.add_file(user, "context", LOCAL_USER_SPACE_CONTEXT_TEXT);
         self.add_file(user, "uid", LOCAL_USER_UID_TEXT);
         self.add_dir(user, "policy");
-        self.add_dir(user, "routes");
+        let route = self.add_dir(user, "route");
+        let routes_compat = self.add_dir(user, "routes");
+        self.attach_children_alias(routes_compat, route);
         self.add_space_agents_projection(user);
         self.add_space_tools_projection(user);
         self.add_space_mcp_projection(user);

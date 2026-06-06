@@ -155,6 +155,20 @@ fn home_mcp_indexes_use_directories_not_flat_underscore_names() {
 }
 
 #[test]
+fn home_route_uses_singular_primary_directory() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["home", "1000", "route"]).is_some(),
+        "home/<uid>/route must be the primary routing namespace"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "routes"]).is_some(),
+        "home/<uid>/routes remains a compatibility namespace"
+    );
+}
+
+#[test]
 fn provider_config_uses_short_url_directory() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let provider = crate::default_provider_id();
