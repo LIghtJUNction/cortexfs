@@ -33,38 +33,48 @@ impl RuntimeState {
         if let Some(inode) = self.pgvector_enabled_inode {
             self.update_dynamic_file(inode, value);
         }
-        let status = if value == "1\n" {
-            "configured\n"
-        } else {
-            "disabled\n"
-        };
-        if let Some(inode) = self.pgvector_status_inode {
-            self.update_dynamic_file(inode, status);
-        }
+        self.refresh_pgvector_status();
         self.append_audit("vector.store.pgvector", "enabled", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
     pub fn write_pgvector_refresh(&mut self, offset: u64, data: &[u8]) -> fuse3::Result<u32> {
         validate_control_write(offset, data)?;
-        let enabled = self
-            .pgvector_enabled_inode
-            .and_then(|inode| self.nodes.get(&inode))
-            .and_then(Node::content)
-            .is_some_and(|content| content.trim() == "1");
-        let status = if enabled { "ready\n" } else { "disabled\n" };
-        if let Some(inode) = self.pgvector_status_inode {
-            self.update_dynamic_file(inode, status);
-        }
-        if let Some(inode) = self.pgvector_collections_inode {
-            let collections = if enabled { "memory_semantic\n" } else { "\n" };
-            self.update_dynamic_file(inode, collections);
-        }
+        self.refresh_pgvector_status();
         if let Some(inode) = self.pgvector_refresh_inode {
             self.update_dynamic_file(inode, "1\n");
         }
         self.update_dynamic_file(self.last_control_inode, "vector/stores/pgvector/refresh\n");
         self.append_audit("vector.store.pgvector", "refresh", "refreshed");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    pub fn refresh_pgvector_status(&mut self) {
+        let enabled = self
+            .pgvector_enabled_inode
+            .and_then(|inode| self.nodes.get(&inode))
+            .and_then(Node::content)
+            .is_some_and(|content| content.trim() == "1");
+        let postgres_ready = self
+            .postgres_status_inode
+            .and_then(|inode| self.nodes.get(&inode))
+            .and_then(Node::content)
+            .is_some_and(|content| content.trim() == "configured");
+        let status = match (enabled, postgres_ready) {
+            (false, _) => "disabled\n",
+            (true, false) => "degraded\n",
+            (true, true) => "ready\n",
+        };
+        if let Some(inode) = self.pgvector_status_inode {
+            self.update_dynamic_file(inode, status);
+        }
+        if let Some(inode) = self.pgvector_collections_inode {
+            let collections = if enabled && postgres_ready {
+                "memory_semantic\n"
+            } else {
+                "\n"
+            };
+            self.update_dynamic_file(inode, collections);
+        }
     }
 }

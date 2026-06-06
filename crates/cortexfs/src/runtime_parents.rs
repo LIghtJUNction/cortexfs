@@ -86,6 +86,7 @@ pub struct RuntimeParents {
     pub pgvector_status: Option<Inode>,
     pub pgvector_collections: Option<Inode>,
     pub pgvector_refresh: Option<Inode>,
+    pub postgres_status: Option<Inode>,
     pub postgres_dsn: Option<Inode>,
     pub provider_parents: BTreeMap<&'static str, ProviderRuntimeParents>,
 }
@@ -200,6 +201,7 @@ impl RuntimeParents {
             pgvector_status: tree.path_inode(&["vector", "stores", "pgvector", "status"]),
             pgvector_collections: tree.path_inode(&["vector", "stores", "pgvector", "collections"]),
             pgvector_refresh: tree.path_inode(&["vector", "stores", "pgvector", "refresh"]),
+            postgres_status: tree.path_inode(&["databases", "postgres", "status"]),
             postgres_dsn: tree.path_inode(POSTGRES_DSN_DIR_PATH),
             provider_parents: provider_runtime_parents(tree),
         }
