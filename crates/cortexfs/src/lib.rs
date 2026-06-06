@@ -1177,6 +1177,10 @@ impl RuntimeState {
 
     fn attach_provider_runtime_files(&mut self, parents: &RuntimeParents) {
         self.add_vector_runtime_files(parents);
+        if let Some(inode) = parents.postgres_status {
+            self.nodes
+                .insert(inode, Node::dynamic_file(inode, "status", "disabled\n"));
+        }
         if let Some(postgres_dsn_parent) = parents.postgres_dsn {
             self.add_postgres_dsn_runtime_files(postgres_dsn_parent);
         }

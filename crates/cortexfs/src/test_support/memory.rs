@@ -180,6 +180,10 @@ fn pgvector_store_enabled_and_refresh_update_runtime_view() -> fuse3::Result<()>
     let status = fs.path_inode(["vector", "stores", "pgvector", "status"])?;
     let collections = fs.path_inode(["vector", "stores", "pgvector", "collections"])?;
     let refresh = fs.path_inode(["vector", "stores", "pgvector", "refresh"])?;
+    let dsn = fs
+        .tree
+        .path_inode(crate::POSTGRES_DSN_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
 
     assert_eq!(fs.node_attr(enabled)?.perm, 0o644);
     assert_eq!(fs.node_attr(refresh)?.perm, 0o222);
@@ -193,6 +197,24 @@ fn pgvector_store_enabled_and_refresh_update_runtime_view() -> fuse3::Result<()>
     }
 
     assert_eq!(fs.node_content(enabled)?, "1\n");
+    assert_eq!(fs.node_content(status)?, "degraded\n");
+    assert_eq!(fs.node_content(collections)?, "\n");
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let current = runtime
+            .lookup_child(dsn, "current")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(
+            current,
+            0,
+            b"postgres://cortex:secret@localhost:5432/cortex\n",
+        )?;
+        assert_eq!(runtime.write(refresh, 0, b"1\n")?, 2);
+        drop(runtime);
+    }
+
     assert_eq!(fs.node_content(status)?, "ready\n");
     assert_eq!(fs.node_content(collections)?, "memory_semantic\n");
     assert_eq!(

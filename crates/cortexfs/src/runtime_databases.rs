@@ -15,12 +15,21 @@ impl RuntimeState {
         } else {
             "current\n"
         };
+        let status = if normalized.trim().is_empty() {
+            "disabled\n"
+        } else {
+            "configured\n"
+        };
+        if let Some(inode) = self.postgres_status_inode {
+            self.update_dynamic_file(inode, status);
+        }
         if let Some(inode) = self.postgres_dsn_source_inode {
             self.update_dynamic_file(inode, source);
         }
         if let Some(inode) = self.postgres_dsn_effective_inode {
             self.update_dynamic_file(inode, format!("{}\n", redact_dsn(normalized.trim())));
         }
+        self.refresh_pgvector_status();
         self.append_audit("database.postgres.dsn", "current", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
