@@ -16,9 +16,9 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 它把不同生态拆成两层：
 
 - `format/`：协议形状，例如 `openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
-- `provider/`：后端实例，例如官方账号、中转站、兼容 OpenAI 格式的厂商、本地推理运行时或未来的 adapter。
+- `provider/`：后端实例，例如官方账号、中转站、使用 OpenAI 格式的厂商、本地推理运行时或未来的 adapter。
 
-现实中 Kimi、MiniMax、中转站、本地模型服务可能都支持 OpenAI-compatible API；CortexFS 不把厂商品牌硬编码成核心路径，而是让 provider 声明自己支持哪些 format、模型、账号类型、健康状态和路由策略。
+现实中 Kimi、MiniMax、中转站、本地模型服务可能都支持 `openai.chat` 或 `openai.responses`；CortexFS 不把厂商品牌硬编码成核心路径，而是让 provider 声明自己支持哪些 format、模型、账号类型、健康状态和路由策略。
 
 ## 首版能力
 
@@ -31,18 +31,20 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - provider/model 发现：通过 `count`、`list`、`format`、`url/*`、`enabled/*`、`health/*`、`model/*` 等小文本文件读取。
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json`，再由 `control/drain` 进入执行队列。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
-- thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path。
+- thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path；MCP tool 调用会进入同一条 permission/tool call/tool result 轨迹。
+- cluster 任务骨架：`queue/default/{pending,running,done,failed}`、`task/<id>/state`、`events.jsonl`、失败任务 `retry` 控制节点。
 - 多用户空间：`home/<uid>/...` 是权限、模型可见性、路由、记忆、审计和导出的边界。
 - 外部主体模型：为 QQ 群友、机器人平台用户等非 Linux 用户预留 `external subject` 身份上下文。
-- 记忆与导出：分层记忆、JSONL 导出、训练数据友好的对话和 tool trace 投影。
+- 记忆与导出：分层记忆、`memory/index/default/refresh`、JSONL 导出、训练数据友好的对话和 tool trace 投影。
 - 本地 live test：使用本机轻量模型 fixture 验证 provider 调用，不依赖云 API。
+- `cortex daemon --once`：用一次性请求验证 daemon execution plane 的入队、执行和原生 JSON 响应路径。
 
 ## 当前非目标
 
 这些能力在设计中已经留出 ABI，但不是首版完成状态：
 
-- `cortexd` 完整 daemon 执行平面。
-- 生产级 HTTP 本地兼容 API。
+- 长驻 `cortexd` daemon、后台队列 worker 和生命周期管理。
+- 生产级 HTTP 本地 API。
 - 生产级 secret store、OAuth/session 管理和密钥轮转。
 - 完整 MCP server 生命周期管理。
 - 真正的集群调度、跨机器 worker、成本控制和重试系统。
@@ -54,12 +56,11 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 挂载根目录当前形状：
 
 ```text
-/
-  status
-  cap/
-  api/
-  format/
-  provider/
+  /
+    status
+    cap/
+    format/
+    provider/
   model/
   home/
   group/
@@ -78,7 +79,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
   control/
 ```
 
-旧的 `capabilities/`、`formats/`、`providers/`、`models/`、`spaces/`、`agents/`、`clusters/`、`skills/`、`tools/`、`databases/` 是兼容入口。新脚本应使用短名单数入口。
+开发期只保留当前 ABI。脚本和集成只能依赖上面这组单数、短名词目录；同一对象不能再暴露第二套入口或复数形式。
 
 小文件约定：
 
@@ -116,9 +117,9 @@ export CTX_HOME="/ctx/home/$(id -u)"
 
 `$CTX_HOME` 类似 `/home/$USER`，但指向 CortexFS 内部的用户空间。比如 `$CTX_HOME/api`、`$CTX_HOME/thread`、`$CTX_HOME/memory`、`$CTX_HOME/export` 分别对应当前用户可用的 API、对话、记忆和导出视图。
 
-`home/<uid>` 是用户入口。当前实现中它与内部用户投影指向同一个 inode，不复制第二棵树。通过 `$CTX_HOME` 提交请求、写 thread、读 memory，都会落到同一套队列、路由、审计和导出流。
+`home/<uid>` 是唯一用户工作入口。通过 `$CTX_HOME` 提交请求、写 thread、读 memory，都会落到同一套队列、路由、审计和导出流。
 
-目录命名遵循 Linux 风格：普通名词、短路径、少别名。用户路径只使用 `/ctx/home/<uid>`；共享空间使用 `/ctx/shared/<name>`；外部平台身份使用 `/ctx/ext/<platform>/...`。不提供 `/ctx/ctx_home` 这类额外发现节点。
+目录命名遵循 Linux 风格：普通名词、短路径、单一入口。用户路径使用 `/ctx/home/<uid>`；共享空间使用 `/ctx/shared/<name>`；外部平台身份使用 `/ctx/ext/<platform>/...`。
 
 示例：
 
@@ -131,7 +132,7 @@ export CTX_HOME="/ctx/home/$(id -u)"
 
 如果要做多用户挂载，使用明确的多用户挂载模式，并按系统 FUSE 配置处理 `/ctx` 的 owner、group、mode 和 `allow_other` 策略。
 
-`space/` 是策略视图；`spaces/` 只作为兼容入口保留。新脚本应优先使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。
+`space/` 是只读安全上下文索引；日常脚本使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。开发期不提供 `spaces/` 目录，也不提供 `space/users/<uid>` 这类第二入口。
 
 ## 本地测试挂载
 
@@ -234,9 +235,45 @@ cat "$thread/tool-loop/steps.jsonl"
 cat "$mnt/tool/list"
 cat "$mnt/mcp/tool/list"
 cat "$mnt/skill/installed/cortexfs-test/SKILL.md"
+cat "$mnt/agent/helper/memory/scope"
+cat "$mnt/agent/helper/memory/search"
 ```
 
 后续实时通信会使用 socket fast path，例如 `thread/<id>/io.sock`。socket 必须和文件式提交进入同一条内部管线：同一套 policy、route、secret resolve、store、audit 和 export，不能形成不可审计旁路。
+
+本地统一 API 的元数据在当前用户工作入口下暴露：
+
+```bash
+cat "$CTX_HOME/api/endpoints"
+cat "$CTX_HOME/api/transport"
+cat "$CTX_HOME/api/pipeline"
+cat "$CTX_HOME/api/store"
+cat "$CTX_HOME/api/policy"
+cat "$CTX_HOME/api/audit"
+cat "$CTX_HOME/api/unix/path"
+```
+
+`api/http` 和 `api/unix/api.sock` 只是同一执行面的不同传输入口，必须进入同一条 `api/pipeline`；它们不能拥有独立的 provider 调用路径。
+
+## 外部软件集成
+
+CortexFS 可以被 workflow engine、agent runtime、数字人系统和批处理脚本当作本地 AI 执行面使用，但它不会为某个上层项目增加专属目录。集成方应该依赖发现文件和通用提交规则：
+
+```bash
+CTX_HOME="/ctx/home/$(id -u)"
+
+cat "$CTX_HOME/model/list"
+cat "$CTX_HOME/route/openai.chat/provider"
+cat "$CTX_HOME/route/openai.chat/model"
+
+mv req.tmp "$CTX_HOME/api/openai.chat/inbox/run-001.req.json"
+cat "$CTX_HOME/api/openai.chat/outbox/run-001.fingerprint"
+cat /ctx/audit/events.jsonl
+```
+
+同一个请求无论来自文件、HTTP 还是 Unix socket，都必须进入同一条管线，并产生同一个 request id、fingerprint、route metadata、policy decision、audit event 和 export row。socket 只是低延迟 fast path，不是绕过文件 ABI 的旁路。
+
+当前实现中的 `home/1000`、`agent/helper`、`ext/qq/group/888888` 是 MVP 测试投影。外部软件不要写死这些 fixture；正式模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`，并通过 `count`、`list`、`status`、`route`、`model` 等小文件发现实际可用对象。
 
 ## 安全模型
 
@@ -295,9 +332,9 @@ cat "$exports/agent_traces.jsonl"
 过滤导出视图：
 
 ```bash
-printf 'helper\n' > "$exports/filters/agent"
-printf 'home/1000\n' > "$exports/filters/space"
-printf '2\n' > "$exports/filters/from"
+printf 'helper\n' > "$exports/filter/agent"
+printf 'home/1000\n' > "$exports/filter/space"
+printf '2\n' > "$exports/filter/from"
 cat "$exports/conversations.jsonl"
 ```
 
@@ -329,11 +366,27 @@ ollama pull smollm2:135m
 
 ```bash
 cargo test -p cortex-providers --test ollama_live --locked -- --ignored --nocapture
-cargo test -p cortexd --test ollama_live --locked -- --ignored --nocapture
-cargo test -p cortexfs ollama_live_request_drains_through_cortexfs_file_pipeline --locked -- --ignored --nocapture
+cargo test -p cortexd --test execution_ollama_live --locked -- --ignored --nocapture
+cargo test -p cortexfs --features live-tests --test ollama_file_pipeline_live --locked -- --ignored --nocapture
 ```
 
 Ollama 只是当前本地 live-test fixture，不是 CortexFS 的特殊核心 provider。
+
+一次性 daemon 执行平面 smoke：
+
+```bash
+cargo run -p cortex-cli -- daemon --once
+cargo run -p cortex-cli -- daemon --once \
+  --method GET \
+  --endpoint /v1/models \
+  --request-id models-001
+cargo run -p cortex-cli -- daemon --once \
+  --endpoint /v1/responses \
+  --body '{"input":"hello"}' \
+  --request-id resp-001
+```
+
+该命令不启动后台监听，也不实现热加载；它只验证 CLI 能把本地 API endpoint 归一化为 API format，进入 `cortexd` execution plane，并输出原生 API JSON 响应。`GET /v1/models` 作为只读发现入口从 provider model registry 派生响应，不进入 provider call 队列。
 
 ## 开发约束
 

@@ -6,83 +6,210 @@ fn projection_exposes_helper_agent_profile_runtime_and_socket() -> fuse3::Result
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["agents", "count"])
+        fs.lookup_path(["agent", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
     );
     assert_eq!(
-        fs.lookup_path(["agents", "list"])
+        fs.lookup_path(["agent", "list"])
             .and_then(crate::Node::content),
         Some("helper\n")
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "profile", "name"])
+        fs.lookup_path(["agent", "helper", "profile", "name"])
             .and_then(crate::Node::content),
         Some("helper\n")
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "context"])
+        fs.lookup_path(["agent", "helper", "context"])
             .and_then(crate::Node::content),
         Some(crate::LOCAL_AGENT_CONTEXT_TEXT)
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "profile", "model", "provider"])
+        fs.lookup_path(["agent", "helper", "profile", "model", "provider"])
             .and_then(crate::Node::content),
         Some(format!("{}\n", crate::default_provider_id()).as_str())
     );
+    assert!(
+        fs.lookup_path(["agent", "helper", "profile", "default_model"])
+            .is_none(),
+        "agent profile exposes exactly one model entry"
+    );
+    assert_agent_runtime_files_are_runtime_owned(&fs)?;
+    assert_eq!(agent_runtime_content(&fs, "state")?, "idle\n");
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "runtime", "state"])
+        fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "pid"])?)?,
+        "\n"
+    );
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "heartbeat"])?)?,
+        "\n"
+    );
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode([
+            "agent",
+            "helper",
+            "runtime",
+            "current_thread",
+        ])?)?,
+        "\n"
+    );
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "current_task",])?)?,
+        "\n"
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "thread", "count"])
             .and_then(crate::Node::content),
-        Some("idle\n")
+        Some("1\n")
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "pid"])?)?,
-        "\n"
+        fs.lookup_path(["agent", "helper", "thread", "list"])
+            .and_then(crate::Node::content),
+        Some("demo\n")
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "heartbeat"])?)?,
-        "\n"
+        fs.lookup_path(["agent", "helper", "thread", "demo"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_USER_THREAD_DISPLAY_TEXT)
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "thread", "demo", "inbox"])
+            .is_none(),
+        "agent thread view is a read-only reference index, not a second thread tree"
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "threads"]).is_none(),
+        "agent must not expose plural thread entry"
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "current_thread"])?)?,
-        "\n"
-    );
-    assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "current_task"])?)?,
-        "\n"
-    );
-    assert_eq!(
-        fs.lookup_path(["agents", "helper", "io.sock"])
+        fs.lookup_path(["agent", "helper", "io.sock"])
             .map(crate::Node::kind),
         Some(FileType::Socket)
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "policy", "allowed_skills"])
+        fs.lookup_path(["agent", "helper", "policy", "allowed_skills"])
             .and_then(crate::Node::content),
         Some("cortexfs-test\n")
     );
     assert!(
-        fs.lookup_path(["agents", "helper", "inbox"]).is_some(),
+        fs.lookup_path(["agent", "helper", "inbox"]).is_some(),
         "agent file task inbox must exist"
     );
     assert!(
-        fs.lookup_path(["agents", "helper", "outbox"]).is_some(),
+        fs.lookup_path(["agent", "helper", "outbox"]).is_some(),
         "agent file task outbox must exist"
     );
     assert!(
-        fs.lookup_path(["agents", "helper", "control", "start"])
-            .is_some(),
+        fs.resolve_path_inode(["agent", "helper", "control", "start"])
+            .is_ok(),
         "agent control start node must exist"
     );
+    assert_agent_control_files_are_runtime_owned(&fs)?;
     let socket_inode = fs
         .tree
-        .path_inode(&["agents", "helper", "io.sock"])
+        .path_inode(&["agent", "helper", "io.sock"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(
         fs.node_content(socket_inode).is_err(),
         "socket nodes are realtime endpoints, not regular files"
     );
     Ok(())
+}
+
+fn assert_agent_control_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let control = fs.path_inode(["agent", "helper", "control"])?;
+    let entries = fs.children(control);
+    for name in ["start", "stop", "restart", "pause"] {
+        assert!(
+            fs.tree
+                .path_inode(&["agent", "helper", "control", name])
+                .is_none(),
+            "agent control {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "agent/helper/control must expose one {name} entry"
+        );
+        assert_eq!(
+            fs.node_attr(fs.resolve_path_inode(["agent", "helper", "control", name])?)?
+                .perm,
+            0o222
+        );
+    }
+    Ok(())
+}
+
+fn assert_agent_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let runtime_parent = fs.path_inode(["agent", "helper", "runtime"])?;
+    let entries = fs.children(runtime_parent);
+    for name in [
+        "state",
+        "pid",
+        "heartbeat",
+        "current_thread",
+        "current_task",
+    ] {
+        assert!(
+            fs.tree
+                .path_inode(&["agent", "helper", "runtime", name])
+                .is_none(),
+            "agent runtime {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "agent runtime directory must expose one {name} entry"
+        );
+    }
+    Ok(())
+}
+
+fn agent_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Result<String> {
+    fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", name])?)
+}
+
+#[test]
+fn projection_exposes_helper_agent_memory_scope_as_references() {
+    let fs = CortexFs::new();
+
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "memory", "scope"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_USER_MEMORY_SCOPE_TEXT)
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "memory", "layer"])
+            .and_then(crate::Node::content),
+        Some("semantic\nprofile\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "memory", "search"])
+            .and_then(crate::Node::content),
+        Some("home/1000/memory/search\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "memory", "semantic"])
+            .and_then(crate::Node::content),
+        Some("home/1000/memory/semantic\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["agent", "helper", "memory", "profile"])
+            .and_then(crate::Node::content),
+        Some("home/1000/memory/profile\n")
+    );
+    assert!(
+        fs.lookup_path(["agent", "helper", "memory", "semantic", "inbox"])
+            .is_none(),
+        "agent memory view is a reference index, not a second memory tree"
+    );
 }
 
 #[test]
@@ -100,7 +227,7 @@ fn projection_exposes_helper_agent_capability_views() {
         Some("cortexfs-test\n")
     );
     assert!(
-        fs.lookup_path(["agent", "helper", "skills", "list"])
+        fs.lookup_path(["agent", "helper", "skill", "list"])
             .is_some()
     );
     assert_eq!(
@@ -119,7 +246,7 @@ fn projection_exposes_helper_agent_capability_views() {
         Some("filesystem.read\nmcp.local-fs.read_file\n")
     );
     assert!(
-        fs.lookup_path(["agent", "helper", "tools", "list"])
+        fs.lookup_path(["agent", "helper", "tool", "list"])
             .is_some()
     );
     assert_eq!(
@@ -138,7 +265,7 @@ fn projection_exposes_helper_agent_capability_views() {
         Some("local-fs\n")
     );
     assert!(
-        fs.lookup_path(["agent", "helper", "mcp", "servers", "enabled"])
+        fs.lookup_path(["agent", "helper", "mcp", "server", "enabled"])
             .is_some()
     );
 }
@@ -180,36 +307,33 @@ fn agent_helper_control_nodes_update_runtime_last_control_and_audit() -> fuse3::
         drop(runtime);
 
         assert_eq!(
-            fs.lookup_path(["agents", "helper", "runtime", "state"])
-                .map(crate::Node::inode)
-                .map(|inode| fs.node_content(inode))
-                .transpose()?,
-            Some(expected_state.to_owned())
+            agent_runtime_content(&fs, "state")?,
+            expected_state.to_owned()
         );
         assert_eq!(
-            fs.node_content(fs.path_inode(["agents", "helper", "runtime", "pid"])?)?,
+            fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "pid"])?)?,
             expected_pid
         );
         assert_eq!(
-            fs.node_content(fs.path_inode(["agents", "helper", "runtime", "heartbeat"])?)?,
+            fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "heartbeat",])?)?,
             expected_heartbeat
         );
         assert_eq!(
-            fs.node_content(fs.path_inode(["agents", "helper", "runtime", "current_thread"])?)?,
+            fs.node_content(fs.resolve_path_inode([
+                "agent",
+                "helper",
+                "runtime",
+                "current_thread",
+            ])?)?,
             expected_thread
         );
-        let current_task = fs
-            .lookup_path(["agents", "helper", "runtime", "current_task"])
-            .map(crate::Node::inode)
-            .map(|inode| fs.node_content(inode))
-            .transpose()?
-            .unwrap_or_default();
+        let current_task = agent_runtime_content(&fs, "current_task")?;
         if matches!(control_name, "start" | "stop" | "restart") {
             assert_eq!(current_task, "\n");
         }
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("agents/helper/{control_name}\n")
+            format!("agent/helper/{control_name}\n")
         );
         let audit = fs.node_content(fs.audit_events_inode()?)?;
         assert!(audit.contains("\"format\":\"agent.helper.control\""));
@@ -244,30 +368,26 @@ fn agent_inbox_submit_drains_to_outbox_and_trace() -> fuse3::Result<()> {
         fs.node_content(fs.control_file_inode("queue_depth")?)?,
         "1\n"
     );
+    assert_eq!(agent_runtime_content(&fs, "state")?, "busy\n".to_owned());
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "runtime", "state"])
-            .map(crate::Node::inode)
-            .map(|inode| fs.node_content(inode))
-            .transpose()?,
-        Some("busy\n".to_owned())
+        agent_runtime_content(&fs, "current_task")?,
+        "assist\n".to_owned()
     );
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "runtime", "current_task"])
-            .map(crate::Node::inode)
-            .map(|inode| fs.node_content(inode))
-            .transpose()?,
-        Some("assist\n".to_owned())
-    );
-    assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "pid"])?)?,
+        fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "pid"])?)?,
         "1234\n"
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "heartbeat"])?)?,
+        fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "heartbeat"])?)?,
         "1\n"
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "current_thread"])?)?,
+        fs.node_content(fs.resolve_path_inode([
+            "agent",
+            "helper",
+            "runtime",
+            "current_thread",
+        ])?)?,
         crate::LOCAL_USER_THREAD_DISPLAY_TEXT
     );
 
@@ -293,23 +413,22 @@ fn agent_inbox_submit_drains_to_outbox_and_trace() -> fuse3::Result<()> {
             })
     );
     drop(runtime);
+    assert_eq!(agent_runtime_content(&fs, "state")?, "idle\n".to_owned());
     assert_eq!(
-        fs.lookup_path(["agents", "helper", "runtime", "state"])
-            .map(crate::Node::inode)
-            .map(|inode| fs.node_content(inode))
-            .transpose()?,
-        Some("idle\n".to_owned())
-    );
-    assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "pid"])?)?,
+        fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "pid"])?)?,
         "1234\n"
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "heartbeat"])?)?,
+        fs.node_content(fs.resolve_path_inode(["agent", "helper", "runtime", "heartbeat"])?)?,
         "2\n"
     );
     assert_eq!(
-        fs.node_content(fs.path_inode(["agents", "helper", "runtime", "current_thread"])?)?,
+        fs.node_content(fs.resolve_path_inode([
+            "agent",
+            "helper",
+            "runtime",
+            "current_thread",
+        ])?)?,
         crate::LOCAL_USER_THREAD_DISPLAY_TEXT
     );
     let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;

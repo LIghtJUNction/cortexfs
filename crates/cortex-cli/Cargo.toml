@@ -15,6 +15,10 @@ name = "cortex"
 path = "src/main.rs"
 
 [dependencies]
+cortex-core = { version = "0.1.0", path = "../cortex-core" }
+cortex-providers = { version = "0.1.0", path = "../cortex-providers" }
+cortex-store = { version = "0.1.0", path = "../cortex-store" }
+cortexd = { version = "0.1.0", path = "../cortexd" }
 cortexfs = { path = "../cortexfs" }
 
 [lints]

@@ -1,29 +1,161 @@
 use crate::CortexFs;
 use fuse3::FileType;
+use fuse3::Inode;
+
+fn assert_demo_thread_runtime_files_are_runtime_owned(
+    fs: &CortexFs,
+    thread: Inode,
+) -> fuse3::Result<()> {
+    assert_thread_runtime_files_are_runtime_owned(
+        fs,
+        thread,
+        &["home", "1000", "thread", "demo"],
+        "demo thread",
+    )
+}
+
+fn assert_external_thread_runtime_files_are_runtime_owned(
+    fs: &CortexFs,
+    thread: Inode,
+) -> fuse3::Result<()> {
+    assert_thread_runtime_files_are_runtime_owned(
+        fs,
+        thread,
+        &["ext", "qq", "group", "888888", "thread", "demo"],
+        "external qq thread",
+    )
+}
+
+fn assert_thread_runtime_files_are_runtime_owned(
+    fs: &CortexFs,
+    thread: Inode,
+    static_parent_path: &[&str],
+    label: &str,
+) -> fuse3::Result<()> {
+    let entries = fs.children(thread);
+    for (file, expected) in [
+        ("messages.jsonl", crate::EMPTY_TEXT),
+        ("latest.md", crate::EMPTY_TEXT),
+        ("state", "idle\n"),
+        ("fingerprint", crate::EMPTY_TEXT),
+    ] {
+        let mut static_path = static_parent_path.to_vec();
+        static_path.push(file);
+        assert!(
+            fs.tree.path_inode(&static_path).is_none(),
+            "{label} {file} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(file))
+                .count(),
+            1,
+            "{label} directory must expose one {file} entry"
+        );
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let inode = runtime
+            .lookup_child(thread, file)
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        drop(runtime);
+        assert_eq!(fs.node_content(inode)?, expected);
+    }
+    Ok(())
+}
+
+fn assert_tool_loop_runtime_files_are_runtime_owned(
+    fs: &CortexFs,
+    tool_loop: Inode,
+) -> fuse3::Result<()> {
+    let entries = fs.children(tool_loop);
+    for (file, expected) in [("state", "idle\n"), ("steps.jsonl", crate::EMPTY_TEXT)] {
+        assert!(
+            fs.tree
+                .path_inode(&["home", "1000", "thread", "demo", "tool-loop", file])
+                .is_none(),
+            "demo tool-loop {file} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(file))
+                .count(),
+            1,
+            "demo tool-loop directory must expose one {file} entry"
+        );
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let inode = runtime
+            .lookup_child(tool_loop, file)
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        drop(runtime);
+        assert_eq!(fs.node_content(inode)?, expected);
+    }
+    Ok(())
+}
+
+fn assert_control_files_are_runtime_owned<const N: usize>(
+    fs: &CortexFs,
+    parent_path: [&str; N],
+    label: &str,
+) -> fuse3::Result<()> {
+    let control = fs.resolve_path_inode(parent_path)?;
+    let entries = fs.children(control);
+    for name in ["continue", "pause", "cancel"] {
+        let mut child_path = parent_path.map(str::to_owned).to_vec();
+        child_path.push(name.to_owned());
+        assert!(
+            fs.tree.path_inode_owned(&child_path).is_none(),
+            "{label} control {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "{label} control directory must expose one {name} entry"
+        );
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let inode = runtime
+            .lookup_child(control, name)
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        drop(runtime);
+        assert_eq!(fs.node_attr(inode)?.perm, 0o222);
+    }
+    Ok(())
+}
 
 #[test]
 fn projection_exposes_demo_thread_and_tool_loop_state() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "thread", "count"])
+        fs.lookup_path(["home", "1000", "thread", "count"])
             .and_then(crate::Node::content),
         Some(crate::THREAD_COUNT_TEXT)
     );
     assert!(
-        fs.lookup_path(["spaces", "users", "1000", "thread", "demo", "inbox"])
+        fs.lookup_path(["home", "1000", "thread", "demo", "inbox"])
             .is_some(),
         "thread inbox must exist"
     );
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "thread", "demo", "io.sock"])
+        fs.lookup_path(["home", "1000", "thread", "demo", "io.sock"])
             .map(crate::Node::kind),
         Some(FileType::Socket)
     );
+    let thread = fs
+        .tree
+        .path_inode(crate::DEMO_THREAD_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_demo_thread_runtime_files_are_runtime_owned(&fs, thread)?;
     assert!(
-        fs.lookup_path(["spaces", "users", "1000", "threads", "demo", "inbox"])
+        fs.lookup_path(["home", "1000", "thread", "demo", "inbox"])
             .is_some(),
-        "threads remains a compatibility namespace"
+        "thread inbox must exist"
     );
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let thread = fs
@@ -43,19 +175,11 @@ fn projection_exposes_demo_thread_and_tool_loop_state() -> fuse3::Result<()> {
         Some("idle\n")
     );
     drop(runtime);
-    assert_eq!(
-        fs.lookup_path([
-            "spaces",
-            "users",
-            "1000",
-            "thread",
-            "demo",
-            "tool-loop",
-            "state"
-        ])
-        .and_then(crate::Node::content),
-        Some("idle\n")
-    );
+    let tool_loop = fs
+        .tree
+        .path_inode(crate::DEMO_THREAD_TOOL_LOOP_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_tool_loop_runtime_files_are_runtime_owned(&fs, tool_loop)?;
     for (limit_name, expected) in [
         ("max_steps", "64\n"),
         ("max_time_ms", "300000\n"),
@@ -63,33 +187,28 @@ fn projection_exposes_demo_thread_and_tool_loop_state() -> fuse3::Result<()> {
     ] {
         assert_eq!(
             fs.lookup_path([
-                "spaces",
-                "users",
+                "home",
                 "1000",
                 "thread",
                 "demo",
                 "tool-loop",
-                "limits",
+                "limit",
                 limit_name,
             ])
             .and_then(crate::Node::content),
             Some(expected)
         );
     }
-    assert!(
-        fs.lookup_path([
-            "spaces",
-            "users",
-            "1000",
-            "thread",
-            "demo",
-            "tool-loop",
-            "control",
-            "cancel"
-        ])
-        .is_some(),
-        "tool-loop control nodes must exist"
-    );
+    assert_control_files_are_runtime_owned(
+        &fs,
+        ["home", "1000", "thread", "demo", "control"],
+        "demo thread",
+    )?;
+    assert_control_files_are_runtime_owned(
+        &fs,
+        ["home", "1000", "thread", "demo", "tool-loop", "control"],
+        "demo tool-loop",
+    )?;
     Ok(())
 }
 
@@ -377,7 +496,7 @@ fn thread_inbox_submit_updates_messages_after_drain() -> fuse3::Result<()> {
             .and_then(crate::Node::content),
         Some("idle\n")
     );
-    let episodic = fs.path_inode(["spaces", "users", "1000", "memory", "episodic"])?;
+    let episodic = fs.path_inode(["home", "1000", "memory", "episodic"])?;
     let episodic_items = runtime
         .lookup_child(episodic, "items.jsonl")
         .and_then(crate::Node::content)
@@ -400,22 +519,25 @@ fn thread_inbox_submit_updates_messages_after_drain() -> fuse3::Result<()> {
 #[test]
 fn external_thread_submit_preserves_subject_identity() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let quota = fs
-        .tree
-        .path_inode(crate::EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH)
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(
+        fs.tree
+            .path_inode(crate::EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH)
+            .is_none(),
+        "external subject quota requests must be runtime-owned, not a static placeholder"
+    );
+    let quota = fs.resolve_path_inode(crate::EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH)?;
     assert_eq!(fs.node_content(quota)?, "0\n");
+    let thread = fs
+        .tree
+        .path_inode(crate::EXTERNAL_QQ_GROUP_THREAD_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_external_thread_runtime_files_are_runtime_owned(&fs, thread)?;
     fs.create_staged_external_thread_request(
             "qq-turn.tmp",
             "{\"messages\":[{\"role\":\"user\",\"content\":\"群里问题\",\"subject\":\"qq:user:123456\",\"display_name\":\"Alice\"}]}\n",
         )?;
     fs.submit_external_thread_request("qq-turn.tmp", "qq-turn.req.json")?;
     assert_eq!(fs.node_content(quota)?, "1\n");
-
-    let thread = fs
-        .tree
-        .path_inode(crate::EXTERNAL_QQ_GROUP_THREAD_DIR_PATH)
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
     {
         let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
         assert_eq!(
@@ -465,12 +587,12 @@ fn external_thread_submit_preserves_subject_identity() -> fuse3::Result<()> {
         runtime.node(quota).and_then(crate::Node::content),
         Some("1\n")
     );
-    let episodic = fs.path_inode(["spaces", "users", "1000", "memory", "episodic"])?;
+    let episodic = fs.path_inode(["home", "1000", "memory", "episodic"])?;
     let episodic_items = runtime
         .lookup_child(episodic, "items.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(episodic_items.contains("thread=spaces/external/qq/groups/888888/threads/demo"));
+    assert!(episodic_items.contains("thread=ext/qq/group/888888/thread/demo"));
     assert!(episodic_items.contains("subject=qq:user:123456"));
     assert!(episodic_items.contains("display_name=Alice"));
     assert!(episodic_items.contains("群里问题"));
@@ -479,6 +601,21 @@ fn external_thread_submit_preserves_subject_identity() -> fuse3::Result<()> {
     let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
     assert!(export.contains("\"request_id\":\"qq-turn\""));
     assert!(export.contains("qq:user:123456"));
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    let queued = audit
+        .lines()
+        .find(|line| line.contains("\"name\":\"qq-turn.req.json\""))
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(queued.contains("\"external_subject\":\"qq:user:123456\""));
+    assert!(queued.contains("\"space\":\"ext/qq/group/888888\""));
+    let drained = audit
+        .lines()
+        .find(|line| {
+            line.contains("\"name\":\"qq-turn\"") && line.contains("\"event\":\"drained\"")
+        })
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(drained.contains("\"external_subject\":\"qq:user:123456\""));
+    assert!(drained.contains("\"space\":\"ext/qq/group/888888\""));
     let filters = fs
         .tree
         .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
@@ -494,26 +631,25 @@ fn external_thread_submit_preserves_subject_identity() -> fuse3::Result<()> {
             .map(crate::Node::inode)
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         runtime.write(subject, 0, b"qq:user:123456\n")?;
-        runtime.write(space, 0, b"spaces/external/qq/groups/888888\n")?;
+        runtime.write(space, 0, b"ext/qq/group/888888\n")?;
         drop(runtime);
     }
     let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
     assert!(export.contains("\"request_id\":\"qq-turn\""));
     assert!(export.contains("qq:user:123456"));
-    assert!(
-        fs.node_content(fs.audit_events_inode()?)?
-            .contains("\"name\":\"qq-turn.req.json\"")
-    );
     Ok(())
 }
 
 #[test]
 fn external_thread_rejects_untrusted_subject() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let quota = fs
-        .tree
-        .path_inode(crate::EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH)
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(
+        fs.tree
+            .path_inode(crate::EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH)
+            .is_none(),
+        "external subject quota requests must be runtime-owned, not a static placeholder"
+    );
+    let quota = fs.resolve_path_inode(crate::EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH)?;
     fs.create_staged_external_thread_request(
             "qq-bad.tmp",
             "{\"messages\":[{\"role\":\"user\",\"content\":\"spoof\",\"subject\":\"qq:user:999999\",\"display_name\":\"Mallory\"}]}\n",

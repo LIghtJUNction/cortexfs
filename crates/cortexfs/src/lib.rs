@@ -3,6 +3,8 @@
 pub(crate) mod abi;
 mod execution;
 mod filesystem;
+#[cfg(feature = "live-tests")]
+pub mod live_support;
 mod mount_config;
 mod projection;
 pub(crate) mod providers;
@@ -38,29 +40,30 @@ pub(crate) use abi::{
     DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
     DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_DIR_PATH, EXPORT_FILTERS_DIR_PATH,
     EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH,
-    MEMORY_SEARCH_DIR_PATH, POSTGRES_DSN_DIR_PATH, USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH,
-    USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
+    MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH, POSTGRES_DSN_DIR_PATH, USER_CONTROL_DIR_PATH,
+    USER_MODELS_DIR_PATH, USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
 };
 pub(crate) use abi::{
     AGENT_HELPER_INBOX_PATH, AGENT_HELPER_OUTBOX_PATH, AGENT_TASK_FORMAT, API_PREFIX,
     BATCH_INBOX_PATH, BATCH_OUTBOX_PATH, CLUSTER_TASK_DONE_PATH, CLUSTER_TASK_FORMAT,
     CLUSTER_TASK_PENDING_PATH, CORTEX_CONTEXT_XATTR, CORTEX_CONTEXT_XATTR_LIST,
     DEFAULT_BATCH_FORMAT, DEFAULT_THREAD_FORMAT, DEMO_THREAD_INBOX_PATH, DYNAMIC_INODE_BASE,
-    EMPTY_TEXT, EXTERNAL_QQ_GROUP_THREAD_COMPAT_INBOX_PATH, EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH,
-    FEEDBACK_PREFERENCE_INBOX_PATH, FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL,
-    FILESYSTEM_READ_TOOL_INBOX_PATH, FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_AGENT_CONTEXT_TEXT,
+    EMPTY_TEXT, EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH, FEEDBACK_PREFERENCE_INBOX_PATH,
+    FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL, FILESYSTEM_READ_TOOL_INBOX_PATH,
+    FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_AGENT_CONTEXT_TEXT, LOCAL_API_AUDIT_TEXT,
     LOCAL_API_ENDPOINTS_TEXT, LOCAL_API_LISTEN_TEXT, LOCAL_API_PIPELINE_TEXT,
-    LOCAL_API_SOCKET_TEXT, LOCAL_USER_CONTROL_DISPLAY_PREFIX, LOCAL_USER_HOME_PREFIX,
-    LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT, LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT,
-    LOCAL_USER_SPACE_CONTEXT_TEXT, LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_THREAD_DISPLAY_PATH,
-    LOCAL_USER_THREAD_DISPLAY_TEXT, LOCAL_USER_UID_TEXT, MAX_WRITE, MCP_LOCAL_FS_READ_TOOL,
-    MCP_LOCAL_FS_READ_TOOL_INBOX_PATH, MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH,
-    MCP_PROMPT_RENDER_FORMAT, MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH,
-    MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_ITEM_FORMAT, MEMORY_SEMANTIC_DIR_PATH,
-    MEMORY_SEMANTIC_INBOX_PATH, PREFERENCE_PAIR_FORMAT, ROOT_INODE,
-    SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH,
-    SHARED_PROJECT_A_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_LOCK_LEASES_PATH, STATFS_BLOCK_SIZE,
-    STATFS_BLOCKS, STATFS_NAME_LENGTH, STATUS_TEXT, THREAD_COUNT_TEXT, TOOL_FORMAT, TTL,
+    LOCAL_API_POLICY_TEXT, LOCAL_API_SOCKET_TEXT, LOCAL_API_SOURCE_TEXT, LOCAL_API_STORE_TEXT,
+    LOCAL_API_TRANSPORT_TEXT, LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT,
+    LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT, LOCAL_USER_SPACE_CONTEXT_TEXT,
+    LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_THREAD_DISPLAY_PATH, LOCAL_USER_THREAD_DISPLAY_TEXT,
+    LOCAL_USER_UID_TEXT, MAX_WRITE, MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
+    MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH, MCP_PROMPT_RENDER_FORMAT,
+    MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH,
+    MEMORY_EPISODIC_FORMAT, MEMORY_PROCEDURAL_FORMAT, MEMORY_PROFILE_FORMAT,
+    MEMORY_SEMANTIC_FORMAT, MEMORY_WORKING_FORMAT, PREFERENCE_PAIR_FORMAT, ROOT_INODE,
+    SHARED_PROJECT_A_DEMO_CLAIM_PATH, SHARED_PROJECT_A_LOCK_LEASE_PATH, SHELL_EXEC_TOOL,
+    SHELL_EXEC_TOOL_INBOX_PATH, SHELL_EXEC_TOOL_OUTBOX_PATH, STATFS_BLOCK_SIZE, STATFS_BLOCKS,
+    STATFS_NAME_LENGTH, STATUS_TEXT, THREAD_COUNT_TEXT, TOOL_FORMAT, TTL,
 };
 pub use mount_config::{
     FuseConfig, FuseProjection, MountError, MountMode, MountOptions, MountSecurityOptions,
@@ -74,19 +77,20 @@ pub(crate) use providers::{
     provider_list, provider_list_for_format, provider_model_id, provider_response_for_format,
     provider_spec, provider_supports_format,
 };
+use runtime_audit::AuditRouteEvent;
 use runtime_controls::McpServerControlEffect;
 use runtime_parents::RuntimeParents;
 pub(crate) use runtime_state::RuntimeState;
 use runtime_types::{
     AgentTask, ApiRouteInodes, ApiSubmission, ClusterTask, MemoryItem, PendingResponse,
     PreferencePair, PromptRender, ProviderConfigInodes, ProviderRuntimeParents, RouteMetadata,
-    SubmissionPayload, ThreadUpdate, UserModelAccessInodes,
+    SubmissionPayload, ThreadUpdate, TrainingExportMetadata, UserModelAccessInodes,
 };
 use submission::{
     CollabClaimLocation, CollabLockLocation, SubmissionDirectoryKind, SubmissionLocation,
     SubmissionScope,
 };
-use text::{audit_cost_content, json_string};
+use text::{audit_cost_content, external_subject, json_string};
 pub(crate) use tree::{Node, NodeContent, StaticTree, build_path_index};
 pub(crate) use validation::default_allowed_providers_content;
 use validation::{
@@ -178,6 +182,16 @@ impl CortexFs {
             inode = node.inode();
         }
         self.tree.nodes.get(&inode)
+    }
+
+    #[cfg(test)]
+    fn resolve_path_inode<'a>(&self, components: impl AsRef<[&'a str]>) -> fuse3::Result<Inode> {
+        let mut inode = ROOT_INODE;
+        for component in components.as_ref() {
+            let node = self.lookup_child(inode, OsStr::new(component))?;
+            inode = node.inode();
+        }
+        Ok(inode)
     }
 
     #[cfg(test)]
@@ -544,21 +558,9 @@ impl CortexFs {
             .path_inode(DEMO_THREAD_TOOL_LOOP_PATH)
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-        let runtime_inode = runtime.lookup_child(tool_loop, name).map(Node::inode);
-        drop(runtime);
-        if let Some(inode) = runtime_inode {
-            return Ok(inode);
-        }
-        self.tree
-            .path_inode(&[
-                "spaces",
-                "users",
-                "1000",
-                "threads",
-                "demo",
-                "tool-loop",
-                name,
-            ])
+        runtime
+            .lookup_child(tool_loop, name)
+            .map(Node::inode)
             .ok_or_else(fuse3::Errno::new_not_exist)
     }
 
@@ -670,19 +672,6 @@ impl CortexFs {
         let submission = self.api_submission(inbox).ok_or(libc::EINVAL)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime.submit(inbox, staged_name, inbox, request_name, submission)
-    }
-
-    #[cfg(test)]
-    fn use_ollama_execution_plane(&self) -> fuse3::Result<()> {
-        let provider = cortex_providers::OllamaProvider::local_smollm2()
-            .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
-        let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-        runtime.plane = Some(ExecutionPlane::new(
-            cortex_store::InMemoryStore::new(),
-            Box::new(provider),
-        ));
-        drop(runtime);
-        Ok(())
     }
 
     #[cfg(test)]
@@ -870,12 +859,23 @@ impl CortexFs {
 
     #[cfg(test)]
     fn create_staged_memory_item(&self, name: &str, content: &str) -> fuse3::Result<Inode> {
+        self.create_staged_memory_layer_item(name, "semantic", content)
+    }
+
+    #[cfg(test)]
+    fn create_staged_memory_layer_item(
+        &self,
+        name: &str,
+        layer: &str,
+        content: &str,
+    ) -> fuse3::Result<Inode> {
         let inbox = self
             .tree
-            .path_inode(MEMORY_SEMANTIC_INBOX_PATH)
+            .path_inode(&["home", "1000", "memory", layer, "inbox"])
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-        let inode = runtime.create_staged(inbox, MEMORY_ITEM_FORMAT, name)?;
+        let submission = self.api_submission(inbox).ok_or(libc::EINVAL)?;
+        let inode = runtime.create_staged(inbox, submission.format, name)?;
         runtime.write(inode, 0, content.as_bytes())?;
         drop(runtime);
         Ok(inode)
@@ -883,9 +883,19 @@ impl CortexFs {
 
     #[cfg(test)]
     fn submit_memory_item(&self, staged_name: &str, request_name: &str) -> fuse3::Result<()> {
+        self.submit_memory_layer_item(staged_name, "semantic", request_name)
+    }
+
+    #[cfg(test)]
+    fn submit_memory_layer_item(
+        &self,
+        staged_name: &str,
+        layer: &str,
+        request_name: &str,
+    ) -> fuse3::Result<()> {
         let inbox = self
             .tree
-            .path_inode(MEMORY_SEMANTIC_INBOX_PATH)
+            .path_inode(&["home", "1000", "memory", layer, "inbox"])
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let submission = self.api_submission(inbox).ok_or(libc::EINVAL)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
@@ -918,12 +928,12 @@ impl CortexFs {
 
     #[cfg(test)]
     fn create_staged_collab_claim(&self, name: &str, content: &str) -> fuse3::Result<Inode> {
-        let claims = self
+        let claim_dir = self
             .tree
-            .path_inode(SHARED_PROJECT_A_DEMO_CLAIMS_PATH)
+            .path_inode(SHARED_PROJECT_A_DEMO_CLAIM_PATH)
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-        let inode = runtime.create_collab_claim(claims, name)?;
+        let inode = runtime.create_collab_claim(claim_dir, name)?;
         runtime.write(inode, 0, content.as_bytes())?;
         drop(runtime);
         Ok(inode)
@@ -931,12 +941,12 @@ impl CortexFs {
 
     #[cfg(test)]
     fn create_staged_collab_lock_lease(&self, name: &str, content: &str) -> fuse3::Result<Inode> {
-        let leases = self
+        let lease_dir = self
             .tree
-            .path_inode(SHARED_PROJECT_A_LOCK_LEASES_PATH)
+            .path_inode(SHARED_PROJECT_A_LOCK_LEASE_PATH)
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-        let inode = runtime.create_collab_lock_lease(leases, name)?;
+        let inode = runtime.create_collab_lock_lease(lease_dir, name)?;
         runtime.write(inode, 0, content.as_bytes())?;
         drop(runtime);
         Ok(inode)
@@ -944,22 +954,22 @@ impl CortexFs {
 
     #[cfg(test)]
     fn submit_collab_claim(&self, staged_name: &str, claim_name: &str) -> fuse3::Result<()> {
-        let claims = self
+        let claim_dir = self
             .tree
-            .path_inode(SHARED_PROJECT_A_DEMO_CLAIMS_PATH)
+            .path_inode(SHARED_PROJECT_A_DEMO_CLAIM_PATH)
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-        runtime.submit_collab_claim(claims, staged_name, claims, claim_name)
+        runtime.submit_collab_claim(claim_dir, staged_name, claim_dir, claim_name)
     }
 
     #[cfg(test)]
     fn submit_collab_lock_lease(&self, staged_name: &str, lease_name: &str) -> fuse3::Result<()> {
-        let leases = self
+        let lease_dir = self
             .tree
-            .path_inode(SHARED_PROJECT_A_LOCK_LEASES_PATH)
+            .path_inode(SHARED_PROJECT_A_LOCK_LEASE_PATH)
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-        runtime.submit_collab_lock_lease(leases, staged_name, leases, lease_name)
+        runtime.submit_collab_lock_lease(lease_dir, staged_name, lease_dir, lease_name)
     }
 
     fn api_submission(&self, inbox: Inode) -> Option<ApiSubmission> {
@@ -975,6 +985,7 @@ impl CortexFs {
             SubmissionScope::Batch => self.tree.path_inode(BATCH_OUTBOX_PATH)?,
             SubmissionScope::Thread | SubmissionScope::ExternalThread => inbox,
             SubmissionScope::Tool => match location.tool {
+                Some(SHELL_EXEC_TOOL) => self.tree.path_inode(SHELL_EXEC_TOOL_OUTBOX_PATH)?,
                 Some(FILESYSTEM_READ_TOOL) => {
                     self.tree.path_inode(FILESYSTEM_READ_TOOL_OUTBOX_PATH)?
                 }
@@ -984,7 +995,10 @@ impl CortexFs {
                 _ => return None,
             },
             SubmissionScope::ClusterTask => self.tree.path_inode(CLUSTER_TASK_DONE_PATH)?,
-            SubmissionScope::MemoryItem => self.tree.path_inode(MEMORY_SEMANTIC_DIR_PATH)?,
+            SubmissionScope::MemoryItem => {
+                let layer = location.memory_layer?;
+                self.tree.path_inode(&["home", "1000", "memory", layer])?
+            }
             SubmissionScope::PreferencePair => {
                 self.tree.path_inode(FEEDBACK_PREFERENCE_OUTBOX_PATH)?
             }
@@ -997,6 +1011,7 @@ impl CortexFs {
             scope: location.scope,
             format: location.format,
             tool: location.tool,
+            memory_layer: location.memory_layer,
             outbox_parent,
             materialize_response_file: !matches!(
                 location.scope,
@@ -1016,6 +1031,13 @@ impl CortexFs {
 enum ResolvedNode {
     Static(Node),
     Dynamic(Node),
+}
+
+struct QueuedAuditContext<'a> {
+    fingerprint: &'a str,
+    route: Option<&'a RouteMetadata>,
+    external_subject: Option<&'a str>,
+    space: Option<&'a str>,
 }
 
 impl ResolvedNode {
@@ -1040,13 +1062,44 @@ impl RuntimeState {
         self.refresh_audit_usage();
         if let Some(exports_parent) = parents.exports {
             self.add_exports_runtime_files(exports_parent, parents.export_filters);
-            self.add_exports_runtime_aliases(parents);
         }
         self.add_control_runtime_files(parents.control);
         self.attach_queue_runtime_files(parents);
         self.attach_policy_runtime_files(parents);
         self.attach_provider_runtime_files(parents);
         self.attach_cluster_runtime_files(parents);
+        self.attach_local_api_runtime_files(parents);
+        self.attach_skill_runtime_files(parents);
+        if let Some(convert_parent) = parents.convert {
+            self.add_dynamic_file(convert_parent, "status", "idle\n");
+        }
+        if let Some(cache_parent) = parents.cache {
+            self.add_dynamic_file(cache_parent, "status", "enabled\n");
+            self.add_dynamic_file(cache_parent, "entries", "0\n");
+        }
+        if let Some(audit_parent) = parents.user_audit {
+            self.add_dynamic_file(audit_parent, "status", "enabled\n");
+            self.user_audit_events_inode =
+                Some(self.add_dynamic_file(audit_parent, "events", "0\n"));
+        }
+    }
+
+    fn attach_skill_runtime_files(&mut self, parents: &RuntimeParents) {
+        if let Some(skill_parent) = parents.installed_skill_cortexfs_test {
+            self.add_dynamic_file(skill_parent, "status", "installed\n");
+        }
+    }
+
+    fn attach_local_api_runtime_files(&mut self, parents: &RuntimeParents) {
+        if let Some(api_parent) = parents.local_api {
+            self.add_dynamic_file(api_parent, "status", "configured\n");
+        }
+        if let Some(http_parent) = parents.local_api_http {
+            self.add_dynamic_file(http_parent, "status", "daemon_required\n");
+        }
+        if let Some(unix_parent) = parents.local_api_unix {
+            self.add_dynamic_file(unix_parent, "status", "daemon_required\n");
+        }
     }
 
     fn attach_queue_runtime_files(&mut self, parents: &RuntimeParents) {
@@ -1062,22 +1115,15 @@ impl RuntimeState {
         if let Some(thread_parent) = parents.external_thread {
             self.add_external_thread_runtime_files(thread_parent);
         }
-        if let Some(inode) = parents.external_subject_quota_requests {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "requests", "0\n"));
+        if let Some(quota_parent) = parents.external_subject_quota {
+            self.external_subject_quota_requests_inode =
+                Some(self.add_dynamic_file(quota_parent, "requests", "0\n"));
         }
         if let Some(tool_loop_parent) = parents.tool_loop {
             self.add_tool_loop_runtime_files(tool_loop_parent);
         }
         if let Some(limits_parent) = parents.tool_loop_limits {
             self.add_tool_loop_limit_runtime_files(limits_parent);
-        }
-        if let Some(state_inode) = parents.tool_loop_state {
-            self.nodes.insert(
-                state_inode,
-                Node::dynamic_file(state_inode, "state", "idle\n"),
-            );
-            self.tool_loop_state_inode = Some(state_inode);
         }
         if let Some(control_parent) = parents.tool_loop_control {
             self.add_tool_loop_control_runtime_files(control_parent);
@@ -1086,19 +1132,19 @@ impl RuntimeState {
             self.add_memory_search_runtime_files(memory_search_parent);
         }
         self.add_memory_layer_runtime_files(parents);
+        if let Some(memory_index_parent) = parents.memory_index {
+            self.add_memory_index_runtime_files(memory_index_parent);
+        }
         self.add_mcp_runtime_files(parents);
         self.add_agent_runtime_files(parents);
         self.add_collab_runtime_files(parents);
     }
 
     fn add_mcp_runtime_files(&mut self, parents: &RuntimeParents) {
-        if let Some(inode) = parents.mcp_local_fs_status {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "status", "configured\n"));
-        }
-        if let Some(inode) = parents.mcp_local_fs_pid {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "pid", "\n"));
+        if let Some(server_parent) = parents.mcp_local_fs_server {
+            self.mcp_local_fs_status_inode =
+                Some(self.add_dynamic_file(server_parent, "status", "configured\n"));
+            self.mcp_local_fs_pid_inode = Some(self.add_dynamic_file(server_parent, "pid", "\n"));
         }
         if let Some(control_parent) = parents.mcp_local_fs_control {
             self.mcp_local_fs_start_inode =
@@ -1106,49 +1152,36 @@ impl RuntimeState {
             self.mcp_local_fs_stop_inode = Some(self.add_dynamic_file(control_parent, "stop", ""));
             self.mcp_local_fs_restart_inode =
                 Some(self.add_dynamic_file(control_parent, "restart", ""));
-            self.mcp_local_fs_reload_inode =
-                Some(self.add_dynamic_file(control_parent, "reload", ""));
         }
-        if let Some(inode) = parents.mcp_workspace_content {
-            self.nodes.insert(
-                inode,
-                Node::dynamic_file(inode, "content", "workspace=available\nentries=0\n"),
-            );
+        if let Some(workspace_parent) = parents.mcp_workspace {
+            self.mcp_workspace_content_inode = Some(self.add_dynamic_file(
+                workspace_parent,
+                "content",
+                "workspace=available\nentries=0\n",
+            ));
+            self.mcp_workspace_refresh_inode =
+                Some(self.add_dynamic_file(workspace_parent, "refresh", ""));
         }
-        if let Some(inode) = parents.mcp_workspace_refresh {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "refresh", ""));
-        }
-        if let Some(inode) = parents.mcp_session_state {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "state", "idle\n"));
-        }
-        if let Some(inode) = parents.mcp_session_transcript {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "transcript.jsonl", ""));
+        if let Some(session_parent) = parents.mcp_session {
+            self.mcp_session_state_inode =
+                Some(self.add_dynamic_file(session_parent, "state", "idle\n"));
+            self.mcp_session_transcript_inode =
+                Some(self.add_dynamic_file(session_parent, "transcript.jsonl", ""));
         }
     }
 
     fn add_agent_runtime_files(&mut self, parents: &RuntimeParents) {
-        if let Some(inode) = parents.agent_helper_runtime_state {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "state", "idle\n"));
-        }
-        if let Some(inode) = parents.agent_helper_runtime_pid {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "pid", "\n"));
-        }
-        if let Some(inode) = parents.agent_helper_runtime_heartbeat {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "heartbeat", "\n"));
-        }
-        if let Some(inode) = parents.agent_helper_runtime_current_thread {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "current_thread", "\n"));
-        }
-        if let Some(inode) = parents.agent_helper_runtime_current_task {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "current_task", "\n"));
+        if let Some(runtime_parent) = parents.agent_helper_runtime {
+            self.agent_helper_runtime_state_inode =
+                Some(self.add_dynamic_file(runtime_parent, "state", "idle\n"));
+            self.agent_helper_runtime_pid_inode =
+                Some(self.add_dynamic_file(runtime_parent, "pid", "\n"));
+            self.agent_helper_runtime_heartbeat_inode =
+                Some(self.add_dynamic_file(runtime_parent, "heartbeat", "\n"));
+            self.agent_helper_runtime_current_thread_inode =
+                Some(self.add_dynamic_file(runtime_parent, "current_thread", "\n"));
+            self.agent_helper_runtime_current_task_inode =
+                Some(self.add_dynamic_file(runtime_parent, "current_task", "\n"));
         }
         if let Some(control_parent) = parents.agent_helper_control {
             self.agent_helper_start_inode =
@@ -1162,23 +1195,32 @@ impl RuntimeState {
     }
 
     fn add_collab_runtime_files(&mut self, parents: &RuntimeParents) {
-        if let Some(inode) = parents.collab_task_owner {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "owner", "agents/helper\n"));
-        }
-        if let Some(inode) = parents.collab_task_state {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "state", "open\n"));
-        }
-        if let Some(inode) = parents.collab_task_events {
-            self.nodes.insert(
-                inode,
-                Node::dynamic_file(
-                    inode,
-                    "events.jsonl",
-                    "{\"event\":\"created\",\"agent\":\"helper\",\"state\":\"open\"}\n",
-                ),
+        if let Some(blackboard_parent) = parents.collab_blackboard {
+            self.add_dynamic_file(
+                blackboard_parent,
+                "notes.jsonl",
+                "{\"agent\":\"helper\",\"note\":\"project collaboration space initialized\"}\n",
             );
+            self.add_dynamic_file(blackboard_parent, "state", "open\n");
+        }
+        if let Some(task_parent) = parents.collab_task_demo {
+            self.collab_task_owner_inode =
+                Some(self.add_dynamic_file(task_parent, "owner", "agent/helper\n"));
+            self.collab_task_state_inode =
+                Some(self.add_dynamic_file(task_parent, "state", "open\n"));
+            self.collab_task_events_inode = Some(self.add_dynamic_file(
+                task_parent,
+                "events.jsonl",
+                "{\"event\":\"created\",\"agent\":\"helper\",\"state\":\"open\"}\n",
+            ));
+        }
+        if let Some(handoff_parent) = parents.collab_handoff_demo {
+            self.add_dynamic_file(handoff_parent, "state", "ready\n");
+        }
+        if let Some(lock_parent) = parents.collab_lock_demo {
+            self.add_dynamic_file(lock_parent, "owner", "agent/helper\n");
+            self.add_dynamic_file(lock_parent, "state", "released\n");
+            self.add_dynamic_file(lock_parent, "lease_expires", "\n");
         }
     }
 
@@ -1187,7 +1229,7 @@ impl RuntimeState {
             self.add_user_policy_runtime_files(user_policy_parent);
         }
         if let Some(user_routes_parent) = parents.user_routes {
-            self.add_user_routes_runtime_files(user_routes_parent, parents.user_routes_compat);
+            self.add_user_routes_runtime_files(user_routes_parent);
         }
         if let Some(user_control_parent) = parents.user_control {
             self.add_user_control_runtime_files(user_control_parent);
@@ -1200,28 +1242,20 @@ impl RuntimeState {
             self.user_models_refresh_inode =
                 Some(self.add_dynamic_file(user_models_parent, "refresh", ""));
         }
-        if let Some(user_models_parent) = parents.user_models_compat {
-            self.user_models_count_compat_inode =
-                Some(self.add_dynamic_file(user_models_parent, "count", "0\n"));
-            self.user_models_list_compat_inode =
-                Some(self.add_dynamic_file(user_models_parent, "list", ""));
-            self.user_models_refresh_compat_inode =
-                Some(self.add_dynamic_file(user_models_parent, "refresh", ""));
-        }
         for (&provider, &model_parent) in &parents.user_models_by_provider {
-            let compat_parent = parents
-                .user_models_compat_by_provider
-                .get(provider)
-                .copied();
-            self.add_user_model_runtime_files(provider, model_parent, compat_parent);
+            self.add_user_model_runtime_files(provider, model_parent);
         }
     }
 
     fn attach_provider_runtime_files(&mut self, parents: &RuntimeParents) {
         self.add_vector_runtime_files(parents);
-        if let Some(inode) = parents.postgres_status {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "status", "disabled\n"));
+        if let Some(sqlite_parent) = parents.sqlite {
+            self.sqlite_status_inode =
+                Some(self.add_dynamic_file(sqlite_parent, "status", "disabled\n"));
+        }
+        if let Some(postgres_parent) = parents.postgres {
+            self.postgres_status_inode =
+                Some(self.add_dynamic_file(postgres_parent, "status", "disabled\n"));
         }
         if let Some(postgres_dsn_parent) = parents.postgres_dsn {
             self.add_postgres_dsn_runtime_files(postgres_dsn_parent);
@@ -1232,33 +1266,19 @@ impl RuntimeState {
     }
 
     fn attach_cluster_runtime_files(&mut self, parents: &RuntimeParents) {
-        if let Some(state_inode) = parents.cluster_state {
-            self.nodes.insert(
-                state_inode,
-                Node::dynamic_file(state_inode, "state", "idle\n"),
-            );
+        if let Some(cluster_parent) = parents.cluster_local {
+            self.cluster_state_inode =
+                Some(self.add_dynamic_file(cluster_parent, "state", "idle\n"));
         }
-        if let Some(state_inode) = parents.cluster_worker_state {
-            self.nodes.insert(
-                state_inode,
-                Node::dynamic_file(state_inode, "state", "idle\n"),
-            );
-        }
-        if let Some(heartbeat_inode) = parents.cluster_worker_heartbeat {
-            self.nodes.insert(
-                heartbeat_inode,
-                Node::dynamic_file(heartbeat_inode, "heartbeat", "\n"),
-            );
-        }
-        if let Some(load_inode) = parents.cluster_worker_load {
-            self.nodes
-                .insert(load_inode, Node::dynamic_file(load_inode, "load", "0\n"));
-        }
-        if let Some(task_inode) = parents.cluster_worker_current_task {
-            self.nodes.insert(
-                task_inode,
-                Node::dynamic_file(task_inode, "current_task", "\n"),
-            );
+        if let Some(worker_parent) = parents.cluster_worker {
+            self.cluster_worker_state_inode =
+                Some(self.add_dynamic_file(worker_parent, "state", "idle\n"));
+            self.cluster_worker_heartbeat_inode =
+                Some(self.add_dynamic_file(worker_parent, "heartbeat", "\n"));
+            self.cluster_worker_load_inode =
+                Some(self.add_dynamic_file(worker_parent, "load", "0\n"));
+            self.cluster_worker_current_task_inode =
+                Some(self.add_dynamic_file(worker_parent, "current_task", "\n"));
         }
         if let Some(control_parent) = parents.cluster_control {
             self.cluster_rebalance_inode =
@@ -1307,10 +1327,6 @@ impl RuntimeState {
         inode
     }
 
-    fn attach_runtime_child_alias(&mut self, parent: Inode, child: Inode) {
-        self.parent_children.entry(parent).or_default().push(child);
-    }
-
     fn add_exports_runtime_files(&mut self, exports_parent: Inode, filters_parent: Option<Inode>) {
         self.conversations_export_inode =
             Some(self.add_dynamic_file(exports_parent, "conversations.jsonl", ""));
@@ -1341,48 +1357,8 @@ impl RuntimeState {
         }
     }
 
-    fn add_exports_runtime_aliases(&mut self, parents: &RuntimeParents) {
-        if let Some(exports_compat) = parents.exports_compat
-            && Some(exports_compat) != parents.exports
-        {
-            for inode in [
-                self.conversations_export_inode,
-                self.sft_export_inode,
-                self.preference_export_inode,
-                self.tool_calls_export_inode,
-                self.agent_traces_export_inode,
-                self.export_refresh_inode,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                self.attach_runtime_child_alias(exports_compat, inode);
-            }
-        }
-        if let Some(filters_compat) = parents.export_filters_compat
-            && Some(filters_compat) != parents.export_filters
-        {
-            for inode in [
-                self.export_filter_provider_inode,
-                self.export_filter_model_inode,
-                self.export_filter_agent_inode,
-                self.export_filter_subject_inode,
-                self.export_filter_space_inode,
-                self.export_filter_from_inode,
-                self.export_filter_to_inode,
-                self.export_filter_exclude_failed_inode,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                self.attach_runtime_child_alias(filters_compat, inode);
-            }
-        }
-    }
-
     fn add_control_runtime_files(&mut self, control_parent: Inode) {
         self.drain_inode = self.add_dynamic_file(control_parent, "drain", "");
-        self.reload_inode = self.add_dynamic_file(control_parent, "reload", "");
         self.flush_inode = self.add_dynamic_file(control_parent, "flush", "");
         self.gc_inode = self.add_dynamic_file(control_parent, "gc", "");
         self.last_control_inode = self.add_dynamic_file(control_parent, "last_control", "none\n");
@@ -1422,6 +1398,8 @@ impl RuntimeState {
     }
 
     fn add_tool_loop_runtime_files(&mut self, tool_loop_parent: Inode) {
+        self.tool_loop_state_inode =
+            Some(self.add_dynamic_file(tool_loop_parent, "state", "idle\n"));
         self.tool_loop_steps_inode =
             Some(self.add_dynamic_file(tool_loop_parent, "steps.jsonl", ""));
     }
@@ -1465,6 +1443,22 @@ impl RuntimeState {
             .map(|parent| self.add_dynamic_file(parent, "items.jsonl", ""));
     }
 
+    fn add_memory_index_runtime_files(&mut self, index_parent: Inode) {
+        self.add_dynamic_file(index_parent, "count", "1\n");
+        self.add_dynamic_file(index_parent, "list", "default\n");
+        let default = self.add_dynamic_dir(index_parent, "default");
+        self.add_dynamic_file(default, "backend", "vector/store/pgvector\n");
+        self.add_dynamic_file(default, "layer", "semantic\n");
+        self.memory_index_state_inode = Some(self.add_dynamic_file(default, "state", "disabled\n"));
+        self.memory_index_store_inode = Some(self.add_dynamic_file(default, "store", "disabled\n"));
+        self.memory_index_source_inode = Some(self.add_dynamic_file(
+            default,
+            "source",
+            "home/1000/memory/semantic/items.jsonl\n",
+        ));
+        self.memory_index_refresh_inode = Some(self.add_dynamic_file(default, "refresh", ""));
+    }
+
     fn add_user_policy_runtime_files(&mut self, policy_parent: Inode) {
         self.user_allowed_providers_inode = Some(self.add_dynamic_file_owned(
             policy_parent,
@@ -1473,80 +1467,37 @@ impl RuntimeState {
         ));
     }
 
-    fn add_user_routes_runtime_files(
-        &mut self,
-        routes_parent: Inode,
-        compat_parent: Option<Inode>,
-    ) {
+    fn add_user_routes_runtime_files(&mut self, routes_parent: Inode) {
         self.user_default_provider_inode = Some(self.add_dynamic_file_owned(
             routes_parent,
             "default_provider",
             format!("{}\n", default_provider_id()),
         ));
-        if let Some(compat_parent) = compat_parent {
-            self.user_default_provider_compat_inode = Some(self.add_dynamic_file_owned(
-                compat_parent,
-                "default_provider",
-                format!("{}\n", default_provider_id()),
-            ));
-        }
         for format in API_FORMATS {
             let route = self.add_dynamic_dir(routes_parent, format);
-            let compat_route = compat_parent.map(|parent| self.add_dynamic_dir(parent, format));
             let inodes = ApiRouteInodes {
                 provider: self.add_dynamic_file(route, "provider", "\n"),
                 model: self.add_dynamic_file(route, "model", "\n"),
                 reason: self.add_dynamic_file(route, "reason", "unsupported_format\n"),
-                compat_provider: compat_route
-                    .map(|route| self.add_dynamic_file(route, "provider", "\n")),
-                compat_model: compat_route.map(|route| self.add_dynamic_file(route, "model", "\n")),
-                compat_reason: compat_route
-                    .map(|route| self.add_dynamic_file(route, "reason", "unsupported_format\n")),
             };
             self.user_routes.insert(format, inodes);
         }
     }
 
     fn add_user_control_runtime_files(&mut self, control_parent: Inode) {
-        self.user_reload_inode = Some(self.add_dynamic_file(control_parent, "reload", ""));
         self.user_gc_inode = Some(self.add_dynamic_file(control_parent, "gc", ""));
     }
 
-    fn add_user_model_runtime_files(
-        &mut self,
-        provider: &'static str,
-        model_parent: Inode,
-        compat_parent: Option<Inode>,
-    ) {
+    fn add_user_model_runtime_files(&mut self, provider: &'static str, model_parent: Inode) {
         if let Some(spec) = provider_spec(provider) {
             self.add_dynamic_file(model_parent, "context_window", spec.context_window);
             self.add_dynamic_file(model_parent, "max_output_tokens", spec.max_output_tokens);
             self.add_dynamic_file(model_parent, "cap", spec.model_capabilities);
-            self.add_dynamic_file(model_parent, "capabilities", spec.model_capabilities);
-            if let Some(compat_parent) = compat_parent {
-                self.add_dynamic_file(compat_parent, "context_window", spec.context_window);
-                self.add_dynamic_file(compat_parent, "max_output_tokens", spec.max_output_tokens);
-                self.add_dynamic_file(compat_parent, "cap", spec.model_capabilities);
-                self.add_dynamic_file(compat_parent, "capabilities", spec.model_capabilities);
-            }
         }
         let allowed = self.add_dynamic_file(model_parent, "allowed", "1\n");
         let reason = self.add_dynamic_file(model_parent, "reason", "ready\n");
-        let (compat_allowed, compat_reason) = compat_parent.map_or((None, None), |parent| {
-            (
-                Some(self.add_dynamic_file(parent, "allowed", "1\n")),
-                Some(self.add_dynamic_file(parent, "reason", "ready\n")),
-            )
-        });
-        self.user_model_access.insert(
-            provider,
-            UserModelAccessInodes {
-                allowed,
-                reason,
-                compat_allowed,
-                compat_reason,
-            },
-        );
+        self.user_model_access
+            .insert(provider, UserModelAccessInodes { allowed, reason });
     }
 
     fn add_postgres_dsn_runtime_files(&mut self, dsn_parent: Inode) {
@@ -1567,23 +1518,12 @@ impl RuntimeState {
         let url_current = self.add_dynamic_file(parents.url, "current", default_base_url);
         let url_effective = self.add_dynamic_file(parents.url, "effective", default_base_url);
         let url_source = self.add_dynamic_file(parents.url, "source", "default\n");
-        let (compat_current, compat_effective, compat_source) =
-            parents.url_compat.map_or((None, None, None), |url_compat| {
-                (
-                    Some(self.add_dynamic_file(url_compat, "current", default_base_url)),
-                    Some(self.add_dynamic_file(url_compat, "effective", default_base_url)),
-                    Some(self.add_dynamic_file(url_compat, "source", "default\n")),
-                )
-            });
         self.provider_url.insert(
             provider,
             ProviderConfigInodes {
                 current: Some(url_current),
                 effective: Some(url_effective),
                 source: Some(url_source),
-                compat_current,
-                compat_effective,
-                compat_source,
                 status: None,
             },
         );
@@ -1604,27 +1544,25 @@ impl RuntimeState {
                 current: Some(enabled_current),
                 effective: Some(enabled_effective),
                 source: Some(enabled_source),
-                compat_current: None,
-                compat_effective: None,
-                compat_source: None,
                 status: Some(status),
             },
         );
+        let secret_status =
+            self.add_dynamic_file(parents.secrets, "status", provider_secret_status(provider));
+        self.provider_secret_status.insert(provider, secret_status);
         let rotate = self.add_dynamic_file(parents.secrets, "rotate", "");
+        let active =
+            self.add_dynamic_file_owned(parents.secrets, "active", secret_active_id(provider));
         let last_rotated = self.add_dynamic_file(parents.secrets, "last_rotated", "\n");
         let next_rotation = self.add_dynamic_file(parents.secrets, "next_rotation", "\n");
         self.provider_secret_rotate.insert(provider, rotate);
+        self.provider_secret_active.insert(provider, active);
         self.provider_secret_last_rotated
             .insert(provider, last_rotated);
         self.provider_secret_next_rotation
             .insert(provider, next_rotation);
         let refresh = self.add_dynamic_file(parents.models, "refresh", "");
         self.provider_models_refresh.insert(provider, refresh);
-        if let Some(models_compat) = parents.models_compat {
-            let compat_refresh = self.add_dynamic_file(models_compat, "refresh", "");
-            self.provider_models_refresh_compat
-                .insert(provider, compat_refresh);
-        }
     }
 
     fn node(&self, inode: Inode) -> Option<&Node> {
@@ -1667,10 +1605,8 @@ impl RuntimeState {
     fn is_write_only_control_node(&self, inode: Inode) -> bool {
         self.is_control_command(inode)
             || Some(inode) == self.export_refresh_inode
-            || Some(inode) == self.user_reload_inode
             || Some(inode) == self.user_gc_inode
             || Some(inode) == self.user_models_refresh_inode
-            || Some(inode) == self.user_models_refresh_compat_inode
             || Some(inode) == self.thread_continue_inode
             || Some(inode) == self.thread_pause_inode
             || Some(inode) == self.thread_cancel_inode
@@ -1680,8 +1616,8 @@ impl RuntimeState {
             || Some(inode) == self.mcp_local_fs_start_inode
             || Some(inode) == self.mcp_local_fs_stop_inode
             || Some(inode) == self.mcp_local_fs_restart_inode
-            || Some(inode) == self.mcp_local_fs_reload_inode
             || Some(inode) == self.mcp_workspace_refresh_inode
+            || Some(inode) == self.memory_index_refresh_inode
             || Some(inode) == self.agent_helper_start_inode
             || Some(inode) == self.agent_helper_stop_inode
             || Some(inode) == self.agent_helper_restart_inode
@@ -1689,6 +1625,7 @@ impl RuntimeState {
             || Some(inode) == self.cluster_rebalance_inode
             || Some(inode) == self.cluster_drain_inode
             || Some(inode) == self.cluster_pause_inode
+            || self.cluster_task_retry_inodes.contains_key(&inode)
             || Some(inode) == self.pgvector_refresh_inode
             || self
                 .provider_health_check
@@ -1702,15 +1639,12 @@ impl RuntimeState {
                 .provider_models_refresh
                 .values()
                 .any(|refresh_inode| *refresh_inode == inode)
-            || self
-                .provider_models_refresh_compat
-                .values()
-                .any(|refresh_inode| *refresh_inode == inode)
     }
 
     fn is_writable_dynamic_file(&self, inode: Inode) -> bool {
         self.is_control_command(inode)
             || Some(inode) == self.memory_query_inode
+            || Some(inode) == self.memory_index_refresh_inode
             || Some(inode) == self.export_refresh_inode
             || Some(inode) == self.export_filter_provider_inode
             || Some(inode) == self.export_filter_model_inode
@@ -1722,11 +1656,8 @@ impl RuntimeState {
             || Some(inode) == self.export_filter_exclude_failed_inode
             || Some(inode) == self.user_allowed_providers_inode
             || Some(inode) == self.user_default_provider_inode
-            || Some(inode) == self.user_default_provider_compat_inode
-            || Some(inode) == self.user_reload_inode
             || Some(inode) == self.user_gc_inode
             || Some(inode) == self.user_models_refresh_inode
-            || Some(inode) == self.user_models_refresh_compat_inode
             || Some(inode) == self.thread_continue_inode
             || Some(inode) == self.thread_pause_inode
             || Some(inode) == self.thread_cancel_inode
@@ -1736,7 +1667,6 @@ impl RuntimeState {
             || Some(inode) == self.mcp_local_fs_start_inode
             || Some(inode) == self.mcp_local_fs_stop_inode
             || Some(inode) == self.mcp_local_fs_restart_inode
-            || Some(inode) == self.mcp_local_fs_reload_inode
             || Some(inode) == self.mcp_workspace_refresh_inode
             || Some(inode) == self.agent_helper_start_inode
             || Some(inode) == self.agent_helper_stop_inode
@@ -1745,6 +1675,7 @@ impl RuntimeState {
             || Some(inode) == self.cluster_rebalance_inode
             || Some(inode) == self.cluster_drain_inode
             || Some(inode) == self.cluster_pause_inode
+            || self.cluster_task_retry_inodes.contains_key(&inode)
             || Some(inode) == self.pgvector_enabled_inode
             || Some(inode) == self.pgvector_refresh_inode
             || Some(inode) == self.postgres_dsn_current_inode
@@ -1769,20 +1700,13 @@ impl RuntimeState {
                 .values()
                 .any(|refresh_inode| *refresh_inode == inode)
             || self
-                .provider_models_refresh_compat
-                .values()
-                .any(|refresh_inode| *refresh_inode == inode)
-            || self
                 .staged
                 .values()
                 .any(|staged_inode| *staged_inode == inode)
     }
 
     fn is_control_command(&self, inode: Inode) -> bool {
-        inode == self.drain_inode
-            || inode == self.reload_inode
-            || inode == self.flush_inode
-            || inode == self.gc_inode
+        inode == self.drain_inode || inode == self.flush_inode || inode == self.gc_inode
     }
 
     fn create_staged(
@@ -1881,9 +1805,6 @@ impl RuntimeState {
         if inode == self.drain_inode {
             return self.write_drain(offset, data).map(Some);
         }
-        if inode == self.reload_inode {
-            return self.write_simple_control("reload", offset, data).map(Some);
-        }
         if inode == self.flush_inode {
             return self.write_simple_control("flush", offset, data).map(Some);
         }
@@ -1892,6 +1813,9 @@ impl RuntimeState {
         }
         if Some(inode) == self.memory_query_inode {
             return self.write_memory_query(offset, data).map(Some);
+        }
+        if Some(inode) == self.memory_index_refresh_inode {
+            return self.write_memory_index_refresh(offset, data).map(Some);
         }
         if Some(inode) == self.mcp_workspace_refresh_inode {
             return self.write_mcp_resource_refresh(offset, data).map(Some);
@@ -1917,23 +1841,12 @@ impl RuntimeState {
         if Some(inode) == self.user_default_provider_inode {
             return self.write_user_default_provider(offset, data).map(Some);
         }
-        if Some(inode) == self.user_default_provider_compat_inode {
-            return self.write_user_default_provider(offset, data).map(Some);
-        }
-        if Some(inode) == self.user_reload_inode {
-            return self
-                .write_space_control("users/1000", "reload", offset, data)
-                .map(Some);
-        }
         if Some(inode) == self.user_gc_inode {
             return self
-                .write_space_control("users/1000", "gc", offset, data)
+                .write_space_control("home.1000.control", "home/1000", "gc", offset, data)
                 .map(Some);
         }
         if Some(inode) == self.user_models_refresh_inode {
-            return self.write_user_models_refresh(offset, data).map(Some);
-        }
-        if Some(inode) == self.user_models_refresh_compat_inode {
             return self.write_user_models_refresh(offset, data).map(Some);
         }
         Ok(None)
@@ -2025,6 +1938,9 @@ impl RuntimeState {
                 .write_cluster_control("pause", "paused", offset, data)
                 .map(Some);
         }
+        if self.cluster_task_retry_inodes.contains_key(&inode) {
+            return self.write_cluster_task_retry(inode, offset, data).map(Some);
+        }
         Ok(None)
     }
 
@@ -2071,13 +1987,6 @@ impl RuntimeState {
                 server_id: "local-fs",
                 command_name: "restart",
                 next_status: "running",
-                next_pid: "1234\n",
-            }
-        } else if Some(inode) == self.mcp_local_fs_reload_inode {
-            McpServerControlEffect {
-                server_id: "local-fs",
-                command_name: "reload",
-                next_status: "reloaded",
                 next_pid: "1234\n",
             }
         } else {
@@ -2250,7 +2159,7 @@ impl RuntimeState {
             self.update_dynamic_file(inode, value);
         }
         self.refresh_training_exports();
-        self.append_audit("exports.filters", "current", "configured");
+        self.append_audit("export.filter", "current", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
@@ -2308,6 +2217,8 @@ impl RuntimeState {
         } else {
             None
         };
+        let audit_subject = external_subject_for_submission(submission.scope, &request_content);
+        let audit_space = self.audit_space_for_submission(submission.scope);
         self.enqueue_submission_payload(SubmissionPayload {
             submission,
             request_id: request_id.clone(),
@@ -2323,7 +2234,16 @@ impl RuntimeState {
             fingerprint.as_str(),
             route.clone(),
         );
-        self.record_queued_submission(&submission, new_name, fingerprint.as_str(), route.as_ref());
+        self.record_queued_submission(
+            &submission,
+            new_name,
+            &QueuedAuditContext {
+                fingerprint: fingerprint.as_str(),
+                route: route.as_ref(),
+                external_subject: audit_subject.as_deref(),
+                space: audit_space.as_deref(),
+            },
+        );
         Ok(())
     }
 
@@ -2485,6 +2405,10 @@ impl RuntimeState {
         }
         match submission.scope {
             SubmissionScope::ClusterTask => {
+                self.materialize_cluster_pending_task(
+                    &payload.request_id,
+                    payload.export_request_body.as_str(),
+                );
                 self.cluster_tasks.insert(
                     payload.request_id,
                     ClusterTask {
@@ -2506,6 +2430,7 @@ impl RuntimeState {
                 self.memory_items.insert(
                     payload.request_id,
                     MemoryItem {
+                        layer: submission.memory_layer.unwrap_or("semantic"),
                         body: payload.export_request_body,
                         fingerprint: payload.fingerprint.to_owned(),
                     },
@@ -2596,18 +2521,17 @@ impl RuntimeState {
         &mut self,
         submission: &ApiSubmission,
         new_name: &str,
-        fingerprint: &str,
-        route: Option<&RouteMetadata>,
+        audit: &QueuedAuditContext<'_>,
     ) {
         if submission.scope == SubmissionScope::Batch {
             self.batch_count = self.batch_count.saturating_add(1);
             self.update_batch_files();
         }
         if submission.scope == SubmissionScope::Thread {
-            self.update_thread_files(ThreadUpdate::Queued(fingerprint));
+            self.update_thread_files(ThreadUpdate::Queued(audit.fingerprint));
         }
         if submission.scope == SubmissionScope::ExternalThread {
-            self.update_external_thread_files(ThreadUpdate::Queued(fingerprint));
+            self.update_external_thread_files(ThreadUpdate::Queued(audit.fingerprint));
             self.increment_external_subject_quota_requests();
         }
         if submission.scope == SubmissionScope::AgentTask {
@@ -2621,21 +2545,28 @@ impl RuntimeState {
                 submission.tool.unwrap_or(submission.format),
                 new_name,
                 "queued",
-                fingerprint,
+                audit.fingerprint,
             );
             self.update_queue_depth();
             return;
         }
-        if let Some(route) = route {
-            self.append_audit_with_route(
+        if let Some(route) = audit.route {
+            self.append_audit_route_event(&AuditRouteEvent {
+                format: submission.format,
+                name: new_name,
+                event: "queued",
+                fingerprint: Some(audit.fingerprint),
+                route,
+                external_subject: audit.external_subject,
+                space: audit.space,
+            });
+        } else {
+            self.append_audit_with_fingerprint(
                 submission.format,
                 new_name,
                 "queued",
-                Some(fingerprint),
-                route,
+                audit.fingerprint,
             );
-        } else {
-            self.append_audit_with_fingerprint(submission.format, new_name, "queued", fingerprint);
         }
         self.update_queue_depth();
     }
@@ -2705,28 +2636,27 @@ impl RuntimeState {
         request_id: &RequestId,
         pair: &PreferencePair,
     ) -> Result<(), String> {
-        use std::fmt::Write as _;
-
         validate_preference_pair(&pair.body)?;
-        let Some(export_inode) = self.preference_export_inode else {
-            return Err("preference export is unavailable".to_owned());
-        };
-        let Some(content) = self
-            .nodes
-            .get_mut(&export_inode)
-            .and_then(|node| node.content.as_mut())
-            .and_then(NodeContent::as_dynamic_mut)
-        else {
-            return Err("preference export is unavailable".to_owned());
-        };
-        let _ = writeln!(
-            content,
+        let line = format!(
             "{{\"request_id\":\"{}\",\"source\":\"feedback/preference\",\"fingerprint\":\"{}\",\"pair\":{}}}",
             request_id.as_str(),
             pair.fingerprint,
             pair.body.trim(),
         );
+        let row = self.next_training_export_row(line, Self::preference_pair_export_metadata(pair));
+        self.preference_rows.push(row);
+        self.refresh_training_exports();
         Ok(())
+    }
+
+    fn preference_pair_export_metadata(pair: &PreferencePair) -> TrainingExportMetadata {
+        TrainingExportMetadata {
+            fingerprint: pair.fingerprint.clone(),
+            agent: Some("helper".to_owned()),
+            subject: external_subject(&pair.body),
+            space: Some("home/1000".to_owned()),
+            ..TrainingExportMetadata::default()
+        }
     }
 
     fn materialize_preference_ack(&mut self, request_id: &RequestId, pair: &PreferencePair) {
@@ -2831,19 +2761,79 @@ impl RuntimeState {
         let Some(task) = self.cluster_tasks.remove(&request_id) else {
             return Err(libc::EIO.into());
         };
-        let result_body = Self::execute_cluster_task(&request_id, &task);
-        self.materialize_cluster_task(&request_id, &task, &result_body)?;
-        self.append_audit("cluster.task", request_id.as_str(), "drained");
+        self.materialize_cluster_running_task(&request_id, &task.spec);
+        self.remove_cluster_pending_task(&request_id);
+        match Self::execute_cluster_task(&request_id, &task) {
+            Ok(result_body) => {
+                self.remove_cluster_running_task(&request_id);
+                self.materialize_cluster_task(&request_id, &task, &result_body)?;
+                self.append_audit("cluster.task", request_id.as_str(), "drained");
+            }
+            Err(error) => {
+                self.remove_cluster_running_task(&request_id);
+                self.materialize_failed_cluster_task(&request_id, &task, &error)?;
+                self.append_audit("cluster.task", request_id.as_str(), "error");
+            }
+        }
         self.update_last_drained(format!("{}\n", request_id.as_str()));
         Ok(true)
     }
 
-    fn execute_cluster_task(request_id: &RequestId, task: &ClusterTask) -> String {
-        format!(
+    fn execute_cluster_task(request_id: &RequestId, task: &ClusterTask) -> Result<String, String> {
+        let spec = serde_json::from_str::<serde_json::Value>(&task.spec)
+            .map_err(|error| format!("invalid cluster task spec: {error}"))?;
+        if spec
+            .get("fail")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Err("cluster task requested failure".to_owned());
+        }
+        Ok(format!(
             "{{\"request_id\":\"{}\",\"worker\":\"local-worker\",\"status\":\"done\",\"echo\":{}}}\n",
             request_id.as_str(),
             json_string(&task.spec),
-        )
+        ))
+    }
+
+    fn materialize_cluster_pending_task(&mut self, request_id: &RequestId, spec: &str) {
+        let Some(parent) = self.cluster_pending_parent else {
+            return;
+        };
+        let name = format!("{}.req.json", request_id.as_str());
+        let inode = self.upsert_dynamic_child(parent, &name, spec.to_owned());
+        self.cluster_pending_entries
+            .insert(request_id.clone(), inode);
+    }
+
+    fn remove_cluster_pending_task(&mut self, request_id: &RequestId) {
+        let Some(parent) = self.cluster_pending_parent else {
+            return;
+        };
+        let Some(inode) = self.cluster_pending_entries.remove(request_id) else {
+            return;
+        };
+        self.remove_dynamic_child(parent, inode);
+    }
+
+    fn materialize_cluster_running_task(&mut self, request_id: &RequestId, spec: &str) {
+        let Some(parent) = self.cluster_running_parent else {
+            return;
+        };
+        let name = format!("{}.req.json", request_id.as_str());
+        let inode = self.upsert_dynamic_child(parent, &name, spec.to_owned());
+        self.cluster_running_entries
+            .insert(request_id.clone(), inode);
+    }
+
+    fn remove_cluster_running_task(&mut self, request_id: &RequestId) {
+        let Some(parent) = self.cluster_running_parent else {
+            return;
+        };
+        let Some(inode) = self.cluster_running_entries.remove(request_id) else {
+            return;
+        };
+        self.remove_dynamic_child(parent, inode);
     }
 
     fn materialize_cluster_task(
@@ -2868,7 +2858,16 @@ impl RuntimeState {
             task_dir,
             "audit",
             format!(
-                "{{\"event\":\"drained\",\"worker\":\"local-worker\",\"fingerprint\":\"{}\"}}\n",
+                "{{\"event\":\"done\",\"worker\":\"local-worker\",\"fingerprint\":\"{}\"}}\n",
+                task.fingerprint,
+            ),
+        );
+        self.add_dynamic_file_owned(
+            task_dir,
+            "events.jsonl",
+            format!(
+                "{{\"event\":\"running\",\"worker\":\"local-worker\",\"fingerprint\":\"{}\"}}\n{{\"event\":\"done\",\"worker\":\"local-worker\",\"fingerprint\":\"{}\"}}\n",
+                task.fingerprint,
                 task.fingerprint,
             ),
         );
@@ -2877,6 +2876,138 @@ impl RuntimeState {
         self.outbox.insert((done_parent, done_name), done_inode);
         self.update_cluster_worker_after_task(request_id);
         Ok(())
+    }
+
+    fn materialize_failed_cluster_task(
+        &mut self,
+        request_id: &RequestId,
+        task: &ClusterTask,
+        error: &str,
+    ) -> fuse3::Result<()> {
+        let Some(tasks_parent) = self.cluster_tasks_parent else {
+            return Err(libc::EIO.into());
+        };
+        let Some(failed_parent) = self.cluster_failed_parent else {
+            return Err(libc::EIO.into());
+        };
+        let task_dir = self.add_dynamic_dir(tasks_parent, request_id.as_str());
+        self.add_dynamic_file_owned(task_dir, "spec.req.json", task.spec.clone());
+        self.add_dynamic_file_owned(task_dir, "state", "failed\n");
+        self.add_dynamic_file_owned(task_dir, "assigned_worker", "local-worker\n");
+        self.add_dynamic_file_owned(task_dir, "result.resp.json", "\n");
+        self.add_dynamic_file_owned(task_dir, "error", format!("{error}\n"));
+        let retry_inode = self.add_dynamic_file_owned(task_dir, "retry", "");
+        self.cluster_task_retry_inodes
+            .insert(retry_inode, request_id.clone());
+        self.add_dynamic_file_owned(
+            task_dir,
+            "audit",
+            format!(
+                "{{\"event\":\"failed\",\"worker\":\"local-worker\",\"fingerprint\":\"{}\",\"error\":{}}}\n",
+                task.fingerprint,
+                json_string(error),
+            ),
+        );
+        self.add_dynamic_file_owned(
+            task_dir,
+            "events.jsonl",
+            format!(
+                "{{\"event\":\"running\",\"worker\":\"local-worker\",\"fingerprint\":\"{}\"}}\n{{\"event\":\"failed\",\"worker\":\"local-worker\",\"fingerprint\":\"{}\",\"error\":{}}}\n",
+                task.fingerprint,
+                task.fingerprint,
+                json_string(error),
+            ),
+        );
+        let failed_name = format!("{}.error", request_id.as_str());
+        let failed_body = format!(
+            "{{\"request_id\":\"{}\",\"worker\":\"local-worker\",\"status\":\"failed\",\"error\":{}}}\n",
+            request_id.as_str(),
+            json_string(error),
+        );
+        let failed_inode =
+            self.add_dynamic_file_owned(failed_parent, failed_name.clone(), failed_body);
+        self.outbox
+            .insert((failed_parent, failed_name), failed_inode);
+        self.cluster_failed_tasks
+            .insert(request_id.clone(), task.clone());
+        self.update_cluster_worker_after_task(request_id);
+        Ok(())
+    }
+
+    fn write_cluster_task_retry(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<u32> {
+        validation::validate_control_write(offset, data)?;
+        let request_id = self
+            .cluster_task_retry_inodes
+            .get(&inode)
+            .cloned()
+            .ok_or_else(|| fuse3::Errno::from(libc::ENOENT))?;
+        let task = self
+            .cluster_failed_tasks
+            .remove(&request_id)
+            .ok_or_else(|| fuse3::Errno::from(libc::ENOENT))?;
+        self.cluster_tasks.insert(request_id.clone(), task.clone());
+        self.materialize_cluster_pending_task(&request_id, &task.spec);
+        self.remove_cluster_failed_queue_entry(&request_id);
+        self.update_cluster_task_for_retry(&request_id, &task.fingerprint);
+        self.update_queue_depth();
+        self.append_audit("cluster.task", request_id.as_str(), "retry");
+        u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn remove_cluster_failed_queue_entry(&mut self, request_id: &RequestId) {
+        let Some(parent) = self.cluster_failed_parent else {
+            return;
+        };
+        let name = format!("{}.error", request_id.as_str());
+        let Some(inode) = self.outbox.remove(&(parent, name)) else {
+            return;
+        };
+        self.remove_dynamic_child(parent, inode);
+    }
+
+    fn update_cluster_task_for_retry(&mut self, request_id: &RequestId, fingerprint: &str) {
+        let Some(tasks_parent) = self.cluster_tasks_parent else {
+            return;
+        };
+        let Some(task_dir) = self
+            .lookup_child(tasks_parent, request_id.as_str())
+            .map(Node::inode)
+        else {
+            return;
+        };
+        if let Some(state) = self.lookup_child(task_dir, "state").map(Node::inode) {
+            self.update_dynamic_file(state, "pending\n");
+        }
+        if let Some(error) = self.lookup_child(task_dir, "error").map(Node::inode) {
+            self.update_dynamic_file(error, "\n");
+        }
+        if let Some(events) = self.lookup_child(task_dir, "events.jsonl").map(Node::inode) {
+            let current = self
+                .nodes
+                .get(&events)
+                .and_then(Node::content)
+                .map_or_else(String::new, ToOwned::to_owned);
+            self.update_dynamic_file(
+                events,
+                format!("{current}{{\"event\":\"retry\",\"fingerprint\":\"{fingerprint}\"}}\n"),
+            );
+        }
+        if let Some(audit) = self.lookup_child(task_dir, "audit").map(Node::inode) {
+            let current = self
+                .nodes
+                .get(&audit)
+                .and_then(Node::content)
+                .map_or_else(String::new, ToOwned::to_owned);
+            self.update_dynamic_file(
+                audit,
+                format!("{current}{{\"event\":\"retry\",\"fingerprint\":\"{fingerprint}\"}}\n"),
+            );
+        }
     }
 
     fn update_cluster_worker_after_task(&mut self, request_id: &RequestId) {
@@ -2958,17 +3089,24 @@ impl RuntimeState {
         let Some(pending) = self.pending.remove(&request_id) else {
             return Err(libc::EIO.into());
         };
+        if !Self::tool_allowed(&pending) {
+            self.materialize_tool_permission_denial(&request_id, &pending);
+            self.append_tool_permission_denial(&request_id, &pending);
+            self.append_audit(
+                pending.tool.unwrap_or(pending.format),
+                request_id.as_str(),
+                "denied",
+            );
+            self.update_last_drained(format!("{}\n", request_id.as_str()));
+            return Ok(true);
+        }
         let response_body = self.execute_tool(&pending)?;
         let response_name = format!("{}.resp.json", request_id.as_str());
         self.append_tool_call_export(&request_id, &pending, &response_body);
         self.append_tool_loop_steps(&request_id, &pending, &response_body);
         self.append_agent_trace_export(&request_id, &pending, &response_body);
         if pending.tool == Some(MCP_LOCAL_FS_READ_TOOL) {
-            self.append_mcp_session_transcript(format!(
-                "{{\"type\":\"tool_result\",\"request_id\":\"{}\",\"tool\":\"{}\",\"status\":\"ok\"}}\n",
-                request_id.as_str(),
-                MCP_LOCAL_FS_READ_TOOL
-            ));
+            self.append_mcp_tool_transcript(&request_id, MCP_LOCAL_FS_READ_TOOL);
         }
         let response_inode =
             self.upsert_outbox_response(pending.outbox_parent, &response_name, response_body);
@@ -2981,6 +3119,52 @@ impl RuntimeState {
         );
         self.update_last_drained(format!("{}\n", request_id.as_str()));
         Ok(true)
+    }
+
+    fn tool_allowed(pending: &PendingResponse) -> bool {
+        pending
+            .tool
+            .is_some_and(|tool| cortex_tools::DEFAULT_ALLOWED_TOOLS.contains(&tool))
+    }
+
+    fn materialize_tool_permission_denial(
+        &mut self,
+        request_id: &RequestId,
+        pending: &PendingResponse,
+    ) {
+        let tool = pending.tool.unwrap_or(pending.format);
+        let error_name = format!("{}.error", request_id.as_str());
+        let body = format!(
+            "{{\"request_id\":\"{}\",\"tool\":\"{}\",\"status\":\"denied\",\"permission\":\"{}\",\"policy\":\"agent/helper/policy/allowed_tools\"}}\n",
+            request_id.as_str(),
+            tool,
+            Self::permission_for_tool(tool),
+        );
+        let error_inode = self.upsert_outbox_response(pending.outbox_parent, &error_name, body);
+        self.outbox
+            .insert((pending.outbox_parent, error_name), error_inode);
+    }
+
+    fn permission_for_tool(tool: &str) -> &'static str {
+        match tool {
+            FILESYSTEM_READ_TOOL => cortex_tools::HOST_FS_READ_PERMISSION,
+            MCP_LOCAL_FS_READ_TOOL => cortex_tools::MCP_LOCAL_FS_READ_FILE_PERMISSION,
+            SHELL_EXEC_TOOL => cortex_tools::HOST_SHELL_EXEC_PERMISSION,
+            _ => "tool.invoke",
+        }
+    }
+
+    fn append_mcp_tool_transcript(&mut self, request_id: &RequestId, tool: &str) {
+        self.append_mcp_session_transcript(format!(
+            "{{\"type\":\"permission_check\",\"request_id\":\"{}\",\"tool\":\"{}\",\"permission\":\"{}\",\"decision\":\"allow\",\"policy\":\"agent/helper/policy/allowed_tools\"}}\n{{\"type\":\"tool_call\",\"request_id\":\"{}\",\"tool\":\"{}\"}}\n{{\"type\":\"tool_result\",\"request_id\":\"{}\",\"tool\":\"{}\",\"status\":\"ok\"}}\n",
+            request_id.as_str(),
+            tool,
+            Self::permission_for_tool(tool),
+            request_id.as_str(),
+            tool,
+            request_id.as_str(),
+            tool,
+        ));
     }
 
     fn execute_tool(&self, pending: &PendingResponse) -> fuse3::Result<String> {
@@ -3011,40 +3195,31 @@ impl RuntimeState {
         let normalized = path.trim_start_matches('/');
         match normalized {
             "status" => Ok(STATUS_TEXT.to_owned()),
-            "home/1000/thread/demo/messages.jsonl"
-            | "spaces/users/1000/thread/demo/messages.jsonl"
-            | "home/1000/threads/demo/messages.jsonl"
-            | "spaces/users/1000/threads/demo/messages.jsonl" => self
+            "home/1000/thread/demo/messages.jsonl" => self
                 .thread_messages_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "home/1000/thread/demo/latest.md"
-            | "spaces/users/1000/thread/demo/latest.md"
-            | "home/1000/threads/demo/latest.md"
-            | "spaces/users/1000/threads/demo/latest.md" => self
+            "home/1000/thread/demo/latest.md" => self
                 .thread_latest_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "home/1000/thread/demo/fingerprint"
-            | "spaces/users/1000/thread/demo/fingerprint"
-            | "home/1000/threads/demo/fingerprint"
-            | "spaces/users/1000/threads/demo/fingerprint" => self
+            "home/1000/thread/demo/fingerprint" => self
                 .thread_fingerprint_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "spaces/external/qq/groups/888888/threads/demo/messages.jsonl" => self
+            "ext/qq/group/888888/thread/demo/messages.jsonl" => self
                 .external_thread_messages_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
                 .map(ToOwned::to_owned)
                 .ok_or_else(fuse3::Errno::new_not_exist),
-            "spaces/external/qq/groups/888888/threads/demo/latest.md" => self
+            "ext/qq/group/888888/thread/demo/latest.md" => self
                 .external_thread_latest_inode
                 .and_then(|inode| self.nodes.get(&inode))
                 .and_then(Node::content)
@@ -3163,16 +3338,23 @@ impl RuntimeState {
         let error_inode = self.upsert_outbox_response(pending.outbox_parent, &error_name, body);
         self.outbox
             .insert((pending.outbox_parent, error_name), error_inode);
+        let audit_subject = external_subject_for_submission(pending.scope, &pending.request_body);
+        let audit_space = self.audit_space_for_submission(pending.scope);
         if let Some(route) = pending.route.as_ref() {
-            self.append_audit_with_route(
-                pending.format,
-                request_id.as_str(),
-                "error",
-                Some(pending.fingerprint.as_str()),
+            self.append_audit_route_event(&AuditRouteEvent {
+                format: pending.format,
+                name: request_id.as_str(),
+                event: "error",
+                fingerprint: Some(pending.fingerprint.as_str()),
                 route,
-            );
+                external_subject: audit_subject.as_deref(),
+                space: audit_space.as_deref(),
+            });
         } else {
             self.append_audit(pending.format, request_id.as_str(), "error");
+        }
+        if pending.scope == SubmissionScope::Batch {
+            self.update_batch_files();
         }
         Ok(())
     }
@@ -3192,14 +3374,18 @@ impl RuntimeState {
             self.outbox
                 .insert((pending.outbox_parent, response_name), response_inode);
         }
+        let audit_subject = external_subject_for_submission(pending.scope, &pending.request_body);
+        let audit_space = self.audit_space_for_submission(pending.scope);
         if let Some(route) = pending.route.as_ref() {
-            self.append_audit_with_route(
-                pending.format,
-                request_id.as_str(),
-                "drained",
-                Some(pending.fingerprint.as_str()),
+            self.append_audit_route_event(&AuditRouteEvent {
+                format: pending.format,
+                name: request_id.as_str(),
+                event: "drained",
+                fingerprint: Some(pending.fingerprint.as_str()),
                 route,
-            );
+                external_subject: audit_subject.as_deref(),
+                space: audit_space.as_deref(),
+            });
         } else {
             self.append_audit(pending.format, request_id.as_str(), "drained");
         }
@@ -3263,6 +3449,14 @@ impl RuntimeState {
         }
     }
 
+    fn audit_space_for_submission(&self, scope: SubmissionScope) -> Option<String> {
+        if scope == SubmissionScope::ExternalThread {
+            Some(self.context.external_space.clone())
+        } else {
+            None
+        }
+    }
+
     fn update_dynamic_file(&mut self, inode: Inode, content: impl Into<String>) {
         if let Some(node) = self.nodes.get_mut(&inode) {
             node.content = Some(NodeContent::Dynamic(content.into()));
@@ -3283,6 +3477,16 @@ impl RuntimeState {
         inode
     }
 
+    fn upsert_dynamic_child(&mut self, parent: Inode, name: &str, content: String) -> Inode {
+        if let Some(inode) = self.lookup_child(parent, name).map(Node::inode) {
+            if let Some(node) = self.nodes.get_mut(&inode) {
+                node.content = Some(NodeContent::Dynamic(content));
+            }
+            return inode;
+        }
+        self.add_dynamic_file_owned(parent, name.to_owned(), content)
+    }
+
     fn allocate_inode(&mut self) -> Inode {
         let inode = self.next_inode;
         self.next_inode = self.next_inode.saturating_add(1);
@@ -3297,6 +3501,30 @@ fn dir_entry(inode: Inode, kind: FileType, name: &str, offset: i64) -> Directory
         name: OsString::from(name),
         offset,
     }
+}
+
+fn external_subject_for_submission(scope: SubmissionScope, body: &str) -> Option<String> {
+    if scope == SubmissionScope::ExternalThread {
+        external_subject(body)
+    } else {
+        None
+    }
+}
+
+fn secret_active_id(provider: &str) -> String {
+    if provider_spec(provider).is_some_and(|spec| spec.account_type.trim() == "local_runtime") {
+        "not_required\n".to_owned()
+    } else {
+        "none\n".to_owned()
+    }
+}
+
+fn provider_secret_status(provider: &str) -> &'static str {
+    provider_spec(provider).map_or("missing\n", |spec| spec.secret_status)
+}
+
+fn secret_rotating_id(provider: &str) -> String {
+    format!("{provider}-key-rotating\n")
 }
 
 #[cfg(test)]

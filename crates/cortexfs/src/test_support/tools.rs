@@ -5,44 +5,43 @@ fn projection_exposes_unified_tools_with_invoke_dirs() {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["tools", "count"])
+        fs.lookup_path(["tool", "count"])
             .and_then(crate::Node::content),
         Some("3\n")
     );
     assert_eq!(
-        fs.lookup_path(["tools", "list"])
+        fs.lookup_path(["tool", "list"])
             .and_then(crate::Node::content),
         Some("shell.exec\nfilesystem.read\nmcp.local-fs.read_file\n")
     );
     for tool in ["shell.exec", "filesystem.read", "mcp.local-fs.read_file"] {
         assert!(
-            fs.lookup_path(["tools", tool, "input_schema.json"])
+            fs.lookup_path(["tool", tool, "input_schema.json"])
                 .and_then(crate::Node::content)
                 .is_some_and(|schema| schema.contains("\"type\":\"object\"")),
             "tool input schema must be readable"
         );
         assert!(
-            fs.lookup_path(["tools", tool, "output_schema.json"])
+            fs.lookup_path(["tool", tool, "output_schema.json"])
                 .and_then(crate::Node::content)
                 .is_some_and(|schema| schema.contains("\"type\":\"object\"")),
             "tool output schema must be readable"
         );
         assert!(
-            fs.lookup_path(["tools", tool, "permissions"]).is_some(),
+            fs.lookup_path(["tool", tool, "permissions"]).is_some(),
             "tool permissions must be visible"
         );
         assert!(
-            fs.lookup_path(["tools", tool, "invoke", "inbox"]).is_some(),
+            fs.lookup_path(["tool", tool, "invoke", "inbox"]).is_some(),
             "tool invoke inbox must exist"
         );
         assert!(
-            fs.lookup_path(["tools", tool, "invoke", "outbox"])
-                .is_some(),
+            fs.lookup_path(["tool", tool, "invoke", "outbox"]).is_some(),
             "tool invoke outbox must exist"
         );
     }
     assert_eq!(
-        fs.lookup_path(["tools", "mcp.local-fs.read_file", "kind"])
+        fs.lookup_path(["tool", "mcp.local-fs.read_file", "kind"])
             .and_then(crate::Node::content),
         Some("mcp\n")
     );
@@ -53,27 +52,27 @@ fn projection_exposes_tool_permissions_and_default_policy_allowlists() {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["tools", "shell.exec", "permissions"])
+        fs.lookup_path(["tool", "shell.exec", "permissions"])
             .and_then(crate::Node::content),
         Some("host.shell.exec\n")
     );
     assert_eq!(
-        fs.lookup_path(["tools", "filesystem.read", "permissions"])
+        fs.lookup_path(["tool", "filesystem.read", "permissions"])
             .and_then(crate::Node::content),
         Some("host.fs.read\n")
     );
     assert_eq!(
-        fs.lookup_path(["tools", "mcp.local-fs.read_file", "permissions"])
+        fs.lookup_path(["tool", "mcp.local-fs.read_file", "permissions"])
             .and_then(crate::Node::content),
         Some("mcp.local-fs.read_file\nhost.fs.read\n")
     );
 
     let user_tools = fs
-        .lookup_path(["spaces", "users", "1000", "tools", "enabled"])
+        .lookup_path(["home", "1000", "tool", "enabled"])
         .and_then(crate::Node::content)
         .unwrap_or_default();
     let agent_tools = fs
-        .lookup_path(["agents", "helper", "policy", "allowed_tools"])
+        .lookup_path(["agent", "helper", "policy", "allowed_tools"])
         .and_then(crate::Node::content)
         .unwrap_or_default();
 
@@ -156,6 +155,24 @@ fn filesystem_read_tool_invoke_materializes_response_after_drain() -> fuse3::Res
     assert!(tool_calls.contains("\"status\":\"ok\""));
     assert!(tool_calls.contains("\"output\":"));
     assert!(tool_calls.contains("tool visible"));
+    let tool_loop = fs
+        .tree
+        .path_inode(crate::DEMO_THREAD_TOOL_LOOP_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    let steps = runtime
+        .lookup_child(tool_loop, "steps.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(steps.contains("\"type\":\"permission_check\""));
+    assert!(steps.contains("\"decision\":\"allow\""));
+    assert!(steps.contains("\"permission\":\"host.fs.read\""));
+    assert!(steps.contains("\"policy\":\"agent/helper/policy/allowed_tools\""));
+    drop(runtime);
+    let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
+    assert!(agent_traces.contains("\"event\":\"permission_check\""));
+    assert!(agent_traces.contains("\"permission\":\"host.fs.read\""));
+    assert!(agent_traces.contains("\"decision\":\"allow\""));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"filesystem.read\"")
@@ -219,7 +236,42 @@ fn export_agent_filter_rebuilds_tool_and_agent_trace_views() -> fuse3::Result<()
     assert!(fs.node_content(agent_traces)?.contains("filter visible"));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
-            .contains("\"format\":\"exports.filters\"")
+            .contains("\"format\":\"export.filter\"")
+    );
+    Ok(())
+}
+
+#[test]
+fn tool_training_exports_dedupe_repeated_requests_by_fingerprint_group() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    for request_id in ["tool-dupe-a", "tool-dupe-b"] {
+        fs.create_staged_tool_request(&format!("{request_id}.tmp"), "{\"path\":\"status\"}\n")?;
+        fs.submit_tool_request(
+            &format!("{request_id}.tmp"),
+            &format!("{request_id}.req.json"),
+        )?;
+        let drain = fs.control_file_inode("drain")?;
+        {
+            let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+            runtime.write(drain, 0, b"1\n")?;
+        }
+    }
+
+    let tool_calls = fs.node_content(fs.export_file_inode("tool_calls.jsonl")?)?;
+    assert!(tool_calls.contains("\"request_id\":\"tool-dupe-a\""));
+    assert!(!tool_calls.contains("\"request_id\":\"tool-dupe-b\""));
+    assert_eq!(tool_calls.lines().count(), 1);
+
+    let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
+    assert!(agent_traces.contains("\"request_id\":\"tool-dupe-a\""));
+    assert!(!agent_traces.contains("\"request_id\":\"tool-dupe-b\""));
+    assert!(agent_traces.contains("\"event\":\"permission_check\""));
+    assert!(agent_traces.contains("\"event\":\"tool_call\""));
+    assert!(agent_traces.contains("\"event\":\"tool_result\""));
+    assert_eq!(
+        agent_traces.lines().count(),
+        3,
+        "dedupe must keep the first complete trace group"
     );
     Ok(())
 }
@@ -263,5 +315,75 @@ fn tool_submit_is_not_blocked_by_provider_model_gate() -> fuse3::Result<()> {
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(response.contains("\"content\":\"ready\\n\""));
     drop(runtime);
+    Ok(())
+}
+
+#[test]
+fn shell_exec_tool_is_denied_by_default_policy() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.create_staged_tool_request_at(
+        crate::SHELL_EXEC_TOOL_INBOX_PATH,
+        "shell-deny.tmp",
+        "{\"command\":\"echo should-not-run\"}\n",
+    )?;
+    fs.submit_tool_request_at(
+        crate::SHELL_EXEC_TOOL_INBOX_PATH,
+        "shell-deny.tmp",
+        "shell-deny.req.json",
+    )?;
+
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let outbox = fs
+        .tree
+        .path_inode(crate::SHELL_EXEC_TOOL_OUTBOX_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let tool_loop = fs
+        .tree
+        .path_inode(crate::DEMO_THREAD_TOOL_LOOP_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert!(
+        runtime
+            .lookup_child(outbox, "shell-deny.resp.json")
+            .is_none()
+    );
+    let error = runtime
+        .lookup_child(outbox, "shell-deny.error")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(error.contains("\"status\":\"denied\""));
+    assert!(error.contains("\"tool\":\"shell.exec\""));
+    assert!(error.contains("\"permission\":\"host.shell.exec\""));
+    let steps = runtime
+        .lookup_child(tool_loop, "steps.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(steps.contains("\"type\":\"permission_check\""));
+    assert!(steps.contains("\"decision\":\"deny\""));
+    assert!(steps.contains("\"tool\":\"shell.exec\""));
+    assert!(!steps.contains("\"type\":\"tool_call\""));
+    assert!(!steps.contains("\"type\":\"tool_result\""));
+    drop(runtime);
+
+    let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
+    assert!(agent_traces.contains("\"event\":\"permission_check\""));
+    assert!(agent_traces.contains("\"decision\":\"deny\""));
+    assert!(agent_traces.contains("\"permission\":\"host.shell.exec\""));
+    assert_eq!(
+        fs.node_content(fs.export_file_inode("tool_calls.jsonl")?)?,
+        ""
+    );
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("queue_depth")?)?,
+        "0\n"
+    );
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains("\"format\":\"shell.exec\""));
+    assert!(audit.contains("\"event\":\"denied\""));
     Ok(())
 }

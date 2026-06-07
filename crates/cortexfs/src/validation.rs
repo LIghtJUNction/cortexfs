@@ -59,13 +59,7 @@ pub fn normalize_collab_claim_owner(body: &str) -> fuse3::Result<String> {
 
 pub fn normalize_collab_actor(body: &str) -> fuse3::Result<String> {
     let owner = body.trim();
-    if matches!(
-        owner,
-        "agent/helper"
-            | "agents/helper"
-            | "cluster/local/worker/local-worker"
-            | "clusters/local/workers/local-worker"
-    ) {
+    if matches!(owner, "agent/helper" | "cluster/local/worker/local-worker") {
         return Ok(owner.to_owned());
     }
     Err(libc::EINVAL.into())
@@ -73,17 +67,11 @@ pub fn normalize_collab_actor(body: &str) -> fuse3::Result<String> {
 
 pub fn request_fingerprint(
     format: &str,
-    request_id: &str,
+    _request_id: &str,
     request_content: &str,
 ) -> fuse3::Result<Fingerprint> {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in format
-        .bytes()
-        .chain([0])
-        .chain(request_id.bytes())
-        .chain([0])
-        .chain(request_content.bytes())
-    {
+    for byte in format.bytes().chain([0]).chain(request_content.bytes()) {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }

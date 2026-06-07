@@ -1,5 +1,6 @@
 use cortex_store::RequestId;
 use fuse3::Inode;
+use std::collections::HashSet;
 
 use crate::runtime_types::{
     AgentTask, ConversationExportRow, PendingResponse, TrainingExportMetadata, TrainingExportRow,
@@ -18,7 +19,7 @@ impl RuntimeState {
         if let Some(inode) = self.export_refresh_inode {
             self.update_dynamic_file(inode, "1\n");
         }
-        self.append_audit("exports", "refresh", "refreshed");
+        self.append_audit("export", "refresh", "refreshed");
     }
 
     fn sft_export(&self) -> String {
@@ -77,19 +78,23 @@ impl RuntimeState {
     ) {
         let request = json_string(&pending.request_body);
         let response = json_string(response_body);
-        let (subject, space) = export_subject_and_space(pending);
+        let local_space = self.context.local_space.clone();
+        let external_space = self.context.external_space.clone();
+        let (subject, space) = export_subject_and_space(pending, &local_space, &external_space);
         let metadata = export_metadata_json(subject.as_deref());
+        let agent = self.context.agent.clone();
         self.export_seq = self.export_seq.saturating_add(1);
         let time = format!("{:020}", self.export_seq);
         let (line, provider, model) = pending.route.as_ref().map_or_else(
             || {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":{},\"space\":{},{}\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
                         time,
                         pending.format,
                         pending.fingerprint,
+                        json_string(&agent),
                         json_string(space),
                         metadata,
                         request,
@@ -102,11 +107,12 @@ impl RuntimeState {
             |route| {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":\"helper\",\"space\":{},{}\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":{},\"space\":{},{}\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
                         time,
                         pending.format,
                         pending.fingerprint,
+                        json_string(&agent),
                         json_string(space),
                         metadata,
                         json_string(&route.provider),
@@ -123,9 +129,11 @@ impl RuntimeState {
         self.conversation_rows.push(ConversationExportRow {
             line,
             time,
+            fingerprint: pending.fingerprint.clone(),
+            dedupe_key: pending.fingerprint.clone(),
             provider,
             model,
-            agent: Some("helper".to_owned()),
+            agent: Some(agent),
             subject,
             space: Some(space.to_owned()),
             failed: false,
@@ -135,22 +143,16 @@ impl RuntimeState {
 
     pub fn refresh_training_exports(&mut self) {
         self.refresh_conversations_export();
+        self.refresh_preference_export();
         self.refresh_tool_calls_export();
         self.refresh_agent_traces_export();
     }
 
     fn refresh_conversations_export(&mut self) {
-        use std::fmt::Write as _;
         let Some(export_inode) = self.conversations_export_inode else {
             return;
         };
-        let mut rows = String::new();
-        for row in &self.conversation_rows {
-            if !self.export_row_visible(row) {
-                continue;
-            }
-            let _ = writeln!(rows, "{}", row.line);
-        }
+        let rows = self.filtered_deduped_rows(&self.conversation_rows);
         self.update_dynamic_file(export_inode, rows);
     }
 
@@ -159,6 +161,14 @@ impl RuntimeState {
             return;
         };
         let content = self.filtered_training_rows(&self.tool_call_rows);
+        self.update_dynamic_file(export_inode, content);
+    }
+
+    fn refresh_preference_export(&mut self) {
+        let Some(export_inode) = self.preference_export_inode else {
+            return;
+        };
+        let content = self.filtered_training_rows(&self.preference_rows);
         self.update_dynamic_file(export_inode, content);
     }
 
@@ -171,14 +181,22 @@ impl RuntimeState {
     }
 
     fn filtered_training_rows(&self, rows: &[TrainingExportRow]) -> String {
+        self.filtered_deduped_rows(rows)
+    }
+
+    fn filtered_deduped_rows(&self, rows: &[impl ExportFilterRow]) -> String {
         use std::fmt::Write as _;
 
         let mut content = String::new();
+        let mut seen = HashSet::new();
         for row in rows {
             if !self.export_row_visible(row) {
                 continue;
             }
-            let _ = writeln!(content, "{}", row.line);
+            if !seen.insert(row.dedupe_key()) {
+                continue;
+            }
+            let _ = writeln!(content, "{}", row.line());
         }
         content
     }
@@ -243,7 +261,8 @@ impl RuntimeState {
             json_string(response_body),
             pending.fingerprint,
         );
-        let row = self.next_training_export_row(line, helper_training_metadata());
+        let row = self
+            .next_training_export_row(line, self.helper_training_metadata(&pending.fingerprint));
         self.tool_call_rows.push(row);
         self.refresh_tool_calls_export();
     }
@@ -270,8 +289,13 @@ impl RuntimeState {
         let tool = pending.tool.unwrap_or(pending.format);
         let _ = writeln!(
             content,
+            "{}",
+            permission_check_line(next_step, request_id, tool, pending)
+        );
+        let _ = writeln!(
+            content,
             "{{\"step\":{},\"type\":\"tool_call\",\"request_id\":\"{}\",\"tool\":\"{}\",\"input\":{},\"fingerprint\":\"{}\"}}",
-            next_step,
+            next_step.saturating_add(1),
             request_id.as_str(),
             tool,
             json_string(&pending.request_body),
@@ -280,7 +304,7 @@ impl RuntimeState {
         let _ = writeln!(
             content,
             "{{\"step\":{},\"type\":\"tool_result\",\"request_id\":\"{}\",\"tool\":\"{}\",\"output\":{},\"fingerprint\":\"{}\"}}",
-            next_step.saturating_add(1),
+            next_step.saturating_add(2),
             request_id.as_str(),
             tool,
             json_string(response_body),
@@ -295,25 +319,65 @@ impl RuntimeState {
         response_body: &str,
     ) {
         let tool = pending.tool.unwrap_or(pending.format);
+        let permission_check = permission_check_trace_line(request_id, tool, pending);
+        let agent = self.context.agent.clone();
         for line in [
+            permission_check,
             format!(
-                "{{\"agent\":\"helper\",\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"tool_call\",\"tool\":\"{}\",\"input\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"tool_call\",\"tool\":\"{}\",\"input\":{},\"fingerprint\":\"{}\"}}",
+                json_string(&agent),
                 request_id.as_str(),
                 tool,
                 json_string(&pending.request_body),
                 pending.fingerprint,
             ),
             format!(
-                "{{\"agent\":\"helper\",\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"tool_result\",\"tool\":\"{}\",\"output\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"tool_result\",\"tool\":\"{}\",\"output\":{},\"fingerprint\":\"{}\"}}",
+                json_string(&agent),
                 request_id.as_str(),
                 tool,
                 json_string(response_body),
                 pending.fingerprint,
             ),
         ] {
-            let row = self.next_training_export_row(line, helper_training_metadata());
+            let slot = trace_slot(&line);
+            let row = self.next_training_export_row(
+                line,
+                self.helper_training_metadata_with_slot(&pending.fingerprint, slot),
+            );
             self.agent_trace_rows.push(row);
         }
+        self.refresh_agent_traces_export();
+    }
+
+    pub fn append_tool_permission_denial(
+        &mut self,
+        request_id: &RequestId,
+        pending: &PendingResponse,
+    ) {
+        use std::fmt::Write as _;
+
+        let tool = pending.tool.unwrap_or(pending.format);
+        if let Some(steps_inode) = self.tool_loop_steps_inode
+            && let Some(content) = self
+                .nodes
+                .get_mut(&steps_inode)
+                .and_then(|node| node.content.as_mut())
+                .and_then(NodeContent::as_dynamic_mut)
+        {
+            let next_step = content.lines().count().saturating_add(1);
+            let _ = writeln!(
+                content,
+                "{}",
+                permission_check_line_with_decision(next_step, request_id, tool, pending, "deny")
+            );
+        }
+
+        let row = self.next_training_export_row(
+            permission_check_trace_line_with_decision(request_id, tool, pending, "deny"),
+            self.helper_training_metadata_with_slot(&pending.fingerprint, "permission_check"),
+        );
+        self.agent_trace_rows.push(row);
         self.refresh_agent_traces_export();
     }
 
@@ -323,27 +387,34 @@ impl RuntimeState {
         task: &AgentTask,
         response_body: &str,
     ) {
+        let agent = self.context.agent.clone();
         for line in [
             format!(
-                "{{\"agent\":\"helper\",\"request_id\":\"{}\",\"event\":\"task\",\"input\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"request_id\":\"{}\",\"event\":\"task\",\"input\":{},\"fingerprint\":\"{}\"}}",
+                json_string(&agent),
                 request_id.as_str(),
                 json_string(&task.body),
                 task.fingerprint,
             ),
             format!(
-                "{{\"agent\":\"helper\",\"request_id\":\"{}\",\"event\":\"task_result\",\"output\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"request_id\":\"{}\",\"event\":\"task_result\",\"output\":{},\"fingerprint\":\"{}\"}}",
+                json_string(&agent),
                 request_id.as_str(),
                 json_string(response_body),
                 task.fingerprint,
             ),
         ] {
-            let row = self.next_training_export_row(line, helper_training_metadata());
+            let slot = trace_slot(&line);
+            let row = self.next_training_export_row(
+                line,
+                self.helper_training_metadata_with_slot(&task.fingerprint, slot),
+            );
             self.agent_trace_rows.push(row);
         }
         self.refresh_agent_traces_export();
     }
 
-    fn next_training_export_row(
+    pub(crate) fn next_training_export_row(
         &mut self,
         line: String,
         metadata: TrainingExportMetadata,
@@ -352,6 +423,12 @@ impl RuntimeState {
         TrainingExportRow {
             line,
             time: format!("{:020}", self.export_seq),
+            dedupe_key: if metadata.dedupe_key.is_empty() {
+                metadata.fingerprint.clone()
+            } else {
+                metadata.dedupe_key
+            },
+            fingerprint: metadata.fingerprint,
             provider: metadata.provider,
             model: metadata.model,
             agent: metadata.agent,
@@ -360,10 +437,92 @@ impl RuntimeState {
             failed: metadata.failed,
         }
     }
+
+    fn helper_training_metadata(&self, fingerprint: &str) -> TrainingExportMetadata {
+        TrainingExportMetadata {
+            fingerprint: fingerprint.to_owned(),
+            agent: Some(self.context.agent.clone()),
+            space: Some(self.context.local_space.clone()),
+            ..TrainingExportMetadata::default()
+        }
+    }
+
+    fn helper_training_metadata_with_slot(
+        &self,
+        fingerprint: &str,
+        slot: &str,
+    ) -> TrainingExportMetadata {
+        TrainingExportMetadata {
+            dedupe_key: format!("{fingerprint}:{slot}"),
+            ..self.helper_training_metadata(fingerprint)
+        }
+    }
+}
+
+fn permission_for_tool(tool: &str) -> &'static str {
+    match tool {
+        crate::SHELL_EXEC_TOOL => cortex_tools::HOST_SHELL_EXEC_PERMISSION,
+        crate::FILESYSTEM_READ_TOOL => "host.fs.read",
+        crate::MCP_LOCAL_FS_READ_TOOL => "mcp.local-fs.read_file",
+        _ => "tool.invoke",
+    }
+}
+
+fn permission_check_line(
+    step: usize,
+    request_id: &RequestId,
+    tool: &str,
+    pending: &PendingResponse,
+) -> String {
+    permission_check_line_with_decision(step, request_id, tool, pending, "allow")
+}
+
+fn permission_check_line_with_decision(
+    step: usize,
+    request_id: &RequestId,
+    tool: &str,
+    pending: &PendingResponse,
+    decision: &str,
+) -> String {
+    format!(
+        "{{\"step\":{},\"type\":\"permission_check\",\"request_id\":\"{}\",\"tool\":\"{}\",\"permission\":\"{}\",\"decision\":\"{}\",\"policy\":\"agent/helper/policy/allowed_tools\",\"fingerprint\":\"{}\"}}",
+        step,
+        request_id.as_str(),
+        tool,
+        permission_for_tool(tool),
+        decision,
+        pending.fingerprint,
+    )
+}
+
+fn permission_check_trace_line(
+    request_id: &RequestId,
+    tool: &str,
+    pending: &PendingResponse,
+) -> String {
+    permission_check_trace_line_with_decision(request_id, tool, pending, "allow")
+}
+
+fn permission_check_trace_line_with_decision(
+    request_id: &RequestId,
+    tool: &str,
+    pending: &PendingResponse,
+    decision: &str,
+) -> String {
+    format!(
+        "{{\"agent\":\"helper\",\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"permission_check\",\"tool\":\"{}\",\"permission\":\"{}\",\"decision\":\"{}\",\"policy\":\"agent/helper/policy/allowed_tools\",\"fingerprint\":\"{}\"}}",
+        request_id.as_str(),
+        tool,
+        permission_for_tool(tool),
+        decision,
+        pending.fingerprint,
+    )
 }
 
 trait ExportFilterRow {
+    fn line(&self) -> &str;
     fn time(&self) -> &str;
+    fn dedupe_key(&self) -> &str;
     fn provider(&self) -> Option<&str>;
     fn model(&self) -> Option<&str>;
     fn agent(&self) -> Option<&str>;
@@ -373,8 +532,16 @@ trait ExportFilterRow {
 }
 
 impl ExportFilterRow for ConversationExportRow {
+    fn line(&self) -> &str {
+        &self.line
+    }
+
     fn time(&self) -> &str {
         &self.time
+    }
+
+    fn dedupe_key(&self) -> &str {
+        &self.dedupe_key
     }
 
     fn provider(&self) -> Option<&str> {
@@ -403,8 +570,16 @@ impl ExportFilterRow for ConversationExportRow {
 }
 
 impl ExportFilterRow for TrainingExportRow {
+    fn line(&self) -> &str {
+        &self.line
+    }
+
     fn time(&self) -> &str {
         &self.time
+    }
+
+    fn dedupe_key(&self) -> &str {
+        &self.dedupe_key
     }
 
     fn provider(&self) -> Option<&str> {
@@ -432,11 +607,19 @@ impl ExportFilterRow for TrainingExportRow {
     }
 }
 
-fn helper_training_metadata() -> TrainingExportMetadata {
-    TrainingExportMetadata {
-        agent: Some("helper".to_owned()),
-        space: Some("home/1000".to_owned()),
-        ..TrainingExportMetadata::default()
+fn trace_slot(line: &str) -> &'static str {
+    if line.contains("\"event\":\"permission_check\"") {
+        "permission_check"
+    } else if line.contains("\"event\":\"tool_call\"") {
+        "tool_call"
+    } else if line.contains("\"event\":\"tool_result\"") {
+        "tool_result"
+    } else if line.contains("\"event\":\"task_result\"") {
+        "task_result"
+    } else if line.contains("\"event\":\"task\"") {
+        "task"
+    } else {
+        "trace"
     }
 }
 
@@ -446,13 +629,14 @@ fn export_metadata_json(subject: Option<&str>) -> String {
     })
 }
 
-fn export_subject_and_space(pending: &PendingResponse) -> (Option<String>, &'static str) {
+fn export_subject_and_space<'a>(
+    pending: &PendingResponse,
+    local_space: &'a str,
+    external_space: &'a str,
+) -> (Option<String>, &'a str) {
     if pending.scope == SubmissionScope::ExternalThread {
-        (
-            external_subject(&pending.request_body),
-            "spaces/external/qq/groups/888888",
-        )
+        (external_subject(&pending.request_body), external_space)
     } else {
-        (None, "home/1000")
+        (None, local_space)
     }
 }

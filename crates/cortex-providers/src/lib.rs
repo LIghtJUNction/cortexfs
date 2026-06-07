@@ -4,10 +4,13 @@ use cortex_core::{ApiFormat, ModelId, ProviderId};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
-/// Provider health state exposed under `providers/<id>/health`.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Provider health state exposed under `provider/<id>/health`.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProviderHealth {
     status: ProviderStatus,
@@ -457,10 +460,10 @@ fn post_json(base_url: &str, path: &str, body: &str) -> ProviderResult<String> {
     let endpoint = HttpEndpoint::parse(base_url)?;
     let mut stream = endpoint.connect()?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
+        .set_read_timeout(Some(HTTP_IO_TIMEOUT))
         .map_err(|error| ProviderError::Transport(error.to_string()))?;
     stream
-        .set_write_timeout(Some(Duration::from_secs(30)))
+        .set_write_timeout(Some(HTTP_IO_TIMEOUT))
         .map_err(|error| ProviderError::Transport(error.to_string()))?;
     let request_target = endpoint.request_target(path);
     let host = endpoint.host_header();
@@ -521,18 +524,9 @@ impl HttpEndpoint {
     }
 
     fn connect(&self) -> ProviderResult<TcpStream> {
-        let addresses = (self.host.as_str(), self.port)
-            .to_socket_addrs()
-            .map_err(|error| ProviderError::Transport(error.to_string()))?
-            .collect::<Vec<_>>();
-        if addresses.is_empty() {
-            return Err(ProviderError::Transport(
-                "host resolved to no addresses".to_owned(),
-            ));
-        }
         let mut last_error = None;
-        for address in addresses {
-            match TcpStream::connect_timeout(&address, Duration::from_secs(15)) {
+        for address in self.addresses()? {
+            match TcpStream::connect_timeout(&address, HTTP_CONNECT_TIMEOUT) {
                 Ok(stream) => return Ok(stream),
                 Err(error) => last_error = Some(format!("{address}: {error}")),
             }
@@ -551,6 +545,19 @@ impl HttpEndpoint {
 
     fn host_header(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+
+    fn addresses(&self) -> ProviderResult<Vec<SocketAddr>> {
+        let addresses = (self.host.as_str(), self.port)
+            .to_socket_addrs()
+            .map_err(|error| ProviderError::Transport(error.to_string()))?
+            .collect::<Vec<_>>();
+        if addresses.is_empty() {
+            return Err(ProviderError::Transport(
+                "host resolved to no addresses".to_owned(),
+            ));
+        }
+        Ok(addresses)
     }
 }
 

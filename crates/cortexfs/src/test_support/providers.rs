@@ -55,25 +55,25 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
     let primary = crate::PROVIDER_SPECS
         .first()
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let compatible = crate::PROVIDER_SPECS
+    let secondary = crate::PROVIDER_SPECS
         .get(1)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let compatible_url = fs.provider_child_dir_inode(compatible.id, "url")?;
+    let secondary_url = fs.provider_child_dir_inode(secondary.id, "url")?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert_eq!(
         runtime
-            .lookup_child(compatible_url, "effective")
+            .lookup_child(secondary_url, "effective")
             .and_then(crate::Node::content),
-        Some(compatible.default_base_url)
+        Some(secondary.default_base_url)
     );
     drop(runtime);
     assert_eq!(
-        fs.lookup_path(["providers", primary.id, "context"])
+        fs.lookup_path(["provider", primary.id, "context"])
             .and_then(crate::Node::content),
         Some("local:provider_r:provider_t:s0\n")
     );
     assert_eq!(
-        fs.lookup_path(["providers", "count"])
+        fs.lookup_path(["provider", "count"])
             .and_then(crate::Node::content),
         Some(crate::provider_count().as_str())
     );
@@ -88,31 +88,31 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
         Some(format!("{}\n", primary.default_model).as_str())
     );
     assert_eq!(
-        fs.lookup_path(["providers", primary.id, "models", "count"])
+        fs.lookup_path(["provider", primary.id, "model", "count"])
             .and_then(crate::Node::content),
         Some("1\n"),
-        "provider models compatibility path must expose the same index content"
+        "provider model index must expose the model count"
     );
     assert_eq!(
-        fs.lookup_path(["providers", compatible.id, "family"])
+        fs.lookup_path(["provider", secondary.id, "family"])
             .and_then(crate::Node::content),
-        Some(compatible.family)
+        Some(secondary.family)
     );
     assert_eq!(
-        fs.lookup_path(["provider", compatible.id, "model", "list"])
+        fs.lookup_path(["provider", secondary.id, "model", "list"])
             .and_then(crate::Node::content),
-        Some(format!("{}\n", compatible.default_model).as_str())
+        Some(format!("{}\n", secondary.default_model).as_str())
     );
     assert_eq!(
         fs.lookup_path([
             "provider",
-            compatible.id,
+            secondary.id,
             "model",
-            compatible.default_model,
+            secondary.default_model,
             "format"
         ])
         .and_then(crate::Node::content),
-        Some(format!("{}\n", crate::default_format(compatible)).as_str())
+        Some(format!("{}\n", crate::default_format(secondary)).as_str())
     );
     assert_eq!(
         fs.lookup_path([
@@ -139,11 +139,11 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
         &fs,
         &[
             "provider".to_owned(),
-            compatible.id.to_owned(),
+            secondary.id.to_owned(),
             "model".to_owned(),
-            compatible.default_model.to_owned(),
+            secondary.default_model.to_owned(),
         ],
-        compatible,
+        secondary,
     );
     Ok(())
 }
@@ -154,7 +154,7 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
     let primary = crate::PROVIDER_SPECS
         .first()
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let compatible = crate::PROVIDER_SPECS
+    let secondary = crate::PROVIDER_SPECS
         .get(1)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
 
@@ -170,20 +170,20 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
     assert_eq!(
         fs.lookup_path_owned(&[
             "model".to_owned(),
-            crate::provider_model_id(compatible),
+            crate::provider_model_id(secondary),
             "provider".to_owned()
         ])
         .and_then(crate::Node::content),
-        Some(format!("{}\n", compatible.id).as_str())
+        Some(format!("{}\n", secondary.id).as_str())
     );
     assert_eq!(
         fs.lookup_path_owned(&[
             "model".to_owned(),
-            crate::provider_model_id(compatible),
+            crate::provider_model_id(secondary),
             "model".to_owned()
         ])
         .and_then(crate::Node::content),
-        Some(format!("{}\n", compatible.default_model).as_str())
+        Some(format!("{}\n", secondary.default_model).as_str())
     );
     assert_eq!(
         fs.lookup_path(["model", "count"])
@@ -196,10 +196,10 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
         Some(crate::global_model_list().as_str())
     );
     assert_eq!(
-        fs.lookup_path(["models", "list"])
+        fs.lookup_path(["model", "list"])
             .and_then(crate::Node::content),
         Some(crate::global_model_list().as_str()),
-        "global models compatibility path must expose the same index content"
+        "global model list must expose provider models"
     );
     assert_model_metadata(
         &fs,
@@ -208,8 +208,8 @@ fn global_model_index_follows_specs() -> fuse3::Result<()> {
     );
     assert_model_metadata(
         &fs,
-        &["model".to_owned(), crate::provider_model_id(compatible)],
-        compatible,
+        &["model".to_owned(), crate::provider_model_id(secondary)],
+        secondary,
     );
     let model_list_inode = fs
         .tree
@@ -230,12 +230,6 @@ fn projection_exposes_provider_supported_formats_from_specs() {
                 .and_then(crate::Node::content),
             Some(expected.as_str())
         );
-        assert_eq!(
-            fs.lookup_path(["providers", provider.id, "formats"])
-                .and_then(crate::Node::content),
-            Some(expected.as_str()),
-            "provider/<id>/formats remains a compatibility file"
-        );
     }
 }
 
@@ -244,18 +238,18 @@ fn projection_exposes_provider_root_index() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
     assert_eq!(
-        fs.lookup_path(["providers", "count"])
+        fs.lookup_path(["provider", "count"])
             .and_then(crate::Node::content),
         Some(crate::provider_count().as_str())
     );
     assert_eq!(
-        fs.lookup_path(["providers", "list"])
+        fs.lookup_path(["provider", "list"])
             .and_then(crate::Node::content),
         Some(crate::provider_list().as_str())
     );
     let providers_list_inode = fs
         .tree
-        .path_inode(&["providers", "list"])
+        .path_inode(&["provider", "list"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert_eq!(fs.node_attr(providers_list_inode)?.perm, 0o444);
     Ok(())
@@ -309,7 +303,7 @@ fn provider_health_check_updates_status_control_and_audit() -> fuse3::Result<()>
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("providers/{}/health/check\n", provider.id)
+            format!("provider/{}/health/check\n", provider.id)
         );
         let status = fs.provider_health_file_inode(provider.id, "status")?;
         assert_eq!(fs.node_content(status)?, "queued\n");
@@ -362,7 +356,66 @@ fn provider_secret_rotate_updates_only_secret_status_view() -> fuse3::Result<()>
     let fs = CortexFs::new();
 
     for provider in crate::PROVIDER_SPECS {
+        let secrets_dir = fs.provider_child_dir_inode(provider.id, "secrets")?;
+        for name in [
+            "status",
+            "active",
+            "rotate",
+            "last_rotated",
+            "next_rotation",
+        ] {
+            let mut path = crate::provider_child_path(provider.id, "secrets");
+            path.push(name.to_owned());
+            assert!(
+                fs.tree.path_inode_owned(&path).is_none(),
+                "provider secrets runtime file {name} must not have a static path inode"
+            );
+        }
+        let status = fs.provider_secrets_file_inode(provider.id, "status")?;
         let rotate = fs.provider_secrets_file_inode(provider.id, "rotate")?;
+        let active = fs.provider_secrets_file_inode(provider.id, "active")?;
+        let secret_entries = fs.children(secrets_dir);
+        for name in [
+            "status",
+            "active",
+            "rotate",
+            "last_rotated",
+            "next_rotation",
+        ] {
+            let entry_count = secret_entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count();
+            assert_eq!(
+                entry_count, 1,
+                "provider secrets directory must expose one {name} entry"
+            );
+        }
+        assert!(
+            secret_entries
+                .iter()
+                .any(|entry| entry.name.to_str() == Some("status") && entry.inode == status),
+            "provider secrets status entry must resolve to the runtime inode"
+        );
+        assert!(
+            secret_entries
+                .iter()
+                .any(|entry| entry.name.to_str() == Some("active") && entry.inode == active),
+            "provider secrets active entry must resolve to the runtime inode"
+        );
+        assert!(
+            secret_entries
+                .iter()
+                .any(|entry| entry.name.to_str() == Some("rotate") && entry.inode == rotate),
+            "provider secrets rotate entry must resolve to the runtime inode"
+        );
+        let initial_active = fs.node_content(active)?;
+        assert_eq!(fs.node_content(status)?, provider.secret_status);
+        if provider.account_type.trim() == "local_runtime" {
+            assert_eq!(initial_active, "not_required\n");
+        } else {
+            assert_eq!(initial_active, "none\n");
+        }
         {
             let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
             assert_eq!(runtime.write(rotate, 0, b"1\n")?, 2);
@@ -376,10 +429,14 @@ fn provider_secret_rotate_updates_only_secret_status_view() -> fuse3::Result<()>
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
-            format!("providers/{}/secrets/rotate\n", provider.id)
+            format!("provider/{}/secrets/rotate\n", provider.id)
         );
         let last_rotated = fs.provider_secrets_file_inode(provider.id, "last_rotated")?;
         let next_rotation = fs.provider_secrets_file_inode(provider.id, "next_rotation")?;
+        assert_eq!(
+            fs.node_content(active)?,
+            format!("{}-key-rotating\n", provider.id)
+        );
         assert_eq!(fs.node_content(last_rotated)?, "pending\n");
         assert_eq!(fs.node_content(next_rotation)?, "\n");
         let audit = fs.node_content(fs.audit_events_inode()?)?;
@@ -389,6 +446,44 @@ fn provider_secret_rotate_updates_only_secret_status_view() -> fuse3::Result<()>
         assert!(!audit.contains("api_key"));
         assert!(!audit.contains("token"));
         assert!(!audit.contains("secret-password"));
+        assert!(!fs.node_content(active)?.contains("api_key"));
+        assert!(!fs.node_content(active)?.contains("token"));
+        assert!(!fs.node_content(active)?.contains("secret-password"));
+    }
+    Ok(())
+}
+
+#[test]
+fn provider_runtime_control_files_are_not_static_placeholders() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+
+    for provider in crate::PROVIDER_SPECS {
+        for (child, names) in [
+            (
+                "health",
+                ["status", "latency_ms", "last_error", "check"].as_slice(),
+            ),
+            ("model", ["refresh"].as_slice()),
+        ] {
+            let parent = fs.provider_child_dir_inode(provider.id, child)?;
+            let entries = fs.children(parent);
+            for name in names {
+                let mut path = crate::provider_child_path(provider.id, child);
+                path.push((*name).to_owned());
+                assert!(
+                    fs.tree.path_inode_owned(&path).is_none(),
+                    "provider {child}/{name} must be runtime-owned, not a static placeholder"
+                );
+                assert_eq!(
+                    entries
+                        .iter()
+                        .filter(|entry| entry.name.to_str() == Some(*name))
+                        .count(),
+                    1,
+                    "provider {child} directory must expose one {name} entry"
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -448,7 +543,7 @@ fn user_models_refresh_recomputes_space_access_routes_and_audit() -> fuse3::Resu
     );
     assert!(!user_models_file_content(&fs, "list")?.contains(&crate::provider_model_id(primary)));
     let audit = fs.node_content(fs.audit_events_inode()?)?;
-    assert!(audit.contains("\"format\":\"space.users.1000.model\""));
+    assert!(audit.contains("\"format\":\"home.1000.model\""));
     assert!(audit.contains("\"name\":\"refresh\""));
     assert!(audit.contains("\"event\":\"refreshed\""));
     Ok(())
@@ -513,25 +608,7 @@ fn projection_exposes_space_model_access_view() -> fuse3::Result<()> {
                 .and_then(crate::Node::content),
             Some(provider.model_capabilities)
         );
-        assert_eq!(
-            runtime
-                .lookup_child(user_model, "capabilities")
-                .and_then(crate::Node::content),
-            Some(provider.model_capabilities),
-            "user model capabilities remains a compatibility file"
-        );
     }
-    let models_compat = fs
-        .tree
-        .path_inode(&["home", "1000", "models"])
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert_eq!(
-        runtime
-            .lookup_child(models_compat, "list")
-            .and_then(crate::Node::content),
-        Some(crate::global_model_list().as_str()),
-        "user models compatibility path must expose the same index content"
-    );
     drop(runtime);
     assert!(fs.lookup_path(["home", "1000", "model", "count"]).is_none());
     assert!(fs.lookup_path(["home", "1000", "model", "list"]).is_none());
@@ -547,19 +624,40 @@ fn projection_exposes_space_model_access_view() -> fuse3::Result<()> {
 }
 
 #[test]
-fn user_models_compat_refresh_uses_primary_model_control_name() -> fuse3::Result<()> {
+fn user_models_refresh_uses_primary_model_control_name() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let models_compat = fs
+    let models = fs
         .tree
-        .path_inode(&["home", "1000", "models"])
+        .path_inode(&["home", "1000", "model"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(
+        fs.tree
+            .path_inode(&["home", "1000", "model", "refresh"])
+            .is_none(),
+        "home model refresh must not have a static path inode"
+    );
     let refresh = {
         let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime
-            .lookup_child(models_compat, "refresh")
+            .lookup_child(models, "refresh")
             .map(crate::Node::inode)
             .ok_or_else(fuse3::Errno::new_not_exist)?
     };
+    let model_entries = fs.children(models);
+    assert_eq!(
+        model_entries
+            .iter()
+            .filter(|entry| entry.name.to_str() == Some("refresh"))
+            .count(),
+        1,
+        "home model directory must expose one refresh entry"
+    );
+    assert!(
+        model_entries
+            .iter()
+            .any(|entry| entry.name.to_str() == Some("refresh") && entry.inode == refresh),
+        "home model refresh entry must resolve to the runtime inode"
+    );
 
     {
         let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
@@ -572,7 +670,7 @@ fn user_models_compat_refresh_uses_primary_model_control_name() -> fuse3::Result
         crate::LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT
     );
     let audit = fs.node_content(fs.audit_events_inode()?)?;
-    assert!(audit.contains("\"format\":\"space.users.1000.model\""));
+    assert!(audit.contains("\"format\":\"home.1000.model\""));
     assert!(audit.contains("\"name\":\"refresh\""));
     assert!(audit.contains("\"event\":\"refreshed\""));
     Ok(())
@@ -794,12 +892,12 @@ fn projection_exposes_space_routes_and_policy() -> fuse3::Result<()> {
     );
     drop(runtime);
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "context"])
+        fs.lookup_path(["home", "1000", "context"])
             .and_then(crate::Node::content),
         Some(crate::LOCAL_USER_SPACE_CONTEXT_TEXT)
     );
     assert_eq!(
-        fs.lookup_path(["spaces", "users", "1000", "uid"])
+        fs.lookup_path(["home", "1000", "uid"])
             .and_then(crate::Node::content),
         Some(crate::LOCAL_USER_UID_TEXT)
     );
@@ -851,25 +949,11 @@ fn unsupported_api_format_route_denies_submit_at_rename() -> fuse3::Result<()> {
 
     let inbox = fs
         .tree
-        .path_inode(&[
-            "spaces",
-            "users",
-            "1000",
-            "api",
-            "anthropic.messages",
-            "inbox",
-        ])
+        .path_inode(&["home", "1000", "api", "anthropic.messages", "inbox"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let outbox = fs
         .tree
-        .path_inode(&[
-            "spaces",
-            "users",
-            "1000",
-            "api",
-            "anthropic.messages",
-            "outbox",
-        ])
+        .path_inode(&["home", "1000", "api", "anthropic.messages", "outbox"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert!(runtime.lookup_child(inbox, "unsupported.tmp").is_some());
@@ -933,7 +1017,7 @@ fn user_allowed_providers_updates_policy_and_audit() -> fuse3::Result<()> {
     drop(runtime);
 
     let audit = fs.node_content(fs.audit_events_inode()?)?;
-    assert!(audit.contains("\"format\":\"space.users.1000.policy\""));
+    assert!(audit.contains("\"format\":\"home.1000.policy\""));
     assert!(!audit.contains(crate::invalid_provider_id()));
     Ok(())
 }
@@ -1286,13 +1370,13 @@ fn user_default_provider_updates_route_and_audit() -> fuse3::Result<()> {
     drop(runtime);
 
     let audit = fs.node_content(fs.audit_events_inode()?)?;
-    assert!(audit.contains("\"format\":\"space.users.1000.route\""));
+    assert!(audit.contains("\"format\":\"home.1000.route\""));
     assert!(!audit.contains(crate::invalid_provider_id()));
     Ok(())
 }
 
 #[test]
-fn user_routes_compat_default_provider_writes_primary_route() -> fuse3::Result<()> {
+fn user_route_default_provider_writes_primary_route() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let default = crate::default_provider_spec()?;
     let alternate = crate::alternate_provider_spec(&default)?;
@@ -1300,13 +1384,9 @@ fn user_routes_compat_default_provider_writes_primary_route() -> fuse3::Result<(
         .tree
         .path_inode(crate::USER_ROUTES_DIR_PATH)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let routes_compat = fs
-        .tree
-        .path_inode(&["home", "1000", "routes"])
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let default_provider = runtime
-        .lookup_child(routes_compat, "default_provider")
+        .lookup_child(route, "default_provider")
         .map(crate::Node::inode)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
 
@@ -1322,22 +1402,9 @@ fn user_routes_compat_default_provider_writes_primary_route() -> fuse3::Result<(
             .and_then(crate::Node::content),
         Some(format!("{}\n", alternate.id).as_str())
     );
-    assert_eq!(
-        runtime
-            .lookup_child(routes_compat, "default_provider")
-            .and_then(crate::Node::content),
-        Some(format!("{}\n", alternate.id).as_str())
-    );
     assert_openai_chat_route(
         &runtime,
         route,
-        format!("{}\n", alternate.id).as_str(),
-        provider_model_text(alternate.id).as_str(),
-        "ready\n",
-    )?;
-    assert_openai_chat_route(
-        &runtime,
-        routes_compat,
         format!("{}\n", alternate.id).as_str(),
         provider_model_text(alternate.id).as_str(),
         "ready\n",

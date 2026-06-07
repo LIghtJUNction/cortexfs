@@ -14,14 +14,18 @@ impl RuntimeState {
             return Err(libc::EIO.into());
         };
         self.append_memory_item(&request_id, &item);
-        self.append_audit("memory.semantic", request_id.as_str(), "drained");
+        self.append_audit(
+            format!("memory.{}", item.layer).as_str(),
+            request_id.as_str(),
+            "drained",
+        );
         self.update_last_drained(format!("{}\n", request_id.as_str()));
         Ok(true)
     }
 
     fn append_memory_item(&mut self, request_id: &RequestId, item: &MemoryItem) {
         self.append_memory_layer_item(
-            "semantic",
+            item.layer,
             request_id.as_str(),
             &item.body,
             &item.fingerprint,

@@ -1,8 +1,73 @@
 use crate::CortexFs;
 use fuse3::FileType;
 
+fn mcp_server_runtime_inode(fs: &CortexFs, name: &'static str) -> fuse3::Result<fuse3::Inode> {
+    fs.resolve_path_inode(["mcp", "server", "local-fs", name])
+}
+
+fn mcp_workspace_runtime_inode(fs: &CortexFs, name: &'static str) -> fuse3::Result<fuse3::Inode> {
+    fs.resolve_path_inode(["mcp", "resource", "local-fs", "workspace", name])
+}
+
+fn mcp_session_runtime_inode(fs: &CortexFs, name: &'static str) -> fuse3::Result<fuse3::Inode> {
+    fs.resolve_path_inode(["mcp", "session", "local-fs.demo", name])
+}
+
+fn mcp_server_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Result<String> {
+    fs.node_content(mcp_server_runtime_inode(fs, name)?)
+}
+
+fn mcp_workspace_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Result<String> {
+    fs.node_content(mcp_workspace_runtime_inode(fs, name)?)
+}
+
+fn mcp_session_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Result<String> {
+    fs.node_content(mcp_session_runtime_inode(fs, name)?)
+}
+
+fn assert_mcp_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    for (parent_path, names) in [
+        (
+            ["mcp", "server", "local-fs"].as_slice(),
+            ["status", "pid"].as_slice(),
+        ),
+        (
+            ["mcp", "resource", "local-fs", "workspace"].as_slice(),
+            ["content", "refresh"].as_slice(),
+        ),
+        (
+            ["mcp", "session", "local-fs.demo"].as_slice(),
+            ["state", "transcript.jsonl"].as_slice(),
+        ),
+    ] {
+        let parent = fs
+            .tree
+            .path_inode(parent_path)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        let entries = fs.children(parent);
+        for name in names {
+            let mut static_path = parent_path.to_vec();
+            static_path.push(name);
+            assert!(
+                fs.tree.path_inode(&static_path).is_none(),
+                "MCP runtime file {} must not have a static path inode",
+                static_path.join("/")
+            );
+            assert_eq!(
+                entries
+                    .iter()
+                    .filter(|entry| entry.name.to_str() == Some(*name))
+                    .count(),
+                1,
+                "MCP runtime directory must expose one {name} entry"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[test]
-fn projection_exposes_mcp_primary_and_compat_indexes() {
+fn projection_exposes_mcp_primary_indexes() {
     let fs = CortexFs::new();
 
     assert_eq!(
@@ -16,12 +81,6 @@ fn projection_exposes_mcp_primary_and_compat_indexes() {
         Some("local-fs\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "servers", "list"])
-            .and_then(crate::Node::content),
-        Some("local-fs\n"),
-        "mcp servers compatibility path must expose the same index content"
-    );
-    assert_eq!(
         fs.lookup_path(["mcp", "tool", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
@@ -30,12 +89,6 @@ fn projection_exposes_mcp_primary_and_compat_indexes() {
         fs.lookup_path(["mcp", "tool", "list"])
             .and_then(crate::Node::content),
         Some("local-fs.read_file\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["mcp", "tools", "list"])
-            .and_then(crate::Node::content),
-        Some("local-fs.read_file\n"),
-        "mcp tools compatibility path must expose the same index content"
     );
     assert_eq!(
         fs.lookup_path(["mcp", "resource", "count"])
@@ -48,12 +101,6 @@ fn projection_exposes_mcp_primary_and_compat_indexes() {
         Some("local-fs/workspace\n")
     );
     assert_eq!(
-        fs.lookup_path(["mcp", "resources", "list"])
-            .and_then(crate::Node::content),
-        Some("local-fs/workspace\n"),
-        "mcp resources compatibility path must expose the same index content"
-    );
-    assert_eq!(
         fs.lookup_path(["mcp", "prompt", "count"])
             .and_then(crate::Node::content),
         Some("1\n")
@@ -62,12 +109,6 @@ fn projection_exposes_mcp_primary_and_compat_indexes() {
         fs.lookup_path(["mcp", "prompt", "list"])
             .and_then(crate::Node::content),
         Some("local-fs/summarize-file\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["mcp", "prompts", "list"])
-            .and_then(crate::Node::content),
-        Some("local-fs/summarize-file\n"),
-        "mcp prompts compatibility path must expose the same index content"
     );
     assert_eq!(
         fs.lookup_path(["mcp", "session", "count"])
@@ -79,26 +120,15 @@ fn projection_exposes_mcp_primary_and_compat_indexes() {
             .and_then(crate::Node::content),
         Some("local-fs.demo\n")
     );
-    assert_eq!(
-        fs.lookup_path(["mcp", "sessions", "list"])
-            .and_then(crate::Node::content),
-        Some("local-fs.demo\n"),
-        "mcp sessions compatibility path must expose the same index content"
-    );
 }
 
 #[test]
 fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
-    assert_eq!(
-        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "state"])?)?,
-        "idle\n"
-    );
-    assert_eq!(
-        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?,
-        ""
-    );
+    assert_mcp_runtime_files_are_runtime_owned(&fs)?;
+    assert_eq!(mcp_session_runtime_content(&fs, "state")?, "idle\n");
+    assert_eq!(mcp_session_runtime_content(&fs, "transcript.jsonl")?, "");
     assert_eq!(
         fs.lookup_path(["mcp", "server", "local-fs", "transport"])
             .and_then(crate::Node::content),
@@ -113,12 +143,6 @@ fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
         fs.lookup_path(["mcp", "server", "local-fs", "cap"])
             .and_then(crate::Node::content),
         Some("tools\nresources\nprompts\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["mcp", "server", "local-fs", "capabilities"])
-            .and_then(crate::Node::content),
-        Some("tools\nresources\nprompts\n"),
-        "mcp server capabilities remains a compatibility file"
     );
     assert_eq!(
         fs.lookup_path(["mcp", "tool", "local-fs.read_file", "permissions"])
@@ -153,10 +177,10 @@ fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
 #[test]
 fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let refresh = fs.path_inode(["mcp", "resource", "local-fs", "workspace", "refresh"])?;
+    let refresh = mcp_workspace_runtime_inode(&fs, "refresh")?;
 
     assert_eq!(
-        fs.node_content(fs.path_inode(["mcp", "resource", "local-fs", "workspace", "content"])?)?,
+        mcp_workspace_runtime_content(&fs, "content")?,
         "workspace=available\nentries=0\n"
     );
     assert_eq!(fs.node_attr(refresh)?.perm, 0o222);
@@ -170,17 +194,12 @@ fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Resul
         drop(runtime);
     }
 
-    let content =
-        fs.node_content(fs.path_inode(["mcp", "resource", "local-fs", "workspace", "content"])?)?;
+    let content = mcp_workspace_runtime_content(&fs, "content")?;
     assert!(content.contains("workspace=available\n"));
     assert!(content.contains("entries=1\n"));
     assert!(content.contains("refreshed=1\n"));
-    assert_eq!(
-        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "state"])?)?,
-        "refreshed\n"
-    );
-    let transcript =
-        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
+    assert_eq!(mcp_session_runtime_content(&fs, "state")?, "refreshed\n");
+    let transcript = mcp_session_runtime_content(&fs, "transcript.jsonl")?;
     assert!(transcript.contains("\"type\":\"resource_refresh\""));
     assert!(transcript.contains("\"resource\":\"local-fs/workspace\""));
     assert_eq!(
@@ -197,7 +216,7 @@ fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Resul
 #[test]
 fn mcp_resource_refresh_rejects_invalid_input() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let refresh = fs.path_inode(["mcp", "resource", "local-fs", "workspace", "refresh"])?;
+    let refresh = mcp_workspace_runtime_inode(&fs, "refresh")?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
 
     assert!(runtime.write(refresh, 0, b"yes\n").is_err());
@@ -210,19 +229,47 @@ fn mcp_resource_refresh_rejects_invalid_input() -> fuse3::Result<()> {
 fn projection_exposes_mcp_control_and_session_socket_semantics() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
-    let reload_inode = {
+    let start_inode = {
         let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let control = fs.path_inode(["mcp", "server", "local-fs", "control"])?;
+        assert!(
+            runtime.lookup_child(control, "reload").is_none(),
+            "MCP server control exposes only the current ABI entries"
+        );
+        for name in ["start", "stop", "restart"] {
+            assert!(
+                fs.tree
+                    .path_inode(&["mcp", "server", "local-fs", "control", name])
+                    .is_none(),
+                "MCP server control command {name} must not have a static path inode"
+            );
+        }
         runtime
-            .lookup_child(
-                fs.path_inode(["mcp", "server", "local-fs", "control"])?,
-                "reload",
-            )
+            .lookup_child(control, "start")
             .map(crate::Node::inode)
             .ok_or_else(fuse3::Errno::new_not_exist)?
     };
-    assert_eq!(fs.node_attr(reload_inode)?.perm, 0o222);
+    let control = fs.path_inode(["mcp", "server", "local-fs", "control"])?;
+    let entries = fs.children(control);
+    for name in ["start", "stop", "restart"] {
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "MCP server control directory must expose one {name} entry"
+        );
+    }
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.name.to_str() == Some("start") && entry.inode == start_inode),
+        "MCP server start entry must resolve to the runtime inode"
+    );
+    assert_eq!(fs.node_attr(start_inode)?.perm, 0o222);
     assert_eq!(
-        fs.node_content(reload_inode),
+        fs.node_content(start_inode),
         Err(fuse3::Errno::from(libc::EACCES))
     );
     assert_eq!(
@@ -251,7 +298,6 @@ fn mcp_server_control_nodes_update_status_pid_last_control_and_audit() -> fuse3:
 
     for (control_name, expected_status, expected_pid) in [
         ("start", "running\n", "1234\n"),
-        ("reload", "reloaded\n", "1234\n"),
         ("restart", "running\n", "1234\n"),
         ("stop", "stopped\n", "\n"),
     ] {
@@ -263,14 +309,8 @@ fn mcp_server_control_nodes_update_status_pid_last_control_and_audit() -> fuse3:
         assert_eq!(runtime.write(control_inode, 0, b"1\n")?, 2);
         drop(runtime);
 
-        assert_eq!(
-            fs.node_content(fs.path_inode(["mcp", "server", "local-fs", "status"])?)?,
-            expected_status
-        );
-        assert_eq!(
-            fs.node_content(fs.path_inode(["mcp", "server", "local-fs", "pid"])?)?,
-            expected_pid
-        );
+        assert_eq!(mcp_server_runtime_content(&fs, "status")?, expected_status);
+        assert_eq!(mcp_server_runtime_content(&fs, "pid")?, expected_pid);
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
             format!("mcp/server/local-fs/{control_name}\n")
@@ -280,11 +320,9 @@ fn mcp_server_control_nodes_update_status_pid_last_control_and_audit() -> fuse3:
     let audit = fs.node_content(fs.audit_events_inode()?)?;
     assert!(audit.contains("\"format\":\"mcp.server.local-fs.control\""));
     assert!(audit.contains("\"name\":\"start\""));
-    assert!(audit.contains("\"name\":\"reload\""));
     assert!(audit.contains("\"name\":\"restart\""));
     assert!(audit.contains("\"name\":\"stop\""));
-    let transcript =
-        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
+    let transcript = mcp_session_runtime_content(&fs, "transcript.jsonl")?;
     assert!(transcript.contains("\"type\":\"server_control\""));
     assert!(transcript.contains("\"command\":\"start\""));
     assert!(transcript.contains("\"command\":\"stop\""));
@@ -294,11 +332,12 @@ fn mcp_server_control_nodes_update_status_pid_last_control_and_audit() -> fuse3:
 #[test]
 fn mcp_server_control_nodes_reject_invalid_input() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let start = fs
-        .tree
-        .path_inode(&["mcp", "server", "local-fs", "control", "start"])
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let control = fs.path_inode(["mcp", "server", "local-fs", "control"])?;
     let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    let start = runtime
+        .lookup_child(control, "start")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
 
     assert!(runtime.write(start, 0, b"yes\n").is_err());
     assert!(runtime.write(start, 1, b"1\n").is_err());
@@ -368,6 +407,9 @@ fn mcp_local_fs_tool_invokes_through_unified_tool_plane() -> fuse3::Result<()> {
         .lookup_child(tool_loop, "steps.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(steps.contains("\"type\":\"permission_check\""));
+    assert!(steps.contains("\"decision\":\"allow\""));
+    assert!(steps.contains("\"permission\":\"mcp.local-fs.read_file\""));
     assert!(steps.contains("\"type\":\"tool_call\""));
     assert!(steps.contains("\"type\":\"tool_result\""));
     assert!(steps.contains("\"tool\":\"mcp.local-fs.read_file\""));
@@ -375,16 +417,21 @@ fn mcp_local_fs_tool_invokes_through_unified_tool_plane() -> fuse3::Result<()> {
     drop(runtime);
     let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
     assert!(agent_traces.contains("\"agent\":\"helper\""));
+    assert!(agent_traces.contains("\"event\":\"permission_check\""));
     assert!(agent_traces.contains("\"event\":\"tool_call\""));
     assert!(agent_traces.contains("\"event\":\"tool_result\""));
     assert!(agent_traces.contains("\"tool\":\"mcp.local-fs.read_file\""));
+    assert!(agent_traces.contains("\"permission\":\"mcp.local-fs.read_file\""));
     assert!(agent_traces.contains("mcp visible"));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"mcp.local-fs.read_file\"")
     );
-    let transcript =
-        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
+    let transcript = mcp_session_runtime_content(&fs, "transcript.jsonl")?;
+    assert!(transcript.contains("\"type\":\"permission_check\""));
+    assert!(transcript.contains("\"decision\":\"allow\""));
+    assert!(transcript.contains("\"permission\":\"mcp.local-fs.read_file\""));
+    assert!(transcript.contains("\"type\":\"tool_call\""));
     assert!(transcript.contains("\"type\":\"tool_result\""));
     assert!(transcript.contains("\"tool\":\"mcp.local-fs.read_file\""));
     assert!(transcript.contains("\"request_id\":\"mcp-read\""));
@@ -441,8 +488,7 @@ fn mcp_prompt_render_materializes_prompt_after_drain() -> fuse3::Result<()> {
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"mcp.prompt.render\"")
     );
-    let transcript =
-        fs.node_content(fs.path_inode(["mcp", "session", "local-fs.demo", "transcript.jsonl"])?)?;
+    let transcript = mcp_session_runtime_content(&fs, "transcript.jsonl")?;
     assert!(transcript.contains("\"type\":\"prompt_render\""));
     assert!(transcript.contains("\"prompt\":\"summarize-file\""));
     assert!(transcript.contains("\"request_id\":\"render-001\""));

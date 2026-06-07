@@ -1,6 +1,6 @@
 use crate::{
-    LOCAL_USER_CONTROL_DISPLAY_PREFIX, LOCAL_USER_THREAD_DISPLAY_PATH,
-    LOCAL_USER_THREAD_DISPLAY_TEXT, RuntimeState, validation::validate_control_write,
+    LOCAL_USER_THREAD_DISPLAY_PATH, LOCAL_USER_THREAD_DISPLAY_TEXT, RuntimeState,
+    validation::validate_control_write,
 };
 
 #[derive(Clone, Copy)]
@@ -26,7 +26,8 @@ impl RuntimeState {
 
     pub fn write_space_control(
         &mut self,
-        space: &str,
+        audit_format: &str,
+        display_prefix: &str,
         command_name: &str,
         offset: u64,
         data: &[u8],
@@ -34,10 +35,9 @@ impl RuntimeState {
         validate_control_write(offset, data)?;
         self.update_dynamic_file(
             self.last_control_inode,
-            space_control_display_path(space, command_name),
+            format!("{display_prefix}/{command_name}\n"),
         );
-        let audit_format = format!("space.{space}.control");
-        self.append_audit(&audit_format, command_name, "control");
+        self.append_audit(audit_format, command_name, "control");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
@@ -185,7 +185,7 @@ impl RuntimeState {
         }
         self.update_dynamic_file(
             self.last_control_inode,
-            format!("agents/helper/{command_name}\n"),
+            format!("agent/helper/{command_name}\n"),
         );
         self.append_audit("agent.helper.control", command_name, next_state);
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
@@ -304,11 +304,4 @@ fn parse_non_negative_decimal(value: &str) -> fuse3::Result<()> {
         return Err(libc::EINVAL.into());
     }
     Ok(())
-}
-
-fn space_control_display_path(space: &str, command_name: &str) -> String {
-    if space == "users/1000" {
-        return format!("{LOCAL_USER_CONTROL_DISPLAY_PREFIX}/{command_name}\n");
-    }
-    format!("spaces/{space}/{command_name}\n")
 }

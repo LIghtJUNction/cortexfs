@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use cortex_core::{ApiFormat, Message, MessageRole, ProviderId, ThreadId};
+use cortex_core::{ApiFormat, Message, MessageRole, ModelId, ProviderId, ThreadId};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -29,6 +29,7 @@ pub struct ApiRequest {
     id: RequestId,
     format: ApiFormat,
     provider: Option<ProviderId>,
+    model: Option<ModelId>,
     body: String,
 }
 
@@ -45,8 +46,16 @@ impl ApiRequest {
             id,
             format,
             provider,
+            model: None,
             body: body.into(),
         }
+    }
+
+    /// Return a copy with the routed model set.
+    #[must_use]
+    pub fn with_model(mut self, model: ModelId) -> Self {
+        self.model = Some(model);
+        self
     }
 
     /// Request id.
@@ -65,6 +74,12 @@ impl ApiRequest {
     #[must_use]
     pub const fn provider(&self) -> Option<&ProviderId> {
         self.provider.as_ref()
+    }
+
+    /// Optional routed model id.
+    #[must_use]
+    pub const fn model(&self) -> Option<&ModelId> {
+        self.model.as_ref()
     }
 
     /// Raw native JSON request body.
@@ -101,6 +116,89 @@ impl ApiResponse {
     #[must_use]
     pub fn body(&self) -> &str {
         &self.body
+    }
+}
+
+/// Minimal audit event persisted by the execution store.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct AuditEvent {
+    request_id: RequestId,
+    format: String,
+    event: String,
+    provider: Option<ProviderId>,
+    model: Option<ModelId>,
+    decision: Option<String>,
+}
+
+impl AuditEvent {
+    /// Create an audit event.
+    #[must_use]
+    pub fn new(request_id: RequestId, format: impl Into<String>, event: impl Into<String>) -> Self {
+        Self {
+            request_id,
+            format: format.into(),
+            event: event.into(),
+            provider: None,
+            model: None,
+            decision: None,
+        }
+    }
+
+    /// Return a copy with routed provider metadata.
+    #[must_use]
+    pub fn with_provider(mut self, provider: ProviderId) -> Self {
+        self.provider = Some(provider);
+        self
+    }
+
+    /// Return a copy with routed model metadata.
+    #[must_use]
+    pub fn with_model(mut self, model: ModelId) -> Self {
+        self.model = Some(model);
+        self
+    }
+
+    /// Return a copy with policy/routing decision metadata.
+    #[must_use]
+    pub fn with_decision(mut self, decision: impl Into<String>) -> Self {
+        self.decision = Some(decision.into());
+        self
+    }
+
+    /// Request id associated with the event.
+    #[must_use]
+    pub const fn request_id(&self) -> &RequestId {
+        &self.request_id
+    }
+
+    /// API format or discovery surface.
+    #[must_use]
+    pub fn format(&self) -> &str {
+        &self.format
+    }
+
+    /// Stable event name.
+    #[must_use]
+    pub fn event(&self) -> &str {
+        &self.event
+    }
+
+    /// Routed provider, if known.
+    #[must_use]
+    pub const fn provider(&self) -> Option<&ProviderId> {
+        self.provider.as_ref()
+    }
+
+    /// Routed model, if known.
+    #[must_use]
+    pub const fn model(&self) -> Option<&ModelId> {
+        self.model.as_ref()
+    }
+
+    /// Policy/routing decision, if known.
+    #[must_use]
+    pub fn decision(&self) -> Option<&str> {
+        self.decision.as_deref()
     }
 }
 
@@ -189,6 +287,9 @@ pub trait Store {
     /// Persist the response for an existing request.
     fn put_response(&mut self, response: ApiResponse) -> StoreResult<()>;
 
+    /// Append an audit event.
+    fn append_audit(&mut self, event: AuditEvent) -> StoreResult<()>;
+
     /// Append a chat message to a thread.
     fn append_thread_message(&mut self, id: ThreadId, message: Message) -> StoreResult<()>;
 
@@ -205,6 +306,9 @@ pub trait Store {
     /// Read a response by request id.
     fn response(&self, id: &RequestId) -> Option<&ApiResponse>;
 
+    /// Return persisted audit events.
+    fn audit_events(&self) -> &[AuditEvent];
+
     /// Return a read-only thread snapshot.
     fn thread_snapshot(&self, id: &ThreadId) -> StoreResult<ThreadSnapshot>;
 }
@@ -215,6 +319,7 @@ pub struct InMemoryStore {
     requests: HashMap<RequestId, ApiRequest>,
     responses: HashMap<RequestId, ApiResponse>,
     threads: HashMap<ThreadId, ThreadState>,
+    audit_events: Vec<AuditEvent>,
 }
 
 impl InMemoryStore {
@@ -241,6 +346,11 @@ impl Store for InMemoryStore {
         }
         self.responses
             .insert(response.request_id().clone(), response);
+        Ok(())
+    }
+
+    fn append_audit(&mut self, event: AuditEvent) -> StoreResult<()> {
+        self.audit_events.push(event);
         Ok(())
     }
 
@@ -274,6 +384,10 @@ impl Store for InMemoryStore {
         self.responses.get(id)
     }
 
+    fn audit_events(&self) -> &[AuditEvent] {
+        &self.audit_events
+    }
+
     fn thread_snapshot(&self, id: &ThreadId) -> StoreResult<ThreadSnapshot> {
         let thread = self
             .threads
@@ -297,8 +411,8 @@ struct ThreadState {
 
 #[cfg(test)]
 mod tests {
-    use super::{ApiRequest, ApiResponse, InMemoryStore, RequestId, Store, StoreError};
-    use cortex_core::{ApiFormat, Message, MessageRole, ProviderId, ThreadId};
+    use super::{ApiRequest, ApiResponse, AuditEvent, InMemoryStore, RequestId, Store, StoreError};
+    use cortex_core::{ApiFormat, Message, MessageRole, ModelId, ProviderId, ThreadId};
     use std::error::Error;
 
     #[test]
@@ -311,11 +425,19 @@ mod tests {
             ApiFormat::OpenAiChat,
             Some(provider),
             r#"{"messages":[]}"#,
-        );
+        )
+        .with_model(ModelId::new("gpt-test")?);
 
         store.put_request(request.clone())?;
 
         assert_eq!(store.request(&request_id), Some(&request));
+        assert_eq!(
+            store
+                .request(&request_id)
+                .and_then(ApiRequest::model)
+                .map(ModelId::as_str),
+            Some("gpt-test")
+        );
         assert_eq!(
             store.put_request(request),
             Err(StoreError::DuplicateRequest(request_id.clone()))
@@ -361,6 +483,45 @@ mod tests {
         );
         assert_eq!(snapshot.latest(), Some("world"));
         assert_eq!(snapshot.fingerprint(), Some("blake3:abc123"));
+        Ok(())
+    }
+
+    #[test]
+    fn store_keeps_append_only_audit_events() -> Result<(), Box<dyn Error>> {
+        let mut store = InMemoryStore::new();
+        let request_id = RequestId::new("audited");
+
+        let provider = ProviderId::new("test-provider")?;
+        let model = ModelId::new("test-model")?;
+        store.append_audit(
+            AuditEvent::new(request_id.clone(), ApiFormat::OpenAiChat.as_str(), "queued")
+                .with_provider(provider.clone())
+                .with_model(model.clone())
+                .with_decision("ready"),
+        )?;
+        store.append_audit(AuditEvent::new(
+            request_id.clone(),
+            ApiFormat::OpenAiChat.as_str(),
+            "drained",
+        ))?;
+
+        assert_eq!(
+            store.audit_events(),
+            [
+                AuditEvent::new(request_id.clone(), "openai.chat", "queued")
+                    .with_provider(provider)
+                    .with_model(model)
+                    .with_decision("ready"),
+                AuditEvent::new(request_id, "openai.chat", "drained"),
+            ]
+        );
+        let event = store.audit_events().first().ok_or("missing audit event")?;
+        assert_eq!(
+            event.provider().map(ProviderId::as_str),
+            Some("test-provider")
+        );
+        assert_eq!(event.model().map(ModelId::as_str), Some("test-model"));
+        assert_eq!(event.decision(), Some("ready"));
         Ok(())
     }
 }

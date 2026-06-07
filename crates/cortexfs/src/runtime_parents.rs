@@ -4,29 +4,25 @@ use fuse3::Inode;
 
 use crate::abi::{
     AGENT_HELPER_CONTROL_PATH, AGENT_HELPER_OUTBOX_PATH, AUDIT_DIR_PATH, BATCH_DIR_PATH,
-    CLUSTER_LOCAL_CONTROL_PATH, CLUSTER_LOCAL_STATE_PATH, CLUSTER_TASK_DONE_PATH,
-    CLUSTER_TASKS_PATH, CONTROL_DIR_PATH, DEMO_THREAD_CONTROL_PATH, DEMO_THREAD_DIR_PATH,
-    DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
-    DEMO_THREAD_TOOL_LOOP_PATH, DEMO_THREAD_TOOL_LOOP_STATE_PATH, EXPORT_DIR_PATH,
-    EXPORT_FILTERS_DIR_PATH, EXTERNAL_QQ_GROUP_THREAD_DIR_PATH,
-    EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH, FEEDBACK_PREFERENCE_OUTBOX_PATH,
-    MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH,
-    POSTGRES_DSN_DIR_PATH, ROOT_INODE, USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH,
-    USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
+    CLUSTER_LOCAL_CONTROL_PATH, CLUSTER_TASK_DONE_PATH, CLUSTER_TASK_FAILED_PATH,
+    CLUSTER_TASK_PENDING_PATH, CLUSTER_TASKS_PATH, CONTROL_DIR_PATH, DEMO_THREAD_CONTROL_PATH,
+    DEMO_THREAD_DIR_PATH, DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
+    DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_DIR_PATH, EXPORT_FILTERS_DIR_PATH,
+    EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_DIR_PATH,
+    FEEDBACK_PREFERENCE_OUTBOX_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH,
+    MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH, POSTGRES_DSN_DIR_PATH, ROOT_INODE,
+    USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH, USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
 };
-use crate::providers::{PROVIDER_SPECS, provider_child_path, provider_model_id, user_model_path};
+use crate::providers::{PROVIDER_SPECS, provider_child_path, user_model_path};
 use crate::runtime_types::ProviderRuntimeParents;
 use crate::tree::StaticTree;
 
 #[derive(Debug, Clone, Copy)]
 pub struct McpRuntimeParents {
-    pub local_fs_status: Option<Inode>,
-    pub local_fs_pid: Option<Inode>,
+    pub local_fs_server: Option<Inode>,
     pub local_fs_control: Option<Inode>,
-    pub workspace_content: Option<Inode>,
-    pub workspace_refresh: Option<Inode>,
-    pub session_state: Option<Inode>,
-    pub session_transcript: Option<Inode>,
+    pub workspace: Option<Inode>,
+    pub session: Option<Inode>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,16 +32,19 @@ pub struct RuntimeParents {
     pub control: Inode,
     pub batch: Option<Inode>,
     pub exports: Option<Inode>,
-    pub exports_compat: Option<Inode>,
     pub export_filters: Option<Inode>,
-    pub export_filters_compat: Option<Inode>,
+    pub convert: Option<Inode>,
+    pub cache: Option<Inode>,
+    pub user_audit: Option<Inode>,
+    pub local_api: Option<Inode>,
+    pub local_api_http: Option<Inode>,
+    pub local_api_unix: Option<Inode>,
     pub feedback_preference_outbox: Option<Inode>,
     pub thread: Option<Inode>,
     pub thread_control: Option<Inode>,
     pub external_thread: Option<Inode>,
-    pub external_subject_quota_requests: Option<Inode>,
+    pub external_subject_quota: Option<Inode>,
     pub tool_loop: Option<Inode>,
-    pub tool_loop_state: Option<Inode>,
     pub tool_loop_control: Option<Inode>,
     pub tool_loop_limits: Option<Inode>,
     pub memory_working: Option<Inode>,
@@ -54,89 +53,64 @@ pub struct RuntimeParents {
     pub memory_semantic: Option<Inode>,
     pub memory_procedural: Option<Inode>,
     pub memory_profile: Option<Inode>,
-    pub mcp_local_fs_status: Option<Inode>,
-    pub mcp_local_fs_pid: Option<Inode>,
+    pub memory_index: Option<Inode>,
+    pub mcp_local_fs_server: Option<Inode>,
     pub mcp_local_fs_control: Option<Inode>,
-    pub mcp_workspace_content: Option<Inode>,
-    pub mcp_workspace_refresh: Option<Inode>,
-    pub mcp_session_state: Option<Inode>,
-    pub mcp_session_transcript: Option<Inode>,
+    pub mcp_workspace: Option<Inode>,
+    pub mcp_session: Option<Inode>,
+    pub installed_skill_cortexfs_test: Option<Inode>,
     pub agent_helper_outbox: Option<Inode>,
     pub agent_helper_control: Option<Inode>,
-    pub agent_helper_runtime_state: Option<Inode>,
-    pub agent_helper_runtime_pid: Option<Inode>,
-    pub agent_helper_runtime_heartbeat: Option<Inode>,
-    pub agent_helper_runtime_current_thread: Option<Inode>,
-    pub agent_helper_runtime_current_task: Option<Inode>,
-    pub collab_task_owner: Option<Inode>,
-    pub collab_task_state: Option<Inode>,
-    pub collab_task_events: Option<Inode>,
+    pub agent_helper_runtime: Option<Inode>,
+    pub collab_blackboard: Option<Inode>,
+    pub collab_task_demo: Option<Inode>,
+    pub collab_handoff_demo: Option<Inode>,
+    pub collab_lock_demo: Option<Inode>,
     pub collab_locks: Option<Inode>,
     pub mcp_prompt_render_outbox: Option<Inode>,
     pub user_policy: Option<Inode>,
     pub user_routes: Option<Inode>,
-    pub user_routes_compat: Option<Inode>,
     pub user_control: Option<Inode>,
     pub user_models: Option<Inode>,
-    pub user_models_compat: Option<Inode>,
     pub user_models_by_provider: BTreeMap<&'static str, Inode>,
-    pub user_models_compat_by_provider: BTreeMap<&'static str, Inode>,
-    pub cluster_state: Option<Inode>,
-    pub cluster_worker_state: Option<Inode>,
-    pub cluster_worker_heartbeat: Option<Inode>,
-    pub cluster_worker_load: Option<Inode>,
-    pub cluster_worker_current_task: Option<Inode>,
+    pub cluster_local: Option<Inode>,
+    pub cluster_worker: Option<Inode>,
     pub cluster_control: Option<Inode>,
+    pub cluster_pending: Option<Inode>,
+    pub cluster_running: Option<Inode>,
     pub cluster_tasks: Option<Inode>,
     pub cluster_done: Option<Inode>,
-    pub pgvector_enabled: Option<Inode>,
-    pub pgvector_status: Option<Inode>,
-    pub pgvector_collections: Option<Inode>,
-    pub pgvector_refresh: Option<Inode>,
-    pub postgres_status: Option<Inode>,
+    pub cluster_failed: Option<Inode>,
+    pub vector_stores: BTreeMap<&'static str, Inode>,
+    pub pgvector_store: Option<Inode>,
+    pub sqlite: Option<Inode>,
+    pub postgres: Option<Inode>,
     pub postgres_dsn: Option<Inode>,
     pub provider_parents: BTreeMap<&'static str, ProviderRuntimeParents>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ClusterWorkerRuntimeParents {
-    state: Option<Inode>,
-    heartbeat: Option<Inode>,
-    load: Option<Inode>,
-    current_task: Option<Inode>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct AgentRuntimeParents {
-    state: Option<Inode>,
-    pid: Option<Inode>,
-    heartbeat: Option<Inode>,
-    current_thread: Option<Inode>,
-    current_task: Option<Inode>,
 }
 
 impl RuntimeParents {
     pub fn from_tree(tree: &StaticTree) -> Self {
         let mcp = mcp_runtime_parents(tree);
-        let agent = agent_runtime_parents(tree);
-        let cluster_worker = cluster_worker_runtime_parents(tree);
         Self {
             audit: tree.path_inode(AUDIT_DIR_PATH).unwrap_or(ROOT_INODE),
             audit_cost: tree.path_inode(&["audit", "cost"]),
             control: tree.path_inode(CONTROL_DIR_PATH).unwrap_or(ROOT_INODE),
             batch: tree.path_inode(BATCH_DIR_PATH),
             exports: tree.path_inode(EXPORT_DIR_PATH),
-            exports_compat: tree.path_inode(&["home", "1000", "exports"]),
             export_filters: tree.path_inode(EXPORT_FILTERS_DIR_PATH),
-            export_filters_compat: tree.path_inode(&["home", "1000", "exports", "filters"]),
+            convert: tree.path_inode(&["home", "1000", "convert"]),
+            cache: tree.path_inode(&["home", "1000", "cache"]),
+            user_audit: tree.path_inode(&["home", "1000", "audit"]),
+            local_api: tree.path_inode(&["home", "1000", "api"]),
+            local_api_http: tree.path_inode(&["home", "1000", "api", "http"]),
+            local_api_unix: tree.path_inode(&["home", "1000", "api", "unix"]),
             feedback_preference_outbox: tree.path_inode(FEEDBACK_PREFERENCE_OUTBOX_PATH),
             thread: tree.path_inode(DEMO_THREAD_DIR_PATH),
             thread_control: tree.path_inode(DEMO_THREAD_CONTROL_PATH),
             external_thread: tree.path_inode(EXTERNAL_QQ_GROUP_THREAD_DIR_PATH),
-            external_subject_quota_requests: tree
-                .path_inode(EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH),
+            external_subject_quota: tree.path_inode(EXTERNAL_QQ_SUBJECT_QUOTA_DIR_PATH),
             tool_loop: tree.path_inode(DEMO_THREAD_TOOL_LOOP_PATH),
-            tool_loop_state: tree.path_inode(DEMO_THREAD_TOOL_LOOP_STATE_PATH),
             tool_loop_control: tree.path_inode(DEMO_THREAD_TOOL_LOOP_CONTROL_PATH),
             tool_loop_limits: tree.path_inode(DEMO_THREAD_TOOL_LOOP_LIMITS_PATH),
             memory_working: tree.path_inode(&["home", "1000", "memory", "working"]),
@@ -145,74 +119,62 @@ impl RuntimeParents {
             memory_semantic: tree.path_inode(MEMORY_SEMANTIC_DIR_PATH),
             memory_procedural: tree.path_inode(&["home", "1000", "memory", "procedural"]),
             memory_profile: tree.path_inode(&["home", "1000", "memory", "profile"]),
-            mcp_local_fs_status: mcp.local_fs_status,
-            mcp_local_fs_pid: mcp.local_fs_pid,
+            memory_index: tree.path_inode(&["memory", "index"]),
+            mcp_local_fs_server: mcp.local_fs_server,
             mcp_local_fs_control: mcp.local_fs_control,
-            mcp_workspace_content: mcp.workspace_content,
-            mcp_workspace_refresh: mcp.workspace_refresh,
-            mcp_session_state: mcp.session_state,
-            mcp_session_transcript: mcp.session_transcript,
+            mcp_workspace: mcp.workspace,
+            mcp_session: mcp.session,
+            installed_skill_cortexfs_test: tree.path_inode(&[
+                "skill",
+                "installed",
+                "cortexfs-test",
+            ]),
             agent_helper_outbox: tree.path_inode(AGENT_HELPER_OUTBOX_PATH),
             agent_helper_control: tree.path_inode(AGENT_HELPER_CONTROL_PATH),
-            agent_helper_runtime_state: agent.state,
-            agent_helper_runtime_pid: agent.pid,
-            agent_helper_runtime_heartbeat: agent.heartbeat,
-            agent_helper_runtime_current_thread: agent.current_thread,
-            agent_helper_runtime_current_task: agent.current_task,
-            collab_task_owner: tree.path_inode(&[
-                "spaces",
+            agent_helper_runtime: tree.path_inode(&["agent", "helper", "runtime"]),
+            collab_blackboard: tree.path_inode(&["shared", "project-a", "collab", "blackboard"]),
+            collab_task_demo: tree.path_inode(&["shared", "project-a", "collab", "task", "demo"]),
+            collab_handoff_demo: tree.path_inode(&[
                 "shared",
                 "project-a",
                 "collab",
-                "task",
+                "handoff",
                 "demo",
-                "owner",
             ]),
-            collab_task_state: tree.path_inode(&[
-                "spaces",
-                "shared",
-                "project-a",
-                "collab",
-                "task",
-                "demo",
-                "state",
-            ]),
-            collab_task_events: tree.path_inode(&[
-                "spaces",
-                "shared",
-                "project-a",
-                "collab",
-                "task",
-                "demo",
-                "events.jsonl",
-            ]),
-            collab_locks: tree.path_inode(&["spaces", "shared", "project-a", "collab", "lock"]),
+            collab_lock_demo: tree.path_inode(&["shared", "project-a", "collab", "lock", "demo"]),
+            collab_locks: tree.path_inode(&["shared", "project-a", "collab", "lock"]),
             mcp_prompt_render_outbox: tree.path_inode(MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH),
             user_policy: tree.path_inode(USER_POLICY_DIR_PATH),
             user_routes: tree.path_inode(USER_ROUTES_DIR_PATH),
-            user_routes_compat: tree.path_inode(&["home", "1000", "routes"]),
             user_control: tree.path_inode(USER_CONTROL_DIR_PATH),
             user_models: tree.path_inode(USER_MODELS_DIR_PATH),
-            user_models_compat: tree.path_inode(&["home", "1000", "models"]),
             user_models_by_provider: user_model_parents(tree),
-            user_models_compat_by_provider: user_model_compat_parents(tree),
-            cluster_state: tree.path_inode(CLUSTER_LOCAL_STATE_PATH),
-            cluster_worker_state: cluster_worker.state,
-            cluster_worker_heartbeat: cluster_worker.heartbeat,
-            cluster_worker_load: cluster_worker.load,
-            cluster_worker_current_task: cluster_worker.current_task,
+            cluster_local: tree.path_inode(&["cluster", "local"]),
+            cluster_worker: tree.path_inode(&["cluster", "local", "worker", "local-worker"]),
             cluster_control: tree.path_inode(CLUSTER_LOCAL_CONTROL_PATH),
+            cluster_pending: tree.path_inode(CLUSTER_TASK_PENDING_PATH),
+            cluster_running: tree.path_inode(&["cluster", "local", "queue", "default", "running"]),
             cluster_tasks: tree.path_inode(CLUSTER_TASKS_PATH),
             cluster_done: tree.path_inode(CLUSTER_TASK_DONE_PATH),
-            pgvector_enabled: tree.path_inode(&["vector", "store", "pgvector", "enabled"]),
-            pgvector_status: tree.path_inode(&["vector", "store", "pgvector", "status"]),
-            pgvector_collections: tree.path_inode(&["vector", "store", "pgvector", "collections"]),
-            pgvector_refresh: tree.path_inode(&["vector", "store", "pgvector", "refresh"]),
-            postgres_status: tree.path_inode(&["db", "postgres", "status"]),
+            cluster_failed: tree.path_inode(CLUSTER_TASK_FAILED_PATH),
+            vector_stores: vector_store_parents(tree),
+            pgvector_store: tree.path_inode(&["vector", "store", "pgvector"]),
+            sqlite: tree.path_inode(&["db", "sqlite"]),
+            postgres: tree.path_inode(&["db", "postgres"]),
             postgres_dsn: tree.path_inode(POSTGRES_DSN_DIR_PATH),
             provider_parents: provider_runtime_parents(tree),
         }
     }
+}
+
+fn vector_store_parents(tree: &StaticTree) -> BTreeMap<&'static str, Inode> {
+    ["local", "pgvector", "qdrant", "milvus"]
+        .into_iter()
+        .filter_map(|store| {
+            tree.path_inode_owned(&["vector", "store", store].map(String::from))
+                .map(|inode| (store, inode))
+        })
+        .collect()
 }
 
 fn user_model_parents(tree: &StaticTree) -> BTreeMap<&'static str, Inode> {
@@ -225,42 +187,22 @@ fn user_model_parents(tree: &StaticTree) -> BTreeMap<&'static str, Inode> {
         .collect()
 }
 
-fn user_model_compat_parents(tree: &StaticTree) -> BTreeMap<&'static str, Inode> {
-    PROVIDER_SPECS
-        .iter()
-        .filter_map(|provider| {
-            let path = vec![
-                "home".to_owned(),
-                "1000".to_owned(),
-                "models".to_owned(),
-                provider_model_id(provider),
-            ];
-            tree.path_inode_owned(&path)
-                .map(|inode| (provider.id, inode))
-        })
-        .collect()
-}
-
 fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, ProviderRuntimeParents> {
     PROVIDER_SPECS
         .iter()
         .filter_map(|provider| {
             let url = tree.path_inode_owned(&provider_child_path(provider.id, "url"))?;
-            let url_compat = tree.path_inode_owned(&provider_child_path(provider.id, "base_url"));
             let enabled = tree.path_inode_owned(&provider_child_path(provider.id, "enabled"))?;
             let health = tree.path_inode_owned(&provider_child_path(provider.id, "health"))?;
             let models = tree.path_inode_owned(&provider_child_path(provider.id, "model"))?;
-            let models_compat = tree.path_inode_owned(&provider_child_path(provider.id, "models"));
             let secrets = tree.path_inode_owned(&provider_child_path(provider.id, "secrets"))?;
             Some((
                 provider.id,
                 ProviderRuntimeParents {
                     url,
-                    url_compat,
                     enabled,
                     health,
                     models,
-                    models_compat,
                     secrets,
                 },
             ))
@@ -268,56 +210,11 @@ fn provider_runtime_parents(tree: &StaticTree) -> BTreeMap<&'static str, Provide
         .collect()
 }
 
-fn agent_runtime_parents(tree: &StaticTree) -> AgentRuntimeParents {
-    AgentRuntimeParents {
-        state: tree.path_inode(&["agent", "helper", "runtime", "state"]),
-        pid: tree.path_inode(&["agent", "helper", "runtime", "pid"]),
-        heartbeat: tree.path_inode(&["agent", "helper", "runtime", "heartbeat"]),
-        current_thread: tree.path_inode(&["agent", "helper", "runtime", "current_thread"]),
-        current_task: tree.path_inode(&["agent", "helper", "runtime", "current_task"]),
-    }
-}
-
-fn cluster_worker_runtime_parents(tree: &StaticTree) -> ClusterWorkerRuntimeParents {
-    ClusterWorkerRuntimeParents {
-        state: tree.path_inode(&["cluster", "local", "worker", "local-worker", "state"]),
-        heartbeat: tree.path_inode(&["cluster", "local", "worker", "local-worker", "heartbeat"]),
-        load: tree.path_inode(&["cluster", "local", "worker", "local-worker", "load"]),
-        current_task: tree.path_inode(&[
-            "cluster",
-            "local",
-            "worker",
-            "local-worker",
-            "current_task",
-        ]),
-    }
-}
-
 fn mcp_runtime_parents(tree: &StaticTree) -> McpRuntimeParents {
     McpRuntimeParents {
-        local_fs_status: tree.path_inode(&["mcp", "server", "local-fs", "status"]),
-        local_fs_pid: tree.path_inode(&["mcp", "server", "local-fs", "pid"]),
+        local_fs_server: tree.path_inode(&["mcp", "server", "local-fs"]),
         local_fs_control: tree.path_inode(&["mcp", "server", "local-fs", "control"]),
-        workspace_content: tree.path_inode(&[
-            "mcp",
-            "resource",
-            "local-fs",
-            "workspace",
-            "content",
-        ]),
-        workspace_refresh: tree.path_inode(&[
-            "mcp",
-            "resource",
-            "local-fs",
-            "workspace",
-            "refresh",
-        ]),
-        session_state: tree.path_inode(&["mcp", "session", "local-fs.demo", "state"]),
-        session_transcript: tree.path_inode(&[
-            "mcp",
-            "session",
-            "local-fs.demo",
-            "transcript.jsonl",
-        ]),
+        workspace: tree.path_inode(&["mcp", "resource", "local-fs", "workspace"]),
+        session: tree.path_inode(&["mcp", "session", "local-fs.demo"]),
     }
 }
