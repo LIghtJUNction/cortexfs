@@ -1,6 +1,19 @@
 use crate::CortexFs;
+use crate::runtime_types::RuntimeContext;
 
 use super::support::set_default_provider;
+
+#[test]
+fn request_fingerprint_ignores_request_id_for_training_dedupe() -> fuse3::Result<()> {
+    let first = crate::request_fingerprint("openai.chat", "dedupe-a", "{\"messages\":[]}\n")?;
+    let second = crate::request_fingerprint("openai.chat", "dedupe-b", "{\"messages\":[]}\n")?;
+    let other_format =
+        crate::request_fingerprint("openai.responses", "dedupe-b", "{\"messages\":[]}\n")?;
+
+    assert_eq!(first.as_str(), second.as_str());
+    assert_ne!(first.as_str(), other_format.as_str());
+    Ok(())
+}
 
 #[test]
 fn export_refresh_derives_sft_from_thread_messages() -> fuse3::Result<()> {
@@ -28,27 +41,46 @@ fn export_refresh_derives_sft_from_thread_messages() -> fuse3::Result<()> {
     assert!(sft.contains("\"role\":\"assistant\",\"content\":\"cortexfs-ok\""));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
-            .contains("\"format\":\"exports\"")
+            .contains("\"format\":\"export\"")
     );
     Ok(())
 }
 
 #[test]
-fn export_compat_path_exposes_runtime_files() -> fuse3::Result<()> {
+fn runtime_context_drives_audit_and_conversation_export_identity() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    let primary = fs.export_file_inode("conversations.jsonl")?;
-    let compat_parent = fs.path_inode(["home", "1000", "exports"])?;
-    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
-    let compat = runtime
-        .lookup_child(compat_parent, "conversations.jsonl")
-        .map(crate::Node::inode)
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
-    drop(runtime);
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.context = RuntimeContext {
+            host_uid: 4242,
+            host_gid: 4243,
+            host_pid: 4244,
+            agent: "agent/context-test".to_owned(),
+            local_space: "home/4242".to_owned(),
+            external_space: "ext/test/group/1".to_owned(),
+        };
+        drop(runtime);
+    }
 
-    assert_eq!(
-        primary, compat,
-        "export compatibility path must expose the same runtime inode"
-    );
+    fs.create_staged_request("openai.chat", "context.tmp", "{\"messages\":[]}\n")?;
+    fs.submit_request("openai.chat", "context.tmp", "context.req.json")?;
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains("\"host_uid\":4242"));
+    assert!(audit.contains("\"host_gid\":4243"));
+    assert!(audit.contains("\"host_pid\":4244"));
+    assert!(audit.contains("\"agent\":\"agent/context-test\""));
+    assert!(audit.contains("\"space\":\"home/4242\""));
+
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"agent\":\"agent/context-test\""));
+    assert!(export.contains("\"space\":\"home/4242\""));
+    assert!(export.contains("\"request_id\":\"context\""));
     Ok(())
 }
 
@@ -104,6 +136,56 @@ fn preference_feedback_submit_exports_training_pair() -> fuse3::Result<()> {
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"feedback.preference\"")
     );
+    Ok(())
+}
+
+#[test]
+fn export_filters_rebuild_preference_view_by_subject() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.create_staged_preference_pair(
+            "pref-filter.tmp",
+            "{\"prompt\":\"pick one\",\"chosen\":{\"role\":\"assistant\",\"content\":\"better\"},\"rejected\":{\"role\":\"assistant\",\"content\":\"worse\"},\"subject\":\"qq:user:123456\"}\n",
+        )?;
+    fs.submit_preference_pair("pref-filter.tmp", "pref-filter.req.json")?;
+
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let preference = fs.export_file_inode("preference.jsonl")?;
+    let export = fs.node_content(preference)?;
+    assert!(export.contains("\"request_id\":\"pref-filter\""));
+    assert!(export.contains("qq:user:123456"));
+
+    let filters = fs
+        .tree
+        .path_inode(crate::EXPORT_FILTERS_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let subject = runtime
+            .lookup_child(filters, "subject")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(subject, 0, b"qq:user:missing\n")?;
+    }
+    assert!(
+        fs.node_content(preference)?.is_empty(),
+        "subject filter must exclude non-matching preference rows"
+    );
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let subject = runtime
+            .lookup_child(filters, "subject")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime.write(subject, 0, b"qq:user:123456\n")?;
+    }
+    let export = fs.node_content(preference)?;
+    assert!(export.contains("\"request_id\":\"pref-filter\""));
     Ok(())
 }
 
@@ -203,6 +285,38 @@ fn conversation_export_uses_submission_time_route() -> fuse3::Result<()> {
 }
 
 #[test]
+fn conversation_export_dedupes_by_fingerprint_after_filters() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let request = "{\"messages\":[{\"role\":\"user\",\"content\":\"same request\"}]}\n";
+    for request_id in ["dedupe-a", "dedupe-b"] {
+        fs.create_staged_request("openai.chat", &format!("{request_id}.tmp"), request)?;
+        fs.submit_request(
+            "openai.chat",
+            &format!("{request_id}.tmp"),
+            &format!("{request_id}.req.json"),
+        )?;
+        let drain = fs.control_file_inode("drain")?;
+        {
+            let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+            runtime.write(drain, 0, b"1\n")?;
+        }
+    }
+
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"dedupe-a\""));
+    assert!(!export.contains("\"request_id\":\"dedupe-b\""));
+    assert_eq!(export.lines().count(), 1);
+
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains("\"name\":\"dedupe-a\""));
+    assert!(
+        audit.contains("\"name\":\"dedupe-b\""),
+        "dedupe must affect training export only, not audit"
+    );
+    Ok(())
+}
+
+#[test]
 fn daemon_request_store_uses_submission_time_route_provider() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let provider = crate::providers_for_format("openai.responses")
@@ -224,14 +338,7 @@ fn daemon_request_store_uses_submission_time_route_provider() -> fuse3::Result<(
 
     let outbox = fs
         .tree
-        .path_inode(&[
-            "spaces",
-            "users",
-            "1000",
-            "api",
-            "openai.responses",
-            "outbox",
-        ])
+        .path_inode(&["home", "1000", "api", "openai.responses", "outbox"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     let response = runtime
@@ -344,7 +451,11 @@ fn export_filters_rebuild_conversation_view_by_provider() -> fuse3::Result<()> {
 #[test]
 fn export_filters_rebuild_conversation_view_by_time_range() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    fs.create_staged_request("openai.chat", "first.tmp", "{\"messages\":[]}\n")?;
+    fs.create_staged_request(
+        "openai.chat",
+        "first.tmp",
+        "{\"messages\":[{\"role\":\"user\",\"content\":\"first\"}]}\n",
+    )?;
     fs.submit_request("openai.chat", "first.tmp", "first.req.json")?;
     let drain = fs.control_file_inode("drain")?;
     {
@@ -352,7 +463,11 @@ fn export_filters_rebuild_conversation_view_by_time_range() -> fuse3::Result<()>
         runtime.write(drain, 0, b"1\n")?;
     }
 
-    fs.create_staged_request("openai.chat", "second.tmp", "{\"messages\":[]}\n")?;
+    fs.create_staged_request(
+        "openai.chat",
+        "second.tmp",
+        "{\"messages\":[{\"role\":\"user\",\"content\":\"second\"}]}\n",
+    )?;
     fs.submit_request("openai.chat", "second.tmp", "second.req.json")?;
     {
         let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
@@ -399,6 +514,30 @@ fn export_filters_rebuild_conversation_view_by_time_range() -> fuse3::Result<()>
     let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
     assert!(export.contains("\"request_id\":\"first\""));
     assert!(!export.contains("\"request_id\":\"second\""));
+    Ok(())
+}
+
+#[test]
+fn preference_export_dedupes_by_fingerprint() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let pair = "{\"prompt\":\"same\",\"chosen\":{\"role\":\"assistant\",\"content\":\"a\"},\"rejected\":{\"role\":\"assistant\",\"content\":\"b\"}}\n";
+    for request_id in ["pref-dupe-a", "pref-dupe-b"] {
+        fs.create_staged_preference_pair(&format!("{request_id}.tmp"), pair)?;
+        fs.submit_preference_pair(
+            &format!("{request_id}.tmp"),
+            &format!("{request_id}.req.json"),
+        )?;
+        let drain = fs.control_file_inode("drain")?;
+        {
+            let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+            runtime.write(drain, 0, b"1\n")?;
+        }
+    }
+
+    let export = fs.node_content(fs.export_file_inode("preference.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"pref-dupe-a\""));
+    assert!(!export.contains("\"request_id\":\"pref-dupe-b\""));
+    assert_eq!(export.lines().count(), 1);
     Ok(())
 }
 

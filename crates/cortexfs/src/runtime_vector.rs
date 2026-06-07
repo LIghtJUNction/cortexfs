@@ -2,21 +2,18 @@ use crate::{Node, RuntimeState, validation::validate_control_write};
 
 impl RuntimeState {
     pub fn add_vector_runtime_files(&mut self, parents: &crate::RuntimeParents) {
-        if let Some(inode) = parents.pgvector_enabled {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "enabled", "0\n"));
+        for (&store, &store_parent) in &parents.vector_stores {
+            let enabled = self.add_dynamic_file(store_parent, "enabled", "0\n");
+            let status = self.add_dynamic_file(store_parent, "status", "disabled\n");
+            if store == "pgvector" {
+                self.pgvector_enabled_inode = Some(enabled);
+                self.pgvector_status_inode = Some(status);
+            }
         }
-        if let Some(inode) = parents.pgvector_status {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "status", "disabled\n"));
-        }
-        if let Some(inode) = parents.pgvector_collections {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "collections", "\n"));
-        }
-        if let Some(inode) = parents.pgvector_refresh {
-            self.nodes
-                .insert(inode, Node::dynamic_file(inode, "refresh", ""));
+        if let Some(store_parent) = parents.pgvector_store {
+            self.pgvector_collections_inode =
+                Some(self.add_dynamic_file(store_parent, "collections", "\n"));
+            self.pgvector_refresh_inode = Some(self.add_dynamic_file(store_parent, "refresh", ""));
         }
     }
 
@@ -49,6 +46,17 @@ impl RuntimeState {
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
+    pub fn write_memory_index_refresh(&mut self, offset: u64, data: &[u8]) -> fuse3::Result<u32> {
+        validate_control_write(offset, data)?;
+        self.refresh_pgvector_status();
+        if let Some(inode) = self.memory_index_refresh_inode {
+            self.update_dynamic_file(inode, "1\n");
+        }
+        self.update_dynamic_file(self.last_control_inode, "memory/index/default/refresh\n");
+        self.append_audit("memory.index.default", "refresh", "refreshed");
+        u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
     pub fn refresh_pgvector_status(&mut self) {
         let enabled = self
             .pgvector_enabled_inode
@@ -68,6 +76,12 @@ impl RuntimeState {
         if let Some(inode) = self.pgvector_status_inode {
             self.update_dynamic_file(inode, status);
         }
+        if let Some(inode) = self.memory_index_state_inode {
+            self.update_dynamic_file(inode, status);
+        }
+        if let Some(inode) = self.memory_index_store_inode {
+            self.update_dynamic_file(inode, "vector/store/pgvector\n");
+        }
         if let Some(inode) = self.pgvector_collections_inode {
             let collections = if enabled && postgres_ready {
                 "memory_semantic\n"
@@ -75,6 +89,9 @@ impl RuntimeState {
                 "\n"
             };
             self.update_dynamic_file(inode, collections);
+        }
+        if let Some(inode) = self.memory_index_source_inode {
+            self.update_dynamic_file(inode, "home/1000/memory/semantic/items.jsonl\n");
         }
     }
 }

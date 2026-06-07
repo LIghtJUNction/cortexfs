@@ -1,4 +1,4 @@
-use crate::{CortexFs, ROOT_INODE, STATUS_TEXT};
+use crate::{CortexFs, LOCAL_USER_ID, ROOT_INODE, STATUS_TEXT};
 use fuse3::FileType;
 use std::ffi::OsStr;
 
@@ -7,28 +7,25 @@ fn read_only_projection_exposes_proc_style_nodes() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("status")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("api")).is_ok());
-    assert!(
-        fs.lookup_child(ROOT_INODE, OsStr::new("capabilities"))
-            .is_ok()
-    );
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("formats")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("providers")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("models")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("api")).is_err());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("cap")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("format")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("provider")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("model")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("home")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("spaces")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("agents")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("clusters")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("home")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("agent")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("cluster")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("mcp")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("skills")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("tools")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("skill")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("tool")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("memory")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("vector")).is_ok());
-    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("databases")).is_ok());
+    assert!(fs.lookup_child(ROOT_INODE, OsStr::new("db")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("audit")).is_ok());
     assert!(fs.lookup_child(ROOT_INODE, OsStr::new("control")).is_ok());
     assert!(fs.control_file_inode("drain").is_ok());
-    assert!(fs.control_file_inode("reload").is_ok());
+    assert!(fs.control_file_inode("reload").is_err());
     assert!(fs.control_file_inode("flush").is_ok());
     assert!(fs.control_file_inode("gc").is_ok());
     assert!(fs.control_file_inode("last_control").is_ok());
@@ -59,48 +56,104 @@ fn read_only_projection_exposes_proc_style_nodes() -> fuse3::Result<()> {
 fn projection_exposes_local_api_fast_path_metadata() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
+    for (path, expected) in [
+        (
+            &["home", LOCAL_USER_ID, "api", "status"][..],
+            "configured\n",
+        ),
+        (
+            &["home", LOCAL_USER_ID, "api", "http", "status"][..],
+            "daemon_required\n",
+        ),
+        (
+            &["home", LOCAL_USER_ID, "api", "unix", "status"][..],
+            "daemon_required\n",
+        ),
+    ] {
+        assert!(
+            fs.tree.path_inode(path).is_none(),
+            "{} must be runtime-owned, not a static placeholder",
+            path.join("/")
+        );
+        assert_eq!(
+            fs.node_content(fs.resolve_path_inode(path)?)?,
+            expected,
+            "{} must expose the expected runtime status",
+            path.join("/")
+        );
+    }
     assert_eq!(
-        fs.lookup_path(["api", "status"])
-            .and_then(crate::Node::content),
-        Some("configured\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["api", "http", "listen"])
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "http", "listen"])
             .and_then(crate::Node::content),
         Some(crate::LOCAL_API_LISTEN_TEXT)
     );
     assert_eq!(
-        fs.lookup_path(["api", "unix", "path"])
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "unix", "path"])
             .and_then(crate::Node::content),
         Some(crate::LOCAL_API_SOCKET_TEXT)
     );
     assert_eq!(
-        fs.lookup_path(["api", "unix", "api.sock"])
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "source"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_API_SOURCE_TEXT)
+    );
+    assert_eq!(
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "transport"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_API_TRANSPORT_TEXT)
+    );
+    assert_eq!(
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "store"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_API_STORE_TEXT)
+    );
+    assert_eq!(
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "policy"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_API_POLICY_TEXT)
+    );
+    assert_eq!(
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "audit"])
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_API_AUDIT_TEXT)
+    );
+    assert_eq!(
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "unix", "api.sock"])
             .map(crate::Node::kind),
         Some(FileType::Socket)
     );
     let socket = fs
         .tree
-        .path_inode(&["api", "unix", "api.sock"])
+        .path_inode(&["home", LOCAL_USER_ID, "api", "unix", "api.sock"])
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(
         fs.node_content(socket).is_err(),
         "local API socket is a realtime endpoint, not a regular file"
     );
     let endpoints = fs
-        .lookup_path(["api", "endpoints"])
+        .lookup_path(["home", LOCAL_USER_ID, "api", "endpoints"])
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(endpoints.contains("GET /v1/models"));
     assert!(endpoints.contains("POST /v1/chat/completions"));
     assert!(endpoints.contains("POST /v1/generateContent"));
     let pipeline = fs
-        .lookup_path(["api", "pipeline"])
+        .lookup_path(["home", LOCAL_USER_ID, "api", "pipeline"])
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert!(pipeline.contains("policy check"));
     assert!(pipeline.contains("secret resolve"));
     assert!(pipeline.contains("audit"));
+    assert_eq!(
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "http", "pipeline"])
+            .and_then(crate::Node::content),
+        Some("../pipeline\n")
+    );
+    assert_eq!(
+        fs.lookup_path(["home", LOCAL_USER_ID, "api", "unix", "pipeline"])
+            .and_then(crate::Node::content),
+        Some("../pipeline\n")
+    );
     Ok(())
 }
 
@@ -124,12 +177,6 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         Some(crate::model_list_for_format("openai.chat").as_str())
     );
     assert_eq!(
-        fs.lookup_path(["formats", "openai.chat", "models", "list"])
-            .and_then(crate::Node::content),
-        Some(crate::model_list_for_format("openai.chat").as_str()),
-        "format models compatibility path must expose the same index content"
-    );
-    assert_eq!(
         fs.lookup_path(["cap", "model"])
             .and_then(crate::Node::content),
         Some(crate::global_model_list().as_str())
@@ -143,12 +190,6 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         fs.lookup_path(["format", "openai.chat", "provider", "list"])
             .and_then(crate::Node::content),
         Some(crate::provider_list_for_format("openai.chat").as_str())
-    );
-    assert_eq!(
-        fs.lookup_path(["formats", "openai.chat", "providers", "list"])
-            .and_then(crate::Node::content),
-        Some(crate::provider_list_for_format("openai.chat").as_str()),
-        "format providers compatibility path must expose the same index content"
     );
     for format in [
         "openai.responses",
@@ -196,26 +237,25 @@ fn projection_exposes_formats_and_capability_indexes() -> fuse3::Result<()> {
         "mcp server namespace must exist"
     );
     assert_eq!(
-        fs.lookup_path(["capabilities", "mcp"])
+        fs.lookup_path(["cap", "mcp"])
             .and_then(crate::Node::content),
         Some("local-fs\n")
     );
     assert!(
-        fs.lookup_path(["skills", "indexes", "by-trigger"])
-            .is_some(),
+        fs.lookup_path(["skill", "index", "by-trigger"]).is_some(),
         "skill trigger index must exist"
     );
     assert_eq!(
-        fs.lookup_path(["capabilities", "skill"])
+        fs.lookup_path(["cap", "skill"])
             .and_then(crate::Node::content),
         Some("cortexfs-test\n")
     );
     assert!(
-        fs.lookup_path(["tools", "shell.exec"]).is_some(),
+        fs.lookup_path(["tool", "shell.exec"]).is_some(),
         "tool projection must exist"
     );
     assert_eq!(
-        fs.lookup_path(["capabilities", "tool"])
+        fs.lookup_path(["cap", "tool"])
             .and_then(crate::Node::content),
         Some("shell.exec\nfilesystem.read\nmcp.local-fs.read_file\n")
     );

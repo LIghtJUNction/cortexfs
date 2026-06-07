@@ -60,6 +60,10 @@ version = "0.1.0"
 name = "cortex-cli"
 version = "0.1.0"
 dependencies = [
+ "cortex-core",
+ "cortex-providers",
+ "cortex-store",
+ "cortexd",
  "cortexfs",
 ]
 

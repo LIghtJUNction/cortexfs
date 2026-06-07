@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use cortex_core::ApiFormat;
+    use cortex_core::{ApiFormat, MessageRole, ThreadId};
     use cortex_providers::OllamaProvider;
     use cortex_store::{InMemoryStore, RequestId, Store};
     use cortexd::{EnqueueOutcome, ExecutionPlane, SubmitRequest};
@@ -13,6 +13,7 @@ mod tests {
         let provider = OllamaProvider::local_smollm2()?;
         let mut plane = ExecutionPlane::new(InMemoryStore::new(), provider);
         let request_id = RequestId::new("ollama-live-001");
+        let thread_id = ThreadId::new("demo")?;
         let command = SubmitRequest::new(
             request_id.clone(),
             ApiFormat::OpenAiChat,
@@ -26,7 +27,8 @@ mod tests {
                 ]
             })
             .to_string(),
-        );
+        )
+        .with_thread(thread_id.clone());
 
         assert_eq!(
             plane.enqueue(command)?,
@@ -61,6 +63,26 @@ mod tests {
 
         assert!(model.starts_with("smollm2"), "unexpected model: {model:?}");
         assert!(!content.trim().is_empty(), "Ollama returned empty content");
+        let snapshot = plane.store().thread_snapshot(&thread_id)?;
+        assert_eq!(snapshot.messages().len(), 2);
+        let user = snapshot
+            .messages()
+            .first()
+            .ok_or("missing user thread message")?;
+        let assistant = snapshot
+            .messages()
+            .get(1)
+            .ok_or("missing assistant thread message")?;
+        assert_eq!(user.role(), MessageRole::User);
+        assert_eq!(user.content(), "Reply with exactly: cortexfs-ok");
+        assert_eq!(assistant.role(), MessageRole::Assistant);
+        assert_eq!(assistant.content(), content);
+        assert_eq!(snapshot.latest(), Some(content));
+        assert!(
+            snapshot
+                .fingerprint()
+                .is_some_and(|fingerprint| fingerprint.starts_with("fnv1a64:"))
+        );
         Ok(())
     }
 }

@@ -3,32 +3,54 @@ use fuse3::Inode;
 
 use crate::submission::SubmissionScope;
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RuntimeContext {
+    pub host_uid: u32,
+    pub host_gid: u32,
+    pub host_pid: u32,
+    pub agent: String,
+    pub local_space: String,
+    pub external_space: String,
+}
+
+impl RuntimeContext {
+    pub fn mvp_fixture() -> Self {
+        Self {
+            host_uid: 1000,
+            host_gid: 1000,
+            host_pid: 0,
+            agent: "helper".to_owned(),
+            local_space: "home/1000".to_owned(),
+            external_space: "ext/qq/group/888888".to_owned(),
+        }
+    }
+}
+
+impl Default for RuntimeContext {
+    fn default() -> Self {
+        Self::mvp_fixture()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ApiRouteInodes {
     pub provider: Inode,
     pub model: Inode,
     pub reason: Inode,
-    pub compat_provider: Option<Inode>,
-    pub compat_model: Option<Inode>,
-    pub compat_reason: Option<Inode>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct UserModelAccessInodes {
     pub allowed: Inode,
     pub reason: Inode,
-    pub compat_allowed: Option<Inode>,
-    pub compat_reason: Option<Inode>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ProviderRuntimeParents {
     pub url: Inode,
-    pub url_compat: Option<Inode>,
     pub enabled: Inode,
     pub health: Inode,
     pub models: Inode,
-    pub models_compat: Option<Inode>,
     pub secrets: Inode,
 }
 
@@ -37,9 +59,6 @@ pub struct ProviderConfigInodes {
     pub current: Option<Inode>,
     pub effective: Option<Inode>,
     pub source: Option<Inode>,
-    pub compat_current: Option<Inode>,
-    pub compat_effective: Option<Inode>,
-    pub compat_source: Option<Inode>,
     pub status: Option<Inode>,
 }
 
@@ -48,6 +67,7 @@ pub struct ApiSubmission {
     pub scope: SubmissionScope,
     pub format: &'static str,
     pub tool: Option<&'static str>,
+    pub memory_layer: Option<&'static str>,
     pub outbox_parent: Inode,
     pub materialize_response_file: bool,
 }
@@ -110,6 +130,8 @@ pub struct PendingResponse {
 pub struct ConversationExportRow {
     pub line: String,
     pub time: String,
+    pub fingerprint: String,
+    pub dedupe_key: String,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub agent: Option<String>,
@@ -122,6 +144,8 @@ pub struct ConversationExportRow {
 pub struct TrainingExportRow {
     pub line: String,
     pub time: String,
+    pub fingerprint: String,
+    pub dedupe_key: String,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub agent: Option<String>,
@@ -132,6 +156,8 @@ pub struct TrainingExportRow {
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct TrainingExportMetadata {
+    pub fingerprint: String,
+    pub dedupe_key: String,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub agent: Option<String>,
@@ -171,6 +197,7 @@ pub struct AgentTask {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MemoryItem {
+    pub layer: &'static str,
     pub body: String,
     pub fingerprint: String,
 }

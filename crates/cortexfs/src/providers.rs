@@ -8,7 +8,7 @@ pub const API_FORMATS: [&str; 4] = [
 ];
 
 const LOCAL_RUNTIME_BASE_URL_TEXT: &str = "http://127.0.0.1:6186\n";
-const LOCAL_OPENAI_COMPAT_BASE_URL_TEXT: &str = "http://127.0.0.1:6187/v1\n";
+const LOCAL_RELAY_BASE_URL_TEXT: &str = "http://127.0.0.1:6187/v1\n";
 const NO_DEFAULT_PROVIDER_ID: &str = "";
 
 pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
@@ -59,8 +59,8 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
     },
     ProviderRuntimeSpec {
         id: "relay-openai",
-        family: "openai-compatible\n",
-        name: "OpenAI-compatible relay endpoint\n",
+        family: "relay\n",
+        name: "Relay endpoint using OpenAI formats\n",
         formats: &["openai.chat", "openai.responses"],
         default_base_url: "https://relay.example.invalid/v1\n",
         auth_scheme: "bearer\n",
@@ -74,8 +74,8 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
     },
     ProviderRuntimeSpec {
         id: "kimi-main",
-        family: "openai-compatible\n",
-        name: "Kimi OpenAI-compatible account\n",
+        family: "moonshot\n",
+        name: "Kimi API account\n",
         formats: &["openai.chat"],
         default_base_url: "https://api.moonshot.cn/v1\n",
         auth_scheme: "bearer\n",
@@ -89,8 +89,8 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
     },
     ProviderRuntimeSpec {
         id: "minimax-main",
-        family: "openai-compatible\n",
-        name: "MiniMax OpenAI-compatible account\n",
+        family: "minimax\n",
+        name: "MiniMax API account\n",
         formats: &["openai.chat"],
         default_base_url: "https://api.minimax.chat/v1\n",
         auth_scheme: "bearer\n",
@@ -118,16 +118,16 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         model_capabilities: "chat\nlocal\n",
     },
     ProviderRuntimeSpec {
-        id: "local-openai-compatible",
-        family: "openai-compatible\n",
-        name: "Local OpenAI-compatible provider\n",
+        id: "local-relay",
+        family: "local-relay\n",
+        name: "Local relay provider\n",
         formats: &["openai.chat"],
-        default_base_url: LOCAL_OPENAI_COMPAT_BASE_URL_TEXT,
+        default_base_url: LOCAL_RELAY_BASE_URL_TEXT,
         auth_scheme: "none\n",
         account_type: "local_runtime\n",
         priority: "49\n",
         secret_status: "not_required\n",
-        default_model: "cortexfs-openai-compatible-model",
+        default_model: "cortexfs-local-relay-model",
         context_window: "8192\n",
         max_output_tokens: "1024\n",
         model_capabilities: "chat\nlocal\n",

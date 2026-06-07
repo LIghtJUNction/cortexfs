@@ -5,7 +5,7 @@ use fuse3::FileType;
 fn xattr_exposes_cortex_security_context() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let space = fs
-        .lookup_path(["spaces", "users", "1000"])
+        .lookup_path(["home", "1000"])
         .map(crate::Node::inode)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let context = fs.node_context(space)?;
@@ -24,7 +24,7 @@ fn xattr_exposes_cortex_security_context() -> fuse3::Result<()> {
     assert!(crate::filesystem::reply_xattr(context.as_bytes(), 1).is_err());
 
     let context_file = fs
-        .lookup_path(["spaces", "users", "1000", "context"])
+        .lookup_path(["home", "1000", "context"])
         .map(crate::Node::inode)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     assert_eq!(fs.node_context(context_file)?, context);
@@ -46,11 +46,11 @@ fn xattr_exposes_cortex_security_context() -> fuse3::Result<()> {
 #[test]
 fn directory_entries_keep_stable_offsets() {
     assert_eq!(
-        dir_entry(42, FileType::Directory, "providers", 7),
+        dir_entry(42, FileType::Directory, "provider", 7),
         fuse3::raw::reply::DirectoryEntry {
             inode: 42,
             kind: FileType::Directory,
-            name: "providers".into(),
+            name: "provider".into(),
             offset: 7,
         }
     );

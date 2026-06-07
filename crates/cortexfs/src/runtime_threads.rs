@@ -269,7 +269,7 @@ impl RuntimeState {
             self.episodic_item_count().saturating_add(1)
         );
         let content = format!(
-            "thread=spaces/external/qq/groups/888888/threads/demo\nsubject={subject}\ndisplay_name={display_name}\nformat={}\ntext={text}",
+            "thread=ext/qq/group/888888/thread/demo\nsubject={subject}\ndisplay_name={display_name}\nformat={}\ntext={text}",
             pending.format
         );
         self.append_memory_layer_item("episodic", &id, &content, &pending.fingerprint);

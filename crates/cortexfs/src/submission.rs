@@ -2,15 +2,15 @@ use crate::{
     AGENT_HELPER_INBOX_PATH, AGENT_HELPER_OUTBOX_PATH, AGENT_TASK_FORMAT, API_FORMATS, API_PREFIX,
     BATCH_INBOX_PATH, BATCH_OUTBOX_PATH, CLUSTER_TASK_FORMAT, CLUSTER_TASK_PENDING_PATH,
     DEFAULT_BATCH_FORMAT, DEFAULT_THREAD_FORMAT, DEMO_THREAD_INBOX_PATH,
-    EXTERNAL_QQ_GROUP_THREAD_COMPAT_INBOX_PATH, EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH,
-    FEEDBACK_PREFERENCE_INBOX_PATH, FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL,
-    FILESYSTEM_READ_TOOL_INBOX_PATH, FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_USER_HOME_PREFIX,
-    LOCAL_USER_ID, MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
+    EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH, FEEDBACK_PREFERENCE_INBOX_PATH,
+    FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL, FILESYSTEM_READ_TOOL_INBOX_PATH,
+    FILESYSTEM_READ_TOOL_OUTBOX_PATH, MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
     MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH, MCP_PROMPT_RENDER_FORMAT,
     MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH,
-    MEMORY_ITEM_FORMAT, MEMORY_SEMANTIC_INBOX_PATH, PREFERENCE_PAIR_FORMAT,
-    SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH,
-    SHARED_PROJECT_A_DEMO_CLAIMS_PATH, SHARED_PROJECT_A_LOCK_LEASES_PATH, TOOL_FORMAT,
+    MEMORY_EPISODIC_FORMAT, MEMORY_PROCEDURAL_FORMAT, MEMORY_PROFILE_FORMAT,
+    MEMORY_SEMANTIC_FORMAT, MEMORY_WORKING_FORMAT, PREFERENCE_PAIR_FORMAT,
+    SHARED_PROJECT_A_DEMO_CLAIM_PATH, SHARED_PROJECT_A_LOCK_LEASE_PATH, SHELL_EXEC_TOOL,
+    SHELL_EXEC_TOOL_INBOX_PATH, SHELL_EXEC_TOOL_OUTBOX_PATH, TOOL_FORMAT,
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -38,6 +38,7 @@ pub struct SubmissionLocation {
     pub scope: SubmissionScope,
     pub format: &'static str,
     pub tool: Option<&'static str>,
+    pub memory_layer: Option<&'static str>,
     pub kind: SubmissionDirectoryKind,
 }
 
@@ -53,13 +54,6 @@ pub struct CollabLockLocation {
 
 impl SubmissionLocation {
     pub fn from_path(path: &[String]) -> Option<Self> {
-        let canonical_path;
-        let path = if is_local_user_space_compat_path(path) {
-            canonical_path = canonical_user_home_path(path)?;
-            canonical_path.as_slice()
-        } else {
-            path
-        };
         Self::from_api_path(path)
             .or_else(|| Self::from_batch_path(path))
             .or_else(|| Self::from_thread_path(path))
@@ -92,6 +86,7 @@ impl SubmissionLocation {
             scope: SubmissionScope::Api,
             format,
             tool: None,
+            memory_layer: None,
             kind,
         })
     }
@@ -107,6 +102,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::Batch,
                 format: DEFAULT_BATCH_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Inbox,
             });
         }
@@ -120,6 +116,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::Batch,
                 format: DEFAULT_BATCH_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Outbox,
             });
         }
@@ -137,6 +134,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::Thread,
                 format: DEFAULT_THREAD_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Inbox,
             });
         }
@@ -144,17 +142,12 @@ impl SubmissionLocation {
     }
 
     fn from_external_thread_path(path: &[String]) -> Option<Self> {
-        if path_eq_any(
-            path,
-            &[
-                EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH,
-                EXTERNAL_QQ_GROUP_THREAD_COMPAT_INBOX_PATH,
-            ],
-        ) {
+        if path_eq(path, EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH) {
             return Some(Self {
                 scope: SubmissionScope::ExternalThread,
                 format: DEFAULT_THREAD_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Inbox,
             });
         }
@@ -163,6 +156,16 @@ impl SubmissionLocation {
 
     fn from_tool_path(path: &[String]) -> Option<Self> {
         [
+            (
+                SHELL_EXEC_TOOL,
+                SHELL_EXEC_TOOL_INBOX_PATH,
+                SubmissionDirectoryKind::Inbox,
+            ),
+            (
+                SHELL_EXEC_TOOL,
+                SHELL_EXEC_TOOL_OUTBOX_PATH,
+                SubmissionDirectoryKind::Outbox,
+            ),
             (
                 FILESYSTEM_READ_TOOL,
                 FILESYSTEM_READ_TOOL_INBOX_PATH,
@@ -195,6 +198,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::Tool,
                 format: TOOL_FORMAT,
                 tool: Some(tool),
+                memory_layer: None,
                 kind,
             })
         })
@@ -211,6 +215,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::ClusterTask,
                 format: CLUSTER_TASK_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Inbox,
             });
         }
@@ -228,6 +233,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::AgentTask,
                 format: AGENT_TASK_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Inbox,
             });
         }
@@ -241,6 +247,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::AgentTask,
                 format: AGENT_TASK_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Outbox,
             });
         }
@@ -248,20 +255,27 @@ impl SubmissionLocation {
     }
 
     fn from_memory_item_path(path: &[String]) -> Option<Self> {
-        if path.len() == MEMORY_SEMANTIC_INBOX_PATH.len()
-            && path
+        const MEMORY_PREFIX: &[&str] = &["home", "1000", "memory"];
+        if path.len() != MEMORY_PREFIX.len().saturating_add(2)
+            || !path
                 .iter()
-                .zip(MEMORY_SEMANTIC_INBOX_PATH)
+                .zip(MEMORY_PREFIX)
                 .all(|(actual, expected)| actual == expected)
         {
-            return Some(Self {
-                scope: SubmissionScope::MemoryItem,
-                format: MEMORY_ITEM_FORMAT,
-                tool: None,
-                kind: SubmissionDirectoryKind::Inbox,
-            });
+            return None;
         }
-        None
+        let layer = path.get(MEMORY_PREFIX.len())?;
+        let kind_name = path.get(MEMORY_PREFIX.len().saturating_add(1))?;
+        if kind_name != "inbox" {
+            return None;
+        }
+        memory_format_for_layer(layer).map(|(layer, format)| Self {
+            scope: SubmissionScope::MemoryItem,
+            format,
+            tool: None,
+            memory_layer: Some(layer),
+            kind: SubmissionDirectoryKind::Inbox,
+        })
     }
 
     fn from_preference_path(path: &[String]) -> Option<Self> {
@@ -275,6 +289,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::PreferencePair,
                 format: PREFERENCE_PAIR_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Inbox,
             });
         }
@@ -288,6 +303,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::PreferencePair,
                 format: PREFERENCE_PAIR_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Outbox,
             });
         }
@@ -305,6 +321,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::McpPromptRender,
                 format: MCP_PROMPT_RENDER_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Inbox,
             });
         }
@@ -318,6 +335,7 @@ impl SubmissionLocation {
                 scope: SubmissionScope::McpPromptRender,
                 format: MCP_PROMPT_RENDER_FORMAT,
                 tool: None,
+                memory_layer: None,
                 kind: SubmissionDirectoryKind::Outbox,
             });
         }
@@ -333,33 +351,20 @@ impl SubmissionLocation {
     }
 }
 
-fn is_local_user_space_compat_path(path: &[String]) -> bool {
-    matches!(
-        path,
-        [root, users, uid, ..]
-            if (root == "space" || root == "spaces") && users == "users" && uid == LOCAL_USER_ID
-    )
-}
-
-fn canonical_user_home_path(path: &[String]) -> Option<Vec<String>> {
-    if !is_local_user_space_compat_path(path) {
-        return None;
+fn memory_format_for_layer(layer: &str) -> Option<(&'static str, &'static str)> {
+    match layer {
+        "working" => Some(("working", MEMORY_WORKING_FORMAT)),
+        "episodic" => Some(("episodic", MEMORY_EPISODIC_FORMAT)),
+        "semantic" => Some(("semantic", MEMORY_SEMANTIC_FORMAT)),
+        "procedural" => Some(("procedural", MEMORY_PROCEDURAL_FORMAT)),
+        "profile" => Some(("profile", MEMORY_PROFILE_FORMAT)),
+        _ => None,
     }
-    let mut canonical = Vec::with_capacity(path.len().saturating_sub(1));
-    canonical.extend(LOCAL_USER_HOME_PREFIX.iter().map(ToString::to_string));
-    canonical.extend(path.iter().skip(3).cloned());
-    Some(canonical)
 }
 
 impl CollabClaimLocation {
     pub fn from_path(path: &[String]) -> Option<Self> {
-        if path_eq_any(
-            path,
-            &[
-                SHARED_PROJECT_A_DEMO_CLAIMS_PATH,
-                SHARED_PROJECT_A_COMPAT_DEMO_CLAIMS_PATH,
-            ],
-        ) {
+        if path_eq(path, SHARED_PROJECT_A_DEMO_CLAIM_PATH) {
             return Some(Self { task_id: "demo" });
         }
         None
@@ -368,25 +373,17 @@ impl CollabClaimLocation {
 
 impl CollabLockLocation {
     pub fn from_path(path: &[String]) -> Option<Self> {
-        if path_eq_any(
-            path,
-            &[
-                SHARED_PROJECT_A_LOCK_LEASES_PATH,
-                SHARED_PROJECT_A_COMPAT_LOCK_LEASES_PATH,
-            ],
-        ) {
+        if path_eq(path, SHARED_PROJECT_A_LOCK_LEASE_PATH) {
             return Some(Self { scope: "shared" });
         }
         None
     }
 }
 
-fn path_eq_any(path: &[String], expected_paths: &[&[&str]]) -> bool {
-    expected_paths.iter().any(|expected_path| {
-        path.len() == expected_path.len()
-            && path
-                .iter()
-                .zip(*expected_path)
-                .all(|(actual, expected)| actual == expected)
-    })
+fn path_eq(path: &[String], expected_path: &[&str]) -> bool {
+    path.len() == expected_path.len()
+        && path
+            .iter()
+            .zip(expected_path)
+            .all(|(actual, expected)| actual == expected)
 }

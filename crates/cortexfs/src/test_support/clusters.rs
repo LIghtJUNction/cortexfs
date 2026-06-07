@@ -18,7 +18,7 @@ fn assert_worker_runtime(
         ("current_task", expected.current_task),
     ] {
         assert_eq!(
-            fs.node_content(fs.path_inode([
+            fs.node_content(fs.resolve_path_inode([
                 "cluster",
                 "local",
                 "worker",
@@ -29,6 +29,392 @@ fn assert_worker_runtime(
             "worker runtime file mismatch: {file}"
         );
     }
+    Ok(())
+}
+
+fn assert_worker_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let worker = fs.path_inode(["cluster", "local", "worker", "local-worker"])?;
+    let entries = fs.children(worker);
+    for name in ["state", "heartbeat", "load", "current_task"] {
+        assert!(
+            fs.tree
+                .path_inode(&["cluster", "local", "worker", "local-worker", name])
+                .is_none(),
+            "cluster worker {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "cluster worker directory must expose one {name} entry"
+        );
+    }
+    Ok(())
+}
+
+fn assert_cluster_state_is_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let cluster = fs.path_inode(["cluster", "local"])?;
+    let entries = fs.children(cluster);
+    assert!(
+        fs.tree.path_inode(&["cluster", "local", "state"]).is_none(),
+        "cluster/local/state must be runtime-owned, not a static placeholder"
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.name.to_str() == Some("state"))
+            .count(),
+        1,
+        "cluster/local must expose one state entry"
+    );
+    Ok(())
+}
+
+fn assert_cluster_control_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let control = fs.path_inode(["cluster", "local", "control"])?;
+    let entries = fs.children(control);
+    for name in ["rebalance", "drain", "pause"] {
+        assert!(
+            fs.tree
+                .path_inode(&["cluster", "local", "control", name])
+                .is_none(),
+            "cluster control {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "cluster/local/control must expose one {name} entry"
+        );
+        assert_eq!(
+            fs.node_attr(fs.resolve_path_inode(["cluster", "local", "control", name,])?)?
+                .perm,
+            0o222
+        );
+    }
+    Ok(())
+}
+
+fn assert_collab_task_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let task = fs.path_inode(["shared", "project-a", "collab", "task", "demo"])?;
+    let entries = fs.children(task);
+    for (name, expected) in [
+        ("owner", "agent/helper\n"),
+        ("state", "open\n"),
+        (
+            "events.jsonl",
+            "{\"event\":\"created\",\"agent\":\"helper\",\"state\":\"open\"}\n",
+        ),
+    ] {
+        assert!(
+            fs.tree
+                .path_inode(&["shared", "project-a", "collab", "task", "demo", name])
+                .is_none(),
+            "collab task {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "collab task directory must expose one {name} entry"
+        );
+        assert_eq!(
+            fs.node_content(fs.resolve_path_inode([
+                "shared",
+                "project-a",
+                "collab",
+                "task",
+                "demo",
+                name,
+            ])?)?,
+            expected
+        );
+    }
+    Ok(())
+}
+
+fn assert_blackboard_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let blackboard = fs.path_inode(["shared", "project-a", "collab", "blackboard"])?;
+    let entries = fs.children(blackboard);
+    for (name, expected) in [
+        (
+            "notes.jsonl",
+            "{\"agent\":\"helper\",\"note\":\"project collaboration space initialized\"}\n",
+        ),
+        ("state", "open\n"),
+    ] {
+        assert!(
+            fs.tree
+                .path_inode(&["shared", "project-a", "collab", "blackboard", name])
+                .is_none(),
+            "collab blackboard {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "collab blackboard directory must expose one {name} entry"
+        );
+        assert_eq!(
+            fs.node_content(fs.resolve_path_inode([
+                "shared",
+                "project-a",
+                "collab",
+                "blackboard",
+                name,
+            ])?)?,
+            expected
+        );
+    }
+    Ok(())
+}
+
+fn assert_collab_handoff_state_is_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let handoff = fs.path_inode(["shared", "project-a", "collab", "handoff", "demo"])?;
+    let entries = fs.children(handoff);
+    assert!(
+        fs.tree
+            .path_inode(&["shared", "project-a", "collab", "handoff", "demo", "state"])
+            .is_none(),
+        "collab handoff state must be runtime-owned, not a static placeholder"
+    );
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.name.to_str() == Some("state"))
+            .count(),
+        1,
+        "collab handoff directory must expose one state entry"
+    );
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode([
+            "shared",
+            "project-a",
+            "collab",
+            "handoff",
+            "demo",
+            "state",
+        ])?)?,
+        "ready\n"
+    );
+    Ok(())
+}
+
+fn assert_collab_lock_demo_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
+    let lock = fs.path_inode(["shared", "project-a", "collab", "lock", "demo"])?;
+    let entries = fs.children(lock);
+    for (name, expected) in [
+        ("owner", "agent/helper\n"),
+        ("state", "released\n"),
+        ("lease_expires", "\n"),
+    ] {
+        assert!(
+            fs.tree
+                .path_inode(&["shared", "project-a", "collab", "lock", "demo", name])
+                .is_none(),
+            "collab lock demo {name} must be runtime-owned, not a static placeholder"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.name.to_str() == Some(name))
+                .count(),
+            1,
+            "collab lock demo directory must expose one {name} entry"
+        );
+        assert_eq!(
+            fs.node_content(fs.resolve_path_inode([
+                "shared",
+                "project-a",
+                "collab",
+                "lock",
+                "demo",
+                name,
+            ])?)?,
+            expected
+        );
+    }
+    Ok(())
+}
+
+fn assert_cluster_task_queue_after_submit(
+    fs: &CortexFs,
+    pending: fuse3::Inode,
+    running: fuse3::Inode,
+    done: fuse3::Inode,
+) -> fuse3::Result<()> {
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert!(
+        runtime
+            .lookup_child(pending, "task-001.req.json")
+            .and_then(crate::Node::content)
+            .is_some_and(|spec| spec.contains("cluster visible")),
+        "cluster task submit must materialize the pending queue entry"
+    );
+    assert!(
+        runtime.lookup_child(done, "task-001.resp.json").is_none(),
+        "cluster task submit queues work until control/drain"
+    );
+    assert!(
+        runtime.lookup_child(running, "task-001.req.json").is_none(),
+        "cluster task submit must not skip pending and appear running early"
+    );
+    drop(runtime);
+    Ok(())
+}
+
+fn assert_cluster_task_queue_after_drain(
+    fs: &CortexFs,
+    pending: fuse3::Inode,
+    running: fuse3::Inode,
+    done: fuse3::Inode,
+) -> fuse3::Result<()> {
+    let tasks = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASKS_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert!(
+        runtime.lookup_child(pending, "task-001.req.json").is_none(),
+        "cluster task drain must remove the pending queue entry"
+    );
+    assert!(
+        runtime.lookup_child(running, "task-001.req.json").is_none(),
+        "cluster task drain must remove the transient running queue entry"
+    );
+    let task_dir = runtime
+        .lookup_child(tasks, "task-001")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_eq!(
+        runtime
+            .lookup_child(task_dir, "state")
+            .and_then(crate::Node::content),
+        Some("done\n")
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(task_dir, "assigned_worker")
+            .and_then(crate::Node::content),
+        Some("local-worker\n")
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(task_dir, "spec.req.json")
+            .and_then(crate::Node::content),
+        Some("{\"task\":\"summarize\",\"input\":\"cluster visible\"}\n")
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(task_dir, "error")
+            .and_then(crate::Node::content),
+        Some("\n")
+    );
+    let result = runtime
+        .lookup_child(task_dir, "result.resp.json")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(result.contains("\"status\":\"done\""));
+    assert!(result.contains("cluster visible"));
+    let audit = runtime
+        .lookup_child(task_dir, "audit")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(audit.contains("\"event\":\"done\""));
+    assert!(audit.contains("\"worker\":\"local-worker\""));
+    assert!(audit.contains("\"fingerprint\":\"fnv1a64:"));
+    let events = runtime
+        .lookup_child(task_dir, "events.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(events.contains("\"event\":\"running\""));
+    assert!(events.contains("\"event\":\"done\""));
+    assert!(
+        runtime
+            .lookup_child(done, "task-001.resp.json")
+            .and_then(crate::Node::content)
+            .is_some_and(|done_result| done_result.contains("local-worker"))
+    );
+    drop(runtime);
+    Ok(())
+}
+
+fn assert_failed_cluster_task_queue_entry(
+    runtime: &crate::RuntimeState,
+    pending: fuse3::Inode,
+    running: fuse3::Inode,
+    done: fuse3::Inode,
+    failed: fuse3::Inode,
+) {
+    assert!(
+        runtime
+            .lookup_child(pending, "task-fail.req.json")
+            .is_none()
+    );
+    assert!(
+        runtime
+            .lookup_child(running, "task-fail.req.json")
+            .is_none()
+    );
+    assert!(runtime.lookup_child(done, "task-fail.resp.json").is_none());
+    assert!(
+        runtime
+            .lookup_child(failed, "task-fail.error")
+            .and_then(crate::Node::content)
+            .is_some_and(|error| error.contains("\"status\":\"failed\"")
+                && error.contains("cluster task requested failure")),
+        "cluster task errors must materialize in the failed queue"
+    );
+}
+
+fn assert_failed_cluster_task_directory(
+    runtime: &crate::RuntimeState,
+    tasks: fuse3::Inode,
+) -> fuse3::Result<()> {
+    let task_dir = runtime
+        .lookup_child(tasks, "task-fail")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    for (name, expected) in [
+        ("state", "failed\n"),
+        ("error", "cluster task requested failure\n"),
+        ("assigned_worker", "local-worker\n"),
+        (
+            "spec.req.json",
+            "{\"task\":\"summarize\",\"input\":\"cluster visible\",\"fail\":true}\n",
+        ),
+        ("result.resp.json", "\n"),
+    ] {
+        assert_eq!(
+            runtime
+                .lookup_child(task_dir, name)
+                .and_then(crate::Node::content),
+            Some(expected),
+            "failed cluster task file mismatch: {name}"
+        );
+    }
+    let audit = runtime
+        .lookup_child(task_dir, "audit")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(audit.contains("\"event\":\"failed\""));
+    assert!(audit.contains("\"worker\":\"local-worker\""));
+    assert!(audit.contains("\"error\":\"cluster task requested failure\""));
+    assert!(audit.contains("\"fingerprint\":\"fnv1a64:"));
+    let events = runtime
+        .lookup_child(task_dir, "events.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(events.contains("\"event\":\"running\""));
+    assert!(events.contains("\"event\":\"failed\""));
     Ok(())
 }
 
@@ -46,10 +432,10 @@ fn projection_exposes_cluster_worker_and_queue_shape() -> fuse3::Result<()> {
             .and_then(crate::Node::content),
         Some("local\n")
     );
+    assert_cluster_state_is_runtime_owned(&fs)?;
     assert_eq!(
-        fs.lookup_path(["cluster", "local", "state"])
-            .and_then(crate::Node::content),
-        Some("idle\n")
+        fs.node_content(fs.resolve_path_inode(["cluster", "local", "state"])?)?,
+        "idle\n"
     );
     assert_eq!(
         fs.lookup_path(["cluster", "local", "context"])
@@ -81,12 +467,7 @@ fn projection_exposes_cluster_worker_and_queue_shape() -> fuse3::Result<()> {
             .and_then(crate::Node::content),
         Some("fuse\nprovider.registry\nlocal_runtime\n")
     );
-    assert_eq!(
-        fs.lookup_path(["cluster", "local", "worker", "local-worker", "capabilities"])
-            .and_then(crate::Node::content),
-        Some("fuse\nprovider.registry\nlocal_runtime\n"),
-        "worker capabilities remains a compatibility file"
-    );
+    assert_worker_runtime_files_are_runtime_owned(&fs)?;
     assert_worker_runtime(
         &fs,
         &WorkerRuntimeExpectation {
@@ -122,37 +503,16 @@ fn projection_exposes_cluster_worker_and_queue_shape() -> fuse3::Result<()> {
         fs.lookup_path(["cluster", "local", "task"]).is_some(),
         "cluster task namespace must exist"
     );
-    assert!(
-        fs.lookup_path(["cluster", "local", "control", "rebalance"])
-            .is_some(),
-        "cluster rebalance control node must exist"
-    );
-    assert_eq!(
-        fs.tree
-            .path_inode(&["cluster", "local"])
-            .zip(fs.tree.path_inode(&["clusters", "local"]))
-            .map(|(primary, compat)| primary == compat),
-        Some(true)
-    );
+    assert_cluster_control_files_are_runtime_owned(&fs)?;
     assert!(
         fs.lookup_path(["cluster", "local", "worker", "local-worker"])
             .is_some()
     );
     assert!(
-        fs.lookup_path(["cluster", "local", "workers", "local-worker"])
-            .is_some(),
-        "cluster/local/workers remains a compatibility namespace"
-    );
-    assert!(
         fs.lookup_path(["cluster", "local", "queue", "default"])
             .is_some()
     );
-    assert!(
-        fs.lookup_path(["cluster", "local", "queues", "default"])
-            .is_some(),
-        "cluster/local/queues remains a compatibility namespace"
-    );
-    assert!(fs.lookup_path(["cluster", "local", "tasks"]).is_some());
+    assert!(fs.lookup_path(["cluster", "local", "task"]).is_some());
     Ok(())
 }
 
@@ -177,11 +537,8 @@ fn cluster_control_nodes_update_state_last_control_and_audit() -> fuse3::Result<
         }
 
         assert_eq!(
-            fs.lookup_path(["cluster", "local", "state"])
-                .map(crate::Node::inode)
-                .map(|inode| fs.node_content(inode))
-                .transpose()?,
-            Some(expected_state.to_owned())
+            fs.node_content(fs.resolve_path_inode(["cluster", "local", "state"])?)?,
+            expected_state
         );
         assert_eq!(
             fs.node_content(fs.control_file_inode("last_control")?)?,
@@ -214,7 +571,7 @@ fn cluster_control_nodes_reject_invalid_input() -> fuse3::Result<()> {
 }
 
 #[test]
-fn projection_exposes_shared_collaboration_space() {
+fn projection_exposes_shared_collaboration_space() -> fuse3::Result<()> {
     let fs = CortexFs::new();
 
     assert_eq!(
@@ -222,48 +579,25 @@ fn projection_exposes_shared_collaboration_space() {
             .and_then(crate::Node::content),
         Some("local:shared_project_a:object_r:shared_space_t:s0:c_project_a\n")
     );
-    assert_eq!(
+    assert!(
         fs.tree
-            .path_inode(&["shared", "project-a"])
-            .zip(fs.tree.path_inode(&["spaces", "shared", "project-a"]))
-            .map(|(direct, compat)| direct == compat),
-        Some(true)
+            .path_inode(&["space", "shared", "project-a"])
+            .is_none()
     );
-    assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "blackboard", "state"])
-            .and_then(crate::Node::content),
-        Some("open\n")
-    );
+    assert_blackboard_runtime_files_are_runtime_owned(&fs)?;
     assert!(
         fs.lookup_path(["shared", "project-a", "collab", "blackboard", "artifact"])
             .is_some(),
         "blackboard artifact directory must be the primary namespace"
     );
-    assert!(
-        fs.lookup_path(["shared", "project-a", "collab", "blackboard", "artifacts"])
-            .is_some(),
-        "blackboard artifacts directory remains a compatibility namespace"
-    );
-    assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "owner"])
-            .and_then(crate::Node::content),
-        Some("agents/helper\n")
-    );
+    assert_collab_task_runtime_files_are_runtime_owned(&fs)?;
     assert!(
         fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "claim"])
             .is_some(),
-        "collab task claims directory must exist"
+        "collab task claim directory must exist"
     );
-    assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "handoff", "demo", "state"])
-            .and_then(crate::Node::content),
-        Some("ready\n")
-    );
-    assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "lock", "demo", "state"])
-            .and_then(crate::Node::content),
-        Some("released\n")
-    );
+    assert_collab_handoff_state_is_runtime_owned(&fs)?;
+    assert_collab_lock_demo_files_are_runtime_owned(&fs)?;
     assert!(
         fs.lookup_path(["shared", "project-a", "collab", "lock", "lease"])
             .is_some(),
@@ -274,23 +608,14 @@ fn projection_exposes_shared_collaboration_space() {
             .is_some(),
         "collab decisions must be visible"
     );
-    for (primary, compat) in [
-        ("task", "tasks"),
-        ("handoff", "handoffs"),
-        ("lock", "locks"),
-        ("decision", "decisions"),
-    ] {
+    for primary in ["task", "handoff", "lock", "decision"] {
         assert!(
             fs.lookup_path(["shared", "project-a", "collab", primary])
                 .is_some(),
             "shared collab/{primary} must be the primary namespace"
         );
-        assert!(
-            fs.lookup_path(["shared", "project-a", "collab", compat])
-                .is_some(),
-            "shared collab/{compat} remains a compatibility namespace"
-        );
     }
+    Ok(())
 }
 
 #[test]
@@ -300,7 +625,7 @@ fn projection_exposes_collab_handoff_context_refs() {
     assert_eq!(
         fs.lookup_path(["shared", "project-a", "collab", "handoff", "demo", "from"])
             .and_then(crate::Node::content),
-        Some("agents/helper\n")
+        Some("agent/helper\n")
     );
     assert_eq!(
         fs.lookup_path(["shared", "project-a", "collab", "handoff", "demo", "to"])
@@ -337,52 +662,54 @@ fn projection_exposes_collab_handoff_context_refs() {
 #[test]
 fn collab_task_claim_uses_atomic_rename_and_writes_events() -> fuse3::Result<()> {
     let fs = CortexFs::new();
-    fs.create_staged_collab_claim("helper.tmp", "agents/helper\n")?;
+    fs.create_staged_collab_claim("helper.tmp", "agent/helper\n")?;
     fs.submit_collab_claim("helper.tmp", "helper.claim")?;
 
-    let claims = fs
+    let claim_dir = fs
         .tree
-        .path_inode(crate::SHARED_PROJECT_A_DEMO_CLAIMS_PATH)
+        .path_inode(crate::SHARED_PROJECT_A_DEMO_CLAIM_PATH)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert_eq!(
         runtime
-            .lookup_child(claims, "helper.claim")
+            .lookup_child(claim_dir, "helper.claim")
             .and_then(crate::Node::content),
-        Some("agents/helper\n")
+        Some("agent/helper\n")
     );
     drop(runtime);
     assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "owner"])
-            .map(crate::Node::inode)
-            .map(|inode| fs.node_content(inode))
-            .transpose()?,
-        Some("agents/helper\n".to_owned())
-    );
-    assert_eq!(
-        fs.lookup_path(["shared", "project-a", "collab", "task", "demo", "state"])
-            .map(crate::Node::inode)
-            .map(|inode| fs.node_content(inode))
-            .transpose()?,
-        Some("claimed\n".to_owned())
-    );
-    let events = fs
-        .lookup_path([
-            "spaces",
+        fs.node_content(fs.resolve_path_inode([
             "shared",
             "project-a",
             "collab",
             "task",
             "demo",
-            "events.jsonl",
-        ])
-        .map(crate::Node::inode)
-        .map(|inode| fs.node_content(inode))
-        .transpose()?
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
+            "owner",
+        ])?)?,
+        "agent/helper\n"
+    );
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode([
+            "shared",
+            "project-a",
+            "collab",
+            "task",
+            "demo",
+            "state",
+        ])?)?,
+        "claimed\n"
+    );
+    let events = fs.node_content(fs.resolve_path_inode([
+        "shared",
+        "project-a",
+        "collab",
+        "task",
+        "demo",
+        "events.jsonl",
+    ])?)?;
     assert!(events.contains("\"event\":\"created\""));
     assert!(events.contains("\"event\":\"claimed\""));
-    assert!(events.contains("\"agent\":\"agents/helper\""));
+    assert!(events.contains("\"agent\":\"agent/helper\""));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"collab.task.claim\"")
@@ -396,14 +723,14 @@ fn collab_lock_lease_uses_atomic_rename_and_materializes_lock() -> fuse3::Result
     fs.create_staged_collab_lock_lease("handoff.tmp", "cluster/local/worker/local-worker\n")?;
     fs.submit_collab_lock_lease("handoff.tmp", "handoff.lease")?;
 
-    let leases = fs
+    let lease_dir = fs
         .tree
-        .path_inode(crate::SHARED_PROJECT_A_LOCK_LEASES_PATH)
+        .path_inode(crate::SHARED_PROJECT_A_LOCK_LEASE_PATH)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
     assert_eq!(
         runtime
-            .lookup_child(leases, "handoff.lease")
+            .lookup_child(lease_dir, "handoff.lease")
             .and_then(crate::Node::content),
         Some("cluster/local/worker/local-worker\n")
     );
@@ -469,14 +796,15 @@ fn cluster_task_submit_drains_to_task_result_and_done_queue() -> fuse3::Result<(
         .tree
         .path_inode(crate::CLUSTER_TASK_DONE_PATH)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    {
-        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
-        assert!(
-            runtime.lookup_child(done, "task-001.resp.json").is_none(),
-            "cluster task submit queues work until control/drain"
-        );
-        drop(runtime);
-    }
+    let pending = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASK_PENDING_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let running = fs
+        .tree
+        .path_inode(&["cluster", "local", "queue", "default", "running"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_cluster_task_queue_after_submit(&fs, pending, running, done)?;
 
     let drain = fs.control_file_inode("drain")?;
     {
@@ -484,40 +812,7 @@ fn cluster_task_submit_drains_to_task_result_and_done_queue() -> fuse3::Result<(
         runtime.write(drain, 0, b"1\n")?;
     }
 
-    let tasks = fs
-        .tree
-        .path_inode(crate::CLUSTER_TASKS_PATH)
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
-    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
-    let task_dir = runtime
-        .lookup_child(tasks, "task-001")
-        .map(crate::Node::inode)
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert_eq!(
-        runtime
-            .lookup_child(task_dir, "state")
-            .and_then(crate::Node::content),
-        Some("done\n")
-    );
-    assert_eq!(
-        runtime
-            .lookup_child(task_dir, "assigned_worker")
-            .and_then(crate::Node::content),
-        Some("local-worker\n")
-    );
-    let result = runtime
-        .lookup_child(task_dir, "result.resp.json")
-        .and_then(crate::Node::content)
-        .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(result.contains("\"status\":\"done\""));
-    assert!(result.contains("cluster visible"));
-    assert!(
-        runtime
-            .lookup_child(done, "task-001.resp.json")
-            .and_then(crate::Node::content)
-            .is_some_and(|done_result| done_result.contains("local-worker"))
-    );
-    drop(runtime);
+    assert_cluster_task_queue_after_drain(&fs, pending, running, done)?;
     assert_eq!(
         fs.node_content(fs.control_file_inode("queue_depth")?)?,
         "0\n"
@@ -535,5 +830,217 @@ fn cluster_task_submit_drains_to_task_result_and_done_queue() -> fuse3::Result<(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"format\":\"cluster.task\"")
     );
+    Ok(())
+}
+
+#[test]
+fn cluster_task_error_drains_to_failed_queue() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.create_staged_cluster_task(
+        "task-fail.tmp",
+        "{\"task\":\"summarize\",\"input\":\"cluster visible\",\"fail\":true}\n",
+    )?;
+    fs.submit_cluster_task("task-fail.tmp", "task-fail.req.json")?;
+
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let pending = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASK_PENDING_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let running = fs
+        .tree
+        .path_inode(&["cluster", "local", "queue", "default", "running"])
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let done = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASK_DONE_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let failed = fs
+        .tree
+        .path_inode(crate::abi::CLUSTER_TASK_FAILED_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let tasks = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASKS_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert_failed_cluster_task_queue_entry(&runtime, pending, running, done, failed);
+    assert_failed_cluster_task_directory(&runtime, tasks)?;
+    drop(runtime);
+
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("queue_depth")?)?,
+        "0\n"
+    );
+    assert_worker_runtime(
+        &fs,
+        &WorkerRuntimeExpectation {
+            state: "idle\n",
+            heartbeat: "2\n",
+            load: "0\n",
+            current_task: "task-fail\n",
+        },
+    )?;
+    assert!(
+        fs.node_content(fs.audit_events_inode()?)?
+            .contains("\"format\":\"cluster.task\"")
+    );
+    assert!(
+        fs.node_content(fs.audit_events_inode()?)?
+            .contains("\"event\":\"error\"")
+    );
+    Ok(())
+}
+
+#[test]
+fn failed_cluster_task_retry_requeues_pending_task() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.create_staged_cluster_task(
+        "task-retry.tmp",
+        "{\"task\":\"summarize\",\"input\":\"retry visible\",\"fail\":true}\n",
+    )?;
+    fs.submit_cluster_task("task-retry.tmp", "task-retry.req.json")?;
+
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let pending = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASK_PENDING_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let failed = fs
+        .tree
+        .path_inode(crate::abi::CLUSTER_TASK_FAILED_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let tasks = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASKS_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let retry = {
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let task_dir = runtime
+            .lookup_child(tasks, "task-retry")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        let retry = runtime
+            .lookup_child(task_dir, "retry")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        assert_eq!(
+            runtime
+                .lookup_child(task_dir, "state")
+                .and_then(crate::Node::content),
+            Some("failed\n")
+        );
+        drop(runtime);
+        retry
+    };
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(retry, 0, b"1\n")?;
+    }
+
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert!(
+        runtime
+            .lookup_child(pending, "task-retry.req.json")
+            .is_some(),
+        "retry must requeue the failed task into pending"
+    );
+    assert!(
+        runtime.lookup_child(failed, "task-retry.error").is_none(),
+        "retry must remove the failed queue entry"
+    );
+    let task_dir = runtime
+        .lookup_child(tasks, "task-retry")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert_eq!(
+        runtime
+            .lookup_child(task_dir, "state")
+            .and_then(crate::Node::content),
+        Some("pending\n")
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(task_dir, "error")
+            .and_then(crate::Node::content),
+        Some("\n"),
+        "retry must clear the per-task error file"
+    );
+    let audit = runtime
+        .lookup_child(task_dir, "audit")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(audit.contains("\"event\":\"retry\""));
+    assert!(audit.contains("\"fingerprint\":\"fnv1a64:"));
+    let events = runtime
+        .lookup_child(task_dir, "events.jsonl")
+        .and_then(crate::Node::content)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    assert!(events.contains("\"event\":\"retry\""));
+    drop(runtime);
+
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("queue_depth")?)?,
+        "1\n"
+    );
+    assert!(
+        fs.node_content(fs.audit_events_inode()?)?
+            .contains("\"event\":\"retry\"")
+    );
+    Ok(())
+}
+
+#[test]
+fn failed_cluster_task_retry_rejects_invalid_control_writes() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    fs.create_staged_cluster_task(
+        "task-retry-invalid.tmp",
+        "{\"task\":\"summarize\",\"input\":\"retry invalid\",\"fail\":true}\n",
+    )?;
+    fs.submit_cluster_task("task-retry-invalid.tmp", "task-retry-invalid.req.json")?;
+
+    let drain = fs.control_file_inode("drain")?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(drain, 0, b"1\n")?;
+    }
+
+    let tasks = fs
+        .tree
+        .path_inode(crate::CLUSTER_TASKS_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let retry = {
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        let task_dir = runtime
+            .lookup_child(tasks, "task-retry-invalid")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        runtime
+            .lookup_child(task_dir, "retry")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?
+    };
+
+    let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert_eq!(
+        runtime.write(retry, 0, b"yes\n").map_err(i32::from),
+        Err(-libc::EINVAL)
+    );
+    assert_eq!(
+        runtime.write(retry, 1, b"1\n").map_err(i32::from),
+        Err(-libc::EINVAL)
+    );
+    drop(runtime);
     Ok(())
 }

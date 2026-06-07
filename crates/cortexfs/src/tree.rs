@@ -184,11 +184,7 @@ impl Node {
     }
 
     fn is_writable_submit_dir(&self) -> bool {
-        self.is_dir()
-            && matches!(
-                self.name.as_str(),
-                "inbox" | "pending" | "claim" | "claims" | "lease" | "leases"
-            )
+        self.is_dir() && matches!(self.name.as_str(), "inbox" | "pending" | "claim" | "lease")
     }
 }
 
