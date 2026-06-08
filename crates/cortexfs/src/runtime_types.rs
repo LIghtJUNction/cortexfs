@@ -63,6 +63,26 @@ pub struct ProviderConfigInodes {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ChanRuntimeInodes {
+    pub dir: Inode,
+    pub url: Inode,
+    pub keyref: Inode,
+    pub fmt: Inode,
+    pub model: Inode,
+    pub enabled: Inode,
+    pub status: Inode,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct JobRuntimeInodes {
+    pub dir: Inode,
+    pub spec: Inode,
+    pub req: Inode,
+    pub out: Inode,
+    pub status: Inode,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ApiSubmission {
     pub scope: SubmissionScope,
     pub format: &'static str,

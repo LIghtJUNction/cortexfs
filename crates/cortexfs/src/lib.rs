@@ -36,8 +36,8 @@ use std::sync::Mutex;
 
 #[cfg(test)]
 pub(crate) use abi::{
-    AGENT_HELPER_CONTROL_PATH, BATCH_DIR_PATH, CLUSTER_LOCAL_CONTROL_PATH, CLUSTER_TASKS_PATH,
-    CONTROL_DIR_PATH, DEMO_THREAD_CONTROL_PATH, DEMO_THREAD_DIR_PATH,
+    AGENT_HELPER_CONTROL_PATH, BATCH_DIR_PATH, CHAN_DIR_PATH, CLUSTER_LOCAL_CONTROL_PATH,
+    CLUSTER_TASKS_PATH, CONTROL_DIR_PATH, DEMO_THREAD_CONTROL_PATH, DEMO_THREAD_DIR_PATH,
     DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
     DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_DIR_PATH, EXPORT_FILTERS_DIR_PATH,
     EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH,
@@ -52,9 +52,9 @@ pub(crate) use abi::{
     EMPTY_TEXT, EXTERNAL_QQ_GROUP_THREAD_INBOX_PATH, FEEDBACK_PREFERENCE_INBOX_PATH,
     FEEDBACK_PREFERENCE_OUTBOX_PATH, FILESYSTEM_READ_TOOL, FILESYSTEM_READ_TOOL_INBOX_PATH,
     FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_AGENT_CONTEXT_TEXT, LOCAL_API_AUDIT_TEXT,
-    LOCAL_API_ENDPOINTS_TEXT, LOCAL_API_LISTEN_TEXT, LOCAL_API_PIPELINE_TEXT,
-    LOCAL_API_POLICY_TEXT, LOCAL_API_SOCKET_TEXT, LOCAL_API_SOURCE_TEXT, LOCAL_API_STORE_TEXT,
-    LOCAL_API_TRANSPORT_TEXT, LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT,
+    LOCAL_API_BASE_URL_TEXT, LOCAL_API_ENDPOINTS_TEXT, LOCAL_API_LISTEN_TEXT,
+    LOCAL_API_PIPELINE_TEXT, LOCAL_API_POLICY_TEXT, LOCAL_API_SOCKET_TEXT, LOCAL_API_SOURCE_TEXT,
+    LOCAL_API_STORE_TEXT, LOCAL_API_TRANSPORT_TEXT, LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT,
     LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT, LOCAL_USER_SPACE_CONTEXT_TEXT,
     LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_THREAD_DISPLAY_PATH, LOCAL_USER_THREAD_DISPLAY_TEXT,
     LOCAL_USER_UID_TEXT, MAX_WRITE, MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
@@ -83,9 +83,10 @@ use runtime_controls::McpServerControlEffect;
 use runtime_parents::RuntimeParents;
 pub(crate) use runtime_state::RuntimeState;
 use runtime_types::{
-    AgentTask, ApiRouteInodes, ApiSubmission, ClusterTask, MemoryItem, PendingResponse,
-    PreferencePair, PromptRender, ProviderConfigInodes, ProviderRuntimeParents, RouteMetadata,
-    SubmissionPayload, ThreadUpdate, TrainingExportMetadata, UserModelAccessInodes,
+    AgentTask, ApiRouteInodes, ApiSubmission, ChanRuntimeInodes, ClusterTask, JobRuntimeInodes,
+    MemoryItem, PendingResponse, PreferencePair, PromptRender, ProviderConfigInodes,
+    ProviderRuntimeParents, RouteMetadata, SubmissionPayload, ThreadUpdate, TrainingExportMetadata,
+    UserModelAccessInodes,
 };
 use submission::{
     CollabClaimLocation, CollabLockLocation, SubmissionDirectoryKind, SubmissionLocation,
@@ -1106,6 +1107,21 @@ struct QueuedAuditContext<'a> {
     space: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum ChanField {
+    Url,
+    Keyref,
+    Fmt,
+    Model,
+    Enabled,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum JobField {
+    Spec,
+    Req,
+}
+
 impl ResolvedNode {
     const fn inode(&self) -> Inode {
         match self {
@@ -1135,6 +1151,8 @@ impl RuntimeState {
         self.attach_provider_runtime_files(parents);
         self.attach_cluster_runtime_files(parents);
         self.attach_local_api_runtime_files(parents);
+        self.attach_chan_runtime_files(parents);
+        self.attach_job_runtime_files(parents);
         self.attach_skill_runtime_files(parents);
         if let Some(convert_parent) = parents.convert {
             self.add_dynamic_file(convert_parent, "status", "idle\n");
@@ -1161,11 +1179,27 @@ impl RuntimeState {
             self.add_dynamic_file(api_parent, "status", "configured\n");
         }
         if let Some(http_parent) = parents.local_api_http {
-            self.add_dynamic_file(http_parent, "status", "daemon_required\n");
+            self.add_dynamic_file(http_parent, "status", "need-daemon\n");
         }
         if let Some(unix_parent) = parents.local_api_unix {
-            self.add_dynamic_file(unix_parent, "status", "daemon_required\n");
+            self.add_dynamic_file(unix_parent, "status", "need-daemon\n");
         }
+    }
+
+    fn attach_chan_runtime_files(&mut self, parents: &RuntimeParents) {
+        let Some(chan_parent) = parents.chans else {
+            return;
+        };
+        self.chan_count_inode = Some(self.add_dynamic_file(chan_parent, "count", "0\n"));
+        self.chan_list_inode = Some(self.add_dynamic_file(chan_parent, "list", ""));
+    }
+
+    fn attach_job_runtime_files(&mut self, parents: &RuntimeParents) {
+        let Some(job_parent) = parents.user_jobs else {
+            return;
+        };
+        self.job_count_inode = Some(self.add_dynamic_file(job_parent, "count", "0\n"));
+        self.job_list_inode = Some(self.add_dynamic_file(job_parent, "list", ""));
     }
 
     fn attach_queue_runtime_files(&mut self, parents: &RuntimeParents) {
@@ -1772,6 +1806,17 @@ impl RuntimeState {
                 .provider_models_refresh
                 .values()
                 .any(|refresh_inode| *refresh_inode == inode)
+            || self.chans.values().any(|chan| {
+                inode == chan.url
+                    || inode == chan.keyref
+                    || inode == chan.fmt
+                    || inode == chan.model
+                    || inode == chan.enabled
+            })
+            || self
+                .jobs
+                .values()
+                .any(|job| inode == job.spec || inode == job.req)
             || self
                 .staged
                 .values()
@@ -1835,6 +1880,86 @@ impl RuntimeState {
         Ok(inode)
     }
 
+    fn create_chan(&mut self, parent: Inode, name: &str) -> fuse3::Result<Inode> {
+        if Some(parent) != self.chans_parent {
+            return Err(libc::EROFS.into());
+        }
+        validate_chan_id(name)?;
+        if self.chans.contains_key(name) || self.lookup_child(parent, name).is_some() {
+            return Err(libc::EEXIST.into());
+        }
+
+        let dir = self.add_dynamic_dir(parent, name);
+        self.add_dynamic_file_owned(dir, "id", format!("{name}\n"));
+        let url = self.add_dynamic_file_owned(dir, "url", "\n");
+        let keyref = self.add_dynamic_file_owned(dir, "keyref", "\n");
+        let fmt = self.add_dynamic_file_owned(dir, "fmt", "openai.chat\nopenai.responses\n");
+        let model = self.add_dynamic_file_owned(dir, "mod", "*\n");
+        let enabled = self.add_dynamic_file_owned(dir, "enabled", "1\n");
+        let status = self.add_dynamic_file_owned(dir, "status", "no-url\n");
+        self.add_dynamic_file_owned(dir, "localurl", LOCAL_API_BASE_URL_TEXT);
+        self.chans.insert(
+            name.to_owned(),
+            ChanRuntimeInodes {
+                dir,
+                url,
+                keyref,
+                fmt,
+                model,
+                enabled,
+                status,
+            },
+        );
+        self.refresh_chan_index();
+        self.refresh_chan_status(name);
+        self.append_audit("chan", name, "created");
+        Ok(dir)
+    }
+
+    fn create_job(&mut self, parent: Inode, name: &str) -> fuse3::Result<Inode> {
+        if Some(parent) != self.jobs_parent {
+            return Err(libc::EROFS.into());
+        }
+        validate_virtual_id(name)?;
+        if self.jobs.contains_key(name) || self.lookup_child(parent, name).is_some() {
+            return Err(libc::EEXIST.into());
+        }
+
+        let dir = self.add_dynamic_dir(parent, name);
+        self.add_dynamic_file_owned(dir, "id", format!("{name}\n"));
+        let spec = self.add_dynamic_file_owned(
+            dir,
+            "spec",
+            "kind=translate\nfrom=auto\nto=zh\nout=json\nfields=text,from,to\n",
+        );
+        let req = self.add_dynamic_file_owned(dir, "req", "\n");
+        let out = self.add_dynamic_file_owned(dir, "out.json", "{}\n");
+        let status = self.add_dynamic_file_owned(dir, "status", "idle\n");
+        self.jobs.insert(
+            name.to_owned(),
+            JobRuntimeInodes {
+                dir,
+                spec,
+                req,
+                out,
+                status,
+            },
+        );
+        self.refresh_job_index();
+        self.append_audit("job", name, "created");
+        Ok(dir)
+    }
+
+    fn create_virtual_dir(&mut self, parent: Inode, name: &str) -> fuse3::Result<Inode> {
+        if Some(parent) == self.chans_parent {
+            return self.create_chan(parent, name);
+        }
+        if Some(parent) == self.jobs_parent {
+            return self.create_job(parent, name);
+        }
+        Err(libc::EROFS.into())
+    }
+
     fn write(&mut self, inode: Inode, offset: u64, data: &[u8]) -> fuse3::Result<u32> {
         if let Some(result) = self.write_runtime_control_or_config(inode, offset, data)? {
             return Ok(result);
@@ -1864,6 +1989,12 @@ impl RuntimeState {
             return Ok(Some(result));
         }
         if let Some(result) = self.write_provider_config(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_chan_config(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_job_file(inode, offset, data)? {
             return Ok(Some(result));
         }
         Ok(None)
@@ -2237,6 +2368,171 @@ impl RuntimeState {
         self.refresh_training_exports();
         self.append_audit("export.filter", "current", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn write_chan_config(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
+        let Some((chan, field)) = self.chan_field_for_inode(inode) else {
+            return Ok(None);
+        };
+        if offset != 0 {
+            return Err(libc::EINVAL.into());
+        }
+        let value = normalize_chan_value(field, data)?;
+        self.update_dynamic_file(inode, value);
+        self.refresh_chan_status(&chan);
+        self.append_audit("chan", &chan, "configured");
+        u32::try_from(data.len())
+            .map(Some)
+            .map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn chan_field_for_inode(&self, inode: Inode) -> Option<(String, ChanField)> {
+        self.chans.iter().find_map(|(chan, inodes)| {
+            let field = if inode == inodes.url {
+                ChanField::Url
+            } else if inode == inodes.keyref {
+                ChanField::Keyref
+            } else if inode == inodes.fmt {
+                ChanField::Fmt
+            } else if inode == inodes.model {
+                ChanField::Model
+            } else if inode == inodes.enabled {
+                ChanField::Enabled
+            } else {
+                return None;
+            };
+            Some((chan.clone(), field))
+        })
+    }
+
+    fn refresh_chan_index(&mut self) {
+        let list = self
+            .chans
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let list = if list.is_empty() {
+            String::new()
+        } else {
+            format!("{list}\n")
+        };
+        if let Some(inode) = self.chan_count_inode {
+            self.update_dynamic_file(inode, format!("{}\n", self.chans.len()));
+        }
+        if let Some(inode) = self.chan_list_inode {
+            self.update_dynamic_file(inode, list);
+        }
+    }
+
+    fn refresh_chan_status(&mut self, chan: &str) {
+        let Some(inodes) = self.chans.get(chan).copied() else {
+            return;
+        };
+        let url = self.dynamic_text(inodes.url).unwrap_or_default();
+        let keyref = self.dynamic_text(inodes.keyref).unwrap_or_default();
+        let enabled = self.dynamic_text(inodes.enabled).unwrap_or_default();
+        let status = if enabled.trim() != "1" {
+            "disabled\n"
+        } else if url.trim().is_empty() {
+            "no-url\n"
+        } else if keyref.trim().is_empty() {
+            "no-keyref\n"
+        } else {
+            "ready\n"
+        };
+        self.update_dynamic_file(inodes.status, status);
+    }
+
+    fn dynamic_text(&self, inode: Inode) -> Option<&str> {
+        self.nodes.get(&inode)?.content()
+    }
+
+    fn write_job_file(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
+        let Some((job, field)) = self.job_field_for_inode(inode) else {
+            return Ok(None);
+        };
+        if offset != 0 {
+            return Err(libc::EINVAL.into());
+        }
+        let text = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
+        match field {
+            JobField::Spec => {
+                validate_job_spec(text)?;
+                self.update_dynamic_file(inode, ensure_trailing_newline(text.trim()));
+                self.update_job_status(&job, "spec-ready\n");
+                self.append_audit("job.spec", &job, "configured");
+            }
+            JobField::Req => {
+                self.update_dynamic_file(inode, ensure_trailing_newline(text.trim()));
+                self.run_job(&job)?;
+                self.append_audit("job.req", &job, "drained");
+            }
+        }
+        u32::try_from(data.len())
+            .map(Some)
+            .map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn job_field_for_inode(&self, inode: Inode) -> Option<(String, JobField)> {
+        self.jobs.iter().find_map(|(job, inodes)| {
+            let field = if inode == inodes.spec {
+                JobField::Spec
+            } else if inode == inodes.req {
+                JobField::Req
+            } else {
+                return None;
+            };
+            Some((job.clone(), field))
+        })
+    }
+
+    fn run_job(&mut self, job: &str) -> fuse3::Result<()> {
+        let Some(inodes) = self.jobs.get(job).copied() else {
+            return Err(fuse3::Errno::new_not_exist());
+        };
+        let spec = self.dynamic_text(inodes.spec).unwrap_or_default();
+        let req = self.dynamic_text(inodes.req).unwrap_or_default();
+        let out = structured_job_output(spec, req)?;
+        self.update_dynamic_file(inodes.out, out);
+        self.update_job_status(job, "done\n");
+        Ok(())
+    }
+
+    fn update_job_status(&mut self, job: &str, status: &'static str) {
+        if let Some(inodes) = self.jobs.get(job).copied() {
+            self.update_dynamic_file(inodes.status, status);
+        }
+    }
+
+    fn refresh_job_index(&mut self) {
+        let list = self
+            .jobs
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let list = if list.is_empty() {
+            String::new()
+        } else {
+            format!("{list}\n")
+        };
+        if let Some(inode) = self.job_count_inode {
+            self.update_dynamic_file(inode, format!("{}\n", self.jobs.len()));
+        }
+        if let Some(inode) = self.job_list_inode {
+            self.update_dynamic_file(inode, list);
+        }
     }
 
     fn submit(
@@ -3599,6 +3895,144 @@ fn external_subject_for_submission(scope: SubmissionScope, body: &str) -> Option
         external_subject(body)
     } else {
         None
+    }
+}
+
+fn validate_chan_id(id: &str) -> fuse3::Result<()> {
+    validate_virtual_id(id)
+}
+
+fn validate_virtual_id(id: &str) -> fuse3::Result<()> {
+    let valid = !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-'));
+    if valid {
+        Ok(())
+    } else {
+        Err(libc::EINVAL.into())
+    }
+}
+
+fn validate_job_spec(spec: &str) -> fuse3::Result<()> {
+    let kind = spec_value(spec, "kind").unwrap_or("translate");
+    if kind != "translate" {
+        return Err(libc::EINVAL.into());
+    }
+    let out = spec_value(spec, "out").unwrap_or("json");
+    if out != "json" {
+        return Err(libc::EINVAL.into());
+    }
+    let fields = spec_fields(spec);
+    if fields.is_empty() || fields.iter().any(|field| !valid_job_field(field)) {
+        return Err(libc::EINVAL.into());
+    }
+    Ok(())
+}
+
+fn structured_job_output(spec: &str, req: &str) -> fuse3::Result<String> {
+    validate_job_spec(spec)?;
+    let from = spec_value(spec, "from").unwrap_or("auto");
+    let to = spec_value(spec, "to").unwrap_or("zh");
+    let input = req.trim();
+    let translated = translate_fixture(input, to);
+    let fields = spec_fields(spec);
+    let mut pairs = Vec::with_capacity(fields.len());
+    for field in fields {
+        let value = match field.as_str() {
+            "text" => translated.as_str(),
+            "from" => from,
+            "to" => to,
+            "input" => input,
+            "kind" => "translate",
+            _other => return Err(libc::EINVAL.into()),
+        };
+        pairs.push(format!("{}:{}", json_string(&field), json_string(value)));
+    }
+    Ok(format!("{{{}}}\n", pairs.join(",")))
+}
+
+fn spec_value<'a>(spec: &'a str, key: &str) -> Option<&'a str> {
+    spec.lines().find_map(|line| {
+        let (line_key, value) = line.split_once('=')?;
+        (line_key.trim() == key).then(|| value.trim())
+    })
+}
+
+fn spec_fields(spec: &str) -> Vec<String> {
+    spec_value(spec, "fields")
+        .unwrap_or("text,from,to")
+        .split(',')
+        .map(str::trim)
+        .filter(|field| !field.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn valid_job_field(field: &str) -> bool {
+    matches!(field, "text" | "from" | "to" | "input" | "kind")
+}
+
+fn translate_fixture(input: &str, to: &str) -> String {
+    if to == "zh" || to == "zh-CN" {
+        match input.trim().to_ascii_lowercase().as_str() {
+            "hello world" => "你好，世界".to_owned(),
+            "good morning" => "早上好".to_owned(),
+            _other => input.to_owned(),
+        }
+    } else {
+        input.to_owned()
+    }
+}
+
+fn ensure_trailing_newline(text: &str) -> String {
+    if text.is_empty() {
+        "\n".to_owned()
+    } else {
+        format!("{text}\n")
+    }
+}
+
+fn normalize_chan_value(field: ChanField, data: &[u8]) -> fuse3::Result<String> {
+    let text = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
+    let value = text.trim();
+    match field {
+        ChanField::Url => {
+            if value.is_empty() || value.starts_with("https://") || value.starts_with("http://") {
+                Ok(format!("{value}\n"))
+            } else {
+                Err(libc::EINVAL.into())
+            }
+        }
+        ChanField::Keyref => Ok(format!("{value}\n")),
+        ChanField::Fmt => {
+            let formats = value
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>();
+            if formats.is_empty()
+                || formats
+                    .iter()
+                    .all(|format| API_FORMATS.iter().any(|known| known == format))
+            {
+                Ok(format!("{}\n", formats.join("\n")))
+            } else {
+                Err(libc::EINVAL.into())
+            }
+        }
+        ChanField::Model => {
+            if value.is_empty() {
+                Ok("*\n".to_owned())
+            } else {
+                Ok(format!("{value}\n"))
+            }
+        }
+        ChanField::Enabled => match value {
+            "0" | "1" => Ok(format!("{value}\n")),
+            _other => Err(libc::EINVAL.into()),
+        },
     }
 }
 

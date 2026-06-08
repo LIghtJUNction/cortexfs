@@ -12,6 +12,9 @@
 
 # Local test/runtime scratch data
 /.cortexfs/
+/.env
+/.env.*
+!/.env.example
 /tmp/
 *.log
 *.pid

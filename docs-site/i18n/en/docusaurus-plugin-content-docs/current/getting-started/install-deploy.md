@@ -32,6 +32,14 @@ cortex start
 
 `cortex start` manages the systemd unit `cortexfs@$USER.service`. This is a system service operation, so the CLI requests admin authorization when needed. The service loads FUSE, clears a broken `/ctx` mount, creates `/ctx`, and sets owner/mode automatically. The default deployment does not require manually creating `/ctx` or manually configuring mount permissions.
 
+The service reads this local environment file:
+
+```text
+~/.config/cortexfs/.env
+```
+
+Put API keys there, for example `FENGYING_API_KEY=...`. This file is a local secret and must not be committed to Git.
+
 For foreground debugging, mount manually:
 
 ```bash

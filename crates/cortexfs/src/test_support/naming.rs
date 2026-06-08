@@ -3,8 +3,9 @@ use fuse3::FileType;
 use std::ffi::OsStr;
 
 const ROOT_ABI_NAMES: &[&str] = &[
-    "status", "cap", "format", "provider", "model", "home", "group", "shared", "ext", "space",
-    "agent", "cluster", "mcp", "skill", "tool", "memory", "vector", "db", "audit", "control",
+    "status", "cap", "format", "provider", "chan", "model", "home", "group", "shared", "ext",
+    "space", "agent", "cluster", "mcp", "skill", "tool", "memory", "vector", "db", "audit",
+    "control",
 ];
 
 const FORBIDDEN_ROOT_NAMES: &[&str] = &[

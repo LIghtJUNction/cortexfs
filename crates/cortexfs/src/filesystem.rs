@@ -115,6 +115,29 @@ impl Filesystem for CortexFs {
         })
     }
 
+    async fn mkdir(
+        &self,
+        _req: Request,
+        parent: Inode,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+    ) -> fuse3::Result<ReplyEntry> {
+        let name = name.to_str().ok_or(libc::EINVAL)?;
+        let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
+        let inode = runtime.create_virtual_dir(parent, name)?;
+        let attr = runtime
+            .node(inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?
+            .attr(self.owner_uid, self.owner_gid);
+        drop(runtime);
+        Ok(ReplyEntry {
+            ttl: TTL,
+            attr,
+            generation: 0,
+        })
+    }
+
     async fn write(
         &self,
         _req: Request,

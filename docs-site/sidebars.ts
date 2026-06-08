@@ -37,7 +37,13 @@ const sidebars: SidebarsConfig = {
     {
       type: 'category',
       label: 'API 表面',
-      items: ['api/file-api', 'api/local-api', 'api/threads-and-batch'],
+      items: [
+        'api/file-api',
+        'api/local-api',
+        'api/structured-jobs',
+        'api/uds-control-plane',
+        'api/threads-and-batch',
+      ],
     },
     {
       type: 'category',

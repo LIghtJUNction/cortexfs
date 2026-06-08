@@ -7,9 +7,9 @@ use fuse3::Inode;
 use crate::execution::{FsExecutionPlane, default_execution_plane};
 use crate::runtime_parents::RuntimeParents;
 use crate::runtime_types::{
-    AgentTask, ApiRouteInodes, ClusterTask, ConversationExportRow, MemoryItem, PendingResponse,
-    PreferencePair, PromptRender, ProviderConfigInodes, RuntimeContext, TrainingExportRow,
-    UserModelAccessInodes,
+    AgentTask, ApiRouteInodes, ChanRuntimeInodes, ClusterTask, ConversationExportRow,
+    JobRuntimeInodes, MemoryItem, PendingResponse, PreferencePair, PromptRender,
+    ProviderConfigInodes, RuntimeContext, TrainingExportRow, UserModelAccessInodes,
 };
 use crate::{DYNAMIC_INODE_BASE, Node};
 
@@ -214,6 +214,14 @@ pub struct RuntimeState {
     pub(crate) provider_secret_last_rotated: BTreeMap<&'static str, Inode>,
     pub(crate) provider_secret_next_rotation: BTreeMap<&'static str, Inode>,
     pub(crate) provider_models_refresh: BTreeMap<&'static str, Inode>,
+    pub(crate) chans_parent: Option<Inode>,
+    pub(crate) chan_count_inode: Option<Inode>,
+    pub(crate) chan_list_inode: Option<Inode>,
+    pub(crate) chans: BTreeMap<String, ChanRuntimeInodes>,
+    pub(crate) jobs_parent: Option<Inode>,
+    pub(crate) job_count_inode: Option<Inode>,
+    pub(crate) job_list_inode: Option<Inode>,
+    pub(crate) jobs: BTreeMap<String, JobRuntimeInodes>,
     pub(crate) batch_count: usize,
     pub(crate) plane: Option<FsExecutionPlane>,
 }
@@ -282,6 +290,8 @@ impl RuntimeState {
             pgvector_refresh_inode: None,
             sqlite_status_inode: None,
             postgres_status_inode: None,
+            chans_parent: parents.chans,
+            jobs_parent: parents.user_jobs,
             plane: default_execution_plane(),
             ..Self::default()
         }

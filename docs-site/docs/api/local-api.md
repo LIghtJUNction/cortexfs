@@ -26,9 +26,18 @@ POST /v1/generateContent
 ```bash
 cat "$CTX_HOME/api/endpoints"
 cat "$CTX_HOME/api/http/listen"
+cat "$CTX_HOME/api/http/localurl"
 cat "$CTX_HOME/api/unix/path"
 cat "$CTX_HOME/api/pipeline"
 ```
+
+`localurl` 是客户端应该读取的本地 OpenAI-compatible base URL：
+
+```bash
+base_url="$(cat "$CTX_HOME/api/http/localurl")"
+```
+
+当前投影值是 `http://127.0.0.1:6185/v1`。这是发现 ABI；实际 HTTP listener 属于后续 daemon 运行面，不要把它和 FUSE 文件投影混为一谈。
 
 ## 管线
 

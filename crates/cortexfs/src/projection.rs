@@ -1,13 +1,14 @@
 use crate::tree::Node;
 use crate::{
-    EMPTY_TEXT, LOCAL_AGENT_CONTEXT_TEXT, LOCAL_API_AUDIT_TEXT, LOCAL_API_ENDPOINTS_TEXT,
-    LOCAL_API_LISTEN_TEXT, LOCAL_API_PIPELINE_TEXT, LOCAL_API_POLICY_TEXT, LOCAL_API_SOCKET_TEXT,
-    LOCAL_API_SOURCE_TEXT, LOCAL_API_STORE_TEXT, LOCAL_API_TRANSPORT_TEXT, LOCAL_USER_ID,
-    LOCAL_USER_MEMORY_SCOPE_TEXT, LOCAL_USER_SPACE_CONTEXT_TEXT, LOCAL_USER_THREAD_CONTEXT_TEXT,
-    LOCAL_USER_UID_TEXT, PROVIDER_SPECS, ProviderRuntimeSpec, ROOT_INODE, STATUS_TEXT, StaticTree,
-    THREAD_COUNT_TEXT, build_path_index, default_format, default_model_for_provider,
-    default_provider_id, global_model_count, global_model_list, model_count_for_format,
-    model_list_for_format, newline_list, provider_count, provider_count_for_format, provider_list,
+    EMPTY_TEXT, LOCAL_AGENT_CONTEXT_TEXT, LOCAL_API_AUDIT_TEXT, LOCAL_API_BASE_URL_TEXT,
+    LOCAL_API_ENDPOINTS_TEXT, LOCAL_API_LISTEN_TEXT, LOCAL_API_PIPELINE_TEXT,
+    LOCAL_API_POLICY_TEXT, LOCAL_API_SOCKET_TEXT, LOCAL_API_SOURCE_TEXT, LOCAL_API_STORE_TEXT,
+    LOCAL_API_TRANSPORT_TEXT, LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT,
+    LOCAL_USER_SPACE_CONTEXT_TEXT, LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_UID_TEXT,
+    PROVIDER_SPECS, ProviderRuntimeSpec, ROOT_INODE, STATUS_TEXT, StaticTree, THREAD_COUNT_TEXT,
+    build_path_index, default_format, default_model_for_provider, default_provider_id,
+    global_model_count, global_model_list, model_count_for_format, model_list_for_format,
+    newline_list, provider_count, provider_count_for_format, provider_list,
     provider_list_for_format,
 };
 use fuse3::Inode;
@@ -111,6 +112,7 @@ impl NodeTreeBuilder {
         self.add_file(api, "audit", LOCAL_API_AUDIT_TEXT);
         let http = self.add_dir(api, "http");
         self.add_file(http, "listen", LOCAL_API_LISTEN_TEXT);
+        self.add_file(http, "localurl", LOCAL_API_BASE_URL_TEXT);
         self.add_file(http, "pipeline", "../pipeline\n");
         let unix = self.add_dir(api, "unix");
         self.add_file(unix, "path", LOCAL_API_SOCKET_TEXT);
@@ -189,6 +191,11 @@ impl NodeTreeBuilder {
         for provider in PROVIDER_SPECS {
             self.add_configured_provider(providers, provider);
         }
+
+        let chans = self.add_dir(ROOT_INODE, "chan");
+        self.add_file(chans, "count", "0\n");
+        self.add_file(chans, "list", "");
+        self.add_file(chans, "localurl", LOCAL_API_BASE_URL_TEXT);
 
         let models = self.add_dir(ROOT_INODE, "model");
         self.add_global_models_index(models);
@@ -390,6 +397,9 @@ impl NodeTreeBuilder {
         self.add_file(exports, "dedupe", "fingerprint\n");
         self.add_dir(exports, "filter");
         self.add_space_convert_projection(user);
+        let jobs = self.add_dir(user, "job");
+        self.add_file(jobs, "count", "0\n");
+        self.add_file(jobs, "list", "");
         self.add_dir(user, "control");
         self.add_feedback_projection(user);
         self.add_batch_projection(user);

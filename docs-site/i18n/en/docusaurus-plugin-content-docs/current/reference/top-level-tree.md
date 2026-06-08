@@ -12,6 +12,7 @@ Current top-level ABI:
   cap/
   format/
   provider/
+  chan/
   model/
   home/
   group/

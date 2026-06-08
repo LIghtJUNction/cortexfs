@@ -32,6 +32,14 @@ cortex start
 
 `cortex start` 本质上管理 systemd 服务 `cortexfs@$USER.service`。这是系统服务操作，CLI 会在需要时请求管理员授权；服务会自动加载 FUSE、清理坏挂载、创建 `/ctx` 并设置 owner/mode。默认部署不需要手动创建 `/ctx`，也不需要手动配置挂载权限。
 
+服务会读取本机环境文件：
+
+```text
+~/.config/cortexfs/.env
+```
+
+把 API key 写在这里，例如 `FENGYING_API_KEY=...`。该文件只属于本机 secret，不要提交到 Git。
+
 如果需要临时前台调试，也可以手动挂载：
 
 ```bash
