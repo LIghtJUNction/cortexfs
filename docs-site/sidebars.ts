@@ -17,7 +17,7 @@ const sidebars: SidebarsConfig = {
     'intro',
     {
       type: 'category',
-      label: 'Getting Started',
+      label: '快速开始',
       items: [
         'getting-started/quick-start',
         'getting-started/mounting',
@@ -26,7 +26,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Concepts',
+      label: '核心概念',
       items: [
         'concepts/filesystem-abi',
         'concepts/formats-providers-models',
@@ -35,12 +35,12 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'API Surface',
+      label: 'API 表面',
       items: ['api/file-api', 'api/local-api', 'api/threads-and-batch'],
     },
     {
       type: 'category',
-      label: 'Providers and Routing',
+      label: 'Provider 与路由',
       items: [
         'providers/provider-instances',
         'providers/routing-fallback',
@@ -49,7 +49,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Integrations',
+      label: '集成',
       items: [
         'bun-template',
         'integrations/external-orchestrators',
@@ -58,7 +58,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Operations',
+      label: '运维',
       items: [
         'operations/audit-export',
         'operations/live-tests',
@@ -67,7 +67,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Reference',
+      label: '参考',
       items: ['reference/top-level-tree', 'reference/file-types', 'design'],
     },
   ],

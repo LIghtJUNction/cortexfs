@@ -32,7 +32,17 @@ const config: Config = {
   // may want to replace "en" with "zh-Hans".
   i18n: {
     defaultLocale: 'zh-Hans',
-    locales: ['zh-Hans'],
+    locales: ['zh-Hans', 'en'],
+    localeConfigs: {
+      'zh-Hans': {
+        label: '简体中文',
+        htmlLang: 'zh-CN',
+      },
+      en: {
+        label: 'English',
+        htmlLang: 'en-US',
+      },
+    },
   },
 
   presets: [
@@ -63,7 +73,11 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'docs',
           position: 'left',
-          label: 'Docs',
+          label: '文档',
+        },
+        {
+          type: 'localeDropdown',
+          position: 'right',
         },
         {
           href: 'https://github.com/LIghtJUNction/cortexfs',
@@ -76,31 +90,31 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Docs',
+          title: '文档',
           items: [
             {
-              label: 'Overview',
+              label: '概览',
               to: '/docs/intro',
             },
             {
-              label: 'Getting Started',
+              label: '快速开始',
               to: '/docs/getting-started/quick-start',
             },
             {
-              label: 'Concepts',
+              label: '核心概念',
               to: '/docs/concepts/filesystem-abi',
             },
           ],
         },
         {
-          title: 'Guides',
+          title: '指南',
           items: [
             {
-              label: 'API Surface',
+              label: 'API 表面',
               to: '/docs/api/file-api',
             },
             {
-              label: 'Providers and Routing',
+              label: 'Provider 与路由',
               to: '/docs/providers/provider-instances',
             },
             {
@@ -110,14 +124,14 @@ const config: Config = {
           ],
         },
         {
-          title: 'More',
+          title: '更多',
           items: [
             {
-              label: 'Operations',
+              label: '运维',
               to: '/docs/operations/audit-export',
             },
             {
-              label: 'Design Spec',
+              label: '设计规范',
               to: '/docs/design',
             },
             {
