@@ -6,6 +6,7 @@ use cortex_store::{InMemoryStore, RequestId, Store, ThreadSnapshot};
 use cortexd::{ExecutionPlane, LocalApiEndpoint, LocalApiRequest};
 use std::io::Write as _;
 use std::path::PathBuf;
+use std::process::Command as ProcessCommand;
 
 fn main() -> std::process::ExitCode {
     let command = Command::from_env();
@@ -38,6 +39,8 @@ pub enum Command {
     Daemon(DaemonCommand),
     /// Mount the FUSE projection.
     Mount(MountCommand),
+    /// Manage the systemd-backed mount service.
+    Service(ServiceCommand),
     /// Report daemon and mount status.
     Status(StatusCommand),
     /// Reject invalid command arguments.
@@ -70,6 +73,18 @@ impl Command {
                 Ok(command) => Self::Mount(command),
                 Err(error) => Self::Invalid(error),
             },
+            "start" => match parse_no_arguments(arguments, "start") {
+                Ok(()) => Self::Service(ServiceCommand::start()),
+                Err(error) => Self::Invalid(error),
+            },
+            "stop" => match parse_no_arguments(arguments, "stop") {
+                Ok(()) => Self::Service(ServiceCommand::stop()),
+                Err(error) => Self::Invalid(error),
+            },
+            "restart" => match parse_no_arguments(arguments, "restart") {
+                Ok(()) => Self::Service(ServiceCommand::restart()),
+                Err(error) => Self::Invalid(error),
+            },
             "status" => match parse_no_arguments(arguments, "status") {
                 Ok(()) => Self::Status(StatusCommand),
                 Err(error) => Self::Invalid(error),
@@ -95,6 +110,43 @@ fn parse_no_arguments(
 /// Placeholder for `cortex init`.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct InitCommand;
+
+/// systemd service operation for the background mount.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ServiceAction {
+    /// Enable and start the mount service.
+    Start,
+    /// Stop the mount service.
+    Stop,
+    /// Restart the mount service.
+    Restart,
+}
+
+/// Manage `cortexfs@<user>.service`.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ServiceCommand {
+    action: ServiceAction,
+}
+
+impl ServiceCommand {
+    const fn start() -> Self {
+        Self {
+            action: ServiceAction::Start,
+        }
+    }
+
+    const fn stop() -> Self {
+        Self {
+            action: ServiceAction::Stop,
+        }
+    }
+
+    const fn restart() -> Self {
+        Self {
+            action: ServiceAction::Restart,
+        }
+    }
+}
 
 /// Run the daemon execution plane.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -202,7 +254,7 @@ impl MountCommand {
     fn parse(
         arguments: impl IntoIterator<Item = std::ffi::OsString>,
     ) -> Result<Self, InvalidCommand> {
-        let mut mountpoint = PathBuf::from("mnt/cortex");
+        let mut mountpoint = PathBuf::from("/ctx");
         let mut multi_user = false;
         let mut explicit_mountpoint = false;
 
@@ -315,6 +367,8 @@ pub enum CliError {
     UnknownCommand(String),
     /// The FUSE projection returned an error.
     Mount(cortexfs::MountError),
+    /// systemd service management failed.
+    Service(String),
     /// Writing CLI output failed.
     Io(std::io::Error),
 }
@@ -330,6 +384,7 @@ impl std::fmt::Display for CliError {
             Self::InvalidCommand(ref message) => write!(f, "invalid command: {message}"),
             Self::UnknownCommand(ref command) => write!(f, "unknown command: {command}"),
             Self::Mount(ref error) => error.fmt(f),
+            Self::Service(ref message) => write!(f, "{message}"),
             Self::Io(ref error) => write!(f, "I/O error: {error}"),
         }
     }
@@ -387,10 +442,59 @@ pub fn run(command: Command) -> Result<(), CliError> {
             cortexfs::mount(&config)?;
             Ok(())
         }
+        Command::Service(command) => run_service(command),
         Command::Status(_command) => print_output(&StatusCommand::render()),
         Command::Invalid(command) => Err(CliError::InvalidCommand(command.message)),
         Command::Unknown(command) => Err(CliError::UnknownCommand(command.name)),
     }
+}
+
+fn run_service(command: ServiceCommand) -> Result<(), CliError> {
+    let user = service_user()?;
+    let unit = format!("cortexfs@{user}.service");
+    let args: Vec<&str> = match command.action {
+        ServiceAction::Start => vec!["enable", "--now", unit.as_str()],
+        ServiceAction::Stop => vec!["stop", unit.as_str()],
+        ServiceAction::Restart => vec!["restart", unit.as_str()],
+    };
+    let mut process = service_manager();
+    let status = process
+        .args(args)
+        .status()
+        .map_err(|error| {
+            CliError::Service(format!(
+                "failed to run systemd for {unit}: {error}. Install cortexfs-git and run cortex start again"
+            ))
+        })?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(CliError::Service(format!(
+        "systemctl failed for {unit}: {status}"
+    )))
+}
+
+fn service_user() -> Result<String, CliError> {
+    if current_uid() == 0
+        && let Ok(user) = std::env::var("SUDO_USER")
+        && !user.is_empty()
+        && user != "root"
+    {
+        return Ok(user);
+    }
+    std::env::var("USER")
+        .ok()
+        .filter(|user| !user.is_empty())
+        .ok_or_else(|| CliError::Service("USER is not set for cortexfs service".to_owned()))
+}
+
+fn service_manager() -> ProcessCommand {
+    if current_uid() == 0 {
+        return ProcessCommand::new("systemctl");
+    }
+    let mut command = ProcessCommand::new("sudo");
+    command.arg("systemctl");
+    command
 }
 
 fn run_daemon_once(command: DaemonCommand) -> Result<(), CliError> {
@@ -498,7 +602,9 @@ fn daemon_once_result(command: DaemonCommand) -> Result<DaemonOnceResult, CliErr
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, DaemonCommand, MountCommand, StatusCommand};
+    use super::{
+        Command, DaemonCommand, MountCommand, ServiceAction, ServiceCommand, StatusCommand,
+    };
     use cortex_core::MessageRole;
     use std::ffi::OsString;
     use std::path::PathBuf;
@@ -539,6 +645,28 @@ mod tests {
             Command::Invalid(super::InvalidCommand::new(
                 "unexpected init argument: --watch"
             ))
+        );
+    }
+
+    #[test]
+    fn parser_accepts_systemd_service_commands() {
+        assert_eq!(
+            Command::parse([OsString::from("start")]),
+            Command::Service(ServiceCommand {
+                action: ServiceAction::Start,
+            })
+        );
+        assert_eq!(
+            Command::parse([OsString::from("stop")]),
+            Command::Service(ServiceCommand {
+                action: ServiceAction::Stop,
+            })
+        );
+        assert_eq!(
+            Command::parse([OsString::from("restart")]),
+            Command::Service(ServiceCommand {
+                action: ServiceAction::Restart,
+            })
         );
     }
 

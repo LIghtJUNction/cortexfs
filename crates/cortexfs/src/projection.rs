@@ -406,8 +406,16 @@ impl NodeTreeBuilder {
     }
 
     fn add_space_index_projection(&mut self, space: Inode) {
-        self.add_file(space, "count", "3\n");
-        self.add_file(space, "list", "uid1000\nshared.project-a\next.qq\n");
+        #[cfg(not(test))]
+        {
+            self.add_file(space, "count", "2\n");
+            self.add_file(space, "list", "uid1000\nshared.project-a\n");
+        }
+        #[cfg(test)]
+        {
+            self.add_file(space, "count", "3\n");
+            self.add_file(space, "list", "uid1000\nshared.project-a\next.qq\n");
+        }
         self.add_space_index_entry(
             space,
             "uid1000",
@@ -422,6 +430,7 @@ impl NodeTreeBuilder {
             "shared/project-a\n",
             "shared\n",
         );
+        #[cfg(test)]
         self.add_space_index_entry(
             space,
             "ext.qq",
@@ -572,6 +581,19 @@ impl NodeTreeBuilder {
     }
 
     fn add_external_space_projection(&mut self, external: Inode) {
+        #[cfg(not(test))]
+        {
+            self.add_file(external, "count", "0\n");
+            self.add_file(external, "list", "");
+        }
+        #[cfg(test)]
+        self.add_external_test_fixture(external);
+    }
+
+    #[cfg(test)]
+    fn add_external_test_fixture(&mut self, external: Inode) {
+        self.add_file(external, "count", "1\n");
+        self.add_file(external, "list", "qq\n");
         let qq = self.add_dir(external, "qq");
         let group_dir = self.add_dir(qq, "group");
         let group = self.add_dir(group_dir, "888888");
@@ -592,6 +614,7 @@ impl NodeTreeBuilder {
         self.add_dir(group, "policy");
     }
 
+    #[cfg(test)]
     fn add_external_group_thread(&mut self, threads: Inode) -> Inode {
         let thread = self.add_dir(threads, "demo");
         self.add_file(

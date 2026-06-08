@@ -29,16 +29,23 @@ $CTX_HOME/memory
 $CTX_HOME/export
 ```
 
+## Background Mount
+
+The default production mount uses systemd:
+
+```bash
+cortex start
+```
+
+`cortex start` prepares `/ctx`, fixes owner/mode, and sends the foreground mount process an exit signal when stopping. The default single-user deployment does not require manual FUSE permission configuration.
+
 ## Multi-user Mounts
 
-Default mounts are single-user. Multi-user mode must be explicit and must be
-combined with the system FUSE `allow_other`, owner, group, and mode policy.
+Default mounts are single-user. Use explicit multi-user mode only when one mount must be shared across Linux users:
 
 ```bash
 cortex mount --multi-user /ctx
 ```
-
-On Arch Linux, first make sure `/etc/fuse.conf` enables `user_allow_other`. Without that setting, FUSE rejects the `allow_other` mount option.
 
 Paths are namespaces, not security boundaries. Decisions should use host
 credential, external subject, object context, and Cortex policy.

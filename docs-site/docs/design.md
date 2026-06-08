@@ -247,7 +247,7 @@ space/
     context
     entry
     kind
-  ext.qq/
+  ext.<platform>/
     context
     entry
     kind
@@ -1064,7 +1064,7 @@ CortexFS 使用 SELinux 风格安全上下文。
 
 ```text
 HostActor  本机 uid/gid/pid
-Subject    被代表用户，例如 qq:user:123456
+Subject    被代表用户，例如 chat:user:123456
 Object     文件系统对象或 AI 资源
 ```
 
@@ -1078,9 +1078,9 @@ identity:role:type:level
 
 ```text
 local:uid1000:user_r:chat_client_t:s0
-local:uid1000:adapter_r:qq_adapter_t:s0
-qq:user123456:member_r:group_member_t:s0:c_qq,c_group888888
-qq:group888888:object_r:group_thread_t:s0:c_qq,c_group888888
+local:uid1000:adapter_r:chat_adapter_t:s0
+chat:user123456:member_r:chat_member_t:s0:c_chat,c_room888888
+chat:room888888:object_r:room_thread_t:s0:c_chat,c_room888888
 ```
 
 Object classes：
@@ -1141,7 +1141,7 @@ getfattr -n user.cortex.context <path>
 外部群聊和机器人平台不是 Linux 用户。
 
 ```text
-ext/qq/group/888888/
+ext/chat/room/888888/
   subject/
   thread/
   agent/
@@ -1161,7 +1161,7 @@ subject/123456/
 消息可带 subject：
 
 ```jsonl
-{"role":"user","content":"帮我总结","subject":"qq:user:123456","display_name":"Alice"}
+{"role":"user","content":"帮我总结","subject":"chat:user:123456","display_name":"Alice"}
 ```
 
 只有可信 adapter domain 可以代表 external subject 写入。
@@ -1240,7 +1240,7 @@ export row
 thread/tool-loop update when bound
 ```
 
-外部软件不得假设 provider id、model id、agent id、uid、平台 subject 或 demo thread 名称。`home/1000`、`agent/helper`、`ext/qq/group/888888` 这类当前投影只是 MVP fixture；正式 ABI 模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`。
+外部软件不得假设 provider id、model id、agent id、uid、平台 subject 或 demo thread 名称。`home/1000`、`agent/helper`、`ext/chat/room/888888` 这类路径只是示例；正式 ABI 模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`。
 
 外部编排器如果需要表达自己的 run/step，应把它写进请求 JSON、thread metadata 或 audit subject/agent context；不要要求 CortexFS 增加 `<project>/`、`workflow/`、`pipeline/` 这类上层项目目录。CortexFS 只提供 provider、format、policy、tool、memory、audit 和 export 的通用执行面。
 
@@ -1278,7 +1278,7 @@ cortex-agent     agent runtime/collab/cluster primitives
 cortex-memory     memory/vector/db integration
 cortexd           daemon 执行平面
 cortexfs          FUSE 投影
-cortex-cli        init/mount/daemon/status
+cortex-cli        init/start/stop/restart/mount/daemon/status
 ```
 
 ## 28. MVP

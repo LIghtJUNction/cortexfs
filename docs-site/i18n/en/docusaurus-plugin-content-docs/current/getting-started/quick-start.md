@@ -14,13 +14,11 @@ cortex status
 Production-style local mount:
 
 ```bash
-sudo mkdir -p /ctx
-sudo chown "$USER:$USER" /ctx
-cortex mount /ctx
+cortex start
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-`cortex mount` runs in the foreground. Keep that terminal open, then inspect or submit requests from another terminal.
+`cortex start` starts `cortexfs@$USER.service` through systemd.
 
 Developer repository test mount:
 

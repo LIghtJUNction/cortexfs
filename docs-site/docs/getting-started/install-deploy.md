@@ -24,14 +24,15 @@ cortex status
 
 ## 单用户部署
 
-创建推荐挂载点：
+推荐使用 systemd 后台服务启动挂载：
 
 ```bash
-sudo mkdir -p /ctx
-sudo chown "$USER:$USER" /ctx
+cortex start
 ```
 
-启动挂载：
+`cortex start` 本质上执行 systemd 服务 `cortexfs@$USER.service`。CLI 会在需要时调用 `sudo systemctl`，服务会自动加载 FUSE、清理坏挂载、创建 `/ctx` 并设置 owner/mode。默认部署不需要手动创建 `/ctx`，也不需要手动配置挂载权限。
+
+如果需要临时前台调试，也可以手动挂载：
 
 ```bash
 cortex mount /ctx
@@ -49,7 +50,7 @@ cat "$CTX_HOME/model/list"
 卸载：
 
 ```bash
-fusermount3 -u /ctx
+cortex stop
 ```
 
 ## systemd 后台挂载
@@ -59,7 +60,7 @@ AUR 包安装 systemd 模板服务 `cortexfs@.service`。`/ctx` 是系统路径�
 启用当前用户的后台挂载：
 
 ```bash
-sudo systemctl enable --now "cortexfs@$USER.service"
+cortex start
 ```
 
 查看状态：
@@ -73,40 +74,24 @@ cat /ctx/status
 停止并卸载：
 
 ```bash
-sudo systemctl stop "cortexfs@$USER.service"
+cortex stop
 ```
 
-如果你手动杀掉了 `cortex mount`，可能会留下坏 FUSE endpoint。先清理再重启服务：
+如果你手动杀掉了前台 `cortex mount`，可能会留下坏 FUSE endpoint。后台服务启动前会自动清理它：
 
 ```bash
-fusermount3 -u /ctx
-sudo systemctl restart "cortexfs@$USER.service"
+cortex restart
 ```
 
 ## 多用户部署
 
-多用户挂载需要显式开启 CortexFS 的 multi-user 模式，并允许 FUSE 使用 `allow_other`。
-
-1. 编辑 `/etc/fuse.conf`，启用这一行：
-
-```text
-user_allow_other
-```
-
-2. 准备挂载点权限，让需要访问的本机用户可以进入 `/ctx`：
-
-```bash
-sudo mkdir -p /ctx
-sudo chmod 755 /ctx
-```
-
-3. 使用已安装的 `cortex` 命令挂载：
+默认的 `cortex start` 是单用户挂载：`/ctx` 由 systemd 准备，FUSE 进程以当前用户运行。需要跨 Linux 用户共享同一个挂载时，才使用显式 multi-user 模式：
 
 ```bash
 cortex mount --multi-user /ctx
 ```
 
-路径只是命名空间，不是安全边界。多用户部署仍然应该依赖 host credential、external subject、object context 和 Cortex policy 做实际访问决策。
+multi-user 是高级部署形态；路径只是命名空间，不是安全边界。多用户部署仍然应该依赖 host credential、external subject、object context 和 Cortex policy 做实际访问决策。
 
 ## 从源码构建
 

@@ -19,4 +19,4 @@ training export      read home/<uid>/export/*.jsonl
 ```
 
 Do not hard-code MVP fixtures such as `home/1000`, `agent/helper`, or
-`ext/qq/group/888888`.
+`ext/chat/room/888888`.

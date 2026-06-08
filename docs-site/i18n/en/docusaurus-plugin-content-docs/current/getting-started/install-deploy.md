@@ -24,14 +24,15 @@ cortex status
 
 ## Single-user Deployment
 
-Create the recommended mountpoint:
+The recommended path is the systemd-backed background service:
 
 ```bash
-sudo mkdir -p /ctx
-sudo chown "$USER:$USER" /ctx
+cortex start
 ```
 
-Start the mount:
+`cortex start` starts `cortexfs@$USER.service`. The CLI calls `sudo systemctl` when needed. The service loads FUSE, clears a broken `/ctx` mount, creates `/ctx`, and sets owner/mode automatically. The default deployment does not require manually creating `/ctx` or manually configuring mount permissions.
+
+For foreground debugging, mount manually:
 
 ```bash
 cortex mount /ctx
@@ -49,17 +50,17 @@ cat "$CTX_HOME/model/list"
 Unmount:
 
 ```bash
-fusermount3 -u /ctx
+cortex stop
 ```
 
 ## systemd Background Mount
 
 The AUR package installs the systemd template unit `cortexfs@.service`. `/ctx` is a system path, so the unit prepares the mountpoint under systemd and runs the FUSE process as the selected user.
 
-Enable the background mount for the current user:
+Enable and start the background mount for the current user:
 
 ```bash
-sudo systemctl enable --now "cortexfs@$USER.service"
+cortex start
 ```
 
 Inspect it:
@@ -73,40 +74,24 @@ cat /ctx/status
 Stop and unmount:
 
 ```bash
-sudo systemctl stop "cortexfs@$USER.service"
+cortex stop
 ```
 
-If `cortex mount` was killed manually, a broken FUSE endpoint may remain. Clean it before restarting the service:
+If a foreground `cortex mount` was killed manually, a broken FUSE endpoint may remain. The background service cleans it before startup:
 
 ```bash
-fusermount3 -u /ctx
-sudo systemctl restart "cortexfs@$USER.service"
+cortex restart
 ```
 
 ## Multi-user Deployment
 
-Multi-user mounts must explicitly enable CortexFS multi-user mode and must allow FUSE `allow_other`.
-
-1. Edit `/etc/fuse.conf` and enable:
-
-```text
-user_allow_other
-```
-
-2. Prepare mountpoint permissions for the local users that should enter `/ctx`:
-
-```bash
-sudo mkdir -p /ctx
-sudo chmod 755 /ctx
-```
-
-3. Mount with the installed `cortex` command:
+The default `cortex start` path is single-user: systemd prepares `/ctx`, then runs the FUSE process as the selected user. Use explicit multi-user mode only when one mount must be shared across Linux users:
 
 ```bash
 cortex mount --multi-user /ctx
 ```
 
-Paths are namespaces, not security boundaries. Multi-user deployments should still rely on host credential, external subject, object context, and Cortex policy for access decisions.
+Multi-user mode is an advanced deployment shape. Paths are namespaces, not security boundaries. Multi-user deployments should still rely on host credential, external subject, object context, and Cortex policy for access decisions.
 
 ## Build from Source
 

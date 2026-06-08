@@ -29,15 +29,23 @@ $CTX_HOME/memory
 $CTX_HOME/export
 ```
 
-## 单用户和多用户
+## 后台挂载
 
-默认挂载是 single-user。多用户挂载需要明确使用 multi-user 模式，并配合系统 FUSE 的 `allow_other`、目录 owner、group、mode 策略。
+默认生产挂载使用 systemd：
+
+```bash
+cortex start
+```
+
+`cortex start` 会自动准备 `/ctx`，修正 owner/mode，并在停止时向前台 mount 进程发送退出信号。默认单用户部署不需要手动配置 FUSE 权限。
+
+## 多用户挂载
+
+默认挂载是 single-user。需要跨 Linux 用户共享同一个挂载时，才显式使用 multi-user 模式：
 
 ```bash
 cortex mount --multi-user /ctx
 ```
-
-在 Arch Linux 上，先确认 `/etc/fuse.conf` 中启用了 `user_allow_other`。如果没有该配置，FUSE 会拒绝 `allow_other` 挂载选项。
 
 路径只是命名空间，不是安全边界。真实访问决策应基于 host credential、external subject、object context 和 policy。
 
