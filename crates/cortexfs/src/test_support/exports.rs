@@ -36,7 +36,7 @@ fn export_refresh_derives_sft_from_thread_messages() -> fuse3::Result<()> {
     }
 
     let sft = fs.node_content(fs.export_file_inode("sft.jsonl")?)?;
-    assert!(sft.contains("\"source\":\"thread/demo/messages.jsonl\""));
+    assert!(sft.contains("\"source\":\"home/1000/thread/demo/messages.jsonl\""));
     assert!(sft.contains("\"role\":\"user\",\"content\":\"train me\""));
     assert!(sft.contains("\"role\":\"assistant\",\"content\":\"cortexfs-ok\""));
     assert!(
