@@ -253,7 +253,20 @@ impl RuntimeState {
             .unwrap_or_default()
             .to_owned();
         transcript.push_str(line.as_ref());
+        self.update_mcp_session_summary(&transcript);
         self.update_dynamic_file(inode, transcript);
+    }
+
+    fn update_mcp_session_summary(&mut self, transcript: &str) {
+        let Some(inode) = self.mcp_session_summary_inode else {
+            return;
+        };
+        let line_count = transcript.lines().count();
+        let last_entry = transcript.lines().last().unwrap_or_default();
+        self.update_dynamic_file(
+            inode,
+            format!("lines={line_count}\nlast_entry={last_entry}\n"),
+        );
     }
 
     pub fn write_mcp_session_search(&mut self, offset: u64, data: &[u8]) -> fuse3::Result<u32> {
