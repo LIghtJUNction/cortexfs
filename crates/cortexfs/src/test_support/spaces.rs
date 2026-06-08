@@ -399,9 +399,9 @@ fn projection_exposes_space_exports_batch_feedback_and_control() -> fuse3::Resul
     assert!(
         fs.lookup_path(["home", "1000", "export", "source"])
             .and_then(crate::Node::content)
-            .is_some_and(|source| source.contains("thread/*/messages.jsonl")
-                && source.contains("audit/events.jsonl")
-                && source.contains("human feedback")),
+            .is_some_and(|source| source.contains("home/*/thread/*/messages.jsonl")
+                && source.contains("home/*/audit/events.jsonl")
+                && source.contains("home/*/feedback/preference")),
         "export source must document provenance"
     );
     assert!(
