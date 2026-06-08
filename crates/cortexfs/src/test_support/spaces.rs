@@ -400,6 +400,7 @@ fn projection_exposes_space_exports_batch_feedback_and_control() -> fuse3::Resul
         fs.lookup_path(["home", "1000", "export", "source"])
             .and_then(crate::Node::content)
             .is_some_and(|source| source.contains("home/*/thread/*/messages.jsonl")
+                && source.contains("ext/*/.../thread/*/inbox/*.req.json")
                 && source.contains("home/*/audit/events.jsonl")
                 && source.contains("tool/*/invoke/inbox/*.req.json")
                 && source.contains("agent/*/inbox/*.req.json")
