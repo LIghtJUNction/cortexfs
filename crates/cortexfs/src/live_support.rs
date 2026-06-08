@@ -29,13 +29,13 @@ impl LiveCortexFs {
         }
     }
 
-    /// Use the local Ollama fixture execution plane.
+    /// Use a caller-supplied local live-test fixture execution plane.
     ///
     /// # Errors
     ///
     /// Returns an I/O error if the fixture provider id cannot be constructed.
-    pub fn use_ollama_execution_plane(&self) -> fuse3::Result<()> {
-        let provider = cortex_providers::OllamaProvider::local_smollm2()
+    pub fn use_ollama_execution_plane(&self, url: &str) -> fuse3::Result<()> {
+        let provider = cortex_providers::OllamaProvider::fixture_smollm2(url)
             .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
         let mut runtime = self.fs.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime.plane = Some(ExecutionPlane::new(

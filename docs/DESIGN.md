@@ -149,8 +149,8 @@ provider/<id>/
     current
     effective
     source
-  auth_scheme
-  account_type
+  auth
+  acct
   enabled/
     default
     current
@@ -180,10 +180,10 @@ provider/<id>/
       status
 ```
 
-`account_type`：
+`acct`：
 
 ```text
-api_key
+key
 oauth
 session
 service_account

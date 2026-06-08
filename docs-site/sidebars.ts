@@ -43,6 +43,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Provider 与路由',
       items: [
+        'providers/new-api-replacement',
         'providers/provider-instances',
         'providers/routing-fallback',
         'providers/secrets',

@@ -34,10 +34,10 @@ struct ProviderProjection {
     family: &'static str,
     name: &'static str,
     formats: &'static [&'static str],
-    base_url: &'static str,
+    url: &'static str,
     runtime_files: ProviderRuntimeFiles,
-    auth_scheme: &'static str,
-    account_type: &'static str,
+    auth: &'static str,
+    acct: &'static str,
     priority: &'static str,
     secret_status: &'static str,
 }
@@ -276,10 +276,10 @@ impl NodeTreeBuilder {
             family: spec.family,
             name: spec.name,
             formats: spec.formats,
-            base_url: spec.default_base_url,
+            url: spec.url,
             runtime_files: CONFIGURED_PROVIDER_RUNTIME_FILES,
-            auth_scheme: spec.auth_scheme,
-            account_type: spec.account_type,
+            auth: spec.auth,
+            acct: spec.acct,
             priority: spec.priority,
             secret_status: spec.secret_status,
         };
@@ -300,14 +300,14 @@ impl NodeTreeBuilder {
         self.add_file(provider, "name", projection.name);
         self.add_owned_file(provider, "format", newline_list(projection.formats.iter()));
         let url = self.add_dir(provider, "url");
-        self.add_file(url, "default", projection.base_url);
+        self.add_file(url, "default", projection.url);
         if !projection.runtime_files.contains(ProviderRuntimeFiles::URL) {
-            self.add_file(url, "current", projection.base_url);
-            self.add_file(url, "effective", projection.base_url);
+            self.add_file(url, "current", projection.url);
+            self.add_file(url, "effective", projection.url);
             self.add_file(url, "source", "default\n");
         }
-        self.add_file(provider, "auth_scheme", projection.auth_scheme);
-        self.add_file(provider, "account_type", projection.account_type);
+        self.add_file(provider, "auth", projection.auth);
+        self.add_file(provider, "acct", projection.acct);
         let enabled = self.add_dir(provider, "enabled");
         self.add_file(enabled, "default", "1\n");
         if !projection

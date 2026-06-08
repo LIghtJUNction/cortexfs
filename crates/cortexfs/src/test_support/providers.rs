@@ -19,7 +19,7 @@ fn provider_runtime_files_follow_specs() -> fuse3::Result<()> {
         runtime
             .lookup_child(primary_url, "effective")
             .and_then(crate::Node::content),
-        Some(primary.default_base_url)
+        Some(primary.url)
     );
     assert_eq!(
         runtime
@@ -64,7 +64,7 @@ fn provider_model_views_follow_specs() -> fuse3::Result<()> {
         runtime
             .lookup_child(secondary_url, "effective")
             .and_then(crate::Node::content),
-        Some(secondary.default_base_url)
+        Some(secondary.url)
     );
     drop(runtime);
     assert_eq!(
@@ -411,7 +411,7 @@ fn provider_secret_rotate_updates_only_secret_status_view() -> fuse3::Result<()>
         );
         let initial_active = fs.node_content(active)?;
         assert_eq!(fs.node_content(status)?, provider.secret_status);
-        if provider.account_type.trim() == "local_runtime" {
+        if provider.acct.trim() == "local_runtime" {
             assert_eq!(initial_active, "not_required\n");
         } else {
             assert_eq!(initial_active, "none\n");
@@ -435,7 +435,7 @@ fn provider_secret_rotate_updates_only_secret_status_view() -> fuse3::Result<()>
         let next_rotation = fs.provider_secrets_file_inode(provider.id, "next_rotation")?;
         assert_eq!(
             fs.node_content(active)?,
-            format!("{}-key-rotating\n", provider.id)
+            format!("ref:{}:rotating\n", provider.id)
         );
         assert_eq!(fs.node_content(last_rotated)?, "pending\n");
         assert_eq!(fs.node_content(next_rotation)?, "\n");
@@ -443,10 +443,10 @@ fn provider_secret_rotate_updates_only_secret_status_view() -> fuse3::Result<()>
         assert!(audit.contains(&format!("\"format\":\"provider.{}.secrets\"", provider.id)));
         assert!(audit.contains("\"name\":\"rotate\""));
         assert!(audit.contains("\"event\":\"requested\""));
-        assert!(!audit.contains("api_key"));
+        assert!(!audit.contains("key"));
         assert!(!audit.contains("token"));
         assert!(!audit.contains("secret-password"));
-        assert!(!fs.node_content(active)?.contains("api_key"));
+        assert!(!fs.node_content(active)?.contains("key"));
         assert!(!fs.node_content(active)?.contains("token"));
         assert!(!fs.node_content(active)?.contains("secret-password"));
     }
@@ -873,7 +873,7 @@ fn projection_exposes_space_routes_and_policy() -> fuse3::Result<()> {
         "google.generate_content",
     ] {
         let provider = crate::providers_for_format(format)
-            .find(|provider| provider.account_type.trim() != "local_runtime")
+            .find(|provider| provider.acct.trim() != "local_runtime")
             .ok_or_else(fuse3::Errno::new_not_exist)?;
         assert_format_route(
             &runtime,

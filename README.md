@@ -145,6 +145,13 @@ cortex mount --multi-user /ctx
 
 在 Arch Linux 上，多用户挂载前需要在 `/etc/fuse.conf` 启用 `user_allow_other`。
 
+后台挂载使用 AUR 包安装的 systemd 模板服务：
+
+```bash
+sudo systemctl enable --now "cortexfs@$USER.service"
+systemctl status "cortexfs@$USER.service"
+```
+
 `space/` 是只读安全上下文索引；日常脚本使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。开发期不提供 `spaces/` 目录，也不提供 `space/users/<uid>` 这类第二入口。
 
 ## 本地测试挂载
