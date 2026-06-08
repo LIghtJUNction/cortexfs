@@ -1,10 +1,10 @@
 ---
-title: Live Tests
+title: 实时测试
 ---
 
-# Live Tests
+# 实时测试
 
-仓库包含 ignored live tests，用本机轻量模型 fixture 验证 provider adapter 和 daemon execution plane。
+仓库包含 ignored live test，用本机轻量模型 fixture 验证 provider adapter 和 daemon execution plane。
 
 当前 fixture：
 

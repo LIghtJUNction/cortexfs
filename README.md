@@ -90,9 +90,16 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - JSONL 用于消息、审计、tool loop、训练数据导出。
 - `.sock` 只作为实时 fast path，文件树仍然是可审计 source of truth。
 
-## 快速试用
+## 安装与快速试用
 
-构建：
+Arch Linux 用户可以直接从 AUR 安装 `cortexfs-git`：
+
+```bash
+paru -S cortexfs-git
+cortex status
+```
+
+从源码构建适合开发者和 CI：
 
 ```bash
 cargo build --locked --workspace
@@ -126,11 +133,17 @@ export CTX_HOME="/ctx/home/$(id -u)"
 ```bash
 sudo mkdir -p /ctx
 sudo chown "$USER:$USER" /ctx
-cargo run -p cortex-cli -- mount /ctx
+cortex mount /ctx
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
 如果要做多用户挂载，使用明确的多用户挂载模式，并按系统 FUSE 配置处理 `/ctx` 的 owner、group、mode 和 `allow_other` 策略。
+
+```bash
+cortex mount --multi-user /ctx
+```
+
+在 Arch Linux 上，多用户挂载前需要在 `/etc/fuse.conf` 启用 `user_allow_other`。
 
 `space/` 是只读安全上下文索引；日常脚本使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。开发期不提供 `spaces/` 目录，也不提供 `space/users/<uid>` 这类第二入口。
 

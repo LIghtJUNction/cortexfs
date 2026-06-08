@@ -1,12 +1,12 @@
 ---
-title: Agents, Tools, MCP
+title: 智能体、工具和 MCP
 ---
 
-# Agents, Tools, MCP
+# 智能体、工具和 MCP
 
 CortexFS 把 agent、tool 和 MCP 都建模成可审计文件系统对象。
 
-## Agent
+## 智能体
 
 ```text
 agent/<id>/
@@ -23,7 +23,7 @@ agent/<id>/
 
 Agent 是带 profile、policy、tool、skill、memory 和 thread 的执行主体。
 
-## Tools
+## 工具
 
 ```text
 tool/<tool-id>/

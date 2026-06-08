@@ -1,12 +1,12 @@
 ---
-title: Filesystem ABI
+title: 文件系统 ABI
 ---
 
-# Filesystem ABI
+# 文件系统 ABI
 
 CortexFS 的核心不是 UI，而是一组稳定文件路径和读写语义。脚本、agent runtime、workflow engine 和本地工具都应该依赖这些 ABI。
 
-## ABI Rules
+## ABI 规则
 
 - 顶层目录使用单数短名词，如 `provider/`、`model/`、`thread/`。
 - 小配置使用小文本属性文件。
@@ -15,7 +15,7 @@ CortexFS 的核心不是 UI，而是一组稳定文件路径和读写语义。�
 - Socket 只作为低延迟 fast path，不是 source of truth。
 - 慢操作进入 daemon/execution plane。
 
-## File Kinds
+## 文件类型
 
 ```text
 无扩展名        小文本属性或控制节点
@@ -29,7 +29,7 @@ schema.json     大结构 schema
 manifest.json   大结构 manifest
 ```
 
-## Small Text Semantics
+## 小文本语义
 
 ```text
 一个文件一个值

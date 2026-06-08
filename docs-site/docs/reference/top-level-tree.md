@@ -1,8 +1,8 @@
 ---
-title: Top-level Tree
+title: 顶层目录
 ---
 
-# Top-level Tree
+# 顶层目录
 
 当前 ABI 顶层目录：
 
@@ -30,7 +30,7 @@ title: Top-level Tree
   control/
 ```
 
-## Meanings
+## 含义
 
 ```text
 status        全局状态

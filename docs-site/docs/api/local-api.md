@@ -1,8 +1,8 @@
 ---
-title: Local API
+title: 本地 API
 ---
 
-# Local API
+# 本地 API
 
 CortexFS 预留本地统一 API，使外部 OpenAI-compatible 客户端可以接入同一执行面。
 
@@ -21,7 +21,7 @@ POST /v1/messages
 POST /v1/generateContent
 ```
 
-## Discovery
+## 发现
 
 ```bash
 cat "$CTX_HOME/api/endpoints"
@@ -30,7 +30,7 @@ cat "$CTX_HOME/api/unix/path"
 cat "$CTX_HOME/api/pipeline"
 ```
 
-## Pipeline
+## 管线
 
 文件路径、HTTP 和 Unix socket 必须进入同一内部管线：
 

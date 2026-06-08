@@ -35,8 +35,10 @@ Default mounts are single-user. Multi-user mode must be explicit and must be
 combined with the system FUSE `allow_other`, owner, group, and mode policy.
 
 ```bash
-cargo run -p cortex-cli -- mount --multi-user /ctx
+cortex mount --multi-user /ctx
 ```
+
+On Arch Linux, first make sure `/etc/fuse.conf` enables `user_allow_other`. Without that setting, FUSE rejects the `allow_other` mount option.
 
 Paths are namespaces, not security boundaries. Decisions should use host
 credential, external subject, object context, and Cortex policy.

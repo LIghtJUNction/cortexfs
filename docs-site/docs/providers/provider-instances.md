@@ -1,8 +1,8 @@
 ---
-title: Provider Instances
+title: Provider 实例
 ---
 
-# Provider Instances
+# Provider 实例
 
 多个 `base_url + key` 组合应该表示为多个 provider instance。
 
@@ -29,21 +29,21 @@ provider/<id>/
   model/
 ```
 
-## Configure URL
+## 配置 URL
 
 ```bash
 printf 'https://api.openai.com/v1\n' > /ctx/provider/openai-main/url/current
 printf 'https://relay.example.com/v1\n' > /ctx/provider/relay-openai/url/current
 ```
 
-Read effective URL:
+读取 effective URL：
 
 ```bash
 cat /ctx/provider/openai-main/url/effective
 cat /ctx/provider/openai-main/url/source
 ```
 
-## Enable or Disable
+## 启用或禁用
 
 ```bash
 printf '1\n' > /ctx/provider/openai-main/enabled/current

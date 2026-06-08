@@ -1,12 +1,12 @@
 ---
-title: Formats, Providers, Models
+title: 协议格式、Provider 和模型
 ---
 
-# Formats, Providers, Models
+# 协议格式、Provider 和模型
 
 CortexFS 把 API format、provider instance 和 model 分成三个层级。
 
-## Format
+## 协议格式
 
 `format/` 描述请求协议形状，不等于 provider。
 
@@ -35,7 +35,7 @@ provider/
 
 同一个厂商可以有多个 provider instance；一个中转站也可以是 provider。
 
-## Model
+## 模型
 
 全局模型索引：
 

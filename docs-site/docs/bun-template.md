@@ -1,22 +1,22 @@
-# Bun CortexFS Client Template
+# Bun CortexFS 客户端模板
 
-This template is a zero-dependency Bun client for CortexFS.
+这个模板是一个零依赖的 CortexFS Bun 客户端。
 
-It supports two transports:
+它支持两种传输方式：
 
-- `file`: submits through the stable CortexFS file ABI and writes `control/drain`.
-- `http`: calls the local OpenAI-compatible API derived from `home/<uid>/api/http/listen`.
+- `file`：通过稳定的 CortexFS 文件 ABI 提交，并写入 `control/drain`。
+- `http`：调用从 `home/<uid>/api/http/listen` 派生出的本地 OpenAI-compatible API。
 
-The file transport is the default because it works with the current CortexFS projection. The HTTP transport is for a running local API daemon.
+默认使用 `file` transport，因为它适配当前 CortexFS 投影。`http` transport 用于已经运行本地 API daemon 的场景。
 
-## Run
+## 运行
 
 ```bash
 cd templates/bun-cortexfs-client
 bun run chat -- "Reply with exactly: cortexfs-ok"
 ```
 
-With a mounted repo test mount:
+使用已经挂载的仓库测试挂载点：
 
 ```bash
 export CORTEXFS_MOUNT=../../tests/mounts/cortexfs
@@ -25,7 +25,7 @@ bun run route
 bun run chat -- "Reply with exactly: cortexfs-ok"
 ```
 
-With a production mount:
+使用生产式挂载点：
 
 ```bash
 export CTX_HOME=/ctx/home/$(id -u)
@@ -33,24 +33,24 @@ bun run models
 bun run chat -- "hello"
 ```
 
-Use the local HTTP API:
+使用本地 HTTP API：
 
 ```bash
 export CORTEXFS_TRANSPORT=http
 bun run chat -- "hello"
 ```
 
-## Environment
+## 环境变量
 
 ```text
-CTX_HOME             Explicit CortexFS user home, for example /ctx/home/1000.
-CORTEXFS_MOUNT      Mount root. Default: /ctx.
-CORTEXFS_UID        User id under home/. Default: process uid, then 1000.
-CORTEXFS_FORMAT     API format. Default: openai.chat.
-CORTEXFS_TRANSPORT  file or http. Default: file.
-CORTEXFS_BASE_URL   Optional local API base URL override.
-CORTEXFS_API_KEY    Optional HTTP bearer token.
-CORTEXFS_PROMPT     Prompt used when no CLI prompt is provided.
+CTX_HOME             显式 CortexFS 用户 home，例如 /ctx/home/1000。
+CORTEXFS_MOUNT      挂载根目录。默认：/ctx。
+CORTEXFS_UID        home/ 下的用户 id。默认：进程 uid，然后回退到 1000。
+CORTEXFS_FORMAT     API format。默认：openai.chat。
+CORTEXFS_TRANSPORT  file 或 http。默认：file。
+CORTEXFS_BASE_URL   可选，本地 API base URL 覆盖值。
+CORTEXFS_API_KEY    可选，HTTP bearer token。
+CORTEXFS_PROMPT     未提供 CLI prompt 时使用的 prompt。
 ```
 
-Provider API keys are not read from this template. CortexFS should resolve real provider secrets inside `cortexd`; the mount tree only exposes route and secret status.
+这个模板不会读取 provider API key。CortexFS 应该在 `cortexd` 内解析真实 provider secret；挂载树只暴露 route 和 secret 状态。

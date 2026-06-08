@@ -1,10 +1,10 @@
 ---
-title: File Types
+title: 文件类型
 ---
 
-# File Types
+# 文件类型
 
-## Naming
+## 命名
 
 ```text
 无扩展名        小文本属性或控制节点
@@ -18,7 +18,7 @@ schema.json     大结构 schema
 manifest.json   大结构 manifest
 ```
 
-## Error Semantics
+## 错误语义
 
 ```text
 非法写入返回 EINVAL
@@ -27,7 +27,7 @@ manifest.json   大结构 manifest
 不支持返回 ENOSYS
 ```
 
-## Submission
+## 提交
 
 `*.req.json` 必须通过 staged tmp 文件加原子 rename 提交：
 

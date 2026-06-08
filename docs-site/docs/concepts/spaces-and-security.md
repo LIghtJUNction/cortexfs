@@ -1,12 +1,12 @@
 ---
-title: Spaces and Security
+title: 空间和安全
 ---
 
-# Spaces and Security
+# 空间和安全
 
 Space 是权限、审计、记忆和执行的边界。
 
-## User Entry
+## 用户入口
 
 ```text
 home/<uid>/
@@ -21,7 +21,7 @@ home/<uid>/
 
 `home/<uid>` 是用户工作入口。`space/` 是只读安全上下文索引，不是第二个提交入口。
 
-## Security Inputs
+## 安全输入
 
 访问决策应基于：
 
@@ -29,7 +29,7 @@ home/<uid>/
 - `Subject`：被代表的外部用户，例如 `qq:user:123456`。
 - `Object`：文件系统对象、provider、model、tool、memory、thread 等资源。
 
-## Security Flow
+## 安全流程
 
 ```text
 FUSE request
