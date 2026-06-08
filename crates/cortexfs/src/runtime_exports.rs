@@ -394,18 +394,21 @@ impl RuntimeState {
         response_body: &str,
     ) {
         let agent = self.context.agent.clone();
+        let source = agent_task_source(&agent, request_id);
         for line in [
             format!(
-                "{{\"agent\":{},\"request_id\":\"{}\",\"event\":\"task\",\"input\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"request_id\":\"{}\",\"source\":{},\"event\":\"task\",\"input\":{},\"fingerprint\":\"{}\"}}",
                 json_string(&agent),
                 request_id.as_str(),
+                json_string(&source),
                 json_string(&task.body),
                 task.fingerprint,
             ),
             format!(
-                "{{\"agent\":{},\"request_id\":\"{}\",\"event\":\"task_result\",\"output\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"request_id\":\"{}\",\"source\":{},\"event\":\"task_result\",\"output\":{},\"fingerprint\":\"{}\"}}",
                 json_string(&agent),
                 request_id.as_str(),
+                json_string(&source),
                 json_string(response_body),
                 task.fingerprint,
             ),
@@ -529,6 +532,10 @@ fn permission_check_trace_line_with_decision(
 
 fn tool_submit_source(tool: &str, request_id: &RequestId) -> String {
     format!("tool/{tool}/invoke/inbox/{}.req.json", request_id.as_str())
+}
+
+fn agent_task_source(agent: &str, request_id: &RequestId) -> String {
+    format!("agent/{agent}/inbox/{}.req.json", request_id.as_str())
 }
 
 trait ExportFilterRow {

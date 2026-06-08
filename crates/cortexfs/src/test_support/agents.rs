@@ -432,6 +432,7 @@ fn agent_inbox_submit_drains_to_outbox_and_trace() -> fuse3::Result<()> {
         crate::LOCAL_USER_THREAD_DISPLAY_TEXT
     );
     let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
+    assert!(agent_traces.contains("\"source\":\"agent/helper/inbox/assist.req.json\""));
     assert!(agent_traces.contains("\"event\":\"task\""));
     assert!(agent_traces.contains("\"event\":\"task_result\""));
     assert!(agent_traces.contains("agent visible"));
