@@ -110,7 +110,9 @@ fn preference_feedback_submit_exports_training_pair() -> fuse3::Result<()> {
     }
 
     let export = fs.node_content(preference)?;
-    assert!(export.contains("\"source\":\"feedback/preference\""));
+    assert!(
+        export.contains("\"source\":\"home/1000/feedback/preference/inbox/pref-001.req.json\"")
+    );
     assert!(export.contains("\"request_id\":\"pref-001\""));
     assert!(export.contains("\"chosen\""));
     assert!(export.contains("\"rejected\""));
