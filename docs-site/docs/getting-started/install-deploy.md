@@ -55,7 +55,7 @@ cortex stop
 
 ## systemd 后台挂载
 
-AUR 包安装 systemd 模板服务 `cortexfs@.service`。`/ctx` 是系统路径，所以服务由 systemd 管理挂载点，再把实际 FUSE 进程降权到指定用户运行。
+AUR 包安装 systemd 模板服务 `cortexfs@.service`。`/ctx` 是系统路径，所以服务由 systemd 管理挂载点，通过内部准备步骤加载 FUSE、清理坏挂载、创建目录，再把实际 FUSE 进程降权到指定用户运行。
 
 启用当前用户的后台挂载：
 

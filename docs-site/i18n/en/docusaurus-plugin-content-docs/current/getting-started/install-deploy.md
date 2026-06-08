@@ -55,7 +55,7 @@ cortex stop
 
 ## systemd Background Mount
 
-The AUR package installs the systemd template unit `cortexfs@.service`. `/ctx` is a system path, so the unit prepares the mountpoint under systemd and runs the FUSE process as the selected user.
+The AUR package installs the systemd template unit `cortexfs@.service`. `/ctx` is a system path, so the unit uses an internal prep step to load FUSE, clear broken mounts, create the directory, then runs the FUSE process as the selected user.
 
 Enable and start the background mount for the current user:
 

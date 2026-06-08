@@ -6,7 +6,7 @@ use cortex_store::{InMemoryStore, RequestId, Store, ThreadSnapshot};
 use cortexd::{ExecutionPlane, LocalApiEndpoint, LocalApiRequest};
 use std::io::Write as _;
 use std::path::PathBuf;
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
 
 fn main() -> std::process::ExitCode {
     let command = Command::from_env();
@@ -39,6 +39,8 @@ pub enum Command {
     Daemon(DaemonCommand),
     /// Mount the FUSE projection.
     Mount(MountCommand),
+    /// Prepare the system mountpoint before systemd starts FUSE.
+    MountPrep(MountPrepCommand),
     /// Manage the systemd-backed mount service.
     Service(ServiceCommand),
     /// Report daemon and mount status.
@@ -71,6 +73,10 @@ impl Command {
             },
             "mount" => match MountCommand::parse(arguments) {
                 Ok(command) => Self::Mount(command),
+                Err(error) => Self::Invalid(error),
+            },
+            "mount-prep" => match MountPrepCommand::parse(arguments) {
+                Ok(command) => Self::MountPrep(command),
                 Err(error) => Self::Invalid(error),
             },
             "start" => match parse_no_arguments(arguments, "start") {
@@ -304,6 +310,42 @@ impl MountCommand {
     }
 }
 
+/// Internal mountpoint setup command used by the systemd unit.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MountPrepCommand {
+    mountpoint: PathBuf,
+    user: String,
+    group: String,
+}
+
+impl MountPrepCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut arguments = arguments.into_iter();
+        let Some(mountpoint) = arguments.next() else {
+            return Err(InvalidCommand::new("missing mount-prep mountpoint"));
+        };
+        let Some(user) = arguments.next() else {
+            return Err(InvalidCommand::new("missing mount-prep user"));
+        };
+        let Some(group) = arguments.next() else {
+            return Err(InvalidCommand::new("missing mount-prep group"));
+        };
+        if let Some(extra) = arguments.next() {
+            return Err(InvalidCommand::new(format!(
+                "unexpected mount-prep argument: {}",
+                extra.to_string_lossy()
+            )));
+        }
+        Ok(Self {
+            mountpoint: PathBuf::from(mountpoint),
+            user: user.to_string_lossy().into_owned(),
+            group: group.to_string_lossy().into_owned(),
+        })
+    }
+}
+
 /// Placeholder for `cortex status`.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct StatusCommand;
@@ -379,6 +421,8 @@ pub enum CliError {
     Mount(cortexfs::MountError),
     /// systemd service management failed.
     Service(String),
+    /// system mountpoint preparation failed.
+    MountPrep(String),
     /// Writing CLI output failed.
     Io(std::io::Error),
 }
@@ -394,7 +438,7 @@ impl std::fmt::Display for CliError {
             Self::InvalidCommand(ref message) => write!(f, "invalid command: {message}"),
             Self::UnknownCommand(ref command) => write!(f, "unknown command: {command}"),
             Self::Mount(ref error) => error.fmt(f),
-            Self::Service(ref message) => write!(f, "{message}"),
+            Self::Service(ref message) | Self::MountPrep(ref message) => write!(f, "{message}"),
             Self::Io(ref error) => write!(f, "I/O error: {error}"),
         }
     }
@@ -452,11 +496,77 @@ pub fn run(command: Command) -> Result<(), CliError> {
             cortexfs::mount(&config)?;
             Ok(())
         }
+        Command::MountPrep(command) => run_mount_prep(&command),
         Command::Service(command) => run_service(command),
         Command::Status(_command) => print_output(&StatusCommand::render()),
         Command::Invalid(command) => Err(CliError::InvalidCommand(command.message)),
         Command::Unknown(command) => Err(CliError::UnknownCommand(command.name)),
     }
+}
+
+fn run_mount_prep(command: &MountPrepCommand) -> Result<(), CliError> {
+    ensure_fuse_device()?;
+    clean_mountpoint(&command.mountpoint);
+    let status = ProcessCommand::new("/usr/bin/install")
+        .args([
+            "-d",
+            "-o",
+            command.user.as_str(),
+            "-g",
+            command.group.as_str(),
+            "-m",
+            "0755",
+        ])
+        .arg(&command.mountpoint)
+        .status()
+        .map_err(|error| {
+            CliError::MountPrep(format!(
+                "failed to prepare {}: {error}",
+                command.mountpoint.display()
+            ))
+        })?;
+    if status.success() {
+        return Ok(());
+    }
+    Err(CliError::MountPrep(format!(
+        "failed to prepare {} for {}:{}: {status}",
+        command.mountpoint.display(),
+        command.user,
+        command.group
+    )))
+}
+
+fn ensure_fuse_device() -> Result<(), CliError> {
+    if std::path::Path::new("/dev/fuse").exists() {
+        return Ok(());
+    }
+    let status = quiet_process("/usr/bin/modprobe")
+        .arg("fuse")
+        .status()
+        .map_err(|error| CliError::MountPrep(format!("failed to load fuse module: {error}")))?;
+    if status.success() || std::path::Path::new("/dev/fuse").exists() {
+        return Ok(());
+    }
+    Err(CliError::MountPrep(format!(
+        "failed to load fuse module: {status}"
+    )))
+}
+
+fn clean_mountpoint(mountpoint: &std::path::Path) {
+    let _status = quiet_process("/usr/bin/fusermount3")
+        .args(["-uz"])
+        .arg(mountpoint)
+        .status();
+    let _status = quiet_process("/usr/bin/umount")
+        .args(["-l"])
+        .arg(mountpoint)
+        .status();
+}
+
+fn quiet_process(program: &str) -> ProcessCommand {
+    let mut command = ProcessCommand::new(program);
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    command
 }
 
 fn run_service(command: ServiceCommand) -> Result<(), CliError> {
@@ -624,7 +734,8 @@ fn daemon_once_result(command: DaemonCommand) -> Result<DaemonOnceResult, CliErr
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, DaemonCommand, MountCommand, ServiceAction, ServiceCommand, StatusCommand,
+        Command, DaemonCommand, MountCommand, MountPrepCommand, ServiceAction, ServiceCommand,
+        StatusCommand,
     };
     use cortex_core::MessageRole;
     use std::ffi::OsString;
@@ -687,6 +798,23 @@ mod tests {
             Command::parse([OsString::from("restart")]),
             Command::Service(ServiceCommand {
                 action: ServiceAction::Restart,
+            })
+        );
+    }
+
+    #[test]
+    fn parser_accepts_internal_mount_prep_command() {
+        assert_eq!(
+            Command::parse([
+                OsString::from("mount-prep"),
+                OsString::from("/ctx"),
+                OsString::from("alice"),
+                OsString::from("users"),
+            ]),
+            Command::MountPrep(MountPrepCommand {
+                mountpoint: PathBuf::from("/ctx"),
+                user: "alice".to_owned(),
+                group: "users".to_owned(),
             })
         );
     }
