@@ -964,6 +964,7 @@ impl NodeTreeBuilder {
 
     fn add_mcp_session(&mut self, sessions: Inode) {
         let session = self.add_dir(sessions, "local-fs.demo");
+        self.add_dir(session, "search");
         self.add_file(session, "server", "local-fs\n");
         self.add_socket(session, "io.sock");
     }

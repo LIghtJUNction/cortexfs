@@ -1,5 +1,5 @@
 use crate::{
-    LOCAL_USER_THREAD_DISPLAY_PATH, LOCAL_USER_THREAD_DISPLAY_TEXT, RuntimeState,
+    LOCAL_USER_THREAD_DISPLAY_PATH, LOCAL_USER_THREAD_DISPLAY_TEXT, RuntimeState, json_string,
     validation::validate_control_write,
 };
 
@@ -254,6 +254,55 @@ impl RuntimeState {
             .to_owned();
         transcript.push_str(line.as_ref());
         self.update_dynamic_file(inode, transcript);
+    }
+
+    pub fn write_mcp_session_search(&mut self, offset: u64, data: &[u8]) -> fuse3::Result<u32> {
+        if offset != 0 {
+            return Err(libc::EINVAL.into());
+        }
+        let query = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
+        let query = query.trim();
+        if let Some(inode) = self.mcp_session_search_query_inode {
+            self.update_dynamic_file(inode, format!("{query}\n"));
+        }
+        if let Some(inode) = self.mcp_session_search_results_inode {
+            self.update_dynamic_file(inode, self.mcp_session_search_results(query));
+        }
+        self.update_dynamic_file(
+            self.last_control_inode,
+            "mcp/session/local-fs.demo/search/query\n",
+        );
+        self.append_audit("mcp.session.search", "query", "searched");
+        u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn mcp_session_search_results(&self, query: &str) -> String {
+        use std::fmt::Write as _;
+
+        if query.is_empty() {
+            return String::new();
+        }
+        let Some(transcript) = self
+            .mcp_session_transcript_inode
+            .and_then(|inode| self.nodes.get(&inode))
+            .and_then(crate::Node::content)
+        else {
+            return String::new();
+        };
+
+        let mut results = String::new();
+        for (index, line) in transcript.lines().enumerate() {
+            if !line.contains(query) {
+                continue;
+            }
+            let _ = writeln!(
+                results,
+                "{{\"source\":\"mcp/session/local-fs.demo/transcript.jsonl\",\"session\":\"mcp/session/local-fs.demo\",\"line\":{},\"score\":1.0,\"text\":{}}}",
+                index.saturating_add(1),
+                json_string(line),
+            );
+        }
+        results
     }
 
     pub fn write_cluster_control(
