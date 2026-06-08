@@ -17,13 +17,58 @@ const sidebars: SidebarsConfig = {
     'intro',
     {
       type: 'category',
-      label: 'Using CortexFS',
-      items: ['routing', 'bun-template'],
+      label: 'Getting Started',
+      items: [
+        'getting-started/quick-start',
+        'getting-started/mounting',
+        'getting-started/first-request',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Concepts',
+      items: [
+        'concepts/filesystem-abi',
+        'concepts/formats-providers-models',
+        'concepts/spaces-and-security',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'API Surface',
+      items: ['api/file-api', 'api/local-api', 'api/threads-and-batch'],
+    },
+    {
+      type: 'category',
+      label: 'Providers and Routing',
+      items: [
+        'providers/provider-instances',
+        'providers/routing-fallback',
+        'providers/secrets',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Integrations',
+      items: [
+        'bun-template',
+        'integrations/external-orchestrators',
+        'integrations/agents-tools-mcp',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Operations',
+      items: [
+        'operations/audit-export',
+        'operations/live-tests',
+        'operations/development-constraints',
+      ],
     },
     {
       type: 'category',
       label: 'Reference',
-      items: ['design'],
+      items: ['reference/top-level-tree', 'reference/file-types', 'design'],
     },
   ],
 };

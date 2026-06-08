@@ -28,3 +28,19 @@
   color: var(--ifm-color-white);
   border-color: var(--ifm-color-white);
 }
+
+.sectionCard {
+  height: 100%;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: var(--ifm-global-radius);
+  padding: 1.25rem;
+  background: var(--ifm-background-surface-color);
+}
+
+.sectionCard h2 {
+  font-size: 1.35rem;
+}
+
+.sectionCard p {
+  margin-bottom: 0;
+}
