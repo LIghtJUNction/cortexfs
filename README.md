@@ -135,7 +135,7 @@ cortex start
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-后台挂载使用 AUR 包安装的 systemd 模板服务，直接用 CLI 启动。`cortex start` 会在需要时调用 `sudo systemctl`，自动加载 FUSE、清理坏挂载、创建 `/ctx` 并设置 owner/mode：
+后台挂载使用 AUR 包安装的 systemd 模板服务，直接用 CLI 启动。`cortex start` 会请求系统授权管理 `cortexfs@$USER.service`，服务自动加载 FUSE、清理坏挂载、创建 `/ctx` 并设置 owner/mode：
 
 ```bash
 cortex start

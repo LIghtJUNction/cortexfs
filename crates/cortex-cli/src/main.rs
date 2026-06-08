@@ -122,6 +122,16 @@ pub enum ServiceAction {
     Restart,
 }
 
+impl ServiceAction {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+        }
+    }
+}
+
 /// Manage `cortexfs@<user>.service`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ServiceCommand {
@@ -452,6 +462,7 @@ pub fn run(command: Command) -> Result<(), CliError> {
 fn run_service(command: ServiceCommand) -> Result<(), CliError> {
     let user = service_user()?;
     let unit = format!("cortexfs@{user}.service");
+    let manager = service_manager_name();
     let args: Vec<&str> = match command.action {
         ServiceAction::Start => vec!["enable", "--now", unit.as_str()],
         ServiceAction::Stop => vec!["stop", unit.as_str()],
@@ -463,14 +474,16 @@ fn run_service(command: ServiceCommand) -> Result<(), CliError> {
         .status()
         .map_err(|error| {
             CliError::Service(format!(
-                "failed to run systemd for {unit}: {error}. Install cortexfs-git and run cortex start again"
+                "failed to run {manager} for {unit}: {error}. cortex {} manages a system service and needs admin rights",
+                command.action.name()
             ))
         })?;
     if status.success() {
         return Ok(());
     }
     Err(CliError::Service(format!(
-        "systemctl failed for {unit}: {status}"
+        "{manager} failed for {unit}: {status}. authorize the admin prompt or run sudo cortex {}",
+        command.action.name()
     )))
 }
 
@@ -493,8 +506,16 @@ fn service_manager() -> ProcessCommand {
         return ProcessCommand::new("systemctl");
     }
     let mut command = ProcessCommand::new("sudo");
-    command.arg("systemctl");
+    command.arg("--").arg("systemctl");
     command
+}
+
+fn service_manager_name() -> &'static str {
+    if current_uid() == 0 {
+        "systemctl"
+    } else {
+        "sudo systemctl"
+    }
 }
 
 fn run_daemon_once(command: DaemonCommand) -> Result<(), CliError> {
