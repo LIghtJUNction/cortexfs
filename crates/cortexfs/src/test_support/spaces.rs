@@ -401,6 +401,7 @@ fn projection_exposes_space_exports_batch_feedback_and_control() -> fuse3::Resul
             .and_then(crate::Node::content)
             .is_some_and(|source| source.contains("home/*/thread/*/messages.jsonl")
                 && source.contains("home/*/audit/events.jsonl")
+                && source.contains("tool/*/invoke/inbox/*.req.json")
                 && source.contains("home/*/feedback/preference/inbox/*.req.json")),
         "export source must document provenance"
     );
