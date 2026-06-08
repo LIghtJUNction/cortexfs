@@ -52,6 +52,37 @@ Unmount:
 fusermount3 -u /ctx
 ```
 
+## systemd Background Mount
+
+The AUR package installs the systemd template unit `cortexfs@.service`. `/ctx` is a system path, so the unit prepares the mountpoint under systemd and runs the FUSE process as the selected user.
+
+Enable the background mount for the current user:
+
+```bash
+sudo systemctl enable --now "cortexfs@$USER.service"
+```
+
+Inspect it:
+
+```bash
+systemctl status "cortexfs@$USER.service"
+findmnt /ctx
+cat /ctx/status
+```
+
+Stop and unmount:
+
+```bash
+sudo systemctl stop "cortexfs@$USER.service"
+```
+
+If `cortex mount` was killed manually, a broken FUSE endpoint may remain. Clean it before restarting the service:
+
+```bash
+fusermount3 -u /ctx
+sudo systemctl restart "cortexfs@$USER.service"
+```
+
 ## Multi-user Deployment
 
 Multi-user mounts must explicitly enable CortexFS multi-user mode and must allow FUSE `allow_other`.

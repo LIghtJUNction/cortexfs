@@ -1568,10 +1568,9 @@ impl RuntimeState {
         provider: &'static str,
         parents: ProviderRuntimeParents,
     ) {
-        let default_base_url =
-            provider_spec(provider).map_or(EMPTY_TEXT, |spec| spec.default_base_url);
-        let url_current = self.add_dynamic_file(parents.url, "current", default_base_url);
-        let url_effective = self.add_dynamic_file(parents.url, "effective", default_base_url);
+        let url = provider_spec(provider).map_or(EMPTY_TEXT, |spec| spec.url);
+        let url_current = self.add_dynamic_file(parents.url, "current", url);
+        let url_effective = self.add_dynamic_file(parents.url, "effective", url);
         let url_source = self.add_dynamic_file(parents.url, "source", "default\n");
         self.provider_url.insert(
             provider,
@@ -3585,7 +3584,7 @@ fn external_subject_for_submission(scope: SubmissionScope, body: &str) -> Option
 }
 
 fn secret_active_id(provider: &str) -> String {
-    if provider_spec(provider).is_some_and(|spec| spec.account_type.trim() == "local_runtime") {
+    if provider_spec(provider).is_some_and(|spec| spec.acct.trim() == "local_runtime") {
         "not_required\n".to_owned()
     } else {
         "none\n".to_owned()
@@ -3597,7 +3596,7 @@ fn provider_secret_status(provider: &str) -> &'static str {
 }
 
 fn secret_rotating_id(provider: &str) -> String {
-    format!("{provider}-key-rotating\n")
+    format!("ref:{provider}:rotating\n")
 }
 
 #[cfg(test)]

@@ -147,7 +147,7 @@ impl RuntimeState {
         };
         let current = if trimmed.is_empty() {
             provider_spec(provider)
-                .map_or(EMPTY_TEXT, |spec| spec.default_base_url)
+                .map_or(EMPTY_TEXT, |spec| spec.url)
                 .to_owned()
         } else {
             format!("{trimmed}\n")

@@ -9,7 +9,8 @@ mod tests {
     #[ignore = "requires local Ollama with smollm2:135m"]
     fn smollm2_chat_smoke_returns_openai_chat_completion() -> Result<(), Box<dyn std::error::Error>>
     {
-        let provider = OllamaProvider::local_smollm2()?;
+        let url = std::env::var("CORTEXFS_LIVE_URL")?;
+        let provider = OllamaProvider::fixture_smollm2(url)?;
         let response = provider.call(ProviderRequest::new(
             ApiFormat::OpenAiChat,
             serde_json::json!({

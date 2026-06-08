@@ -52,6 +52,37 @@ cat "$CTX_HOME/model/list"
 fusermount3 -u /ctx
 ```
 
+## systemd 后台挂载
+
+AUR 包安装 systemd 模板服务 `cortexfs@.service`。`/ctx` 是系统路径，所以服务由 systemd 管理挂载点，再把实际 FUSE 进程降权到指定用户运行。
+
+启用当前用户的后台挂载：
+
+```bash
+sudo systemctl enable --now "cortexfs@$USER.service"
+```
+
+查看状态：
+
+```bash
+systemctl status "cortexfs@$USER.service"
+findmnt /ctx
+cat /ctx/status
+```
+
+停止并卸载：
+
+```bash
+sudo systemctl stop "cortexfs@$USER.service"
+```
+
+如果你手动杀掉了 `cortex mount`，可能会留下坏 FUSE endpoint。先清理再重启服务：
+
+```bash
+fusermount3 -u /ctx
+sudo systemctl restart "cortexfs@$USER.service"
+```
+
 ## 多用户部署
 
 多用户挂载需要显式开启 CortexFS 的 multi-user 模式，并允许 FUSE 使用 `allow_other`。

@@ -4,7 +4,7 @@ title: Provider 实例
 
 # Provider 实例
 
-多个 `base_url + key` 组合应该表示为多个 provider instance。
+多个 `url + keyref` 组合应该表示为多个 `chan`。`provider/` 是兼容视图，核心控制面应收敛到 `chan/`。
 
 ```text
 provider/<id>/
@@ -16,8 +16,8 @@ provider/<id>/
     current
     effective
     source
-  auth_scheme
-  account_type
+  auth
+  acct
   enabled/
     default
     current

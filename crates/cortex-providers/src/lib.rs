@@ -340,7 +340,7 @@ where
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct OllamaProvider {
     id: ProviderId,
-    base_url: String,
+    url: String,
     model: ModelId,
     formats: Vec<ApiFormat>,
 }
@@ -348,25 +348,25 @@ pub struct OllamaProvider {
 impl OllamaProvider {
     /// Create an Ollama adapter.
     #[must_use]
-    pub fn new(id: ProviderId, base_url: impl Into<String>, model: ModelId) -> Self {
+    pub fn new(id: ProviderId, url: impl Into<String>, model: ModelId) -> Self {
         Self {
             id,
-            base_url: base_url.into(),
+            url: url.into(),
             model,
             formats: vec![ApiFormat::OpenAiChat],
         }
     }
 
-    /// Default local Ollama adapter used by integration tests.
+    /// Test fixture adapter for a caller-supplied local runtime URL.
     ///
     /// # Errors
     ///
     /// Returns a validation error if the built-in provider or model id is not
     /// valid for the filesystem ABI.
-    pub fn local_smollm2() -> Result<Self, cortex_core::ValidationError> {
+    pub fn fixture_smollm2(url: impl Into<String>) -> Result<Self, cortex_core::ValidationError> {
         Ok(Self::new(
             ProviderId::new("ollama")?,
-            "http://127.0.0.1:11434",
+            url,
             ModelId::new("smollm2:135m")?,
         ))
     }
@@ -398,8 +398,8 @@ impl OllamaProvider {
             }
         })
         .to_string();
-        let body = post_json(&self.base_url, "/api/chat", &ollama_body)
-            .and_then(|body| parse_json(&body))?;
+        let body =
+            post_json(&self.url, "/api/chat", &ollama_body).and_then(|body| parse_json(&body))?;
         let content = body
             .get("message")
             .and_then(|message| message.get("content"))
@@ -456,8 +456,8 @@ fn parse_json(body: &str) -> ProviderResult<serde_json::Value> {
     serde_json::from_str(body).map_err(|error| ProviderError::InvalidResponse(error.to_string()))
 }
 
-fn post_json(base_url: &str, path: &str, body: &str) -> ProviderResult<String> {
-    let endpoint = HttpEndpoint::parse(base_url)?;
+fn post_json(url: &str, path: &str, body: &str) -> ProviderResult<String> {
+    let endpoint = HttpEndpoint::parse(url)?;
     let mut stream = endpoint.connect()?;
     stream
         .set_read_timeout(Some(HTTP_IO_TIMEOUT))
@@ -503,10 +503,10 @@ struct HttpEndpoint {
 }
 
 impl HttpEndpoint {
-    fn parse(base_url: &str) -> ProviderResult<Self> {
-        let stripped = base_url.strip_prefix("http://").ok_or_else(|| {
-            ProviderError::Transport("only http:// base_url is supported".to_owned())
-        })?;
+    fn parse(url: &str) -> ProviderResult<Self> {
+        let stripped = url
+            .strip_prefix("http://")
+            .ok_or_else(|| ProviderError::Transport("only http:// url is supported".to_owned()))?;
         let (authority, path_prefix) = stripped
             .split_once('/')
             .map_or((stripped, ""), |parts| parts);
@@ -803,7 +803,7 @@ mod tests {
 
     #[test]
     fn ollama_provider_exposes_local_smollm2_model() -> Result<(), Box<dyn std::error::Error>> {
-        let provider = OllamaProvider::local_smollm2()?;
+        let provider = OllamaProvider::fixture_smollm2("http://fixture.invalid")?;
         let models = provider.models();
         let model = models.first().ok_or("missing smollm2 model")?;
 
@@ -821,7 +821,7 @@ mod tests {
 
     #[test]
     fn ollama_provider_rejects_non_chat_format() -> Result<(), Box<dyn std::error::Error>> {
-        let provider = OllamaProvider::local_smollm2()?;
+        let provider = OllamaProvider::fixture_smollm2("http://fixture.invalid")?;
         let error = provider
             .call(ProviderRequest::new(ApiFormat::OpenAiResponses, "{}"))
             .map_err(|error| error.to_string());
@@ -836,7 +836,7 @@ mod tests {
     #[test]
     fn ollama_provider_rejects_unknown_model_without_network()
     -> Result<(), Box<dyn std::error::Error>> {
-        let provider = OllamaProvider::local_smollm2()?;
+        let provider = OllamaProvider::fixture_smollm2("http://fixture.invalid")?;
         let error = provider
             .call(
                 ProviderRequest::new(ApiFormat::OpenAiChat, r#"{"messages":[]}"#)

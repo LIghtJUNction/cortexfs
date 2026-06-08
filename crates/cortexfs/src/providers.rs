@@ -7,19 +7,21 @@ pub const API_FORMATS: [&str; 4] = [
     "google.generate_content",
 ];
 
-const LOCAL_RUNTIME_BASE_URL_TEXT: &str = "http://127.0.0.1:6186\n";
-const LOCAL_RELAY_BASE_URL_TEXT: &str = "http://127.0.0.1:6187/v1\n";
 const NO_DEFAULT_PROVIDER_ID: &str = "";
 
+#[cfg(not(test))]
+pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[];
+
+#[cfg(test)]
 pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
     ProviderRuntimeSpec {
         id: "openai-main",
         family: "openai\n",
         name: "OpenAI primary API account\n",
         formats: &["openai.chat", "openai.responses"],
-        default_base_url: "https://api.openai.com/v1\n",
-        auth_scheme: "bearer\n",
-        account_type: "api_key\n",
+        url: "https://api.openai.com/v1\n",
+        auth: "bearer\n",
+        acct: "key\n",
         priority: "80\n",
         secret_status: "missing\n",
         default_model: "gpt-4.1-mini",
@@ -32,9 +34,9 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         family: "anthropic\n",
         name: "Anthropic primary API account\n",
         formats: &["anthropic.messages"],
-        default_base_url: "https://api.anthropic.com\n",
-        auth_scheme: "x-api-key\n",
-        account_type: "api_key\n",
+        url: "https://api.anthropic.com\n",
+        auth: "x-api-key\n",
+        acct: "key\n",
         priority: "70\n",
         secret_status: "missing\n",
         default_model: "claude-3-5-haiku-latest",
@@ -47,9 +49,9 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         family: "google\n",
         name: "Google Gemini primary API account\n",
         formats: &["google.generate_content"],
-        default_base_url: "https://generativelanguage.googleapis.com\n",
-        auth_scheme: "api_key\n",
-        account_type: "api_key\n",
+        url: "https://generativelanguage.googleapis.com\n",
+        auth: "key\n",
+        acct: "key\n",
         priority: "70\n",
         secret_status: "missing\n",
         default_model: "gemini-2.0-flash",
@@ -62,9 +64,9 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         family: "relay\n",
         name: "Relay endpoint using OpenAI formats\n",
         formats: &["openai.chat", "openai.responses"],
-        default_base_url: "https://relay.example.invalid/v1\n",
-        auth_scheme: "bearer\n",
-        account_type: "api_key\n",
+        url: "https://relay.example.invalid/v1\n",
+        auth: "bearer\n",
+        acct: "key\n",
         priority: "60\n",
         secret_status: "missing\n",
         default_model: "default",
@@ -77,9 +79,9 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         family: "moonshot\n",
         name: "Kimi API account\n",
         formats: &["openai.chat"],
-        default_base_url: "https://api.moonshot.cn/v1\n",
-        auth_scheme: "bearer\n",
-        account_type: "api_key\n",
+        url: "https://api.moonshot.cn/v1\n",
+        auth: "bearer\n",
+        acct: "key\n",
         priority: "55\n",
         secret_status: "missing\n",
         default_model: "kimi-k2-0711-preview",
@@ -92,9 +94,9 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         family: "minimax\n",
         name: "MiniMax API account\n",
         formats: &["openai.chat"],
-        default_base_url: "https://api.minimax.chat/v1\n",
-        auth_scheme: "bearer\n",
-        account_type: "api_key\n",
+        url: "https://api.minimax.chat/v1\n",
+        auth: "bearer\n",
+        acct: "key\n",
         priority: "55\n",
         secret_status: "missing\n",
         default_model: "MiniMax-M1",
@@ -107,9 +109,9 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         family: "local-runtime\n",
         name: "Local runtime provider\n",
         formats: &["openai.chat"],
-        default_base_url: LOCAL_RUNTIME_BASE_URL_TEXT,
-        auth_scheme: "none\n",
-        account_type: "local_runtime\n",
+        url: "\n",
+        auth: "none\n",
+        acct: "local_runtime\n",
         priority: "50\n",
         secret_status: "not_required\n",
         default_model: "cortexfs-test-model",
@@ -122,9 +124,9 @@ pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
         family: "local-relay\n",
         name: "Local relay provider\n",
         formats: &["openai.chat"],
-        default_base_url: LOCAL_RELAY_BASE_URL_TEXT,
-        auth_scheme: "none\n",
-        account_type: "local_runtime\n",
+        url: "\n",
+        auth: "none\n",
+        acct: "local_runtime\n",
         priority: "49\n",
         secret_status: "not_required\n",
         default_model: "cortexfs-local-relay-model",
@@ -140,9 +142,9 @@ pub struct ProviderRuntimeSpec {
     pub family: &'static str,
     pub name: &'static str,
     pub formats: &'static [&'static str],
-    pub default_base_url: &'static str,
-    pub auth_scheme: &'static str,
-    pub account_type: &'static str,
+    pub url: &'static str,
+    pub auth: &'static str,
+    pub acct: &'static str,
     pub priority: &'static str,
     pub secret_status: &'static str,
     pub default_model: &'static str,
@@ -245,7 +247,7 @@ pub fn in_memory_execution_provider_spec() -> Option<ProviderRuntimeSpec> {
     PROVIDER_SPECS
         .iter()
         .copied()
-        .find(|provider| provider.account_type.trim() == "local_runtime")
+        .find(|provider| provider.acct.trim() == "local_runtime")
         .or_else(|| PROVIDER_SPECS.first().copied())
 }
 

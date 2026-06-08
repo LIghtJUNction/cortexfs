@@ -13,7 +13,8 @@ mod tests {
     fn smollm2_request_drains_through_cortexfs_file_pipeline()
     -> Result<(), Box<dyn std::error::Error>> {
         let fs = LiveCortexFs::new();
-        fs.use_ollama_execution_plane()?;
+        let url = std::env::var("CORTEXFS_LIVE_URL")?;
+        fs.use_ollama_execution_plane(&url)?;
         fs.submit_api_request(
             "openai.chat",
             "ollama-live",

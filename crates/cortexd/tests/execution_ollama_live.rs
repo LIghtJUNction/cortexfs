@@ -10,7 +10,8 @@ mod tests {
     #[test]
     #[ignore = "requires local Ollama with smollm2:135m"]
     fn smollm2_request_drains_through_execution_plane() -> Result<(), Box<dyn std::error::Error>> {
-        let provider = OllamaProvider::local_smollm2()?;
+        let url = std::env::var("CORTEXFS_LIVE_URL")?;
+        let provider = OllamaProvider::fixture_smollm2(url)?;
         let mut plane = ExecutionPlane::new(InMemoryStore::new(), provider);
         let request_id = RequestId::new("ollama-live-001");
         let thread_id = ThreadId::new("demo")?;
