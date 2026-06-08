@@ -37,7 +37,7 @@ $CTX_HOME/export
 cortex start
 ```
 
-`cortex start` 会自动准备 `/ctx`，修正 owner/mode，并在停止时向前台 mount 进程发送退出信号。默认单用户部署不需要手动配置 FUSE 权限。
+`cortex start` 会请求系统授权管理 `cortexfs@$USER.service`，自动准备 `/ctx`，修正 owner/mode，并在停止时向前台 mount 进程发送退出信号。默认单用户部署不需要手动配置 FUSE 权限。
 
 ## 多用户挂载
 

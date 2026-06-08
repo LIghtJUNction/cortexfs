@@ -30,7 +30,7 @@ The recommended path is the systemd-backed background service:
 cortex start
 ```
 
-`cortex start` starts `cortexfs@$USER.service`. The CLI calls `sudo systemctl` when needed. The service loads FUSE, clears a broken `/ctx` mount, creates `/ctx`, and sets owner/mode automatically. The default deployment does not require manually creating `/ctx` or manually configuring mount permissions.
+`cortex start` manages the systemd unit `cortexfs@$USER.service`. This is a system service operation, so the CLI requests admin authorization when needed. The service loads FUSE, clears a broken `/ctx` mount, creates `/ctx`, and sets owner/mode automatically. The default deployment does not require manually creating `/ctx` or manually configuring mount permissions.
 
 For foreground debugging, mount manually:
 

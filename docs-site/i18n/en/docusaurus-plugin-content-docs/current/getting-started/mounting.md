@@ -37,7 +37,7 @@ The default production mount uses systemd:
 cortex start
 ```
 
-`cortex start` prepares `/ctx`, fixes owner/mode, and sends the foreground mount process an exit signal when stopping. The default single-user deployment does not require manual FUSE permission configuration.
+`cortex start` requests system authorization to manage `cortexfs@$USER.service`, prepares `/ctx`, fixes owner/mode, and sends the foreground mount process an exit signal when stopping. The default single-user deployment does not require manual FUSE permission configuration.
 
 ## Multi-user Mounts
 

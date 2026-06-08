@@ -30,7 +30,7 @@ cortex status
 cortex start
 ```
 
-`cortex start` 本质上执行 systemd 服务 `cortexfs@$USER.service`。CLI 会在需要时调用 `sudo systemctl`，服务会自动加载 FUSE、清理坏挂载、创建 `/ctx` 并设置 owner/mode。默认部署不需要手动创建 `/ctx`，也不需要手动配置挂载权限。
+`cortex start` 本质上管理 systemd 服务 `cortexfs@$USER.service`。这是系统服务操作，CLI 会在需要时请求管理员授权；服务会自动加载 FUSE、清理坏挂载、创建 `/ctx` 并设置 owner/mode。默认部署不需要手动创建 `/ctx`，也不需要手动配置挂载权限。
 
 如果需要临时前台调试，也可以手动挂载：
 
