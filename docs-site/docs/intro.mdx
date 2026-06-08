@@ -1,0 +1,69 @@
+---
+sidebar_position: 1
+title: Overview
+---
+
+# CortexFS
+
+CortexFS is a provider-neutral Linux FUSE filesystem for AI API infrastructure.
+It exposes API formats, provider instances, models, requests, responses,
+threads, tools, memory, audit, and controls as ordinary filesystem objects.
+
+The mount tree is the ABI:
+
+```text
+/
+  status
+  cap/
+  format/
+  provider/
+  model/
+  home/
+  tool/
+  memory/
+  audit/
+  control/
+```
+
+## Quick Start
+
+```bash
+cargo build --locked --workspace
+cargo run -p cortex-cli -- status
+```
+
+Mount locally:
+
+```bash
+sudo mkdir -p /ctx
+sudo chown "$USER:$USER" /ctx
+cargo run -p cortex-cli -- mount /ctx
+export CTX_HOME="/ctx/home/$(id -u)"
+```
+
+Submit a file ABI request:
+
+```bash
+api="$CTX_HOME/api/openai.chat"
+
+printf '%s\n' '{"messages":[{"role":"user","content":"Reply with cortexfs-ok"}]}' \
+  > "$api/inbox/001.tmp"
+
+mv "$api/inbox/001.tmp" "$api/inbox/001.req.json"
+printf '1\n' > /ctx/control/drain
+
+cat "$api/outbox/001.resp.json"
+```
+
+## Core Idea
+
+CortexFS separates:
+
+- `format/`: protocol shape, such as `openai.chat` or `anthropic.messages`.
+- `provider/`: backend/account instances, including official APIs, relays, and local runtimes.
+- `model/`: provider-scoped model descriptors.
+- `home/<uid>/route/`: user-visible route decisions.
+- `audit/`: request, route, policy, execution, and export observability.
+
+Secrets do not enter the mount tree. The filesystem exposes secret status and
+active key ids; real secret values should be resolved by `cortexd`.
