@@ -1,0 +1,13 @@
+{
+  "name": "bun-cortexfs-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts chat",
+    "chat": "bun run src/index.ts chat",
+    "route": "bun run src/index.ts route",
+    "models": "bun run src/index.ts models",
+    "http": "CORTEXFS_TRANSPORT=http bun run src/index.ts chat"
+  }
+}
