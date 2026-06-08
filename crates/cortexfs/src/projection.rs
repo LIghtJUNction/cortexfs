@@ -384,7 +384,7 @@ impl NodeTreeBuilder {
         self.add_file(
             exports,
             "source",
-            "home/*/thread/*/messages.jsonl\nhome/*/thread/*/tool-loop/steps.jsonl\nhome/*/api/*/inbox\nhome/*/api/*/outbox\nhome/*/audit/events.jsonl\nhome/*/memory/episodic\nhome/*/feedback/preference/inbox/*.req.json\n",
+            "home/*/thread/*/messages.jsonl\nhome/*/thread/*/tool-loop/steps.jsonl\nhome/*/api/*/inbox\nhome/*/api/*/outbox\ntool/*/invoke/inbox/*.req.json\nhome/*/audit/events.jsonl\nhome/*/memory/episodic\nhome/*/feedback/preference/inbox/*.req.json\n",
         );
         self.add_file(exports, "redaction", "policy\n");
         self.add_file(exports, "dedupe", "fingerprint\n");

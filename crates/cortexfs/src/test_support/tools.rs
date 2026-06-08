@@ -151,6 +151,9 @@ fn filesystem_read_tool_invoke_materializes_response_after_drain() -> fuse3::Res
     assert!(response.contains("tool visible"));
     drop(runtime);
     let tool_calls = fs.node_content(fs.export_file_inode("tool_calls.jsonl")?)?;
+    assert!(
+        tool_calls.contains("\"source\":\"tool/filesystem.read/invoke/inbox/read-001.req.json\"")
+    );
     assert!(tool_calls.contains("\"tool\":\"filesystem.read\""));
     assert!(tool_calls.contains("\"status\":\"ok\""));
     assert!(tool_calls.contains("\"output\":"));
@@ -170,6 +173,9 @@ fn filesystem_read_tool_invoke_materializes_response_after_drain() -> fuse3::Res
     assert!(steps.contains("\"policy\":\"agent/helper/policy/allowed_tools\""));
     drop(runtime);
     let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
+    assert!(
+        agent_traces.contains("\"source\":\"tool/filesystem.read/invoke/inbox/read-001.req.json\"")
+    );
     assert!(agent_traces.contains("\"event\":\"permission_check\""));
     assert!(agent_traces.contains("\"permission\":\"host.fs.read\""));
     assert!(agent_traces.contains("\"decision\":\"allow\""));
@@ -371,6 +377,9 @@ fn shell_exec_tool_is_denied_by_default_policy() -> fuse3::Result<()> {
     drop(runtime);
 
     let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
+    assert!(
+        agent_traces.contains("\"source\":\"tool/shell.exec/invoke/inbox/shell-deny.req.json\"")
+    );
     assert!(agent_traces.contains("\"event\":\"permission_check\""));
     assert!(agent_traces.contains("\"decision\":\"deny\""));
     assert!(agent_traces.contains("\"permission\":\"host.shell.exec\""));

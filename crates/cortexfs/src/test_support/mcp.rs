@@ -455,6 +455,10 @@ fn mcp_local_fs_tool_invokes_through_unified_tool_plane() -> fuse3::Result<()> {
     drop(runtime);
 
     let tool_calls = fs.node_content(fs.export_file_inode("tool_calls.jsonl")?)?;
+    assert!(
+        tool_calls
+            .contains("\"source\":\"tool/mcp.local-fs.read_file/invoke/inbox/mcp-read.req.json\"")
+    );
     assert!(tool_calls.contains("\"tool\":\"mcp.local-fs.read_file\""));
     assert!(tool_calls.contains("\"status\":\"ok\""));
     assert!(tool_calls.contains("mcp visible"));
@@ -477,6 +481,10 @@ fn mcp_local_fs_tool_invokes_through_unified_tool_plane() -> fuse3::Result<()> {
     drop(runtime);
     let agent_traces = fs.node_content(fs.export_file_inode("agent_traces.jsonl")?)?;
     assert!(agent_traces.contains("\"agent\":\"helper\""));
+    assert!(
+        agent_traces
+            .contains("\"source\":\"tool/mcp.local-fs.read_file/invoke/inbox/mcp-read.req.json\"")
+    );
     assert!(agent_traces.contains("\"event\":\"permission_check\""));
     assert!(agent_traces.contains("\"event\":\"tool_call\""));
     assert!(agent_traces.contains("\"event\":\"tool_result\""));

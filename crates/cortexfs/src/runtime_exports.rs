@@ -253,10 +253,13 @@ impl RuntimeState {
         pending: &PendingResponse,
         response_body: &str,
     ) {
+        let tool = pending.tool.unwrap_or(pending.format);
+        let source = tool_submit_source(tool, request_id);
         let line = format!(
-            "{{\"request_id\":\"{}\",\"tool\":\"{}\",\"status\":\"ok\",\"input\":{},\"output\":{},\"fingerprint\":\"{}\"}}",
+            "{{\"request_id\":\"{}\",\"source\":{},\"tool\":\"{}\",\"status\":\"ok\",\"input\":{},\"output\":{},\"fingerprint\":\"{}\"}}",
             request_id.as_str(),
-            pending.tool.unwrap_or(pending.format),
+            json_string(&source),
+            tool,
             json_string(&pending.request_body),
             json_string(response_body),
             pending.fingerprint,
@@ -321,20 +324,23 @@ impl RuntimeState {
         let tool = pending.tool.unwrap_or(pending.format);
         let permission_check = permission_check_trace_line(request_id, tool, pending);
         let agent = self.context.agent.clone();
+        let source = tool_submit_source(tool, request_id);
         for line in [
             permission_check,
             format!(
-                "{{\"agent\":{},\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"tool_call\",\"tool\":\"{}\",\"input\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"thread\":\"demo\",\"request_id\":\"{}\",\"source\":{},\"event\":\"tool_call\",\"tool\":\"{}\",\"input\":{},\"fingerprint\":\"{}\"}}",
                 json_string(&agent),
                 request_id.as_str(),
+                json_string(&source),
                 tool,
                 json_string(&pending.request_body),
                 pending.fingerprint,
             ),
             format!(
-                "{{\"agent\":{},\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"tool_result\",\"tool\":\"{}\",\"output\":{},\"fingerprint\":\"{}\"}}",
+                "{{\"agent\":{},\"thread\":\"demo\",\"request_id\":\"{}\",\"source\":{},\"event\":\"tool_result\",\"tool\":\"{}\",\"output\":{},\"fingerprint\":\"{}\"}}",
                 json_string(&agent),
                 request_id.as_str(),
+                json_string(&source),
                 tool,
                 json_string(response_body),
                 pending.fingerprint,
@@ -509,14 +515,20 @@ fn permission_check_trace_line_with_decision(
     pending: &PendingResponse,
     decision: &str,
 ) -> String {
+    let source = tool_submit_source(tool, request_id);
     format!(
-        "{{\"agent\":\"helper\",\"thread\":\"demo\",\"request_id\":\"{}\",\"event\":\"permission_check\",\"tool\":\"{}\",\"permission\":\"{}\",\"decision\":\"{}\",\"policy\":\"agent/helper/policy/allowed_tools\",\"fingerprint\":\"{}\"}}",
+        "{{\"agent\":\"helper\",\"thread\":\"demo\",\"request_id\":\"{}\",\"source\":{},\"event\":\"permission_check\",\"tool\":\"{}\",\"permission\":\"{}\",\"decision\":\"{}\",\"policy\":\"agent/helper/policy/allowed_tools\",\"fingerprint\":\"{}\"}}",
         request_id.as_str(),
+        json_string(&source),
         tool,
         permission_for_tool(tool),
         decision,
         pending.fingerprint,
     )
+}
+
+fn tool_submit_source(tool: &str, request_id: &RequestId) -> String {
+    format!("tool/{tool}/invoke/inbox/{}.req.json", request_id.as_str())
 }
 
 trait ExportFilterRow {
