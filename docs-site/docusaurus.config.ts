@@ -83,14 +83,26 @@ const config: Config = {
               to: '/docs/intro',
             },
             {
-              label: 'Design Spec',
-              to: '/docs/design',
+              label: 'Getting Started',
+              to: '/docs/getting-started/quick-start',
+            },
+            {
+              label: 'Concepts',
+              to: '/docs/concepts/filesystem-abi',
             },
           ],
         },
         {
-          title: 'Integrations',
+          title: 'Guides',
           items: [
+            {
+              label: 'API Surface',
+              to: '/docs/api/file-api',
+            },
+            {
+              label: 'Providers and Routing',
+              to: '/docs/providers/provider-instances',
+            },
             {
               label: 'Bun Template',
               to: '/docs/bun-template',
@@ -100,6 +112,14 @@ const config: Config = {
         {
           title: 'More',
           items: [
+            {
+              label: 'Operations',
+              to: '/docs/operations/audit-export',
+            },
+            {
+              label: 'Design Spec',
+              to: '/docs/design',
+            },
             {
               label: 'GitHub',
               href: 'https://github.com/LIghtJUNction/cortexfs',

@@ -36,6 +36,39 @@ function HomepageHeader() {
   );
 }
 
+const sections = [
+  {
+    title: 'Getting Started',
+    href: '/docs/getting-started/quick-start',
+    body: '构建、挂载、设置 CTX_HOME，并提交第一条文件 ABI 请求。',
+  },
+  {
+    title: 'Concepts',
+    href: '/docs/concepts/filesystem-abi',
+    body: '理解 filesystem ABI、format/provider/model 分层、space 和安全边界。',
+  },
+  {
+    title: 'API Surface',
+    href: '/docs/api/file-api',
+    body: '文件 API、本地 HTTP/Unix API、thread 和 batch 的提交语义。',
+  },
+  {
+    title: 'Providers and Routing',
+    href: '/docs/providers/provider-instances',
+    body: '多个 base_url/key 的 provider instance、fallback、priority、weight 和 secrets。',
+  },
+  {
+    title: 'Integrations',
+    href: '/docs/bun-template',
+    body: 'Bun 客户端模板、外部编排器、agent、tool 和 MCP 接入方式。',
+  },
+  {
+    title: 'Operations',
+    href: '/docs/operations/audit-export',
+    body: '审计、导出、live tests 和开发约束。',
+  },
+];
+
 export default function Home(): ReactNode {
   const {siteConfig} = useDocusaurusContext();
   return (
@@ -46,27 +79,16 @@ export default function Home(): ReactNode {
       <main>
         <section className="container margin-top--lg margin-bottom--xl">
           <div className="row">
-            <article className="col col--4">
-              <h2>File ABI</h2>
-              <p>
-                Submit native API JSON through stable FUSE paths and inspect
-                routes, responses, audit events, and exports with ordinary Unix tools.
-              </p>
-            </article>
-            <article className="col col--4">
-              <h2>Provider-neutral</h2>
-              <p>
-                API format, provider instance, model, route, secret status, and
-                health are separate filesystem objects.
-              </p>
-            </article>
-            <article className="col col--4">
-              <h2>Bun ready</h2>
-              <p>
-                Use the bundled Bun client template to discover CortexFS routes
-                and submit requests through the file ABI or local API.
-              </p>
-            </article>
+            {sections.map((section) => (
+              <article className="col col--4 margin-bottom--lg" key={section.title}>
+                <div className={styles.sectionCard}>
+                  <h2>
+                    <Link to={section.href}>{section.title}</Link>
+                  </h2>
+                  <p>{section.body}</p>
+                </div>
+              </article>
+            ))}
           </div>
         </section>
       </main>
