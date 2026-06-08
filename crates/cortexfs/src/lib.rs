@@ -2710,7 +2710,8 @@ impl RuntimeState {
     ) -> Result<(), String> {
         validate_preference_pair(&pair.body)?;
         let line = format!(
-            "{{\"request_id\":\"{}\",\"source\":\"feedback/preference\",\"fingerprint\":\"{}\",\"pair\":{}}}",
+            "{{\"request_id\":\"{}\",\"source\":\"home/1000/feedback/preference/inbox/{}.req.json\",\"fingerprint\":\"{}\",\"pair\":{}}}",
+            request_id.as_str(),
             request_id.as_str(),
             pair.fingerprint,
             pair.body.trim(),
