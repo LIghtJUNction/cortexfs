@@ -28,19 +28,30 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
-      - name: Build static documentation
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: docs-site
+        run: bun install --frozen-lockfile
+
+      - name: Build Docusaurus
+        working-directory: docs-site
+        run: bun run build
+
+      - name: Add source markdown
         run: |
-          mkdir -p _site/docs _site/templates/bun-cortexfs-client
-          cp -a docs/pages/. _site/
-          cp README.md _site/README.md
-          cp docs/DESIGN.md _site/docs/DESIGN.md
-          cp templates/bun-cortexfs-client/README.md _site/templates/bun-cortexfs-client/README.md
-          touch _site/.nojekyll
+          mkdir -p docs-site/build/source/docs docs-site/build/source/templates/bun-cortexfs-client
+          cp README.md docs-site/build/source/README.md
+          cp docs/DESIGN.md docs-site/build/source/docs/DESIGN.md
+          cp templates/bun-cortexfs-client/README.md docs-site/build/source/templates/bun-cortexfs-client/README.md
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: docs-site/build
 
       - name: Deploy to GitHub Pages
         id: deployment
