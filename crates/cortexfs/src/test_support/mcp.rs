@@ -48,7 +48,7 @@ fn assert_mcp_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()
         ),
         (
             ["mcp", "session", "local-fs.demo"].as_slice(),
-            ["state", "transcript.jsonl"].as_slice(),
+            ["state", "summary.md", "transcript.jsonl"].as_slice(),
         ),
         (
             ["mcp", "session", "local-fs.demo", "search"].as_slice(),
@@ -143,6 +143,10 @@ fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
 
     assert_mcp_runtime_files_are_runtime_owned(&fs)?;
     assert_eq!(mcp_session_runtime_content(&fs, "state")?, "idle\n");
+    assert_eq!(
+        mcp_session_runtime_content(&fs, "summary.md")?,
+        "lines=0\nlast_entry=\n"
+    );
     assert_eq!(mcp_session_runtime_content(&fs, "transcript.jsonl")?, "");
     assert_eq!(mcp_session_search_runtime_content(&fs, "query")?, "\n");
     assert_eq!(
@@ -227,6 +231,9 @@ fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Resul
     let transcript = mcp_session_runtime_content(&fs, "transcript.jsonl")?;
     assert!(transcript.contains("\"type\":\"resource_refresh\""));
     assert!(transcript.contains("\"resource\":\"local-fs/workspace\""));
+    let summary = mcp_session_runtime_content(&fs, "summary.md")?;
+    assert!(summary.contains("lines=1\n"));
+    assert!(summary.contains("\"type\":\"resource_refresh\""));
     assert_eq!(
         fs.node_content(fs.control_file_inode("last_control")?)?,
         "mcp/resource/local-fs/workspace/refresh\n"
