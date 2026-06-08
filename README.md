@@ -275,6 +275,18 @@ cat /ctx/audit/events.jsonl
 
 当前实现中的 `home/1000`、`agent/helper`、`ext/qq/group/888888` 是 MVP 测试投影。外部软件不要写死这些 fixture；正式模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`，并通过 `count`、`list`、`status`、`route`、`model` 等小文件发现实际可用对象。
 
+### Bun 客户端模板
+
+仓库提供一个零依赖 Bun 模板，用于外部应用按 CortexFS ABI 发现 route/model，并通过文件 ABI 或本地 OpenAI-compatible HTTP 入口提交请求：
+
+```bash
+cd templates/bun-cortexfs-client
+bun run route
+bun run chat -- "Reply with exactly: cortexfs-ok"
+```
+
+默认 transport 是 `file`，适配当前实现；如已启动本地 HTTP API，可设置 `CORTEXFS_TRANSPORT=http`。
+
 ## 安全模型
 
 CortexFS 天然按多用户设计。路径只是命名空间，不是安全边界。
