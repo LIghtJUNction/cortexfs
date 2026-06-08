@@ -44,6 +44,7 @@ struct McpRuntimeInodes {
     workspace_refresh: Option<Inode>,
     session_state: Option<Inode>,
     session_transcript: Option<Inode>,
+    session_summary: Option<Inode>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -152,6 +153,9 @@ pub struct RuntimeState {
     pub(crate) mcp_workspace_refresh_inode: Option<Inode>,
     pub(crate) mcp_session_state_inode: Option<Inode>,
     pub(crate) mcp_session_transcript_inode: Option<Inode>,
+    pub(crate) mcp_session_summary_inode: Option<Inode>,
+    pub(crate) mcp_session_search_query_inode: Option<Inode>,
+    pub(crate) mcp_session_search_results_inode: Option<Inode>,
     pub(crate) agent_helper_outbox_parent: Option<Inode>,
     pub(crate) agent_helper_start_inode: Option<Inode>,
     pub(crate) agent_helper_stop_inode: Option<Inode>,
@@ -247,6 +251,9 @@ impl RuntimeState {
             mcp_workspace_refresh_inode: mcp.workspace_refresh,
             mcp_session_state_inode: mcp.session_state,
             mcp_session_transcript_inode: mcp.session_transcript,
+            mcp_session_summary_inode: mcp.session_summary,
+            mcp_session_search_query_inode: None,
+            mcp_session_search_results_inode: None,
             agent_helper_outbox_parent: parents.agent_helper_outbox,
             agent_helper_runtime_state_inode: agent.state,
             agent_helper_runtime_pid_inode: agent.pid,
@@ -289,6 +296,7 @@ const fn mcp_runtime_inodes(_parents: &RuntimeParents) -> McpRuntimeInodes {
         workspace_refresh: None,
         session_state: None,
         session_transcript: None,
+        session_summary: None,
     }
 }
 

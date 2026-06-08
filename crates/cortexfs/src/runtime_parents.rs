@@ -9,9 +9,10 @@ use crate::abi::{
     DEMO_THREAD_DIR_PATH, DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
     DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_DIR_PATH, EXPORT_FILTERS_DIR_PATH,
     EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_DIR_PATH,
-    FEEDBACK_PREFERENCE_OUTBOX_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH,
-    MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH, POSTGRES_DSN_DIR_PATH, ROOT_INODE,
-    USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH, USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
+    FEEDBACK_PREFERENCE_OUTBOX_PATH, MCP_SESSION_DIR_PATH, MCP_SESSION_SEARCH_DIR_PATH,
+    MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH,
+    POSTGRES_DSN_DIR_PATH, ROOT_INODE, USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH,
+    USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
 };
 use crate::providers::{PROVIDER_SPECS, provider_child_path, user_model_path};
 use crate::runtime_types::ProviderRuntimeParents;
@@ -23,6 +24,7 @@ pub struct McpRuntimeParents {
     pub local_fs_control: Option<Inode>,
     pub workspace: Option<Inode>,
     pub session: Option<Inode>,
+    pub session_search: Option<Inode>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +60,7 @@ pub struct RuntimeParents {
     pub mcp_local_fs_control: Option<Inode>,
     pub mcp_workspace: Option<Inode>,
     pub mcp_session: Option<Inode>,
+    pub mcp_session_search: Option<Inode>,
     pub installed_skill_cortexfs_test: Option<Inode>,
     pub agent_helper_outbox: Option<Inode>,
     pub agent_helper_control: Option<Inode>,
@@ -124,6 +127,7 @@ impl RuntimeParents {
             mcp_local_fs_control: mcp.local_fs_control,
             mcp_workspace: mcp.workspace,
             mcp_session: mcp.session,
+            mcp_session_search: mcp.session_search,
             installed_skill_cortexfs_test: tree.path_inode(&[
                 "skill",
                 "installed",
@@ -215,6 +219,7 @@ fn mcp_runtime_parents(tree: &StaticTree) -> McpRuntimeParents {
         local_fs_server: tree.path_inode(&["mcp", "server", "local-fs"]),
         local_fs_control: tree.path_inode(&["mcp", "server", "local-fs", "control"]),
         workspace: tree.path_inode(&["mcp", "resource", "local-fs", "workspace"]),
-        session: tree.path_inode(&["mcp", "session", "local-fs.demo"]),
+        session: tree.path_inode(MCP_SESSION_DIR_PATH),
+        session_search: tree.path_inode(MCP_SESSION_SEARCH_DIR_PATH),
     }
 }

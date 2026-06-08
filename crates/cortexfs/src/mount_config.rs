@@ -53,8 +53,12 @@ impl MountOptions {
 
     /// Enables or disables multi-user mode.
     #[must_use]
-    pub const fn with_mode(mut self, mode: MountMode) -> Self {
+    pub fn with_mode(mut self, mode: MountMode) -> Self {
         self.mode = mode;
+        self.security = match mode {
+            MountMode::SingleUser => MountSecurityOptions::new(),
+            MountMode::MultiUser => MountSecurityOptions::multi_user(),
+        };
         self
     }
 

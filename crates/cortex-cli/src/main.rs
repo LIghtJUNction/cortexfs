@@ -58,16 +58,38 @@ impl Command {
         };
 
         match command.to_string_lossy().as_ref() {
-            "init" => Self::Init(InitCommand),
+            "init" => match parse_no_arguments(arguments, "init") {
+                Ok(()) => Self::Init(InitCommand),
+                Err(error) => Self::Invalid(error),
+            },
             "daemon" => match DaemonCommand::parse(arguments) {
                 Ok(command) => Self::Daemon(command),
                 Err(error) => Self::Invalid(error),
             },
-            "mount" => Self::Mount(MountCommand::parse(arguments)),
-            "status" => Self::Status(StatusCommand),
+            "mount" => match MountCommand::parse(arguments) {
+                Ok(command) => Self::Mount(command),
+                Err(error) => Self::Invalid(error),
+            },
+            "status" => match parse_no_arguments(arguments, "status") {
+                Ok(()) => Self::Status(StatusCommand),
+                Err(error) => Self::Invalid(error),
+            },
             unknown => Self::Unknown(UnknownCommand::new(unknown)),
         }
     }
+}
+
+fn parse_no_arguments(
+    arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    command: &str,
+) -> Result<(), InvalidCommand> {
+    if let Some(argument) = arguments.into_iter().next() {
+        return Err(InvalidCommand::new(format!(
+            "unexpected {command} argument: {}",
+            argument.to_string_lossy()
+        )));
+    }
+    Ok(())
 }
 
 /// Placeholder for `cortex init`.
@@ -103,7 +125,7 @@ impl DaemonCommand {
                     command.method = parse_required_argument(&mut arguments, "--method")?;
                 }
                 "--body" => {
-                    command.body = parse_required_argument(&mut arguments, "--body")?;
+                    command.body = parse_required_value(&mut arguments, "--body")?;
                 }
                 "--request-id" => {
                     command.request_id = parse_required_argument(&mut arguments, "--request-id")?;
@@ -148,6 +170,19 @@ fn parse_required_argument(
     arguments: &mut impl Iterator<Item = std::ffi::OsString>,
     flag: &str,
 ) -> Result<String, InvalidCommand> {
+    let value = parse_required_value(arguments, flag)?;
+    if value.starts_with("--") {
+        return Err(InvalidCommand::new(format!(
+            "missing value for daemon argument: {flag}"
+        )));
+    }
+    Ok(value)
+}
+
+fn parse_required_value(
+    arguments: &mut impl Iterator<Item = std::ffi::OsString>,
+    flag: &str,
+) -> Result<String, InvalidCommand> {
     let Some(value) = arguments.next() else {
         return Err(InvalidCommand::new(format!(
             "missing value for daemon argument: {flag}"
@@ -164,22 +199,37 @@ pub struct MountCommand {
 }
 
 impl MountCommand {
-    fn parse(arguments: impl IntoIterator<Item = std::ffi::OsString>) -> Self {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
         let mut mountpoint = PathBuf::from("mnt/cortex");
         let mut multi_user = false;
+        let mut explicit_mountpoint = false;
 
         for argument in arguments {
             if argument == "--multi-user" {
                 multi_user = true;
+            } else if argument.to_string_lossy().starts_with("--") {
+                return Err(InvalidCommand::new(format!(
+                    "unknown mount argument: {}",
+                    argument.to_string_lossy()
+                )));
             } else {
+                if explicit_mountpoint {
+                    return Err(InvalidCommand::new(format!(
+                        "unexpected extra mountpoint: {}",
+                        argument.to_string_lossy()
+                    )));
+                }
                 mountpoint = PathBuf::from(argument);
+                explicit_mountpoint = true;
             }
         }
 
-        Self {
+        Ok(Self {
             mountpoint,
             multi_user,
-        }
+        })
     }
 
     fn fuse_config(&self) -> cortexfs::FuseConfig {
@@ -473,6 +523,26 @@ mod tests {
     }
 
     #[test]
+    fn parser_rejects_status_arguments() {
+        assert_eq!(
+            Command::parse([OsString::from("status"), OsString::from("--watch")]),
+            Command::Invalid(super::InvalidCommand::new(
+                "unexpected status argument: --watch"
+            ))
+        );
+    }
+
+    #[test]
+    fn parser_rejects_init_arguments() {
+        assert_eq!(
+            Command::parse([OsString::from("init"), OsString::from("--watch")]),
+            Command::Invalid(super::InvalidCommand::new(
+                "unexpected init argument: --watch"
+            ))
+        );
+    }
+
+    #[test]
     fn parses_effective_uid_from_proc_status() {
         let status = "Name:\tcortex\nUid:\t1000\t2000\t3000\t4000\n";
 
@@ -491,18 +561,19 @@ mod tests {
     }
 
     #[test]
-    fn daemon_once_runs_execution_plane_and_prints_native_response() {
+    fn daemon_once_runs_execution_plane_and_prints_native_response()
+    -> Result<(), Box<dyn std::error::Error>> {
         let response = super::daemon_once_response(DaemonCommand {
             once: true,
             ..DaemonCommand::default()
-        })
-        .unwrap_or_default();
+        })?;
 
         assert!(response.contains("cortexfs-daemon-ok"));
+        Ok(())
     }
 
     #[test]
-    fn parser_accepts_daemon_once_endpoint_and_body() {
+    fn parser_accepts_daemon_once_endpoint_and_body() -> Result<(), Box<dyn std::error::Error>> {
         let command = Command::parse([
             OsString::from("daemon"),
             OsString::from("--once"),
@@ -523,7 +594,7 @@ mod tests {
         ]);
 
         let Command::Daemon(command) = command else {
-            return;
+            return Err("expected daemon command".into());
         };
         assert!(command.once);
         assert_eq!(command.method, "POST");
@@ -533,6 +604,24 @@ mod tests {
         assert_eq!(command.provider.as_deref(), Some("daemon-local"));
         assert_eq!(command.model.as_deref(), Some("model-a"));
         assert_eq!(command.thread.as_deref(), Some("demo"));
+        Ok(())
+    }
+
+    #[test]
+    fn parser_accepts_daemon_body_that_starts_with_dashes() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let command = Command::parse([
+            OsString::from("daemon"),
+            OsString::from("--once"),
+            OsString::from("--body"),
+            OsString::from("--literal-body"),
+        ]);
+
+        let Command::Daemon(command) = command else {
+            return Err("expected daemon command".into());
+        };
+        assert_eq!(command.body, "--literal-body");
+        Ok(())
     }
 
     #[test]
@@ -591,7 +680,23 @@ mod tests {
     }
 
     #[test]
-    fn daemon_once_models_endpoint_returns_model_list() {
+    fn parser_rejects_daemon_argument_value_that_looks_like_flag() {
+        assert_eq!(
+            Command::parse([
+                OsString::from("daemon"),
+                OsString::from("--once"),
+                OsString::from("--provider"),
+                OsString::from("--model"),
+                OsString::from("model-a"),
+            ]),
+            Command::Invalid(super::InvalidCommand::new(
+                "missing value for daemon argument: --provider"
+            ))
+        );
+    }
+
+    #[test]
+    fn daemon_once_models_endpoint_returns_model_list() -> Result<(), Box<dyn std::error::Error>> {
         let response = super::daemon_once_response(DaemonCommand {
             once: true,
             method: "GET".to_owned(),
@@ -601,11 +706,11 @@ mod tests {
             provider: None,
             model: None,
             thread: None,
-        })
-        .unwrap_or_default();
+        })?;
 
         assert!(response.contains("\"object\":\"list\""));
         assert!(response.contains("daemon-openai-chat"));
+        Ok(())
     }
 
     #[test]
@@ -667,15 +772,43 @@ mod tests {
     }
 
     #[test]
-    fn multi_user_mount_command_requests_allow_other() {
+    fn parser_rejects_unknown_mount_argument() {
+        assert_eq!(
+            Command::parse([OsString::from("mount"), OsString::from("--watch")]),
+            Command::Invalid(super::InvalidCommand::new(
+                "unknown mount argument: --watch"
+            ))
+        );
+    }
+
+    #[test]
+    fn parser_rejects_extra_mountpoint() {
+        assert_eq!(
+            Command::parse([
+                OsString::from("mount"),
+                OsString::from("/mnt/a"),
+                OsString::from("/mnt/b"),
+            ]),
+            Command::Invalid(super::InvalidCommand::new(
+                "unexpected extra mountpoint: /mnt/b"
+            ))
+        );
+    }
+
+    #[test]
+    fn multi_user_mount_command_requests_allow_other_without_relaxing_hardening() {
         let command = MountCommand {
             mountpoint: PathBuf::from("/mnt/cortex"),
             multi_user: true,
         };
         let config = command.fuse_config();
+        let security = config.options().security();
 
         assert_eq!(config.options().mode(), cortexfs::MountMode::MultiUser);
-        assert!(config.options().security().allow_other());
-        assert!(config.options().security().default_permissions());
+        assert!(security.allow_other());
+        assert!(security.default_permissions());
+        assert!(security.noexec());
+        assert!(security.nodev());
+        assert!(security.nosuid());
     }
 }

@@ -95,6 +95,53 @@ fn rename_to_req_json_queues_request_and_writes_fingerprint() -> fuse3::Result<(
 }
 
 #[test]
+fn duplicate_pending_request_id_is_rejected_without_rewriting_staged_request() -> fuse3::Result<()>
+{
+    let fs = CortexFs::new();
+    fs.create_staged_request("openai.chat", "same-a.tmp", "{\"messages\":[\"first\"]}\n")?;
+    fs.submit_request("openai.chat", "same-a.tmp", "same.req.json")?;
+    let outbox = fs.path_inode(["home", "1000", "api", "openai.chat", "outbox"])?;
+    let original_fingerprint = {
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .lookup_child(outbox, "same.fingerprint")
+            .and_then(crate::Node::content)
+            .map(ToOwned::to_owned)
+            .ok_or_else(fuse3::Errno::new_not_exist)?
+    };
+    fs.create_staged_request("openai.chat", "same-b.tmp", "{\"messages\":[\"second\"]}\n")?;
+
+    assert_eq!(
+        fs.submit_request("openai.chat", "same-b.tmp", "same.req.json"),
+        Err(fuse3::Errno::from(libc::EAGAIN))
+    );
+
+    let inbox = fs.path_inode(["home", "1000", "api", "openai.chat", "inbox"])?;
+    let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert!(
+        runtime.lookup_child(inbox, "same.req.json").is_some(),
+        "original queued request must remain visible under the committed request id"
+    );
+    assert!(
+        runtime.lookup_child(inbox, "same-b.tmp").is_some(),
+        "duplicate request must remain staged under its original name"
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(outbox, "same.fingerprint")
+            .and_then(crate::Node::content),
+        Some(original_fingerprint.as_str()),
+        "duplicate submission must not rewrite the original request fingerprint"
+    );
+    drop(runtime);
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("queue_depth")?)?,
+        "1\n"
+    );
+    Ok(())
+}
+
+#[test]
 fn home_uid_api_inbox_queues_request() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let inbox = fs

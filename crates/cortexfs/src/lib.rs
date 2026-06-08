@@ -30,6 +30,7 @@ use cortexd::{EnqueueOutcome, ExecutionPlane, SubmitRequest};
 use fuse3::raw::prelude::{DirectoryEntry, DirectoryEntryPlus, FileAttr, ReplyStatFs};
 use fuse3::{FileType, Inode};
 use std::ffi::{OsStr, OsString};
+use std::future::Future;
 use std::str::FromStr;
 use std::sync::Mutex;
 
@@ -125,14 +126,44 @@ pub fn mount(config: &FuseConfig) -> Result<FuseProjection, MountError> {
     runtime.block_on(async {
         let mount_options = fuse_mount_options(config.options());
         let session = fuse3::raw::Session::new(mount_options.clone());
-        let handle = session
+        let mut handle = session
             .mount_with_unprivileged(CortexFs::new(), config.options().mountpoint())
             .await
             .map_err(MountError::Fuse)?;
-        tokio::signal::ctrl_c().await.map_err(MountError::Fuse)?;
-        handle.unmount().await.map_err(MountError::Fuse)?;
+        match wait_for_mount_shutdown(tokio::signal::ctrl_c(), &mut handle)
+            .await
+            .map_err(MountError::Fuse)?
+        {
+            MountShutdown::Signal => {
+                handle.unmount().await.map_err(MountError::Fuse)?;
+            }
+            MountShutdown::SessionEnded => {}
+        }
         Ok(FuseProjection::new())
     })
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum MountShutdown {
+    Signal,
+    SessionEnded,
+}
+
+async fn wait_for_mount_shutdown(
+    signal: impl Future<Output = std::io::Result<()>>,
+    session: impl Future<Output = std::io::Result<()>>,
+) -> std::io::Result<MountShutdown> {
+    tokio::select! {
+        biased;
+        result = session => {
+            result?;
+            Ok(MountShutdown::SessionEnded)
+        }
+        signal = signal => {
+            signal?;
+            Ok(MountShutdown::Signal)
+        }
+    }
 }
 
 fn fuse_mount_options(options: &MountOptions) -> fuse3::MountOptions {
@@ -141,7 +172,23 @@ fn fuse_mount_options(options: &MountOptions) -> fuse3::MountOptions {
     fuse_options.fs_name("cortexfs");
     fuse_options.default_permissions(security.default_permissions());
     fuse_options.allow_other(security.allow_other());
+    if let Some(options) = fuse_security_custom_options(security) {
+        fuse_options.custom_options(options);
+    }
     fuse_options
+}
+
+fn fuse_security_custom_options(security: MountSecurityOptions) -> Option<OsString> {
+    let options = [
+        security.noexec().then_some("noexec"),
+        security.nodev().then_some("nodev"),
+        security.nosuid().then_some("nosuid"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+
+    (!options.is_empty()).then(|| OsString::from(options.join(",")))
 }
 
 #[derive(Debug)]
@@ -1167,6 +1214,14 @@ impl RuntimeState {
                 Some(self.add_dynamic_file(session_parent, "state", "idle\n"));
             self.mcp_session_transcript_inode =
                 Some(self.add_dynamic_file(session_parent, "transcript.jsonl", ""));
+            self.mcp_session_summary_inode =
+                Some(self.add_dynamic_file(session_parent, "summary.md", "lines=0\nlast_entry=\n"));
+            if let Some(search_parent) = parents.mcp_session_search {
+                self.mcp_session_search_query_inode =
+                    Some(self.add_dynamic_file(search_parent, "query", "\n"));
+                self.mcp_session_search_results_inode =
+                    Some(self.add_dynamic_file(search_parent, "results.jsonl", ""));
+            }
         }
     }
 
@@ -1968,6 +2023,9 @@ impl RuntimeState {
         offset: u64,
         data: &[u8],
     ) -> fuse3::Result<Option<u32>> {
+        if Some(inode) == self.mcp_session_search_query_inode {
+            return self.write_mcp_session_search(offset, data).map(Some);
+        }
         let effect = if Some(inode) == self.mcp_local_fs_start_inode {
             McpServerControlEffect {
                 server_id: "local-fs",
@@ -2174,12 +2232,17 @@ impl RuntimeState {
         if parent != new_parent {
             return Err(libc::EXDEV.into());
         }
-        let Some(inode) = self.staged.remove(&(parent, name.to_owned())) else {
+        let staged_key = (parent, name.to_owned());
+        let Some(inode) = self.staged.get(&staged_key).copied() else {
             return Err(fuse3::Errno::new_not_exist());
         };
         if !new_name.ends_with(".req.json") {
-            self.staged.insert((parent, name.to_owned()), inode);
             return Err(libc::EINVAL.into());
+        }
+        let request_id_text = new_name.trim_end_matches(".req.json");
+        let request_id = RequestId::new(request_id_text);
+        if self.request_id_is_pending(&request_id) {
+            return Err(libc::EAGAIN.into());
         }
         let request_content = self
             .nodes
@@ -2191,27 +2254,22 @@ impl RuntimeState {
             validate_external_thread_subject(&request_content)?;
         }
         if submission.requires_provider() && !self.current_route_is_allowed(submission.format) {
-            self.staged.insert((parent, name.to_owned()), inode);
             let route = RouteMetadata::from(self.current_route(submission.format));
             self.append_audit_with_route(submission.format, new_name, "denied", None, &route);
             return Err(libc::EACCES.into());
         }
-        if let Some(node) = self.nodes.get_mut(&inode) {
-            new_name.clone_into(&mut node.name);
-        }
-        self.staged.insert((parent, new_name.to_owned()), inode);
-        let request_id = new_name.trim_end_matches(".req.json");
-        if self
-            .outbox
-            .contains_key(&(submission.outbox_parent, format!("{request_id}.resp.json")))
-        {
+        if self.outbox.contains_key(&(
+            submission.outbox_parent,
+            format!("{request_id_text}.resp.json"),
+        )) {
+            self.staged.remove(&staged_key);
             self.remove_dynamic_child(parent, inode);
             self.append_audit(submission.format, new_name, "duplicate");
             return Ok(());
         }
-        let fingerprint = request_fingerprint(submission.format, request_id, &request_content)?;
+        let fingerprint =
+            request_fingerprint(submission.format, request_id_text, &request_content)?;
         let export_request_body = request_content.clone();
-        let request_id = RequestId::new(request_id);
         let route = if submission.requires_provider() {
             Some(RouteMetadata::from(self.current_route(submission.format)))
         } else {
@@ -2227,6 +2285,15 @@ impl RuntimeState {
             fingerprint: fingerprint.as_str(),
             route: route.clone(),
         })?;
+        self.staged.remove(&staged_key);
+        if let Some(node) = self.nodes.get_mut(&inode) {
+            new_name.clone_into(&mut node.name);
+        }
+        self.staged.insert((parent, new_name.to_owned()), inode);
+        if submission.scope == SubmissionScope::ClusterTask {
+            self.cluster_pending_entries
+                .insert(request_id.clone(), inode);
+        }
         self.materialize_fingerprint(&submission, &request_id, fingerprint.as_str());
         self.materialize_route_metadata(
             &submission,
@@ -2245,6 +2312,15 @@ impl RuntimeState {
             },
         );
         Ok(())
+    }
+
+    fn request_id_is_pending(&self, request_id: &RequestId) -> bool {
+        self.pending.contains_key(request_id)
+            || self.cluster_tasks.contains_key(request_id)
+            || self.agent_tasks.contains_key(request_id)
+            || self.memory_items.contains_key(request_id)
+            || self.preference_pairs.contains_key(request_id)
+            || self.prompt_renders.contains_key(request_id)
     }
 
     fn submit_collab_claim(
@@ -2405,10 +2481,6 @@ impl RuntimeState {
         }
         match submission.scope {
             SubmissionScope::ClusterTask => {
-                self.materialize_cluster_pending_task(
-                    &payload.request_id,
-                    payload.export_request_body.as_str(),
-                );
                 self.cluster_tasks.insert(
                     payload.request_id,
                     ClusterTask {

@@ -13,6 +13,13 @@ fn mcp_session_runtime_inode(fs: &CortexFs, name: &'static str) -> fuse3::Result
     fs.resolve_path_inode(["mcp", "session", "local-fs.demo", name])
 }
 
+fn mcp_session_search_runtime_inode(
+    fs: &CortexFs,
+    name: &'static str,
+) -> fuse3::Result<fuse3::Inode> {
+    fs.resolve_path_inode(["mcp", "session", "local-fs.demo", "search", name])
+}
+
 fn mcp_server_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Result<String> {
     fs.node_content(mcp_server_runtime_inode(fs, name)?)
 }
@@ -23,6 +30,10 @@ fn mcp_workspace_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Re
 
 fn mcp_session_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Result<String> {
     fs.node_content(mcp_session_runtime_inode(fs, name)?)
+}
+
+fn mcp_session_search_runtime_content(fs: &CortexFs, name: &'static str) -> fuse3::Result<String> {
+    fs.node_content(mcp_session_search_runtime_inode(fs, name)?)
 }
 
 fn assert_mcp_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()> {
@@ -38,6 +49,10 @@ fn assert_mcp_runtime_files_are_runtime_owned(fs: &CortexFs) -> fuse3::Result<()
         (
             ["mcp", "session", "local-fs.demo"].as_slice(),
             ["state", "transcript.jsonl"].as_slice(),
+        ),
+        (
+            ["mcp", "session", "local-fs.demo", "search"].as_slice(),
+            ["query", "results.jsonl"].as_slice(),
         ),
     ] {
         let parent = fs
@@ -129,6 +144,11 @@ fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
     assert_mcp_runtime_files_are_runtime_owned(&fs)?;
     assert_eq!(mcp_session_runtime_content(&fs, "state")?, "idle\n");
     assert_eq!(mcp_session_runtime_content(&fs, "transcript.jsonl")?, "");
+    assert_eq!(mcp_session_search_runtime_content(&fs, "query")?, "\n");
+    assert_eq!(
+        mcp_session_search_runtime_content(&fs, "results.jsonl")?,
+        ""
+    );
     assert_eq!(
         fs.lookup_path(["mcp", "server", "local-fs", "transport"])
             .and_then(crate::Node::content),
@@ -171,6 +191,11 @@ fn projection_exposes_mcp_objects() -> fuse3::Result<()> {
         .is_some(),
         "mcp prompt render outbox must exist"
     );
+    assert!(
+        fs.lookup_path(["mcp", "session", "local-fs.demo", "search"])
+            .is_some(),
+        "mcp session search directory must exist"
+    );
     Ok(())
 }
 
@@ -210,6 +235,34 @@ fn mcp_resource_refresh_updates_content_last_control_and_audit() -> fuse3::Resul
     assert!(audit.contains("\"format\":\"mcp.resource.local-fs.workspace\""));
     assert!(audit.contains("\"name\":\"refresh\""));
     assert!(audit.contains("\"event\":\"refreshed\""));
+    Ok(())
+}
+
+#[test]
+fn mcp_session_search_indexes_transcript() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let refresh = mcp_workspace_runtime_inode(&fs, "refresh")?;
+    let search = mcp_session_search_runtime_inode(&fs, "query")?;
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        assert_eq!(runtime.write(refresh, 0, b"1\n")?, 2);
+        assert_eq!(runtime.write(search, 0, b"resource_refresh\n")?, 17);
+        drop(runtime);
+    }
+
+    let results = mcp_session_search_runtime_content(&fs, "results.jsonl")?;
+    assert!(results.contains("\"source\":\"mcp/session/local-fs.demo/transcript.jsonl\""));
+    assert!(results.contains("\"session\":\"mcp/session/local-fs.demo\""));
+    assert!(results.contains("resource_refresh"));
+    assert_eq!(
+        fs.node_content(fs.control_file_inode("last_control")?)?,
+        "mcp/session/local-fs.demo/search/query\n"
+    );
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains("\"format\":\"mcp.session.search\""));
+    assert!(audit.contains("\"name\":\"query\""));
+    assert!(audit.contains("\"event\":\"searched\""));
     Ok(())
 }
 

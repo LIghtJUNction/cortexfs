@@ -98,6 +98,8 @@ pub const MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH: &[&str] = &[
     "render",
     "outbox",
 ];
+pub const MCP_SESSION_DIR_PATH: &[&str] = &["mcp", "session", "local-fs.demo"];
+pub const MCP_SESSION_SEARCH_DIR_PATH: &[&str] = &["mcp", "session", "local-fs.demo", "search"];
 pub const AGENT_HELPER_INBOX_PATH: &[&str] = &["agent", "helper", "inbox"];
 pub const AGENT_HELPER_OUTBOX_PATH: &[&str] = &["agent", "helper", "outbox"];
 pub const AGENT_HELPER_CONTROL_PATH: &[&str] = &["agent", "helper", "control"];
