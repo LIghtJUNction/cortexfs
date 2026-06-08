@@ -90,7 +90,7 @@ impl RuntimeState {
                 }
                 let _ = writeln!(
                     results,
-                    "{{\"source\":\"thread/demo/messages.jsonl\",\"line\":{},\"score\":1.0,\"text\":{}}}",
+                    "{{\"source\":\"home/1000/thread/demo/messages.jsonl\",\"line\":{},\"score\":1.0,\"text\":{}}}",
                     index.saturating_add(1),
                     json_string(line),
                 );
@@ -146,7 +146,7 @@ fn append_memory_layer_search_results<'a>(
         }
         let _ = writeln!(
             results,
-            "{{\"source\":\"memory/{layer}/items.jsonl\",\"line\":{},\"score\":1.0,\"text\":{}}}",
+            "{{\"source\":\"home/1000/memory/{layer}/items.jsonl\",\"line\":{},\"score\":1.0,\"text\":{}}}",
             index.saturating_add(1),
             json_string(line),
         );

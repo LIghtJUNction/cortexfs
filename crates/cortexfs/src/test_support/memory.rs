@@ -483,7 +483,7 @@ fn memory_search_query_derives_results_from_thread_messages() -> fuse3::Result<(
         .lookup_child(search, "results.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(results.contains("\"source\":\"thread/demo/messages.jsonl\""));
+    assert!(results.contains("\"source\":\"home/1000/thread/demo/messages.jsonl\""));
     assert!(results.contains("\"line\":1"));
     assert!(results.contains("remember cortexfs"));
     drop(runtime);
@@ -524,9 +524,9 @@ fn memory_search_indexes_runtime_backed_non_semantic_layers() -> fuse3::Result<(
         .lookup_child(search, "results.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(results.contains("\"source\":\"memory/working/items.jsonl\""));
+    assert!(results.contains("\"source\":\"home/1000/memory/working/items.jsonl\""));
     assert!(results.contains("working cortexfs scratchpad"));
-    assert!(results.contains("\"source\":\"memory/profile/items.jsonl\""));
+    assert!(results.contains("\"source\":\"home/1000/memory/profile/items.jsonl\""));
     assert!(results.contains("profile cortexfs preference"));
     drop(runtime);
 
@@ -593,7 +593,7 @@ fn semantic_memory_item_submit_drains_into_items_and_search() -> fuse3::Result<(
         .lookup_child(search, "results.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(results.contains("\"source\":\"memory/semantic/items.jsonl\""));
+    assert!(results.contains("\"source\":\"home/1000/memory/semantic/items.jsonl\""));
     assert!(results.contains("semantic cortexfs memory"));
     drop(runtime);
 
@@ -659,7 +659,7 @@ fn profile_memory_item_submit_drains_into_profile_layer_and_search() -> fuse3::R
         .lookup_child(search, "results.jsonl")
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
-    assert!(results.contains("\"source\":\"memory/profile/items.jsonl\""));
+    assert!(results.contains("\"source\":\"home/1000/memory/profile/items.jsonl\""));
     assert!(results.contains("profile cortexfs preference"));
     drop(runtime);
 
