@@ -34,9 +34,7 @@ cortex status
 本地挂载：
 
 ```bash
-sudo mkdir -p /ctx
-sudo chown "$USER:$USER" /ctx
-cortex mount /ctx
+cortex start
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 

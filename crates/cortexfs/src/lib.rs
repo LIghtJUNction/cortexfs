@@ -130,7 +130,7 @@ pub fn mount(config: &FuseConfig) -> Result<FuseProjection, MountError> {
             .mount_with_unprivileged(CortexFs::new(), config.options().mountpoint())
             .await
             .map_err(MountError::Fuse)?;
-        match wait_for_mount_shutdown(tokio::signal::ctrl_c(), &mut handle)
+        match wait_for_mount_shutdown(mount_shutdown_signal(), &mut handle)
             .await
             .map_err(MountError::Fuse)?
         {
@@ -164,6 +164,25 @@ async fn wait_for_mount_shutdown(
             Ok(MountShutdown::Signal)
         }
     }
+}
+
+#[cfg(unix)]
+async fn mount_shutdown_signal() -> std::io::Result<()> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut hangup = signal(SignalKind::hangup())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    let mut terminate = signal(SignalKind::terminate())?;
+    tokio::select! {
+        _ = hangup.recv() => Ok(()),
+        _ = interrupt.recv() => Ok(()),
+        _ = terminate.recv() => Ok(()),
+    }
+}
+
+#[cfg(not(unix))]
+async fn mount_shutdown_signal() -> std::io::Result<()> {
+    tokio::signal::ctrl_c().await
 }
 
 fn fuse_mount_options(options: &MountOptions) -> fuse3::MountOptions {

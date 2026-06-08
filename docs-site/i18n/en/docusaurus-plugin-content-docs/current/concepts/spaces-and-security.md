@@ -23,7 +23,7 @@ second submission entry.
 Security decisions should consider:
 
 - `HostActor`: Linux `uid/gid/pid`.
-- `Subject`: represented external user, such as `qq:user:123456`.
+- `Subject`: represented external user, such as `chat:user:123456`.
 - `Object`: provider, model, tool, memory, thread, or file object.
 
 Secrets, OAuth tokens, and session tokens do not enter the mounted tree.

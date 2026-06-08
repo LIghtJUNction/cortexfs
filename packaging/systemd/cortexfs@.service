@@ -2,15 +2,15 @@
 Description=CortexFS FUSE mount at /ctx for %i
 Documentation=https://lightjunction.github.io/cortexfs/docs/getting-started/install-deploy/
 After=local-fs.target
-ConditionPathExists=/dev/fuse
 
 [Service]
 Type=simple
 User=%i
 Group=%i
+ExecStartPre=+/bin/sh -c '/usr/bin/modprobe fuse 2>/dev/null || true'
+ExecStartPre=+/bin/sh -c '/usr/bin/fusermount3 -uz /ctx 2>/dev/null || /usr/bin/umount -l /ctx 2>/dev/null || true'
 ExecStartPre=+/usr/bin/install -d -o %i -g %i -m 0755 /ctx
 ExecStart=/usr/bin/cortex mount /ctx
-ExecStop=/usr/bin/fusermount3 -u /ctx
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=20s

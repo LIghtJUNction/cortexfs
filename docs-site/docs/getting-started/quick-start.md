@@ -20,13 +20,11 @@ cortex status
 生产式本地路径推荐 `/ctx`：
 
 ```bash
-sudo mkdir -p /ctx
-sudo chown "$USER:$USER" /ctx
-cortex mount /ctx
+cortex start
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-`cortex mount` 是前台进程。保持挂载进程运行，然后在另一个终端继续检查或提交请求。
+`cortex start` 会通过 systemd 后台启动 `cortexfs@$USER.service`。
 
 开发者做仓库内集成测试时，固定挂载点是：
 

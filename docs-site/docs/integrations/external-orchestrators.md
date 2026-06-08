@@ -22,7 +22,7 @@ MCP 调用        rename to mcp/tool/<server>.<tool>/invoke/inbox/<id>.req.json
 
 ## 不要写死 Fixture
 
-当前实现中的 `home/1000`、`agent/helper`、`ext/qq/group/888888` 是 MVP 测试投影。正式集成应通过 `count`、`list`、`status`、`route`、`model` 等小文件发现对象。
+不要写死 `home/1000`、`agent/helper`、`ext/chat/room/888888` 这类示例路径。正式集成应通过 `count`、`list`、`status`、`route`、`model` 等小文件发现对象。
 
 ## 不要新增项目专属根目录
 

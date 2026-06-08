@@ -26,7 +26,7 @@ home/<uid>/
 访问决策应基于：
 
 - `HostActor`：Linux `uid/gid/pid`。
-- `Subject`：被代表的外部用户，例如 `qq:user:123456`。
+- `Subject`：被代表的外部用户，例如 `chat:user:123456`。
 - `Object`：文件系统对象、provider、model、tool、memory、thread 等资源。
 
 ## 安全流程

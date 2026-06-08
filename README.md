@@ -34,7 +34,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path；MCP tool 调用会进入同一条 permission/tool call/tool result 轨迹。
 - cluster 任务骨架：`queue/default/{pending,running,done,failed}`、`task/<id>/state`、`events.jsonl`、失败任务 `retry` 控制节点。
 - 多用户空间：`home/<uid>/...` 是权限、模型可见性、路由、记忆、审计和导出的边界。
-- 外部主体模型：为 QQ 群友、机器人平台用户等非 Linux 用户预留 `external subject` 身份上下文。
+- 外部主体模型：为聊天平台、机器人平台、Webhook 等非 Linux 用户预留 `external subject` 身份上下文。
 - 记忆与导出：分层记忆、`memory/index/default/refresh`、JSONL 导出、训练数据友好的对话和 tool trace 投影。
 - 本地 live test：使用本机轻量模型 fixture 验证 provider 调用，不依赖云 API。
 - `cortex daemon --once`：用一次性请求验证 daemon execution plane 的入队、执行和原生 JSON 响应路径。
@@ -131,25 +131,21 @@ export CTX_HOME="/ctx/home/$(id -u)"
 示例：
 
 ```bash
-sudo mkdir -p /ctx
-sudo chown "$USER:$USER" /ctx
-cortex mount /ctx
+cortex start
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-如果要做多用户挂载，使用明确的多用户挂载模式，并按系统 FUSE 配置处理 `/ctx` 的 owner、group、mode 和 `allow_other` 策略。
+后台挂载使用 AUR 包安装的 systemd 模板服务，直接用 CLI 启动。`cortex start` 会在需要时调用 `sudo systemctl`，自动加载 FUSE、清理坏挂载、创建 `/ctx` 并设置 owner/mode：
+
+```bash
+cortex start
+systemctl status "cortexfs@$USER.service"
+```
+
+如果要做跨 Linux 用户共享的多用户挂载，使用明确的高级 multi-user 模式：
 
 ```bash
 cortex mount --multi-user /ctx
-```
-
-在 Arch Linux 上，多用户挂载前需要在 `/etc/fuse.conf` 启用 `user_allow_other`。
-
-后台挂载使用 AUR 包安装的 systemd 模板服务：
-
-```bash
-sudo systemctl enable --now "cortexfs@$USER.service"
-systemctl status "cortexfs@$USER.service"
 ```
 
 `space/` 是只读安全上下文索引；日常脚本使用 `/ctx/home/<uid>`、`/ctx/shared`、`/ctx/ext` 这些直接入口。开发期不提供 `spaces/` 目录，也不提供 `space/users/<uid>` 这类第二入口。
@@ -293,7 +289,7 @@ cat /ctx/audit/events.jsonl
 
 同一个请求无论来自文件、HTTP 还是 Unix socket，都必须进入同一条管线，并产生同一个 request id、fingerprint、route metadata、policy decision、audit event 和 export row。socket 只是低延迟 fast path，不是绕过文件 ABI 的旁路。
 
-当前实现中的 `home/1000`、`agent/helper`、`ext/qq/group/888888` 是 MVP 测试投影。外部软件不要写死这些 fixture；正式模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`，并通过 `count`、`list`、`status`、`route`、`model` 等小文件发现实际可用对象。
+不要写死 `home/1000`、`agent/helper`、`ext/chat/room/888888` 这类示例路径；正式模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`，并通过 `count`、`list`、`status`、`route`、`model` 等小文件发现实际可用对象。
 
 ### Bun 客户端模板
 
@@ -314,7 +310,7 @@ CortexFS 天然按多用户设计。路径只是命名空间，不是安全边�
 访问决策基于三类身份：
 
 - `HostActor`：Linux `uid/gid/pid`。
-- `Subject`：被代表的外部用户，例如 `qq:user:123456`。
+- `Subject`：被代表的外部用户，例如 `chat:user:123456`。
 - `Object`：文件系统对象、provider、model、tool、memory、thread 等资源。
 
 每次访问流程：
