@@ -1,12 +1,12 @@
 ---
-title: Audit and Export
+title: 审计和导出
 ---
 
-# Audit and Export
+# 审计和导出
 
 CortexFS 要求请求、拒绝、执行、错误、route、policy 和导出都可观察。
 
-## Global Audit
+## 全局审计
 
 ```bash
 cat /ctx/audit/fields
@@ -17,7 +17,7 @@ cat /ctx/audit/cost
 
 Audit event 应包含 request id、fingerprint、route metadata、policy decision、provider、model、subject 和 time 等信息。
 
-## User Export
+## 用户导出
 
 ```bash
 exports="$CTX_HOME/export"
@@ -29,7 +29,7 @@ cat "$exports/tool_calls.jsonl"
 cat "$exports/agent_traces.jsonl"
 ```
 
-## Filters
+## 过滤器
 
 ```bash
 printf 'helper\n' > "$exports/filter/agent"

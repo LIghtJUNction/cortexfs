@@ -1,12 +1,12 @@
 ---
-title: External Orchestrators
+title: 外部编排器
 ---
 
-# External Orchestrators
+# 外部编排器
 
 Workflow engines, bot runtimes, desktop tools, and local applications should use CortexFS through discovery files and generic submission rules.
 
-## Integration Map
+## 集成映射
 
 ```text
 能力            接入方式
@@ -20,10 +20,10 @@ MCP 调用        rename to mcp/tool/<server>.<tool>/invoke/inbox/<id>.req.json
 训练导出        read home/<uid>/export/*.jsonl
 ```
 
-## Do Not Hard-code Fixtures
+## 不要写死 Fixture
 
 当前实现中的 `home/1000`、`agent/helper`、`ext/qq/group/888888` 是 MVP 测试投影。正式集成应通过 `count`、`list`、`status`、`route`、`model` 等小文件发现对象。
 
-## No Project-specific Root
+## 不要新增项目专属根目录
 
 外部编排器如果需要表达自己的 run、step、workflow，应写进请求 JSON、thread metadata 或 audit subject/agent context。不要要求 CortexFS 增加项目专属顶层目录。

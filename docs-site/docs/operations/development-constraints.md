@@ -1,12 +1,12 @@
 ---
-title: Development Constraints
+title: 开发约束
 ---
 
-# Development Constraints
+# 开发约束
 
 开发必须遵守项目 ABI 和测试约定。
 
-## Rules
+## 规则
 
 - 先读 `docs/DESIGN.md`。
 - 不新增 `mod.rs`。
@@ -17,7 +17,7 @@ title: Development Constraints
 - FUSE callback 不做远程 API 调用、长时间模型发现、向量检索、MCP 调用或 tool execution。
 - 慢操作进入 daemon/execution plane。
 
-## Verification
+## 验证
 
 ```bash
 cargo fmt --all -- --check
@@ -26,7 +26,7 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 ```
 
-Extra static checks:
+额外静态检查：
 
 ```bash
 rg --files | rg '(^|/)mod\.rs$'

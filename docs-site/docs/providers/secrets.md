@@ -1,12 +1,12 @@
 ---
-title: Secrets
+title: 密钥
 ---
 
-# Secrets
+# 密钥
 
-Provider secrets do not enter the mount tree.
+Provider secret 不进入挂载树。
 
-## Exposed Files
+## 暴露文件
 
 ```text
 provider/<id>/secrets/
@@ -17,17 +17,17 @@ provider/<id>/secrets/
   next_rotation
 ```
 
-These files expose state, not secret values.
+这些文件只暴露状态，不暴露 secret 值。
 
-## Rules
+## 规则
 
-- API keys, OAuth tokens, and session tokens are not writable plaintext files in FUSE.
-- `active` is a key id or secret reference, not the raw key.
-- `rotate` is a control node for daemon-side rotation.
-- `cortexd` resolves real secrets from a protected secret store.
-- Audit must redact secret material.
+- API key、OAuth token 和 session token 不是 FUSE 中可写的明文文件。
+- `active` 是 key id 或 secret reference，不是原始 key。
+- `rotate` 是 daemon 侧轮转控制节点。
+- `cortexd` 从受保护的 secret store 解析真实 secret。
+- Audit 必须打码 secret material。
 
-## Rotate
+## 轮转
 
 ```bash
 printf '1\n' > /ctx/provider/openai-main/secrets/rotate

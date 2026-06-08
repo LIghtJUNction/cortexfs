@@ -6,7 +6,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'CortexFS',
-  tagline: 'Provider-neutral AI API filesystem ABI',
+  tagline: 'Provider-neutral AI API 文件系统 ABI',
   favicon: 'img/favicon.ico',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
@@ -51,8 +51,6 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          editUrl:
-            'https://github.com/LIghtJUNction/cortexfs/tree/main/docs-site/docs/',
         },
         blog: false,
         theme: {
@@ -141,7 +139,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} CortexFS. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} CortexFS。由 Docusaurus 构建。`,
     },
     prism: {
       theme: prismThemes.github,

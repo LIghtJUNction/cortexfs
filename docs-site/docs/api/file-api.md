@@ -1,8 +1,8 @@
 ---
-title: File API
+title: 文件 API
 ---
 
-# File API
+# 文件 API
 
 每个用户工作入口按 format 暴露 API。
 
@@ -22,7 +22,7 @@ home/<uid>/api/
     outbox/
 ```
 
-## Submit Contract
+## 提交契约
 
 - `write()` 不触发 API。
 - rename 到 `inbox/*.req.json` 才触发提交。
@@ -31,7 +31,7 @@ home/<uid>/api/
 - 每次请求都计算 fingerprint。
 - 每次请求都写 audit。
 
-## Outbox Files
+## Outbox 文件
 
 ```text
 outbox/<id>.route.json

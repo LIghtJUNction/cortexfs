@@ -28,8 +28,8 @@ The mount tree is the ABI:
 ## Quick Start
 
 ```bash
-cargo build --locked --workspace
-cargo run -p cortex-cli -- status
+paru -S cortexfs-git
+cortex status
 ```
 
 Mount locally:
@@ -37,7 +37,7 @@ Mount locally:
 ```bash
 sudo mkdir -p /ctx
 sudo chown "$USER:$USER" /ctx
-cargo run -p cortex-cli -- mount /ctx
+cortex mount /ctx
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 

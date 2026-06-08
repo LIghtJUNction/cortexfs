@@ -19,6 +19,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: '快速开始',
       items: [
+        'getting-started/install-deploy',
         'getting-started/quick-start',
         'getting-started/mounting',
         'getting-started/first-request',

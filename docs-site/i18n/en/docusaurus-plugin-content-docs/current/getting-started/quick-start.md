@@ -4,12 +4,11 @@ title: Quick Start
 
 # Quick Start
 
-CortexFS currently runs as a Linux FUSE filesystem. The minimum path is:
-build the CLI, mount the tree, then submit a request through the file ABI.
+CortexFS currently runs as a Linux FUSE filesystem. On Arch Linux, install the AUR package `cortexfs-git`, mount the tree with the installed `cortex` command, then submit a request through the file ABI.
 
 ```bash
-cargo build --locked --workspace
-cargo run -p cortex-cli -- status
+paru -S cortexfs-git
+cortex status
 ```
 
 Production-style local mount:
@@ -17,11 +16,13 @@ Production-style local mount:
 ```bash
 sudo mkdir -p /ctx
 sudo chown "$USER:$USER" /ctx
-cargo run -p cortex-cli -- mount /ctx
+cortex mount /ctx
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-Repository test mount:
+`cortex mount` runs in the foreground. Keep that terminal open, then inspect or submit requests from another terminal.
+
+Developer repository test mount:
 
 ```bash
 mkdir -p tests/mounts/cortexfs

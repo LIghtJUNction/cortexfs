@@ -1,12 +1,12 @@
 ---
-title: First Request
+title: 第一条请求
 ---
 
-# First Request
+# 第一条请求
 
 CortexFS 的文件式提交规则是：普通 `write()` 只写内容，不触发 provider；只有原子 rename 到 `inbox/*.req.json` 才表示提交。
 
-## Submit
+## 提交
 
 ```bash
 api="$CTX_HOME/api/openai.chat"
@@ -18,7 +18,7 @@ mv "$api/inbox/001.tmp" "$api/inbox/001.req.json"
 printf '1\n' > /ctx/control/drain
 ```
 
-## Read Result
+## 读取结果
 
 ```bash
 cat "$api/outbox/001.route.json"
@@ -32,7 +32,7 @@ cat "$api/outbox/001.resp.json"
 cat "$api/outbox/001.error"
 ```
 
-## Batch Shell Pattern
+## Shell 批处理模式
 
 ```bash
 for f in requests/*.json; do

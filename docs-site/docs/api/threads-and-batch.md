@@ -1,12 +1,12 @@
 ---
-title: Threads and Batch
+title: 会话和批处理
 ---
 
-# Threads and Batch
+# 会话和批处理
 
 Thread 是持续上下文，Batch 是批处理队列。
 
-## Thread
+## 会话
 
 ```text
 home/<uid>/thread/<id>/
@@ -29,7 +29,7 @@ mv "$thread/inbox/0001.tmp" "$thread/inbox/0001.req.json"
 
 Socket fast path 必须和文件式提交进入同一 policy、route、store、audit 和 export 管线。
 
-## Batch
+## 批处理
 
 批处理用于多请求入队、drain 和审计。它应满足：
 

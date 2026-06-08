@@ -1,15 +1,14 @@
 ---
 sidebar_position: 1
-title: Overview
+title: 概览
 ---
 
 # CortexFS
 
-CortexFS is a provider-neutral Linux FUSE filesystem for AI API infrastructure.
-It exposes API formats, provider instances, models, requests, responses,
-threads, tools, memory, audit, and controls as ordinary filesystem objects.
+CortexFS 是一个面向 AI API 基础设施的 provider-neutral Linux FUSE 文件系统。
+它把 API format、provider 实例、模型、请求、响应、thread、工具、记忆、审计和控制节点暴露为普通文件系统对象。
 
-The mount tree is the ABI:
+挂载树就是 ABI：
 
 ```text
 /
@@ -25,23 +24,23 @@ The mount tree is the ABI:
   control/
 ```
 
-## Quick Start
+## 快速开始
 
 ```bash
-cargo build --locked --workspace
-cargo run -p cortex-cli -- status
+paru -S cortexfs-git
+cortex status
 ```
 
-Mount locally:
+本地挂载：
 
 ```bash
 sudo mkdir -p /ctx
 sudo chown "$USER:$USER" /ctx
-cargo run -p cortex-cli -- mount /ctx
+cortex mount /ctx
 export CTX_HOME="/ctx/home/$(id -u)"
 ```
 
-Submit a file ABI request:
+提交文件 ABI 请求：
 
 ```bash
 api="$CTX_HOME/api/openai.chat"
@@ -55,15 +54,14 @@ printf '1\n' > /ctx/control/drain
 cat "$api/outbox/001.resp.json"
 ```
 
-## Core Idea
+## 核心思想
 
 CortexFS separates:
 
-- `format/`: protocol shape, such as `openai.chat` or `anthropic.messages`.
-- `provider/`: backend/account instances, including official APIs, relays, and local runtimes.
-- `model/`: provider-scoped model descriptors.
-- `home/<uid>/route/`: user-visible route decisions.
-- `audit/`: request, route, policy, execution, and export observability.
+- `format/`：协议形状，例如 `openai.chat` 或 `anthropic.messages`。
+- `provider/`：后端/账号实例，包括官方 API、中转站和本地运行时。
+- `model/`：provider 作用域内的模型描述。
+- `home/<uid>/route/`：用户可见的路由决策。
+- `audit/`：请求、路由、策略、执行和导出的可观测性。
 
-Secrets do not enter the mount tree. The filesystem exposes secret status and
-active key ids; real secret values should be resolved by `cortexd`.
+密钥不进入挂载树。文件系统只暴露 secret 状态和 active key id；真实 secret 值应由 `cortexd` 解析。
