@@ -14,6 +14,8 @@ mod exports;
 mod fuse_ops;
 #[path = "test_support/integration.rs"]
 mod integration;
+#[path = "test_support/jobs.rs"]
+mod jobs;
 #[path = "test_support/mcp.rs"]
 mod mcp;
 #[path = "test_support/memory.rs"]

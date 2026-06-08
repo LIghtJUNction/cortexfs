@@ -12,6 +12,7 @@ title: 顶层目录
   cap/
   format/
   provider/
+  chan/
   model/
   home/
   group/
@@ -37,6 +38,7 @@ status        全局状态
 cap/          全局能力列表
 format/       API 协议格式
 provider/     后端提供商和账号实例
+chan/         New API 风格渠道控制面
 model/        全局模型索引
 home/         类 /home 的用户入口
 group/        本机组入口

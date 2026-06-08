@@ -63,11 +63,11 @@ fn projection_exposes_local_api_fast_path_metadata() -> fuse3::Result<()> {
         ),
         (
             &["home", LOCAL_USER_ID, "api", "http", "status"][..],
-            "daemon_required\n",
+            "need-daemon\n",
         ),
         (
             &["home", LOCAL_USER_ID, "api", "unix", "status"][..],
-            "daemon_required\n",
+            "need-daemon\n",
         ),
     ] {
         assert!(

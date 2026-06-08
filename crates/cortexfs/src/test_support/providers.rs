@@ -6,6 +6,60 @@ use super::support::{
 };
 
 #[test]
+fn channel_can_be_configured_by_file_operations() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let chan_root = fs
+        .tree
+        .path_inode(crate::CHAN_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    let chan = runtime.create_chan(chan_root, "fengying")?;
+    let url = runtime
+        .lookup_child(chan, "url")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let keyref = runtime
+        .lookup_child(chan, "keyref")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let fmt = runtime
+        .lookup_child(chan, "fmt")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+
+    runtime.write(url, 0, b"https://api.fengying.xin\n")?;
+    runtime.write(keyref, 0, b"env:FENGYING_API_KEY\n")?;
+    runtime.write(fmt, 0, b"openai.chat\nopenai.responses\n")?;
+
+    assert_eq!(
+        runtime
+            .lookup_child(chan, "status")
+            .and_then(crate::Node::content),
+        Some("ready\n")
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(chan, "localurl")
+            .and_then(crate::Node::content),
+        Some(crate::LOCAL_API_BASE_URL_TEXT)
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(chan_root, "count")
+            .and_then(crate::Node::content),
+        Some("1\n")
+    );
+    assert_eq!(
+        runtime
+            .lookup_child(chan_root, "list")
+            .and_then(crate::Node::content),
+        Some("fengying\n")
+    );
+    drop(runtime);
+    Ok(())
+}
+
+#[test]
 fn provider_runtime_files_follow_specs() -> fuse3::Result<()> {
     let fs = CortexFs::new();
     let primary = crate::PROVIDER_SPECS
