@@ -85,13 +85,15 @@ impl RuntimeState {
         let agent = self.context.agent.clone();
         self.export_seq = self.export_seq.saturating_add(1);
         let time = format!("{:020}", self.export_seq);
+        let source = conversation_source(pending, request_id);
         let (line, provider, model) = pending.route.as_ref().map_or_else(
             || {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":{},\"space\":{},{}\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"source\":{},\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":{},\"space\":{},{}\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
                         time,
+                        json_string(&source),
                         pending.format,
                         pending.fingerprint,
                         json_string(&agent),
@@ -107,9 +109,10 @@ impl RuntimeState {
             |route| {
                 (
                     format!(
-                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":{},\"space\":{},{}\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
+                        "{{\"request_id\":\"{}\",\"time\":\"{}\",\"source\":{},\"format\":\"{}\",\"fingerprint\":\"{}\",\"agent\":{},\"space\":{},{}\"route\":{{\"provider\":{},\"model\":{},\"reason\":{}}},\"request\":{},\"response\":{}}}",
                         request_id.as_str(),
                         time,
+                        json_string(&source),
                         pending.format,
                         pending.fingerprint,
                         json_string(&agent),
@@ -536,6 +539,34 @@ fn tool_submit_source(tool: &str, request_id: &RequestId) -> String {
 
 fn agent_task_source(agent: &str, request_id: &RequestId) -> String {
     format!("agent/{agent}/inbox/{}.req.json", request_id.as_str())
+}
+
+fn conversation_source(pending: &PendingResponse, request_id: &RequestId) -> String {
+    match pending.scope {
+        SubmissionScope::Api => {
+            format!(
+                "home/1000/api/{}/inbox/{}.req.json",
+                pending.format,
+                request_id.as_str()
+            )
+        }
+        SubmissionScope::Batch => {
+            format!("home/1000/batch/inbox/{}.req.json", request_id.as_str())
+        }
+        SubmissionScope::Thread => {
+            format!(
+                "home/1000/thread/demo/inbox/{}.req.json",
+                request_id.as_str()
+            )
+        }
+        SubmissionScope::ExternalThread => {
+            format!(
+                "ext/qq/group/888888/thread/demo/inbox/{}.req.json",
+                request_id.as_str()
+            )
+        }
+        _ => format!("unknown/{}.req.json", request_id.as_str()),
+    }
 }
 
 trait ExportFilterRow {

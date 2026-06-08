@@ -509,6 +509,9 @@ fn thread_inbox_submit_updates_messages_after_drain() -> fuse3::Result<()> {
     assert!(steps.contains("\"step\":1"));
     assert!(steps.contains("\"type\":\"model\""));
     assert!(steps.contains("\"message\":\"cortexfs-ok\""));
+    let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
+    assert!(export.contains("\"request_id\":\"turn-001\""));
+    assert!(export.contains("\"source\":\"home/1000/thread/demo/inbox/turn-001.req.json\""));
     assert!(
         fs.node_content(fs.audit_events_inode()?)?
             .contains("\"name\":\"turn-001.req.json\"")
@@ -600,6 +603,9 @@ fn external_thread_submit_preserves_subject_identity() -> fuse3::Result<()> {
 
     let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
     assert!(export.contains("\"request_id\":\"qq-turn\""));
+    assert!(
+        export.contains("\"source\":\"ext/qq/group/888888/thread/demo/inbox/qq-turn.req.json\"")
+    );
     assert!(export.contains("qq:user:123456"));
     let audit = fs.node_content(fs.audit_events_inode()?)?;
     let queued = audit

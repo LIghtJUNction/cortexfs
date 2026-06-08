@@ -127,6 +127,7 @@ fn control_drain_materializes_batch_response() -> fuse3::Result<()> {
     assert!(audit.contains("\"event\":\"drained\""));
     let export = fs.node_content(fs.export_file_inode("conversations.jsonl")?)?;
     assert!(export.contains("\"request_id\":\"batch-001\""));
+    assert!(export.contains("\"source\":\"home/1000/batch/inbox/batch-001.req.json\""));
     assert!(export.contains("\"format\":\"openai.chat\""));
     assert!(export.contains("\"fingerprint\":\"fnv1a64:"));
     assert!(export.contains("cortexfs-ok"));
