@@ -5,7 +5,7 @@ title: First Request
 # First Request
 
 Plain `write()` only writes bytes. A request is submitted only when a staged
-file is atomically renamed to `inbox/*.req.json`.
+file is atomically renamed within the same directory to `inbox/*.req.json`. Execution happens through `control/drain` or a daemon worker.
 
 ```bash
 api="$CTX_HOME/api/openai.chat"

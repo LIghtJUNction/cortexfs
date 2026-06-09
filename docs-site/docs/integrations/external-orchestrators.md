@@ -26,4 +26,4 @@ MCP 调用        rename to mcp/tool/<server>.<tool>/invoke/inbox/<id>.req.json
 
 ## 不要新增项目专属根目录
 
-外部编排器如果需要表达自己的 run、step、workflow，应写进请求 JSON、thread metadata 或 audit subject/agent context。不要要求 CortexFS 增加项目专属顶层目录。
+外部编排器如果需要表达自己的 run、step、workflow，应写进请求 JSON、thread metadata 或 audit subject/agent context。不要要求 CortexFS 增加项目专属顶层目录，也不要要求 `chan/`、`job/`、`hook/` 这类第二套执行抽象。

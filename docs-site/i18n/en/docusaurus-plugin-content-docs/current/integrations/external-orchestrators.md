@@ -20,3 +20,6 @@ training export      read home/<uid>/export/*.jsonl
 
 Do not hard-code MVP fixtures such as `home/1000`, `agent/helper`, or
 `ext/chat/room/888888`.
+
+
+If an orchestrator needs run, step, or workflow state, store it in request JSON, thread metadata, audit context, or the orchestrator's own state store. Do not ask CortexFS to add project-specific top-level directories, or second execution abstractions such as `chan/`, `job/`, or `hook/`.

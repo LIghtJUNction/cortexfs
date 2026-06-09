@@ -12,7 +12,6 @@ title: 顶层目录
   cap/
   format/
   provider/
-  chan/
   model/
   home/
   group/
@@ -38,7 +37,6 @@ status        全局状态
 cap/          全局能力列表
 format/       API 协议格式
 provider/     后端提供商和账号实例
-chan/         New API 风格渠道控制面
 model/        全局模型索引
 home/         类 /home 的用户入口
 group/        本机组入口
@@ -56,3 +54,5 @@ db/           PostgreSQL/SQLite 等结构化后端
 audit/        全局审计视图
 control/      全局控制节点
 ```
+
+不提供 `/ctx/chan`、`home/<uid>/job`、`home/<uid>/hook` 或 `workflow/`。中转站或账号实例属于 `provider/`；路由属于 `home/<uid>/route/`；外部任务和触发器直接写入通用 inbox 并通过 rename 提交。挂载树不是可扩展数据目录；对未声明 ABI 目录执行 `mkdir` 会返回 EROFS。

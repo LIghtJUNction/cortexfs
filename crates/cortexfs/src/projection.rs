@@ -192,11 +192,6 @@ impl NodeTreeBuilder {
             self.add_configured_provider(providers, provider);
         }
 
-        let chans = self.add_dir(ROOT_INODE, "chan");
-        self.add_file(chans, "count", "0\n");
-        self.add_file(chans, "list", "");
-        self.add_file(chans, "localurl", LOCAL_API_BASE_URL_TEXT);
-
         let models = self.add_dir(ROOT_INODE, "model");
         self.add_global_models_index(models);
 
@@ -397,12 +392,6 @@ impl NodeTreeBuilder {
         self.add_file(exports, "dedupe", "fingerprint\n");
         self.add_dir(exports, "filter");
         self.add_space_convert_projection(user);
-        let jobs = self.add_dir(user, "job");
-        self.add_file(jobs, "count", "0\n");
-        self.add_file(jobs, "list", "");
-        let hooks = self.add_dir(user, "hook");
-        self.add_file(hooks, "count", "0\n");
-        self.add_file(hooks, "list", "");
         self.add_dir(user, "control");
         self.add_feedback_projection(user);
         self.add_batch_projection(user);

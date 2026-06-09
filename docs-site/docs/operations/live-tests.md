@@ -4,7 +4,7 @@ title: 实时测试
 
 # 实时测试
 
-仓库包含 ignored live test，用本机轻量模型 fixture 验证 provider adapter 和 daemon execution plane。
+仓库包含 ignored live tests，用本机轻量模型 fixture 验证 provider adapter、daemon execution plane 和文件式 pipeline。live test 不依赖外部云 API。
 
 当前 fixture：
 
@@ -12,13 +12,13 @@ title: 实时测试
 smollm2:135m
 ```
 
-确认模型存在：
+运行前确认 Ollama 可达且模型存在：
 
 ```bash
 ollama list
 ```
 
-如果没有，拉取精确 fixture：
+如果没有 `smollm2:135m`，先提示用户安装/拉取；不要静默换模型。需要拉取时使用精确 fixture：
 
 ```bash
 ollama pull smollm2:135m

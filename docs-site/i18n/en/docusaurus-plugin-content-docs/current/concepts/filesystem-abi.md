@@ -12,10 +12,16 @@ semantics.
 
 - Top-level directories use short singular nouns, such as `provider/` and `model/`.
 - Small configuration values are small text files.
+- Ordinary `write()` calls only update file contents.
+- Same-directory atomic rename to `*.req.json` is the submission boundary.
 - Native API requests and responses are JSON.
 - Messages, audit streams, and exports are JSONL.
 - Sockets are low-latency fast paths, not the source of truth.
 - Slow work enters the daemon/execution plane.
+- CortexFS does not expose `chan/`, `job/`, `hook/`, or `workflow/` as second
+  submission or orchestration ABIs.
+- The mounted tree is not an extensible data directory; `mkdir` cannot create
+  undeclared ABI directories and must return EROFS.
 
 ## File Kinds
 

@@ -4,8 +4,7 @@ title: Provider Instances
 
 # Provider Instances
 
-Multiple `base_url + key` pairs should be represented as multiple provider
-instances.
+A provider is a backend instance, not a vendor brand and not a `/ctx/chan` compatibility alias. Multiple `url + secret ref + format/model` combinations should be represented as multiple `provider/<id>` entries. Route selection is exposed under `home/<uid>/route/<format>/`.
 
 ```text
 provider/<id>/
@@ -17,16 +16,20 @@ provider/<id>/
     current
     effective
     source
-  auth_scheme
-  account_type
+  auth
+  acct
   enabled/
+    default
+    current
+    effective
+    source
   priority
   health/
   secrets/
   model/
 ```
 
-Configure URLs:
+## Configure URL
 
 ```bash
 printf 'https://api.openai.com/v1\n' > /ctx/provider/openai-main/url/current
@@ -39,3 +42,12 @@ Read effective URL:
 cat /ctx/provider/openai-main/url/effective
 cat /ctx/provider/openai-main/url/source
 ```
+
+## Enable or disable
+
+```bash
+printf '1\n' > /ctx/provider/openai-main/enabled/current
+printf '0\n' > /ctx/provider/relay-openai/enabled/current
+```
+
+User policy still controls whether an enabled provider is visible to a space.

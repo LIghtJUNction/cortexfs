@@ -1,199 +1,54 @@
 ---
-title: 替代 New API
+title: Provider/Route 替代 Channel
 ---
 
-# 替代 New API
+# Provider/Route 替代 Channel
 
-CortexFS 的目标不是做 provider demo，而是替代 New API 这一类本地网关控制面。
-
-默认状态必须是零后端：
+CortexFS 不再提供 `/ctx/chan`。之前的 channel 概念拆成两个已有文件对象：
 
 ```text
-/ctx/provider/list   空
-/ctx/model/list      空
-/ctx/chan/list       空
+provider/<id>/          一个后端实例：URL、账号类型、格式、健康、模型、secret 状态
+home/<uid>/route/<fmt>/ 当前用户对某个 API format 的路由结果
 ```
 
-只有用户显式配置后才出现渠道、模型和路由。
+这样不会在 provider 和 route 之外再造一套“渠道”抽象。
 
-## 文件式接入渠道
-
-接入中转站只通过挂载树文件操作完成。以 `https://api.fengying.xin` 为例：
-
-先把真实 key 放到本机 `.env`，不要提交到 Git：
+## 配置后端实例
 
 ```bash
-mkdir -p ~/.config/cortexfs
-printf 'FENGYING_API_KEY=sk-...\n' > ~/.config/cortexfs/.env
-chmod 600 ~/.config/cortexfs/.env
-cortex restart
+cat /ctx/provider/list
+cat /ctx/provider/openai-main/format
+cat /ctx/provider/openai-main/url/effective
+cat /ctx/provider/openai-main/secrets/status
 ```
 
-仓库内临时测试也可以使用根目录 `.env`，该文件已被 `.gitignore` 忽略：
+开发期可以通过 provider 的小文本控制节点调整运行态视图：
 
 ```bash
-printf 'FENGYING_API_KEY=sk-...\n' > .env
+printf 'https://relay.example.com/v1\n' > /ctx/provider/openai-main/url/current
+printf '1\n' > /ctx/provider/openai-main/enabled/current
 ```
 
-然后通过 `/ctx` 文件操作创建 channel：
+真实 key 不进入挂载树；挂载树只暴露 secret 状态和 key id。
+
+## 观察路由
 
 ```bash
-mkdir /ctx/chan/fengying
-printf 'https://api.fengying.xin\n' > /ctx/chan/fengying/url
-printf 'env:FENGYING_API_KEY\n' > /ctx/chan/fengying/keyref
-printf 'openai.chat\nopenai.responses\n' > /ctx/chan/fengying/fmt
-printf '*\n' > /ctx/chan/fengying/mod
-printf '1\n' > /ctx/chan/fengying/enabled
-
-cat /ctx/chan/fengying/status
-cat /ctx/chan/list
+CTX_HOME=/ctx/home/$(id -u)
+cat "$CTX_HOME/route/openai.chat/provider"
+cat "$CTX_HOME/route/openai.chat/model"
+cat "$CTX_HOME/route/openai.chat/reason"
 ```
 
-`keyref` 是 secret 引用，不是明文 key。上例表示真实 key 从环境变量 `FENGYING_API_KEY` 或后续 daemon secret store 解析；挂载树不会展示真实 key。
+## 提交请求
 
-本地标准接口从挂载树读取：
+所有外部网关、workflow、bot bridge 都走统一文件提交：
 
 ```bash
-cat /ctx/chan/fengying/localurl
-cat /ctx/home/$(id -u)/api/http/localurl
+api="$CTX_HOME/api/openai.chat"
+printf '%s\n' '{"messages":[{"role":"user","content":"hello"}]}' > "$api/inbox/001.tmp"
+mv "$api/inbox/001.tmp" "$api/inbox/001.req.json"
+cat "$api/outbox/001.fingerprint"
 ```
 
-当前值为：
-
-```text
-http://127.0.0.1:6185/v1
-```
-
-当前已实现的是文件 ABI 和本地入口发现；真正监听 `6185` 并把请求转发到上游的 HTTP daemon 仍属于后续运行面工作。用户脚本应该通过 `localurl` 发现地址，而不是硬编码。
-
-## 本地统一入口
-
-对外只暴露一个本地标准入口：
-
-```text
-http://127.0.0.1:6185/v1
-```
-
-兼容入口：
-
-```text
-GET  /v1/models
-POST /v1/chat/completions
-POST /v1/responses
-POST /v1/messages
-POST /v1/generateContent
-```
-
-所有入口进入同一管线：
-
-```text
-parse
-norm
-route
-policy
-key
-send
-store
-log
-bill
-```
-
-不能存在绕过 policy、key、log、bill 的旁路。
-
-## 短命名
-
-对外 ABI 使用短词，避免下划线：
-
-```text
-chan     渠道，一个 url + keyref + fmt + model 集合
-url      上游地址
-keyref   密钥引用，不是明文 key
-fmt      协议格式
-mod      模型名
-grp      用户组
-tok      本地访问令牌
-quota    额度
-ratio    计费倍率
-prio     fallback 优先级
-wt       同优先级权重
-fb       fallback 策略
-log      请求日志
-```
-
-## 控制面
-
-文件 ABI 应映射到这些 New API 等价能力：
-
-```text
-chan/
-  count
-  list
-  <id>/
-    url
-    fmt
-    keyref
-    mod/
-    grp
-    ratio
-    prio
-    wt
-    state
-    health/
-
-tok/
-  count
-  list
-  <id>/
-    name
-    grp
-    quota
-    state
-
-route/
-  openai.chat/
-    fb
-    chan
-    mod
-    why
-
-log/
-  req.jsonl
-  bill.jsonl
-```
-
-旧的 `provider/` 可以保留为兼容视图，但核心控制面应该收敛到 `chan/`。
-
-## Fallback
-
-`fb` 是可配置策略，不是硬编码分支。
-
-基础策略：
-
-```text
-prio    先选最高可用优先级
-wt      同优先级按权重分流
-health  跳过 down、限流、超额、缺 key 的 chan
-retry   按策略重试同级或下级
-```
-
-例子：
-
-```text
-chan/openai-a prio=100 wt=80
-chan/openai-b prio=100 wt=20
-chan/kimi-a   prio=80  wt=100
-```
-
-## 持久化
-
-通过 `/ctx/chan/<id>` 写入的 channel 会写穿到本地持久存储：
-
-```text
-~/.config/cortexfs/chan.d/*.conf
-~/.config/cortexfs/tok.d/*.conf
-~/.config/cortexfs/.env
-```
-
-当前已实现 `chan.d/*.conf`：挂载启动时自动读取，卸载/重启后 channel 仍会恢复。开发期刷新仍以 Git commit 和重新挂载为边界；不会新增后台监听、轮询或热加载子命令。
-
-`chan.d` 只保存 `keyref`，不保存明文 key。真实 secret 由 systemd `EnvironmentFile=~/.config/cortexfs/.env`、keyring、pass、sops 或后续 daemon secret store 解析。
+CortexFS 的本地 HTTP/UDS 入口也必须进入同一条 provider、route、policy、store、audit 管线，不能绕过文件 ABI 产生另一套事实。

@@ -6,11 +6,16 @@ CortexFS 是一个面向 AI API、Agent、工具调用、MCP、Skills、记忆�
 
 `cortexfs` 只做 FUSE/VFS 投影。`cortexd` 负责执行：网络 API 调用、provider 路由、MCP 通信、tool loop、skill 解析、权限决策、审计、缓存、记忆检索、训练数据导出和集群调度。
 
+设计必须克制：不要因为上层产品里有“channel”“job”“hook”“workflow”等名词，就把它们变成新的 ABI 目录。CortexFS 的核心提交语义是统一的文件队列：写临时文件、同目录原子 rename 成 `*.req.json`、从 outbox 读结果、向 audit 追加事实。
+
 ## 1. 基本原则
 
 - FUSE 回调不做远程 API 调用。
 - FUSE 回调不做长时间模型发现、向量检索、MCP 调用或 tool execution。
 - 所有慢操作进入 daemon 队列。
+- 普通 `write()` 只修改文件内容；只有同目录原子 `rename` 到 `*.req.json` 才表示提交。
+- 所有提交入口共享同一条 staging、rename、queue、outbox、audit 语义。
+- provider/model 设计必须保持中立；测试 fixture 不能变成核心默认路径、核心能力或特殊分支。
 - 文件路径是命名空间，不是安全边界。
 - 安全决策基于 host credential、external subject、object context 和 policy。
 - 小配置使用小文本属性文件。
@@ -73,7 +78,18 @@ audit/        全局审计视图
 control/      全局控制节点
 ```
 
-开发期只保留当前 ABI。ABI 只暴露上面的单数、短名词目录；同一对象不得再暴露第二套入口或复数形式。
+开发期只保留当前 ABI。ABI 只暴露上面的单数、短名词目录；同一对象不得再暴露第二套入口或复数形式。挂载树不是可扩展数据目录；对未声明 ABI 目录执行 `mkdir` 必须返回 EROFS，不能在运行态动态创建新的顶层目录或用户子入口。
+
+明确不提供这些入口：
+
+```text
+chan/              provider/route 的第二套抽象
+home/<uid>/job/    上层任务 DSL
+home/<uid>/hook/   上层触发器 DSL
+workflow/          上层编排 DSL
+```
+
+如果外部系统需要“任务”“触发器”“步骤”，应把它们写入请求 JSON、thread metadata、external subject 或自己的状态库，然后通过通用 inbox/outbox 提交。
 
 ## 3. 文件类型约定
 
@@ -338,7 +354,8 @@ outbox/001.error
 规则：
 
 - `write()` 不触发 API。
-- rename 到 `inbox/*.req.json` 才触发提交。
+- 同目录 rename 到 `inbox/*.req.json` 才触发提交。
+- rename 只负责入队、计算 fingerprint、记录 route metadata 和 audit；FUSE 回调不得在提交路径里调用远程 provider。
 - request id 是幂等 key。
 - 请求和响应保持原生 API JSON。
 - 每次请求都写 audit。
@@ -1243,6 +1260,8 @@ thread/tool-loop update when bound
 外部软件不得假设 provider id、model id、agent id、uid、平台 subject 或 demo thread 名称。`home/1000`、`agent/helper`、`ext/chat/room/888888` 这类路径只是示例；正式 ABI 模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`。
 
 外部编排器如果需要表达自己的 run/step，应把它写进请求 JSON、thread metadata 或 audit subject/agent context；不要要求 CortexFS 增加 `<project>/`、`workflow/`、`pipeline/` 这类上层项目目录。CortexFS 只提供 provider、format、policy、tool、memory、audit 和 export 的通用执行面。
+
+同理，不要要求 CortexFS 增加 `chan/`、`job/` 或 `hook/`。中转站和账号实例是 `provider/`，路由选择是 `home/<uid>/route/`，外部触发器直接写对应 inbox。
 
 socket 只能降低延迟，不能改变语义。socket 接入必须校验 peer credential，进入同一 policy/route/store/audit/export 管线。文件树是可审计 source of truth。
 

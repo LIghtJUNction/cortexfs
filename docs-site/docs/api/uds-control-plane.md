@@ -20,32 +20,19 @@ UDS control plane   .sock 双向 IPC、流式输出、telemetry、FD 传递
 ```bash
 cat /ctx/home/$(id -u)/api/unix/path
 ls -l /ctx/home/$(id -u)/api/unix/api.sock
+ls -l /ctx/home/$(id -u)/thread/demo/io.sock
 ```
 
-未来会增加会话级 stream socket：
-
-```text
-home/<uid>/thread/<id>/io.sock
-home/<uid>/job/<id>/stream.sock
-```
+不会增加 `home/<uid>/job/<id>/stream.sock`。持续会话走 `thread/<id>/io.sock`；一次性任务走 inbox/outbox。
 
 ## 设计要求
 
 - FUSE 线程不做远程 API 调用。
-- 网络请求进入 Tokio worker 线程池。
+- 网络请求进入 daemon 队列或 worker 线程池。
 - FUSE 与 API worker 通过队列通信。
 - `.sock` RPC 可以承载高频控制、状态查询和流式 token。
 - UDS 可以用 `SCM_RIGHTS` 接收外部进程传入的文件描述符，避免大文件经 FUSE 复制。
-- stream socket 支持双向交互，允许中断、追加输入和工具结果回传。
-- telemetry 通过 socket 读取运行态延迟、缓存命中、额度和队列深度。
-
-## 未来流式体验
-
-```bash
-nc -U /ctx/home/$(id -u)/job/translate.zh/stream.sock
-```
-
-LLM 返回第一批 token 后立即写入 socket。终端会像打字机一样看到增量输出。
+- socket 必须写同一 store、audit 和 export，不能形成旁路。
 
 ## 约束
 

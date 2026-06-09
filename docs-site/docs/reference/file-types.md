@@ -36,4 +36,4 @@ printf '%s\n' "$json" > "$inbox/001.tmp"
 mv "$inbox/001.tmp" "$inbox/001.req.json"
 ```
 
-普通 write 不触发 provider 调用。
+普通 write 不触发 provider 调用；同目录 rename 只负责入队、fingerprint、route metadata 和 audit，远程 provider 调用由 `control/drain` 或 daemon worker 执行。
