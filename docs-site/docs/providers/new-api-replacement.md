@@ -186,7 +186,7 @@ chan/kimi-a   prio=80  wt=100
 
 ## 持久化
 
-当前版本中，通过 `/ctx/chan/<id>` 写入的 channel 是运行时投影，卸载或重启后会消失。持久化目标是把配置落到本地存储：
+通过 `/ctx/chan/<id>` 写入的 channel 会写穿到本地持久存储：
 
 ```text
 ~/.config/cortexfs/chan.d/*.conf
@@ -194,4 +194,6 @@ chan/kimi-a   prio=80  wt=100
 ~/.config/cortexfs/.env
 ```
 
-key 不落明文，只保存 `keyref`。真实 secret 由 keyring、pass、sops 或 daemon secret store 解析。
+当前已实现 `chan.d/*.conf`：挂载启动时自动读取，卸载/重启后 channel 仍会恢复。开发期刷新仍以 Git commit 和重新挂载为边界；不会新增后台监听、轮询或热加载子命令。
+
+`chan.d` 只保存 `keyref`，不保存明文 key。真实 secret 由 systemd `EnvironmentFile=~/.config/cortexfs/.env`、keyring、pass、sops 或后续 daemon secret store 解析。

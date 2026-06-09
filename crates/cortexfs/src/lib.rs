@@ -31,6 +31,7 @@ use fuse3::raw::prelude::{DirectoryEntry, DirectoryEntryPlus, FileAttr, ReplySta
 use fuse3::{FileType, Inode};
 use std::ffi::{OsStr, OsString};
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Mutex;
 
@@ -221,11 +222,23 @@ struct CortexFs {
 
 impl CortexFs {
     fn new() -> Self {
+        Self::with_chan_config_dir(default_chan_config_dir())
+    }
+
+    #[cfg(test)]
+    fn new_with_chan_config_dir(config_dir: PathBuf) -> Self {
+        Self::with_chan_config_dir(Some(config_dir))
+    }
+
+    fn with_chan_config_dir(chan_config_dir: Option<PathBuf>) -> Self {
         let tree = NodeTreeBuilder::new().build_design_projection();
         let parents = RuntimeParents::from_tree(&tree);
         Self {
             tree,
-            runtime: Mutex::new(RuntimeState::new(&parents)),
+            runtime: Mutex::new(RuntimeState::new_with_chan_config_dir(
+                &parents,
+                chan_config_dir,
+            )),
             owner_uid: nix::unistd::getuid().as_raw(),
             owner_gid: nix::unistd::getgid().as_raw(),
         }
@@ -1094,6 +1107,30 @@ impl CortexFs {
     }
 }
 
+#[cfg(test)]
+fn default_chan_config_dir() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(test))]
+fn default_chan_config_dir() -> Option<PathBuf> {
+    config_root().map(|root| root.join("chan.d"))
+}
+
+#[cfg(not(test))]
+fn config_root() -> Option<PathBuf> {
+    env_path("CORTEXFS_CONFIG_DIR")
+        .or_else(|| env_path("XDG_CONFIG_HOME").map(|path| path.join("cortexfs")))
+        .or_else(|| env_path("HOME").map(|path| path.join(".config").join("cortexfs")))
+}
+
+#[cfg(not(test))]
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 #[derive(Debug, Clone)]
 enum ResolvedNode {
     Static(Node),
@@ -1120,6 +1157,15 @@ enum ChanField {
 enum JobField {
     Spec,
     Req,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct ChanConfig {
+    url: String,
+    keyref: String,
+    fmt: String,
+    model: String,
+    enabled: String,
 }
 
 impl ResolvedNode {
@@ -1889,6 +1935,13 @@ impl RuntimeState {
             return Err(libc::EEXIST.into());
         }
 
+        let dir = self.materialize_chan(parent, name);
+        self.persist_chan_config(name)?;
+        self.append_audit("chan", name, "created");
+        Ok(dir)
+    }
+
+    fn materialize_chan(&mut self, parent: Inode, name: &str) -> Inode {
         let dir = self.add_dynamic_dir(parent, name);
         self.add_dynamic_file_owned(dir, "id", format!("{name}\n"));
         let url = self.add_dynamic_file_owned(dir, "url", "\n");
@@ -1912,8 +1965,7 @@ impl RuntimeState {
         );
         self.refresh_chan_index();
         self.refresh_chan_status(name);
-        self.append_audit("chan", name, "created");
-        Ok(dir)
+        dir
     }
 
     fn create_job(&mut self, parent: Inode, name: &str) -> fuse3::Result<Inode> {
@@ -2385,6 +2437,7 @@ impl RuntimeState {
         let value = normalize_chan_value(field, data)?;
         self.update_dynamic_file(inode, value);
         self.refresh_chan_status(&chan);
+        self.persist_chan_config(&chan)?;
         self.append_audit("chan", &chan, "configured");
         u32::try_from(data.len())
             .map(Some)
@@ -2447,6 +2500,88 @@ impl RuntimeState {
             "ready\n"
         };
         self.update_dynamic_file(inodes.status, status);
+    }
+
+    fn load_persisted_chans(&mut self) {
+        let Some(chan_parent) = self.chans_parent else {
+            return;
+        };
+        let Some(config_dir) = self.chan_config_dir.clone() else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(config_dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(OsStr::to_str) != Some("conf") {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(OsStr::to_str) else {
+                continue;
+            };
+            if validate_chan_id(id).is_err()
+                || self.chans.contains_key(id)
+                || self.lookup_child(chan_parent, id).is_some()
+            {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(config) = parse_chan_config(&content) else {
+                continue;
+            };
+            self.materialize_chan(chan_parent, id);
+            self.apply_chan_config(id, &config);
+            self.append_audit("chan", id, "loaded");
+        }
+    }
+
+    fn apply_chan_config(&mut self, chan: &str, config: &ChanConfig) {
+        let Some(inodes) = self.chans.get(chan).copied() else {
+            return;
+        };
+        self.update_dynamic_file(inodes.url, config.url.clone());
+        self.update_dynamic_file(inodes.keyref, config.keyref.clone());
+        self.update_dynamic_file(inodes.fmt, config.fmt.clone());
+        self.update_dynamic_file(inodes.model, config.model.clone());
+        self.update_dynamic_file(inodes.enabled, config.enabled.clone());
+        self.refresh_chan_status(chan);
+    }
+
+    fn persist_chan_config(&self, chan: &str) -> fuse3::Result<()> {
+        let Some(config_dir) = self.chan_config_dir.as_deref() else {
+            return Ok(());
+        };
+        let Some(config) = self.chan_config(chan) else {
+            return Err(fuse3::Errno::new_not_exist());
+        };
+        std::fs::create_dir_all(config_dir).map_err(|_error| libc::EIO)?;
+        let path = chan_config_path(config_dir, chan)?;
+        std::fs::write(&path, render_chan_config(chan, &config)).map_err(|_error| libc::EIO)?;
+        set_secret_file_mode(&path).map_err(|_error| libc::EIO)?;
+        Ok(())
+    }
+
+    fn chan_config(&self, chan: &str) -> Option<ChanConfig> {
+        let inodes = self.chans.get(chan).copied()?;
+        Some(ChanConfig {
+            url: self.dynamic_text(inodes.url).unwrap_or_default().to_owned(),
+            keyref: self
+                .dynamic_text(inodes.keyref)
+                .unwrap_or_default()
+                .to_owned(),
+            fmt: self.dynamic_text(inodes.fmt).unwrap_or_default().to_owned(),
+            model: self
+                .dynamic_text(inodes.model)
+                .unwrap_or_default()
+                .to_owned(),
+            enabled: self
+                .dynamic_text(inodes.enabled)
+                .unwrap_or_default()
+                .to_owned(),
+        })
     }
 
     fn dynamic_text(&self, inode: Inode) -> Option<&str> {
@@ -2650,7 +2785,7 @@ impl RuntimeState {
         let Some(inode) = self.staged.remove(&(parent, name.to_owned())) else {
             return Err(fuse3::Errno::new_not_exist());
         };
-        if !std::path::Path::new(new_name)
+        if !Path::new(new_name)
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("claim"))
         {
@@ -2691,7 +2826,7 @@ impl RuntimeState {
         let Some(inode) = self.staged.remove(&(parent, name.to_owned())) else {
             return Err(fuse3::Errno::new_not_exist());
         };
-        if !std::path::Path::new(new_name)
+        if !Path::new(new_name)
             .extension()
             .is_some_and(|extension| extension.eq_ignore_ascii_case("lease"))
         {
@@ -4034,6 +4169,88 @@ fn normalize_chan_value(field: ChanField, data: &[u8]) -> fuse3::Result<String> 
             _other => Err(libc::EINVAL.into()),
         },
     }
+}
+
+fn default_persisted_chan_config() -> ChanConfig {
+    ChanConfig {
+        url: "\n".to_owned(),
+        keyref: "\n".to_owned(),
+        fmt: "openai.chat\nopenai.responses\n".to_owned(),
+        model: "*\n".to_owned(),
+        enabled: "1\n".to_owned(),
+    }
+}
+
+fn parse_chan_config(content: &str) -> fuse3::Result<ChanConfig> {
+    let mut config = default_persisted_chan_config();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (key, value) = trimmed.split_once('=').ok_or(libc::EINVAL)?;
+        match key.trim() {
+            "id" => {
+                validate_chan_id(value.trim())?;
+            }
+            "url" => {
+                config.url = normalize_chan_value(ChanField::Url, value.as_bytes())?;
+            }
+            "keyref" => {
+                config.keyref = normalize_chan_value(ChanField::Keyref, value.as_bytes())?;
+            }
+            "fmt" => {
+                let fmt = value.replace(',', "\n");
+                config.fmt = normalize_chan_value(ChanField::Fmt, fmt.as_bytes())?;
+            }
+            "mod" => {
+                config.model = normalize_chan_value(ChanField::Model, value.as_bytes())?;
+            }
+            "enabled" => {
+                config.enabled = normalize_chan_value(ChanField::Enabled, value.as_bytes())?;
+            }
+            _other => return Err(libc::EINVAL.into()),
+        }
+    }
+    Ok(config)
+}
+
+fn render_chan_config(id: &str, config: &ChanConfig) -> String {
+    let fmt = config
+        .fmt
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "# cortexfs channel config\nid={}\nurl={}\nkeyref={}\nfmt={}\nmod={}\nenabled={}\n",
+        id,
+        config.url.trim(),
+        config.keyref.trim(),
+        fmt,
+        config.model.trim(),
+        config.enabled.trim(),
+    )
+}
+
+fn chan_config_path(config_dir: &Path, chan: &str) -> fuse3::Result<PathBuf> {
+    validate_chan_id(chan)?;
+    Ok(config_dir.join(format!("{chan}.conf")))
+}
+
+#[cfg(unix)]
+fn set_secret_file_mode(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_mode(0o600);
+    std::fs::set_permissions(path, permissions)
+}
+
+#[cfg(not(unix))]
+fn set_secret_file_mode(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn secret_active_id(provider: &str) -> String {
