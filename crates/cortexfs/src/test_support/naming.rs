@@ -3,9 +3,8 @@ use fuse3::FileType;
 use std::ffi::OsStr;
 
 const ROOT_ABI_NAMES: &[&str] = &[
-    "status", "cap", "format", "provider", "chan", "model", "home", "group", "shared", "ext",
-    "space", "agent", "cluster", "mcp", "skill", "tool", "memory", "vector", "db", "audit",
-    "control",
+    "status", "cap", "format", "provider", "model", "home", "group", "shared", "ext", "space",
+    "agent", "cluster", "mcp", "skill", "tool", "memory", "vector", "db", "audit", "control",
 ];
 
 const FORBIDDEN_ROOT_NAMES: &[&str] = &[
@@ -13,6 +12,8 @@ const FORBIDDEN_ROOT_NAMES: &[&str] = &[
     "capabilities",
     "formats",
     "providers",
+    "chan",
+    "channels",
     "models",
     "spaces",
     "agents",
@@ -91,6 +92,24 @@ fn root_names_are_single_canonical_abi_entries() -> fuse3::Result<()> {
         );
     }
     Ok(())
+}
+
+#[test]
+fn provider_route_and_rename_submission_are_the_only_execution_abstractions() {
+    let fs = CortexFs::new();
+
+    assert!(
+        fs.lookup_path(["chan"]).is_none(),
+        "runtime channel must not be a second provider/route abstraction"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "job"]).is_none(),
+        "jobs must be represented as requests submitted through inbox rename"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "hook"]).is_none(),
+        "hooks must be external writers that submit files, not a CortexFS workflow ABI"
+    );
 }
 
 #[test]

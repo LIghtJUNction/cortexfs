@@ -7,7 +7,8 @@ title: Overview
 
 CortexFS is a provider-neutral Linux FUSE filesystem for AI API infrastructure.
 It exposes API formats, provider instances, models, requests, responses,
-threads, tools, memory, audit, and controls as ordinary filesystem objects.
+threads, tools, MCP, skills, agents, memory, cluster state, audit, and controls
+as ordinary filesystem objects.
 
 The mount tree is the ABI:
 
@@ -19,11 +20,27 @@ The mount tree is the ABI:
   provider/
   model/
   home/
+  group/
+  shared/
+  ext/
+  space/
+  agent/
+  cluster/
+  mcp/
+  skill/
   tool/
   memory/
+  vector/
+  db/
   audit/
   control/
 ```
+
+CortexFS has one core submission semantic: write a temporary file, atomically
+rename it in the same directory to `*.req.json`, read the result from outbox,
+and append facts to audit. `channel`, `job`, `hook`, and `workflow` are not core
+filesystem directories; external orchestrators should use the generic
+inbox/outbox contract.
 
 ## Quick Start
 
@@ -55,8 +72,14 @@ cat "$api/outbox/001.resp.json"
 
 ## Core Idea
 
-CortexFS separates API format, provider instance, model, route, policy, secret
-status, execution, audit, and export into inspectable filesystem objects.
+CortexFS separates:
 
-Secrets do not enter the mount tree. The filesystem exposes secret status and
-active key ids; real secret values should be resolved by `cortexd`.
+- `format/`: protocol shape, such as `openai.chat` or `anthropic.messages`.
+- `provider/`: backend or account instances, including official APIs, relays,
+  and local runtimes.
+- `model/`: model metadata under provider scope.
+- `home/<uid>/route/`: user-visible routing decisions.
+- `audit/`: observability for requests, routes, policy, execution, and export.
+
+Secrets do not enter the mounted tree. The filesystem only exposes secret
+status and active key IDs; real secret values should be resolved by `cortexd`.

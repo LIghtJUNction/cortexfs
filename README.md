@@ -7,6 +7,8 @@ format、provider、模型、请求、响应、对话线程、工具、MCP、ski
 
 很多挂载树中的文件并不会落盘。它们是由 `cortexfs`/`cortexd` 运行时投影出来的 in-memory 虚拟文件，只在挂载实例中存在。这一点参考 `/proc` 和 `sysfs`：文件系统是内核/VFS 风格的状态视图和控制面，不是普通数据目录。
 
+CortexFS 的核心提交语义只有一条：先写临时文件，再用同目录原子 `rename` 提交为 `*.req.json`，结果从 outbox 读取，事实进入 audit。它不再把 channel、job、hook 作为新的文件系统抽象；provider、route、inbox、outbox 和 audit 已经足够表达这些能力。
+
 > 当前版本：`0.1.0`
 
 ## 定位
@@ -20,6 +22,15 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 现实中 Kimi、MiniMax、中转站、本地模型服务可能都支持 `openai.chat` 或 `openai.responses`；CortexFS 不把厂商品牌硬编码成核心路径，而是让 provider 声明自己支持哪些 format、模型、账号类型、健康状态和路由策略。
 
+## 项目边界
+
+- `cortexfs` 只做 FUSE/VFS 投影；远程 provider 调用、MCP 通信、tool loop、记忆检索、审计导出和调度执行属于 `cortexd`/execution plane。
+- 文件系统树是公开 ABI，不是产品 UI。路径、文件名、读写语义、权限语义和错误语义必须稳定、可文档化、可测试。
+- 提交入口只保留通用文件队列：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读结果，向 audit 追加事实。
+- 不把 channel、job、hook、workflow 做成核心目录；外部编排器应把 run、step、trigger 等状态放进请求 JSON、thread metadata、audit context 或自己的状态库。
+- provider/model 必须保持中立。本地 live test 当前使用 Ollama `smollm2:135m`，但它只是测试 fixture，不是核心默认 provider、核心能力或特殊分支。
+- 开发期刷新以 Git commit 为唯一事件边界；已挂载实例不会热更新，新 ABI 需要提交后重建并重新挂载。
+
 ## 首版能力
 
 `0.1.0` 建立了第一版可验证的 FUSE ABI、Rust workspace、严格 lint 规则和 provider-neutral 的运行时投影。
@@ -29,7 +40,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - FUSE 挂载树：`format`、`provider`、`model`、`home`、`group`、`shared`、`ext`、`space`、`agent`、`cluster`、`mcp`、`skill`、`tool`、`memory`、`vector`、`db`、`audit`、`control`。
 - API format：`openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
 - provider/model 发现：通过 `count`、`list`、`format`、`url/*`、`enabled/*`、`health/*`、`model/*` 等小文本文件读取。
-- 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json`，再由 `control/drain` 进入执行队列。
+- 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json` 入队，再由 `control/drain` 或 daemon worker 执行。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
 - thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path；MCP tool 调用会进入同一条 permission/tool call/tool result 轨迹。
 - cluster 任务骨架：`queue/default/{pending,running,done,failed}`、`task/<id>/state`、`events.jsonl`、失败任务 `retry` 控制节点。
@@ -49,6 +60,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - 完整 MCP server 生命周期管理。
 - 真正的集群调度、跨机器 worker、成本控制和重试系统。
 - 完整向量数据库/PG 持久化实现。
+- 内置 workflow/job/hook/channel DSL；外部编排器、systemd timer、cron、CI 或 webhook 应直接写入通用 inbox。
 - 非 Linux 平台支持。
 
 ## 文件系统形状
@@ -56,11 +68,11 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 挂载根目录当前形状：
 
 ```text
-  /
-    status
-    cap/
-    format/
-    provider/
+/
+  status
+  cap/
+  format/
+  provider/
   model/
   home/
   group/
@@ -79,7 +91,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
   control/
 ```
 
-开发期只保留当前 ABI。脚本和集成只能依赖上面这组单数、短名词目录；同一对象不能再暴露第二套入口或复数形式。
+开发期只保留当前 ABI。脚本和集成只能依赖上面这组单数、短名词目录；同一对象不能再暴露第二套入口或复数形式。挂载树不是可扩展数据目录；对未声明 ABI 目录执行 `mkdir` 会返回 EROFS。尤其不要依赖 `/ctx/chan`、`home/<uid>/job` 或 `home/<uid>/hook` 这类已移除的上层抽象。
 
 小文件约定：
 
@@ -199,7 +211,7 @@ cat "$CTX_HOME/route/openai.chat/reason"
 
 ## 文件式 API 调用
 
-CortexFS 的文件式提交规则是：普通 `write()` 只写入内容，不触发 provider；只有原子 rename 到 `inbox/*.req.json` 才表示提交。
+CortexFS 的文件式提交规则是：普通 `write()` 只写入内容，不触发 provider；只有同目录原子 rename 到 `inbox/*.req.json` 才表示提交。FUSE 回调只完成入队和派生元数据，不在 `rename()` 里调用远程 provider；执行由 `control/drain` 或后续 daemon worker 完成。
 
 ```bash
 mnt=tests/mounts/cortexfs
@@ -233,6 +245,8 @@ done
 printf '1\n' > "$mnt/control/drain"
 find "$api/outbox" -name '*.resp.json' -print -exec jq . {} \;
 ```
+
+外部触发器也走同一条路：systemd timer、cron、CI、webhook bridge 或 workflow engine 只需要把请求 JSON 写成临时文件，再 `mv` 到对应 inbox。CortexFS 不为它们新增 `job/`、`hook/`、`workflow/` 目录。
 
 ## Agent 可观测性
 
@@ -290,6 +304,8 @@ cat /ctx/audit/events.jsonl
 同一个请求无论来自文件、HTTP 还是 Unix socket，都必须进入同一条管线，并产生同一个 request id、fingerprint、route metadata、policy decision、audit event 和 export row。socket 只是低延迟 fast path，不是绕过文件 ABI 的旁路。
 
 不要写死 `home/1000`、`agent/helper`、`ext/chat/room/888888` 这类示例路径；正式模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`，并通过 `count`、`list`、`status`、`route`、`model` 等小文件发现实际可用对象。
+
+如果集成方需要表达“任务”“步骤”“触发器”，把这些字段放进请求 JSON、thread metadata 或外部系统自己的状态库；CortexFS 只负责通用的 provider/route/policy/queue/audit/export 执行面。
 
 ### Bun 客户端模板
 
@@ -440,7 +456,7 @@ cargo test --locked --workspace --all-targets --all-features
 额外静态检查：
 
 ```bash
-rg --files | rg '(^|/)mod\.rs$'
+rg --files --glob '!vendor/**' | rg '(^|/)mod\.rs$'
 rg -n "dev|watch|hot.?reload|poll|notify" README.md AGENTS.md crates .agents tests --glob '!vendor/**'
 git diff --check
 ```

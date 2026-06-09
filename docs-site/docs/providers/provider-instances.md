@@ -4,7 +4,7 @@ title: Provider 实例
 
 # Provider 实例
 
-多个 `url + keyref` 组合应该表示为多个 `chan`。`provider/` 是兼容视图，核心控制面应收敛到 `chan/`。
+Provider 是后端实例，不是厂商品牌，也不是 `/ctx/chan` 的兼容别名。多个 `url + secret ref + format/model` 组合应表示为多个 `provider/<id>`；路由选择由 `home/<uid>/route/<format>/` 暴露。
 
 ```text
 provider/<id>/
@@ -50,4 +50,4 @@ printf '1\n' > /ctx/provider/openai-main/enabled/current
 printf '0\n' > /ctx/provider/relay-openai/enabled/current
 ```
 
-User policy still controls whether an enabled provider is visible to a space.
+用户 policy 仍然控制 enabled provider 是否对某个 space 可见。

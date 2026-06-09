@@ -1,5 +1,7 @@
-use crate::{CortexFs, dir_entry};
+use crate::{CortexFs, ROOT_INODE, dir_entry};
 use fuse3::FileType;
+use fuse3::raw::prelude::{Filesystem, Request};
+use std::ffi::OsStr;
 
 #[test]
 fn xattr_exposes_cortex_security_context() -> fuse3::Result<()> {
@@ -69,4 +71,44 @@ fn statfs_reports_virtual_read_only_capacity() {
     assert_eq!(statfs.bsize, crate::STATFS_BLOCK_SIZE);
     assert_eq!(statfs.frsize, crate::STATFS_BLOCK_SIZE);
     assert_eq!(statfs.namelen, crate::STATFS_NAME_LENGTH);
+}
+
+#[tokio::test]
+async fn mkdir_cannot_create_runtime_abi_directories() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let home = fs.path_inode(["home", "1000"])?;
+
+    for (parent, name) in [
+        (ROOT_INODE, "chan"),
+        (ROOT_INODE, "workflow"),
+        (home, "job"),
+        (home, "hook"),
+    ] {
+        let result = fs
+            .mkdir(Request::default(), parent, OsStr::new(name), 0o755, 0)
+            .await;
+
+        assert_eq!(
+            result.map(|_reply| ()),
+            Err(fuse3::Errno::from(libc::EROFS))
+        );
+    }
+
+    assert!(
+        fs.lookup_path(["chan"]).is_none(),
+        "mkdir must not materialize a second provider/route abstraction"
+    );
+    assert!(
+        fs.lookup_path(["workflow"]).is_none(),
+        "mkdir must not materialize a workflow ABI"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "job"]).is_none(),
+        "mkdir must not materialize a job ABI"
+    );
+    assert!(
+        fs.lookup_path(["home", "1000", "hook"]).is_none(),
+        "mkdir must not materialize a hook ABI"
+    );
+    Ok(())
 }

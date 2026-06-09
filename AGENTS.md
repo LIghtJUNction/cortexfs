@@ -2,6 +2,8 @@
 请使用cargo add新增依赖，不要手动编辑文件添加依赖
 先去阅读规范（如有）：docs/DESIGN.md
 开发触发事件以 Git commit 为唯一边界；不要新增后台监听、轮询或热加载子命令。
+文件系统 ABI 只使用当前规范里的短单数顶层目录；不要新增 chan/job/hook/workflow 这类第二套提交或编排入口。
+统一提交语义是：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读取结果，向 audit 追加事实。
 
 测试约定：
 - FUSE 集成测试挂载点固定使用 `tests/mounts/cortexfs`。

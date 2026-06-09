@@ -1,49 +1,33 @@
 ---
-title: Structured Jobs
+title: Task Submission
 ---
 
-# Structured Jobs
+# Task Submission
 
-Structured jobs implement the “write a spec, write a request, read JSON output” workflow. Translation, extraction, classification, and rewriting should share this file ABI.
+CortexFS does not expose `home/<uid>/job` and does not define an internal job DSL. A task is just a request file: external software puts its task spec in JSON and submits it through the generic inbox/outbox path.
 
-## Shape
+Unified rule:
 
 ```text
-home/<uid>/job/
-  count
-  list
-  <id>/
-    spec
-    req
-    out.json
-    status
+write tmp file
+rename tmp -> <id>.req.json
+read outbox/<id>.resp.json or outbox/<id>.error
+read audit/events.jsonl
 ```
 
-`spec` is the small-text contract. `req` is the request input. After writing `req`, CortexFS generates `out.json` according to `spec`.
-
-## Translation Example
+## Example
 
 ```bash
-job="/ctx/home/$(id -u)/job/translate.zh"
-mkdir "$job"
+CTX_HOME="/ctx/home/$(id -u)"
+api="$CTX_HOME/api/openai.chat"
 
-cat > "$job/spec" <<'EOF'
-kind=translate
-from=en
-to=zh
-out=json
-fields=text,from,to,input
-EOF
+cat > "$api/inbox/translate-001.tmp" <<'JSON'
+{"messages":[{"role":"user","content":"Translate to zh-CN: hello world"}]}
+JSON
 
-printf 'hello world\n' > "$job/req"
-cat "$job/out.json"
-cat "$job/status"
+mv "$api/inbox/translate-001.tmp" "$api/inbox/translate-001.req.json"
+printf '1\n' > /ctx/control/drain
+cat "$api/outbox/translate-001.resp.json"
 ```
 
-Output:
-
-```json
-{"text":"你好，世界","from":"en","to":"zh","input":"hello world"}
-```
-
-The current implementation is synchronous and deterministic. The same ABI will later connect to the worker pool and streaming LLM output without changing user scripts.
+If a workflow engine needs run IDs, step IDs, input sources, or retry policies, store those in the request JSON, thread metadata, or the engine's own state store. CortexFS only provides the generic provider, route, policy, queue, outbox, audit, and export plane.

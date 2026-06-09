@@ -1,86 +1,30 @@
 ---
-title: Timers and Hooks
+title: External Triggers
 ---
 
-# Timers and Hooks
+# External Triggers
 
-CortexFS does not add background polling, hot reload, or an internal scheduler. Recommended split:
+CortexFS does not expose `home/<uid>/hook`. systemd timers, cron, git hooks, CI jobs, webhook bridges, and other external triggers should write the generic inbox directly and submit by atomic rename.
 
-```text
-systemd timer / cron / git hook / CI   trigger
-CortexFS hook file ABI                 input, output, status, log, audit
-cortexd                                future async execution plane
-```
-
-## Shape
+Recommended split:
 
 ```text
-home/<uid>/hook/
-  count
-  list
-  <id>/
-    trigger
-    spec
-    req
-    out.json
-    status
-    last
-    log.jsonl
+systemd timer / cron / CI / webhook   decides when to trigger
+CortexFS inbox/outbox                  receives requests and exposes results
+cortexd / control/drain                executes the queue
+CortexFS audit                         records facts
 ```
 
-`trigger` declares the external trigger source, for example `manual`, `systemd.timer`, `cron`, or `git.pre-commit`. CortexFS does not start a watcher because of it.
-
-`spec` describes what to do. The first implementation supports binding a hook to a structured job:
-
-```text
-kind=job
-job=translate.zh
-from=en
-to=zh
-fields=text,from,to,input
-```
-
-Writing `req` generates `out.json` and updates `status`, `last`, and `log.jsonl`.
-
-## Example: systemd timer translation
-
-Create the hook:
-
-```bash
-hook="/ctx/home/$(id -u)/hook/daily-translate"
-mkdir "$hook"
-
-printf 'systemd.timer\n' > "$hook/trigger"
-cat > "$hook/spec" <<'EOF'
-kind=job
-job=translate.zh
-from=en
-to=zh
-fields=text,from,to,input
-EOF
-```
-
-The external timer only writes the request:
+## systemd timer example
 
 ```bash
 systemd-run --user --on-calendar='daily' \
-  sh -c 'cat ~/todo.txt > /ctx/home/$(id -u)/hook/daily-translate/req'
+  sh -lc 'CTX_HOME=/ctx/home/$(id -u); api=$CTX_HOME/api/openai.chat; id=daily-$(date +%Y%m%d); printf %s "{\"messages\":[{\"role\":\"user\",\"content\":\"Summarize ~/todo.txt\"}]}" > "$api/inbox/$id.tmp"; mv "$api/inbox/$id.tmp" "$api/inbox/$id.req.json"'
 ```
 
-Read the result:
+Read the result through the same outbox and audit files:
 
 ```bash
-cat "$hook/out.json"
-cat "$hook/status"
-cat "$hook/log.jsonl"
+cat /ctx/home/$(id -u)/api/openai.chat/outbox/<id>.resp.json
+cat /ctx/audit/events.jsonl
 ```
-
-## Persistence
-
-The hook `trigger` and `spec` are written through to:
-
-```text
-~/.config/cortexfs/hook.d/<id>.conf
-```
-
-They are restored when the mount starts. `req`, `out.json`, `status`, `last`, and `log.jsonl` are runtime projections.

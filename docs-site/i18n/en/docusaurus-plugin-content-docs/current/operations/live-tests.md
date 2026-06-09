@@ -5,7 +5,8 @@ title: Live Tests
 # Live Tests
 
 The repository includes ignored live tests using a local lightweight model
-fixture.
+fixture to verify provider adapters, the daemon execution plane, and the file
+pipeline. Live tests do not depend on external cloud APIs.
 
 Current fixture:
 
@@ -13,13 +14,14 @@ Current fixture:
 smollm2:135m
 ```
 
-Check it:
+Before running, confirm that Ollama is reachable and the model exists:
 
 ```bash
 ollama list
 ```
 
-Pull it if missing:
+If `smollm2:135m` is missing, report that it must be installed or pulled; do
+not silently switch models. Pull the exact fixture when needed:
 
 ```bash
 ollama pull smollm2:135m

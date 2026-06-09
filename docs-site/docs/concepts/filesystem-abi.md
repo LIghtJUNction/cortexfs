@@ -10,10 +10,14 @@ CortexFS 的核心不是 UI，而是一组稳定文件路径和读写语义。�
 
 - 顶层目录使用单数短名词，如 `provider/`、`model/`、`thread/`。
 - 小配置使用小文本属性文件。
+- 普通 `write()` 只修改文件内容。
+- 同目录原子 rename 到 `*.req.json` 才表示提交。
 - JSON 用于原生 API request/response。
 - JSONL 用于消息、审计和训练数据导出。
 - Socket 只作为低延迟 fast path，不是 source of truth。
 - 慢操作进入 daemon/execution plane。
+- 不提供 `chan/`、`job/`、`hook/`、`workflow/` 作为第二套提交或编排 ABI。
+- 挂载树不是可扩展数据目录；`mkdir` 不能创建未声明 ABI 目录，必须返回 EROFS。
 
 ## 文件类型
 

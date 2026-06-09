@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
 use std::time::Instant;
 
 use cortex_store::RequestId;
@@ -8,9 +7,9 @@ use fuse3::Inode;
 use crate::execution::{FsExecutionPlane, default_execution_plane};
 use crate::runtime_parents::RuntimeParents;
 use crate::runtime_types::{
-    AgentTask, ApiRouteInodes, ChanRuntimeInodes, ClusterTask, ConversationExportRow,
-    HookRuntimeInodes, JobRuntimeInodes, MemoryItem, PendingResponse, PreferencePair, PromptRender,
-    ProviderConfigInodes, RuntimeContext, TrainingExportRow, UserModelAccessInodes,
+    AgentTask, ApiRouteInodes, ClusterTask, ConversationExportRow, MemoryItem, PendingResponse,
+    PreferencePair, PromptRender, ProviderConfigInodes, RuntimeContext, TrainingExportRow,
+    UserModelAccessInodes,
 };
 use crate::{DYNAMIC_INODE_BASE, Node};
 
@@ -215,38 +214,14 @@ pub struct RuntimeState {
     pub(crate) provider_secret_last_rotated: BTreeMap<&'static str, Inode>,
     pub(crate) provider_secret_next_rotation: BTreeMap<&'static str, Inode>,
     pub(crate) provider_models_refresh: BTreeMap<&'static str, Inode>,
-    pub(crate) chans_parent: Option<Inode>,
-    pub(crate) chan_count_inode: Option<Inode>,
-    pub(crate) chan_list_inode: Option<Inode>,
-    pub(crate) chans: BTreeMap<String, ChanRuntimeInodes>,
-    pub(crate) chan_config_dir: Option<PathBuf>,
-    pub(crate) jobs_parent: Option<Inode>,
-    pub(crate) job_count_inode: Option<Inode>,
-    pub(crate) job_list_inode: Option<Inode>,
-    pub(crate) jobs: BTreeMap<String, JobRuntimeInodes>,
-    pub(crate) hooks_parent: Option<Inode>,
-    pub(crate) hook_count_inode: Option<Inode>,
-    pub(crate) hook_list_inode: Option<Inode>,
-    pub(crate) hook_config_dir: Option<PathBuf>,
-    pub(crate) hooks: BTreeMap<String, HookRuntimeInodes>,
     pub(crate) batch_count: usize,
     pub(crate) plane: Option<FsExecutionPlane>,
 }
 
 impl RuntimeState {
-    pub(crate) fn new_with_chan_config_dir(
-        parents: &RuntimeParents,
-        chan_config_dir: Option<PathBuf>,
-    ) -> Self {
+    pub(crate) fn new(parents: &RuntimeParents) -> Self {
         let mut state = Self::blank(parents);
-        state.hook_config_dir = chan_config_dir
-            .as_deref()
-            .and_then(std::path::Path::parent)
-            .map(|root| root.join("hook.d"));
-        state.chan_config_dir = chan_config_dir;
         state.attach_runtime_files(parents);
-        state.load_persisted_chans();
-        state.load_persisted_hooks();
         state.refresh_provider_health_statuses();
         state.refresh_user_model_access();
         state.refresh_user_routes();
@@ -307,9 +282,6 @@ impl RuntimeState {
             pgvector_refresh_inode: None,
             sqlite_status_inode: None,
             postgres_status_inode: None,
-            chans_parent: parents.chans,
-            jobs_parent: parents.user_jobs,
-            hooks_parent: parents.user_hooks,
             plane: default_execution_plane(),
             ..Self::default()
         }

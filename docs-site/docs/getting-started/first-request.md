@@ -4,7 +4,7 @@ title: 第一条请求
 
 # 第一条请求
 
-CortexFS 的文件式提交规则是：普通 `write()` 只写内容，不触发 provider；只有原子 rename 到 `inbox/*.req.json` 才表示提交。
+CortexFS 的文件式提交规则是：普通 `write()` 只写内容，不触发 provider；只有同目录原子 rename 到 `inbox/*.req.json` 才表示提交。提交后由 `control/drain` 或 daemon worker 执行。
 
 ## 提交
 
