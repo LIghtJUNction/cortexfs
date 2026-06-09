@@ -9,10 +9,10 @@ use crate::abi::{
     DEMO_THREAD_DIR_PATH, DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
     DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_DIR_PATH, EXPORT_FILTERS_DIR_PATH,
     EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_DIR_PATH,
-    FEEDBACK_PREFERENCE_OUTBOX_PATH, MCP_SESSION_DIR_PATH, MCP_SESSION_SEARCH_DIR_PATH,
-    MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH,
-    POSTGRES_DSN_DIR_PATH, ROOT_INODE, USER_CONTROL_DIR_PATH, USER_MODELS_DIR_PATH,
-    USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
+    FEEDBACK_PREFERENCE_OUTBOX_PATH, HOOK_DIR_PATH, MCP_SESSION_DIR_PATH,
+    MCP_SESSION_SEARCH_DIR_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_SEARCH_DIR_PATH,
+    MEMORY_SEMANTIC_DIR_PATH, POSTGRES_DSN_DIR_PATH, ROOT_INODE, USER_CONTROL_DIR_PATH,
+    USER_MODELS_DIR_PATH, USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
 };
 use crate::providers::{PROVIDER_SPECS, provider_child_path, user_model_path};
 use crate::runtime_types::ProviderRuntimeParents;
@@ -77,6 +77,7 @@ pub struct RuntimeParents {
     pub user_control: Option<Inode>,
     pub user_models: Option<Inode>,
     pub user_jobs: Option<Inode>,
+    pub user_hooks: Option<Inode>,
     pub user_models_by_provider: BTreeMap<&'static str, Inode>,
     pub cluster_local: Option<Inode>,
     pub cluster_worker: Option<Inode>,
@@ -156,6 +157,7 @@ impl RuntimeParents {
             user_control: tree.path_inode(USER_CONTROL_DIR_PATH),
             user_models: tree.path_inode(USER_MODELS_DIR_PATH),
             user_jobs: tree.path_inode(&["home", "1000", "job"]),
+            user_hooks: tree.path_inode(HOOK_DIR_PATH),
             user_models_by_provider: user_model_parents(tree),
             cluster_local: tree.path_inode(&["cluster", "local"]),
             cluster_worker: tree.path_inode(&["cluster", "local", "worker", "local-worker"]),

@@ -12,6 +12,8 @@ mod databases;
 mod exports;
 #[path = "test_support/fuse_ops.rs"]
 mod fuse_ops;
+#[path = "test_support/hooks.rs"]
+mod hooks;
 #[path = "test_support/integration.rs"]
 mod integration;
 #[path = "test_support/jobs.rs"]

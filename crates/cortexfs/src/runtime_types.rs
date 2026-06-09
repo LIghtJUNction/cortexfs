@@ -83,6 +83,18 @@ pub struct JobRuntimeInodes {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct HookRuntimeInodes {
+    pub dir: Inode,
+    pub trigger: Inode,
+    pub spec: Inode,
+    pub req: Inode,
+    pub out: Inode,
+    pub status: Inode,
+    pub last: Inode,
+    pub log: Inode,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ApiSubmission {
     pub scope: SubmissionScope,
     pub format: &'static str,

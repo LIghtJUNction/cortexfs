@@ -38,6 +38,7 @@ pub const API_PREFIX: &[&str] = &["home", "1000", "api"];
 pub const BATCH_DIR_PATH: &[&str] = &["home", "1000", "batch"];
 pub const BATCH_INBOX_PATH: &[&str] = &["home", "1000", "batch", "inbox"];
 pub const BATCH_OUTBOX_PATH: &[&str] = &["home", "1000", "batch", "outbox"];
+pub const HOOK_DIR_PATH: &[&str] = &["home", "1000", "hook"];
 pub const CONTROL_DIR_PATH: &[&str] = &["control"];
 pub const EXPORT_DIR_PATH: &[&str] = &["home", "1000", "export"];
 pub const EXPORT_FILTERS_DIR_PATH: &[&str] = &["home", "1000", "export", "filter"];

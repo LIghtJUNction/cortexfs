@@ -41,6 +41,7 @@ const sidebars: SidebarsConfig = {
         'api/file-api',
         'api/local-api',
         'api/structured-jobs',
+        'api/hooks',
         'api/uds-control-plane',
         'api/threads-and-batch',
       ],
