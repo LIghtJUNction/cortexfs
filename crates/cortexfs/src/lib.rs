@@ -41,7 +41,7 @@ pub(crate) use abi::{
     CLUSTER_TASKS_PATH, CONTROL_DIR_PATH, DEMO_THREAD_CONTROL_PATH, DEMO_THREAD_DIR_PATH,
     DEMO_THREAD_TOOL_LOOP_CONTROL_PATH, DEMO_THREAD_TOOL_LOOP_LIMITS_PATH,
     DEMO_THREAD_TOOL_LOOP_PATH, EXPORT_DIR_PATH, EXPORT_FILTERS_DIR_PATH,
-    EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH,
+    EXTERNAL_QQ_GROUP_THREAD_DIR_PATH, EXTERNAL_QQ_SUBJECT_QUOTA_REQUESTS_PATH, HOOK_DIR_PATH,
     MEMORY_SEARCH_DIR_PATH, MEMORY_SEMANTIC_DIR_PATH, POSTGRES_DSN_DIR_PATH, USER_CONTROL_DIR_PATH,
     USER_MODELS_DIR_PATH, USER_POLICY_DIR_PATH, USER_ROUTES_DIR_PATH,
 };
@@ -84,10 +84,10 @@ use runtime_controls::McpServerControlEffect;
 use runtime_parents::RuntimeParents;
 pub(crate) use runtime_state::RuntimeState;
 use runtime_types::{
-    AgentTask, ApiRouteInodes, ApiSubmission, ChanRuntimeInodes, ClusterTask, JobRuntimeInodes,
-    MemoryItem, PendingResponse, PreferencePair, PromptRender, ProviderConfigInodes,
-    ProviderRuntimeParents, RouteMetadata, SubmissionPayload, ThreadUpdate, TrainingExportMetadata,
-    UserModelAccessInodes,
+    AgentTask, ApiRouteInodes, ApiSubmission, ChanRuntimeInodes, ClusterTask, HookRuntimeInodes,
+    JobRuntimeInodes, MemoryItem, PendingResponse, PreferencePair, PromptRender,
+    ProviderConfigInodes, ProviderRuntimeParents, RouteMetadata, SubmissionPayload, ThreadUpdate,
+    TrainingExportMetadata, UserModelAccessInodes,
 };
 use submission::{
     CollabClaimLocation, CollabLockLocation, SubmissionDirectoryKind, SubmissionLocation,
@@ -1159,6 +1159,13 @@ enum JobField {
     Req,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum HookField {
+    Trigger,
+    Spec,
+    Req,
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct ChanConfig {
     url: String,
@@ -1166,6 +1173,12 @@ struct ChanConfig {
     fmt: String,
     model: String,
     enabled: String,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct HookConfig {
+    trigger: String,
+    spec: String,
 }
 
 impl ResolvedNode {
@@ -1199,6 +1212,7 @@ impl RuntimeState {
         self.attach_local_api_runtime_files(parents);
         self.attach_chan_runtime_files(parents);
         self.attach_job_runtime_files(parents);
+        self.attach_hook_runtime_files(parents);
         self.attach_skill_runtime_files(parents);
         if let Some(convert_parent) = parents.convert {
             self.add_dynamic_file(convert_parent, "status", "idle\n");
@@ -1246,6 +1260,14 @@ impl RuntimeState {
         };
         self.job_count_inode = Some(self.add_dynamic_file(job_parent, "count", "0\n"));
         self.job_list_inode = Some(self.add_dynamic_file(job_parent, "list", ""));
+    }
+
+    fn attach_hook_runtime_files(&mut self, parents: &RuntimeParents) {
+        let Some(hook_parent) = parents.user_hooks else {
+            return;
+        };
+        self.hook_count_inode = Some(self.add_dynamic_file(hook_parent, "count", "0\n"));
+        self.hook_list_inode = Some(self.add_dynamic_file(hook_parent, "list", ""));
     }
 
     fn attach_queue_runtime_files(&mut self, parents: &RuntimeParents) {
@@ -1864,6 +1886,10 @@ impl RuntimeState {
                 .values()
                 .any(|job| inode == job.spec || inode == job.req)
             || self
+                .hooks
+                .values()
+                .any(|hook| inode == hook.trigger || inode == hook.spec || inode == hook.req)
+            || self
                 .staged
                 .values()
                 .any(|staged_inode| *staged_inode == inode)
@@ -2002,12 +2028,61 @@ impl RuntimeState {
         Ok(dir)
     }
 
+    fn create_hook(&mut self, parent: Inode, name: &str) -> fuse3::Result<Inode> {
+        if Some(parent) != self.hooks_parent {
+            return Err(libc::EROFS.into());
+        }
+        validate_virtual_id(name)?;
+        if self.hooks.contains_key(name) || self.lookup_child(parent, name).is_some() {
+            return Err(libc::EEXIST.into());
+        }
+
+        let dir = self.materialize_hook(parent, name);
+        self.persist_hook_config(name)?;
+        self.append_audit("hook", name, "created");
+        Ok(dir)
+    }
+
+    fn materialize_hook(&mut self, parent: Inode, name: &str) -> Inode {
+        let dir = self.add_dynamic_dir(parent, name);
+        self.add_dynamic_file_owned(dir, "id", format!("{name}\n"));
+        let trigger = self.add_dynamic_file_owned(dir, "trigger", "manual\n");
+        let spec = self.add_dynamic_file_owned(
+            dir,
+            "spec",
+            "kind=job\njob=translate.zh\nfrom=auto\nto=zh\nfields=text,from,to,input\n",
+        );
+        let req = self.add_dynamic_file_owned(dir, "req", "\n");
+        let out = self.add_dynamic_file_owned(dir, "out.json", "{}\n");
+        let status = self.add_dynamic_file_owned(dir, "status", "idle\n");
+        let last = self.add_dynamic_file_owned(dir, "last", "\n");
+        let log = self.add_dynamic_file_owned(dir, "log.jsonl", "");
+        self.hooks.insert(
+            name.to_owned(),
+            HookRuntimeInodes {
+                dir,
+                trigger,
+                spec,
+                req,
+                out,
+                status,
+                last,
+                log,
+            },
+        );
+        self.refresh_hook_index();
+        dir
+    }
+
     fn create_virtual_dir(&mut self, parent: Inode, name: &str) -> fuse3::Result<Inode> {
         if Some(parent) == self.chans_parent {
             return self.create_chan(parent, name);
         }
         if Some(parent) == self.jobs_parent {
             return self.create_job(parent, name);
+        }
+        if Some(parent) == self.hooks_parent {
+            return self.create_hook(parent, name);
         }
         Err(libc::EROFS.into())
     }
@@ -2047,6 +2122,9 @@ impl RuntimeState {
             return Ok(Some(result));
         }
         if let Some(result) = self.write_job_file(inode, offset, data)? {
+            return Ok(Some(result));
+        }
+        if let Some(result) = self.write_hook_file(inode, offset, data)? {
             return Ok(Some(result));
         }
         Ok(None)
@@ -2668,6 +2746,196 @@ impl RuntimeState {
         if let Some(inode) = self.job_list_inode {
             self.update_dynamic_file(inode, list);
         }
+    }
+
+    fn write_hook_file(
+        &mut self,
+        inode: Inode,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<Option<u32>> {
+        let Some((hook, field)) = self.hook_field_for_inode(inode) else {
+            return Ok(None);
+        };
+        if offset != 0 {
+            return Err(libc::EINVAL.into());
+        }
+        let text = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
+        match field {
+            HookField::Trigger => {
+                let value = normalize_hook_trigger(text)?;
+                self.update_dynamic_file(inode, value);
+                self.persist_hook_config(&hook)?;
+                self.append_hook_log(&hook, "configured", "trigger");
+                self.append_audit("hook.trigger", &hook, "configured");
+            }
+            HookField::Spec => {
+                validate_hook_spec(text)?;
+                self.update_dynamic_file(inode, ensure_trailing_newline(text.trim()));
+                self.persist_hook_config(&hook)?;
+                self.update_hook_status(&hook, "spec-ready\n");
+                self.append_hook_log(&hook, "configured", "spec");
+                self.append_audit("hook.spec", &hook, "configured");
+            }
+            HookField::Req => {
+                self.update_dynamic_file(inode, ensure_trailing_newline(text.trim()));
+                self.run_hook(&hook)?;
+                self.append_audit("hook.req", &hook, "drained");
+            }
+        }
+        u32::try_from(data.len())
+            .map(Some)
+            .map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn hook_field_for_inode(&self, inode: Inode) -> Option<(String, HookField)> {
+        self.hooks.iter().find_map(|(hook, inodes)| {
+            let field = if inode == inodes.trigger {
+                HookField::Trigger
+            } else if inode == inodes.spec {
+                HookField::Spec
+            } else if inode == inodes.req {
+                HookField::Req
+            } else {
+                return None;
+            };
+            Some((hook.clone(), field))
+        })
+    }
+
+    fn run_hook(&mut self, hook: &str) -> fuse3::Result<()> {
+        let Some(inodes) = self.hooks.get(hook).copied() else {
+            return Err(fuse3::Errno::new_not_exist());
+        };
+        let spec = self.dynamic_text(inodes.spec).unwrap_or_default();
+        let req = self.dynamic_text(inodes.req).unwrap_or_default();
+        let out = hook_output(spec, req)?;
+        self.update_dynamic_file(inodes.out, out);
+        self.update_dynamic_file(inodes.last, "done\n");
+        self.update_hook_status(hook, "done\n");
+        self.append_hook_log(hook, "drained", "req");
+        Ok(())
+    }
+
+    fn update_hook_status(&mut self, hook: &str, status: &'static str) {
+        if let Some(inodes) = self.hooks.get(hook).copied() {
+            self.update_dynamic_file(inodes.status, status);
+        }
+    }
+
+    fn refresh_hook_index(&mut self) {
+        let list = self
+            .hooks
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let list = if list.is_empty() {
+            String::new()
+        } else {
+            format!("{list}\n")
+        };
+        if let Some(inode) = self.hook_count_inode {
+            self.update_dynamic_file(inode, format!("{}\n", self.hooks.len()));
+        }
+        if let Some(inode) = self.hook_list_inode {
+            self.update_dynamic_file(inode, list);
+        }
+    }
+
+    fn append_hook_log(&mut self, hook: &str, event: &str, file: &str) {
+        use std::fmt::Write as _;
+
+        let Some(inodes) = self.hooks.get(hook).copied() else {
+            return;
+        };
+        let Some(content) = self
+            .nodes
+            .get_mut(&inodes.log)
+            .and_then(|node| node.content.as_mut())
+            .and_then(NodeContent::as_dynamic_mut)
+        else {
+            return;
+        };
+        let _ = writeln!(
+            content,
+            "{{\"event\":{},\"file\":{}}}",
+            json_string(event),
+            json_string(file),
+        );
+    }
+
+    fn load_persisted_hooks(&mut self) {
+        let Some(hook_parent) = self.hooks_parent else {
+            return;
+        };
+        let Some(config_dir) = self.hook_config_dir.clone() else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(config_dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(OsStr::to_str) != Some("conf") {
+                continue;
+            }
+            let Some(id) = path.file_stem().and_then(OsStr::to_str) else {
+                continue;
+            };
+            if validate_virtual_id(id).is_err()
+                || self.hooks.contains_key(id)
+                || self.lookup_child(hook_parent, id).is_some()
+            {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(config) = parse_hook_config(&content) else {
+                continue;
+            };
+            self.materialize_hook(hook_parent, id);
+            self.apply_hook_config(id, &config);
+            self.append_audit("hook", id, "loaded");
+        }
+    }
+
+    fn apply_hook_config(&mut self, hook: &str, config: &HookConfig) {
+        let Some(inodes) = self.hooks.get(hook).copied() else {
+            return;
+        };
+        self.update_dynamic_file(inodes.trigger, config.trigger.clone());
+        self.update_dynamic_file(inodes.spec, config.spec.clone());
+        self.update_hook_status(hook, "ready\n");
+    }
+
+    fn persist_hook_config(&self, hook: &str) -> fuse3::Result<()> {
+        let Some(config_dir) = self.hook_config_dir.as_deref() else {
+            return Ok(());
+        };
+        let Some(config) = self.hook_config(hook) else {
+            return Err(fuse3::Errno::new_not_exist());
+        };
+        std::fs::create_dir_all(config_dir).map_err(|_error| libc::EIO)?;
+        let path = hook_config_path(config_dir, hook)?;
+        std::fs::write(&path, render_hook_config(hook, &config)).map_err(|_error| libc::EIO)?;
+        set_secret_file_mode(&path).map_err(|_error| libc::EIO)?;
+        Ok(())
+    }
+
+    fn hook_config(&self, hook: &str) -> Option<HookConfig> {
+        let inodes = self.hooks.get(hook).copied()?;
+        Some(HookConfig {
+            trigger: self
+                .dynamic_text(inodes.trigger)
+                .unwrap_or_default()
+                .to_owned(),
+            spec: self
+                .dynamic_text(inodes.spec)
+                .unwrap_or_default()
+                .to_owned(),
+        })
     }
 
     fn submit(
@@ -4066,6 +4334,17 @@ fn validate_job_spec(spec: &str) -> fuse3::Result<()> {
     Ok(())
 }
 
+fn validate_hook_spec(spec: &str) -> fuse3::Result<()> {
+    let kind = spec_value(spec, "kind").unwrap_or("job");
+    if kind != "job" {
+        return Err(libc::EINVAL.into());
+    }
+    let job = spec_value(spec, "job").unwrap_or("translate.zh");
+    validate_virtual_id(job)?;
+    validate_job_spec(&hook_job_spec(spec)?)?;
+    Ok(())
+}
+
 fn structured_job_output(spec: &str, req: &str) -> fuse3::Result<String> {
     validate_job_spec(spec)?;
     let from = spec_value(spec, "from").unwrap_or("auto");
@@ -4086,6 +4365,24 @@ fn structured_job_output(spec: &str, req: &str) -> fuse3::Result<String> {
         pairs.push(format!("{}:{}", json_string(&field), json_string(value)));
     }
     Ok(format!("{{{}}}\n", pairs.join(",")))
+}
+
+fn hook_output(spec: &str, req: &str) -> fuse3::Result<String> {
+    validate_hook_spec(spec)?;
+    structured_job_output(&hook_job_spec(spec)?, req)
+}
+
+fn hook_job_spec(spec: &str) -> fuse3::Result<String> {
+    let job = spec_value(spec, "job").unwrap_or("translate.zh");
+    if !job.starts_with("translate.") {
+        return Err(libc::EINVAL.into());
+    }
+    let from = spec_value(spec, "from").unwrap_or("auto");
+    let to = spec_value(spec, "to").unwrap_or("zh");
+    let fields = spec_value(spec, "fields").unwrap_or("text,from,to,input");
+    Ok(format!(
+        "kind=translate\nfrom={from}\nto={to}\nout=json\nfields={fields}\n"
+    ))
 }
 
 fn spec_value<'a>(spec: &'a str, key: &str) -> Option<&'a str> {
@@ -4126,6 +4423,20 @@ fn ensure_trailing_newline(text: &str) -> String {
         "\n".to_owned()
     } else {
         format!("{text}\n")
+    }
+}
+
+fn normalize_hook_trigger(trigger: &str) -> fuse3::Result<String> {
+    let value = trigger.trim();
+    let valid = !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':'));
+    if valid {
+        Ok(format!("{value}\n"))
+    } else {
+        Err(libc::EINVAL.into())
     }
 }
 
@@ -4237,6 +4548,77 @@ fn render_chan_config(id: &str, config: &ChanConfig) -> String {
 fn chan_config_path(config_dir: &Path, chan: &str) -> fuse3::Result<PathBuf> {
     validate_chan_id(chan)?;
     Ok(config_dir.join(format!("{chan}.conf")))
+}
+
+fn default_persisted_hook_config() -> HookConfig {
+    HookConfig {
+        trigger: "manual\n".to_owned(),
+        spec: "kind=job\njob=translate.zh\nfrom=auto\nto=zh\nfields=text,from,to,input\n"
+            .to_owned(),
+    }
+}
+
+fn parse_hook_config(content: &str) -> fuse3::Result<HookConfig> {
+    let mut config = default_persisted_hook_config();
+    let mut spec_lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (key, value) = trimmed.split_once('=').ok_or(libc::EINVAL)?;
+        match key.trim() {
+            "id" => {
+                validate_virtual_id(value.trim())?;
+            }
+            "trigger" => {
+                config.trigger = normalize_hook_trigger(value)?;
+            }
+            key if key.starts_with("spec.") => {
+                let spec_key = key.trim_start_matches("spec.");
+                if !valid_spec_key(spec_key) {
+                    return Err(libc::EINVAL.into());
+                }
+                spec_lines.push(format!("{spec_key}={}", value.trim()));
+            }
+            _other => return Err(libc::EINVAL.into()),
+        }
+    }
+    if !spec_lines.is_empty() {
+        spec_lines.sort();
+        config.spec = ensure_trailing_newline(&spec_lines.join("\n"));
+    }
+    validate_hook_spec(&config.spec)?;
+    Ok(config)
+}
+
+fn render_hook_config(id: &str, config: &HookConfig) -> String {
+    let mut rendered = format!(
+        "# cortexfs hook config\nid={id}\ntrigger={}\n",
+        config.trigger.trim()
+    );
+    for line in config.spec.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if valid_spec_key(key.trim()) {
+            rendered.push_str("spec.");
+            rendered.push_str(key.trim());
+            rendered.push('=');
+            rendered.push_str(value.trim());
+            rendered.push('\n');
+        }
+    }
+    rendered
+}
+
+fn hook_config_path(config_dir: &Path, hook: &str) -> fuse3::Result<PathBuf> {
+    validate_virtual_id(hook)?;
+    Ok(config_dir.join(format!("{hook}.conf")))
+}
+
+fn valid_spec_key(key: &str) -> bool {
+    matches!(key, "kind" | "job" | "from" | "to" | "fields")
 }
 
 #[cfg(unix)]

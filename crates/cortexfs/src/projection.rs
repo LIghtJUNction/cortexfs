@@ -400,6 +400,9 @@ impl NodeTreeBuilder {
         let jobs = self.add_dir(user, "job");
         self.add_file(jobs, "count", "0\n");
         self.add_file(jobs, "list", "");
+        let hooks = self.add_dir(user, "hook");
+        self.add_file(hooks, "count", "0\n");
+        self.add_file(hooks, "list", "");
         self.add_dir(user, "control");
         self.add_feedback_projection(user);
         self.add_batch_projection(user);
