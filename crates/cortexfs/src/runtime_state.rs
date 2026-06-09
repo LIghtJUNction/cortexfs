@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use cortex_store::RequestId;
@@ -218,6 +219,7 @@ pub struct RuntimeState {
     pub(crate) chan_count_inode: Option<Inode>,
     pub(crate) chan_list_inode: Option<Inode>,
     pub(crate) chans: BTreeMap<String, ChanRuntimeInodes>,
+    pub(crate) chan_config_dir: Option<PathBuf>,
     pub(crate) jobs_parent: Option<Inode>,
     pub(crate) job_count_inode: Option<Inode>,
     pub(crate) job_list_inode: Option<Inode>,
@@ -227,9 +229,14 @@ pub struct RuntimeState {
 }
 
 impl RuntimeState {
-    pub(crate) fn new(parents: &RuntimeParents) -> Self {
+    pub(crate) fn new_with_chan_config_dir(
+        parents: &RuntimeParents,
+        chan_config_dir: Option<PathBuf>,
+    ) -> Self {
         let mut state = Self::blank(parents);
+        state.chan_config_dir = chan_config_dir;
         state.attach_runtime_files(parents);
+        state.load_persisted_chans();
         state.refresh_provider_health_statuses();
         state.refresh_user_model_access();
         state.refresh_user_routes();

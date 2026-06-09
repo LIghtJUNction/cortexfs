@@ -186,7 +186,7 @@ chan/kimi-a   prio=80  wt=100
 
 ## Persistence
 
-In the current version, channels written through `/ctx/chan/<id>` are runtime projections and disappear after unmount or restart. The persistence target is local storage:
+Channels written through `/ctx/chan/<id>` are written through to local persistent storage:
 
 ```text
 ~/.config/cortexfs/chan.d/*.conf
@@ -194,4 +194,6 @@ In the current version, channels written through `/ctx/chan/<id>` are runtime pr
 ~/.config/cortexfs/.env
 ```
 
-Keys are not stored as plaintext in the mounted tree. Store `keyref`; resolve the real secret through keyring, pass, sops, or the daemon secret store.
+`chan.d/*.conf` is implemented now: the mount loads it at startup, so channels survive unmount and restart. Development refresh still uses Git commits and remounts as the boundary; CortexFS does not add background watchers, polling, or hot-reload subcommands.
+
+`chan.d` stores `keyref`, not plaintext keys. Resolve the real secret through the systemd `EnvironmentFile=~/.config/cortexfs/.env`, keyring, pass, sops, or the future daemon secret store.
