@@ -1,7 +1,47 @@
 # CortexFS
 
+<div align="center">
+  <p>
+    <a href="Cargo.toml"><img alt="Rust 2024" src="https://img.shields.io/badge/Rust-2024-f46623?logo=rust&logoColor=white" /></a>
+    <a href="Cargo.toml"><img alt="MIT license" src="https://img.shields.io/badge/License-MIT-green.svg" /></a>
+    <a href=".github/workflows/pages.yml"><img alt="Docs site" src="https://img.shields.io/badge/Docs-Pages-7b68ee" /></a>
+    <a href="AGENTS.md"><img alt="Agent docs" src="https://img.shields.io/badge/Agent%20docs-available-0ea5e9" /></a>
+  </p>
+</div>
+
+<p align="center">
+  <a href="#overview">Overview</a>
+  · <a href="#quick-start">Quick Start</a>
+  · <a href="#文件系统形状">中文说明</a>
+</p>
+
 CortexFS 是一个专为 Linux 设计的 Rust FUSE 文件系统。它把 AI API
 format、provider、模型、请求、响应、对话线程、工具、MCP、skill、agent、记忆、集群状态和审计记录暴露为普通文件。
+
+## Overview
+
+CortexFS turns AI infrastructure into a filesystem ABI. Instead of hiding state behind an app UI, it exposes formats, providers, models, threads, tools, memory, audit logs, and control surfaces as files that shell tools can inspect and mutate.
+
+Typical use cases:
+
+- inspect model/provider state with `cat`
+- submit requests with atomic `mv`
+- audit behavior with JSONL logs
+- automate workflows with standard Unix tooling
+
+## Quick Start
+
+```bash
+paru -S cortexfs-git
+cortex status
+```
+
+For developers:
+
+```bash
+cargo build --locked --workspace
+cargo run -p cortex-cli -- status
+```
 
 它的目标不是再做一个黑箱 agent 框架，而是把 agent 基础设施做成可检查、可脚本化、可审计的 Linux 文件系统接口。挂载树就是公开 ABI：用 `cat` 读取状态，用 `mv` 原子提交请求，用 `printf` 写控制节点，用 `find`、`xargs`、`jq`、`awk` 等普通 Unix 工具批处理。
 
