@@ -1,5 +1,5 @@
+use crate::configured_provider_ids;
 use crate::text::external_subject;
-use crate::{configured_provider_ids, provider_spec};
 use cortex_core::{Fingerprint, ModelId};
 
 pub fn validate_staged_name(name: &str) -> fuse3::Result<()> {
@@ -116,35 +116,6 @@ pub fn request_model(body: &str) -> fuse3::Result<Option<ModelId>> {
     ModelId::new(model)
         .map(Some)
         .map_err(|_error| fuse3::Errno::from(libc::EINVAL))
-}
-
-pub fn normalize_allowed_providers(providers: &str) -> fuse3::Result<String> {
-    let trimmed = providers.trim();
-    if trimmed.is_empty() {
-        return Ok(default_allowed_providers_content());
-    }
-    let mut normalized = String::new();
-    let mut seen = Vec::new();
-    for provider in providers
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        if provider_spec(provider).is_none() {
-            return Err(libc::EINVAL.into());
-        }
-        if seen.iter().any(|seen_provider| seen_provider == provider) {
-            continue;
-        }
-        seen.push(provider.to_owned());
-        normalized.push_str(provider);
-        normalized.push('\n');
-    }
-    if normalized.is_empty() {
-        Ok(default_allowed_providers_content())
-    } else {
-        Ok(normalized)
-    }
 }
 
 pub fn default_allowed_providers_content() -> String {

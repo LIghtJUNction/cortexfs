@@ -31,9 +31,25 @@ provider/<id>/
 
 ## 配置 URL
 
+新增或更新 provider instance 走 `provider/inbox`，而不是把 API key 写进配置文件。
+
 ```bash
-printf 'https://api.openai.com/v1\n' > /ctx/provider/openai-main/url/current
-printf 'https://relay.example.com/v1\n' > /ctx/provider/relay-openai/url/current
+provider=/ctx/provider
+cat > "$provider/inbox/relay-openai.tmp" <<'JSON'
+{
+  "op": "upsert",
+  "id": "relay-openai",
+  "family": "openai-compatible",
+  "name": "Relay endpoint using OpenAI formats",
+  "formats": ["openai.chat", "openai.responses"],
+  "base_url": "https://relay.example.com/",
+  "default_model": "gpt-4o-mini",
+  "priority": 80,
+  "enabled": true
+}
+JSON
+mv "$provider/inbox/relay-openai.tmp" "$provider/inbox/relay-openai.req.json"
+cat "$provider/outbox/relay-openai.resp.json"
 ```
 
 读取 effective URL：
@@ -45,9 +61,6 @@ cat /ctx/provider/openai-main/url/source
 
 ## 启用或禁用
 
-```bash
-printf '1\n' > /ctx/provider/openai-main/enabled/current
-printf '0\n' > /ctx/provider/relay-openai/enabled/current
-```
+把 provider config request 里的 `enabled` 设为 `true` 或 `false` 后再次提交即可。
 
 用户 policy 仍然控制 enabled provider 是否对某个 space 可见。

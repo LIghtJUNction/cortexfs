@@ -31,9 +31,26 @@ provider/<id>/
 
 ## Configure URL
 
+Create or update provider instances through `provider/inbox`. Do not put API keys
+in provider config requests.
+
 ```bash
-printf 'https://api.openai.com/v1\n' > /ctx/provider/openai-main/url/current
-printf 'https://relay.example.com/v1\n' > /ctx/provider/relay-openai/url/current
+provider=/ctx/provider
+cat > "$provider/inbox/relay-openai.tmp" <<'JSON'
+{
+  "op": "upsert",
+  "id": "relay-openai",
+  "family": "openai-compatible",
+  "name": "Relay endpoint using OpenAI formats",
+  "formats": ["openai.chat", "openai.responses"],
+  "base_url": "https://relay.example.com/",
+  "default_model": "gpt-4o-mini",
+  "priority": 80,
+  "enabled": true
+}
+JSON
+mv "$provider/inbox/relay-openai.tmp" "$provider/inbox/relay-openai.req.json"
+cat "$provider/outbox/relay-openai.resp.json"
 ```
 
 Read effective URL:
@@ -45,9 +62,7 @@ cat /ctx/provider/openai-main/url/source
 
 ## Enable or disable
 
-```bash
-printf '1\n' > /ctx/provider/openai-main/enabled/current
-printf '0\n' > /ctx/provider/relay-openai/enabled/current
-```
+Set `enabled` to `true` or `false` in the provider config request and submit it
+again.
 
 User policy still controls whether an enabled provider is visible to a space.

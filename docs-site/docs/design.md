@@ -144,6 +144,8 @@ Provider 是后端实例，不是域名，也不是厂商品牌。一个厂商�
 
 ```text
 provider/
+  inbox/
+  outbox/
   openai-main/
   openai-relay-a/
   kimi-main/
@@ -184,6 +186,8 @@ provider/<id>/
     rotate
     last_rotated
     next_rotation
+    inbox/
+    outbox/
   model/
     count
     refresh
@@ -207,6 +211,32 @@ local_runtime
 ```
 
 密钥、OAuth token、session token 不进入挂载树，只暴露状态和 key id。
+
+新增或更新 provider instance 使用统一提交语义：向 `provider/inbox/` 写临时 JSON 文件，再同目录原子 rename 成 `*.req.json`。实现把配置保存到本机 provider registry；不得把 API key 放入该 JSON。
+
+```json
+{
+  "op": "upsert",
+  "id": "openai-relay-a",
+  "family": "openai-compatible",
+  "name": "OpenAI-compatible relay A",
+  "formats": ["openai.chat", "openai.responses"],
+  "base_url": "https://relay.example.com/",
+  "default_model": "gpt-4o-mini",
+  "priority": 80,
+  "enabled": true
+}
+```
+
+Provider secret import 也使用同一条提交语义，但入口在 `provider/<id>/secrets/inbox/`。明文 secret 只允许出现在提交请求体内，处理后必须进入系统 secret store；挂载树只暴露 `status` 和 `active` secret reference。
+
+```json
+{
+  "op": "import",
+  "kind": "bearer",
+  "value": "sk-placeholder"
+}
+```
 
 ## 6. 模型视图
 

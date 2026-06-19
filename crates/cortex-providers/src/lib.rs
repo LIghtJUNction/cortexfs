@@ -365,6 +365,15 @@ impl OpenAiCompatibleProvider {
         }
     }
 
+    /// Restrict the adapter to the formats declared by a provider instance.
+    #[must_use]
+    pub fn with_formats(mut self, formats: Vec<ApiFormat>) -> Self {
+        if !formats.is_empty() {
+            self.formats = formats;
+        }
+        self
+    }
+
     /// Build a provider from the `CORTEXFS_OPENAI_*` environment contract.
     ///
     /// # Errors

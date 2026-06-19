@@ -89,6 +89,9 @@ pub struct RuntimeParents {
     pub sqlite: Option<Inode>,
     pub postgres: Option<Inode>,
     pub postgres_dsn: Option<Inode>,
+    pub provider_root: Option<Inode>,
+    pub provider_count: Option<Inode>,
+    pub provider_list: Option<Inode>,
     pub provider_parents: BTreeMap<&'static str, ProviderRuntimeParents>,
 }
 
@@ -166,6 +169,9 @@ impl RuntimeParents {
             sqlite: tree.path_inode(&["db", "sqlite"]),
             postgres: tree.path_inode(&["db", "postgres"]),
             postgres_dsn: tree.path_inode(POSTGRES_DSN_DIR_PATH),
+            provider_root: tree.path_inode(&["provider"]),
+            provider_count: tree.path_inode(&["provider", "count"]),
+            provider_list: tree.path_inode(&["provider", "list"]),
             provider_parents: provider_runtime_parents(tree),
         }
     }

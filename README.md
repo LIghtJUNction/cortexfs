@@ -80,6 +80,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - FUSE 挂载树：`format`、`provider`、`model`、`home`、`group`、`shared`、`ext`、`space`、`agent`、`cluster`、`mcp`、`skill`、`tool`、`memory`、`vector`、`db`、`audit`、`control`。
 - API format：`openai.chat`、`openai.responses`、`anthropic.messages`、`google.generate_content`。
 - provider/model 发现：通过 `count`、`list`、`format`、`url/*`、`enabled/*`、`health/*`、`model/*` 等小文本文件读取。
+- 多 provider 配置：向 `provider/inbox/*.req.json` 原子提交 provider instance 配置，向 `provider/<id>/secrets/inbox/*.req.json` 导入 API key；明文 key 保存进系统 Secret Service，挂载树只暴露 secret reference。
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json` 入队，再由 `control/drain` 或 daemon worker 执行。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
 - thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path；MCP tool 调用会进入同一条 permission/tool call/tool result 轨迹。
@@ -96,7 +97,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 - 长驻 `cortexd` daemon、后台队列 worker 和生命周期管理。
 - 生产级 HTTP 本地 API。
-- 生产级 secret store、OAuth/session 管理和密钥轮转。
+- OAuth/session 管理和完整密钥轮转策略。
 - 完整 MCP server 生命周期管理。
 - 真正的集群调度、跨机器 worker、成本控制和重试系统。
 - 完整向量数据库/PG 持久化实现。

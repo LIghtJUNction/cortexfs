@@ -7,9 +7,9 @@ use fuse3::Inode;
 use crate::execution::{FsExecutionPlane, default_execution_plane};
 use crate::runtime_parents::RuntimeParents;
 use crate::runtime_types::{
-    AgentTask, ApiRouteInodes, ClusterTask, ConversationExportRow, MemoryItem, PendingResponse,
-    PreferencePair, PromptRender, ProviderConfigInodes, RuntimeContext, TrainingExportRow,
-    UserModelAccessInodes,
+    AgentTask, ApiRouteInodes, ClusterTask, ConversationExportRow, DynamicProviderInodes,
+    MemoryItem, PendingResponse, PreferencePair, PromptRender, ProviderConfigInodes,
+    RuntimeContext, TrainingExportRow, UserModelAccessInodes,
 };
 use crate::{DYNAMIC_INODE_BASE, Node};
 
@@ -214,6 +214,15 @@ pub struct RuntimeState {
     pub(crate) provider_secret_last_rotated: BTreeMap<&'static str, Inode>,
     pub(crate) provider_secret_next_rotation: BTreeMap<&'static str, Inode>,
     pub(crate) provider_models_refresh: BTreeMap<&'static str, Inode>,
+    pub(crate) provider_root_inode: Option<Inode>,
+    pub(crate) provider_count_inode: Option<Inode>,
+    pub(crate) provider_list_inode: Option<Inode>,
+    pub(crate) provider_registry_inbox_inode: Option<Inode>,
+    pub(crate) provider_registry_outbox_inode: Option<Inode>,
+    pub(crate) dynamic_providers: BTreeMap<String, crate::provider_registry::RegistryProvider>,
+    pub(crate) dynamic_provider_inodes: BTreeMap<String, DynamicProviderInodes>,
+    pub(crate) dynamic_secret_inboxes: BTreeMap<Inode, String>,
+    pub(crate) dynamic_secret_outboxes: BTreeMap<String, Inode>,
     pub(crate) batch_count: usize,
     pub(crate) plane: Option<FsExecutionPlane>,
 }
