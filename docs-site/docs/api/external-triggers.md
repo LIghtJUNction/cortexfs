@@ -4,7 +4,7 @@ title: 外部触发器
 
 # 外部触发器
 
-CortexFS 不提供 `home/<uid>/hook` 目录。systemd timer、cron、git hook、CI、webhook bridge 等外部触发器应直接写通用 inbox，并用原子 rename 提交。
+CortexFS 不提供 `home/<uid>/hook` 目录，也不把外部触发器命名为文件系统 ABI。systemd timer、cron、git hook、CI、webhook bridge 等外部触发器应直接写通用 inbox，并用原子 rename 提交。
 
 推荐分工：
 

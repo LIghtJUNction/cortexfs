@@ -4,7 +4,7 @@ title: 任务提交
 
 # 任务提交
 
-CortexFS 不提供 `home/<uid>/job` 目录，也不提供内置 job DSL。任务只是一个请求文件：外部程序把任务规范放进 JSON，然后通过通用 inbox/outbox 提交。
+CortexFS 不提供 `home/<uid>/job` 目录，也不提供内置 job DSL。任务只是一个请求文件：外部程序把任务规范放进 JSON，然后通过通用 inbox/outbox 提交；文件系统路径仍然只使用 `api/`、`thread/`、`tool/`、`mcp/`、`memory/` 等既有入口。
 
 统一规则：
 

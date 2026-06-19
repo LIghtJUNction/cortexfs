@@ -4,7 +4,7 @@ title: External Triggers
 
 # External Triggers
 
-CortexFS does not expose `home/<uid>/hook`. systemd timers, cron, git hooks, CI jobs, webhook bridges, and other external triggers should write the generic inbox directly and submit by atomic rename.
+CortexFS does not expose `home/<uid>/hook`, and external triggers are not filesystem ABI names. systemd timers, cron, git hooks, CI jobs, webhook bridges, and other external triggers should write the generic inbox directly and submit by atomic rename.
 
 Recommended split:
 

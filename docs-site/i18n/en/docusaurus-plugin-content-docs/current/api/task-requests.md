@@ -4,7 +4,7 @@ title: Task Submission
 
 # Task Submission
 
-CortexFS does not expose `home/<uid>/job` and does not define an internal job DSL. A task is just a request file: external software puts its task spec in JSON and submits it through the generic inbox/outbox path.
+CortexFS does not expose `home/<uid>/job` and does not define an internal job DSL. A task is just a request file: external software puts its task spec in JSON and submits it through the generic inbox/outbox path; filesystem paths still use existing entries such as `api/`, `thread/`, `tool/`, `mcp/`, and `memory/`.
 
 Unified rule:
 
