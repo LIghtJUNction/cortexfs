@@ -37,11 +37,11 @@ $CTX_HOME/export
 cortex start
 ```
 
-`cortex start` 会请求系统授权管理 `cortexfs@$USER.service`，自动准备 `/ctx`，修正 owner/mode，并在停止时向前台 mount 进程发送退出信号。默认单用户部署不需要手动配置 FUSE 权限。
+`cortex start` 会请求系统授权管理一个 `cortexfs@<owner>.service` 实例，自动准备 `/ctx`，修正 owner/mode，并在停止时向前台 mount 进程发送退出信号。该 systemd 挂载默认使用 multi-user FUSE 模式；同一台机器不要为多个 Linux 用户同时启动多个 `/ctx` 挂载实例。
 
 ## 多用户挂载
 
-默认挂载是 single-user。需要跨 Linux 用户共享同一个挂载时，才显式使用 multi-user 模式：
+前台调试时也使用 multi-user 模式：
 
 ```bash
 cortex mount --multi-user /ctx

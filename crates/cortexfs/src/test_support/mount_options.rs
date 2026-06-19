@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::{FuseConfig, MountMode, MountOptions, MountSecurityOptions};
+use crate::{CortexFs, FuseConfig, MountMode, MountOptions, MountSecurityOptions};
 
 #[test]
 fn single_user_mount_options_are_hardened_by_default() {
@@ -90,6 +90,24 @@ fn multi_user_fuse_mount_options_keep_hardening_custom_options() {
         options.as_deref(),
         Some(std::ffi::OsStr::new("noexec,nodev,nosuid"))
     );
+}
+
+#[test]
+fn multi_user_projection_permissions_allow_cross_user_submits() -> fuse3::Result<()> {
+    let single_user_fs = CortexFs::new();
+    let multi_user_fs = CortexFs::new_with_mode(MountMode::MultiUser);
+    let inbox = multi_user_fs.resolve_path_inode(crate::DEMO_THREAD_INBOX_PATH)?;
+    let default_provider = multi_user_fs.resolve_path_inode([
+        "home",
+        crate::LOCAL_USER_ID,
+        "route",
+        "default_provider",
+    ])?;
+
+    assert_eq!(single_user_fs.node_attr(inbox)?.perm, 0o755);
+    assert_eq!(multi_user_fs.node_attr(inbox)?.perm, 0o777);
+    assert_eq!(multi_user_fs.node_attr(default_provider)?.perm, 0o666);
+    Ok(())
 }
 
 #[tokio::test]

@@ -101,13 +101,20 @@ cortex restart
 
 ## Multi-user Deployment
 
-The default `cortex start` path is single-user: systemd prepares `/ctx`, then runs the FUSE process as the selected user. Use explicit multi-user mode only when one mount must be shared across Linux users:
+The default `cortex start` path manages one systemd template instance and mounts
+the single `/ctx` tree in multi-user FUSE mode. Do not start one `/ctx` mount per
+Linux user on the same machine; choose one owner instance for the mount and let
+other local users access that same `/ctx`.
+
+Use the same multi-user option for foreground debugging:
 
 ```bash
 cortex mount --multi-user /ctx
 ```
 
-Multi-user mode is an advanced deployment shape. Paths are namespaces, not security boundaries. Multi-user deployments should still rely on host credential, external subject, object context, and Cortex policy for access decisions.
+Paths are namespaces, not security boundaries. Multi-user deployments should
+still rely on host credential, external subject, object context, and Cortex
+policy for access decisions.
 
 ## Build from Source
 

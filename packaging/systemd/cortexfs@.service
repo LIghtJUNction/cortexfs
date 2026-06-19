@@ -1,5 +1,5 @@
 [Unit]
-Description=CortexFS FUSE mount at /ctx for %i
+Description=CortexFS multi-user FUSE mount at /ctx managed by %i
 Documentation=https://lightjunction.github.io/cortexfs/docs/getting-started/install-deploy/
 After=local-fs.target
 
@@ -9,7 +9,7 @@ User=%i
 Group=%i
 EnvironmentFile=-/home/%i/.config/cortexfs/.env
 ExecStartPre=+/usr/bin/cortex mount-prep /ctx %i %i
-ExecStart=/usr/bin/cortex mount /ctx
+ExecStart=/usr/bin/cortex mount --multi-user /ctx
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=20s

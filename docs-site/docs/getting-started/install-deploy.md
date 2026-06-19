@@ -101,13 +101,15 @@ cortex restart
 
 ## 多用户部署
 
-默认的 `cortex start` 是单用户挂载：`/ctx` 由 systemd 准备，FUSE 进程以当前用户运行。需要跨 Linux 用户共享同一个挂载时，才使用显式 multi-user 模式：
+默认的 `cortex start` 管理一个 systemd 模板实例，并以 multi-user FUSE 模式挂载唯一的 `/ctx`。同一台机器不要为多个 Linux 用户同时启动多个 `/ctx` 挂载实例；选择一个 owner 实例负责挂载，其他本地用户访问同一个 `/ctx`。
+
+前台调试时也使用同一条 multi-user mount 参数：
 
 ```bash
 cortex mount --multi-user /ctx
 ```
 
-multi-user 是高级部署形态；路径只是命名空间，不是安全边界。多用户部署仍然应该依赖 host credential、external subject、object context 和 Cortex policy 做实际访问决策。
+路径只是命名空间，不是安全边界。多用户部署仍然应该依赖 host credential、external subject、object context 和 Cortex policy 做实际访问决策。
 
 ## 从源码构建
 
