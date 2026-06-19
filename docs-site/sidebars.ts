@@ -40,8 +40,8 @@ const sidebars: SidebarsConfig = {
       items: [
         'api/file-api',
         'api/local-api',
-        'api/structured-jobs',
-        'api/hooks',
+        'api/task-requests',
+        'api/external-triggers',
         'api/uds-control-plane',
         'api/threads-and-batch',
       ],
