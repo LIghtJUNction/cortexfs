@@ -10,7 +10,32 @@ use crate::{
     provider_spec, provider_supports_format, secret_rotating_id,
 };
 
+const ENV_PROVIDER_ID: &str = "openai-compatible";
+const ENV_BASE_URL: &str = "CORTEXFS_OPENAI_BASE_URL";
+const ENV_API_KEY: &str = "CORTEXFS_OPENAI_API_KEY";
+const LEGACY_ENV_API_KEY: &str = "FENGYING_API_KEY";
+
 impl RuntimeState {
+    pub fn apply_environment_provider_config(&mut self) {
+        if provider_spec(ENV_PROVIDER_ID).is_none() {
+            return;
+        }
+        let base_url = env_value(ENV_BASE_URL);
+        if let Some(base_url) = base_url.as_deref() {
+            self.update_provider_url_from_env(ENV_PROVIDER_ID, base_url);
+        }
+        let api_key_source = if env_value(ENV_API_KEY).is_some() {
+            Some(ENV_API_KEY)
+        } else if env_value(LEGACY_ENV_API_KEY).is_some() {
+            Some(LEGACY_ENV_API_KEY)
+        } else {
+            None
+        };
+        let configured = base_url.is_some() && api_key_source.is_some();
+        self.update_provider_enabled_from_env(ENV_PROVIDER_ID, configured);
+        self.update_provider_secret_from_env(ENV_PROVIDER_ID, api_key_source);
+    }
+
     pub fn write_user_allowed_providers(&mut self, offset: u64, data: &[u8]) -> fuse3::Result<u32> {
         if offset != 0 {
             return Err(libc::EINVAL.into());
@@ -29,6 +54,57 @@ impl RuntimeState {
         self.refresh_user_routes();
         self.append_audit("home.1000.policy", "allowed_providers", "configured");
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn update_provider_url_from_env(&mut self, provider: &str, base_url: &str) {
+        let Some(inodes) = self.provider_url.get(provider).copied() else {
+            return;
+        };
+        let content = format!("{base_url}\n");
+        if let Some(inode) = inodes.current {
+            self.update_dynamic_file(inode, content.as_str());
+        }
+        if let Some(inode) = inodes.effective {
+            self.update_dynamic_file(inode, content);
+        }
+        if let Some(inode) = inodes.source {
+            self.update_dynamic_file(inode, "env\n");
+        }
+    }
+
+    fn update_provider_enabled_from_env(&mut self, provider: &str, enabled: bool) {
+        let Some(inodes) = self.provider_enabled.get(provider).copied() else {
+            return;
+        };
+        let value = if enabled { "1\n" } else { "0\n" };
+        if let Some(inode) = inodes.current {
+            self.update_dynamic_file(inode, value);
+        }
+        if let Some(inode) = inodes.effective {
+            self.update_dynamic_file(inode, value);
+        }
+        if let Some(inode) = inodes.source {
+            self.update_dynamic_file(inode, "env\n");
+        }
+        if let Some(inode) = inodes.status {
+            let status = if enabled { "ready\n" } else { "disabled\n" };
+            self.update_dynamic_file(inode, status);
+        }
+    }
+
+    fn update_provider_secret_from_env(&mut self, provider: &str, source: Option<&str>) {
+        if let Some(&inode) = self.provider_secret_status.get(provider) {
+            let status = if source.is_some() {
+                "configured\n"
+            } else {
+                "missing\n"
+            };
+            self.update_dynamic_file(inode, status);
+        }
+        if let Some(&inode) = self.provider_secret_active.get(provider) {
+            let active = source.map_or_else(|| "none\n".to_owned(), |name| format!("env:{name}\n"));
+            self.update_dynamic_file(inode, active);
+        }
     }
 
     pub fn write_user_default_provider(&mut self, offset: u64, data: &[u8]) -> fuse3::Result<u32> {
@@ -412,7 +488,7 @@ impl RuntimeState {
         } else if self.provider_model_access(provider.id) == ("0\n", "provider_disabled\n") {
             ApiRoute::new(provider.id, "", "provider_disabled")
         } else {
-            ApiRoute::new(provider.id, provider.default_model, "ready")
+            ApiRoute::new(provider.id, route_model(&provider).as_str(), "ready")
         }
     }
 
@@ -482,4 +558,19 @@ impl RuntimeState {
             && reason == "ready"
             && self.provider_model_access(provider).0 == "1\n"
     }
+}
+
+fn env_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn route_model(provider: &crate::ProviderRuntimeSpec) -> String {
+    if provider.id == ENV_PROVIDER_ID {
+        return env_value("CORTEXFS_OPENAI_MODEL")
+            .unwrap_or_else(|| provider.default_model.to_owned());
+    }
+    provider.default_model.to_owned()
 }

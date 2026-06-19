@@ -74,10 +74,14 @@ use projection::NodeTreeBuilder;
 pub(crate) use providers::{
     API_FORMATS, PROVIDER_SPECS, ProviderRuntimeSpec, configured_provider_ids, default_format,
     default_model_for_provider, default_provider_id, global_model_count, global_model_list,
-    in_memory_execution_provider_spec, model_count_for_format, model_list_for_format, newline_list,
-    provider_chat_response, provider_count, provider_count_for_format, provider_format_response,
-    provider_list, provider_list_for_format, provider_model_id, provider_response_for_format,
+    model_count_for_format, model_list_for_format, newline_list, provider_count,
+    provider_count_for_format, provider_list, provider_list_for_format, provider_model_id,
     provider_spec, provider_supports_format,
+};
+#[cfg(test)]
+pub(crate) use providers::{
+    in_memory_execution_provider_spec, provider_chat_response, provider_format_response,
+    provider_response_for_format,
 };
 use runtime_audit::AuditRouteEvent;
 use runtime_controls::McpServerControlEffect;

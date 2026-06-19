@@ -9,6 +9,7 @@ use std::time::Duration;
 
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(30);
+const OPENAI_COMPATIBLE_PROVIDER_ID: &str = "openai-compatible";
 
 /// Provider health state exposed under `provider/<id>/health`.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -336,6 +337,121 @@ where
     }
 }
 
+/// OpenAI-compatible HTTPS provider adapter.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct OpenAiCompatibleProvider {
+    id: ProviderId,
+    base_url: String,
+    api_key: String,
+    model: ModelId,
+    formats: Vec<ApiFormat>,
+}
+
+impl OpenAiCompatibleProvider {
+    /// Create an OpenAI-compatible provider adapter.
+    #[must_use]
+    pub fn new(
+        id: ProviderId,
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: ModelId,
+    ) -> Self {
+        Self {
+            id,
+            base_url: base_url.into(),
+            api_key: api_key.into(),
+            model,
+            formats: vec![ApiFormat::OpenAiChat, ApiFormat::OpenAiResponses],
+        }
+    }
+
+    /// Build a provider from the `CORTEXFS_OPENAI_*` environment contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns a validation error when the configured provider or model id is
+    /// not valid for the filesystem ABI.
+    pub fn from_env() -> Result<Option<Self>, cortex_core::ValidationError> {
+        let Some(base_url) = env_value("CORTEXFS_OPENAI_BASE_URL") else {
+            return Ok(None);
+        };
+        let Some(api_key) =
+            env_value("CORTEXFS_OPENAI_API_KEY").or_else(|| env_value("FENGYING_API_KEY"))
+        else {
+            return Ok(None);
+        };
+        let model = env_value("CORTEXFS_OPENAI_MODEL").unwrap_or_else(|| "gpt-4o-mini".to_owned());
+        Ok(Some(Self::new(
+            ProviderId::new(OPENAI_COMPATIBLE_PROVIDER_ID)?,
+            base_url,
+            api_key,
+            ModelId::new(model)?,
+        )))
+    }
+
+    fn call_openai_compatible(
+        &self,
+        request: &ProviderRequest,
+    ) -> ProviderResult<ProviderResponse> {
+        let (format, endpoint) = match request.format() {
+            ApiFormat::OpenAiChat => (ApiFormat::OpenAiChat, "chat/completions"),
+            ApiFormat::OpenAiResponses => (ApiFormat::OpenAiResponses, "responses"),
+            format => return Err(ProviderError::UnsupportedFormat(format)),
+        };
+        let body = self.request_body_with_model(request)?;
+        let body = post_openai_json(&self.base_url, endpoint, &self.api_key, &body)?;
+        Ok(ProviderResponse::new(format, body))
+    }
+
+    fn request_body_with_model(&self, request: &ProviderRequest) -> ProviderResult<String> {
+        let mut body = parse_json(request.body())?;
+        let model = request.model().unwrap_or(&self.model);
+        if let Some(object) = body.as_object_mut()
+            && !object.contains_key("model")
+        {
+            object.insert(
+                "model".to_owned(),
+                serde_json::Value::String(model.as_str().to_owned()),
+            );
+        }
+        Ok(body.to_string())
+    }
+}
+
+impl Provider for OpenAiCompatibleProvider {
+    fn id(&self) -> &ProviderId {
+        &self.id
+    }
+
+    fn formats(&self) -> &[ApiFormat] {
+        &self.formats
+    }
+
+    fn health(&self) -> ProviderHealth {
+        if self.api_key.is_empty() || self.base_url.is_empty() {
+            return ProviderHealth::new(
+                ProviderStatus::MissingConfiguration,
+                None,
+                Some("missing base URL or API key".to_owned()),
+            );
+        }
+        ProviderHealth::healthy()
+    }
+
+    fn models(&self) -> Vec<ProviderModel> {
+        vec![
+            ProviderModel::new(self.model.clone(), ApiFormat::OpenAiChat)
+                .with_capabilities(vec!["chat".to_owned(), "cloud".to_owned()]),
+            ProviderModel::new(self.model.clone(), ApiFormat::OpenAiResponses)
+                .with_capabilities(vec!["responses".to_owned(), "cloud".to_owned()]),
+        ]
+    }
+
+    fn call(&self, request: ProviderRequest) -> ProviderResult<ProviderResponse> {
+        self.call_openai_compatible(&request)
+    }
+}
+
 /// Local Ollama provider adapter.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct OllamaProvider {
@@ -479,6 +595,58 @@ fn post_json(url: &str, path: &str, body: &str) -> ProviderResult<String> {
         .read_to_string(&mut response)
         .map_err(|error| ProviderError::Transport(error.to_string()))?;
     parse_http_response(&response)
+}
+
+fn post_openai_json(
+    base_url: &str,
+    endpoint: &str,
+    api_key: &str,
+    body: &str,
+) -> ProviderResult<String> {
+    let url = openai_url(base_url, endpoint)?;
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .timeout(HTTP_IO_TIMEOUT)
+        .build()
+        .map_err(|error| ProviderError::Transport(error.to_string()))?;
+    let response = client
+        .post(url)
+        .bearer_auth(api_key)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::ACCEPT, "application/json")
+        .body(body.to_owned())
+        .send()
+        .map_err(|error| ProviderError::Transport(error.to_string()))?;
+    let status = response.status();
+    let response_body = response
+        .text()
+        .map_err(|error| ProviderError::Transport(error.to_string()))?;
+    if !status.is_success() {
+        return Err(ProviderError::Transport(format!(
+            "HTTP {status}: {response_body}"
+        )));
+    }
+    Ok(response_body)
+}
+
+fn openai_url(base_url: &str, endpoint: &str) -> ProviderResult<String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(ProviderError::Transport("empty base URL".to_owned()));
+    }
+    let prefix = if trimmed.ends_with("/v1") {
+        trimmed.to_owned()
+    } else {
+        format!("{trimmed}/v1")
+    };
+    Ok(format!("{prefix}/{endpoint}"))
+}
+
+fn env_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 fn parse_http_response(response: &str) -> ProviderResult<String> {

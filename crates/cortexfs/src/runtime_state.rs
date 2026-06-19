@@ -222,6 +222,7 @@ impl RuntimeState {
     pub(crate) fn new(parents: &RuntimeParents) -> Self {
         let mut state = Self::blank(parents);
         state.attach_runtime_files(parents);
+        state.apply_environment_provider_config();
         state.refresh_provider_health_statuses();
         state.refresh_user_model_access();
         state.refresh_user_routes();

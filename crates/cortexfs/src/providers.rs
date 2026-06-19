@@ -10,7 +10,21 @@ pub const API_FORMATS: [&str; 4] = [
 const NO_DEFAULT_PROVIDER_ID: &str = "";
 
 #[cfg(not(test))]
-pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[];
+pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[ProviderRuntimeSpec {
+    id: "openai-compatible",
+    family: "openai-compatible\n",
+    name: "OpenAI-compatible API configured from environment\n",
+    formats: &["openai.chat", "openai.responses"],
+    url: "\n",
+    auth: "bearer\n",
+    acct: "key\n",
+    priority: "80\n",
+    secret_status: "missing\n",
+    default_model: "gpt-4o-mini",
+    context_window: "\n",
+    max_output_tokens: "\n",
+    model_capabilities: "chat\nresponses\ncloud\n",
+}];
 
 #[cfg(test)]
 pub const PROVIDER_SPECS: &[ProviderRuntimeSpec] = &[
@@ -243,6 +257,7 @@ pub fn default_format(provider: &ProviderRuntimeSpec) -> &'static str {
         .unwrap_or(DEFAULT_BATCH_FORMAT)
 }
 
+#[cfg(test)]
 pub fn in_memory_execution_provider_spec() -> Option<ProviderRuntimeSpec> {
     PROVIDER_SPECS
         .iter()
@@ -260,6 +275,7 @@ pub fn newline_list(items: impl Iterator<Item = impl AsRef<str>>) -> String {
     content
 }
 
+#[cfg(test)]
 pub fn provider_response_for_format(provider: &ProviderRuntimeSpec, format: &str) -> String {
     if format == "openai.chat" {
         provider_chat_response(provider.id, provider.default_model)
@@ -268,12 +284,14 @@ pub fn provider_response_for_format(provider: &ProviderRuntimeSpec, format: &str
     }
 }
 
+#[cfg(test)]
 pub fn provider_chat_response(provider: &str, model: &str) -> String {
     format!(
         r#"{{"id":"chatcmpl-cortexfs","object":"chat.completion","provider":"{provider}","model":"{model}","choices":[{{"index":0,"message":{{"role":"assistant","content":"cortexfs-ok"}},"finish_reason":"stop"}}]}}"#
     )
 }
 
+#[cfg(test)]
 pub fn provider_format_response(provider: &str, format: &str) -> String {
     format!(r#"{{"status":"accepted","provider":"{provider}","format":"{format}"}}"#)
 }
