@@ -134,7 +134,10 @@ pub fn mount(config: &FuseConfig) -> Result<FuseProjection, MountError> {
         let mount_options = fuse_mount_options(config.options());
         let session = fuse3::raw::Session::new(mount_options.clone());
         let mut handle = session
-            .mount_with_unprivileged(CortexFs::new(), config.options().mountpoint())
+            .mount_with_unprivileged(
+                CortexFs::new_with_mode(config.options().mode()),
+                config.options().mountpoint(),
+            )
             .await
             .map_err(MountError::Fuse)?;
         match wait_for_mount_shutdown(mount_shutdown_signal(), &mut handle)
@@ -223,10 +226,15 @@ struct CortexFs {
     runtime: Mutex<RuntimeState>,
     owner_uid: u32,
     owner_gid: u32,
+    mount_mode: MountMode,
 }
 
 impl CortexFs {
     fn new() -> Self {
+        Self::new_with_mode(MountMode::SingleUser)
+    }
+
+    fn new_with_mode(mount_mode: MountMode) -> Self {
         let tree = NodeTreeBuilder::new().build_design_projection();
         let parents = RuntimeParents::from_tree(&tree);
         Self {
@@ -234,6 +242,7 @@ impl CortexFs {
             runtime: Mutex::new(RuntimeState::new(&parents)),
             owner_uid: nix::unistd::getuid().as_raw(),
             owner_gid: nix::unistd::getgid().as_raw(),
+            mount_mode,
         }
     }
 
@@ -284,15 +293,24 @@ impl CortexFs {
     fn node_attr(&self, inode: Inode) -> fuse3::Result<FileAttr> {
         let runtime_attr = {
             let runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
-            runtime
-                .node(inode)
-                .map(|node| runtime.node_attr(node, self.owner_uid, self.owner_gid))
+            runtime.node(inode).map(|node| {
+                runtime.node_attr(
+                    node,
+                    self.owner_uid,
+                    self.owner_gid,
+                    self.mount_mode == MountMode::MultiUser,
+                )
+            })
         };
         if let Some(attr) = runtime_attr {
             return Ok(attr);
         }
         if let Some(node) = self.tree.nodes.get(&inode) {
-            return Ok(node.attr(self.owner_uid, self.owner_gid));
+            return Ok(node.attr_for_mount(
+                self.owner_uid,
+                self.owner_gid,
+                self.mount_mode == MountMode::MultiUser,
+            ));
         }
         Err(fuse3::Errno::new_not_exist())
     }
@@ -428,8 +446,11 @@ impl CortexFs {
             .into_iter()
             .map(|entry| {
                 let attr = self.node_attr(entry.inode).unwrap_or_else(|_error| {
-                    Node::dir(entry.inode, entry.name.to_string_lossy())
-                        .attr(self.owner_uid, self.owner_gid)
+                    Node::dir(entry.inode, entry.name.to_string_lossy()).attr_for_mount(
+                        self.owner_uid,
+                        self.owner_gid,
+                        self.mount_mode == MountMode::MultiUser,
+                    )
                 });
                 DirectoryEntryPlus {
                     inode: entry.inode,
@@ -2009,12 +2030,12 @@ impl RuntimeState {
             .collect()
     }
 
-    fn node_attr(&self, node: &Node, uid: u32, gid: u32) -> FileAttr {
-        let mut attr = node.attr(uid, gid);
+    fn node_attr(&self, node: &Node, uid: u32, gid: u32, multi_user: bool) -> FileAttr {
+        let mut attr = node.attr_for_mount(uid, gid, multi_user);
         if self.is_write_only_control_node(node.inode()) {
             attr.perm = 0o222;
         } else if self.is_writable_dynamic_file(node.inode()) {
-            attr.perm = 0o644;
+            attr.perm = if multi_user { 0o666 } else { 0o644 };
         } else if node.is_dynamic_file() {
             attr.perm = 0o444;
         }

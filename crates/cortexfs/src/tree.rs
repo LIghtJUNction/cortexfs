@@ -136,6 +136,15 @@ impl Node {
     }
 
     pub fn attr(&self, uid: u32, gid: u32) -> fuse3::raw::prelude::FileAttr {
+        self.attr_for_mount(uid, gid, false)
+    }
+
+    pub fn attr_for_mount(
+        &self,
+        uid: u32,
+        gid: u32,
+        multi_user: bool,
+    ) -> fuse3::raw::prelude::FileAttr {
         let size = self
             .content()
             .map(str::len)
@@ -143,18 +152,24 @@ impl Node {
             .transpose()
             .unwrap_or_default()
             .unwrap_or(0);
-        self.attr_with_size(uid, gid, size)
+        self.attr_with_size(uid, gid, size, multi_user)
     }
 
-    pub fn attr_with_size(&self, uid: u32, gid: u32, size: u64) -> fuse3::raw::prelude::FileAttr {
+    pub fn attr_with_size(
+        &self,
+        uid: u32,
+        gid: u32,
+        size: u64,
+        multi_user: bool,
+    ) -> fuse3::raw::prelude::FileAttr {
         let perm = if self.is_writable_submit_dir() {
-            0o755
+            if multi_user { 0o777 } else { 0o755 }
         } else if self.is_socket() {
             0o666
         } else if self.is_dir() {
             0o555
         } else if self.is_dynamic_file() {
-            0o644
+            if multi_user { 0o666 } else { 0o644 }
         } else {
             0o444
         };
