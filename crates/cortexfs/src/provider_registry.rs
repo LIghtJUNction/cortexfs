@@ -12,6 +12,8 @@ use std::sync::{LazyLock, Mutex};
 
 use crate::providers::newline_list;
 use cortex_core::{ApiFormat, ModelId, ProviderId};
+#[cfg(not(test))]
+use nix::unistd::Uid;
 
 #[cfg(test)]
 static TEST_SECRETS: LazyLock<Mutex<BTreeMap<String, String>>> =
@@ -53,12 +55,23 @@ impl ProviderRegistry {
     }
 
     pub fn from_env() -> Option<Self> {
-        let dir = std::env::var("CORTEXFS_PROVIDER_CONFIG_DIR")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .map(PathBuf::from)
-            .or_else(default_config_dir)?;
-        Some(Self { dir })
+        #[cfg(test)]
+        {
+            std::env::var("CORTEXFS_PROVIDER_CONFIG_DIR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(PathBuf::from)
+                .map(|dir| Self { dir })
+        }
+        #[cfg(not(test))]
+        {
+            let dir = std::env::var("CORTEXFS_PROVIDER_CONFIG_DIR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(PathBuf::from)
+                .or_else(default_config_dir)?;
+            Some(Self { dir })
+        }
     }
 
     pub fn load(&self) -> Vec<RegistryProvider> {
@@ -103,7 +116,8 @@ impl SecretStore {
 
 #[cfg(not(test))]
 fn store_provider_key(provider: &str, value: &str) -> Result<String, String> {
-    let mut child = Command::new("secret-tool")
+    let mut command = secret_tool_command();
+    let mut child = command
         .args([
             "store",
             "--label",
@@ -152,7 +166,7 @@ fn store_provider_key(provider: &str, value: &str) -> Result<String, String> {
 
 #[cfg(not(test))]
 fn lookup_provider_key(provider: &str) -> Result<String, String> {
-    let output = Command::new("secret-tool")
+    let output = secret_tool_command()
         .args([
             "lookup",
             "application",
@@ -185,6 +199,23 @@ fn lookup_provider_key(provider: &str) -> Result<String, String> {
         .ok_or_else(|| "missing provider API key in Secret Service".to_owned())
 }
 
+#[cfg(not(test))]
+fn secret_tool_command() -> Command {
+    let mut command = Command::new("secret-tool");
+    let uid = Uid::current().as_raw();
+    let runtime_dir =
+        std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/run/user/{uid}"));
+    command.env("XDG_RUNTIME_DIR", &runtime_dir);
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        command.env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={runtime_dir}/bus"),
+        );
+    }
+    command
+}
+
+#[cfg(not(test))]
 fn default_config_dir() -> Option<PathBuf> {
     std::env::var("HOME")
         .ok()
