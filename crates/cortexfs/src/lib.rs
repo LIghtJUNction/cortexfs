@@ -230,6 +230,7 @@ struct CortexFs {
 }
 
 impl CortexFs {
+    #[cfg(any(test, feature = "live-tests"))]
     fn new() -> Self {
         Self::new_with_mode(MountMode::SingleUser)
     }
