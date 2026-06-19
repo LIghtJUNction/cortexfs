@@ -38,7 +38,15 @@ The service reads this local environment file:
 ~/.config/cortexfs/.env
 ```
 
-Put API keys there, for example `FENGYING_API_KEY=...`. This file is a local secret and must not be committed to Git.
+Write the OpenAI-compatible provider configuration there:
+
+```bash
+CORTEXFS_OPENAI_BASE_URL=https://api.example.com/
+CORTEXFS_OPENAI_API_KEY=...
+CORTEXFS_OPENAI_MODEL=gpt-4o-mini
+```
+
+This file is a local secret and must not be committed to Git. `CORTEXFS_OPENAI_BASE_URL` may be either the service root or the `/v1` base path; the runtime normalizes it to OpenAI-compatible endpoints.
 
 For foreground debugging, mount manually:
 

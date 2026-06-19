@@ -38,7 +38,15 @@ cortex start
 ~/.config/cortexfs/.env
 ```
 
-把 API key 写在这里，例如 `FENGYING_API_KEY=...`。该文件只属于本机 secret，不要提交到 Git。
+把 OpenAI-compatible provider 配置写在这里：
+
+```bash
+CORTEXFS_OPENAI_BASE_URL=https://api.example.com/
+CORTEXFS_OPENAI_API_KEY=...
+CORTEXFS_OPENAI_MODEL=gpt-4o-mini
+```
+
+该文件只属于本机 secret，不要提交到 Git。`CORTEXFS_OPENAI_BASE_URL` 可以是服务根路径或 `/v1` 路径；运行时会把它规范化到 OpenAI-compatible endpoint。
 
 如果需要临时前台调试，也可以手动挂载：
 

@@ -1,15 +1,32 @@
+#[cfg(test)]
 use crate::{
     PROVIDER_SPECS, in_memory_execution_provider_spec, provider_chat_response,
     provider_format_response, provider_response_for_format,
 };
+#[cfg(test)]
 use cortex_core::{ApiFormat, ModelId, ProviderId};
-use cortex_providers::{InMemoryProvider, Provider, ProviderModel, ProviderResponse};
+#[cfg(not(test))]
+use cortex_providers::OpenAiCompatibleProvider;
+use cortex_providers::Provider;
+#[cfg(test)]
+use cortex_providers::{InMemoryProvider, ProviderModel, ProviderResponse};
 use cortex_store::InMemoryStore;
 use cortexd::ExecutionPlane;
+#[cfg(test)]
 use std::str::FromStr;
 
 pub type FsExecutionPlane = ExecutionPlane<InMemoryStore, Box<dyn Provider + Send + Sync>>;
 
+#[cfg(not(test))]
+pub fn default_execution_plane() -> Option<FsExecutionPlane> {
+    let provider = OpenAiCompatibleProvider::from_env().ok().flatten()?;
+    Some(ExecutionPlane::new(
+        InMemoryStore::new(),
+        Box::new(provider),
+    ))
+}
+
+#[cfg(test)]
 pub fn default_execution_plane() -> Option<FsExecutionPlane> {
     let provider_spec = in_memory_execution_provider_spec()?;
     let provider_id = ProviderId::new(provider_spec.id).ok()?;
