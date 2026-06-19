@@ -1,8 +1,11 @@
 use fuse3::Inode;
 
+use cortex_core::ProviderId;
+
+use crate::provider_registry::RegistryProvider;
 use crate::runtime_types::ApiRoute;
 use crate::validation::{
-    allowed_provider_lines, normalize_allowed_providers, validate_control_write,
+    allowed_provider_lines, default_allowed_providers_content, validate_control_write,
 };
 use crate::{
     API_FORMATS, EMPTY_TEXT, LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT, Node, PROVIDER_SPECS,
@@ -41,7 +44,7 @@ impl RuntimeState {
             return Err(libc::EINVAL.into());
         }
         let providers = std::str::from_utf8(data).map_err(|_error| libc::EINVAL)?;
-        let value = normalize_allowed_providers(providers)?;
+        let value = self.normalize_allowed_providers(providers)?;
         if let Some(default_provider) = self.current_user_default_provider()
             && !allowed_provider_lines(&value).any(|provider| provider == default_provider)
         {
@@ -115,7 +118,7 @@ impl RuntimeState {
         let trimmed = provider.trim();
         let provider = if trimmed.is_empty() {
             default_provider_id()
-        } else if provider_spec(trimmed).is_some() {
+        } else if self.provider_exists(trimmed) {
             trimmed
         } else {
             return Err(libc::EINVAL.into());
@@ -425,6 +428,24 @@ impl RuntimeState {
                 self.update_dynamic_file(inode, status);
             }
         }
+        let dynamic_statuses = self
+            .dynamic_providers
+            .iter()
+            .filter_map(|(provider, config)| {
+                let inodes = self.dynamic_provider_inodes.get(provider)?;
+                let status = if !config.enabled {
+                    "disabled\n"
+                } else if config.secret_status.trim() != "configured" {
+                    "missing_configuration\n"
+                } else {
+                    "unknown\n"
+                };
+                Some((inodes.health_status, status))
+            })
+            .collect::<Vec<_>>();
+        for (inode, status) in dynamic_statuses {
+            self.update_dynamic_file(inode, status);
+        }
     }
 
     pub fn refresh_user_model_access(&mut self) {
@@ -440,11 +461,17 @@ impl RuntimeState {
     }
 
     fn refresh_user_model_index(&mut self) {
-        let available = PROVIDER_SPECS
+        let mut available = PROVIDER_SPECS
             .iter()
             .filter(|provider| self.provider_model_access(provider.id).0 == "1\n")
             .map(provider_model_id)
             .collect::<Vec<_>>();
+        available.extend(
+            self.dynamic_providers
+                .values()
+                .filter(|provider| self.provider_model_access(&provider.id).0 == "1\n")
+                .map(|provider| format!("{}.{}", provider.id, provider.default_model)),
+        );
         if let Some(inode) = self.user_models_count_inode {
             self.update_dynamic_file(inode, format!("{}\n", available.len()));
         }
@@ -464,32 +491,118 @@ impl RuntimeState {
         if !API_FORMATS.contains(&format) {
             return ApiRoute::unsupported_format();
         }
-        let preferred_provider = self
-            .current_user_default_provider()
-            .and_then(provider_spec)
-            .filter(|provider| provider_supports_format(provider, format));
-        let routed_provider = preferred_provider.or_else(|| {
-            PROVIDER_SPECS.iter().copied().find(|provider| {
-                provider_supports_format(provider, format)
-                    && self.provider_model_access(provider.id).0 == "1\n"
-            })
+        if let Some(provider) = self.current_user_default_provider()
+            && self.provider_supports_format(provider, format)
+        {
+            return self.route_for_provider(provider);
+        }
+        if let Some(provider) = self
+            .ready_dynamic_provider_for_format(format)
+            .map(|provider| provider.id.clone())
+        {
+            return self.route_for_provider(&provider);
+        }
+        let routed_provider = PROVIDER_SPECS.iter().copied().find(|provider| {
+            provider_supports_format(provider, format)
+                && self.provider_model_access(provider.id).0 == "1\n"
         });
-        let provider = routed_provider.or_else(|| {
-            PROVIDER_SPECS
-                .iter()
-                .copied()
-                .find(|provider| provider_supports_format(provider, format))
-        });
+        if let Some(provider) = routed_provider {
+            return self.route_for_provider(provider.id);
+        }
+        if let Some(provider) = self
+            .fallback_dynamic_provider_for_format(format)
+            .map(|provider| provider.id.clone())
+        {
+            return self.route_for_provider(&provider);
+        }
+        let provider = PROVIDER_SPECS
+            .iter()
+            .copied()
+            .find(|provider| provider_supports_format(provider, format));
         let Some(provider) = provider else {
             return ApiRoute::unsupported_format();
         };
-        if !self.is_provider_allowed(provider.id) {
-            ApiRoute::new(provider.id, "", "policy_denied")
-        } else if self.provider_model_access(provider.id) == ("0\n", "provider_disabled\n") {
-            ApiRoute::new(provider.id, "", "provider_disabled")
+        self.route_for_provider(provider.id)
+    }
+
+    fn route_for_provider(&self, provider: &str) -> ApiRoute {
+        let (allowed, reason) = self.provider_model_access(provider);
+        if allowed == "1\n" {
+            ApiRoute::new(provider, self.route_model(provider).as_str(), "ready")
         } else {
-            ApiRoute::new(provider.id, route_model(&provider).as_str(), "ready")
+            ApiRoute::new(provider, "", reason.trim())
         }
+    }
+
+    fn ready_dynamic_provider_for_format(&self, format: &str) -> Option<&RegistryProvider> {
+        self.dynamic_providers
+            .values()
+            .filter(|provider| {
+                provider.supports_format(format)
+                    && self.provider_model_access(&provider.id).0 == "1\n"
+            })
+            .max_by_key(|provider| provider.priority)
+    }
+
+    fn fallback_dynamic_provider_for_format(&self, format: &str) -> Option<&RegistryProvider> {
+        self.dynamic_providers
+            .values()
+            .filter(|provider| provider.supports_format(format))
+            .max_by_key(|provider| provider.priority)
+    }
+
+    fn provider_supports_format(&self, provider: &str, format: &str) -> bool {
+        if let Some(provider) = self.dynamic_providers.get(provider) {
+            return provider.supports_format(format);
+        }
+        provider_spec(provider).is_some_and(|provider| provider_supports_format(&provider, format))
+    }
+
+    fn provider_exists(&self, provider: &str) -> bool {
+        provider_spec(provider).is_some() || self.dynamic_providers.contains_key(provider)
+    }
+
+    fn normalize_allowed_providers(&self, providers: &str) -> fuse3::Result<String> {
+        let trimmed = providers.trim();
+        if trimmed.is_empty() {
+            return Ok(default_allowed_providers_content());
+        }
+        let mut normalized = String::new();
+        let mut seen = Vec::new();
+        for provider in providers
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            if ProviderId::new(provider).is_err() || !self.provider_exists(provider) {
+                return Err(libc::EINVAL.into());
+            }
+            if seen.iter().any(|seen_provider| seen_provider == provider) {
+                continue;
+            }
+            seen.push(provider.to_owned());
+            normalized.push_str(provider);
+            normalized.push('\n');
+        }
+        if normalized.is_empty() {
+            Ok(default_allowed_providers_content())
+        } else {
+            Ok(normalized)
+        }
+    }
+
+    fn route_model(&self, provider: &str) -> String {
+        if let Some(provider) = self.dynamic_providers.get(provider) {
+            return provider.default_model.clone();
+        }
+        let Some(provider) = provider_spec(provider) else {
+            return String::new();
+        };
+        if provider.id == ENV_PROVIDER_ID {
+            return env_value("CORTEXFS_OPENAI_MODEL")
+                .unwrap_or_else(|| provider.default_model.to_owned());
+        }
+        provider.default_model.to_owned()
     }
 
     fn update_user_route(&mut self, format: &str, route: &ApiRoute) {
@@ -530,10 +643,20 @@ impl RuntimeState {
         if !self.provider_enabled(provider) {
             return ("0\n", "provider_disabled\n");
         }
+        if self
+            .dynamic_providers
+            .get(provider)
+            .is_some_and(|provider| provider.secret_status.trim() != "configured")
+        {
+            return ("0\n", "missing_secret\n");
+        }
         ("1\n", "ready\n")
     }
 
     fn provider_enabled(&self, provider: &str) -> bool {
+        if let Some(provider) = self.dynamic_providers.get(provider) {
+            return provider.enabled;
+        }
         let inode = self.provider_enabled_effective_inode(provider);
         inode
             .and_then(|inode| self.nodes.get(&inode))
@@ -565,12 +688,4 @@ fn env_value(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
-}
-
-fn route_model(provider: &crate::ProviderRuntimeSpec) -> String {
-    if provider.id == ENV_PROVIDER_ID {
-        return env_value("CORTEXFS_OPENAI_MODEL")
-            .unwrap_or_else(|| provider.default_model.to_owned());
-    }
-    provider.default_model.to_owned()
 }

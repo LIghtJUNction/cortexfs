@@ -94,6 +94,10 @@ impl Filesystem for CortexFs {
             runtime.create_collab_claim(parent, name)?
         } else if self.collab_lock_location(parent).is_some() {
             runtime.create_collab_lock_lease(parent, name)?
+        } else if runtime.is_provider_registry_inbox(parent)
+            || runtime.is_dynamic_secret_inbox(parent)
+        {
+            runtime.create_provider_staged(parent, name)?
         } else {
             let location = self.submission_location(parent).ok_or(libc::EROFS)?;
             if !matches!(location.kind, SubmissionDirectoryKind::Inbox) {
@@ -193,6 +197,12 @@ impl Filesystem for CortexFs {
         }
         if self.collab_lock_location(new_parent).is_some() {
             return runtime.submit_collab_lock_lease(parent, name, new_parent, new_name);
+        }
+        if runtime.is_provider_registry_inbox(new_parent) {
+            return runtime.submit_provider_registry(parent, name, new_parent, new_name);
+        }
+        if runtime.is_dynamic_secret_inbox(new_parent) {
+            return runtime.submit_provider_secret(parent, name, new_parent, new_name);
         }
         let submission = self.api_submission(new_parent).ok_or(libc::EROFS)?;
         runtime.submit(parent, name, new_parent, new_name, submission)

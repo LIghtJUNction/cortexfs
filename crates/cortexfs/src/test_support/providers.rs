@@ -3,6 +3,9 @@ use super::support::{
     user_models_file_content,
 };
 use crate::CortexFs;
+use crate::provider_registry::{ProviderRegistry, RegistryProvider, SecretStore};
+use std::fs;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn provider_runtime_files_follow_specs() -> fuse3::Result<()> {
@@ -568,6 +571,132 @@ fn models_refresh_nodes_reject_invalid_input() -> fuse3::Result<()> {
     assert!(runtime.write(user_refresh, 1, b"1\n").is_err());
     drop(runtime);
     Ok(())
+}
+
+#[test]
+fn provider_registry_upsert_persists_config_without_secret() -> std::io::Result<()> {
+    let dir = temp_provider_registry_dir();
+    let _ = fs::remove_dir_all(&dir);
+    let registry = ProviderRegistry::from_dir(dir.clone());
+
+    registry
+        .upsert(
+            r#"{
+                "op": "upsert",
+                "id": "lmm-best",
+                "family": "openai-compatible",
+                "name": "LMM Best relay",
+                "formats": ["openai.chat"],
+                "base_url": "https://api.lmm.best:9000/",
+                "default_model": "gpt-5.4-mini",
+                "priority": 80,
+                "enabled": true
+            }"#,
+        )
+        .map_err(std::io::Error::other)?;
+
+    let saved = fs::read_to_string(dir.join("lmm-best.json"))?;
+    assert!(saved.contains(r#""id":"lmm-best""#));
+    assert!(saved.contains(r#""base_url":"https://api.lmm.best:9000/""#));
+    assert!(!saved.contains("api_key"));
+    assert!(!saved.contains("sk-"));
+    fs::remove_dir_all(dir)
+}
+
+#[test]
+fn dynamic_provider_routes_after_secret_import() -> fuse3::Result<()> {
+    SecretStore::clear_test_secrets();
+    let provider = dynamic_registry_provider();
+    let fs = CortexFs::new();
+    let routes = fs
+        .tree
+        .path_inode(crate::USER_ROUTES_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let provider_list = fs.resolve_path_inode(["provider", "list"])?;
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.upsert_dynamic_provider(provider.clone());
+        assert!(
+            runtime
+                .nodes
+                .get(&provider_list)
+                .and_then(crate::Node::content)
+                .is_some_and(|content| content.lines().any(|line| line == provider.id))
+        );
+        drop(runtime);
+    }
+
+    let secret_status =
+        fs.resolve_path_inode(["provider", provider.id.as_str(), "secrets", "status"])?;
+    let secret_active =
+        fs.resolve_path_inode(["provider", provider.id.as_str(), "secrets", "active"])?;
+    let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    let default_provider = runtime
+        .lookup_child(routes, "default_provider")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+
+    runtime.write(default_provider, 0, format!("{}\n", provider.id).as_bytes())?;
+    assert_openai_chat_route(
+        &runtime,
+        routes,
+        format!("{}\n", provider.id).as_str(),
+        "\n",
+        "missing_secret\n",
+    )?;
+
+    let reference = SecretStore::store_provider_key(&provider.id, "test-api-key")
+        .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
+    runtime.update_dynamic_secret_status(&provider.id, &reference);
+    assert_eq!(
+        runtime
+            .nodes
+            .get(&secret_status)
+            .and_then(crate::Node::content),
+        Some("configured\n")
+    );
+    assert_eq!(
+        runtime
+            .nodes
+            .get(&secret_active)
+            .and_then(crate::Node::content),
+        Some(format!("{reference}\n").as_str())
+    );
+    assert_openai_chat_route(
+        &runtime,
+        routes,
+        format!("{}\n", provider.id).as_str(),
+        format!("{}\n", provider.default_model).as_str(),
+        "ready\n",
+    )?;
+    drop(runtime);
+    Ok(())
+}
+
+fn temp_provider_registry_dir() -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    std::env::temp_dir().join(format!(
+        "cortexfs-provider-registry-{}-{nanos}",
+        std::process::id()
+    ))
+}
+
+fn dynamic_registry_provider() -> RegistryProvider {
+    RegistryProvider {
+        id: "lmm-best".to_owned(),
+        family: "openai-compatible".to_owned(),
+        name: "LMM Best relay".to_owned(),
+        formats: vec!["openai.chat".to_owned()],
+        base_url: "https://api.lmm.best:9000/".to_owned(),
+        default_model: "gpt-5.4-mini".to_owned(),
+        priority: 80,
+        enabled: true,
+        secret_status: "missing\n".to_owned(),
+        secret_ref: "none\n".to_owned(),
+    }
 }
 
 #[test]

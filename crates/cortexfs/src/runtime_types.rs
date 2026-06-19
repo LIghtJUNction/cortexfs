@@ -63,6 +63,24 @@ pub struct ProviderConfigInodes {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct DynamicProviderInodes {
+    pub root: Inode,
+    pub url_current: Inode,
+    pub url_effective: Inode,
+    pub url_source: Inode,
+    pub enabled_current: Inode,
+    pub enabled_effective: Inode,
+    pub enabled_source: Inode,
+    pub health_status: Inode,
+    pub secret_status: Inode,
+    pub secret_active: Inode,
+    pub secret_inbox: Inode,
+    pub secret_outbox: Inode,
+    pub model_count: Inode,
+    pub model_list: Inode,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ApiSubmission {
     pub scope: SubmissionScope,
     pub format: &'static str,

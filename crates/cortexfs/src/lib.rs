@@ -7,6 +7,7 @@ mod filesystem;
 pub mod live_support;
 mod mount_config;
 mod projection;
+mod provider_registry;
 pub(crate) mod providers;
 mod runtime_audit;
 mod runtime_controls;
@@ -71,6 +72,7 @@ pub use mount_config::{
     FuseConfig, FuseProjection, MountError, MountMode, MountOptions, MountSecurityOptions,
 };
 use projection::NodeTreeBuilder;
+use provider_registry::{ProviderRegistry, RegistryProvider, SecretStore};
 pub(crate) use providers::{
     API_FORMATS, PROVIDER_SPECS, ProviderRuntimeSpec, configured_provider_ids, default_format,
     default_model_for_provider, default_provider_id, global_model_count, global_model_list,
@@ -88,9 +90,9 @@ use runtime_controls::McpServerControlEffect;
 use runtime_parents::RuntimeParents;
 pub(crate) use runtime_state::RuntimeState;
 use runtime_types::{
-    AgentTask, ApiRouteInodes, ApiSubmission, ClusterTask, MemoryItem, PendingResponse,
-    PreferencePair, PromptRender, ProviderConfigInodes, ProviderRuntimeParents, RouteMetadata,
-    SubmissionPayload, ThreadUpdate, TrainingExportMetadata, UserModelAccessInodes,
+    AgentTask, ApiRouteInodes, ApiSubmission, ClusterTask, DynamicProviderInodes, MemoryItem,
+    PendingResponse, PreferencePair, PromptRender, ProviderConfigInodes, ProviderRuntimeParents,
+    RouteMetadata, SubmissionPayload, ThreadUpdate, TrainingExportMetadata, UserModelAccessInodes,
 };
 use submission::{
     CollabClaimLocation, CollabLockLocation, SubmissionDirectoryKind, SubmissionLocation,
@@ -1339,9 +1341,26 @@ impl RuntimeState {
         if let Some(postgres_dsn_parent) = parents.postgres_dsn {
             self.add_postgres_dsn_runtime_files(postgres_dsn_parent);
         }
+        self.provider_root_inode = parents.provider_root;
+        if let Some(provider_root) = parents.provider_root {
+            self.provider_registry_inbox_inode = Some(self.add_dynamic_dir(provider_root, "inbox"));
+            self.provider_registry_outbox_inode =
+                Some(self.add_dynamic_dir(provider_root, "outbox"));
+        }
+        if let Some(count) = parents.provider_count {
+            self.provider_count_inode = Some(count);
+            self.nodes
+                .insert(count, Node::dynamic_file(count, "count", provider_count()));
+        }
+        if let Some(list) = parents.provider_list {
+            self.provider_list_inode = Some(list);
+            self.nodes
+                .insert(list, Node::dynamic_file(list, "list", provider_list()));
+        }
         for (&provider, provider_parents) in &parents.provider_parents {
             self.add_provider_runtime_files(provider, *provider_parents);
         }
+        self.load_registry_providers();
     }
 
     fn attach_cluster_runtime_files(&mut self, parents: &RuntimeParents) {
@@ -1641,6 +1660,328 @@ impl RuntimeState {
             .insert(provider, next_rotation);
         let refresh = self.add_dynamic_file(parents.models, "refresh", "");
         self.provider_models_refresh.insert(provider, refresh);
+    }
+
+    fn load_registry_providers(&mut self) {
+        let Some(registry) = ProviderRegistry::from_env() else {
+            self.refresh_provider_index();
+            return;
+        };
+        for provider in registry.load() {
+            self.upsert_dynamic_provider(provider);
+        }
+        self.refresh_provider_index();
+    }
+
+    fn upsert_dynamic_provider(&mut self, mut provider: RegistryProvider) {
+        let Some(root) = self.provider_root_inode else {
+            return;
+        };
+        if SecretStore::lookup_provider_key(&provider.id).is_ok() {
+            "configured\n".clone_into(&mut provider.secret_status);
+            provider.secret_ref = format!("secret-service:provider:{}:api-key\n", provider.id);
+        } else {
+            "missing\n".clone_into(&mut provider.secret_status);
+            "none\n".clone_into(&mut provider.secret_ref);
+        }
+        if let Some(existing) = self.dynamic_provider_inodes.remove(&provider.id) {
+            self.remove_dynamic_child(root, existing.root);
+        }
+        let provider_root = self.add_dynamic_dir(root, provider.id.clone());
+        self.add_dynamic_file(provider_root, "context", "local:provider_r:provider_t:s0\n");
+        self.add_dynamic_file_owned(provider_root, "family", format!("{}\n", provider.family));
+        self.add_dynamic_file_owned(provider_root, "name", format!("{}\n", provider.name));
+        self.add_dynamic_file_owned(provider_root, "format", provider.formats_text());
+        self.add_dynamic_file(provider_root, "auth", "bearer\n");
+        self.add_dynamic_file(provider_root, "acct", "key\n");
+        self.add_dynamic_file_owned(
+            provider_root,
+            "priority",
+            format!("{}\n", provider.priority),
+        );
+
+        let url = self.add_dynamic_dir(provider_root, "url");
+        self.add_dynamic_file(url, "default", "\n");
+        let url_current =
+            self.add_dynamic_file_owned(url, "current", format!("{}\n", provider.base_url));
+        let url_effective =
+            self.add_dynamic_file_owned(url, "effective", format!("{}\n", provider.base_url));
+        let url_source = self.add_dynamic_file(url, "source", "registry\n");
+
+        let enabled = self.add_dynamic_dir(provider_root, "enabled");
+        self.add_dynamic_file(enabled, "default", "1\n");
+        let enabled_value = if provider.enabled { "1\n" } else { "0\n" };
+        let enabled_current = self.add_dynamic_file(enabled, "current", enabled_value);
+        let enabled_effective = self.add_dynamic_file(enabled, "effective", enabled_value);
+        let enabled_source = self.add_dynamic_file(enabled, "source", "registry\n");
+
+        let health = self.add_dynamic_dir(provider_root, "health");
+        let health_status = self.add_dynamic_file(
+            health,
+            "status",
+            if provider.enabled {
+                "unknown\n"
+            } else {
+                "disabled\n"
+            },
+        );
+        self.add_dynamic_file(health, "latency_ms", "\n");
+        self.add_dynamic_file(health, "last_error", "\n");
+        self.add_dynamic_file(health, "check", "");
+
+        let secrets = self.add_dynamic_dir(provider_root, "secrets");
+        let secret_status =
+            self.add_dynamic_file_owned(secrets, "status", provider.secret_status.clone());
+        let secret_active =
+            self.add_dynamic_file_owned(secrets, "active", provider.secret_ref.clone());
+        self.add_dynamic_file(secrets, "rotate", "");
+        self.add_dynamic_file(secrets, "last_rotated", "\n");
+        self.add_dynamic_file(secrets, "next_rotation", "\n");
+        let secret_inbox = self.add_dynamic_dir(secrets, "inbox");
+        let secret_outbox = self.add_dynamic_dir(secrets, "outbox");
+
+        let model = self.add_dynamic_dir(provider_root, "model");
+        let model_count = self.add_dynamic_file(model, "count", "1\n");
+        let model_list =
+            self.add_dynamic_file_owned(model, "list", format!("{}\n", provider.default_model));
+        self.add_dynamic_file(model, "refresh", "");
+        let model_dir = self.add_dynamic_dir(model, provider.default_model.clone());
+        self.add_dynamic_file_owned(model_dir, "name", format!("{}\n", provider.default_model));
+        self.add_dynamic_file_owned(
+            model_dir,
+            "format",
+            format!(
+                "{}\n",
+                provider
+                    .formats
+                    .first()
+                    .map_or("openai.chat", String::as_str)
+            ),
+        );
+        self.add_dynamic_file(model_dir, "context_window", "\n");
+        self.add_dynamic_file(model_dir, "max_output_tokens", "\n");
+        self.add_dynamic_file(model_dir, "cap", "chat\nresponses\ncloud\n");
+        self.add_dynamic_file(model_dir, "status", "ready\n");
+
+        self.dynamic_secret_inboxes
+            .insert(secret_inbox, provider.id.clone());
+        self.dynamic_secret_outboxes
+            .insert(provider.id.clone(), secret_outbox);
+        self.dynamic_provider_inodes.insert(
+            provider.id.clone(),
+            DynamicProviderInodes {
+                root: provider_root,
+                url_current,
+                url_effective,
+                url_source,
+                enabled_current,
+                enabled_effective,
+                enabled_source,
+                health_status,
+                secret_status,
+                secret_active,
+                secret_inbox,
+                secret_outbox,
+                model_count,
+                model_list,
+            },
+        );
+        self.dynamic_providers
+            .insert(provider.id.clone(), provider.clone());
+        self.ensure_provider_allowed(&provider.id);
+        self.refresh_provider_index();
+        self.refresh_user_routes();
+    }
+
+    pub fn is_provider_registry_inbox(&self, inode: Inode) -> bool {
+        Some(inode) == self.provider_registry_inbox_inode
+    }
+
+    pub fn is_dynamic_secret_inbox(&self, inode: Inode) -> bool {
+        self.dynamic_secret_inboxes.contains_key(&inode)
+    }
+
+    fn provider_for_secret_inbox(&self, inode: Inode) -> Option<String> {
+        self.dynamic_secret_inboxes.get(&inode).cloned()
+    }
+
+    pub fn create_provider_staged(&mut self, parent: Inode, name: &str) -> fuse3::Result<Inode> {
+        self.create_staged(parent, "provider.registry", name)
+    }
+
+    pub fn submit_provider_registry(
+        &mut self,
+        parent: Inode,
+        name: &str,
+        new_parent: Inode,
+        new_name: &str,
+    ) -> fuse3::Result<()> {
+        if !self.is_provider_registry_inbox(new_parent) {
+            return Err(libc::EROFS.into());
+        }
+        let content = self.take_staged_content(parent, name, new_name)?;
+        let registry = ProviderRegistry::from_env().ok_or(libc::EIO)?;
+        match registry.upsert(&content) {
+            Ok(provider) => {
+                let id = provider.id.clone();
+                self.upsert_dynamic_provider(provider);
+                self.materialize_provider_registry_ack(&id);
+                self.append_audit("provider.registry", new_name, "configured");
+                Ok(())
+            }
+            Err(error) => {
+                self.materialize_provider_registry_error(new_name, &error);
+                self.append_audit("provider.registry", new_name, "error");
+                Err(libc::EINVAL.into())
+            }
+        }
+    }
+
+    pub fn submit_provider_secret(
+        &mut self,
+        parent: Inode,
+        name: &str,
+        new_parent: Inode,
+        new_name: &str,
+    ) -> fuse3::Result<()> {
+        let provider = self
+            .provider_for_secret_inbox(new_parent)
+            .ok_or(libc::EROFS)?;
+        let content = self.take_staged_content(parent, name, new_name)?;
+        let value = parse_secret_import_value(&content)?;
+        match SecretStore::store_provider_key(&provider, &value) {
+            Ok(reference) => {
+                self.update_dynamic_secret_status(&provider, &reference);
+                self.materialize_secret_import_ack(&provider, &reference);
+                self.append_audit("provider.secrets", new_name, "configured");
+                self.plane = execution::default_execution_plane();
+                Ok(())
+            }
+            Err(error) => {
+                self.materialize_secret_import_error(&provider, &error);
+                self.append_audit("provider.secrets", new_name, "error");
+                Err(libc::EIO.into())
+            }
+        }
+    }
+
+    fn take_staged_content(
+        &mut self,
+        parent: Inode,
+        name: &str,
+        new_name: &str,
+    ) -> fuse3::Result<String> {
+        if !new_name.ends_with(".req.json") {
+            return Err(libc::EINVAL.into());
+        }
+        let staged_key = (parent, name.to_owned());
+        let inode = self
+            .staged
+            .remove(&staged_key)
+            .ok_or_else(fuse3::Errno::new_not_exist)?;
+        let content = self
+            .nodes
+            .get(&inode)
+            .and_then(Node::content)
+            .unwrap_or_default()
+            .to_owned();
+        self.remove_dynamic_child(parent, inode);
+        Ok(content)
+    }
+
+    fn materialize_provider_registry_ack(&mut self, provider: &str) {
+        let Some(outbox) = self.provider_registry_outbox_inode else {
+            return;
+        };
+        let response = serde_json::json!({
+            "provider": provider,
+            "status": "configured"
+        });
+        self.add_dynamic_file_owned(
+            outbox,
+            format!("{provider}.resp.json"),
+            response.to_string(),
+        );
+    }
+
+    fn materialize_provider_registry_error(&mut self, request: &str, error: &str) {
+        let Some(outbox) = self.provider_registry_outbox_inode else {
+            return;
+        };
+        self.add_dynamic_file_owned(
+            outbox,
+            format!("{}.error", request.trim_end_matches(".req.json")),
+            format!("{error}\n"),
+        );
+    }
+
+    fn update_dynamic_secret_status(&mut self, provider: &str, reference: &str) {
+        let Some(inodes) = self.dynamic_provider_inodes.get(provider).copied() else {
+            return;
+        };
+        self.update_dynamic_file(inodes.secret_status, "configured\n");
+        self.update_dynamic_file(inodes.secret_active, format!("{reference}\n"));
+        if let Some(provider) = self.dynamic_providers.get_mut(provider) {
+            "configured\n".clone_into(&mut provider.secret_status);
+            provider.secret_ref = format!("{reference}\n");
+        }
+        self.refresh_user_model_access();
+        self.refresh_user_routes();
+    }
+
+    fn materialize_secret_import_ack(&mut self, provider: &str, reference: &str) {
+        let Some(&outbox) = self.dynamic_secret_outboxes.get(provider) else {
+            return;
+        };
+        let response = serde_json::json!({
+            "provider": provider,
+            "status": "configured",
+            "active": reference
+        });
+        self.add_dynamic_file_owned(outbox, "api-key.resp.json", response.to_string());
+    }
+
+    fn materialize_secret_import_error(&mut self, provider: &str, error: &str) {
+        let Some(&outbox) = self.dynamic_secret_outboxes.get(provider) else {
+            return;
+        };
+        self.add_dynamic_file_owned(outbox, "api-key.error", format!("{error}\n"));
+    }
+
+    fn refresh_provider_index(&mut self) {
+        let mut providers = configured_provider_ids()
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        providers.extend(self.dynamic_provider_inodes.keys().cloned());
+        providers.sort();
+        providers.dedup();
+        if let Some(inode) = self.provider_count_inode {
+            self.update_dynamic_file(inode, format!("{}\n", providers.len()));
+        }
+        if let Some(inode) = self.provider_list_inode {
+            self.update_dynamic_file(inode, newline_list(providers.iter()));
+        }
+    }
+
+    fn ensure_provider_allowed(&mut self, provider: &str) {
+        let Some(inode) = self.user_allowed_providers_inode else {
+            return;
+        };
+        let content = self
+            .nodes
+            .get(&inode)
+            .and_then(Node::content)
+            .unwrap_or_default();
+        if content.lines().any(|line| line.trim() == provider) {
+            return;
+        }
+        let mut updated = content.to_owned();
+        if !updated.ends_with('\n') && !updated.is_empty() {
+            updated.push('\n');
+        }
+        updated.push_str(provider);
+        updated.push('\n');
+        self.update_dynamic_file(inode, updated);
     }
 
     fn node(&self, inode: Inode) -> Option<&Node> {
@@ -3621,6 +3962,18 @@ fn provider_secret_status(provider: &str) -> &'static str {
 
 fn secret_rotating_id(provider: &str) -> String {
     format!("ref:{provider}:rotating\n")
+}
+
+fn parse_secret_import_value(content: &str) -> fuse3::Result<String> {
+    let value =
+        serde_json::from_str::<serde_json::Value>(content).map_err(|_error| libc::EINVAL)?;
+    let secret = value
+        .get("value")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(libc::EINVAL)?;
+    Ok(secret.to_owned())
 }
 
 #[cfg(test)]
