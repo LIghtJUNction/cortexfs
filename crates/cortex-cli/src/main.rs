@@ -4,9 +4,11 @@ use cortex_core::{ApiFormat, ProviderId, ThreadId};
 use cortex_providers::{InMemoryProvider, ProviderResponse};
 use cortex_store::{InMemoryStore, RequestId, Store, ThreadSnapshot};
 use cortexd::{ExecutionPlane, LocalApiEndpoint, LocalApiRequest};
-use std::io::Write as _;
-use std::path::PathBuf;
+use std::io::{Read as _, Write as _};
+use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
+use std::str::FromStr as _;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() -> std::process::ExitCode {
     let command = Command::from_env();
@@ -45,6 +47,14 @@ pub enum Command {
     Service(ServiceCommand),
     /// Report daemon and mount status.
     Status(StatusCommand),
+    /// Read the mounted filesystem ABI marker.
+    Abi(MountReadCommand),
+    /// Read the mounted filesystem implementation version.
+    Version(MountReadCommand),
+    /// Manage provider registry entries through the filesystem ABI.
+    Provider(ProviderCommand),
+    /// Inspect and manage the local aggregate API projection.
+    Api(ApiCommand),
     /// Reject invalid command arguments.
     Invalid(InvalidCommand),
     /// Reject an unsupported command.
@@ -93,6 +103,22 @@ impl Command {
             },
             "status" => match parse_no_arguments(arguments, "status") {
                 Ok(()) => Self::Status(StatusCommand),
+                Err(error) => Self::Invalid(error),
+            },
+            "abi" => match MountReadCommand::parse(arguments, "abi") {
+                Ok(command) => Self::Abi(command),
+                Err(error) => Self::Invalid(error),
+            },
+            "version" => match MountReadCommand::parse(arguments, "version") {
+                Ok(command) => Self::Version(command),
+                Err(error) => Self::Invalid(error),
+            },
+            "provider" => match ProviderCommand::parse(arguments) {
+                Ok(command) => Self::Provider(command),
+                Err(error) => Self::Invalid(error),
+            },
+            "api" => match ApiCommand::parse(arguments) {
+                Ok(command) => Self::Api(command),
                 Err(error) => Self::Invalid(error),
             },
             unknown => Self::Unknown(UnknownCommand::new(unknown)),
@@ -359,6 +385,474 @@ impl StatusCommand {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct MountReadCommand {
+    mountpoint: PathBuf,
+}
+
+impl MountReadCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+        command: &str,
+    ) -> Result<Self, InvalidCommand> {
+        let mut mountpoint = PathBuf::from("/ctx");
+        let mut arguments = arguments.into_iter();
+        while let Some(argument) = arguments.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--mount" => {
+                    mountpoint = PathBuf::from(parse_required_cli_value(
+                        &mut arguments,
+                        command,
+                        "--mount",
+                    )?);
+                }
+                unknown => {
+                    return Err(InvalidCommand::new(format!(
+                        "unknown {command} argument: {unknown}"
+                    )));
+                }
+            }
+        }
+        Ok(Self { mountpoint })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ProviderCommand {
+    List(ProviderListCommand),
+    Add(ProviderAddCommand),
+    Key(ProviderKeyCommand),
+}
+
+impl ProviderCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut arguments = arguments.into_iter();
+        let Some(subcommand) = arguments.next() else {
+            return Err(InvalidCommand::new("missing provider subcommand"));
+        };
+        match subcommand.to_string_lossy().as_ref() {
+            "list" => ProviderListCommand::parse(arguments).map(Self::List),
+            "add" => ProviderAddCommand::parse(arguments).map(Self::Add),
+            "key" => ProviderKeyCommand::parse(arguments).map(Self::Key),
+            unknown => Err(InvalidCommand::new(format!(
+                "unknown provider subcommand: {unknown}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderListCommand {
+    mountpoint: PathBuf,
+}
+
+impl ProviderListCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut mountpoint = PathBuf::from("/ctx");
+        let mut arguments = arguments.into_iter();
+        while let Some(argument) = arguments.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--mount" => {
+                    mountpoint = PathBuf::from(parse_required_cli_value(
+                        &mut arguments,
+                        "provider list",
+                        "--mount",
+                    )?);
+                }
+                unknown => {
+                    return Err(InvalidCommand::new(format!(
+                        "unknown provider list argument: {unknown}"
+                    )));
+                }
+            }
+        }
+        Ok(Self { mountpoint })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderAddCommand {
+    mountpoint: PathBuf,
+    id: String,
+    family: String,
+    name: Option<String>,
+    formats: Vec<String>,
+    base_url: String,
+    default_model: String,
+    priority: u32,
+    enabled: bool,
+}
+
+impl ProviderAddCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut mountpoint = PathBuf::from("/ctx");
+        let mut id = None;
+        let mut family = "openai-compatible".to_owned();
+        let mut name = None;
+        let mut formats = Vec::new();
+        let mut base_url = None;
+        let mut default_model = None;
+        let mut priority = 80;
+        let mut enabled = true;
+        let mut arguments = arguments.into_iter();
+        while let Some(argument) = arguments.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--mount" => {
+                    mountpoint = PathBuf::from(parse_required_cli_value(
+                        &mut arguments,
+                        "provider add",
+                        "--mount",
+                    )?);
+                }
+                "--id" => {
+                    id = Some(parse_required_cli_value(
+                        &mut arguments,
+                        "provider add",
+                        "--id",
+                    )?);
+                }
+                "--family" => {
+                    family = parse_required_cli_value(&mut arguments, "provider add", "--family")?;
+                }
+                "--name" => {
+                    name = Some(parse_required_cli_value(
+                        &mut arguments,
+                        "provider add",
+                        "--name",
+                    )?);
+                }
+                "--format" | "--protocol" => {
+                    let format =
+                        parse_required_cli_value(&mut arguments, "provider add", "--format")?;
+                    ApiFormat::from_str(&format)
+                        .map_err(|error| InvalidCommand::new(error.to_string()))?;
+                    formats.push(format);
+                }
+                "--base-url" => {
+                    base_url = Some(parse_required_cli_value(
+                        &mut arguments,
+                        "provider add",
+                        "--base-url",
+                    )?);
+                }
+                "--model" | "--default-model" => {
+                    default_model = Some(parse_required_cli_value(
+                        &mut arguments,
+                        "provider add",
+                        "--model",
+                    )?);
+                }
+                "--priority" => {
+                    let value =
+                        parse_required_cli_value(&mut arguments, "provider add", "--priority")?;
+                    priority = value.parse().map_err(|_error| {
+                        InvalidCommand::new("provider add --priority must be an integer")
+                    })?;
+                }
+                "--disabled" => enabled = false,
+                unknown => {
+                    return Err(InvalidCommand::new(format!(
+                        "unknown provider add argument: {unknown}"
+                    )));
+                }
+            }
+        }
+        let id = id.ok_or_else(|| InvalidCommand::new("missing provider add argument: --id"))?;
+        ProviderId::new(id.clone()).map_err(|error| InvalidCommand::new(error.to_string()))?;
+        let base_url = base_url
+            .ok_or_else(|| InvalidCommand::new("missing provider add argument: --base-url"))?;
+        if !base_url.starts_with("http://") && !base_url.starts_with("https://") {
+            return Err(InvalidCommand::new(
+                "provider add --base-url must start with http:// or https://",
+            ));
+        }
+        let default_model = default_model
+            .ok_or_else(|| InvalidCommand::new("missing provider add argument: --model"))?;
+        cortex_core::ModelId::new(default_model.clone())
+            .map_err(|error| InvalidCommand::new(error.to_string()))?;
+        if formats.is_empty() {
+            formats.push("openai.chat".to_owned());
+            formats.push("openai.responses".to_owned());
+        }
+        formats.sort();
+        formats.dedup();
+        Ok(Self {
+            mountpoint,
+            id,
+            family,
+            name,
+            formats,
+            base_url,
+            default_model,
+            priority,
+            enabled,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ProviderKeyCommand {
+    Refresh(ProviderKeyRefreshCommand),
+}
+
+impl ProviderKeyCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut arguments = arguments.into_iter();
+        let Some(subcommand) = arguments.next() else {
+            return Err(InvalidCommand::new("missing provider key subcommand"));
+        };
+        match subcommand.to_string_lossy().as_ref() {
+            "refresh" | "import" => ProviderKeyRefreshCommand::parse(arguments).map(Self::Refresh),
+            unknown => Err(InvalidCommand::new(format!(
+                "unknown provider key subcommand: {unknown}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ProviderKeyRefreshCommand {
+    mountpoint: PathBuf,
+    provider: String,
+    source: SecretInputSource,
+}
+
+impl ProviderKeyRefreshCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut mountpoint = PathBuf::from("/ctx");
+        let mut provider = None;
+        let mut source = SecretInputSource::Stdin;
+        let mut arguments = arguments.into_iter();
+        while let Some(argument) = arguments.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--mount" => {
+                    mountpoint = PathBuf::from(parse_required_cli_value(
+                        &mut arguments,
+                        "provider key refresh",
+                        "--mount",
+                    )?);
+                }
+                "--provider" => {
+                    provider = Some(parse_required_cli_value(
+                        &mut arguments,
+                        "provider key refresh",
+                        "--provider",
+                    )?);
+                }
+                "--stdin" => source = SecretInputSource::Stdin,
+                "--key-file" => {
+                    source = SecretInputSource::File(PathBuf::from(parse_required_cli_value(
+                        &mut arguments,
+                        "provider key refresh",
+                        "--key-file",
+                    )?));
+                }
+                unknown => {
+                    return Err(InvalidCommand::new(format!(
+                        "unknown provider key refresh argument: {unknown}"
+                    )));
+                }
+            }
+        }
+        let provider = provider.ok_or_else(|| {
+            InvalidCommand::new("missing provider key refresh argument: --provider")
+        })?;
+        ProviderId::new(provider.clone())
+            .map_err(|error| InvalidCommand::new(error.to_string()))?;
+        Ok(Self {
+            mountpoint,
+            provider,
+            source,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SecretInputSource {
+    Stdin,
+    File(PathBuf),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ApiCommand {
+    Status(ApiStatusCommand),
+    Enable(ApiToggleCommand),
+    Disable(ApiToggleCommand),
+    Key(ApiKeyCommand),
+}
+
+impl ApiCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut arguments = arguments.into_iter();
+        let Some(subcommand) = arguments.next() else {
+            return Err(InvalidCommand::new("missing api subcommand"));
+        };
+        match subcommand.to_string_lossy().as_ref() {
+            "status" => ApiStatusCommand::parse(arguments).map(Self::Status),
+            "enable" => ApiToggleCommand::parse(arguments, true).map(Self::Enable),
+            "disable" => ApiToggleCommand::parse(arguments, false).map(Self::Disable),
+            "key" => ApiKeyCommand::parse(arguments).map(Self::Key),
+            unknown => Err(InvalidCommand::new(format!(
+                "unknown api subcommand: {unknown}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ApiStatusCommand {
+    mountpoint: PathBuf,
+}
+
+impl ApiStatusCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mountpoint = parse_optional_mount(arguments, "api status")?;
+        Ok(Self { mountpoint })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ApiToggleCommand {
+    mountpoint: PathBuf,
+    enabled: bool,
+}
+
+impl ApiToggleCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+        enabled: bool,
+    ) -> Result<Self, InvalidCommand> {
+        let mountpoint = parse_optional_mount(
+            arguments,
+            if enabled { "api enable" } else { "api disable" },
+        )?;
+        Ok(Self {
+            mountpoint,
+            enabled,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ApiKeyCommand {
+    Refresh(ApiKeyRefreshCommand),
+}
+
+impl ApiKeyCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut arguments = arguments.into_iter();
+        let Some(subcommand) = arguments.next() else {
+            return Err(InvalidCommand::new("missing api key subcommand"));
+        };
+        match subcommand.to_string_lossy().as_ref() {
+            "refresh" => ApiKeyRefreshCommand::parse(arguments).map(Self::Refresh),
+            unknown => Err(InvalidCommand::new(format!(
+                "unknown api key subcommand: {unknown}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ApiKeyRefreshCommand {
+    mountpoint: PathBuf,
+    source: SecretInputSource,
+}
+
+impl ApiKeyRefreshCommand {
+    fn parse(
+        arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    ) -> Result<Self, InvalidCommand> {
+        let mut mountpoint = PathBuf::from("/ctx");
+        let mut source = SecretInputSource::Stdin;
+        let mut arguments = arguments.into_iter();
+        while let Some(argument) = arguments.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--mount" => {
+                    mountpoint = PathBuf::from(parse_required_cli_value(
+                        &mut arguments,
+                        "api key refresh",
+                        "--mount",
+                    )?);
+                }
+                "--stdin" => source = SecretInputSource::Stdin,
+                "--key-file" => {
+                    source = SecretInputSource::File(PathBuf::from(parse_required_cli_value(
+                        &mut arguments,
+                        "api key refresh",
+                        "--key-file",
+                    )?));
+                }
+                unknown => {
+                    return Err(InvalidCommand::new(format!(
+                        "unknown api key refresh argument: {unknown}"
+                    )));
+                }
+            }
+        }
+        Ok(Self { mountpoint, source })
+    }
+}
+
+fn parse_optional_mount(
+    arguments: impl IntoIterator<Item = std::ffi::OsString>,
+    command: &str,
+) -> Result<PathBuf, InvalidCommand> {
+    let mut mountpoint = PathBuf::from("/ctx");
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--mount" => {
+                mountpoint = PathBuf::from(parse_required_cli_value(
+                    &mut arguments,
+                    command,
+                    "--mount",
+                )?);
+            }
+            unknown => {
+                return Err(InvalidCommand::new(format!(
+                    "unknown {command} argument: {unknown}"
+                )));
+            }
+        }
+    }
+    Ok(mountpoint)
+}
+
+fn parse_required_cli_value(
+    arguments: &mut impl Iterator<Item = std::ffi::OsString>,
+    command: &str,
+    flag: &str,
+) -> Result<String, InvalidCommand> {
+    let Some(value) = arguments.next() else {
+        return Err(InvalidCommand::new(format!(
+            "missing {command} argument value: {flag}"
+        )));
+    };
+    if value.to_string_lossy().starts_with("--") {
+        return Err(InvalidCommand::new(format!(
+            "missing {command} argument value: {flag}"
+        )));
+    }
+    Ok(value.to_string_lossy().into_owned())
+}
+
 fn current_uid() -> u32 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -423,6 +917,8 @@ pub enum CliError {
     Service(String),
     /// system mountpoint preparation failed.
     MountPrep(String),
+    /// Mounted filesystem ABI did not expose the requested control file.
+    UnsupportedAbi(String),
     /// Writing CLI output failed.
     Io(std::io::Error),
 }
@@ -438,7 +934,9 @@ impl std::fmt::Display for CliError {
             Self::InvalidCommand(ref message) => write!(f, "invalid command: {message}"),
             Self::UnknownCommand(ref command) => write!(f, "unknown command: {command}"),
             Self::Mount(ref error) => error.fmt(f),
-            Self::Service(ref message) | Self::MountPrep(ref message) => write!(f, "{message}"),
+            Self::Service(ref message)
+            | Self::MountPrep(ref message)
+            | Self::UnsupportedAbi(ref message) => write!(f, "{message}"),
             Self::Io(ref error) => write!(f, "I/O error: {error}"),
         }
     }
@@ -499,9 +997,254 @@ pub fn run(command: Command) -> Result<(), CliError> {
         Command::MountPrep(command) => run_mount_prep(&command),
         Command::Service(command) => run_service(command),
         Command::Status(_command) => print_output(&StatusCommand::render()),
+        Command::Abi(command) => print_mount_file(&command.mountpoint, &["control", "abi"]),
+        Command::Version(command) => print_mount_file(&command.mountpoint, &["control", "version"]),
+        Command::Provider(command) => run_provider(command),
+        Command::Api(command) => run_api(command),
         Command::Invalid(command) => Err(CliError::InvalidCommand(command.message)),
         Command::Unknown(command) => Err(CliError::UnknownCommand(command.name)),
     }
+}
+
+fn run_provider(command: ProviderCommand) -> Result<(), CliError> {
+    match command {
+        ProviderCommand::List(command) => print_output(&render_provider_list(&command.mountpoint)?),
+        ProviderCommand::Add(command) => run_provider_add(command),
+        ProviderCommand::Key(command) => match command {
+            ProviderKeyCommand::Refresh(command) => run_provider_key_refresh(&command),
+        },
+    }
+}
+
+fn run_api(command: ApiCommand) -> Result<(), CliError> {
+    match command {
+        ApiCommand::Status(command) => print_output(&render_api_status(&command.mountpoint)?),
+        ApiCommand::Enable(command) | ApiCommand::Disable(command) => run_api_toggle(&command),
+        ApiCommand::Key(command) => match command {
+            ApiKeyCommand::Refresh(command) => run_api_key_refresh(command),
+        },
+    }
+}
+
+fn print_mount_file(mountpoint: &Path, components: &[&str]) -> Result<(), CliError> {
+    let content = read_mount_file(mountpoint, components)?;
+    print_output(&content)
+}
+
+fn read_mount_file(mountpoint: &Path, components: &[&str]) -> Result<String, CliError> {
+    std::fs::read_to_string(join_components(mountpoint, components)).map_err(CliError::Io)
+}
+
+fn write_mount_file(mountpoint: &Path, components: &[&str], content: &str) -> Result<(), CliError> {
+    std::fs::write(join_components(mountpoint, components), content).map_err(CliError::Io)
+}
+
+fn join_components(mountpoint: &Path, components: &[&str]) -> PathBuf {
+    let mut path = mountpoint.to_path_buf();
+    for component in components {
+        path.push(component);
+    }
+    path
+}
+
+fn render_provider_list(mountpoint: &Path) -> Result<String, CliError> {
+    let providers = read_mount_file(mountpoint, &["provider", "list"])?;
+    let mut output = String::from("id\tenabled\tsecret\tformats\tbase_url\n");
+    for provider in providers
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let enabled = read_mount_file(mountpoint, &["provider", provider, "enabled", "effective"])
+            .unwrap_or_else(|_error| "\n".to_owned())
+            .trim()
+            .to_owned();
+        let secret = read_mount_file(mountpoint, &["provider", provider, "secrets", "status"])
+            .unwrap_or_else(|_error| "\n".to_owned())
+            .trim()
+            .to_owned();
+        let formats = read_mount_file(mountpoint, &["provider", provider, "format"])
+            .unwrap_or_else(|_error| "\n".to_owned())
+            .lines()
+            .collect::<Vec<_>>()
+            .join(",");
+        let base_url = read_mount_file(mountpoint, &["provider", provider, "url", "effective"])
+            .unwrap_or_else(|_error| "\n".to_owned())
+            .trim()
+            .to_owned();
+        output.push_str(provider);
+        output.push('\t');
+        output.push_str(&enabled);
+        output.push('\t');
+        output.push_str(&secret);
+        output.push('\t');
+        output.push_str(&formats);
+        output.push('\t');
+        output.push_str(&base_url);
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn run_provider_add(command: ProviderAddCommand) -> Result<(), CliError> {
+    let provider_id = command.id.clone();
+    let body = serde_json::json!({
+        "op": "upsert",
+        "id": provider_id,
+        "family": command.family,
+        "name": command.name.unwrap_or_else(|| command.id.clone()),
+        "formats": command.formats,
+        "base_url": command.base_url,
+        "default_model": command.default_model,
+        "priority": command.priority,
+        "enabled": command.enabled,
+    })
+    .to_string();
+    let response = submit_json_request(
+        &command.mountpoint,
+        &["provider", "inbox"],
+        &["provider", "outbox"],
+        &command.id,
+        &body,
+    )?;
+    print_output(&response)?;
+    print_output("\n")
+}
+
+fn run_provider_key_refresh(command: &ProviderKeyRefreshCommand) -> Result<(), CliError> {
+    let value = read_secret_input(&command.source)?;
+    let body = serde_json::json!({
+        "op": "import",
+        "kind": "bearer",
+        "value": value.trim_end_matches(['\r', '\n']),
+    })
+    .to_string();
+    let response = submit_json_request(
+        &command.mountpoint,
+        &["provider", command.provider.as_str(), "secrets", "inbox"],
+        &["provider", command.provider.as_str(), "secrets", "outbox"],
+        "api-key",
+        &body,
+    )?;
+    print_output(&response)?;
+    print_output("\n")
+}
+
+fn submit_json_request(
+    mountpoint: &Path,
+    inbox_components: &[&str],
+    outbox_components: &[&str],
+    request_id: &str,
+    body: &str,
+) -> Result<String, CliError> {
+    let inbox = join_components(mountpoint, inbox_components);
+    let temp_name = format!("{request_id}.{}.tmp", request_nonce());
+    let temp_path = inbox.join(&temp_name);
+    std::fs::write(&temp_path, body).map_err(CliError::Io)?;
+    let request_name = format!("{request_id}.req.json");
+    let request_path = inbox.join(request_name);
+    std::fs::rename(&temp_path, &request_path).map_err(CliError::Io)?;
+    let outbox = join_components(mountpoint, outbox_components);
+    let response_path = outbox.join(format!("{request_id}.resp.json"));
+    match std::fs::read_to_string(&response_path) {
+        Ok(response) => return Ok(response),
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(CliError::Io(error));
+        }
+        Err(_error) => {}
+    }
+    let error_path = outbox.join(format!("{request_id}.error"));
+    match std::fs::read_to_string(&error_path) {
+        Ok(error) => Err(CliError::UnsupportedAbi(format!(
+            "filesystem request failed: {}",
+            error.trim()
+        ))),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn request_nonce() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos())
+}
+
+fn read_secret_input(source: &SecretInputSource) -> Result<String, CliError> {
+    let mut value = String::new();
+    match *source {
+        SecretInputSource::Stdin => {
+            std::io::stdin()
+                .read_to_string(&mut value)
+                .map_err(CliError::Io)?;
+        }
+        SecretInputSource::File(ref path) => {
+            value = std::fs::read_to_string(path).map_err(CliError::Io)?;
+        }
+    }
+    if value.trim().is_empty() {
+        return Err(CliError::InvalidCommand(
+            "secret input must not be empty".to_owned(),
+        ));
+    }
+    Ok(value)
+}
+
+fn render_api_status(mountpoint: &Path) -> Result<String, CliError> {
+    let home = resolve_ctx_home(mountpoint);
+    let api = home.join("api");
+    let mut output = String::new();
+    append_optional_file(&mut output, "status", &api.join("status"))?;
+    append_optional_file(&mut output, "abi", &api.join("abi"))?;
+    append_optional_file(&mut output, "endpoints", &api.join("endpoints"))?;
+    append_optional_file(&mut output, "http_status", &api.join("http/status"))?;
+    append_optional_file(&mut output, "http_listen", &api.join("http/listen"))?;
+    append_optional_file(&mut output, "http_base_url", &api.join("http/localurl"))?;
+    append_optional_file(&mut output, "unix_status", &api.join("unix/status"))?;
+    append_optional_file(&mut output, "unix_path", &api.join("unix/path"))?;
+    Ok(output)
+}
+
+fn append_optional_file(output: &mut String, key: &str, path: &Path) -> Result<(), CliError> {
+    match std::fs::read_to_string(path) {
+        Ok(value) => {
+            let value = value.trim();
+            output.push_str(key);
+            output.push('=');
+            output.push_str(value);
+            output.push('\n');
+            Ok(())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn resolve_ctx_home(mountpoint: &Path) -> PathBuf {
+    let current = mountpoint.join("home").join(current_uid().to_string());
+    if current.exists() {
+        return current;
+    }
+    mountpoint.join("home").join("1000")
+}
+
+fn run_api_toggle(command: &ApiToggleCommand) -> Result<(), CliError> {
+    let home = resolve_ctx_home(&command.mountpoint);
+    let enabled = home.join("api/http/enabled");
+    if !enabled.exists() {
+        return Err(CliError::UnsupportedAbi(
+            "local aggregate API enable/disable is not exposed by the current filesystem ABI"
+                .to_owned(),
+        ));
+    }
+    let value = if command.enabled { "1\n" } else { "0\n" };
+    write_mount_file(&home, &["api", "http", "enabled"], value)
+}
+
+fn run_api_key_refresh(_command: ApiKeyRefreshCommand) -> Result<(), CliError> {
+    Err(CliError::UnsupportedAbi(
+        "local aggregate API ingress key refresh is not exposed by the current filesystem ABI"
+            .to_owned(),
+    ))
 }
 
 fn run_mount_prep(command: &MountPrepCommand) -> Result<(), CliError> {
@@ -537,14 +1280,14 @@ fn run_mount_prep(command: &MountPrepCommand) -> Result<(), CliError> {
 }
 
 fn ensure_fuse_device() -> Result<(), CliError> {
-    if std::path::Path::new("/dev/fuse").exists() {
+    if Path::new("/dev/fuse").exists() {
         return Ok(());
     }
     let status = quiet_process("/usr/bin/modprobe")
         .arg("fuse")
         .status()
         .map_err(|error| CliError::MountPrep(format!("failed to load fuse module: {error}")))?;
-    if status.success() || std::path::Path::new("/dev/fuse").exists() {
+    if status.success() || Path::new("/dev/fuse").exists() {
         return Ok(());
     }
     Err(CliError::MountPrep(format!(
@@ -552,7 +1295,7 @@ fn ensure_fuse_device() -> Result<(), CliError> {
     )))
 }
 
-fn clean_mountpoint(mountpoint: &std::path::Path) {
+fn clean_mountpoint(mountpoint: &Path) {
     let _status = quiet_process("/usr/bin/fusermount3")
         .args(["-uz"])
         .arg(mountpoint)
@@ -734,12 +1477,13 @@ fn daemon_once_result(command: DaemonCommand) -> Result<DaemonOnceResult, CliErr
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, DaemonCommand, MountCommand, MountPrepCommand, ServiceAction, ServiceCommand,
-        StatusCommand,
+        ApiCommand, Command, DaemonCommand, MountCommand, MountPrepCommand, ProviderCommand,
+        ServiceAction, ServiceCommand, StatusCommand,
     };
     use cortex_core::MessageRole;
     use std::ffi::OsString;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parser_defaults_to_status_without_arguments() {
@@ -768,6 +1512,196 @@ mod tests {
                 "unexpected status argument: --watch"
             ))
         );
+    }
+
+    #[test]
+    fn parser_accepts_abi_and_version_mount_overrides() {
+        assert_eq!(
+            Command::parse([
+                OsString::from("abi"),
+                OsString::from("--mount"),
+                OsString::from("/mnt/ctx"),
+            ]),
+            Command::Abi(super::MountReadCommand {
+                mountpoint: PathBuf::from("/mnt/ctx"),
+            })
+        );
+        assert_eq!(
+            Command::parse([
+                OsString::from("version"),
+                OsString::from("--mount"),
+                OsString::from("/mnt/ctx"),
+            ]),
+            Command::Version(super::MountReadCommand {
+                mountpoint: PathBuf::from("/mnt/ctx"),
+            })
+        );
+    }
+
+    #[test]
+    fn parser_accepts_provider_add_with_formats() -> Result<(), Box<dyn std::error::Error>> {
+        let command = Command::parse([
+            OsString::from("provider"),
+            OsString::from("add"),
+            OsString::from("--id"),
+            OsString::from("relay-a"),
+            OsString::from("--base-url"),
+            OsString::from("https://relay.example/v1"),
+            OsString::from("--model"),
+            OsString::from("gpt-5.4-mini"),
+            OsString::from("--format"),
+            OsString::from("openai.responses"),
+            OsString::from("--format"),
+            OsString::from("openai.chat"),
+            OsString::from("--priority"),
+            OsString::from("60"),
+        ]);
+
+        let Command::Provider(ProviderCommand::Add(command)) = command else {
+            return Err("expected provider add command".into());
+        };
+        assert_eq!(command.id, "relay-a");
+        assert_eq!(command.base_url, "https://relay.example/v1");
+        assert_eq!(command.default_model, "gpt-5.4-mini");
+        assert_eq!(command.formats, ["openai.chat", "openai.responses"]);
+        assert_eq!(command.priority, 60);
+        Ok(())
+    }
+
+    #[test]
+    fn parser_accepts_provider_key_refresh_from_stdin() -> Result<(), Box<dyn std::error::Error>> {
+        let command = Command::parse([
+            OsString::from("provider"),
+            OsString::from("key"),
+            OsString::from("refresh"),
+            OsString::from("--provider"),
+            OsString::from("relay-a"),
+            OsString::from("--stdin"),
+        ]);
+
+        let Command::Provider(ProviderCommand::Key(super::ProviderKeyCommand::Refresh(command))) =
+            command
+        else {
+            return Err("expected provider key refresh command".into());
+        };
+        assert_eq!(command.provider, "relay-a");
+        assert_eq!(command.source, super::SecretInputSource::Stdin);
+        Ok(())
+    }
+
+    #[test]
+    fn parser_accepts_api_status_and_toggle_commands() {
+        assert_eq!(
+            Command::parse([OsString::from("api"), OsString::from("status")]),
+            Command::Api(ApiCommand::Status(super::ApiStatusCommand {
+                mountpoint: PathBuf::from("/ctx"),
+            }))
+        );
+        assert_eq!(
+            Command::parse([OsString::from("api"), OsString::from("enable")]),
+            Command::Api(ApiCommand::Enable(super::ApiToggleCommand {
+                mountpoint: PathBuf::from("/ctx"),
+                enabled: true,
+            }))
+        );
+        assert_eq!(
+            Command::parse([OsString::from("api"), OsString::from("disable")]),
+            Command::Api(ApiCommand::Disable(super::ApiToggleCommand {
+                mountpoint: PathBuf::from("/ctx"),
+                enabled: false,
+            }))
+        );
+    }
+
+    #[test]
+    fn provider_list_renders_filesystem_projection() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = temp_cli_tree("provider-list")?;
+        write_file(&dir, &["provider", "list"], "relay-a\n")?;
+        write_file(
+            &dir,
+            &["provider", "relay-a", "enabled", "effective"],
+            "1\n",
+        )?;
+        write_file(
+            &dir,
+            &["provider", "relay-a", "secrets", "status"],
+            "configured\n",
+        )?;
+        write_file(
+            &dir,
+            &["provider", "relay-a", "format"],
+            "openai.chat\nopenai.responses\n",
+        )?;
+        write_file(
+            &dir,
+            &["provider", "relay-a", "url", "effective"],
+            "https://relay.example/v1\n",
+        )?;
+
+        let output = super::render_provider_list(&dir)?;
+
+        assert!(output.contains("id\tenabled\tsecret\tformats\tbase_url\n"));
+        assert!(output.contains(
+            "relay-a\t1\tconfigured\topenai.chat,openai.responses\thttps://relay.example/v1\n"
+        ));
+        std::fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn api_status_renders_current_user_projection() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = temp_cli_tree("api-status")?;
+        let uid = super::current_uid().to_string();
+        write_file(
+            &dir,
+            &["home", uid.as_str(), "api", "status"],
+            "configured\n",
+        )?;
+        write_file(
+            &dir,
+            &["home", uid.as_str(), "api", "abi"],
+            "cortex.local_api.v0\n",
+        )?;
+        write_file(
+            &dir,
+            &["home", uid.as_str(), "api", "http", "status"],
+            "need-daemon\n",
+        )?;
+        write_file(
+            &dir,
+            &["home", uid.as_str(), "api", "http", "localurl"],
+            "http://127.0.0.1:6185/v1\n",
+        )?;
+
+        let output = super::render_api_status(&dir)?;
+
+        assert!(output.contains("status=configured\n"));
+        assert!(output.contains("abi=cortex.local_api.v0\n"));
+        assert!(output.contains("http_status=need-daemon\n"));
+        assert!(output.contains("http_base_url=http://127.0.0.1:6185/v1\n"));
+        std::fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    fn temp_cli_tree(name: &str) -> std::io::Result<PathBuf> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let dir =
+            std::env::temp_dir().join(format!("cortex-cli-{name}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    fn write_file(root: &Path, components: &[&str], content: &str) -> std::io::Result<()> {
+        let mut path = root.to_path_buf();
+        for component in components {
+            path.push(component);
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, content)
     }
 
     #[test]

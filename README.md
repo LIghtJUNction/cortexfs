@@ -159,6 +159,26 @@ cargo build --locked --workspace
 cargo run -p cortex-cli -- status
 ```
 
+CLI 控制程序名是 `cortex`。常用发现和 provider 管理命令：
+
+```bash
+cortex abi
+cortex version
+cortex provider list
+
+sudo cortex provider add \
+  --id relay-a \
+  --base-url https://relay.example/v1 \
+  --model gpt-5.4-mini \
+  --format openai.chat \
+  --format openai.responses
+
+printf '%s' "$API_KEY" | sudo cortex provider key refresh --provider relay-a --stdin
+cortex api status
+```
+
+`provider add` 和 `provider key refresh` 走同一套文件系统 ABI：写临时文件、同目录原子 rename 成 `*.req.json`，然后从 outbox 读取结果。provider key 是上游真实密钥，只进入系统密钥库；命令行不要使用 `--key` 这类会进入 shell history 的形式。
+
 ## 实机安装目录
 
 推荐实机挂载点：
@@ -236,6 +256,8 @@ cat "$mnt/provider/list"
 cat "$mnt/model/list"
 cat "$mnt/format/openai.chat/model/list"
 ```
+
+provider registry、provider secret、provider URL/enabled、provider health check 和 provider model refresh 是系统级配置。在 multi-user `/ctx` 挂载下，这些写入口只允许挂载 owner 或 root 使用；普通用户仍可读取 provider/model/route 状态，并在自己的 `home/<uid>` 下提交 API 请求。
 
 查询某个 Linux 用户实际可用的模型：
 
@@ -325,6 +347,8 @@ cat "$CTX_HOME/api/unix/path"
 ```
 
 `api/http` 和 `api/unix/api.sock` 只是同一执行面的不同传输入口，必须进入同一条 `api/pipeline`；它们不能拥有独立的 provider 调用路径。
+
+当前 ABI 暴露本地统一 API 的元数据和状态；生产级 HTTP daemon、ingress API key 刷新和 enable/disable 控制面仍是后续实现项。`cortex api status` 会读取这些投影；`cortex api enable`、`cortex api disable` 和 `cortex api key refresh` 在当前 ABI 未暴露控制文件时会明确失败，不会伪造后台服务状态。
 
 ## 外部软件集成
 

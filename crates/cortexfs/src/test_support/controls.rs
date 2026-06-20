@@ -38,6 +38,8 @@ fn control_command_nodes_are_write_only() -> fuse3::Result<()> {
         fs.demo_tool_loop_control_file_inode("pause")?,
         fs.agent_helper_control_file_inode("start")?,
         fs.cluster_control_file_inode("pause")?,
+    ];
+    let admin_provider_controls = [
         fs.provider_models_file_inode(crate::default_provider_id(), "refresh")?,
         fs.provider_health_file_inode(crate::default_provider_id(), "check")?,
         fs.provider_secrets_file_inode(crate::default_provider_id(), "rotate")?,
@@ -45,6 +47,13 @@ fn control_command_nodes_are_write_only() -> fuse3::Result<()> {
 
     for inode in controls {
         assert_eq!(fs.node_attr(inode)?.perm, 0o222);
+        assert_eq!(
+            fs.node_content(inode),
+            Err(fuse3::Errno::from(libc::EACCES))
+        );
+    }
+    for inode in admin_provider_controls {
+        assert_eq!(fs.node_attr(inode)?.perm, 0o200);
         assert_eq!(
             fs.node_content(inode),
             Err(fuse3::Errno::from(libc::EACCES))

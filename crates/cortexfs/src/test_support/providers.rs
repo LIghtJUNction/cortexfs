@@ -269,7 +269,7 @@ fn provider_models_refresh_updates_control_and_audit() -> fuse3::Result<()> {
             drop(runtime);
         }
 
-        assert_eq!(fs.node_attr(refresh)?.perm, 0o222);
+        assert_eq!(fs.node_attr(refresh)?.perm, 0o200);
         assert_eq!(
             fs.node_content(refresh),
             Err(fuse3::Errno::from(libc::EACCES))
@@ -298,7 +298,7 @@ fn provider_health_check_updates_status_control_and_audit() -> fuse3::Result<()>
             drop(runtime);
         }
 
-        assert_eq!(fs.node_attr(check)?.perm, 0o222);
+        assert_eq!(fs.node_attr(check)?.perm, 0o200);
         assert_eq!(
             fs.node_content(check),
             Err(fuse3::Errno::from(libc::EACCES))
@@ -424,7 +424,7 @@ fn provider_secret_rotate_updates_only_secret_status_view() -> fuse3::Result<()>
             drop(runtime);
         }
 
-        assert_eq!(fs.node_attr(rotate)?.perm, 0o222);
+        assert_eq!(fs.node_attr(rotate)?.perm, 0o200);
         assert_eq!(
             fs.node_content(rotate),
             Err(fuse3::Errno::from(libc::EACCES))
@@ -671,6 +671,54 @@ fn dynamic_provider_routes_after_secret_import() -> fuse3::Result<()> {
         "ready\n",
     )?;
     drop(runtime);
+    Ok(())
+}
+
+#[test]
+fn dynamic_provider_admin_controls_are_write_only() -> fuse3::Result<()> {
+    SecretStore::clear_test_secrets();
+    let provider = dynamic_registry_provider();
+    let fs = CortexFs::new();
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.upsert_dynamic_provider(provider.clone());
+        drop(runtime);
+    }
+
+    let health_check =
+        fs.resolve_path_inode(["provider", provider.id.as_str(), "health", "check"])?;
+    let secret_rotate =
+        fs.resolve_path_inode(["provider", provider.id.as_str(), "secrets", "rotate"])?;
+    let model_refresh =
+        fs.resolve_path_inode(["provider", provider.id.as_str(), "model", "refresh"])?;
+    assert_eq!(fs.node_attr(health_check)?.perm, 0o200);
+    assert_eq!(fs.node_attr(secret_rotate)?.perm, 0o200);
+    assert_eq!(fs.node_attr(model_refresh)?.perm, 0o200);
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.write(health_check, 0, b"1\n")?;
+        runtime.write(secret_rotate, 0, b"1\n")?;
+        runtime.write(model_refresh, 0, b"1\n")?;
+        drop(runtime);
+    }
+
+    assert_eq!(
+        fs.node_content(health_check),
+        Err(fuse3::Errno::from(libc::EACCES))
+    );
+    assert_eq!(
+        fs.node_content(secret_rotate),
+        Err(fuse3::Errno::from(libc::EACCES))
+    );
+    assert_eq!(
+        fs.node_content(model_refresh),
+        Err(fuse3::Errno::from(libc::EACCES))
+    );
+    let audit = fs.node_content(fs.audit_events_inode()?)?;
+    assert!(audit.contains(&format!("\"format\":\"provider.{}.health\"", provider.id)));
+    assert!(audit.contains(&format!("\"format\":\"provider.{}.secrets\"", provider.id)));
+    assert!(audit.contains(&format!("\"format\":\"provider.{}.model\"", provider.id)));
     Ok(())
 }
 

@@ -1749,14 +1749,14 @@ impl RuntimeState {
         );
         self.add_dynamic_file(health, "latency_ms", "\n");
         self.add_dynamic_file(health, "last_error", "\n");
-        self.add_dynamic_file(health, "check", "");
+        let health_check = self.add_dynamic_file(health, "check", "");
 
         let secrets = self.add_dynamic_dir(provider_root, "secrets");
         let secret_status =
             self.add_dynamic_file_owned(secrets, "status", provider.secret_status.clone());
         let secret_active =
             self.add_dynamic_file_owned(secrets, "active", provider.secret_ref.clone());
-        self.add_dynamic_file(secrets, "rotate", "");
+        let secret_rotate = self.add_dynamic_file(secrets, "rotate", "");
         self.add_dynamic_file(secrets, "last_rotated", "\n");
         self.add_dynamic_file(secrets, "next_rotation", "\n");
         let secret_inbox = self.add_dynamic_dir(secrets, "inbox");
@@ -1766,7 +1766,7 @@ impl RuntimeState {
         let model_count = self.add_dynamic_file(model, "count", "1\n");
         let model_list =
             self.add_dynamic_file_owned(model, "list", format!("{}\n", provider.default_model));
-        self.add_dynamic_file(model, "refresh", "");
+        let model_refresh = self.add_dynamic_file(model, "refresh", "");
         let model_dir = self.add_dynamic_dir(model, provider.default_model.clone());
         self.add_dynamic_file_owned(model_dir, "name", format!("{}\n", provider.default_model));
         self.add_dynamic_file_owned(
@@ -1800,12 +1800,15 @@ impl RuntimeState {
                 enabled_effective,
                 enabled_source,
                 health_status,
+                health_check,
                 secret_status,
                 secret_active,
+                secret_rotate,
                 secret_inbox,
                 secret_outbox,
                 model_count,
                 model_list,
+                model_refresh,
             },
         );
         self.dynamic_providers
@@ -2033,7 +2036,15 @@ impl RuntimeState {
 
     fn node_attr(&self, node: &Node, uid: u32, gid: u32, multi_user: bool) -> FileAttr {
         let mut attr = node.attr_for_mount(uid, gid, multi_user);
-        if self.is_write_only_control_node(node.inode()) {
+        if self.is_admin_only_dir(node.inode()) {
+            attr.perm = 0o700;
+        } else if self.is_admin_only_staged_or_response(node.inode()) {
+            attr.perm = 0o600;
+        } else if self.is_admin_only_write_only_node(node.inode()) {
+            attr.perm = 0o200;
+        } else if self.is_admin_only_writable_node(node.inode()) {
+            attr.perm = 0o644;
+        } else if self.is_write_only_control_node(node.inode()) {
             attr.perm = 0o222;
         } else if self.is_writable_dynamic_file(node.inode()) {
             attr.perm = if multi_user { 0o666 } else { 0o644 };
@@ -2045,6 +2056,7 @@ impl RuntimeState {
 
     fn is_write_only_control_node(&self, inode: Inode) -> bool {
         self.is_control_command(inode)
+            || self.is_admin_only_write_only_node(inode)
             || Some(inode) == self.export_refresh_inode
             || Some(inode) == self.user_gc_inode
             || Some(inode) == self.user_models_refresh_inode
@@ -2080,6 +2092,60 @@ impl RuntimeState {
                 .provider_models_refresh
                 .values()
                 .any(|refresh_inode| *refresh_inode == inode)
+    }
+
+    pub(crate) fn is_admin_only_node(&self, inode: Inode) -> bool {
+        self.is_admin_only_dir(inode)
+            || self.is_admin_only_staged_or_response(inode)
+            || self.is_admin_only_writable_node(inode)
+            || self.is_admin_only_write_only_node(inode)
+    }
+
+    pub(crate) fn is_admin_only_dir(&self, inode: Inode) -> bool {
+        Some(inode) == self.provider_registry_inbox_inode
+            || Some(inode) == self.provider_registry_outbox_inode
+            || self.dynamic_secret_inboxes.contains_key(&inode)
+            || self
+                .dynamic_secret_outboxes
+                .values()
+                .any(|outbox_inode| *outbox_inode == inode)
+    }
+
+    fn is_admin_only_staged_or_response(&self, inode: Inode) -> bool {
+        self.parent_children
+            .iter()
+            .any(|(&parent, children)| self.is_admin_only_dir(parent) && children.contains(&inode))
+    }
+
+    fn is_admin_only_writable_node(&self, inode: Inode) -> bool {
+        Some(inode) == self.postgres_dsn_current_inode
+            || self
+                .provider_url
+                .values()
+                .any(|inodes| inodes.current == Some(inode))
+            || self
+                .provider_enabled
+                .values()
+                .any(|inodes| inodes.current == Some(inode))
+    }
+
+    fn is_admin_only_write_only_node(&self, inode: Inode) -> bool {
+        self.provider_health_check
+            .values()
+            .any(|check_inode| *check_inode == inode)
+            || self
+                .provider_secret_rotate
+                .values()
+                .any(|rotate_inode| *rotate_inode == inode)
+            || self
+                .provider_models_refresh
+                .values()
+                .any(|refresh_inode| *refresh_inode == inode)
+            || self.dynamic_provider_inodes.values().any(|inodes| {
+                inodes.health_check == inode
+                    || inodes.secret_rotate == inode
+                    || inodes.model_refresh == inode
+            })
     }
 
     fn is_writable_dynamic_file(&self, inode: Inode) -> bool {
