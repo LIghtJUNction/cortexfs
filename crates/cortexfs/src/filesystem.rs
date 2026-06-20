@@ -82,7 +82,7 @@ impl Filesystem for CortexFs {
 
     async fn create(
         &self,
-        _req: Request,
+        req: Request,
         parent: Inode,
         name: &OsStr,
         _mode: u32,
@@ -97,6 +97,7 @@ impl Filesystem for CortexFs {
         } else if runtime.is_provider_registry_inbox(parent)
             || runtime.is_dynamic_secret_inbox(parent)
         {
+            self.ensure_admin_request(&req)?;
             runtime.create_provider_staged(parent, name)?
         } else {
             let location = self.submission_location(parent).ok_or(libc::EROFS)?;
@@ -132,7 +133,7 @@ impl Filesystem for CortexFs {
 
     async fn write(
         &self,
-        _req: Request,
+        req: Request,
         inode: Inode,
         _fh: u64,
         offset: u64,
@@ -141,6 +142,9 @@ impl Filesystem for CortexFs {
         _flags: u32,
     ) -> fuse3::Result<ReplyWrite> {
         let mut runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
+        if runtime.is_admin_only_node(inode) {
+            self.ensure_admin_request(&req)?;
+        }
         let written = runtime.write(inode, offset, data)?;
         drop(runtime);
         Ok(ReplyWrite { written })
@@ -183,7 +187,7 @@ impl Filesystem for CortexFs {
 
     async fn rename(
         &self,
-        _req: Request,
+        req: Request,
         parent: Inode,
         name: &OsStr,
         new_parent: Inode,
@@ -199,9 +203,11 @@ impl Filesystem for CortexFs {
             return runtime.submit_collab_lock_lease(parent, name, new_parent, new_name);
         }
         if runtime.is_provider_registry_inbox(new_parent) {
+            self.ensure_admin_request(&req)?;
             return runtime.submit_provider_registry(parent, name, new_parent, new_name);
         }
         if runtime.is_dynamic_secret_inbox(new_parent) {
+            self.ensure_admin_request(&req)?;
             return runtime.submit_provider_secret(parent, name, new_parent, new_name);
         }
         let submission = self.api_submission(new_parent).ok_or(libc::EROFS)?;
@@ -252,6 +258,15 @@ impl Filesystem for CortexFs {
         Ok(ReplyDirectoryPlus {
             entries: stream::iter(entries),
         })
+    }
+}
+
+impl CortexFs {
+    fn ensure_admin_request(&self, req: &Request) -> fuse3::Result<()> {
+        if req.uid == 0 || req.uid == self.owner_uid {
+            return Ok(());
+        }
+        Err(libc::EACCES.into())
     }
 }
 

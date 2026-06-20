@@ -152,6 +152,7 @@ dependencies = [
  "cortex-store",
  "cortexd",
  "cortexfs",
+ "serde_json",
 ]
 
 [[package]]

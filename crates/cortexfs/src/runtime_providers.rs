@@ -191,14 +191,29 @@ impl RuntimeState {
                 .write_provider_health_check(provider, offset, data)
                 .map(Some);
         }
+        if let Some(provider) = self.dynamic_provider_for_health_check_inode(inode) {
+            return self
+                .write_dynamic_provider_health_check(&provider, offset, data)
+                .map(Some);
+        }
         if let Some(provider) = self.provider_for_secret_rotate_inode(inode) {
             return self
                 .write_provider_secret_rotate(provider, offset, data)
                 .map(Some);
         }
+        if let Some(provider) = self.dynamic_provider_for_secret_rotate_inode(inode) {
+            return self
+                .write_dynamic_provider_secret_rotate(&provider, offset, data)
+                .map(Some);
+        }
         if let Some(provider) = self.provider_for_models_refresh_inode(inode) {
             return self
                 .write_provider_models_refresh(provider, offset, data)
+                .map(Some);
+        }
+        if let Some(provider) = self.dynamic_provider_for_models_refresh_inode(inode) {
+            return self
+                .write_dynamic_provider_models_refresh(&provider, offset, data)
                 .map(Some);
         }
         Ok(None)
@@ -264,6 +279,29 @@ impl RuntimeState {
             return Err(libc::EINVAL.into());
         };
         self.update_dynamic_file(inode, "1\n");
+        self.update_dynamic_file(
+            self.last_control_inode,
+            format!("provider/{provider}/model/refresh\n"),
+        );
+        let audit_format = format!("provider.{provider}.model");
+        self.append_audit(&audit_format, "refresh", "refreshed");
+        u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
+    fn write_dynamic_provider_models_refresh(
+        &mut self,
+        provider: &str,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<u32> {
+        validate_control_write(offset, data)?;
+        self.refresh_provider_health_statuses();
+        self.refresh_user_model_access();
+        self.refresh_user_routes();
+        let Some(inodes) = self.dynamic_provider_inodes.get(provider).copied() else {
+            return Err(libc::EINVAL.into());
+        };
+        self.update_dynamic_file(inodes.model_refresh, "1\n");
         self.update_dynamic_file(
             self.last_control_inode,
             format!("provider/{provider}/model/refresh\n"),
@@ -358,6 +396,33 @@ impl RuntimeState {
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
+    fn write_dynamic_provider_health_check(
+        &mut self,
+        provider: &str,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<u32> {
+        validate_control_write(offset, data)?;
+        let provider_enabled = self.provider_enabled(provider);
+        let status = if provider_enabled {
+            "queued\n"
+        } else {
+            "disabled\n"
+        };
+        let Some(inodes) = self.dynamic_provider_inodes.get(provider).copied() else {
+            return Err(libc::EINVAL.into());
+        };
+        self.update_dynamic_file(inodes.health_status, status);
+        self.update_dynamic_file(inodes.health_check, "1\n");
+        self.update_dynamic_file(
+            self.last_control_inode,
+            format!("provider/{provider}/health/check\n"),
+        );
+        let audit_format = format!("provider.{provider}.health");
+        self.append_audit(&audit_format, "check", "queued");
+        u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
     fn write_provider_secret_rotate(
         &mut self,
         provider: &str,
@@ -387,10 +452,39 @@ impl RuntimeState {
         u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
     }
 
+    fn write_dynamic_provider_secret_rotate(
+        &mut self,
+        provider: &str,
+        offset: u64,
+        data: &[u8],
+    ) -> fuse3::Result<u32> {
+        validate_control_write(offset, data)?;
+        let Some(inodes) = self.dynamic_provider_inodes.get(provider).copied() else {
+            return Err(libc::EINVAL.into());
+        };
+        self.update_dynamic_file(inodes.secret_rotate, "1\n");
+        self.update_dynamic_file(inodes.secret_active, secret_rotating_id(provider));
+        self.update_dynamic_file(
+            self.last_control_inode,
+            format!("provider/{provider}/secrets/rotate\n"),
+        );
+        let audit_format = format!("provider.{provider}.secrets");
+        self.append_audit(&audit_format, "rotate", "requested");
+        u32::try_from(data.len()).map_err(|_error| fuse3::Errno::from(libc::EFBIG))
+    }
+
     fn provider_for_models_refresh_inode(&self, inode: Inode) -> Option<&'static str> {
         self.provider_models_refresh
             .iter()
             .find_map(|(&provider, &refresh_inode)| (refresh_inode == inode).then_some(provider))
+    }
+
+    fn dynamic_provider_for_models_refresh_inode(&self, inode: Inode) -> Option<String> {
+        self.dynamic_provider_inodes
+            .iter()
+            .find_map(|(provider, inodes)| {
+                (inodes.model_refresh == inode).then(|| provider.clone())
+            })
     }
 
     fn provider_for_url_current_inode(&self, inode: Inode) -> Option<&'static str> {
@@ -411,10 +505,24 @@ impl RuntimeState {
             .find_map(|(&provider, &check_inode)| (check_inode == inode).then_some(provider))
     }
 
+    fn dynamic_provider_for_health_check_inode(&self, inode: Inode) -> Option<String> {
+        self.dynamic_provider_inodes
+            .iter()
+            .find_map(|(provider, inodes)| (inodes.health_check == inode).then(|| provider.clone()))
+    }
+
     fn provider_for_secret_rotate_inode(&self, inode: Inode) -> Option<&'static str> {
         self.provider_secret_rotate
             .iter()
             .find_map(|(&provider, &rotate_inode)| (rotate_inode == inode).then_some(provider))
+    }
+
+    fn dynamic_provider_for_secret_rotate_inode(&self, inode: Inode) -> Option<String> {
+        self.dynamic_provider_inodes
+            .iter()
+            .find_map(|(provider, inodes)| {
+                (inodes.secret_rotate == inode).then(|| provider.clone())
+            })
     }
 
     pub fn refresh_provider_health_statuses(&mut self) {

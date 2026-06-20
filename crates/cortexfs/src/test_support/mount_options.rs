@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::{CortexFs, FuseConfig, MountMode, MountOptions, MountSecurityOptions};
+use fuse3::raw::prelude::{Filesystem, Request};
+use std::ffi::OsStr;
 
 #[test]
 fn single_user_mount_options_are_hardened_by_default() {
@@ -76,20 +78,14 @@ fn explicit_security_options_can_be_replaced() {
 fn fuse_mount_options_include_hardening_custom_options() {
     let options = crate::fuse_security_custom_options(MountSecurityOptions::new());
 
-    assert_eq!(
-        options.as_deref(),
-        Some(std::ffi::OsStr::new("noexec,nodev,nosuid"))
-    );
+    assert_eq!(options.as_deref(), Some(OsStr::new("noexec,nodev,nosuid")));
 }
 
 #[test]
 fn multi_user_fuse_mount_options_keep_hardening_custom_options() {
     let options = crate::fuse_security_custom_options(MountSecurityOptions::multi_user());
 
-    assert_eq!(
-        options.as_deref(),
-        Some(std::ffi::OsStr::new("noexec,nodev,nosuid"))
-    );
+    assert_eq!(options.as_deref(), Some(OsStr::new("noexec,nodev,nosuid")));
 }
 
 #[test]
@@ -107,6 +103,57 @@ fn multi_user_projection_permissions_allow_cross_user_submits() -> fuse3::Result
     assert_eq!(single_user_fs.node_attr(inbox)?.perm, 0o755);
     assert_eq!(multi_user_fs.node_attr(inbox)?.perm, 0o777);
     assert_eq!(multi_user_fs.node_attr(default_provider)?.perm, 0o666);
+    Ok(())
+}
+
+#[test]
+fn multi_user_global_provider_config_is_admin_only() -> fuse3::Result<()> {
+    let fs = CortexFs::new_with_mode(MountMode::MultiUser);
+    let provider = crate::PROVIDER_SPECS
+        .first()
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    let provider_inbox = fs.resolve_path_inode(["provider", "inbox"])?;
+    let provider_url = fs.provider_child_dir_inode(provider.id, "url")?;
+    let provider_url_current = {
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .lookup_child(provider_url, "current")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?
+    };
+    let provider_health = fs.provider_child_dir_inode(provider.id, "health")?;
+    let provider_health_check = {
+        let runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .lookup_child(provider_health, "check")
+            .map(crate::Node::inode)
+            .ok_or_else(fuse3::Errno::new_not_exist)?
+    };
+
+    assert_eq!(fs.node_attr(provider_inbox)?.perm, 0o700);
+    assert_eq!(fs.node_attr(provider_url_current)?.perm, 0o644);
+    assert_eq!(fs.node_attr(provider_health_check)?.perm, 0o200);
+    Ok(())
+}
+
+#[tokio::test]
+async fn non_admin_cannot_create_provider_config_submission() -> fuse3::Result<()> {
+    let fs = CortexFs::new_with_mode(MountMode::MultiUser);
+    let provider_inbox = fs.resolve_path_inode(["provider", "inbox"])?;
+    let non_admin = Request {
+        uid: fs.owner_uid.saturating_add(1),
+        gid: fs.owner_gid,
+        ..Request::default()
+    };
+
+    let result = fs
+        .create(non_admin, provider_inbox, OsStr::new("relay.tmp"), 0o600, 0)
+        .await;
+
+    assert_eq!(
+        result.map(|_reply| ()),
+        Err(fuse3::Errno::from(libc::EACCES))
+    );
     Ok(())
 }
 

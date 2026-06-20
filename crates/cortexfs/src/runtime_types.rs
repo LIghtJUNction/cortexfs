@@ -72,12 +72,15 @@ pub struct DynamicProviderInodes {
     pub enabled_effective: Inode,
     pub enabled_source: Inode,
     pub health_status: Inode,
+    pub health_check: Inode,
     pub secret_status: Inode,
     pub secret_active: Inode,
+    pub secret_rotate: Inode,
     pub secret_inbox: Inode,
     pub secret_outbox: Inode,
     pub model_count: Inode,
     pub model_list: Inode,
+    pub model_refresh: Inode,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
