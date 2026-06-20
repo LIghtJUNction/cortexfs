@@ -1,9 +1,13 @@
 //! Test-only helpers for live provider integration checks.
 
+use crate::provider_registry::{RegistryProvider, SecretStore};
 use crate::{CortexFs, ROOT_INODE};
 use cortex_store::InMemoryStore;
 use cortexd::ExecutionPlane;
 use fuse3::Inode;
+
+const LIVE_PROVIDER_ID: &str = "ollama-live";
+const LIVE_MODEL_ID: &str = "smollm2:135m";
 
 /// Result of a provider-backed file pipeline drain.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -37,11 +41,26 @@ impl LiveCortexFs {
     pub fn use_ollama_execution_plane(&self, url: &str) -> fuse3::Result<()> {
         let provider = cortex_providers::OllamaProvider::fixture_smollm2(url)
             .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
+        SecretStore::store_provider_key(LIVE_PROVIDER_ID, "local-live-test-fixture")
+            .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
         let mut runtime = self.fs.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime.plane = Some(ExecutionPlane::new(
             InMemoryStore::new(),
             Box::new(provider),
         ));
+        runtime.upsert_dynamic_provider(RegistryProvider {
+            id: LIVE_PROVIDER_ID.to_owned(),
+            family: "local-runtime".to_owned(),
+            name: "Local Ollama live-test fixture".to_owned(),
+            formats: vec!["openai.chat".to_owned()],
+            base_url: url.to_owned(),
+            default_model: LIVE_MODEL_ID.to_owned(),
+            priority: 100,
+            enabled: true,
+            secret_status: String::new(),
+            secret_ref: String::new(),
+        });
+        runtime.write_user_default_provider(0, format!("{LIVE_PROVIDER_ID}\n").as_bytes())?;
         drop(runtime);
         Ok(())
     }
