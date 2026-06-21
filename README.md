@@ -25,7 +25,8 @@ CortexFS turns AI infrastructure into a filesystem ABI. Instead of hiding state 
 Typical use cases:
 
 - inspect model/provider state with `cat`
-- submit requests with atomic `mv`
+- chat with low-latency Unix sockets under `thread/<id>/io.sock`
+- submit non-interactive requests with atomic `mv`
 - audit behavior with JSONL logs
 - automate workflows with standard Unix tooling
 
@@ -47,7 +48,7 @@ cargo run -p cortex-cli -- status
 
 很多挂载树中的文件并不会落盘。它们是由 `cortexfs`/`cortexd` 运行时投影出来的 in-memory 虚拟文件，只在挂载实例中存在。这一点参考 `/proc` 和 `sysfs`：文件系统是内核/VFS 风格的状态视图和控制面，不是普通数据目录。
 
-CortexFS 的核心提交语义只有一条：先写临时文件，再用同目录原子 `rename` 提交为 `*.req.json`，结果从 outbox 读取，事实进入 audit。它不再把 channel、job、hook 作为新的文件系统抽象；provider、route、inbox、outbox 和 audit 已经足够表达这些能力。
+CortexFS 的文件式提交语义只有一条：先写临时文件，再用同目录原子 `rename` 提交为 `*.req.json`，结果从 outbox 读取，事实进入 audit。交互式 thread/agent 对话优先走 `thread/<id>/io.sock` socket fast path，由 runtime 同步更新 `messages.jsonl`、`latest.md`、`state`、`fingerprint` 和 audit。它不再把 channel、job、hook 作为新的文件系统抽象；provider、route、thread、socket、inbox、outbox 和 audit 已经足够表达这些能力。
 
 > 当前版本：`0.1.0`
 
@@ -66,7 +67,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 - `cortexfs` 只做 FUSE/VFS 投影；远程 provider 调用、MCP 通信、tool loop、记忆检索、审计导出和调度执行属于 `cortexd`/execution plane。
 - 文件系统树是公开 ABI，不是产品 UI。路径、文件名、读写语义、权限语义和错误语义必须稳定、可文档化、可测试。
-- 提交入口只保留通用文件队列：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读结果，向 audit 追加事实。
+- 非交互提交入口只保留通用文件队列：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读结果，向 audit 追加事实；交互式对话使用 thread socket fast path。
 - 不把 channel、job、hook、workflow 做成核心目录；外部编排器应把 run、step、trigger 等状态放进请求 JSON、thread metadata、audit context 或自己的状态库。
 - provider/model 必须保持中立。本地 live test 当前使用 Ollama `smollm2:135m`，但它只是测试 fixture，不是核心默认 provider、核心能力或特殊分支。
 - 开发期刷新以 Git commit 为唯一事件边界；已挂载实例不会热更新，新 ABI 需要提交后重建并重新挂载。
@@ -83,7 +84,7 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 - 多 provider 配置：向 `provider/inbox/*.req.json` 原子提交 provider instance 配置，向 `provider/<id>/secrets/inbox/*.req.json` 导入 API key；明文 key 保存进系统 Secret Service，挂载树只暴露 secret reference。
 - 文件式 API 调用：写临时文件，原子 rename 到 `inbox/*.req.json` 入队，再由 `control/drain` 或 daemon worker 执行。
 - route-aware audit：请求、拒绝、执行、错误都会写入 `audit/events.jsonl`，包含 provider、model、decision、fingerprint 等字段。
-- thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和预留的 `io.sock` fast path；MCP tool 调用会进入同一条 permission/tool call/tool result 轨迹。
+- thread 视图：`messages.jsonl`、`latest.md`、`fingerprint`、`state`、`tool-loop/steps.jsonl` 和 `io.sock` fast path；交互式 agent/chat 客户端应连接 socket，而不是为每一轮对话写文件再 rename。
 - cluster 任务骨架：`queue/default/{pending,running,done,failed}`、`task/<id>/state`、`events.jsonl`、失败任务 `retry` 控制节点。
 - 多用户空间：`home/<uid>/...` 是权限、模型可见性、路由、记忆、审计和导出的边界。
 - 外部主体模型：为聊天平台、机器人平台、Webhook 等非 Linux 用户预留 `external subject` 身份上下文。
@@ -332,7 +333,7 @@ cat "$mnt/agent/helper/memory/scope"
 cat "$mnt/agent/helper/memory/search"
 ```
 
-后续实时通信会使用 socket fast path，例如 `thread/<id>/io.sock`。socket 必须和文件式提交进入同一条内部管线：同一套 policy、route、secret resolve、store、audit 和 export，不能形成不可审计旁路。
+实时通信使用 socket fast path，例如 `thread/<id>/io.sock`。交互式 agent、chat、REPL 和 MCP `thread.send` 应连接这个 socket；不要为了每一轮对话写临时文件再 rename。socket 必须和文件式提交进入同一条内部管线：同一套 policy、route、secret resolve、store、audit 和 export，不能形成不可审计旁路。
 
 本地统一 API 的元数据在当前用户工作入口下暴露：
 
@@ -366,7 +367,14 @@ cat "$CTX_HOME/api/openai.chat/outbox/run-001.fingerprint"
 cat /ctx/audit/events.jsonl
 ```
 
-同一个请求无论来自文件、HTTP 还是 Unix socket，都必须进入同一条管线，并产生同一个 request id、fingerprint、route metadata、policy decision、audit event 和 export row。socket 只是低延迟 fast path，不是绕过文件 ABI 的旁路。
+交互式客户端应优先连接 thread socket：
+
+```bash
+printf '%s\n' '{"op":"send","session":"cwd-demo","scope":"workspace","cwd":"'"$PWD"'","message":{"role":"user","content":"继续"}}' \
+  | nc -U -N "$CTX_HOME/thread/cwd-demo/io.sock"
+```
+
+同一个请求无论来自文件、HTTP 还是 Unix socket，都必须进入同一条管线，并产生同一个 request id、fingerprint、route metadata、policy decision、audit event 和 export row。socket 是低延迟 fast path，不是绕过文件 ABI 的旁路；交互式 agent 使用 socket，批处理和显式队列任务才使用文件提交。
 
 不要写死 `home/1000`、`agent/helper`、`ext/chat/room/888888` 这类示例路径；正式模式是 `home/<uid>`、`agent/<agent-id>`、`ext/<platform>/...`，并通过 `count`、`list`、`status`、`route`、`model` 等小文件发现实际可用对象。
 
