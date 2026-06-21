@@ -1242,6 +1242,7 @@ impl RuntimeState {
         if let Some(thread_parent) = parents.thread {
             self.add_thread_runtime_files(thread_parent);
         }
+        self.load_thread_socket_sessions();
         if let Some(control_parent) = parents.thread_control {
             self.add_thread_control_runtime_files(control_parent);
         }
