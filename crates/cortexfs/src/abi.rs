@@ -25,6 +25,7 @@ pub const LOCAL_USER_MEMORY_SCOPE_TEXT: &str = "home/1000:semantic\nhome/1000:pr
 pub const LOCAL_API_LISTEN_TEXT: &str = "127.0.0.1:6185\n";
 pub const LOCAL_API_BASE_URL_TEXT: &str = "http://127.0.0.1:6185/v1\n";
 pub const LOCAL_API_SOCKET_TEXT: &str = "/run/user/1000/cortex/api.sock\n";
+pub const LOCAL_THREAD_SOCKET_PATH: &str = "/run/user/1000/cortex/thread/demo/io.sock";
 pub const LOCAL_API_ENDPOINTS_TEXT: &str = "GET /v1/models\nPOST /v1/chat/completions\nPOST /v1/responses\nPOST /v1/messages\nPOST /v1/generateContent\n";
 pub const LOCAL_API_PIPELINE_TEXT: &str = "normalize format\nroute\npolicy check\nsecret resolve\nprovider call\nstore response\nappend thread if bound\naudit\n";
 pub const LOCAL_API_SOURCE_TEXT: &str = "home/1000/api\n";

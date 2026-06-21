@@ -80,6 +80,12 @@ impl Filesystem for CortexFs {
         })
     }
 
+    async fn readlink(&self, _req: Request, inode: Inode) -> fuse3::Result<ReplyData> {
+        Ok(ReplyData {
+            data: Bytes::from(self.node_symlink_target(inode)?),
+        })
+    }
+
     async fn create(
         &self,
         req: Request,

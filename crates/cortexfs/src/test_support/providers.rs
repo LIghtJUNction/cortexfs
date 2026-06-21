@@ -675,6 +675,61 @@ fn dynamic_provider_routes_after_secret_import() -> fuse3::Result<()> {
 }
 
 #[test]
+fn dynamic_provider_routes_when_secret_not_required() -> fuse3::Result<()> {
+    SecretStore::clear_test_secrets();
+    let mut provider = dynamic_registry_provider();
+    provider.id = "local-runtime-fixture".to_owned();
+    provider.family = "local-runtime".to_owned();
+    provider.name = "Local runtime fixture".to_owned();
+    provider.secret_status = "not_required\n".to_owned();
+    provider.secret_ref = "not_required\n".to_owned();
+
+    let fs = CortexFs::new();
+    let routes = fs
+        .tree
+        .path_inode(crate::USER_ROUTES_DIR_PATH)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.upsert_dynamic_provider(provider.clone());
+        drop(runtime);
+    }
+    let secret_status =
+        fs.resolve_path_inode(["provider", provider.id.as_str(), "secrets", "status"])?;
+    let secret_active =
+        fs.resolve_path_inode(["provider", provider.id.as_str(), "secrets", "active"])?;
+    let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+    assert_eq!(
+        runtime
+            .nodes
+            .get(&secret_status)
+            .and_then(crate::Node::content),
+        Some("not_required\n")
+    );
+    assert_eq!(
+        runtime
+            .nodes
+            .get(&secret_active)
+            .and_then(crate::Node::content),
+        Some("not_required\n")
+    );
+    let default_provider = runtime
+        .lookup_child(routes, "default_provider")
+        .map(crate::Node::inode)
+        .ok_or_else(fuse3::Errno::new_not_exist)?;
+    runtime.write(default_provider, 0, format!("{}\n", provider.id).as_bytes())?;
+    assert_openai_chat_route(
+        &runtime,
+        routes,
+        format!("{}\n", provider.id).as_str(),
+        format!("{}\n", provider.default_model).as_str(),
+        "ready\n",
+    )?;
+    drop(runtime);
+    Ok(())
+}
+
+#[test]
 fn dynamic_provider_admin_controls_are_write_only() -> fuse3::Result<()> {
     SecretStore::clear_test_secrets();
     let provider = dynamic_registry_provider();

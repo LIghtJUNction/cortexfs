@@ -38,6 +38,14 @@ impl RegistryProvider {
         self.formats.iter().any(|candidate| candidate == format)
     }
 
+    pub fn secret_not_required(&self) -> bool {
+        self.secret_status.trim() == "not_required"
+    }
+
+    pub fn credentials_satisfied(&self) -> bool {
+        matches!(self.secret_status.trim(), "configured" | "not_required")
+    }
+
     pub fn formats_text(&self) -> String {
         newline_list(self.formats.iter())
     }

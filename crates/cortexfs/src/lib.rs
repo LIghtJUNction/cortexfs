@@ -16,6 +16,7 @@ mod runtime_exports;
 mod runtime_memory;
 mod runtime_parents;
 mod runtime_providers;
+mod runtime_socket;
 mod runtime_state;
 mod runtime_threads;
 mod runtime_types;
@@ -34,7 +35,7 @@ use std::ffi::{OsStr, OsString};
 use std::future::Future;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
 pub(crate) use abi::{
@@ -56,17 +57,17 @@ pub(crate) use abi::{
     FILESYSTEM_READ_TOOL_OUTBOX_PATH, LOCAL_AGENT_CONTEXT_TEXT, LOCAL_API_AUDIT_TEXT,
     LOCAL_API_BASE_URL_TEXT, LOCAL_API_ENDPOINTS_TEXT, LOCAL_API_LISTEN_TEXT,
     LOCAL_API_PIPELINE_TEXT, LOCAL_API_POLICY_TEXT, LOCAL_API_SOCKET_TEXT, LOCAL_API_SOURCE_TEXT,
-    LOCAL_API_STORE_TEXT, LOCAL_API_TRANSPORT_TEXT, LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT,
-    LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT, LOCAL_USER_SPACE_CONTEXT_TEXT,
-    LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_THREAD_DISPLAY_PATH, LOCAL_USER_THREAD_DISPLAY_TEXT,
-    LOCAL_USER_UID_TEXT, MAX_WRITE, MCP_LOCAL_FS_READ_TOOL, MCP_LOCAL_FS_READ_TOOL_INBOX_PATH,
-    MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH, MCP_PROMPT_RENDER_FORMAT,
-    MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH, MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH,
-    MEMORY_EPISODIC_FORMAT, MEMORY_PROCEDURAL_FORMAT, MEMORY_PROFILE_FORMAT,
-    MEMORY_SEMANTIC_FORMAT, MEMORY_WORKING_FORMAT, PREFERENCE_PAIR_FORMAT, ROOT_INODE,
-    SHARED_PROJECT_A_DEMO_CLAIM_PATH, SHARED_PROJECT_A_LOCK_LEASE_PATH, SHELL_EXEC_TOOL,
-    SHELL_EXEC_TOOL_INBOX_PATH, SHELL_EXEC_TOOL_OUTBOX_PATH, STATFS_BLOCK_SIZE, STATFS_BLOCKS,
-    STATFS_NAME_LENGTH, STATUS_TEXT, THREAD_COUNT_TEXT, TOOL_FORMAT, TTL,
+    LOCAL_API_STORE_TEXT, LOCAL_API_TRANSPORT_TEXT, LOCAL_THREAD_SOCKET_PATH, LOCAL_USER_ID,
+    LOCAL_USER_MEMORY_SCOPE_TEXT, LOCAL_USER_MODELS_REFRESH_DISPLAY_TEXT,
+    LOCAL_USER_SPACE_CONTEXT_TEXT, LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_THREAD_DISPLAY_PATH,
+    LOCAL_USER_THREAD_DISPLAY_TEXT, LOCAL_USER_UID_TEXT, MAX_WRITE, MCP_LOCAL_FS_READ_TOOL,
+    MCP_LOCAL_FS_READ_TOOL_INBOX_PATH, MCP_LOCAL_FS_READ_TOOL_OUTBOX_PATH,
+    MCP_PROMPT_RENDER_FORMAT, MCP_SUMMARIZE_PROMPT_RENDER_INBOX_PATH,
+    MCP_SUMMARIZE_PROMPT_RENDER_OUTBOX_PATH, MEMORY_EPISODIC_FORMAT, MEMORY_PROCEDURAL_FORMAT,
+    MEMORY_PROFILE_FORMAT, MEMORY_SEMANTIC_FORMAT, MEMORY_WORKING_FORMAT, PREFERENCE_PAIR_FORMAT,
+    ROOT_INODE, SHARED_PROJECT_A_DEMO_CLAIM_PATH, SHARED_PROJECT_A_LOCK_LEASE_PATH,
+    SHELL_EXEC_TOOL, SHELL_EXEC_TOOL_INBOX_PATH, SHELL_EXEC_TOOL_OUTBOX_PATH, STATFS_BLOCK_SIZE,
+    STATFS_BLOCKS, STATFS_NAME_LENGTH, STATUS_TEXT, THREAD_COUNT_TEXT, TOOL_FORMAT, TTL,
 };
 pub use mount_config::{
     FuseConfig, FuseProjection, MountError, MountMode, MountOptions, MountSecurityOptions,
@@ -133,13 +134,23 @@ pub fn mount(config: &FuseConfig) -> Result<FuseProjection, MountError> {
     runtime.block_on(async {
         let mount_options = fuse_mount_options(config.options());
         let session = fuse3::raw::Session::new(mount_options.clone());
-        let mut handle = session
-            .mount_with_unprivileged(
-                CortexFs::new_with_mode(config.options().mode()),
-                config.options().mountpoint(),
-            )
-            .await
-            .map_err(MountError::Fuse)?;
+        let filesystem = CortexFs::new_with_mode(config.options().mode());
+        let socket_listener = runtime_socket::DemoThreadSocket::start(
+            Arc::clone(&filesystem.runtime),
+            filesystem.owner_uid,
+        )
+        .await
+        .map_err(MountError::Runtime)?;
+        let mount_result = session
+            .mount_with_unprivileged(filesystem, config.options().mountpoint())
+            .await;
+        let mut handle = match mount_result {
+            Ok(handle) => handle,
+            Err(error) => {
+                socket_listener.shutdown().await;
+                return Err(MountError::Fuse(error));
+            }
+        };
         match wait_for_mount_shutdown(mount_shutdown_signal(), &mut handle)
             .await
             .map_err(MountError::Fuse)?
@@ -149,6 +160,7 @@ pub fn mount(config: &FuseConfig) -> Result<FuseProjection, MountError> {
             }
             MountShutdown::SessionEnded => {}
         }
+        socket_listener.shutdown().await;
         Ok(FuseProjection::new())
     })
 }
@@ -223,7 +235,7 @@ fn fuse_security_custom_options(security: MountSecurityOptions) -> Option<OsStri
 #[derive(Debug)]
 struct CortexFs {
     tree: StaticTree,
-    runtime: Mutex<RuntimeState>,
+    runtime: Arc<Mutex<RuntimeState>>,
     owner_uid: u32,
     owner_gid: u32,
     mount_mode: MountMode,
@@ -240,7 +252,7 @@ impl CortexFs {
         let parents = RuntimeParents::from_tree(&tree);
         Self {
             tree,
-            runtime: Mutex::new(RuntimeState::new(&parents)),
+            runtime: Arc::new(Mutex::new(RuntimeState::new(&parents))),
             owner_uid: nix::unistd::getuid().as_raw(),
             owner_gid: nix::unistd::getgid().as_raw(),
             mount_mode,
@@ -336,6 +348,29 @@ impl CortexFs {
                 .ok_or_else(|| fuse3::Errno::from(libc::EISDIR));
         }
         Err(fuse3::Errno::new_not_exist())
+    }
+
+    fn node_symlink_target(&self, inode: Inode) -> fuse3::Result<String> {
+        let runtime_target = {
+            let runtime = self.runtime.lock().map_err(|_error| libc::EIO)?;
+            runtime.node(inode).and_then(|node| {
+                node.is_symlink()
+                    .then(|| node.content().map(ToOwned::to_owned))
+                    .flatten()
+            })
+        };
+        if let Some(target) = runtime_target {
+            return Ok(target);
+        }
+        if let Some(node) = self.tree.nodes.get(&inode)
+            && node.is_symlink()
+        {
+            return node
+                .content()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| fuse3::Errno::from(libc::EINVAL));
+        }
+        Err(fuse3::Errno::from(libc::EINVAL))
     }
 
     fn node_context(&self, inode: Inode) -> fuse3::Result<String> {
@@ -1201,6 +1236,9 @@ impl RuntimeState {
         if let Some(batch_parent) = parents.batch {
             self.add_batch_runtime_files(batch_parent);
         }
+        if let Some(threads_parent) = parents.threads {
+            self.add_thread_index_runtime_files(threads_parent);
+        }
         if let Some(thread_parent) = parents.thread {
             self.add_thread_runtime_files(thread_parent);
         }
@@ -1447,6 +1485,18 @@ impl RuntimeState {
         inode
     }
 
+    fn add_dynamic_symlink(
+        &mut self,
+        parent: Inode,
+        name: impl Into<String>,
+        target: &'static str,
+    ) -> Inode {
+        let inode = self.allocate_inode();
+        self.nodes.insert(inode, Node::symlink(inode, name, target));
+        self.parent_children.entry(parent).or_default().push(inode);
+        inode
+    }
+
     fn add_exports_runtime_files(&mut self, exports_parent: Inode, filters_parent: Option<Inode>) {
         self.conversations_export_inode =
             Some(self.add_dynamic_file(exports_parent, "conversations.jsonl", ""));
@@ -1489,6 +1539,14 @@ impl RuntimeState {
     fn add_batch_runtime_files(&mut self, batch_parent: Inode) {
         self.batch_count_inode = Some(self.add_dynamic_file(batch_parent, "count", "0\n"));
         self.batch_state_inode = Some(self.add_dynamic_file(batch_parent, "state", "idle\n"));
+    }
+
+    fn add_thread_index_runtime_files(&mut self, threads_parent: Inode) {
+        self.thread_count_inode = Some(self.add_dynamic_file(threads_parent, "count", "1\n"));
+        self.thread_list_inode =
+            Some(self.add_dynamic_file(threads_parent, "list", "demo\tworkspace\t\t\n"));
+        self.thread_current_inode =
+            Some(self.add_dynamic_file(threads_parent, "current", "demo\n"));
     }
 
     fn add_thread_runtime_files(&mut self, thread_parent: Inode) {
@@ -1699,7 +1757,10 @@ impl RuntimeState {
         let Some(root) = self.provider_root_inode else {
             return;
         };
-        if SecretStore::lookup_provider_key(&provider.id).is_ok() {
+        if provider.secret_not_required() {
+            "not_required\n".clone_into(&mut provider.secret_status);
+            "not_required\n".clone_into(&mut provider.secret_ref);
+        } else if SecretStore::lookup_provider_key(&provider.id).is_ok() {
             "configured\n".clone_into(&mut provider.secret_status);
             provider.secret_ref = format!("secret-service:provider:{}:api-key\n", provider.id);
         } else {
@@ -3982,7 +4043,7 @@ impl RuntimeState {
         }
     }
 
-    fn update_dynamic_file(&mut self, inode: Inode, content: impl Into<String>) {
+    pub(crate) fn update_dynamic_file(&mut self, inode: Inode, content: impl Into<String>) {
         if let Some(node) = self.nodes.get_mut(&inode) {
             node.content = Some(NodeContent::Dynamic(content.into()));
         }
