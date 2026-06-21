@@ -63,6 +63,8 @@ CortexFS 是“AI API 格式的 FUSE 文件系统”，不是某一个 provider 
 
 现实中 Kimi、MiniMax、中转站、本地模型服务可能都支持 `openai.chat` 或 `openai.responses`；CortexFS 不把厂商品牌硬编码成核心路径，而是让 provider 声明自己支持哪些 format、模型、账号类型、健康状态和路由策略。
 
+其中 `openai.responses` 按 OpenAI Responses API 的现代请求形状投影，覆盖 stateful 对话、tool calling、streaming、background execution、stored responses、reasoning/text 配置等字段；`openai.chat` 是 Chat Completions 兼容面。CortexFS 只把这些字段作为 `format/openai.responses/schema.json` 的协议 ABI 暴露，实际 provider 仍由 registry、route 和 execution plane 决定。
+
 ## 项目边界
 
 - `cortexfs` 只做 FUSE/VFS 投影；远程 provider 调用、MCP 通信、tool loop、记忆检索、审计导出和调度执行属于 `cortexd`/execution plane。
@@ -518,7 +520,7 @@ cargo run -p cortex-cli -- daemon --once \
   --request-id models-001
 cargo run -p cortex-cli -- daemon --once \
   --endpoint /v1/responses \
-  --body '{"input":"hello"}' \
+  --body '{"input":"hello","previous_response_id":"resp_123","tools":[],"stream":true,"store":true}' \
   --request-id resp-001
 ```
 

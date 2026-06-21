@@ -285,6 +285,38 @@ fn format_schema_files_expose_protocol_request_shapes() -> fuse3::Result<()> {
                 .any(|field| field.as_str() == Some("content")))
     );
 
+    let responses = format_schema(&fs, "openai.responses")?;
+    for property in [
+        "conversation",
+        "previous_response_id",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "max_output_tokens",
+        "reasoning",
+        "text",
+        "include",
+        "background",
+        "store",
+        "stream",
+        "service_tier",
+        "truncation",
+        "safety_identifier",
+    ] {
+        assert!(
+            schema_path(&responses, &["properties", property]).is_some(),
+            "openai.responses schema must expose {property}"
+        );
+    }
+    assert!(
+        schema_path(&responses, &["properties", "input", "oneOf"])
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|variants| variants.iter().any(|variant| variant
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                == Some("string")))
+    );
+
     let google = format_schema(&fs, "google.generate_content")?;
     assert!(
         schema_path(
