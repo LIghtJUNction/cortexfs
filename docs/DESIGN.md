@@ -448,13 +448,13 @@ thread/<id>/
 {"role":"assistant","content":"..."}
 ```
 
-文件路径：
+文件式提交路径适合批处理、离线导入和不需要流式响应的调用：
 
 ```bash
 mv msg.tmp thread/demo/inbox/0001.req.json
 ```
 
-Socket fast path：
+交互式 agent/chat/REPL 客户端必须优先使用 socket fast path，避免每一轮对话写临时文件再 rename：
 
 ```text
 thread/demo/io.sock
@@ -483,7 +483,7 @@ Socket 必须：
 - 更新 `messages.jsonl`、`latest.md`、`state`、`fingerprint`。
 - 写 audit。
 
-文件管事实，socket 管实时。
+文件管事实和批处理提交，socket 管实时交互。socket 不是旁路：runtime 必须把 socket turn 写回 `messages.jsonl`、`latest.md`、`state`、`fingerprint` 和 audit。
 
 ## 11. 批处理
 
@@ -1266,7 +1266,8 @@ CortexFS 可以作为 workflow engine、agent runtime、数字人系统和批处
 模型发现      读 home/<uid>/model/{count,list} 和 format/<format>/model/list
 路由观察      读 home/<uid>/route/<format>/{provider,model,reason}
 API 提交      rename 到 home/<uid>/api/<format>/inbox/<id>.req.json
-Thread 提交   rename 到 home/<uid>/thread/<id>/inbox/<id>.req.json
+Thread 批处理 rename 到 home/<uid>/thread/<id>/inbox/<id>.req.json
+Thread 实时   连接 home/<uid>/thread/<id>/io.sock
 Tool 调用     rename 到 tool/<tool-id>/invoke/inbox/<id>.req.json
 MCP 调用      rename 到 mcp/tool/<server>.<tool>/invoke/inbox/<id>.req.json
 记忆写入      rename 到 home/<uid>/memory/<layer>/inbox/<id>.req.json
@@ -1293,7 +1294,7 @@ thread/tool-loop update when bound
 
 同理，不要要求 CortexFS 增加 `chan/`、`job/` 或 `hook/`。中转站和账号实例是 `provider/`，路由选择是 `home/<uid>/route/`，外部触发器直接写对应 inbox。
 
-socket 只能降低延迟，不能改变语义。socket 接入必须校验 peer credential，进入同一 policy/route/store/audit/export 管线。文件树是可审计 source of truth。
+socket 只能降低延迟，不能改变语义。socket 接入必须校验 peer credential，进入同一 policy/route/store/audit/export 管线。文件树是可审计 source of truth。交互式 agent 软件不应把每轮对话降级成 `thread/inbox` 文件提交；`thread/inbox` 是批处理和非交互兼容入口。
 
 ## 27. 实现架构
 
