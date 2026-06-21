@@ -560,6 +560,9 @@ impl RuntimeState {
         let Some(inodes) = self.thread_sessions.get(session).copied() else {
             return;
         };
+        if self.thread_session_content(inodes.scope).trim() == "temp" {
+            return;
+        }
         let dir = root.join(session);
         if fs::create_dir_all(&dir).is_err() {
             return;
