@@ -1,6 +1,9 @@
 use crate::CortexFs;
 use fuse3::FileType;
 use fuse3::Inode;
+use std::fs;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn assert_demo_thread_runtime_files_are_runtime_owned(
     fs: &CortexFs,
@@ -285,6 +288,65 @@ fn runtime_creates_native_thread_sessions_for_socket_turns() -> fuse3::Result<()
     );
     assert_eq!(fs.node_attr(thread)?.kind, FileType::Directory);
     Ok(())
+}
+
+#[test]
+fn runtime_restores_native_thread_sessions_from_state_dir() -> fuse3::Result<()> {
+    let state_dir = unique_thread_state_dir();
+    let session = "cwd-restore-123";
+
+    {
+        let fs = CortexFs::new();
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .ensure_thread_socket_session(session, "workspace", "/work/restore")
+            .map_err(|_error| libc::EIO)?;
+        runtime.append_thread_session_socket_turn(
+            session,
+            "thread-restore-001",
+            "remember me",
+            "restored reply",
+        );
+        runtime.persist_thread_socket_sessions_to_dir(&state_dir);
+    }
+
+    let fs = CortexFs::new();
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.load_thread_socket_sessions_from_dir(&state_dir);
+    }
+
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode(["home", "1000", "thread", session, "cwd"])?)?,
+        "/work/restore\n"
+    );
+    let messages = fs.node_content(fs.resolve_path_inode([
+        "home",
+        "1000",
+        "thread",
+        session,
+        "messages.jsonl",
+    ])?)?;
+    assert!(messages.contains("\"content\":\"remember me\""));
+    assert!(messages.contains("\"content\":\"restored reply\""));
+    assert!(
+        fs.node_content(fs.resolve_path_inode(["home", "1000", "thread", "list"])?)?
+            .contains(session)
+    );
+
+    let _ = fs::remove_dir_all(state_dir);
+    Ok(())
+}
+
+fn unique_thread_state_dir() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!(
+        "cortexfs-thread-state-{}-{nonce}",
+        std::process::id()
+    ))
 }
 
 #[test]

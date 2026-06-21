@@ -7,6 +7,8 @@ use crate::{
     LOCAL_USER_THREAD_DISPLAY_PATH, Node, NodeContent, RuntimeState,
 };
 use cortex_core::ThreadId;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 impl RuntimeState {
@@ -352,41 +354,25 @@ impl RuntimeState {
             self.update_dynamic_file(inodes.cwd, format!("{cwd}\n"));
             self.update_dynamic_file(inodes.updated, format!("{}\n", now_text()));
             self.update_thread_index(session);
+            self.persist_thread_socket_session(session);
             return Ok(());
         }
-        let Some(root) = self.thread_root_inode else {
+        if self.thread_root_inode.is_none() {
             return Err("thread root unavailable".to_owned());
-        };
+        }
         let created = now_text();
-        let thread = self.add_dynamic_dir(root, session.to_owned());
-        self.add_dynamic_file(thread, "context", LOCAL_USER_THREAD_CONTEXT_TEXT);
-        self.add_dynamic_dir(thread, "inbox");
-        self.add_dynamic_symlink(thread, "io.sock", LOCAL_THREAD_SOCKET_PATH);
-        self.add_dynamic_file(thread, "memory_scope", LOCAL_USER_MEMORY_SCOPE_TEXT);
-        self.add_dynamic_dir(thread, "control");
-        let messages = self.add_dynamic_file(thread, "messages.jsonl", "");
-        let latest = self.add_dynamic_file(thread, "latest.md", "");
-        let state = self.add_dynamic_file(thread, "state", "idle\n");
-        let fingerprint = self.add_dynamic_file(thread, "fingerprint", "");
-        let scope_inode = self.add_dynamic_file_owned(thread, "scope", format!("{scope}\n"));
-        let cwd_inode = self.add_dynamic_file_owned(thread, "cwd", format!("{cwd}\n"));
-        let created_inode = self.add_dynamic_file_owned(thread, "created", format!("{created}\n"));
-        let updated_inode = self.add_dynamic_file_owned(thread, "updated", format!("{created}\n"));
-        self.thread_sessions.insert(
-            session.to_owned(),
-            crate::runtime_types::ThreadSessionInodes {
-                root: thread,
-                messages,
-                latest,
-                state,
-                fingerprint,
-                scope: scope_inode,
-                cwd: cwd_inode,
-                created: created_inode,
-                updated: updated_inode,
-            },
-        );
+        self.add_thread_socket_session(ThreadSocketSessionSeed {
+            id: session.to_owned(),
+            scope: scope.to_owned(),
+            cwd: cwd.to_owned(),
+            created: created.clone(),
+            updated: created,
+            messages: String::new(),
+            latest: String::new(),
+            fingerprint: String::new(),
+        });
         self.update_thread_index(session);
+        self.persist_thread_socket_session(session);
         Ok(())
     }
 
@@ -459,6 +445,7 @@ impl RuntimeState {
             self.update_dynamic_file(inodes.updated, format!("{}\n", now_text()));
         }
         self.update_thread_index(session);
+        self.persist_thread_socket_session(session);
         self.append_audit_with_fingerprint(
             &format!("thread.{session}.socket"),
             request_id,
@@ -484,7 +471,119 @@ impl RuntimeState {
             self.update_dynamic_file(inodes.updated, format!("{}\n", now_text()));
         }
         self.update_thread_index(session);
+        self.persist_thread_socket_session(session);
         self.append_audit(&format!("thread.{session}.socket"), request_id, "error");
+    }
+
+    pub fn load_thread_socket_sessions(&mut self) {
+        let Some(root) = thread_session_store_dir() else {
+            return;
+        };
+        self.load_thread_socket_sessions_from_dir(&root);
+    }
+
+    pub fn load_thread_socket_sessions_from_dir(&mut self, root: &Path) {
+        let Ok(entries) = fs::read_dir(root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(id) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if validate_socket_session(id).is_err() || self.thread_sessions.contains_key(id) {
+                continue;
+            }
+            let meta = fs::read_to_string(path.join("meta.json")).unwrap_or_default();
+            let messages = fs::read_to_string(path.join("messages.jsonl")).unwrap_or_default();
+            let seed = persisted_session_seed(id, &meta, &messages);
+            self.add_thread_socket_session(seed);
+        }
+        self.update_thread_index("demo");
+    }
+
+    #[cfg(test)]
+    pub fn persist_thread_socket_sessions_to_dir(&self, root: &Path) {
+        for session in self.thread_sessions.keys() {
+            self.persist_thread_socket_session_to_dir(session, root);
+        }
+    }
+
+    fn add_thread_socket_session(&mut self, seed: ThreadSocketSessionSeed) {
+        let Some(root) = self.thread_root_inode else {
+            return;
+        };
+        let thread = self.add_dynamic_dir(root, seed.id.clone());
+        self.add_dynamic_file(thread, "context", LOCAL_USER_THREAD_CONTEXT_TEXT);
+        self.add_dynamic_dir(thread, "inbox");
+        self.add_dynamic_symlink(thread, "io.sock", LOCAL_THREAD_SOCKET_PATH);
+        self.add_dynamic_file(thread, "memory_scope", LOCAL_USER_MEMORY_SCOPE_TEXT);
+        self.add_dynamic_dir(thread, "control");
+        let messages = self.add_dynamic_file_owned(thread, "messages.jsonl", seed.messages);
+        let latest = self.add_dynamic_file_owned(thread, "latest.md", seed.latest);
+        let state = self.add_dynamic_file(thread, "state", "idle\n");
+        let fingerprint = self.add_dynamic_file_owned(thread, "fingerprint", seed.fingerprint);
+        let scope = self.add_dynamic_file_owned(thread, "scope", format!("{}\n", seed.scope));
+        let cwd = self.add_dynamic_file_owned(thread, "cwd", format!("{}\n", seed.cwd));
+        let created = self.add_dynamic_file_owned(thread, "created", format!("{}\n", seed.created));
+        let updated = self.add_dynamic_file_owned(thread, "updated", format!("{}\n", seed.updated));
+        self.thread_sessions.insert(
+            seed.id,
+            crate::runtime_types::ThreadSessionInodes {
+                root: thread,
+                messages,
+                latest,
+                state,
+                fingerprint,
+                scope,
+                cwd,
+                created,
+                updated,
+            },
+        );
+    }
+
+    fn persist_thread_socket_session(&self, session: &str) {
+        if session == "demo" {
+            return;
+        }
+        let Some(root) = thread_session_store_dir() else {
+            return;
+        };
+        self.persist_thread_socket_session_to_dir(session, &root);
+    }
+
+    fn persist_thread_socket_session_to_dir(&self, session: &str, root: &Path) {
+        let Some(inodes) = self.thread_sessions.get(session).copied() else {
+            return;
+        };
+        let dir = root.join(session);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let messages = self.thread_session_content(inodes.messages);
+        let _ = fs::write(dir.join("messages.jsonl"), &messages);
+        let meta = serde_json::json!({
+            "id": session,
+            "scope": self.thread_session_content(inodes.scope).trim(),
+            "cwd": self.thread_session_content(inodes.cwd).trim(),
+            "created": self.thread_session_content(inodes.created).trim(),
+            "updated": self.thread_session_content(inodes.updated).trim(),
+            "latest": self.thread_session_content(inodes.latest).trim_end(),
+            "fingerprint": self.thread_session_content(inodes.fingerprint).trim(),
+        });
+        let _ = fs::write(dir.join("meta.json"), meta.to_string());
+    }
+
+    fn thread_session_content(&self, inode: fuse3::Inode) -> String {
+        self.nodes
+            .get(&inode)
+            .and_then(Node::content)
+            .unwrap_or_default()
+            .to_owned()
     }
 
     fn update_thread_index(&mut self, current: &str) {
@@ -531,12 +630,70 @@ impl RuntimeState {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct ThreadSocketSessionSeed {
+    id: String,
+    scope: String,
+    cwd: String,
+    created: String,
+    updated: String,
+    messages: String,
+    latest: String,
+    fingerprint: String,
+}
+
+fn persisted_session_seed(id: &str, meta: &str, messages: &str) -> ThreadSocketSessionSeed {
+    let value = serde_json::from_str::<serde_json::Value>(meta).unwrap_or_default();
+    let scope = json_str(&value, "scope").unwrap_or("workspace");
+    let cwd = json_str(&value, "cwd").unwrap_or_default();
+    let created = json_str(&value, "created").unwrap_or("unknown");
+    let updated = json_str(&value, "updated").unwrap_or(created);
+    let latest = json_str(&value, "latest").unwrap_or_default();
+    let fingerprint = json_str(&value, "fingerprint").unwrap_or_default();
+    ThreadSocketSessionSeed {
+        id: id.to_owned(),
+        scope: scope.to_owned(),
+        cwd: cwd.to_owned(),
+        created: created.to_owned(),
+        updated: updated.to_owned(),
+        messages: messages.to_owned(),
+        latest: latest.to_owned(),
+        fingerprint: fingerprint.to_owned(),
+    }
+}
+
+fn json_str<'a>(value: &'a serde_json::Value, field: &str) -> Option<&'a str> {
+    value.get(field).and_then(serde_json::Value::as_str)
+}
+
 fn validate_socket_session(session: &str) -> Result<(), String> {
     ThreadId::new(session.to_owned()).map_err(|error| error.to_string())?;
     if matches!(session, "count" | "list" | "current") {
         return Err("reserved thread session id".to_owned());
     }
     Ok(())
+}
+
+#[cfg(test)]
+fn thread_session_store_dir() -> Option<PathBuf> {
+    std::env::var("CORTEXFS_THREAD_STATE_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(not(test))]
+fn thread_session_store_dir() -> Option<PathBuf> {
+    std::env::var("CORTEXFS_THREAD_STATE_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .filter(|value| !value.is_empty())
+                .map(|home| Path::new(&home).join(".local/state/cortexfs/thread"))
+        })
 }
 
 fn now_text() -> String {
