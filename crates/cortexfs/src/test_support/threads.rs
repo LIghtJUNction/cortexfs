@@ -145,7 +145,12 @@ fn projection_exposes_demo_thread_and_tool_loop_state() -> fuse3::Result<()> {
     assert_eq!(
         fs.lookup_path(["home", "1000", "thread", "demo", "io.sock"])
             .map(crate::Node::kind),
-        Some(FileType::Socket)
+        Some(FileType::Symlink)
+    );
+    let socket = fs.path_inode(["home", "1000", "thread", "demo", "io.sock"])?;
+    assert_eq!(
+        fs.node_symlink_target(socket)?,
+        crate::LOCAL_THREAD_SOCKET_PATH
     );
     let thread = fs
         .tree
@@ -209,6 +214,76 @@ fn projection_exposes_demo_thread_and_tool_loop_state() -> fuse3::Result<()> {
         ["home", "1000", "thread", "demo", "tool-loop", "control"],
         "demo tool-loop",
     )?;
+    Ok(())
+}
+
+#[test]
+fn runtime_creates_native_thread_sessions_for_socket_turns() -> fuse3::Result<()> {
+    let fs = CortexFs::new();
+    let session = "cwd-cortexfs-123";
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .ensure_thread_socket_session(session, "workspace", "/work/cortexfs")
+            .map_err(|_error| libc::EIO)?;
+    }
+
+    let thread = fs.resolve_path_inode(["home", "1000", "thread", session])?;
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode(["home", "1000", "thread", session, "scope"])?)?,
+        "workspace\n"
+    );
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode(["home", "1000", "thread", session, "cwd"])?)?,
+        "/work/cortexfs\n"
+    );
+    let socket = fs.resolve_path_inode(["home", "1000", "thread", session, "io.sock"])?;
+    assert_eq!(
+        fs.node_symlink_target(socket)?,
+        crate::LOCAL_THREAD_SOCKET_PATH
+    );
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime.mark_thread_session_socket_queued(session, "thread-session-001");
+        runtime.append_thread_session_socket_turn(
+            session,
+            "thread-session-001",
+            "hello session",
+            "hello back",
+        );
+    }
+
+    let messages = fs.node_content(fs.resolve_path_inode([
+        "home",
+        "1000",
+        "thread",
+        session,
+        "messages.jsonl",
+    ])?)?;
+    assert!(messages.contains("\"content\":\"hello session\""));
+    assert!(messages.contains("\"content\":\"hello back\""));
+    assert_eq!(
+        fs.node_content(fs.resolve_path_inode(["home", "1000", "thread", session, "state"])?)?,
+        "idle\n"
+    );
+    assert!(
+        fs.node_content(fs.resolve_path_inode(["home", "1000", "thread", "list"])?)?
+            .contains(session)
+    );
+    assert!(
+        fs.node_content(fs.resolve_path_inode([
+            "home",
+            "1000",
+            "thread",
+            "demo",
+            "messages.jsonl"
+        ])?)?
+        .is_empty(),
+        "native socket session must not append to demo history"
+    );
+    assert_eq!(fs.node_attr(thread)?.kind, FileType::Directory);
     Ok(())
 }
 

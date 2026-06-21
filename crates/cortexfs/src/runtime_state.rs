@@ -9,7 +9,7 @@ use crate::runtime_parents::RuntimeParents;
 use crate::runtime_types::{
     AgentTask, ApiRouteInodes, ClusterTask, ConversationExportRow, DynamicProviderInodes,
     MemoryItem, PendingResponse, PreferencePair, PromptRender, ProviderConfigInodes,
-    RuntimeContext, TrainingExportRow, UserModelAccessInodes,
+    RuntimeContext, ThreadSessionInodes, TrainingExportRow, UserModelAccessInodes,
 };
 use crate::{DYNAMIC_INODE_BASE, Node};
 
@@ -114,6 +114,11 @@ pub struct RuntimeState {
     pub(crate) last_drained_inode: Inode,
     pub(crate) batch_count_inode: Option<Inode>,
     pub(crate) batch_state_inode: Option<Inode>,
+    pub(crate) thread_root_inode: Option<Inode>,
+    pub(crate) thread_count_inode: Option<Inode>,
+    pub(crate) thread_list_inode: Option<Inode>,
+    pub(crate) thread_current_inode: Option<Inode>,
+    pub(crate) thread_sessions: BTreeMap<String, ThreadSessionInodes>,
     pub(crate) thread_messages_inode: Option<Inode>,
     pub(crate) thread_latest_inode: Option<Inode>,
     pub(crate) thread_state_inode: Option<Inode>,
@@ -254,6 +259,7 @@ impl RuntimeState {
             last_control_inode: DYNAMIC_INODE_BASE,
             queue_depth_inode: DYNAMIC_INODE_BASE,
             last_drained_inode: DYNAMIC_INODE_BASE,
+            thread_root_inode: parents.threads,
             external_subject_quota_requests_inode: None,
             mcp_local_fs_status_inode: mcp.status,
             mcp_local_fs_pid_inode: mcp.pid,

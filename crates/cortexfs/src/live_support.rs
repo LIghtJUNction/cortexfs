@@ -1,6 +1,6 @@
-//! Test-only helpers for live provider integration checks.
+//! Live-test helpers for provider integration checks.
 
-use crate::provider_registry::{RegistryProvider, SecretStore};
+use crate::provider_registry::RegistryProvider;
 use crate::{CortexFs, ROOT_INODE};
 use cortex_store::InMemoryStore;
 use cortexd::ExecutionPlane;
@@ -41,8 +41,6 @@ impl LiveCortexFs {
     pub fn use_ollama_execution_plane(&self, url: &str) -> fuse3::Result<()> {
         let provider = cortex_providers::OllamaProvider::fixture_smollm2(url)
             .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
-        SecretStore::store_provider_key(LIVE_PROVIDER_ID, "local-live-test-fixture")
-            .map_err(|_error| fuse3::Errno::from(libc::EIO))?;
         let mut runtime = self.fs.runtime.lock().map_err(|_error| libc::EIO)?;
         runtime.plane = Some(ExecutionPlane::new(
             InMemoryStore::new(),
@@ -57,8 +55,8 @@ impl LiveCortexFs {
             default_model: LIVE_MODEL_ID.to_owned(),
             priority: 100,
             enabled: true,
-            secret_status: String::new(),
-            secret_ref: String::new(),
+            secret_status: "not_required\n".to_owned(),
+            secret_ref: "not_required\n".to_owned(),
         });
         runtime.write_user_default_provider(0, format!("{LIVE_PROVIDER_ID}\n").as_bytes())?;
         drop(runtime);

@@ -543,7 +543,7 @@ impl RuntimeState {
                 let inodes = self.dynamic_provider_inodes.get(provider)?;
                 let status = if !config.enabled {
                     "disabled\n"
-                } else if config.secret_status.trim() != "configured" {
+                } else if !config.credentials_satisfied() {
                     "missing_configuration\n"
                 } else {
                     "unknown\n"
@@ -754,7 +754,7 @@ impl RuntimeState {
         if self
             .dynamic_providers
             .get(provider)
-            .is_some_and(|provider| provider.secret_status.trim() != "configured")
+            .is_some_and(|provider| !provider.credentials_satisfied())
         {
             return ("0\n", "missing_secret\n");
         }

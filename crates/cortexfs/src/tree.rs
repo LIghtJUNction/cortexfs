@@ -111,6 +111,16 @@ impl Node {
         }
     }
 
+    pub fn symlink(inode: Inode, name: impl Into<String>, target: &'static str) -> Self {
+        Self {
+            inode,
+            name: name.into(),
+            kind: FileType::Symlink,
+            content: Some(NodeContent::Static(target)),
+            children: Vec::new(),
+        }
+    }
+
     pub const fn inode(&self) -> Inode {
         self.inode
     }
@@ -164,6 +174,8 @@ impl Node {
     ) -> fuse3::raw::prelude::FileAttr {
         let perm = if self.is_writable_submit_dir() {
             if multi_user { 0o777 } else { 0o755 }
+        } else if self.is_symlink() {
+            0o777
         } else if self.is_socket() {
             0o666
         } else if self.is_dir() {
@@ -196,6 +208,10 @@ impl Node {
 
     pub const fn is_socket(&self) -> bool {
         matches!(self.kind, FileType::Socket)
+    }
+
+    pub const fn is_symlink(&self) -> bool {
+        matches!(self.kind, FileType::Symlink)
     }
 
     fn is_writable_submit_dir(&self) -> bool {

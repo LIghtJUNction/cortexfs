@@ -3,12 +3,12 @@ use crate::{
     EMPTY_TEXT, LOCAL_AGENT_CONTEXT_TEXT, LOCAL_API_AUDIT_TEXT, LOCAL_API_BASE_URL_TEXT,
     LOCAL_API_ENDPOINTS_TEXT, LOCAL_API_LISTEN_TEXT, LOCAL_API_PIPELINE_TEXT,
     LOCAL_API_POLICY_TEXT, LOCAL_API_SOCKET_TEXT, LOCAL_API_SOURCE_TEXT, LOCAL_API_STORE_TEXT,
-    LOCAL_API_TRANSPORT_TEXT, LOCAL_USER_ID, LOCAL_USER_MEMORY_SCOPE_TEXT,
-    LOCAL_USER_SPACE_CONTEXT_TEXT, LOCAL_USER_THREAD_CONTEXT_TEXT, LOCAL_USER_UID_TEXT,
-    PROVIDER_SPECS, ProviderRuntimeSpec, ROOT_INODE, STATUS_TEXT, StaticTree, THREAD_COUNT_TEXT,
-    build_path_index, default_format, default_model_for_provider, default_provider_id,
-    global_model_count, global_model_list, model_count_for_format, model_list_for_format,
-    newline_list, provider_count, provider_count_for_format, provider_list,
+    LOCAL_API_TRANSPORT_TEXT, LOCAL_THREAD_SOCKET_PATH, LOCAL_USER_ID,
+    LOCAL_USER_MEMORY_SCOPE_TEXT, LOCAL_USER_SPACE_CONTEXT_TEXT, LOCAL_USER_THREAD_CONTEXT_TEXT,
+    LOCAL_USER_UID_TEXT, PROVIDER_SPECS, ProviderRuntimeSpec, ROOT_INODE, STATUS_TEXT, StaticTree,
+    THREAD_COUNT_TEXT, build_path_index, default_format, default_model_for_provider,
+    default_provider_id, global_model_count, global_model_list, model_count_for_format,
+    model_list_for_format, newline_list, provider_count, provider_count_for_format, provider_list,
     provider_list_for_format,
 };
 use fuse3::Inode;
@@ -660,7 +660,7 @@ impl NodeTreeBuilder {
         let thread = self.add_dir(threads, "demo");
         self.add_file(thread, "context", LOCAL_USER_THREAD_CONTEXT_TEXT);
         self.add_dir(thread, "inbox");
-        self.add_socket(thread, "io.sock");
+        self.add_symlink(thread, "io.sock", LOCAL_THREAD_SOCKET_PATH);
         self.add_file(thread, "memory_scope", LOCAL_USER_MEMORY_SCOPE_TEXT);
         self.add_dir(thread, "control");
         let tool_loop = self.add_dir(thread, "tool-loop");
@@ -1090,6 +1090,19 @@ impl NodeTreeBuilder {
     fn add_socket(&mut self, parent: Inode, name: impl Into<String>) -> Inode {
         let inode = self.allocate_inode();
         let node = Node::socket(inode, name);
+        self.attach_child(parent, inode);
+        self.nodes.insert(inode, node);
+        inode
+    }
+
+    fn add_symlink(
+        &mut self,
+        parent: Inode,
+        name: impl Into<String>,
+        target: &'static str,
+    ) -> Inode {
+        let inode = self.allocate_inode();
+        let node = Node::symlink(inode, name, target);
         self.attach_child(parent, inode);
         self.nodes.insert(inode, node);
         inode

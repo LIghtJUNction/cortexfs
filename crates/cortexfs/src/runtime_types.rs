@@ -84,6 +84,19 @@ pub struct DynamicProviderInodes {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct ThreadSessionInodes {
+    pub root: Inode,
+    pub messages: Inode,
+    pub latest: Inode,
+    pub state: Inode,
+    pub fingerprint: Inode,
+    pub scope: Inode,
+    pub cwd: Inode,
+    pub created: Inode,
+    pub updated: Inode,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ApiSubmission {
     pub scope: SubmissionScope,
     pub format: &'static str,
