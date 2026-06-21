@@ -271,43 +271,68 @@ fn format_schema_files_expose_protocol_request_shapes() -> fuse3::Result<()> {
     assert_format_schema_requires(&fs, "anthropic.messages", "messages")?;
     assert_format_schema_requires(&fs, "google.generate_content", "contents")?;
 
-    let chat = format_schema(&fs, "openai.chat")?;
-    assert!(
-        schema_path(&chat, &["properties", "messages", "items", "required"])
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|required| required.iter().any(|field| field.as_str() == Some("role")))
-    );
-    assert!(
-        schema_path(&chat, &["properties", "messages", "items", "required"])
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|required| required
-                .iter()
-                .any(|field| field.as_str() == Some("content")))
-    );
+    assert_openai_chat_schema(&fs)?;
+    assert_openai_responses_schema(&fs)?;
+    assert_anthropic_messages_schema(&fs)?;
+    assert_google_generate_content_schema(&fs)?;
+    Ok(())
+}
 
-    let responses = format_schema(&fs, "openai.responses")?;
-    for property in [
-        "conversation",
-        "previous_response_id",
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "max_output_tokens",
-        "reasoning",
-        "text",
-        "include",
-        "background",
-        "store",
-        "stream",
-        "service_tier",
-        "truncation",
-        "safety_identifier",
-    ] {
-        assert!(
-            schema_path(&responses, &["properties", property]).is_some(),
-            "openai.responses schema must expose {property}"
-        );
-    }
+fn assert_openai_chat_schema(fs: &CortexFs) -> fuse3::Result<()> {
+    let chat = format_schema(fs, "openai.chat")?;
+    assert_schema_required_fields(
+        &chat,
+        "openai.chat messages",
+        &["properties", "messages", "items", "required"],
+        &["role", "content"],
+    );
+    assert_schema_properties(
+        &chat,
+        "openai.chat",
+        &[
+            "max_completion_tokens",
+            "modalities",
+            "parallel_tool_calls",
+            "prediction",
+            "prompt_cache_key",
+            "reasoning_effort",
+            "response_format",
+            "safety_identifier",
+            "service_tier",
+            "store",
+            "stream_options",
+            "tool_choice",
+            "tools",
+            "verbosity",
+            "web_search_options",
+        ],
+    );
+    Ok(())
+}
+
+fn assert_openai_responses_schema(fs: &CortexFs) -> fuse3::Result<()> {
+    let responses = format_schema(fs, "openai.responses")?;
+    assert_schema_properties(
+        &responses,
+        "openai.responses",
+        &[
+            "conversation",
+            "previous_response_id",
+            "tools",
+            "tool_choice",
+            "parallel_tool_calls",
+            "max_output_tokens",
+            "reasoning",
+            "text",
+            "include",
+            "background",
+            "store",
+            "stream",
+            "service_tier",
+            "truncation",
+            "safety_identifier",
+        ],
+    );
     assert!(
         schema_path(&responses, &["properties", "input", "oneOf"])
             .and_then(serde_json::Value::as_array)
@@ -316,14 +341,65 @@ fn format_schema_files_expose_protocol_request_shapes() -> fuse3::Result<()> {
                 .and_then(serde_json::Value::as_str)
                 == Some("string")))
     );
+    Ok(())
+}
 
-    let google = format_schema(&fs, "google.generate_content")?;
+fn assert_anthropic_messages_schema(fs: &CortexFs) -> fuse3::Result<()> {
+    let anthropic = format_schema(fs, "anthropic.messages")?;
+    assert_schema_properties(
+        &anthropic,
+        "anthropic.messages",
+        &[
+            "max_tokens",
+            "system",
+            "tools",
+            "tool_choice",
+            "thinking",
+            "metadata",
+            "stop_sequences",
+            "service_tier",
+            "container",
+            "cache_control",
+            "output_config",
+            "inference_geo",
+        ],
+    );
+    Ok(())
+}
+
+fn assert_google_generate_content_schema(fs: &CortexFs) -> fuse3::Result<()> {
+    let google = format_schema(fs, "google.generate_content")?;
+    assert_schema_properties(
+        &google,
+        "google.generate_content",
+        &[
+            "tools",
+            "toolConfig",
+            "safetySettings",
+            "systemInstruction",
+            "generationConfig",
+            "cachedContent",
+            "serviceTier",
+        ],
+    );
     assert!(
         schema_path(
             &google,
             &["properties", "contents", "items", "properties", "parts"]
         )
         .is_some_and(serde_json::Value::is_object)
+    );
+    assert_schema_nested_properties(
+        &google,
+        "google.generate_content generationConfig",
+        &["properties", "generationConfig", "properties"],
+        &[
+            "responseMimeType",
+            "responseSchema",
+            "responseJsonSchema",
+            "responseModalities",
+            "thinkingConfig",
+        ],
     );
     Ok(())
 }
@@ -356,6 +432,43 @@ fn format_schema(fs: &CortexFs, format: &str) -> fuse3::Result<serde_json::Value
         .and_then(crate::Node::content)
         .ok_or_else(fuse3::Errno::new_not_exist)?;
     serde_json::from_str(schema).map_err(|_error| libc::EIO.into())
+}
+
+fn assert_schema_properties(schema: &serde_json::Value, label: &str, properties: &[&str]) {
+    assert_schema_nested_properties(schema, label, &["properties"], properties);
+}
+
+fn assert_schema_required_fields(
+    schema: &serde_json::Value,
+    label: &str,
+    path: &[&str],
+    fields: &[&str],
+) {
+    let required = schema_path(schema, path).and_then(serde_json::Value::as_array);
+    for field in fields {
+        assert!(
+            required.is_some_and(|required| required
+                .iter()
+                .any(|required_field| required_field.as_str() == Some(field))),
+            "{label} schema must require {field}"
+        );
+    }
+}
+
+fn assert_schema_nested_properties(
+    schema: &serde_json::Value,
+    label: &str,
+    base_path: &[&str],
+    properties: &[&str],
+) {
+    for property in properties {
+        let mut path = base_path.to_vec();
+        path.push(property);
+        assert!(
+            schema_path(schema, &path).is_some(),
+            "{label} schema must expose {property}"
+        );
+    }
 }
 
 fn schema_path<'schema>(

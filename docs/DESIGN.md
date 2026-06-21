@@ -136,9 +136,15 @@ format/
   google.generate_content/
 ```
 
-使用 OpenAI 请求格式的 provider 共享 `openai.chat` 或 `openai.responses`。`openai.responses` 对齐 OpenAI Responses API 的现代请求形状，适合作为 stateful、multimodal、tool-using agent 工作流的首选 format；`openai.chat` 保留为 Chat Completions 兼容 format。使用 Anthropic 请求格式的 provider 共享 `anthropic.messages`。Google/Gemini 使用 `google.generate_content`。
+使用 OpenAI 请求格式的 provider 共享 `openai.chat` 或 `openai.responses`。`openai.responses` 对齐 OpenAI Responses API 的现代请求形状，适合作为 stateful、multimodal、tool-using agent 工作流的首选 format；`openai.chat` 保留为 Chat Completions 兼容 format。使用 Anthropic 请求格式的 provider 共享 `anthropic.messages`。Google/Gemini 使用 `google.generate_content`。所有 format schema 都必须按对应官方 API 的当前请求体设计，作为宽松的协议 ABI 投影；不要把 SDK convenience、默认 provider、某个厂商账号或某个测试 fixture 写进 schema。
 
 `format/openai.responses/schema.json` 必须暴露 Responses 请求体里的核心协议字段，包括 `input`、`instructions`、`conversation`、`previous_response_id`、`tools`、`tool_choice`、`parallel_tool_calls`、`reasoning`、`text`、`background`、`store`、`stream`、`include`、`service_tier` 和 `truncation`。schema 是 CortexFS 对协议形状的 ABI 投影，不是 OpenAI provider 的硬编码；兼容 provider 可以声明支持该 format，并在 execution plane 中执行自己的路由和转换。
+
+其他 format 也遵循同一规则：
+
+- `openai.chat/schema.json` 暴露 Chat Completions 的 multimodal messages、tools/tool_choice、parallel tool calls、structured output `response_format`、reasoning effort、stream options、stored completions、prompt cache、service tier 和 web search options。
+- `anthropic.messages/schema.json` 暴露 Messages API 的 `messages`、`max_tokens`、`system`、content blocks、tools/tool_choice、thinking、metadata、stop sequences、service tier、container、cache control、output config 和 inference geo。
+- `google.generate_content/schema.json` 暴露 Gemini GenerateContentRequest 的 `contents[]`、`tools[]`、`toolConfig`、`safetySettings[]`、`systemInstruction`、`generationConfig`、`cachedContent` 和 service tier；`generationConfig` 内继续暴露 structured output、response modalities、speech/image/thinking config 等字段。
 
 典型 Responses 请求：
 
