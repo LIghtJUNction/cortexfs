@@ -430,6 +430,10 @@ audit
 Thread 是持续上下文。
 
 ```text
+thread/
+  count
+  list
+  current
 thread/<id>/
   inbox/
   io.sock
@@ -437,7 +441,28 @@ thread/<id>/
   latest.md
   state
   fingerprint
+  scope
+  cwd
+  created
+  updated
   control/
+```
+
+`thread/list` 是可恢复会话索引，一行一个 session：
+
+```text
+<id>\t<scope>\t<updated>\t<cwd>
+```
+
+`thread/current` 是当前 runtime 最近处理的 session id。交互式客户端的 resume 行为必须基于 `thread/list` 中的 id；resume 后继续连接对应 `thread/<id>/io.sock` 并在 socket 请求里带同一个 `session` 字段。
+
+`scope` 语义：
+
+```text
+workspace   默认按工作目录匹配的持久会话
+private     显式新建的私有持久会话
+shared      可被上层协作 UI 暴露的共享持久会话
+temp        临时会话，不要求 remount 后恢复
 ```
 
 `messages.jsonl`：
@@ -463,7 +488,7 @@ thread/demo/io.sock
 Socket 协议使用 JSONL：
 
 ```json
-{"op":"send","message":{"role":"user","content":"继续"}}
+{"op":"send","session":"cwd-demo","scope":"workspace","cwd":"/work/demo","message":{"role":"user","content":"继续"}}
 ```
 
 返回：
@@ -484,6 +509,13 @@ Socket 必须：
 - 写 audit。
 
 文件管事实和批处理提交，socket 管实时交互。socket 不是旁路：runtime 必须把 socket turn 写回 `messages.jsonl`、`latest.md`、`state`、`fingerprint` 和 audit。
+
+会话恢复规则：
+
+- runtime 负责维护 `thread/list`、`thread/current` 和 `thread/<id>/messages.jsonl`。
+- 客户端可以按工作目录派生默认 session id，但 source of truth 是 CortexFS thread 视图。
+- `resume <id>` 不复制本地历史；它只切换后续 socket 请求里的 `session`。
+- `temp` session 不进入持久恢复集合。
 
 ## 11. 批处理
 
@@ -1268,6 +1300,7 @@ CortexFS 可以作为 workflow engine、agent runtime、数字人系统和批处
 API 提交      rename 到 home/<uid>/api/<format>/inbox/<id>.req.json
 Thread 批处理 rename 到 home/<uid>/thread/<id>/inbox/<id>.req.json
 Thread 实时   连接 home/<uid>/thread/<id>/io.sock
+Thread 恢复   读 home/<uid>/thread/{list,current}，再连接对应 io.sock
 Tool 调用     rename 到 tool/<tool-id>/invoke/inbox/<id>.req.json
 MCP 调用      rename 到 mcp/tool/<server>.<tool>/invoke/inbox/<id>.req.json
 记忆写入      rename 到 home/<uid>/memory/<layer>/inbox/<id>.req.json

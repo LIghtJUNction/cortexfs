@@ -335,6 +335,17 @@ cat "$mnt/agent/helper/memory/search"
 
 实时通信使用 socket fast path，例如 `thread/<id>/io.sock`。交互式 agent、chat、REPL 和 MCP `thread.send` 应连接这个 socket；不要为了每一轮对话写临时文件再 rename。socket 必须和文件式提交进入同一条内部管线：同一套 policy、route、secret resolve、store、audit 和 export，不能形成不可审计旁路。
 
+Thread 同时承担会话管理。当前用户的会话索引暴露在：
+
+```bash
+cat "$CTX_HOME/thread/list"
+cat "$CTX_HOME/thread/current"
+cat "$CTX_HOME/thread/<session>/messages.jsonl"
+cat "$CTX_HOME/thread/<session>/latest.md"
+```
+
+交互式客户端的 resume 应通过 `thread/list` 发现可恢复会话，再把后续 socket 请求的 `session` 字段设为对应 id。`scope=temp` 的 session 是临时会话，不要求 remount 后恢复；`workspace`、`private` 和 `shared` session 由 runtime 恢复到 `thread/<session>/`。
+
 本地统一 API 的元数据在当前用户工作入口下暴露：
 
 ```bash
@@ -371,6 +382,14 @@ cat /ctx/audit/events.jsonl
 
 ```bash
 printf '%s\n' '{"op":"send","session":"cwd-demo","scope":"workspace","cwd":"'"$PWD"'","message":{"role":"user","content":"继续"}}' \
+  | nc -U -N "$CTX_HOME/thread/cwd-demo/io.sock"
+```
+
+恢复已有会话时先读取索引，再复用 session id：
+
+```bash
+cat "$CTX_HOME/thread/list"
+printf '%s\n' '{"op":"send","session":"cwd-demo","scope":"workspace","cwd":"'"$PWD"'","message":{"role":"user","content":"继续上次"}}' \
   | nc -U -N "$CTX_HOME/thread/cwd-demo/io.sock"
 ```
 
