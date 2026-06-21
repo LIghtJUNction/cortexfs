@@ -136,7 +136,36 @@ format/
   google.generate_content/
 ```
 
-使用 OpenAI 请求格式的 provider 共享 `openai.chat` 或 `openai.responses`。使用 Anthropic 请求格式的 provider 共享 `anthropic.messages`。Google/Gemini 使用 `google.generate_content`。
+使用 OpenAI 请求格式的 provider 共享 `openai.chat` 或 `openai.responses`。`openai.responses` 对齐 OpenAI Responses API 的现代请求形状，适合作为 stateful、multimodal、tool-using agent 工作流的首选 format；`openai.chat` 保留为 Chat Completions 兼容 format。使用 Anthropic 请求格式的 provider 共享 `anthropic.messages`。Google/Gemini 使用 `google.generate_content`。
+
+`format/openai.responses/schema.json` 必须暴露 Responses 请求体里的核心协议字段，包括 `input`、`instructions`、`conversation`、`previous_response_id`、`tools`、`tool_choice`、`parallel_tool_calls`、`reasoning`、`text`、`background`、`store`、`stream`、`include`、`service_tier` 和 `truncation`。schema 是 CortexFS 对协议形状的 ABI 投影，不是 OpenAI provider 的硬编码；兼容 provider 可以声明支持该 format，并在 execution plane 中执行自己的路由和转换。
+
+典型 Responses 请求：
+
+```json
+{
+  "model": "gpt-5.4-mini",
+  "input": "summarize the current thread",
+  "instructions": "Reply concisely.",
+  "previous_response_id": "resp_123",
+  "tools": [
+    {
+      "type": "function",
+      "name": "search_docs",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" }
+        },
+        "required": ["query"]
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "stream": true,
+  "store": true
+}
+```
 
 ## 5. Provider 与 Base URL
 
