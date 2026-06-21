@@ -338,6 +338,34 @@ fn runtime_restores_native_thread_sessions_from_state_dir() -> fuse3::Result<()>
     Ok(())
 }
 
+#[test]
+fn runtime_does_not_persist_temp_thread_sessions() -> fuse3::Result<()> {
+    let state_dir = unique_thread_state_dir();
+    let session = "tmp-restore-123";
+    let fs = CortexFs::new();
+
+    {
+        let mut runtime = fs.runtime.lock().map_err(|_error| libc::EIO)?;
+        runtime
+            .ensure_thread_socket_session(session, "temp", "/work/restore")
+            .map_err(|_error| libc::EIO)?;
+        runtime.append_thread_session_socket_turn(
+            session,
+            "thread-temp-001",
+            "do not persist",
+            "not persisted",
+        );
+        runtime.persist_thread_socket_sessions_to_dir(&state_dir);
+    }
+
+    assert!(
+        !state_dir.join(session).exists(),
+        "temp thread sessions must remain process-local"
+    );
+    let _ = fs::remove_dir_all(state_dir);
+    Ok(())
+}
+
 fn unique_thread_state_dir() -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
