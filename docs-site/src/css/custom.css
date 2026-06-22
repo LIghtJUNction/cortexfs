@@ -1,34 +1,158 @@
-/**
- * Any CSS included here will be global. The classic template
- * bundles Infima by default. Infima is a CSS framework designed to
- * work well for content-centric websites.
- */
-
-/* You can override the default Infima variables here. */
 :root {
-  --ifm-color-primary: #126b57;
-  --ifm-color-primary-dark: #10614e;
-  --ifm-color-primary-darker: #0f5b49;
-  --ifm-color-primary-darkest: #0c4b3c;
-  --ifm-color-primary-light: #14755f;
-  --ifm-color-primary-lighter: #157b64;
-  --ifm-color-primary-lightest: #188b70;
+  --ifm-color-primary: #1b6f68;
+  --ifm-color-primary-dark: #17635d;
+  --ifm-color-primary-darker: #145852;
+  --ifm-color-primary-darkest: #104743;
+  --ifm-color-primary-light: #238178;
+  --ifm-color-primary-lighter: #2b9187;
+  --ifm-color-primary-lightest: #39a89d;
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --cortex-ink: #16201f;
+  --cortex-muted: #5d6f6c;
+  --cortex-line: #d8e2df;
+  --cortex-panel: #f7faf9;
 }
 
-/* For readability concerns, you should choose a lighter palette in dark mode. */
 [data-theme='dark'] {
-  --ifm-color-primary: #35d0ad;
-  --ifm-color-primary-dark: #29c49f;
-  --ifm-color-primary-darker: #27ba97;
-  --ifm-color-primary-darkest: #20997c;
-  --ifm-color-primary-light: #4ad6b6;
-  --ifm-color-primary-lighter: #57d9bd;
-  --ifm-color-primary-lightest: #77e0cb;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-color-primary: #5dd3c2;
+  --ifm-color-primary-dark: #43c8b5;
+  --ifm-color-primary-darker: #35b8a6;
+  --ifm-color-primary-darkest: #258f81;
+  --ifm-color-primary-light: #7addd0;
+  --ifm-color-primary-lighter: #95e5da;
+  --ifm-color-primary-lightest: #b6eee7;
+  --cortex-ink: #edf7f5;
+  --cortex-muted: #adc0bc;
+  --cortex-line: #31413f;
+  --cortex-panel: #17201f;
 }
 
-.hero--primary {
-  --ifm-hero-background-color: #126b57;
+.main-wrapper {
+  background:
+    linear-gradient(180deg, rgba(27, 111, 104, 0.08), transparent 360px),
+    var(--ifm-background-color);
+}
+
+.cortexHome {
+  color: var(--cortex-ink);
+}
+
+.cortexHero {
+  min-height: 72vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 520px);
+  gap: 48px;
+  align-items: center;
+  padding: 72px 0 44px;
+}
+
+.cortexHero h1 {
+  font-size: clamp(42px, 7vw, 88px);
+  line-height: 0.95;
+  margin: 0 0 22px;
+  letter-spacing: 0;
+}
+
+.cortexLead {
+  max-width: 680px;
+  font-size: 20px;
+  line-height: 1.6;
+  color: var(--cortex-muted);
+  margin: 0 0 28px;
+}
+
+.cortexActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.cortexButton {
+  border: 1px solid var(--ifm-color-primary);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-weight: 700;
+}
+
+.cortexButtonPrimary {
+  background: var(--ifm-color-primary);
+  color: white;
+}
+
+.cortexButtonPrimary:hover {
+  color: white;
+}
+
+.cortexTerminal {
+  border: 1px solid var(--cortex-line);
+  border-radius: 8px;
+  background: var(--cortex-panel);
+  box-shadow: 0 20px 60px rgba(14, 26, 24, 0.14);
+  overflow: hidden;
+}
+
+.cortexTerminalBar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--cortex-line);
+}
+
+.cortexDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.cortexDot:nth-child(1) { background: #d65f5f; }
+.cortexDot:nth-child(2) { background: #d3ad4b; }
+.cortexDot:nth-child(3) { background: #4aa36f; }
+
+.cortexTerminal pre {
+  margin: 0;
+  padding: 22px;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.55;
+  background: transparent;
+}
+
+.cortexBand {
+  border-top: 1px solid var(--cortex-line);
+  padding: 48px 0;
+}
+
+.cortexGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.cortexPanel {
+  border-left: 3px solid var(--ifm-color-primary);
+  padding-left: 18px;
+}
+
+.cortexPanel h2 {
+  font-size: 22px;
+  margin: 0 0 10px;
+}
+
+.cortexPanel p {
+  margin: 0;
+  color: var(--cortex-muted);
+}
+
+@media (max-width: 860px) {
+  .cortexHero,
+  .cortexGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .cortexHero {
+    min-height: auto;
+    padding-top: 42px;
+  }
 }

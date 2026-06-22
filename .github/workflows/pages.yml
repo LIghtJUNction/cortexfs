@@ -24,6 +24,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -43,10 +45,10 @@ jobs:
 
       - name: Add source markdown
         run: |
-          mkdir -p docs-site/build/source/docs docs-site/build/source/templates/bun-cortexfs-client
+          mkdir -p docs-site/build/source
           cp README.md docs-site/build/source/README.md
-          cp docs/DESIGN.md docs-site/build/source/docs/DESIGN.md
-          cp templates/bun-cortexfs-client/README.md docs-site/build/source/templates/bun-cortexfs-client/README.md
+          cp -R docs docs-site/build/source/docs
+          cp agent.sh/README.md docs-site/build/source/agent.sh.md
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

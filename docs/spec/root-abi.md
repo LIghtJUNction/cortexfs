@@ -1,0 +1,391 @@
+# Root ABI
+
+Root ABI is frozen for v1.
+
+Stable root:
+
+```text
+/ctx/
+  status
+  bin/
+  model/
+  agent/
+  tool/
+  home/
+  shared/
+```
+
+Meaning:
+
+```text
+status   current mount status
+bin/     CortexFS ABI helper commands
+model/   executable model entries
+agent/   executable agent entries
+tool/    global executable tool entries
+home/    CortexFS home for Linux users
+shared/  shared space for users and agents
+```
+
+## v1 Reference Tree
+
+This is the normative v1 shape. Concrete object names such as `qwen`,
+`coder`, `reviewer`, `1000`, and `project-a` are examples of valid entries.
+
+```text
+/ctx/
+  status
+
+  bin/
+    ctx
+
+  model/
+    qwen
+    qwen.sock
+    qwen.d/
+      id
+      driver
+      cap
+      default
+      session
+      status
+      log
+
+  agent/
+    coder
+    coder.sock
+    coder.d/
+      owner
+      uid
+      gid
+      groups
+      label
+      iso
+      parent
+      life
+      root
+      cwd
+      env
+      path
+      mount
+      model
+      policy
+      status
+      pid
+      log
+      meta.json
+
+    reviewer
+    reviewer.sock
+    reviewer.d/
+      owner
+      uid
+      gid
+      groups
+      label
+      iso
+      parent
+      life
+      root
+      cwd
+      env
+      path
+      mount
+      model
+      policy
+      status
+      pid
+      log
+      meta.json
+
+  tool/
+    fs.read
+    fs.read.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+
+    fs.write
+    fs.write.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+
+    shell.exec
+    shell.exec.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+
+    mcp.github.search_issues
+    mcp.github.search_issues.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+      origin
+
+    agent.create
+    agent.create.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+
+    agent.start
+    agent.start.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+
+    agent.stop
+    agent.stop.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+
+  home/
+    1000/
+      agent/
+        coder/
+          root/
+          session/
+            index/
+              list
+              current
+              by-cwd/
+                <hash>
+
+            default/
+              messages.jsonl
+              events.jsonl
+              latest.md
+              state
+              cwd
+              created_at
+              updated_at
+              meta.json
+
+              context/
+                budget
+                pack.json
+                pack.md
+                summary.md
+                facts.jsonl
+                decisions.jsonl
+                todo.md
+                refs.jsonl
+
+                pinned/
+                swap/
+                  index.jsonl
+                  chunk/
+
+                dedup/
+                  index.jsonl
+                  blob/
+
+                child/
+                  rev-123/
+                    agent
+                    session
+                    status
+                    handoff.md
+                    result.md
+                    refs.jsonl
+                    artifact/
+
+          data/
+          cache/
+          log/
+
+      tool/
+        fs.read -> /ctx/tool/fs.read
+
+      model/
+        coder -> /ctx/model/qwen
+
+  shared/
+    project-a/
+      data/
+      tool/
+        project.test
+        project.test.d/
+          schema
+          policy
+          status
+          log
+
+      agent/
+        coder/
+          session/
+            design-review/
+              messages.jsonl
+              events.jsonl
+              latest.md
+              state
+              cwd
+              created_at
+              updated_at
+              meta.json
+              context/
+
+      queue/
+        inbox/
+        pending/
+        lease/
+        claimed/
+        done/
+        failed/
+
+      result/
+```
+
+`tool/<name>.d/origin` is an optional diagnostic file, not stable ABI. Strict
+clients must not depend on it.
+
+No other v1 root entries are stable ABI. These are explicitly not root
+directories:
+
+```text
+provider/
+format/
+db/
+vector/
+memory/
+mcp/
+skill/
+cluster/
+chan/
+job/
+hook/
+workflow/
+audit/
+control/
+space/
+spawn/
+factory/
+agent-template/
+AGENTS.rc
+```
+
+Some of those concepts may appear as internal implementation, higher-level
+agent capability, tool capability, legacy convenience, or object-local `.d/`
+diagnostics. They must not become root namespaces or CortexFS-defined framework
+configuration formats.
+
+MCP is specifically a tool source, not a root object. MCP-backed capabilities
+may be exposed as ordinary tools such as `tool/mcp.github.search_issues`.
+CortexFS does not define MCP server configuration files or formats. Those are
+ordinary files visible through the agent view; execution still goes through
+`tool/`, `CTX_PATH`, and policy.
+
+The root rule:
+
+```text
+root only contains stable object classes
+root never mirrors provider, database, workflow, memory, or orchestration internals
+```
+
+## Linux Shape
+
+CortexFS follows ordinary Linux habits:
+
+```text
+small root       stable object classes only
+executable obj   if it can run, it is first an executable file
+side control     control files live in the matching .d/
+small text       one value per file, one item per line for lists
+streams          multi-turn, realtime, or long output uses .sock or stdout JSONL
+permissions      uid/gid/mode/namespace first, label/policy second
+explicit failure file ops return errno, exec returns exit code, sockets return error frames
+```
+
+Do not turn CortexFS into a directory mirror of an AI platform database. It
+should look closer to a mix of `/bin`, `/dev`, `/proc`, and `/sys`: paths are
+ABI, not product navigation.
+
+## File Formats
+
+Control files use the smallest format that works:
+
+```text
+single value      UTF-8 text ending in newline
+list              one UTF-8 item per line
+boolean           0 or 1
+key/value         KEY=VALUE, one pair per line
+event stream      JSONL
+complex object    JSON, only when nesting is actually needed
+```
+
+Update control-plane files by same-directory atomic replacement: write a
+temporary file, then `rename` it into place. Interactive chat uses sockets. Do
+not fake chat with file rename.
+
+## Environment
+
+```sh
+export CTX_ROOT=/ctx
+export CTX_HOME="$CTX_ROOT/home/$(id -u)"
+export CTX_PATH="$CTX_ROOT/tool:$CTX_HOME/tool"
+export PATH="$CTX_ROOT/bin:$PATH"
+```
+
+Semantics:
+
+```text
+CTX_ROOT  CortexFS mount root
+CTX_HOME  CortexFS home for the current Linux user
+CTX_PATH  tool lookup path for agents and tools, similar to PATH
+PATH      normal shell command path, may include /ctx/bin
+```
+
+`CTX_PATH` is only for tool lookup. It is not used to find models or agents.
+
+## Legacy rc File
+
+`/ctx/AGENTS.rc` is not stable ABI. Strict clients must not depend on it. Agent
+startup must not execute it by default.
+
+Stable ABI expresses environment as data files:
+
+```text
+/ctx/agent/<name>.d/env    KEY=VALUE, one per line
+/ctx/agent/<name>.d/path   tool path, one per line
+/ctx/agent/<name>.d/mount  bind mount table
+```
+
+Rules:
+
+```text
+config files are data
+env does not do shell expansion
+path builds the agent runtime CTX_PATH
+mount builds the agent mount namespace
+```

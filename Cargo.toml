@@ -1,15 +1,5 @@
 [workspace]
 members = [
-    "crates/cortex-agents",
-    "crates/cortex-cli",
-    "crates/cortex-core",
-    "crates/cortex-mcp",
-    "crates/cortex-memory",
-    "crates/cortex-providers",
-    "crates/cortex-skills",
-    "crates/cortex-store",
-    "crates/cortex-tools",
-    "crates/cortexd",
     "crates/cortexfs",
 ]
 resolver = "3"
@@ -80,9 +70,3 @@ missing_errors_doc = { level = "allow", priority = 1 }
 missing_panics_doc = { level = "allow", priority = 1 }
 
 [workspace.dependencies]
-bytes = "1.11.1"
-fuse3 = { version = "0.9.0", features = ["tokio-runtime"] }
-tokio = "1.52.3"
-
-[patch.crates-io]
-fuse3 = { path = "vendor/fuse3" }
