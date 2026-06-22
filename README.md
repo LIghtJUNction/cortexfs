@@ -1,5 +1,23 @@
 # CortexFS
 
+![CortexFS turns AI runtimes into Unix-shaped files](docs/assets/cortexfs-hero.svg)
+
+![CortexFS v1 ABI map](docs/assets/cortexfs-abi-map.svg)
+
+![CortexFS local benchmark](docs/assets/cortexfs-performance.svg)
+
+```bash
+paru -S cortexfs-git
+sudo systemctl enable --now cortexfs.service
+ctx doctor
+```
+
+重新生成 README 图和本机基准：
+
+```bash
+scripts/update-readme-svg.sh
+```
+
 CortexFS 是一个面向 Linux 的 AI 文件系统 ABI 草案。当前目标不是把所有 AI 基础设施摊成复杂目录，而是保留少数 Unix 风格对象：
 
 ```text
