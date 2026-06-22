@@ -589,17 +589,7 @@ fn mount_reference_tree(
     }
 
     let mount_bin = cortexfs_mount_bin();
-    ProcessCommand::new(&mount_bin)
-        .arg("--source")
-        .arg(&source)
-        .arg(mountpoint)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot start {}: {error}", mount_bin.display()))
-        })?;
+    spawn_mount_process(&mount_bin, &source, mountpoint)?;
 
     for _attempt in 0..20 {
         if is_mount_point(mountpoint).unwrap_or(false) {
@@ -642,6 +632,39 @@ fn cortexfs_mount_bin() -> PathBuf {
         }
     }
     PathBuf::from("cortexfs-mount")
+}
+
+fn spawn_mount_process(mount_bin: &Path, source: &Path, mountpoint: &Path) -> Result<(), CliError> {
+    let mut detached = ProcessCommand::new("setsid");
+    detached
+        .arg("-f")
+        .arg(mount_bin)
+        .arg("--source")
+        .arg(source)
+        .arg(mountpoint);
+    match spawn_null(detached) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut direct = ProcessCommand::new(mount_bin);
+            direct.arg("--source").arg(source).arg(mountpoint);
+            spawn_null(direct).map_err(|error| {
+                CliError::unavailable(format!("cannot start {}: {error}", mount_bin.display()))
+            })
+        }
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot start {}: {error}",
+            mount_bin.display()
+        ))),
+    }
+}
+
+fn spawn_null(mut command: ProcessCommand) -> io::Result<()> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_child| ())
 }
 
 fn list_objects(root: &Path, kind: Option<ObjectClass>) -> Result<(), CliError> {
