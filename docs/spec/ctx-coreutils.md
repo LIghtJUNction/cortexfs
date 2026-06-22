@@ -29,6 +29,8 @@ ctx ls
 ctx ls model
 ctx ls agent
 ctx ls tool
+ctx ls home
+ctx ls shared/project-a
 
 ctx which model qwen
 ctx which agent coder
@@ -113,8 +115,9 @@ tool/fs.read
 
 `ctx status` reads `/ctx/status`.
 
-`ctx ls` uses `readdir`. It does not query a database, index, registry, or
-daemon catalog.
+`ctx ls` uses `readdir`. It accepts an ABI path under `CTX_ROOT`, defaulting to
+the root when no path is provided. It does not query a database, index,
+registry, or daemon catalog.
 
 `ctx which` finds executable objects by ABI class:
 
