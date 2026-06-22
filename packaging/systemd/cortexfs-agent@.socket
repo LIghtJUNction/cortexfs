@@ -1,0 +1,14 @@
+[Unit]
+Description=CortexFS agent socket for %i
+Documentation=file:/usr/share/doc/cortexfs-git/README.md
+Requires=cortexfs.service
+After=cortexfs.service
+
+[Socket]
+ListenStream=/ctx/agent/%i.sock
+SocketMode=0666
+RemoveOnStop=yes
+ExecStartPre=/usr/bin/rm -f /ctx/agent/%i.sock
+
+[Install]
+WantedBy=sockets.target
