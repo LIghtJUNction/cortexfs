@@ -14,7 +14,7 @@ use cortexfs::{
 use fuser::{
     BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, Generation, INodeNo,
     LockOwner, MountOption, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    ReplyWrite, Request, TimeOrNow, WriteFlags,
+    ReplyWrite, Request, SessionACL, TimeOrNow, WriteFlags,
 };
 
 const TTL: Duration = Duration::from_secs(1);
@@ -33,6 +33,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let config = MountConfig::parse(args)?;
     let fs = CortexFuse::new(config.source)?;
     let mut options = Config::default();
+    options.acl = SessionACL::All;
     options.mount_options = vec![
         MountOption::RW,
         MountOption::FSName("cortexfs".to_owned()),
