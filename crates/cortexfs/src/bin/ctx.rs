@@ -75,7 +75,7 @@ enum Command {
         source: Option<PathBuf>,
         mountpoint: Option<PathBuf>,
     },
-    Ls(Option<ObjectClass>),
+    Ls(LsTarget),
     Which(ObjectClass, String),
     PathShared(String),
     History {
@@ -120,6 +120,12 @@ enum FileCommand {
     Classify,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum LsTarget {
+    Root,
+    Path(String),
+}
+
 #[derive(Debug)]
 struct FileArgs {
     command: FileCommand,
@@ -141,7 +147,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             source.as_deref(),
             mountpoint.as_deref(),
         )),
-        Command::Ls(kind) => success(list_objects(&cli.root, kind)),
+        Command::Ls(target) => success(list_objects(&cli.root, &target)),
         Command::Which(class, name) => success(which_object(&cli.root, class, &name)),
         Command::PathShared(name) => success(path_shared(&cli.root, &name)),
         Command::History { agent, session } => {
@@ -316,15 +322,9 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
 }
 
 fn parse_ls_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
-    let kind = match values.next() {
-        Some(value) => Some(
-            ObjectClass::parse(&value)
-                .ok_or_else(|| CliError::usage("ls expects model, agent, or tool"))?,
-        ),
-        None => None,
-    };
+    let target = values.next().map_or(LsTarget::Root, LsTarget::Path);
     no_extra_args(values)?;
-    Ok(Command::Ls(kind))
+    Ok(Command::Ls(target))
 }
 
 fn parse_mount_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
@@ -477,7 +477,7 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] root",
         "  ctx bootstrap [SOURCE]",
         "  ctx [--root PATH] mount [--source SOURCE] [MOUNTPOINT]",
-        "  ctx [--root PATH] ls [model|agent|tool]",
+        "  ctx [--root PATH] ls [PATH|model|agent|tool]",
         "  ctx [--root PATH] which model|agent|tool NAME",
         "  ctx [--root PATH] path shared NAME",
         "  ctx [--root PATH] history AGENT [SESSION]",
@@ -667,26 +667,78 @@ fn spawn_null(mut command: ProcessCommand) -> io::Result<()> {
         .map(|_child| ())
 }
 
-fn list_objects(root: &Path, kind: Option<ObjectClass>) -> Result<(), CliError> {
-    if let Some(kind) = kind {
-        return list_kind(root, kind);
-    }
-
-    for entry in read_dir_names(root)? {
+fn list_objects(root: &Path, target: &LsTarget) -> Result<(), CliError> {
+    for entry in list_names(root, target)? {
         print_line(&entry)?;
     }
     Ok(())
 }
 
-fn list_kind(root: &Path, kind: ObjectClass) -> Result<(), CliError> {
-    let dir = root.join(kind.as_str());
-    for name in read_dir_names(&dir)? {
-        if is_visible_object(&name) {
-            print_line(&name)?;
-        }
+fn list_names(root: &Path, target: &LsTarget) -> Result<Vec<String>, CliError> {
+    let LsPath { path, object_class } = resolve_ls_path(root, target)?;
+
+    if let Some(kind) = object_class {
+        return list_kind_names(root, kind);
     }
 
-    Ok(())
+    read_dir_names(&path)
+}
+
+fn list_kind_names(root: &Path, kind: ObjectClass) -> Result<Vec<String>, CliError> {
+    Ok(read_dir_names(&root.join(kind.as_str()))?
+        .into_iter()
+        .filter(|name| is_visible_object(name))
+        .collect())
+}
+
+struct LsPath {
+    path: PathBuf,
+    object_class: Option<ObjectClass>,
+}
+
+fn resolve_ls_path(root: &Path, target: &LsTarget) -> Result<LsPath, CliError> {
+    let path = match *target {
+        LsTarget::Root => return Ok(root_ls_path(root)),
+        LsTarget::Path(ref path) => normalized_ls_path(path),
+    };
+
+    if path.is_empty() {
+        return Ok(root_ls_path(root));
+    }
+
+    let resolved = resolve_abi_path(root, &path)?;
+    let abi_path = classify_input_path(root, &path)?;
+    let object_class = match abi_path.as_str() {
+        "model" => Some(ObjectClass::Model),
+        "agent" => Some(ObjectClass::Agent),
+        "tool" => Some(ObjectClass::Tool),
+        _ => None,
+    };
+
+    Ok(LsPath {
+        path: resolved,
+        object_class,
+    })
+}
+
+fn root_ls_path(root: &Path) -> LsPath {
+    LsPath {
+        path: root.to_path_buf(),
+        object_class: None,
+    }
+}
+
+fn normalized_ls_path(path: &str) -> String {
+    if path == "/" {
+        return String::new();
+    }
+
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    trimmed.to_owned()
 }
 
 fn is_visible_object(name: &str) -> bool {
@@ -2179,16 +2231,17 @@ fn write_error(line: &str) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, FileCommand, MAX_SOCKET_FRAME_BYTES, ObjectClass, agent_control_path_kind,
-        context_jsonl_path_kind, doctor, executable_object_path, file_check,
-        format_agent_control_issues, format_context_jsonl_issues, format_context_pack_issues,
-        format_event_stream_issues, format_message_stream_issues, format_model_capability_issues,
-        format_object_layout_issues, format_session_control_issues, format_session_index_issues,
-        format_session_layout_issues, format_shared_queue_layout_issues, format_tool_schema_issues,
-        is_context_pack_path, is_durable_session_instance_path, is_model_capability_path,
-        is_session_events_path, is_session_messages_path, is_shared_queue_root_path,
-        is_shared_tool_schema_path, is_tool_schema_path, json_string, newline_terminated,
-        parse_command, resolve_abi_path, session_control_path_kind, session_index_path_kind,
+        Command, FileCommand, LsTarget, MAX_SOCKET_FRAME_BYTES, ObjectClass,
+        agent_control_path_kind, context_jsonl_path_kind, doctor, executable_object_path,
+        file_check, format_agent_control_issues, format_context_jsonl_issues,
+        format_context_pack_issues, format_event_stream_issues, format_message_stream_issues,
+        format_model_capability_issues, format_object_layout_issues, format_session_control_issues,
+        format_session_index_issues, format_session_layout_issues,
+        format_shared_queue_layout_issues, format_tool_schema_issues, is_context_pack_path,
+        is_durable_session_instance_path, is_model_capability_path, is_session_events_path,
+        is_session_messages_path, is_shared_queue_root_path, is_shared_tool_schema_path,
+        is_tool_schema_path, json_string, list_names, newline_terminated, parse_command,
+        resolve_abi_path, session_control_path_kind, session_index_path_kind,
         stream_socket_request,
     };
     use cortexfs::{
@@ -2256,6 +2309,24 @@ mod tests {
                 if args.command == FileCommand::Classify
                     && args.path == "tool/fs.read"
                     && args.value.is_none()
+        ));
+    }
+
+    #[test]
+    fn parses_ls_path_command() {
+        let root = parse_command(vec!["ls".to_owned()]);
+        assert!(matches!(root, Ok(Command::Ls(LsTarget::Root))));
+
+        let home = parse_command(vec!["ls".to_owned(), "home".to_owned()]);
+        assert!(matches!(
+            home,
+            Ok(Command::Ls(LsTarget::Path(ref path))) if path == "home"
+        ));
+
+        let tool = parse_command(vec!["ls".to_owned(), "tool".to_owned()]);
+        assert!(matches!(
+            tool,
+            Ok(Command::Ls(LsTarget::Path(ref path))) if path == "tool"
         ));
     }
 
@@ -2386,6 +2457,34 @@ mod tests {
             resolve_abi_path(root, "/ctx/agent/coder.d/cwd").map(|path| path.display().to_string()),
             Ok("/ctx/agent/coder.d/cwd".to_owned())
         );
+    }
+
+    #[test]
+    fn ls_lists_abi_paths_and_keeps_object_filtering() {
+        let root = unique_test_dir("ctx-ls-paths");
+        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+        assert!(ensure_v1_reference_tree(&root).is_ok());
+
+        let home = list_names(&root, &LsTarget::Path("home".to_owned()));
+        assert_eq!(home, Ok(vec!["1000".to_owned()]));
+
+        let root_alias = list_names(&root, &LsTarget::Path("/".to_owned()));
+        assert!(matches!(root_alias, Ok(ref names) if names.contains(&"home".to_owned())));
+
+        let absolute_home = root.join("home");
+        let absolute_home = absolute_home.display().to_string();
+        let home_absolute = list_names(&root, &LsTarget::Path(absolute_home));
+        assert_eq!(home_absolute, Ok(vec!["1000".to_owned()]));
+
+        let tool = list_names(&root, &LsTarget::Path("tool".to_owned()));
+        assert!(matches!(
+            tool,
+            Ok(ref names)
+                if names.contains(&"fs.read".to_owned())
+                    && !names.contains(&"fs.read.d".to_owned())
+        ));
+
+        let _ignored = fs::remove_dir_all(&root);
     }
 
     #[test]
