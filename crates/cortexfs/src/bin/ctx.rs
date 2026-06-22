@@ -7,7 +7,7 @@ use std::io::{self, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command as ProcessCommand, ExitCode};
+use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
@@ -16,10 +16,11 @@ use cortexfs::{
     ModelCapabilityIssue, MountTable, ObjectClass, ObjectLayoutIssue, PolicyV0, ROOT_ENTRIES,
     SessionControlIssue, SessionControlKind, SessionIndexIssue, SessionIndexKind,
     SessionLayoutIssue, SharedQueueLayoutIssue, ToolPath, ToolSchemaIssue, classify_abi_path,
-    inspect_agent_control, inspect_context_jsonl, inspect_context_pack_json,
-    inspect_event_stream_jsonl, inspect_message_stream_jsonl, inspect_model_capabilities,
-    inspect_object_layout, inspect_session_control, inspect_session_index, inspect_session_layout,
-    inspect_shared_queue_layout, inspect_tool_schema_json, is_executable_file, is_object_name,
+    ensure_v1_reference_tree, inspect_agent_control, inspect_context_jsonl,
+    inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
+    inspect_model_capabilities, inspect_object_layout, inspect_session_control,
+    inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
+    inspect_tool_schema_json, is_executable_file, is_object_name,
 };
 
 fn main() -> ExitCode {
@@ -67,6 +68,13 @@ enum Command {
     Env,
     Root,
     Status,
+    Bootstrap {
+        source: Option<PathBuf>,
+    },
+    Mount {
+        source: Option<PathBuf>,
+        mountpoint: Option<PathBuf>,
+    },
     Ls(Option<ObjectClass>),
     Which(ObjectClass, String),
     PathShared(String),
@@ -127,6 +135,12 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Env => success(print_env(&cli.root)),
         Command::Root => success(print_line(&cli.root.display().to_string())),
         Command::Status => success(print_status(&cli.root)),
+        Command::Bootstrap { source } => success(bootstrap_reference_tree(source.as_deref())),
+        Command::Mount { source, mountpoint } => success(mount_reference_tree(
+            &cli.root,
+            source.as_deref(),
+            mountpoint.as_deref(),
+        )),
         Command::Ls(kind) => success(list_objects(&cli.root, kind)),
         Command::Which(class, name) => success(which_object(&cli.root, class, &name)),
         Command::PathShared(name) => success(path_shared(&cli.root, &name)),
@@ -195,17 +209,13 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         "env" => Ok(Command::Env),
         "root" => Ok(Command::Root),
         "status" => Ok(Command::Status),
-        "ls" => {
-            let kind = match values.next() {
-                Some(value) => Some(
-                    ObjectClass::parse(&value)
-                        .ok_or_else(|| CliError::usage("ls expects model, agent, or tool"))?,
-                ),
-                None => None,
-            };
+        "bootstrap" => {
+            let source = values.next().map(PathBuf::from);
             no_extra_args(values)?;
-            Ok(Command::Ls(kind))
+            Ok(Command::Bootstrap { source })
         }
+        "mount" => parse_mount_command(values),
+        "ls" => parse_ls_command(values),
         "which" => {
             let Some(class) = values.next() else {
                 return Err(CliError::usage("which requires model, agent, or tool"));
@@ -303,6 +313,42 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         }
         _ => Err(CliError::usage(format!("unknown command: {command}"))),
     }
+}
+
+fn parse_ls_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let kind = match values.next() {
+        Some(value) => Some(
+            ObjectClass::parse(&value)
+                .ok_or_else(|| CliError::usage("ls expects model, agent, or tool"))?,
+        ),
+        None => None,
+    };
+    no_extra_args(values)?;
+    Ok(Command::Ls(kind))
+}
+
+fn parse_mount_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let mut source = None;
+    let mut mountpoint = None;
+
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--source" | "-s" => {
+                let Some(next) = values.next() else {
+                    return Err(CliError::usage("mount --source requires a path"));
+                };
+                source = Some(PathBuf::from(next));
+            }
+            _ => {
+                if mountpoint.is_some() {
+                    return Err(CliError::usage(format!("unexpected argument: {value}")));
+                }
+                mountpoint = Some(PathBuf::from(value));
+            }
+        }
+    }
+
+    Ok(Command::Mount { source, mountpoint })
 }
 
 fn parse_agent_session(
@@ -429,6 +475,8 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] abi",
         "  ctx [--root PATH] env",
         "  ctx [--root PATH] root",
+        "  ctx bootstrap [SOURCE]",
+        "  ctx [--root PATH] mount [--source SOURCE] [MOUNTPOINT]",
         "  ctx [--root PATH] ls [model|agent|tool]",
         "  ctx [--root PATH] which model|agent|tool NAME",
         "  ctx [--root PATH] path shared NAME",
@@ -492,6 +540,108 @@ fn print_status(root: &Path) -> Result<(), CliError> {
     }
 
     Ok(())
+}
+
+fn bootstrap_reference_tree(source: Option<&Path>) -> Result<(), CliError> {
+    let source = match source {
+        Some(path) => path.to_path_buf(),
+        None => default_source_root()?,
+    };
+    ensure_v1_reference_tree(&source).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot bootstrap {}: {}",
+            source.display(),
+            error.errno()
+        ))
+    })?;
+    print_line(&format!("source={}", source.display()))
+}
+
+fn mount_reference_tree(
+    root: &Path,
+    source: Option<&Path>,
+    mountpoint: Option<&Path>,
+) -> Result<(), CliError> {
+    let source = match source {
+        Some(path) => path.to_path_buf(),
+        None => default_source_root()?,
+    };
+    let mountpoint = mountpoint.unwrap_or(root);
+
+    ensure_v1_reference_tree(&source).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot bootstrap {}: {}",
+            source.display(),
+            error.errno()
+        ))
+    })?;
+    fs::create_dir_all(mountpoint).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot create mountpoint {}: {error}",
+            mountpoint.display()
+        ))
+    })?;
+    if is_mount_point(mountpoint).unwrap_or(false) {
+        return Err(CliError::unavailable(format!(
+            "already mounted: {}",
+            mountpoint.display()
+        )));
+    }
+
+    let mount_bin = cortexfs_mount_bin();
+    ProcessCommand::new(&mount_bin)
+        .arg("--source")
+        .arg(&source)
+        .arg(mountpoint)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot start {}: {error}", mount_bin.display()))
+        })?;
+
+    for _attempt in 0..20 {
+        if is_mount_point(mountpoint).unwrap_or(false) {
+            print_line(&format!("mounted={}", mountpoint.display()))?;
+            print_line(&format!("source={}", source.display()))?;
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    Err(CliError::unavailable(format!(
+        "mount did not become ready: {}",
+        mountpoint.display()
+    )))
+}
+
+fn default_source_root() -> Result<PathBuf, CliError> {
+    if let Some(data_home) = env::var_os("XDG_DATA_HOME") {
+        return Ok(PathBuf::from(data_home).join("cortexfs").join("v1-root"));
+    }
+    if let Some(home) = env::var_os("HOME") {
+        return Ok(PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("cortexfs")
+            .join("v1-root"));
+    }
+    Err(CliError::unavailable(
+        "cannot choose default source root without HOME or XDG_DATA_HOME",
+    ))
+}
+
+fn cortexfs_mount_bin() -> PathBuf {
+    if let Ok(current) = env::current_exe()
+        && let Some(dir) = current.parent()
+    {
+        let sibling = dir.join("cortexfs-mount");
+        if sibling.is_file() {
+            return sibling;
+        }
+    }
+    PathBuf::from("cortexfs-mount")
 }
 
 fn list_objects(root: &Path, kind: Option<ObjectClass>) -> Result<(), CliError> {
@@ -2152,6 +2302,38 @@ mod tests {
         assert!(matches!(
             cancel,
             Ok(Command::Cancel { ref path, ref run }) if path == "agent/coder" && run == "run-1"
+        ));
+    }
+
+    #[test]
+    fn parses_bootstrap_and_mount_commands() {
+        let bootstrap = parse_command(vec!["bootstrap".to_owned()]);
+        assert!(matches!(bootstrap, Ok(Command::Bootstrap { source: None })));
+
+        let bootstrap_source = parse_command(vec![
+            "bootstrap".to_owned(),
+            "/tmp/cortexfs-source".to_owned(),
+        ]);
+        assert!(matches!(
+            bootstrap_source,
+            Ok(Command::Bootstrap {
+                source: Some(ref source)
+            }) if source == Path::new("/tmp/cortexfs-source")
+        ));
+
+        let mount = parse_command(vec![
+            "mount".to_owned(),
+            "--source".to_owned(),
+            "/tmp/cortexfs-source".to_owned(),
+            "/tmp/cortexfs-mount".to_owned(),
+        ]);
+        assert!(matches!(
+            mount,
+            Ok(Command::Mount {
+                source: Some(ref source),
+                mountpoint: Some(ref mountpoint)
+            }) if source == Path::new("/tmp/cortexfs-source")
+                && mountpoint == Path::new("/tmp/cortexfs-mount")
         ));
     }
 

@@ -22,6 +22,8 @@ ctx status
 ctx abi
 ctx env
 ctx root
+ctx bootstrap
+ctx mount
 
 ctx ls
 ctx ls model
