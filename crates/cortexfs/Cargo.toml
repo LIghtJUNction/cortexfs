@@ -1,6 +1,6 @@
 [package]
 name = "cortexfs"
-description = "CortexFS FUSE projection."
+description = "CortexFS Agent OS ABI design core."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,24 +11,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-bytes.workspace = true
-cortex-core = { version = "0.1.0", path = "../cortex-core" }
-cortex-providers = { version = "0.1.0", path = "../cortex-providers" }
-cortex-store = { version = "0.1.0", path = "../cortex-store" }
-cortex-tools = { version = "0.1.0", path = "../cortex-tools" }
-cortexd = { version = "0.1.0", path = "../cortexd" }
-fuse3 = { workspace = true, features = ["tokio-runtime", "unprivileged"] }
-futures-util = "0.3.32"
-libc = "0.2.186"
-nix = { version = "0.31.3", features = ["user"] }
+fuser = "0.17.0"
+nix = { version = "0.31.3", features = ["socket"] }
 serde_json = "1.0.150"
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "fs"] }
-
-[features]
-live-tests = []
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }

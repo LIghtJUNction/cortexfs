@@ -2,45 +2,27 @@ import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
-// This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
-
 const config: Config = {
   title: 'CortexFS',
-  tagline: 'Provider-neutral AI API 文件系统 ABI',
-  favicon: 'img/favicon.ico',
-
-  // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
-  future: {
-    v4: true, // Improve compatibility with the upcoming Docusaurus v4
-  },
-
-  // Set the production url of your site here
+  tagline: 'A small Linux filesystem ABI for agent runtimes',
   url: 'https://lightjunction.github.io',
-  // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/cortexfs/',
-
-  // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
   organizationName: 'LIghtJUNction',
   projectName: 'cortexfs',
-
   onBrokenLinks: 'throw',
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
 
-  // Even if you don't use internationalization, you can use this field to set
-  // useful metadata like html lang. For example, if your site is Chinese, you
-  // may want to replace "en" with "zh-Hans".
   i18n: {
     defaultLocale: 'zh-Hans',
-    locales: ['zh-Hans', 'en'],
+    locales: ['zh-Hans'],
     localeConfigs: {
       'zh-Hans': {
         label: '简体中文',
         htmlLang: 'zh-CN',
-      },
-      en: {
-        label: 'English',
-        htmlLang: 'en-US',
       },
     },
   },
@@ -50,6 +32,8 @@ const config: Config = {
       'classic',
       {
         docs: {
+          path: '../docs',
+          routeBasePath: 'docs',
           sidebarPath: './sidebars.ts',
         },
         blog: false,
@@ -71,11 +55,12 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'docs',
           position: 'left',
-          label: '文档',
+          label: 'Spec',
         },
         {
-          type: 'localeDropdown',
-          position: 'right',
+          to: '/docs/agent-sh',
+          label: 'agent.sh',
+          position: 'left',
         },
         {
           href: 'https://github.com/LIghtJUNction/cortexfs',
@@ -88,58 +73,29 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: '文档',
+          title: 'Core',
           items: [
-            {
-              label: '概览',
-              to: '/docs/intro',
-            },
-            {
-              label: '快速开始',
-              to: '/docs/getting-started/quick-start',
-            },
-            {
-              label: '核心概念',
-              to: '/docs/concepts/filesystem-abi',
-            },
+            {label: 'Design', to: '/docs/DESIGN'},
+            {label: 'Root ABI', to: '/docs/spec/root-abi'},
+            {label: 'Object ABI', to: '/docs/spec/object-abi'},
           ],
         },
         {
-          title: '指南',
+          title: 'Clients',
           items: [
-            {
-              label: 'API 表面',
-              to: '/docs/api/file-api',
-            },
-            {
-              label: 'Provider 与路由',
-              to: '/docs/providers/provider-instances',
-            },
-            {
-              label: 'Bun Template',
-              to: '/docs/bun-template',
-            },
+            {label: 'ctx coreutils', to: '/docs/CTX'},
+            {label: 'agent.sh', to: '/docs/agent-sh'},
+            {label: 'Session ABI', to: '/docs/spec/session-abi'},
           ],
         },
         {
-          title: '更多',
+          title: 'Project',
           items: [
-            {
-              label: '运维',
-              to: '/docs/operations/audit-export',
-            },
-            {
-              label: '设计规范',
-              to: '/docs/design',
-            },
-            {
-              label: 'GitHub',
-              href: 'https://github.com/LIghtJUNction/cortexfs',
-            },
+            {label: 'GitHub', href: 'https://github.com/LIghtJUNction/cortexfs'},
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} CortexFS。由 Docusaurus 构建。`,
+      copyright: `Copyright © ${new Date().getFullYear()} CortexFS.`,
     },
     prism: {
       theme: prismThemes.github,
