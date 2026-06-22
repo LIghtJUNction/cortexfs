@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">CortexFS turns AI runtimes into Unix-shaped files</title>
+  <desc id="desc">A concise visual showing /ctx with model, agent, tool, home, and shared entries.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#0b1320"/>
+      <stop offset="0.55" stop-color="#10251f"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1">
+      <stop offset="0" stop-color="#58d68d"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000" flood-opacity="0.32"/>
+    </filter>
+    <style>
+      .title{font:700 58px system-ui,-apple-system,Segoe UI,sans-serif;fill:#f8fafc;letter-spacing:0}
+      .sub{font:500 24px system-ui,-apple-system,Segoe UI,sans-serif;fill:#cbd5e1;letter-spacing:0}
+      .mono{font:600 24px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e5f7ef}
+      .small{font:500 18px system-ui,-apple-system,Segoe UI,sans-serif;fill:#cbd5e1}
+      .tag{font:700 16px system-ui,-apple-system,Segoe UI,sans-serif;fill:#07111f}
+      .node{fill:#142033;stroke:#2d405f;stroke-width:1.4}
+      .hot{fill:#102820;stroke:#58d68d;stroke-width:1.7}
+      .line{stroke:#58d68d;stroke-width:3;stroke-linecap:round;opacity:.9}
+      .muted{fill:#8aa0b8}
+    </style>
+  </defs>
+  <rect width="1200" height="520" fill="url(#bg)"/>
+  <path d="M0 436 C188 388 280 454 438 408 C612 357 710 389 851 335 C1005 277 1094 310 1200 248 L1200 520 L0 520 Z" fill="#0f1d2c" opacity=".9"/>
+  <g transform="translate(70 66)">
+    <text class="title" x="0" y="0">AI, exposed as files.</text>
+    <text class="sub" x="0" y="48">No provider tree. No workflow DSL. Just a small Linux ABI at /ctx.</text>
+    <g transform="translate(0 96)">
+      <rect width="178" height="40" rx="6" fill="url(#accent)"/>
+      <text class="tag" x="18" y="26">model as file</text>
+      <rect x="196" width="178" height="40" rx="6" fill="#eab308"/>
+      <text class="tag" x="216" y="26">agent as file</text>
+      <rect x="392" width="164" height="40" rx="6" fill="#f97316"/>
+      <text class="tag" x="412" y="26">tool as file</text>
+    </g>
+  </g>
+  <g transform="translate(666 74)" filter="url(#soft)">
+    <rect x="0" y="0" width="438" height="344" rx="8" fill="#0b1220" stroke="#2d405f"/>
+    <text class="mono" x="30" y="50">/ctx</text>
+    <line class="line" x1="55" y1="68" x2="55" y2="294"/>
+    <g transform="translate(86 86)">
+      <rect class="node" width="270" height="40" rx="6"/><text class="mono" x="18" y="27">status</text>
+      <rect class="node" y="48" width="270" height="40" rx="6"/><text class="mono" x="18" y="75">bin/</text>
+      <rect class="hot" y="96" width="270" height="40" rx="6"/><text class="mono" x="18" y="123">model/qwen</text>
+      <rect class="hot" y="144" width="270" height="40" rx="6"/><text class="mono" x="18" y="171">agent/coder.sock</text>
+      <rect class="hot" y="192" width="270" height="40" rx="6"/><text class="mono" x="18" y="219">tool/fs.read</text>
+      <rect class="node" y="240" width="270" height="40" rx="6"/><text class="mono" x="18" y="267">home/ shared/</text>
+    </g>
+  </g>
+  <g transform="translate(72 358)">
+    <text class="small" x="0" y="0">Install, mount, inspect:</text>
+    <rect x="0" y="18" width="488" height="54" rx="8" fill="#08111f" stroke="#26354f"/>
+    <text class="mono" x="20" y="53">ctx mount  &amp;&amp;  ctx doctor</text>
+  </g>
+</svg>
