@@ -5671,7 +5671,7 @@ fn set_reference_executable(path: &Path) -> Result<(), ReferenceTreeError> {
 fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         return if metadata.file_type().is_socket() {
-            Ok(())
+            set_reference_socket_permissions(path)
         } else {
             Err(ReferenceTreeError::CannotSocket)
         };
@@ -5679,9 +5679,15 @@ fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
     if let Some(parent) = path.parent() {
         create_reference_dir(parent)?;
     }
-    UnixListener::bind(path)
-        .map(|_listener| ())
-        .map_err(|_error| ReferenceTreeError::CannotSocket)
+    UnixListener::bind(path).map_err(|_error| ReferenceTreeError::CannotSocket)?;
+    set_reference_socket_permissions(path)
+}
+
+fn set_reference_socket_permissions(path: &Path) -> Result<(), ReferenceTreeError> {
+    let metadata = fs::metadata(path).map_err(|_error| ReferenceTreeError::CannotSocket)?;
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(0o777);
+    fs::set_permissions(path, permissions).map_err(|_error| ReferenceTreeError::CannotSocket)
 }
 
 fn ensure_reference_symlink(path: &Path, target: &Path) -> Result<(), ReferenceTreeError> {
@@ -8484,6 +8490,9 @@ mod tests {
         let status = fs::read_to_string(root.join("status"));
         assert!(matches!(status, Ok(ref content) if content == "ready\n"));
         assert!(root.join("bin").join("ctx").is_file());
+        let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))
+            .map(|metadata| metadata.permissions().mode() & 0o777);
+        assert!(matches!(agent_socket_mode, Ok(0o777)));
         assert!(!root.join("mcp").exists());
         assert!(!root.join("skill").exists());
         assert!(!root.join("memory").exists());
@@ -8775,7 +8784,8 @@ mod tests {
         let socket_attr = projection.getattr("model/qwen.sock");
         assert!(matches!(
             socket_attr,
-            Ok(ref attr) if attr.file_type() == FuseV1FileType::Socket
+            Ok(ref attr)
+                if attr.file_type() == FuseV1FileType::Socket && attr.mode() & 0o777 == 0o777
         ));
         let symlink_attr = projection.getattr("home/1000/tool/fs.read");
         assert!(matches!(
