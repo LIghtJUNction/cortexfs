@@ -38,7 +38,11 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         MountOption::FSName("cortexfs".to_owned()),
         MountOption::DefaultPermissions,
     ];
-    fuser::mount2(fs, config.mountpoint, &options).map_err(|error| format!("mount failed: {error}"))
+    let session = fuser::spawn_mount2(fs, config.mountpoint, &options)
+        .map_err(|error| format!("mount failed: {error}"))?;
+    session
+        .join()
+        .map_err(|error| format!("mount failed: {error}"))
 }
 
 fn write_error(line: &str) -> io::Result<()> {
