@@ -6,8 +6,7 @@ After=local-fs.target
 [Service]
 Type=simple
 StateDirectory=cortexfs
-ExecStartPre=-/usr/bin/fusermount3 -uz /ctx
-ExecStartPre=-/usr/bin/umount -l /ctx
+ExecStartPre=/usr/bin/sh -c 'if /usr/bin/findmnt -n /ctx >/dev/null 2>&1; then /usr/bin/umount -l /ctx; fi'
 ExecStartPre=/usr/bin/install -d -m 0755 /ctx /var/lib/cortexfs/storage/v1-root
 ExecStartPre=/usr/bin/ctx bootstrap /var/lib/cortexfs/storage/v1-root
 ExecStart=/usr/bin/cortexfs-mount --source /var/lib/cortexfs/storage/v1-root /ctx
