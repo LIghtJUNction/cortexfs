@@ -10,7 +10,7 @@ ExecStartPre=/usr/bin/sh -c 'if /usr/bin/findmnt -n /ctx >/dev/null 2>&1; then /
 ExecStartPre=/usr/bin/install -d -m 0755 /ctx /var/lib/cortexfs/storage/v1-root
 ExecStartPre=/usr/bin/ctx bootstrap /var/lib/cortexfs/storage/v1-root
 ExecStart=/usr/bin/cortexfs-mount --source /var/lib/cortexfs/storage/v1-root /ctx
-ExecStop=/usr/bin/fusermount3 -u /ctx
+ExecStop=/usr/bin/umount -l /ctx
 Restart=on-failure
 RestartSec=2s
 
