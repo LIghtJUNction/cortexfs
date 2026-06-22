@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -9,15 +10,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
     FUSE_V1_ROOT_INODE, FuseV1Attr, FuseV1DirEntry, FuseV1Error, FuseV1FileType, FuseV1Node,
-    FuseV1Projection,
+    FuseV1Projection, classify_abi_path,
 };
 use fuser::{
     BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, Generation, INodeNo,
-    LockOwner, MountOption, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    ReplyWrite, Request, SessionACL, TimeOrNow, WriteFlags,
+    LockOwner, MountOption, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
+    ReplyEntry, ReplyWrite, Request, SessionACL, TimeOrNow, WriteFlags,
 };
 
 const TTL: Duration = Duration::from_secs(1);
+const S_IFMT: u32 = 0o170_000;
+const S_IFSOCK: u32 = 0o140_000;
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -98,6 +101,7 @@ fn usage() -> String {
 struct CortexFuse {
     projection: FuseV1Projection,
     paths: Mutex<HashMap<u64, String>>,
+    socket_overlays: Mutex<HashSet<String>>,
 }
 
 impl CortexFuse {
@@ -111,6 +115,7 @@ impl CortexFuse {
         Ok(Self {
             projection,
             paths: Mutex::new(paths),
+            socket_overlays: Mutex::new(HashSet::new()),
         })
     }
 
@@ -138,6 +143,14 @@ impl CortexFuse {
         }
         reply.entry(&TTL, &file_attr(node.inode(), node.attr()), Generation(0));
     }
+
+    fn forget_path(&self, path: &str) -> Result<(), FuseV1Error> {
+        self.paths
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)?
+            .retain(|_inode, known| known != path);
+        Ok(())
+    }
 }
 
 impl Filesystem for CortexFuse {
@@ -153,14 +166,14 @@ impl Filesystem for CortexFuse {
                 return;
             }
         };
-        let parent_node = match self.projection.node_for_path(&parent_path) {
+        let parent_node = match self.projected_node_for_path(&parent_path) {
             Ok(node) => node,
             Err(error) => {
                 reply.error(errno(error));
                 return;
             }
         };
-        match self.projection.lookup(&parent_node, name) {
+        match self.projected_lookup(&parent_node, name) {
             Ok(node) => self.reply_entry(&node, reply),
             Err(error) => reply.error(errno(error)),
         }
@@ -174,7 +187,7 @@ impl Filesystem for CortexFuse {
                 return;
             }
         };
-        match self.projection.getattr(&path) {
+        match self.projected_getattr(&path) {
             Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
             Err(error) => reply.error(errno(error)),
         }
@@ -238,7 +251,7 @@ impl Filesystem for CortexFuse {
                 return;
             }
         };
-        let entries = match self.projection.readdir(&path) {
+        let entries = match self.projected_readdir(&path) {
             Ok(entries) => entries,
             Err(error) => {
                 reply.error(errno(error));
@@ -346,16 +359,190 @@ impl Filesystem for CortexFuse {
             Err(error) => reply.error(errno(error)),
         }
     }
+
+    fn mknod(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        mode: u32,
+        umask: u32,
+        rdev: u32,
+        reply: ReplyEntry,
+    ) {
+        if rdev != 0 || mode & S_IFMT != S_IFSOCK {
+            reply.error(Errno::EINVAL);
+            return;
+        }
+        let Some(name) = name.to_str() else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        let parent_path = match self.path_for_inode(parent) {
+            Ok(path) => path,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        let Some(path) = child_path(&parent_path, name) else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        if !is_projected_socket_path(&path) {
+            reply.error(Errno::EINVAL);
+            return;
+        }
+        match self.projected_getattr(&path) {
+            Ok(attr) if attr.file_type() != FuseV1FileType::Socket => {
+                reply.error(Errno::EEXIST);
+                return;
+            }
+            Ok(_attr) => {}
+            Err(FuseV1Error::NotFound) => {}
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        }
+        if let Err(_error) = self
+            .socket_overlays
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)
+            .map(|mut sockets| {
+                sockets.insert(path.clone());
+            })
+        {
+            reply.error(Errno::EIO);
+            return;
+        }
+        let permissions = (mode & 0o7777) & !umask;
+        self.reply_entry(&socket_node(&path, permissions), reply);
+    }
+
+    fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let Some(name) = name.to_str() else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        let parent_path = match self.path_for_inode(parent) {
+            Ok(path) => path,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        let Some(path) = child_path(&parent_path, name) else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        if !is_projected_socket_path(&path) {
+            reply.error(Errno::EINVAL);
+            return;
+        }
+        let removed_overlay = match self.socket_overlays.lock() {
+            Ok(mut sockets) => sockets.remove(&path),
+            Err(_error) => {
+                reply.error(Errno::EIO);
+                return;
+            }
+        };
+        if removed_overlay {
+            if let Err(error) = self.forget_path(&path) {
+                reply.error(errno(error));
+                return;
+            }
+            reply.ok();
+            return;
+        }
+        match self.projection.getattr(&path) {
+            Ok(attr) if attr.file_type() == FuseV1FileType::Socket => {
+                if fs::remove_file(self.projection.root().join(&path)).is_err() {
+                    reply.error(Errno::EIO);
+                    return;
+                }
+                if let Err(error) = self.forget_path(&path) {
+                    reply.error(errno(error));
+                    return;
+                }
+                reply.ok();
+            }
+            Ok(_attr) => reply.error(Errno::EINVAL),
+            Err(error) => reply.error(errno(error)),
+        }
+    }
 }
 
 impl CortexFuse {
+    fn projected_getattr(&self, path: &str) -> Result<FuseV1Attr, FuseV1Error> {
+        match self.projection.getattr(path) {
+            Ok(attr) => Ok(attr),
+            Err(FuseV1Error::NotFound) if self.has_socket_overlay(path)? => {
+                Ok(socket_attr(path, 0o666))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn projected_node_for_path(&self, path: &str) -> Result<FuseV1Node, FuseV1Error> {
+        match self.projection.node_for_path(path) {
+            Ok(node) => Ok(node),
+            Err(FuseV1Error::NotFound) if self.has_socket_overlay(path)? => {
+                Ok(socket_node(path, 0o666))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn projected_lookup(&self, parent: &FuseV1Node, name: &str) -> Result<FuseV1Node, FuseV1Error> {
+        match self.projection.lookup(parent, name) {
+            Ok(node) => Ok(node),
+            Err(FuseV1Error::NotFound) => {
+                let Some(path) = child_path(parent.abi_path(), name) else {
+                    return Err(FuseV1Error::InvalidPath);
+                };
+                if self.has_socket_overlay(&path)? {
+                    Ok(socket_node(&path, 0o666))
+                } else {
+                    Err(FuseV1Error::NotFound)
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn projected_readdir(&self, path: &str) -> Result<Vec<FuseV1DirEntry>, FuseV1Error> {
+        let mut entries = self.projection.readdir(path)?;
+        let overlays = self
+            .socket_overlays
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)?;
+        for socket in overlays.iter() {
+            if let Some(name) = immediate_child_name(path, socket)
+                && !entries.iter().any(|entry| entry.name() == name)
+            {
+                entries.push(FuseV1DirEntry::new(name.to_owned(), FuseV1FileType::Socket));
+            }
+        }
+        drop(overlays);
+        entries.sort_by(|left, right| left.name().cmp(right.name()));
+        Ok(entries)
+    }
+
+    fn has_socket_overlay(&self, path: &str) -> Result<bool, FuseV1Error> {
+        self.socket_overlays
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)
+            .map(|sockets| sockets.contains(path))
+    }
+
     fn node_for_dir_entry(
         &self,
         parent_path: &str,
         entry: &FuseV1DirEntry,
     ) -> Result<FuseV1Node, FuseV1Error> {
-        let parent = self.projection.node_for_path(parent_path)?;
-        self.projection.lookup(&parent, entry.name())
+        let parent = self.projected_node_for_path(parent_path)?;
+        self.projected_lookup(&parent, entry.name())
     }
 }
 
@@ -445,6 +632,49 @@ fn usize_from_u32(value: u32) -> usize {
         Ok(value) => value,
         Err(_error) => usize::MAX,
     }
+}
+
+fn child_path(parent: &str, name: &str) -> Option<String> {
+    if name.is_empty() || name.contains('/') {
+        return None;
+    }
+    if parent.is_empty() {
+        Some(name.to_owned())
+    } else {
+        Some(format!("{parent}/{name}"))
+    }
+}
+
+fn is_projected_socket_path(path: &str) -> bool {
+    matches!(
+        classify_abi_path(path),
+        "ctx.agent.socket" | "ctx.model.socket"
+    )
+}
+
+fn socket_attr(path: &str, mode: u32) -> FuseV1Attr {
+    FuseV1Attr::with_owner(path.to_owned(), FuseV1FileType::Socket, 0, mode, 0, 0)
+}
+
+fn socket_node(path: &str, mode: u32) -> FuseV1Node {
+    FuseV1Node::new(socket_inode(path), path.to_owned(), socket_attr(path, mode))
+}
+
+fn socket_inode(path: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in path.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash.max(FUSE_V1_ROOT_INODE + 1)
+}
+
+fn immediate_child_name<'a>(parent: &str, child: &'a str) -> Option<&'a str> {
+    if parent.is_empty() {
+        return child.split_once('/').is_none().then_some(child);
+    }
+    let rest = child.strip_prefix(parent)?.strip_prefix('/')?;
+    rest.split_once('/').is_none().then_some(rest)
 }
 
 #[cfg(test)]
