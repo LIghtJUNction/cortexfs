@@ -1,0 +1,19 @@
+[Unit]
+Description=CortexFS v1 FUSE mount
+Documentation=file:/usr/share/doc/cortexfs-git/README.md
+After=local-fs.target
+
+[Service]
+Type=simple
+StateDirectory=cortexfs
+ExecStartPre=-/usr/bin/fusermount3 -uz /ctx
+ExecStartPre=-/usr/bin/umount -l /ctx
+ExecStartPre=/usr/bin/install -d -m 0755 /ctx /var/lib/cortexfs/storage/v1-root
+ExecStartPre=/usr/bin/ctx bootstrap /var/lib/cortexfs/storage/v1-root
+ExecStart=/usr/bin/cortexfs-mount --source /var/lib/cortexfs/storage/v1-root /ctx
+ExecStop=/usr/bin/fusermount3 -u /ctx
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target
