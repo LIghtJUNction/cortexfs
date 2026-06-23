@@ -124,6 +124,7 @@ fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
 #[test]
 fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let root = clean_test_dir("reference-tree");
+    let user_tool_dir = ctx_home(&root).join("tool");
     for tool in [
         "mcp.github.search_issues",
         "agent.create",
@@ -139,10 +140,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         )
         .is_ok());
     }
-    assert!(fs::create_dir_all(root.join("home").join("1000").join("tool")).is_ok());
+    assert!(fs::create_dir_all(&user_tool_dir).is_ok());
     assert!(symlink(
         Path::new("/ctx/tool/fs.read"),
-        root.join("home").join("1000").join("tool").join("fs.read")
+        user_tool_dir.join("fs.read")
     )
     .is_ok());
 
@@ -198,23 +199,13 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         }
     }
 
-    let private_session_root = root
-        .join("home")
-        .join("1000")
-        .join("agent")
-        .join("coder")
-        .join("session");
+    let private_session_root = agent_session_root(&root, "coder");
     assert!(private_session_root.join("index").join("by-cwd").is_dir());
     assert!(!private_session_root.join("default").exists());
 
-    assert!(root.join("home").join("1000").join("tool").is_dir());
-    assert!(!root
-        .join("home")
-        .join("1000")
-        .join("tool")
-        .join("fs.read")
-        .exists());
-    let model_link = fs::read_link(root.join("home").join("1000").join("model").join("coder"));
+    assert!(user_tool_dir.is_dir());
+    assert!(!user_tool_dir.join("fs.read").exists());
+    let model_link = fs::read_link(ctx_home(&root).join("model").join("coder"));
     assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/debug/echo")));
 
     assert!(root.join("shared").is_dir());
@@ -258,34 +249,31 @@ fn reference_tree_model_exec_is_readonly_metadata() {
 #[test]
 fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     let root = clean_test_dir("reference-tree-legacy-model-alias");
+    let user_model = ctx_home(&root).join("model");
+    let shared_meta_path = fixture_path(
+        &root,
+        &[
+            "shared",
+            "project-a",
+            "agent",
+            "coder",
+            "session",
+            "design-review",
+            "meta.json",
+        ],
+    );
     assert!(fs::create_dir_all(root.join("model")).is_ok());
-    assert!(fs::create_dir_all(root.join("home").join("1000").join("model")).is_ok());
+    assert!(fs::create_dir_all(&user_model).is_ok());
     assert!(symlink("gpt-5.4-mini", root.join("model").join("main")).is_ok());
-    assert!(symlink(
-        "/ctx/model/qwen",
-        root.join("home").join("1000").join("model").join("coder")
-    )
-    .is_ok());
+    assert!(symlink("/ctx/model/qwen", user_model.join("coder")).is_ok());
     write_text_file(
-        &root
-            .join("home")
-            .join("1000")
-            .join("agent")
-            .join("coder")
-            .join("session")
+        &agent_session_root(&root, "coder")
             .join("default")
             .join("meta.json"),
         "{\"client\":\"ctx\",\"model\":\"main\",\"scope\":\"private\"}\n",
     );
     write_text_file(
-        &root
-            .join("shared")
-            .join("project-a")
-            .join("agent")
-            .join("coder")
-            .join("session")
-            .join("design-review")
-            .join("meta.json"),
+        &shared_meta_path,
         "{\"client\":\"ctx\",\"model\":\"qwen\",\"scope\":\"shared\"}\n",
     );
 
@@ -296,43 +284,25 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     assert!(
         matches!(agent_policy, Ok(ref content) if content.contains("model:debug/echo use"))
     );
-    let model_link = fs::read_link(root.join("home").join("1000").join("model").join("coder"));
+    let model_link = fs::read_link(user_model.join("coder"));
     assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/debug/echo")));
-    let private_meta = fs::read_to_string(
-        root.join("home")
-            .join("1000")
-            .join("agent")
-            .join("coder")
-            .join("session")
-            .join("default")
-            .join("meta.json"),
-    );
+    let private_meta =
+        fs::read_to_string(agent_session_root(&root, "coder").join("default").join("meta.json"));
     assert!(matches!(private_meta, Ok(ref content) if content.contains("\"model\":\"debug/echo\"")));
-    let shared_meta = fs::read_to_string(
-        root.join("shared")
-            .join("project-a")
-            .join("agent")
-            .join("coder")
-            .join("session")
-            .join("design-review")
-            .join("meta.json"),
-    );
+    let shared_meta = fs::read_to_string(shared_meta_path);
     assert!(matches!(shared_meta, Ok(ref content) if content.contains("\"model\":\"debug/echo\"")));
 }
 
 #[test]
 fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
     let root = clean_test_dir("reference-tree-valid-model-alias");
-    assert!(fs::create_dir_all(root.join("home").join("1000").join("model")).is_ok());
-    assert!(symlink(
-        "/ctx/model/openai/gpt-4o",
-        root.join("home").join("1000").join("model").join("coder")
-    )
-    .is_ok());
+    let user_model = ctx_home(&root).join("model");
+    assert!(fs::create_dir_all(&user_model).is_ok());
+    assert!(symlink("/ctx/model/openai/gpt-4o", user_model.join("coder")).is_ok());
 
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
-    let model_link = fs::read_link(root.join("home").join("1000").join("model").join("coder"));
+    let model_link = fs::read_link(user_model.join("coder"));
     assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/openai/gpt-4o")));
 }
 

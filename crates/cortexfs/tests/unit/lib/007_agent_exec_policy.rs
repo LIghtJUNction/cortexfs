@@ -1,12 +1,7 @@
 #[test]
 fn agent_executable_socket_runtime_returns_visible_message() {
     let root = reference_tree("agent-executable-socket-runtime");
-    let session_root = root
-        .join("home")
-        .join("1000")
-        .join("agent")
-        .join("coder")
-        .join("session");
+    let session_root = agent_session_root(&root, "coder");
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
@@ -68,12 +63,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 #[test]
 fn agent_executable_socket_runtime_passes_source_root() {
     let root = reference_tree("agent-executable-socket-runtime-source-root");
-    let session_root = root
-        .join("home")
-        .join("1000")
-        .join("agent")
-        .join("coder")
-        .join("session");
+    let session_root = agent_session_root(&root, "coder");
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
@@ -118,12 +108,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 #[test]
 fn agent_executable_socket_runtime_preserves_jsonl_error_output() {
     let root = reference_tree("agent-executable-socket-runtime-error-output");
-    let session_root = root
-        .join("home")
-        .join("1000")
-        .join("agent")
-        .join("coder")
-        .join("session");
+    let session_root = agent_session_root(&root, "coder");
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,

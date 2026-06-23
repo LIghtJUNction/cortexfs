@@ -188,8 +188,8 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
 #[test]
 fn owned_child_cancellation_records_state_and_events_without_deleting_history() {
     let root = clean_test_dir("owned-child-cancel");
-    let parent_session = root.join("home").join("1000").join("agent").join("coder");
-    let child_session = root.join("home").join("1000").join("agent").join("rev-123");
+    let parent_session = agent_home(&root, "coder");
+    let child_session = agent_home(&root, "rev-123");
 
     write_text_file(&parent_session.join("events.jsonl"), "");
     create_complete_session_layout(&child_session);

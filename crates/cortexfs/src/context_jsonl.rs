@@ -127,21 +127,7 @@ fn inspect_fact_record(
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
-    require_context_string_field(
-        line,
-        record.text.as_ref(),
-        "text",
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_string_field(
-        line,
-        record.source.as_ref(),
-        "source",
-        issues,
-        is_nonempty_single_line,
-    );
+    inspect_text_source_record(line, record, "text", record.text.as_ref(), issues);
 }
 
 fn inspect_decision_record(
@@ -149,11 +135,21 @@ fn inspect_decision_record(
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
+    inspect_text_source_record(line, record, "decision", record.decision.as_ref(), issues);
+}
+
+fn inspect_text_source_record(
+    line: usize,
+    record: &ContextJsonlRecordJson,
+    text_field: &str,
+    text_value: Option<&JsonStringField>,
+    issues: &mut Vec<ContextJsonlIssue>,
+) {
     require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
     require_context_string_field(
         line,
-        record.decision.as_ref(),
-        "decision",
+        text_value,
+        text_field,
         issues,
         is_nonempty_single_line,
     );

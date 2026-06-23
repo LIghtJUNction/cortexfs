@@ -33,6 +33,12 @@ fn assert_file_check_error_contains(root: &Path, path: &str, fragments: &[&str])
     }), "{path}");
 }
 
+fn fixture_path(root: &Path, parts: &[&str]) -> PathBuf {
+    let mut path = root.to_path_buf();
+    path.extend(parts.iter().copied());
+    path
+}
+
 macro_rules! cmd {
     ($($arg:literal),* $(,)?) => {
         parse_command(vec![$($arg.to_owned()),*])

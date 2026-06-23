@@ -10,19 +10,14 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
 
     let view = derive_agent_runtime_view(&root, "coder");
     let view = ok!(view);
+    let home = ctx_home(&root);
+    let agent_home = agent_home(&root, "coder");
 
     assert_eq!(view.agent_name(), "coder");
     assert_eq!(view.control_dir(), control.as_path());
     assert_eq!(view.ctx_root(), root.as_path());
-    assert_eq!(view.ctx_home(), root.join("home").join("1000").as_path());
-    assert_eq!(
-        view.home(),
-        root.join("home")
-            .join("1000")
-            .join("agent")
-            .join("coder")
-            .as_path()
-    );
+    assert_eq!(view.ctx_home(), home.as_path());
+    assert_eq!(view.home(), agent_home.as_path());
     assert_eq!(view.owner(), 1000);
     assert_eq!(view.identity().uid(), 1000);
     assert_eq!(view.identity().gid(), 100);
@@ -55,18 +50,11 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     );
     assert_eq!(
         env_value(view.env(), "CTX_HOME").map(str::to_owned),
-        Some(root.join("home").join("1000").display().to_string())
+        Some(home.display().to_string())
     );
     assert_eq!(
         env_value(view.env(), "HOME").map(str::to_owned),
-        Some(
-            root.join("home")
-                .join("1000")
-                .join("agent")
-                .join("coder")
-                .display()
-                .to_string()
-        )
+        Some(agent_home.display().to_string())
     );
     assert_eq!(
         env_value(view.env(), "CTX_PATH"),
