@@ -227,11 +227,12 @@ fn inspect_single_session_control_value(
     validate: impl Fn(usize, &str, &mut Vec<SessionControlIssue>),
 ) -> SessionControlReport {
     let mut issues = Vec::new();
-    let lines = content.lines().collect::<Vec<_>>();
-    let value = lines.first().map_or("", |line| line.trim());
+    let mut lines = content.lines();
+    let line = lines.next().unwrap_or("");
+    let value = line.trim();
     if value.is_empty() {
         issues.push(SessionControlIssue::EmptyValue);
-    } else if lines.first().is_some_and(|line| *line != value) {
+    } else if line != value {
         issues.push(SessionControlIssue::InvalidValue {
             line: 1,
             value: value.to_owned(),
@@ -239,7 +240,7 @@ fn inspect_single_session_control_value(
     } else {
         validate(1, value, &mut issues);
     }
-    if lines.len() > 1 {
+    if lines.next().is_some() {
         issues.push(SessionControlIssue::MultipleValues { line: 2 });
     }
     SessionControlReport::new(issues)

@@ -43,9 +43,8 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
     let label = format!("user_u:agent_r:{name}_t:s0\n");
     let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
     let policy_subject = format!("{name}_t");
-    let selected_model = DEBUG_ECHO_MODEL;
     let policy = format!(
-        "allow {policy_subject} model:{selected_model} use\nallow {policy_subject} tool:fs.read execute\n"
+        "allow {policy_subject} model:{DEBUG_ECHO_MODEL} use\nallow {policy_subject} tool:fs.read execute\n"
     );
     let mount = format!(
         "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n"
@@ -64,7 +63,7 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
         ("env", "CTX_ROOT=/ctx\n".to_owned()),
         ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
-        ("model", format!("{selected_model}\n")),
+        ("model", format!("{DEBUG_ECHO_MODEL}\n")),
         ("policy", policy),
         ("status", "idle\n".to_owned()),
         ("pid", "\n".to_owned()),
