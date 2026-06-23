@@ -84,35 +84,27 @@ pub fn rebuild_context_pack(
 
     let mut candidates = Vec::new();
     append_pinned_pack_candidates(&context, &mut candidates)?;
-    append_context_file_candidate(
-        &context,
-        "summary",
-        "context/summary.md",
-        None,
-        &mut candidates,
-    )?;
-    append_context_jsonl_candidate(
-        &context,
-        "facts",
-        "context/facts.jsonl",
-        ContextJsonlKind::Facts,
-        &mut candidates,
-    )?;
-    append_context_jsonl_candidate(
-        &context,
-        "decisions",
-        "context/decisions.jsonl",
-        ContextJsonlKind::Decisions,
-        &mut candidates,
-    )?;
-    append_context_file_candidate(&context, "todo", "context/todo.md", None, &mut candidates)?;
-    append_context_jsonl_candidate(
-        &context,
-        "refs",
-        "context/refs.jsonl",
-        ContextJsonlKind::Refs,
-        &mut candidates,
-    )?;
+    for (kind, source, jsonl_kind) in [
+        ("summary", "context/summary.md", None),
+        (
+            "facts",
+            "context/facts.jsonl",
+            Some(ContextJsonlKind::Facts),
+        ),
+        (
+            "decisions",
+            "context/decisions.jsonl",
+            Some(ContextJsonlKind::Decisions),
+        ),
+        ("todo", "context/todo.md", None),
+        ("refs", "context/refs.jsonl", Some(ContextJsonlKind::Refs)),
+    ] {
+        if let Some(jsonl_kind) = jsonl_kind {
+            append_context_jsonl_candidate(&context, kind, source, jsonl_kind, &mut candidates)?;
+        } else {
+            append_context_file_candidate(&context, kind, source, None, &mut candidates)?;
+        }
+    }
     append_recent_messages_candidate(&messages, recent_message_limit, &mut candidates);
     append_child_result_candidates(&context, &mut candidates)?;
 

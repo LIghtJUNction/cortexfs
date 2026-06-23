@@ -94,11 +94,9 @@ fn which_object(root: &Path, class: ObjectClass, name: &str) -> Result<(), CliEr
         ObjectClass::Model if !is_model_name(name) => {
             return Err(CliError::usage(format!("invalid model name: {name}")));
         }
-        ObjectClass::Agent if !is_object_name(name) => {
-            return Err(CliError::usage(format!("invalid object name: {name}")));
-        }
+        ObjectClass::Agent => require_cli_name("object name", name)?,
         ObjectClass::Tool => return which_tool(root, name),
-        _ => {}
+        ObjectClass::Model => {}
     }
 
     let candidate = root.join(class.as_str()).join(name);
@@ -113,9 +111,7 @@ fn which_object(root: &Path, class: ObjectClass, name: &str) -> Result<(), CliEr
 }
 
 fn which_tool(root: &Path, name: &str) -> Result<(), CliError> {
-    if !is_object_name(name) {
-        return Err(CliError::usage(format!("invalid object name: {name}")));
-    }
+    require_cli_name("object name", name)?;
 
     if let Some(hit) = ctx_tool_path(root)?.find(name).map_err(tool_path_error)? {
         return print_line(&hit.path().display().to_string());
@@ -125,10 +121,7 @@ fn which_tool(root: &Path, name: &str) -> Result<(), CliError> {
 }
 
 fn path_shared(root: &Path, name: &str) -> Result<(), CliError> {
-    if !is_object_name(name) {
-        return Err(CliError::usage(format!("invalid shared name: {name}")));
-    }
-
+    require_cli_name("shared name", name)?;
     print_line(&root.join("shared").join(name).display().to_string())
 }
 
@@ -152,12 +145,8 @@ fn resume(root: &Path, agent: &str, session: Option<&str>) -> Result<ExitCode, C
 }
 
 fn send(root: &Path, agent: &str, session: &str, input: &str) -> Result<ExitCode, CliError> {
-    if !is_object_name(agent) {
-        return Err(CliError::usage(format!("invalid agent name: {agent}")));
-    }
-    if !is_object_name(session) {
-        return Err(CliError::usage(format!("invalid session name: {session}")));
-    }
+    require_cli_name("agent name", agent)?;
+    require_cli_name("session name", session)?;
 
     let request = format!(
         "{{\"op\":\"send\",\"id\":{},\"session\":{},\"input\":{}}}\n",
@@ -173,9 +162,7 @@ fn ping(root: &Path, path: &str) -> Result<ExitCode, CliError> {
 }
 
 fn cancel(root: &Path, path: &str, run: &str) -> Result<ExitCode, CliError> {
-    if !is_object_name(run) {
-        return Err(CliError::usage(format!("invalid run id: {run}")));
-    }
+    require_cli_name("run id", run)?;
     let request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(run));
     stream_socket_request(&object_socket_path(root, path)?, &request)
 }
@@ -219,13 +206,9 @@ fn agent_session_dir(root: &Path, agent: &str, session: Option<&str>) -> Result<
 }
 
 fn agent_session_name(root: &Path, agent: &str, session: Option<&str>) -> Result<String, CliError> {
-    if !is_object_name(agent) {
-        return Err(CliError::usage(format!("invalid agent name: {agent}")));
-    }
-    if let Some(session) = session
-        && !is_object_name(session)
-    {
-        return Err(CliError::usage(format!("invalid session name: {session}")));
+    require_cli_name("agent name", agent)?;
+    if let Some(session) = session {
+        require_cli_name("session name", session)?;
     }
 
     let session_root = ctx_home(root)?.join("agent").join(agent).join("session");
@@ -236,10 +219,16 @@ fn agent_session_name(root: &Path, agent: &str, session: Option<&str>) -> Result
 }
 
 fn agent_socket_path(root: &Path, agent: &str) -> Result<PathBuf, CliError> {
-    if !is_object_name(agent) {
-        return Err(CliError::usage(format!("invalid agent name: {agent}")));
-    }
+    require_cli_name("agent name", agent)?;
     Ok(root.join("agent").join(format!("{agent}.sock")))
+}
+
+fn require_cli_name(label: &str, value: &str) -> Result<(), CliError> {
+    if is_object_name(value) {
+        Ok(())
+    } else {
+        Err(CliError::usage(format!("invalid {label}: {value}")))
+    }
 }
 
 fn object_socket_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
