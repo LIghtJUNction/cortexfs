@@ -5,14 +5,28 @@ struct RunnerProviderConfig {
     api_key_env: Option<String>,
 }
 
-fn provider_chat_completion(name: &str, input: &str) -> Result<String, String> {
+fn provider_chat_completion(
+    name: &str,
+    input: &str,
+    run: &str,
+    stdout: &mut impl Write,
+) -> Result<(), String> {
     let (provider, model) = name
         .split_once('/')
         .ok_or_else(|| format!("invalid provider model: {name}"))?;
     let config =
         provider_config(provider).ok_or_else(|| format!("missing provider: {provider}"))?;
     let key = provider_key(&config).ok_or_else(|| format!("missing api key: {provider}"))?;
-    call_openai_chat(&config.base_url, model, input, &key)
+    match call_openai_chat_streaming(&config.base_url, model, input, &key, run, stdout) {
+        Ok(()) => Ok(()),
+        Err(error) if error.can_fallback => {
+            let content = call_openai_chat(&config.base_url, model, input, &key)?;
+            write_model_delta(stdout, run, &content)
+                .and_then(|()| stdout.flush())
+                .map_err(|error| format!("cannot write output: {error}"))
+        }
+        Err(error) => Err(error.message),
+    }
 }
 
 fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
@@ -89,7 +103,94 @@ fn call_openai_chat(
     parse_openai_chat_content(&output)
 }
 
+struct StreamFailure {
+    message: String,
+    can_fallback: bool,
+}
+
+fn call_openai_chat_streaming(
+    base_url: &str,
+    model: &str,
+    input: &str,
+    api_key: &str,
+    run: &str,
+    stdout: &mut impl Write,
+) -> Result<(), StreamFailure> {
+    let url = chat_completions_url(base_url);
+    let body = json!({
+        "model": model,
+        "messages": [{"role": "user", "content": input}],
+        "stream": true
+    })
+    .to_string();
+    let mut child = start_curl_json(&url, api_key, &body).map_err(|message| StreamFailure {
+        message,
+        can_fallback: true,
+    })?;
+    let child_stdout = child.stdout.take().ok_or_else(|| StreamFailure {
+        message: "cannot read provider stream".to_owned(),
+        can_fallback: true,
+    })?;
+    let mut emitted = false;
+    let mut done = false;
+    for line in BufReader::new(child_stdout).lines() {
+        let line = line.map_err(|error| StreamFailure {
+            message: format!("cannot read provider stream: {error}"),
+            can_fallback: !emitted,
+        })?;
+        match openai_stream_event(&line) {
+            Ok(OpenAiStreamEvent::Delta(text)) if !text.is_empty() => {
+                write_model_delta(stdout, run, &text)
+                    .and_then(|()| stdout.flush())
+                    .map_err(|error| StreamFailure {
+                        message: format!("cannot write output: {error}"),
+                        can_fallback: false,
+                })?;
+                emitted = true;
+            }
+            Ok(OpenAiStreamEvent::Delta(_empty)) => {}
+            Ok(OpenAiStreamEvent::Done) => done = true,
+            Ok(OpenAiStreamEvent::Ignore) => {}
+            Err(message) => {
+                return Err(StreamFailure {
+                    message,
+                    can_fallback: !emitted,
+                });
+            }
+        }
+    }
+    let status = child.wait().map_err(|error| StreamFailure {
+        message: format!("cannot run curl: {error}"),
+        can_fallback: !emitted,
+    })?;
+    if !status.success() {
+        return Err(StreamFailure {
+            message: "provider stream request failed".to_owned(),
+            can_fallback: !emitted,
+        });
+    }
+    if emitted || done {
+        Ok(())
+    } else {
+        Err(StreamFailure {
+            message: "provider stream produced no content".to_owned(),
+            can_fallback: true,
+        })
+    }
+}
+
 fn run_curl_json(url: &str, api_key: &str, body: &str) -> Result<Vec<u8>, String> {
+    let output = start_curl_json(url, api_key, body)?
+        .wait_with_output()
+        .map_err(|error| format!("cannot run curl: {error}"))?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err("provider request failed".to_owned())
+    }
+}
+
+fn start_curl_json(url: &str, api_key: &str, body: &str) -> Result<std::process::Child, String> {
     let mut child = Command::new("curl")
         .arg("--config")
         .arg("-")
@@ -102,7 +203,7 @@ fn run_curl_json(url: &str, api_key: &str, body: &str) -> Result<Vec<u8>, String
         return Err("cannot write curl config".to_owned());
     };
     let config = format!(
-        "fail\nsilent\nshow-error\nmax-time = 60\nrequest = POST\nurl = {}\nheader = {}\nheader = {}\ndata = {}\n",
+        "fail\nsilent\nshow-error\nno-buffer\nmax-time = 60\nrequest = POST\nurl = {}\nheader = {}\nheader = {}\ndata = {}\n",
         curl_config_quote(url),
         curl_config_quote(&format!("Authorization: Bearer {api_key}")),
         curl_config_quote("Content-Type: application/json"),
@@ -112,14 +213,7 @@ fn run_curl_json(url: &str, api_key: &str, body: &str) -> Result<Vec<u8>, String
         .write_all(config.as_bytes())
         .map_err(|error| format!("cannot write curl config: {error}"))?;
     drop(stdin);
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("cannot run curl: {error}"))?;
-    if output.status.success() {
-        Ok(output.stdout)
-    } else {
-        Err("provider request failed".to_owned())
-    }
+    Ok(child)
 }
 
 fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
@@ -131,6 +225,31 @@ fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
         .or_else(|| value.get("output_text").and_then(Value::as_str))
         .map(str::to_owned)
         .ok_or_else(|| "provider response missing content".to_owned())
+}
+
+enum OpenAiStreamEvent {
+    Delta(String),
+    Done,
+    Ignore,
+}
+
+fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with(':') || !line.starts_with("data:") {
+        return Ok(OpenAiStreamEvent::Ignore);
+    }
+    let data = line.trim_start_matches("data:").trim();
+    if data == "[DONE]" {
+        return Ok(OpenAiStreamEvent::Done);
+    }
+    let value = serde_json::from_str::<Value>(data)
+        .map_err(|error| format!("invalid provider stream json: {error}"))?;
+    let text = value
+        .pointer("/choices/0/delta/content")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("output_text").and_then(Value::as_str))
+        .unwrap_or_default();
+    Ok(OpenAiStreamEvent::Delta(text.to_owned()))
 }
 
 fn chat_completions_url(base_url: &str) -> String {
