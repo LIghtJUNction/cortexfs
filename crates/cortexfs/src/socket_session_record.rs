@@ -212,20 +212,14 @@ pub fn record_child_handoff_to_parent_context(
         .join(child_name);
     fs::create_dir_all(child_dir.join("artifact"))
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    atomic_replace_text(&child_dir.join("agent"), &format!("{child_agent}\n"))
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    atomic_replace_text(&child_dir.join("session"), &format!("{child_session}\n"))
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    atomic_replace_text(
-        &child_dir.join("status"),
+    write_child_context_file(&child_dir, "agent", &format!("{child_agent}\n"))?;
+    write_child_context_file(&child_dir, "session", &format!("{child_session}\n"))?;
+    write_child_context_file(
+        &child_dir,
+        "status",
         &format!("{}\n", ChildContextStatus::Pending.as_str()),
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    atomic_replace_text(
-        &child_dir.join("handoff.md"),
-        &ensure_trailing_newline(handoff),
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    )?;
+    write_child_context_file(&child_dir, "handoff.md", &ensure_trailing_newline(handoff))?;
     write_text_file_if_absent(&child_dir.join("result.md"), "")
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     write_text_file_if_absent(&child_dir.join("refs.jsonl"), "")
@@ -267,18 +261,9 @@ pub fn record_child_result_to_parent_context(
         .join("child")
         .join(child_name);
     require_child_context_files(&child_dir)?;
-    atomic_replace_text(&child_dir.join("status"), &format!("{}\n", status.as_str()))
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    atomic_replace_text(
-        &child_dir.join("result.md"),
-        &ensure_trailing_newline(result),
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    atomic_replace_text(
-        &child_dir.join("refs.jsonl"),
-        &ensure_trailing_newline(refs_jsonl),
-    )
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    write_child_context_file(&child_dir, "status", &format!("{}\n", status.as_str()))?;
+    write_child_context_file(&child_dir, "result.md", &ensure_trailing_newline(result))?;
+    write_child_context_file(&child_dir, "refs.jsonl", &ensure_trailing_newline(refs_jsonl))?;
 
     Ok(())
 }
@@ -397,6 +382,15 @@ fn require_child_context_files(child_dir: &Path) -> Result<(), ChildContextRecor
         }
     }
     Ok(())
+}
+
+fn write_child_context_file(
+    child_dir: &Path,
+    file: &str,
+    content: &str,
+) -> Result<(), ChildContextRecordError> {
+    atomic_replace_text(&child_dir.join(file), content)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)
 }
 
 fn append_session_lines(dir: &Path, file: &str, lines: &[&str]) -> SocketRecordResult<()> {

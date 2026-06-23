@@ -20,6 +20,10 @@ fn clean_test_dir(name: &str) -> PathBuf {
     root
 }
 
+fn assert_abi_class(path: &str, expected: &str) {
+    assert_eq!(classify_abi_path(path), expected, "{path}");
+}
+
 fn reference_tree(name: &str) -> PathBuf {
     let root = clean_test_dir(name);
     assert!(ensure_v1_reference_tree(&root).is_ok());
@@ -31,10 +35,18 @@ fn write_fixture_file(path: &Path, mode: u32) {
         assert!(fs::create_dir_all(parent).is_ok());
     }
     assert!(fs::write(path, "#!/bin/sh\n").is_ok());
+    set_file_mode(path, mode);
+}
+
+fn set_file_mode(path: &Path, mode: u32) {
     let permissions = fs::metadata(path).map(|metadata| metadata.permissions());
     let mut permissions = ok!(permissions);
     permissions.set_mode(mode);
     assert!(fs::set_permissions(path, permissions).is_ok());
+}
+
+fn unix_identity_for(path: &Path) -> std::io::Result<AgentUnixIdentity> {
+    fs::metadata(path).map(|metadata| AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []))
 }
 
 fn create_complete_session_layout(session: &Path) {

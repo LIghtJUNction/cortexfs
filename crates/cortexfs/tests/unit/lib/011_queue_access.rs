@@ -52,9 +52,7 @@ fn shared_access_authority_requires_mount_linux_permission_and_policy() {
     assert!(fs::create_dir_all(&shared).is_ok());
     write_fixture_file(&file, 0o400);
 
-    let metadata = fs::metadata(&file);
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&file));
     let mounts = mount_table_for_source_target(
         "/ctx/shared/project-a",
         &shared,
@@ -78,9 +76,7 @@ fn shared_access_authority_denies_write_on_read_only_mount() {
     assert!(fs::create_dir_all(&shared).is_ok());
     write_fixture_file(&file, 0o600);
 
-    let metadata = fs::metadata(&file);
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&file));
     let mounts =
         mount_table_for_source_target("/ctx/shared/project-a", &shared, "ro", "bind,nosuid,nodev");
     let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Write);
@@ -100,9 +96,7 @@ fn shared_access_authority_denies_missing_policy_and_wrong_space() {
     assert!(fs::create_dir_all(&shared).is_ok());
     write_fixture_file(&file, 0o400);
 
-    let metadata = fs::metadata(&file);
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&file));
     let mounts =
         mount_table_for_source_target("/ctx/shared/project-a", &shared, "ro", "bind,nosuid,nodev");
     let wrong_mounts =
@@ -178,9 +172,7 @@ fn session_access_authority_allows_explicit_im_channel_session() {
         .join("messages.jsonl");
     write_fixture_file(&messages, 0o600);
 
-    let metadata = fs::metadata(&messages);
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&messages));
     let mounts = mount_table_for_source_target(
         "/ctx/shared/im-qq-dev",
         &shared,
@@ -218,9 +210,7 @@ fn session_access_authority_denies_cross_channel_without_session_policy() {
     write_fixture_file(&allowed, 0o600);
     write_fixture_file(&other, 0o600);
 
-    let metadata = fs::metadata(&allowed);
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&allowed));
     let mounts = mount_table_for_source_target(
         "/ctx/shared/im-qq-dev",
         &shared,
@@ -256,9 +246,7 @@ fn session_access_authority_requires_shared_policy_and_mount_write_mode() {
         .join("messages.jsonl");
     write_fixture_file(&messages, 0o600);
 
-    let metadata = fs::metadata(&messages);
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&messages));
     let ro_mounts = mount_table_for_source_target(
         "/ctx/shared/im-slack-company",
         &shared,
@@ -349,9 +337,7 @@ fn session_access_authority_rejects_unmounted_and_non_session_paths() {
 
     write_fixture_file(&file, 0o644);
 
-    let metadata = fs::metadata(&file);
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&file));
     let mounts = mount_table_for_source_target(
         "/ctx/shared/project-a",
         &shared,

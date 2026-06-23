@@ -165,9 +165,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
     );
     assert_eq!(env_value(view.env(), "AGENT_RULES"), Some("allow"));
 
-    let metadata = fs::metadata(env_only.join("fs.read"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&env_only.join("fs.read")));
     let mounts = mount_table_for_target(&env_only, "rw", "bind,nosuid,nodev");
     let tool_policy = allow_tool_policy("coder_t", "fs.read");
     let denied = authorize_tool_execution(

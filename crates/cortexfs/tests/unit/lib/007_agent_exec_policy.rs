@@ -21,11 +21,7 @@ printf '{"type":"delta","run":"%s","text":"%s"}\n' "$run" "$input"
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 "#,
     );
-    let permissions = fs::metadata(&agent_executable);
-    let metadata = ok!(permissions);
-    let mut permissions = metadata.permissions();
-    permissions.set_mode(0o755);
-    assert!(fs::set_permissions(&agent_executable, permissions).is_ok());
+    set_file_mode(&agent_executable, 0o755);
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
 
@@ -89,11 +85,7 @@ printf '{"type":"delta","run":"%s","text":"%s"}\n' "$CTX_RUN_ID" "$CTX_SOURCE"
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
-    let permissions = fs::metadata(&agent_executable);
-    let metadata = ok!(permissions);
-    let mut permissions = metadata.permissions();
-    permissions.set_mode(0o755);
-    assert!(fs::set_permissions(&agent_executable, permissions).is_ok());
+    set_file_mode(&agent_executable, 0o755);
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
@@ -144,10 +136,7 @@ printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
 exit 1
 "#,
     );
-    let permissions = fs::metadata(&agent_executable).map(|metadata| metadata.permissions());
-    let mut permissions = ok!(permissions);
-    permissions.set_mode(0o755);
-    assert!(fs::set_permissions(&agent_executable, permissions).is_ok());
+    set_file_mode(&agent_executable, 0o755);
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
@@ -407,4 +396,3 @@ fn mount_table_rejects_invalid_v0_format() {
         Err(MountError::WrongFieldCount)
     );
 }
-
