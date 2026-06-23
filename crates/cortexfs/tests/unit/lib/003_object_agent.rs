@@ -94,18 +94,12 @@ fn object_layout_reports_missing_parts() {
 fn model_session_control_decides_socket_requirement() {
     let root = clean_test_dir("object-layout-model-session");
     create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
+    let control = root.join("model").join("openai").join("gpt-4o.d");
 
     let no_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(no_socket.is_ok());
 
-    write_text_file(
-        &root
-            .join("model")
-            .join("openai")
-            .join("gpt-4o.d")
-            .join("session"),
-        "socket\n",
-    );
+    write_text_file(&control.join("session"), "socket\n");
     let missing_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(missing_socket
         .issues()
@@ -113,14 +107,7 @@ fn model_session_control_decides_socket_requirement() {
             "model/openai/gpt-4o.sock".to_owned()
         )));
 
-    write_text_file(
-        &root
-            .join("model")
-            .join("openai")
-            .join("gpt-4o.d")
-            .join("session"),
-        "native_thread\n",
-    );
+    write_text_file(&control.join("session"), "native_thread\n");
     let invalid = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(invalid
         .issues()
@@ -232,14 +219,8 @@ fn model_driver_routes_reject_invalid_route_tables() {
 fn model_object_layout_rejects_provider_private_capabilities() {
     let root = clean_test_dir("object-layout-model-cap");
     create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
-    write_text_file(
-        &root
-            .join("model")
-            .join("openai")
-            .join("gpt-4o.d")
-            .join("cap"),
-        "chat\nnative_thread\n",
-    );
+    let control = root.join("model").join("openai").join("gpt-4o.d");
+    write_text_file(&control.join("cap"), "chat\nnative_thread\n");
 
     let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(report
@@ -254,14 +235,8 @@ fn model_object_layout_rejects_provider_private_capabilities() {
 fn model_object_layout_rejects_invalid_driver_routes() {
     let root = clean_test_dir("object-layout-model-driver");
     create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
-    write_text_file(
-        &root
-            .join("model")
-            .join("openai")
-            .join("gpt-4o.d")
-            .join("driver"),
-        "agent=/bin/sh\n",
-    );
+    let control = root.join("model").join("openai").join("gpt-4o.d");
+    write_text_file(&control.join("driver"), "agent=/bin/sh\n");
 
     let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(report

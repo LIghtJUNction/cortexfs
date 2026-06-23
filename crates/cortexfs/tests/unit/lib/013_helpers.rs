@@ -94,6 +94,24 @@ fn assert_file_text(path: &Path, expected: &str) {
     );
 }
 
+fn fixture_path(root: &Path, parts: &[&str]) -> PathBuf {
+    let mut path = root.to_path_buf();
+    path.extend(parts.iter().copied());
+    path
+}
+
+fn ctx_home(root: &Path) -> PathBuf {
+    fixture_path(root, &["home", "1000"])
+}
+
+fn agent_home(root: &Path, agent: &str) -> PathBuf {
+    fixture_path(root, &["home", "1000", "agent", agent])
+}
+
+fn agent_session_root(root: &Path, agent: &str) -> PathBuf {
+    agent_home(root, agent).join("session")
+}
+
 fn create_shared_queue_layout(queue: &Path) {
     for dir in SHARED_QUEUE_REQUIRED_DIRS {
         assert!(fs::create_dir_all(queue.join(dir)).is_ok());

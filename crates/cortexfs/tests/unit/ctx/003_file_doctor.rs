@@ -1,14 +1,18 @@
 #[test]
 fn file_check_validates_message_stream_files() {
     let root = clean_test_dir("ctx-messages-check");
-    let messages = root
-        .join("home")
-        .join("1000")
-        .join("agent")
-        .join("coder")
-        .join("session")
-        .join("default")
-        .join("messages.jsonl");
+    let messages = fixture_path(
+        &root,
+        &[
+            "home",
+            "1000",
+            "agent",
+            "coder",
+            "session",
+            "default",
+            "messages.jsonl",
+        ],
+    );
     write_text_file(
         &messages,
         "{\"role\":\"assistant\",\"response_id\":\"resp_1\",\"content\":\"hello\"}\n"
@@ -34,14 +38,18 @@ fn file_check_validates_message_stream_files() {
 #[test]
 fn file_check_validates_context_jsonl_files() {
     let root = clean_test_dir("ctx-context-jsonl-check");
-    let context = root
-        .join("shared")
-        .join("project-a")
-        .join("agent")
-        .join("coder")
-        .join("session")
-        .join("default")
-        .join("context");
+    let context = fixture_path(
+        &root,
+        &[
+            "shared",
+            "project-a",
+            "agent",
+            "coder",
+            "session",
+            "default",
+            "context",
+        ],
+    );
     assert!(fs::create_dir_all(context.join("swap")).is_ok());
     write_text_file(
         &context.join("facts.jsonl"),
@@ -67,21 +75,16 @@ fn file_check_validates_context_jsonl_files() {
 #[test]
 fn file_check_validates_shared_and_model_session_layouts() {
     let root = clean_test_dir("ctx-shared-model-session-check");
-    let shared_agent = root
-        .join("shared")
-        .join("im-qq-dev")
-        .join("agent")
-        .join("bot")
-        .join("session")
-        .join("group-456");
-    let model_session = root
-        .join("home")
-        .join("1000")
-        .join("model")
-        .join("openai")
-        .join("gpt-4o.d")
-        .join("session")
-        .join("default");
+    let shared_agent = fixture_path(
+        &root,
+        &["shared", "im-qq-dev", "agent", "bot", "session", "group-456"],
+    );
+    let model_session = fixture_path(
+        &root,
+        &[
+            "home", "1000", "model", "openai", "gpt-4o.d", "session", "default",
+        ],
+    );
     create_complete_session_layout(&shared_agent);
     create_complete_session_layout(&model_session);
 
@@ -115,16 +118,15 @@ fn doctor_reports_reference_tree_layout_breakage() {
     let ensured = ensure_v1_reference_tree(&root);
     assert!(ensured.is_ok());
     assert!(fs::remove_file(root.join("tool").join("fs.read.d").join("schema")).is_ok());
-    assert!(fs::remove_dir_all(
-        root.join("home")
-            .join("1000")
-            .join("agent")
-            .join("coder")
-            .join("session")
-            .join("index")
-            .join("by-cwd")
-    )
-    .is_ok());
+    assert!(
+        fs::remove_dir_all(fixture_path(
+            &root,
+            &[
+                "home", "1000", "agent", "coder", "session", "index", "by-cwd",
+            ],
+        ))
+        .is_ok()
+    );
     let checked = doctor(&root);
     assert!(matches!(
         checked,
@@ -134,24 +136,25 @@ fn doctor_reports_reference_tree_layout_breakage() {
 
 #[test]
 fn formats_shared_queue_layout_issues_for_doctor() {
-    let formatted = format_shared_queue_layout_issues(&[
-        SharedQueueLayoutIssue::MissingDirectory("done".to_owned()),
-        SharedQueueLayoutIssue::NotDirectory("failed".to_owned()),
-    ]);
-    assert_eq!(formatted, "missing directory done, not directory failed");
+    assert_eq!(
+        format_shared_queue_layout_issues(&[
+            SharedQueueLayoutIssue::MissingDirectory("done".to_owned()),
+            SharedQueueLayoutIssue::NotDirectory("failed".to_owned()),
+        ]),
+        "missing directory done, not directory failed"
+    );
 }
 
 #[test]
 fn formats_object_layout_issues_for_file_check() {
-    let formatted = format_object_layout_issues(&[
-        ObjectLayoutIssue::MissingExecutable("agent/coder".to_owned()),
-        ObjectLayoutIssue::InvalidControlValue {
-            path: "model/openai/gpt-4o.d/session".to_owned(),
-            value: "native_thread".to_owned(),
-        },
-    ]);
     assert_eq!(
-        formatted,
+        format_object_layout_issues(&[
+            ObjectLayoutIssue::MissingExecutable("agent/coder".to_owned()),
+            ObjectLayoutIssue::InvalidControlValue {
+                path: "model/openai/gpt-4o.d/session".to_owned(),
+                value: "native_thread".to_owned(),
+            },
+        ]),
         "missing executable agent/coder, invalid control value model/openai/gpt-4o.d/session=native_thread"
     );
 }
