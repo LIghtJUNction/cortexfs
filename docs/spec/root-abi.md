@@ -178,7 +178,7 @@ valid entries.
 
       model/
         main -> /ctx/model/openai/gpt-4o
-        coder -> /ctx/model/debug/echo
+        coder -> /ctx/model/main
 
   shared/
     project-a/

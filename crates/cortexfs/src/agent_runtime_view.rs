@@ -50,7 +50,7 @@ pub fn derive_agent_runtime_view(
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("mount".to_owned()))?;
 
     let model = read_required_agent_control_value(&control_dir, "model")?;
-    if !is_model_name(&model) {
+    if !abi_path::is_model_reference(&model) {
         return Err(AgentRuntimeViewError::InvalidControlFile(
             "model".to_owned(),
         ));

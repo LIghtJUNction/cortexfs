@@ -155,6 +155,8 @@ impl ObjectBootstrap {
 
 include!("fuse_v1_projection.rs");
 
+include!("fuse_v1_model_alias.rs");
+
 impl ReferenceTreeBootstrap {
     /// Creates a reference-tree bootstrap result.
     #[must_use]

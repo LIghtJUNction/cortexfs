@@ -10,7 +10,7 @@ fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
 
     ensure_reference_model_alias(
         &root.join("home").join("1000").join("model").join("coder"),
-        Path::new("/ctx/model/debug/echo"),
+        Path::new("/ctx/model/main"),
     )
 }
 
@@ -123,7 +123,7 @@ fn migrate_reference_session_meta_model(meta_path: &Path) -> Result<(), Referenc
     let Some(model) = object.get("model").and_then(Value::as_str) else {
         return Ok(());
     };
-    if is_model_name(model) || !is_object_name(model) {
+    if abi_path::is_model_reference(model) || !is_object_name(model) {
         return Ok(());
     }
 
@@ -208,7 +208,7 @@ fn is_valid_ctx_model_symlink(target: &Path) -> bool {
     let Some(model) = target.strip_prefix("/ctx/model/") else {
         return false;
     };
-    is_model_name(model)
+    abi_path::is_model_reference(model)
 }
 
 fn is_legacy_ctx_model_symlink(target: &Path) -> bool {

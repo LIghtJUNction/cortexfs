@@ -149,6 +149,60 @@ impl CortexFuse {
             .ok_or(FuseV1Error::InvalidPath)
     }
 
+    fn model_alias_child_path(&self, parent: INodeNo, name: &OsStr) -> Result<String, FuseV1Error> {
+        let name = name.to_str().ok_or(FuseV1Error::InvalidPath)?;
+        let parent_path = self.path_for_inode(parent)?;
+        let path = child_path(&parent_path, name).ok_or(FuseV1Error::InvalidPath)?;
+        matches!(path.as_str(), "model/main" | "model/helper")
+            .then_some(path)
+            .ok_or(FuseV1Error::InvalidPath)
+    }
+
+    fn model_symlink_child_path(
+        &self,
+        parent: INodeNo,
+        name: &OsStr,
+    ) -> Result<String, FuseV1Error> {
+        let name = name.to_str().ok_or(FuseV1Error::InvalidPath)?;
+        let parent_path = self.path_for_inode(parent)?;
+        if parent_path != "model" || !is_object_name(name) {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        Ok(format!("model/{name}"))
+    }
+
+    fn unlink_model_path(&self, parent: INodeNo, name: &OsStr) -> Result<bool, FuseV1Error> {
+        if let Ok(path) = self.model_alias_child_path(parent, name) {
+            self.projection.remove_model_alias(&path)?;
+            self.forget_path(&path)?;
+            return Ok(true);
+        }
+        let Ok(path) = self.model_symlink_child_path(parent, name) else {
+            return Ok(false);
+        };
+        match fs::remove_file(self.projection.root().join(&path)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_error) => return Err(FuseV1Error::Io),
+        }
+        self.forget_path(&path)?;
+        Ok(true)
+    }
+
+    fn rename_model_alias_path(
+        &self,
+        parent: INodeNo,
+        name: &OsStr,
+        newparent: INodeNo,
+        newname: &OsStr,
+    ) -> Result<(), FuseV1Error> {
+        let source = self.model_symlink_child_path(parent, name)?;
+        let target = self.model_alias_child_path(newparent, newname)?;
+        self.projection
+            .rename_model_alias_symlink(&source, &target)?;
+        self.rename_path(&source, &target)
+    }
+
     fn xattrs_for_path(&self, path: &str) -> Result<Vec<CortexXattr>, FuseV1Error> {
         let attr = self.projected_getattr(path)?;
         let backing_path = self.projection.root().join(path);
