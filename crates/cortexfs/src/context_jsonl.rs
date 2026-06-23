@@ -40,22 +40,7 @@ pub struct ContextJsonlReport {
     issues: Vec<ContextJsonlIssue>,
 }
 
-impl ContextJsonlReport {
-    #[must_use]
-    pub const fn new(issues: Vec<ContextJsonlIssue>) -> Self {
-        Self { issues }
-    }
-
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    #[must_use]
-    pub fn issues(&self) -> &[ContextJsonlIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(ContextJsonlReport, ContextJsonlIssue);
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]

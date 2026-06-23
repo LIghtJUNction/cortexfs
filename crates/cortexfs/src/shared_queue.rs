@@ -18,25 +18,7 @@ pub struct SharedQueueLayoutReport {
     issues: Vec<SharedQueueLayoutIssue>,
 }
 
-impl SharedQueueLayoutReport {
-    /// Creates a report with collected layout issues.
-    #[must_use]
-    pub const fn new(issues: Vec<SharedQueueLayoutIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the queue satisfies the v1 layout.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected layout issues.
-    #[must_use]
-    pub fn issues(&self) -> &[SharedQueueLayoutIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(SharedQueueLayoutReport, SharedQueueLayoutIssue);
 
 /// Error while claiming a shared queue job.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -19,22 +19,7 @@ pub struct MessageStreamReport {
     issues: Vec<MessageStreamIssue>,
 }
 
-impl MessageStreamReport {
-    #[must_use]
-    pub const fn new(issues: Vec<MessageStreamIssue>) -> Self {
-        Self { issues }
-    }
-
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    #[must_use]
-    pub fn issues(&self) -> &[MessageStreamIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(MessageStreamReport, MessageStreamIssue);
 
 #[must_use]
 pub fn inspect_message_stream_jsonl(content: &str) -> MessageStreamReport {

@@ -60,25 +60,7 @@ impl SessionIndexUpdateError {
     }
 }
 
-impl SessionIndexReport {
-    /// Creates a report with collected session index issues.
-    #[must_use]
-    pub const fn new(issues: Vec<SessionIndexIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the index file satisfies the fixed v1 format.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected session index issues.
-    #[must_use]
-    pub fn issues(&self) -> &[SessionIndexIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(SessionIndexReport, SessionIndexIssue);
 
 /// Inspects a fixed-format v1 session index file.
 #[must_use]
