@@ -1,7 +1,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cortexfs::{
@@ -44,6 +44,8 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         &listener,
         Some(peer_policy),
         AgentExecutableSocketRuntime {
+            ctx_root: Path::new(cortexfs::CTX_ROOT),
+            source_root: &config.source,
             session_root: &session_root,
             default_cwd: &default_cwd,
             model: Some(view.model()),

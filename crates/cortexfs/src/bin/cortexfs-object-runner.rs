@@ -8,6 +8,9 @@ use std::process::{Command, ExitCode};
 use cortexfs::run_echo_model;
 use serde_json::Value;
 
+const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
+const DEFAULT_CTX_ROOT: &str = "/ctx";
+
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -31,10 +34,54 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
             .map_err(|error| format!("echo model failed: {error}"))
         }
         ("model", name) => Err(format!("model {name} is not handled by this runner")),
+        ("agent", name) => run_agent(name, &input),
         ("tool", name) => run_tool(name, &input),
         (class, _name) => Err(format!(
             "object class {class} is not handled by this runner"
         )),
+    }
+}
+
+fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
+    let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
+    let source =
+        env::var_os("CTX_SOURCE").map_or_else(|| PathBuf::from(DEFAULT_SOURCE), PathBuf::from);
+    let ctx_root =
+        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    let model = fs::read_to_string(source.join("agent").join(format!("{name}.d")).join("model"))
+        .map_or_else(
+            |_error| "debug/echo".to_owned(),
+            |content| content.trim().to_owned(),
+        );
+    let model = if model.is_empty() {
+        "debug/echo".to_owned()
+    } else {
+        model
+    };
+    let model_path = ctx_root.join("model").join(&model);
+    if !model_path.exists() {
+        let stdout = io::stdout();
+        let mut stdout = stdout.lock();
+        return write_tool_start(&mut stdout, &run, name)
+            .and_then(|()| write_tool_error(&mut stdout, &run, "ENOENT", "missing model"))
+            .map_err(|error| format!("cannot write output: {error}"));
+    }
+    let output = Command::new(model_path)
+        .arg(input)
+        .env("CTX_RUN_ID", &run)
+        .output()
+        .map_err(|error| format!("cannot run agent model: {error}"))?;
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    stdout
+        .write_all(&output.stdout)
+        .and_then(|()| stdout.write_all(&output.stderr))
+        .map_err(|error| format!("cannot write output: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err("agent model failed".to_owned())
     }
 }
 

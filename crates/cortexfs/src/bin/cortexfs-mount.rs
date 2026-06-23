@@ -683,7 +683,7 @@ impl CortexFuse {
         {
             return true;
         }
-        if classify_abi_path(path) == "ctx.tool.exec" {
+        if matches!(classify_abi_path(path), "ctx.agent.exec" | "ctx.tool.exec") {
             return true;
         }
         if !backing_exists && self.projection.getattr(path).is_ok() {
