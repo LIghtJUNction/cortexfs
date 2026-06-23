@@ -1,0 +1,230 @@
+/// File kind exposed by the v1 FUSE projection layer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FuseV1FileType {
+    /// Directory entry.
+    Directory,
+    /// Regular file.
+    Regular,
+    /// Symbolic link.
+    Symlink,
+    /// Unix domain socket.
+    Socket,
+    /// Other filesystem object.
+    Other,
+}
+
+/// Minimal attributes needed by a FUSE adapter for v1 ABI paths.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FuseV1Attr {
+    abi_path: String,
+    file_type: FuseV1FileType,
+    size: u64,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+}
+
+/// Directory entry returned by the v1 FUSE projection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FuseV1DirEntry {
+    name: String,
+    file_type: FuseV1FileType,
+}
+
+/// Path/inode pair used by a FUSE adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FuseV1Node {
+    inode: u64,
+    abi_path: String,
+    attr: FuseV1Attr,
+}
+
+/// Error returned by the local v1 FUSE projection helpers.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FuseV1Error {
+    /// ABI path escaped the `/ctx` root or used invalid syntax.
+    InvalidPath,
+    /// Path does not exist.
+    NotFound,
+    /// Operation requires a directory.
+    NotDirectory,
+    /// Operation requires a readable regular file or symlink target.
+    NotFile,
+    /// Writes through this projection are limited to ABI control files.
+    NotControlFile,
+    /// Control-file write did not start at offset zero.
+    InvalidOffset,
+    /// Control-file payload was not valid UTF-8 text.
+    InvalidContent,
+    /// Write exceeds the v1 small-control-file limit.
+    TooLarge,
+    /// Underlying filesystem operation failed.
+    Io,
+}
+
+/// Local v1 FUSE projection backend over an existing `/ctx`-shaped tree.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FuseV1Projection {
+    root: PathBuf,
+    provider_config_dir: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct VirtualExecObject {
+    class: ObjectClass,
+    name: String,
+    control_dir: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ProviderConfig {
+    base_url: String,
+    default_model: Option<String>,
+    #[serde(default)]
+    models: Vec<String>,
+    #[serde(default = "default_provider_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    formats: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProjectedProviderModel {
+    provider: String,
+    model: String,
+    base_url: String,
+    driver: String,
+    cap: String,
+}
+
+impl FuseV1Attr {
+    /// Creates a projected file attribute record.
+    #[must_use]
+    pub const fn new(abi_path: String, file_type: FuseV1FileType, size: u64, mode: u32) -> Self {
+        Self::with_owner(abi_path, file_type, size, mode, 0, 0)
+    }
+
+    /// Creates a projected file attribute record with source ownership.
+    #[must_use]
+    pub const fn with_owner(
+        abi_path: String,
+        file_type: FuseV1FileType,
+        size: u64,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Self {
+        Self {
+            abi_path,
+            file_type,
+            size,
+            mode,
+            uid,
+            gid,
+        }
+    }
+
+    /// Returns the ABI path relative to `/ctx`.
+    #[must_use]
+    pub fn abi_path(&self) -> &str {
+        &self.abi_path
+    }
+
+    /// Returns the projected file kind.
+    #[must_use]
+    pub const fn file_type(&self) -> FuseV1FileType {
+        self.file_type
+    }
+
+    /// Returns the projected byte size.
+    #[must_use]
+    pub const fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Returns Unix mode bits from the backing object.
+    #[must_use]
+    pub const fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    /// Returns the Unix owner uid from the backing object.
+    #[must_use]
+    pub const fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    /// Returns the Unix owner gid from the backing object.
+    #[must_use]
+    pub const fn gid(&self) -> u32 {
+        self.gid
+    }
+}
+
+impl FuseV1DirEntry {
+    /// Creates a projected directory entry.
+    #[must_use]
+    pub const fn new(name: String, file_type: FuseV1FileType) -> Self {
+        Self { name, file_type }
+    }
+
+    /// Returns the entry name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the entry file kind.
+    #[must_use]
+    pub const fn file_type(&self) -> FuseV1FileType {
+        self.file_type
+    }
+}
+
+impl FuseV1Node {
+    /// Creates a projected node record.
+    #[must_use]
+    pub const fn new(inode: u64, abi_path: String, attr: FuseV1Attr) -> Self {
+        Self {
+            inode,
+            abi_path,
+            attr,
+        }
+    }
+
+    /// Returns the stable inode id.
+    #[must_use]
+    pub const fn inode(&self) -> u64 {
+        self.inode
+    }
+
+    /// Returns the ABI path relative to `/ctx`.
+    #[must_use]
+    pub fn abi_path(&self) -> &str {
+        &self.abi_path
+    }
+
+    /// Returns projected attributes for this node.
+    #[must_use]
+    pub const fn attr(&self) -> &FuseV1Attr {
+        &self.attr
+    }
+}
+
+impl FuseV1Error {
+    /// Returns the stable errno name for this projection error.
+    #[must_use]
+    pub const fn errno(self) -> &'static str {
+        match self {
+            Self::InvalidPath
+            | Self::NotControlFile
+            | Self::InvalidOffset
+            | Self::InvalidContent => "EINVAL",
+            Self::NotFound => "ENOENT",
+            Self::NotDirectory => "ENOTDIR",
+            Self::NotFile => "EISDIR",
+            Self::TooLarge => "EMSGSIZE",
+            Self::Io => "EIO",
+        }
+    }
+}
