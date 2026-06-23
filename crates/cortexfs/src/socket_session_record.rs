@@ -206,10 +206,7 @@ pub fn record_child_handoff_to_parent_context(
     }
     require_parent_session_context(parent_session_dir)?;
 
-    let child_dir = parent_session_dir
-        .join("context")
-        .join("child")
-        .join(child_name);
+    let child_dir = parent_session_dir.join("context/child").join(child_name);
     fs::create_dir_all(child_dir.join("artifact"))
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     write_child_context_file(&child_dir, "agent", &format!("{child_agent}\n"))?;
@@ -256,10 +253,7 @@ pub fn record_child_result_to_parent_context(
         return Err(ChildContextRecordError::InvalidRefs);
     }
 
-    let child_dir = parent_session_dir
-        .join("context")
-        .join("child")
-        .join(child_name);
+    let child_dir = parent_session_dir.join("context/child").join(child_name);
     require_child_context_files(&child_dir)?;
     write_child_context_file(&child_dir, "status", &format!("{}\n", status.as_str()))?;
     write_child_context_file(&child_dir, "result.md", &ensure_trailing_newline(result))?;
@@ -344,14 +338,14 @@ fn validate_child_context_names(
     child_agent: &str,
     child_session: &str,
 ) -> Result<(), ChildContextRecordError> {
-    if !is_object_name(child_name) {
-        return Err(ChildContextRecordError::InvalidChildName);
-    }
-    if !is_object_name(child_agent) {
-        return Err(ChildContextRecordError::InvalidAgentName);
-    }
-    if !is_object_name(child_session) {
-        return Err(ChildContextRecordError::InvalidSessionName);
+    for (value, error) in [
+        (child_name, ChildContextRecordError::InvalidChildName),
+        (child_agent, ChildContextRecordError::InvalidAgentName),
+        (child_session, ChildContextRecordError::InvalidSessionName),
+    ] {
+        if !is_object_name(value) {
+            return Err(error);
+        }
     }
     Ok(())
 }

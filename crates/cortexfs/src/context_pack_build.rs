@@ -180,14 +180,11 @@ fn require_pack_session_files(session_dir: &Path) -> Result<(), ContextPackBuild
 
 fn read_context_budget(path: &Path) -> Result<Option<u64>, ContextPackBuildError> {
     let content = fs::read_to_string(path).map_err(|_error| ContextPackBuildError::CannotRead)?;
-    let lines = content
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>();
-    let Some(line) = lines.first().copied() else {
+    let mut lines = content.lines().filter(|line| !line.trim().is_empty());
+    let Some(line) = lines.next() else {
         return Ok(None);
     };
-    if lines.len() != 1 {
+    if lines.next().is_some() {
         return Err(ContextPackBuildError::InvalidBudget);
     }
     let value = line.trim();
