@@ -209,13 +209,13 @@ pub fn record_child_handoff_to_parent_context(
     let child_dir = parent_session_dir.join("context/child").join(child_name);
     fs::create_dir_all(child_dir.join("artifact"))
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    write_child_context_file(&child_dir, "agent", &format!("{child_agent}\n"))?;
-    write_child_context_file(&child_dir, "session", &format!("{child_session}\n"))?;
-    write_child_context_file(
-        &child_dir,
-        "status",
-        &format!("{}\n", ChildContextStatus::Pending.as_str()),
-    )?;
+    for (file, value) in [
+        ("agent", child_agent),
+        ("session", child_session),
+        ("status", ChildContextStatus::Pending.as_str()),
+    ] {
+        write_child_context_file(&child_dir, file, &format!("{value}\n"))?;
+    }
     write_child_context_file(&child_dir, "handoff.md", &ensure_trailing_newline(handoff))?;
     write_text_file_if_absent(&child_dir.join("result.md"), "")
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
