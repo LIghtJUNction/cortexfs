@@ -36,7 +36,44 @@ name.d/     control endpoint
 
 当前实现还在迁移中；新版设计以 [docs/DESIGN.md](docs/DESIGN.md) 为准。
 
-模型、agent、tool 的名字都是文件名别名，不解析 `provider/model` 这种斜杠语义。原生 provider id、format、base URL 和模型 id 属于内部实现或 `.d/` 控制文件；用户短名用 `ln -s` 建立。
+Verus proof sources live under `proofs/verus/`. They are opt-in and do not
+change the runtime Cargo workspace. Install the upstream `verus` binary from
+<https://github.com/verus-lang/verus> and run:
+
+```bash
+scripts/verify-verus.sh
+```
+
+Current proofs cover the v1 object-name ABI predicate; see
+[docs/proofs/verus.md](docs/proofs/verus.md).
+
+`/ctx/model` 使用 `provider/model` 两层命名，例如
+`openai/gpt-4o`、`anthropic/claude-sonnet-4`、`google/gemini-2.5-pro`。
+原生模型使用原始 provider；自定义 base URL 没有原始 provider 映射时，
+provider 自动取规范化域名，例如 `https://api.lmm.best:9000/` 投影为
+`api.lmm.best/<model>`。短名或默认选择用 `ln -s` 建立。agent 和 tool
+仍保持单段对象名。
+
+`/ctx/model/main` 是约定默认模型别名，默认符号链接到
+`/ctx/model/debug/echo`；`/ctx/model/helper` 是帮主模型处理杂活的约定
+别名，默认也指向 `debug/echo`。切换模型时改这些别名即可。
+
+资源层级固定分开：
+
+```text
+/ctx/model              系统模型，默认所有用户可见
+/ctx/agent              系统 agent，默认所有用户可见
+/ctx/tool               系统工具，默认所有用户可见
+/ctx/home/<uid>/model   用户自己的模型和 alias
+/ctx/home/<uid>/agent   用户自己的 agent 状态和用户 agent
+/ctx/home/<uid>/tool    用户自己的工具
+```
+
+agent 运行时看到的 tool 集合不是这些目录的落盘副本。它由
+`agent/<name>.d/path`、policy、mount、uid/gid 和 mode bits 计算，然后通过
+FUSE 在内存里投影给该 agent。不要为了表示“agent 可见 fs.read”就在
+`/ctx/home/<uid>/tool` 里放一个默认 symlink；`/ctx/tool/fs.read` 是系统
+工具，是否可执行由 runtime view 和 policy 决定。
 
 CortexFS 不重新实现 AI API 兼容层。OpenAI、Anthropic、Google、本地模型和聚合 API 的兼容交给 Rig；CortexFS 只做更高层的 Agent OS 文件 ABI、会话、权限、mount、shared/home 和 tool 查找。
 
@@ -129,33 +166,120 @@ PATH      普通 shell 命令路径
 
 ```text
 /ctx/model/
-  qwen
-  qwen.sock
-  qwen.d/
-    id
-    driver
-    cap
-    default
-    session
-    status
-    log
+  debug/
+    echo
+    echo.d/
+      id
+      driver
+      cap
+      default
+      session
+      status
+      log
+  openai/
+    gpt-4o
+    gpt-4o.d/
+      id
+      driver
+      cap
+      default
+      session
+      status
+      log
 ```
 
 执行：
 
 ```bash
-/ctx/model/qwen "hello"
-echo "hello" | /ctx/model/qwen
+/ctx/model/debug/echo "hello"
+echo "hello" | /ctx/model/openai/gpt-4o
 ```
 
-`model/qwen` 是无状态模型调用入口。`model/qwen.d/` 放模型 id、driver、能力、默认参数、session 模式、状态和日志。
+`model/debug/echo` 是最小调试模型：无状态、无 provider、无默认云模型，只把输入作为 JSONL delta 回显。`model/debug/echo.d/` 放模型 id、driver、能力、默认参数、session 模式、状态和日志。
 
-`model/qwen.sock` 是多轮模型会话入口。model 只负责推理，不默认拥有 tool、文件写入、项目上下文或长期记忆权限。
+`model/<provider>/<model>` 是只读可执行对象：读取它看到的是模型元数据；执行时由 CortexFS/Rust runtime 或 provider adapter 处理。API key 不写入模型文件或 `.d/`，解析顺序固定为环境变量、系统 keychain、未配置。
+
+`tool/<name>` 同样是只读可执行元数据入口。读取工具文件看到的是
+`#!/usr/bin/cortexfs-object-runner` 开头的 CortexFS metadata，而不是每个
+工具自己的 shell 脚本；具体工具分发在 Rust runner 后面完成。
+
+读正文前可以先读扩展属性做成本判断：
+
+```bash
+getfattr -d /ctx/tool/fs.read
+getfattr -n user.cortexfs.token_estimate /ctx/model/main
+getfattr -n user.cortexfs.origin /ctx/model/helper
+```
+
+`user.cortexfs.origin` 区分 `virtual`、`disk`、`overlay`；`storage` 区分
+`memory` 和 `disk`；`token_estimate`、`input_token_estimate`、
+`output_token_estimate`、`cache_bytes`、`cache_entries` 用于让 agent 在读取前
+判断上下文成本和缓存状态。
+
+自定义 base URL 的持久配置放在 `/etc/cortexfs/providers.d/*.json`，文件
+只保存非密钥配置：
+
+```json
+{
+  "base_url": "https://api.lmm.best:9000/",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat", "openai.responses"]
+}
+```
+
+基础元数据字段对齐 Rig 0.39 `ModelListingClient::list_models()` 返回的 `Model`：`id`、`name`、`description`、`type`、`created_at`、`owned_by`、`context_length`。
+
+`model/<provider>/<model>.d/driver` 是 driver 路由表。旧的单行值仍可用：
+
+```text
+debug
+```
+
+新格式按调用场景选择 driver：
+
+```text
+default=openai-chat
+exec=openai-chat
+socket=openai-chat
+agent=openai-responses,openai-chat
+```
+
+含义：
+
+```text
+exec    直接执行模型文件
+socket  直接连接 model socket
+agent   agent runtime 调模型
+default fallback
+```
+
+所以同一个 `/ctx/model/openai/gpt-4o` 可以在直接对话时走经典 chat driver，
+在 agent 调用时优先走 Responses-style driver，并在不可用时回退到 chat。
+driver 是 adapter 选择，不改变稳定模型名。
+
+只有 `*.d/session` 为 `socket` 的模型才暴露 `model/<provider>/<model>.sock`。model 只负责推理，不默认拥有 tool、文件写入、项目上下文或长期记忆权限。
+
+稳定模型名始终使用原始提供者，而不是聚合商名：
+
+```text
+openai/gpt-4o
+openai/gpt-4.1
+anthropic/claude-sonnet-4
+google/gemini-2.5-pro
+meta-llama/llama-4-maverick
+x-ai/grok-4
+```
+
+如果后端接入的是 `lmm.best` 这类聚合 API，CortexFS 仍暴露
+`/ctx/model/openai/gpt-4o` 这样的原始模型名；聚合商只作为 driver/source
+配置或链接目标存在。
 
 示例 alias：
 
 ```bash
-ln -s /ctx/model/qwen /ctx/home/1000/model/coder
+ln -s /ctx/model/openai/gpt-4o /ctx/home/1000/model/main
+ln -s /ctx/model/debug/echo /ctx/home/1000/model/coder
 ```
 
 alias 只遵守 symlink 语义。不存在 `alias.d` 覆盖；需要默认参数就创建真实对象。
@@ -200,7 +324,7 @@ MCP 是 tool 来源，不是新的根命名空间。不要暴露：
 /ctx/mcp/figma
 ```
 
-应该暴露普通 tool：
+如果 MCP adapter 已经真实接入并生成了完整 schema，可以暴露普通 tool：
 
 ```text
 /ctx/tool/mcp.github.search_issues
@@ -209,11 +333,12 @@ MCP 是 tool 来源，不是新的根命名空间。不要暴露：
 /ctx/tool/mcp.chrome.open
 ```
 
-MCP-backed capability 可以投影成普通 tool。CortexFS 不定义 MCP server
-在哪里配置，也不定义 MCP config 文件格式。agent runtime 或 tool adapter
-可以从 agent view 里可见的普通文件发现 MCP server。
+MCP-backed capability 可以投影成普通 tool，但不属于默认内置工具。
+CortexFS 不定义 MCP server 在哪里配置，也不定义 MCP config 文件格式。
+agent runtime 或 tool adapter 可以从 agent view 里可见的普通文件发现
+MCP server。
 
-tool 控制文件仍然只是普通 tool ABI：
+投影后的 tool 控制文件仍然只是普通 tool ABI：
 
 ```text
 /ctx/tool/mcp.github.search_issues.d/schema
@@ -237,8 +362,8 @@ tool 控制文件仍然只是普通 tool ABI：
 ```
 
 最终 agent 看到的仍然是 `mcp.github.search_issues`、
-`mcp.figma.get_file` 这类普通 tool。MCP 不新增 root namespace、policy
-class、提交入口或 CortexFS 定义的 server 配置格式。
+`mcp.figma.get_file` 这类普通 tool，而不是占位对象。MCP 不新增 root
+namespace、policy class、提交入口或 CortexFS 定义的 server 配置格式。
 
 执行：
 
@@ -253,6 +378,9 @@ agent 调 tool 时按 `CTX_PATH` 搜索同名可执行文件：
 /ctx/home/1000/tool/fs.read
 /ctx/shared/project-a/tool/fs.read
 ```
+
+这些是候选来源层。实际 agent 进程可以看到的是过滤后的内存 FUSE 视图，
+不是把系统工具复制或链接到用户目录后形成的持久目录。
 
 ## agent as file
 
@@ -348,7 +476,7 @@ source<TAB>target<TAB>mode<TAB>options
 
 ## session / resume
 
-多轮交互走 `agent/<name>.sock` 或 `model/<name>.sock`。socket 请求带 `session` 和 `scope`：
+多轮交互走 `agent/<name>.sock` 或 `model/<provider>/<model>.sock`。socket 请求带 `session` 和 `scope`：
 
 ```jsonl
 {"op":"send","id":"client-msg-id","session":"default","scope":"private","cwd":"/work","input":"你好"}
@@ -378,7 +506,7 @@ Policy v0 是最小 type-enforcement allowlist：
 ```text
 allow coder_t tool:fs.read execute
 allow coder_t tool:shell.exec execute
-allow coder_t model:qwen use
+allow coder_t model:openai/gpt-4o use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
 ```

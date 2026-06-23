@@ -3,10 +3,33 @@
 There is only one model ABI:
 
 ```text
-/ctx/model/<name>       one-shot inference executable
-/ctx/model/<name>.sock  optional CortexFS session socket
-/ctx/model/<name>.d/    control files
+/ctx/model/<provider>/<model>       one-shot inference executable
+/ctx/model/<provider>/<model>.sock  optional CortexFS session socket
+/ctx/model/<provider>/<model>.d/    control files
+/ctx/model/main                     default model symlink
+/ctx/model/helper                   helper model symlink
 ```
+
+`<provider>/<model>` is represented as two path components. For native model
+providers, `<provider>` is the original provider identity:
+
+```text
+/ctx/model/openai/gpt-4o
+/ctx/model/anthropic/claude-sonnet-4
+/ctx/model/google/gemini-2.5-pro
+```
+
+For a custom base URL without a declared original provider mapping,
+`<provider>` is the normalized host name. For example,
+`https://api.lmm.best:9000/` projects models under:
+
+```text
+/ctx/model/api.lmm.best/gpt-5.4-mini
+```
+
+The custom base URL is provider-adapter configuration, not a root ABI namespace.
+It may be shown in `model/<provider>/<model>.d/default` for inspection, but
+secrets never appear in model metadata or `.d/` files.
 
 Bottom-layer AI API formats do not enter the ABI. OpenAI Responses, Anthropic
 Messages, Gemini GenerateContent, OpenAI-compatible chat, local runtimes, and
@@ -19,23 +42,35 @@ Example:
 
 ```text
 /ctx/model/
-  qwen
-  qwen.sock
-  qwen.d/
-    id
-    driver
-    cap
-    default
-    session
-    status
-    log
+  main -> /ctx/model/debug/echo
+  helper -> /ctx/model/debug/echo
+  debug/
+    echo
+    echo.d/
+      id
+      driver
+      cap
+      default
+      session
+      status
+      log
+  openai/
+    gpt-4o
+    gpt-4o.d/
+      id
+      driver
+      cap
+      default
+      session
+      status
+      log
 ```
 
 Control files:
 
 ```text
 id       provider-native model id or runtime-internal model id
-driver   internal driver name; first choice is rig
+driver   driver route table; see below
 cap      capability list, one per line
 default  default parameters, KEY=VALUE, one per line
 session  none or socket
@@ -43,14 +78,75 @@ status   dynamic status
 log      short call log or pointer to log location
 ```
 
+`driver` may be a legacy single driver name:
+
+```text
+debug
+```
+
+or a route table:
+
+```text
+default=openai-chat
+exec=openai-chat
+socket=openai-chat
+agent=openai-responses,openai-chat
+```
+
+Route keys:
+
+```text
+default  fallback route
+exec     direct one-shot model file execution
+socket   direct model socket calls
+agent    agent-owned model calls
+```
+
+Each value is a comma-separated priority list. Runtime selection checks the
+use-case route first, then `default`. This lets direct model usage choose a
+classic chat driver while agents prefer a richer Responses-style driver with a
+chat fallback. Driver names are adapter names, not stable model names.
+
+Secrets are never stored in model files or `.d/` control files. Provider
+credentials use this priority:
+
+```text
+environment variable
+system keychain
+unconfigured
+```
+
+For example, a provider adapter may first read `LMM_API_KEY`, then look up a
+system keychain item such as `service=cortexfs:lmm account=default`. If both
+are absent, the model is not configured and must return a stable error.
+
 ## One-Shot Exec
 
-`/ctx/model/<name>` is always one-shot inference:
+`/ctx/model/<provider>/<model>` is a read-only executable object. Reading it returns
+CortexFS metadata text for that model. Executing it performs one-shot
+inference through CortexFS/Rust runtime code or a provider adapter; model
+objects must not be shell-script implementations.
+
+The first metadata keys mirror Rig 0.39 model listing fields:
+
+```text
+id
+name
+description
+type
+created_at
+owned_by
+context_length
+```
+
+Provider adapters may populate those fields from
+`ModelListingClient::list_models()` / `ModelList`. The built-in `debug/echo`
+model is local debug metadata and does not imply a provider default.
 
 ```bash
-/ctx/model/qwen "hello"
-echo "hello" | /ctx/model/qwen
-echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/qwen
+/ctx/model/debug/echo "hello"
+echo "hello" | /ctx/model/openai/gpt-4o
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-4o
 ```
 
 Semantics:
@@ -60,15 +156,16 @@ one invocation
 no durable session mutation
 stdout is the canonical JSONL event stream
 exit code is the process-level summary
+file content is inspectable metadata, not provider code or secrets
 ```
 
-Even if the underlying provider has native state, `/ctx/model/<name>` behaves
-as a stateless single call. Scripts must be predictable.
+Even if the underlying provider has native state,
+`/ctx/model/<provider>/<model>` behaves as a stateless single call.
 
 ## Model Socket
 
-`/ctx/model/<name>.sock` is the only multi-turn model entry. It uses the shared
-JSONL socket protocol from [object-abi.md](object-abi.md).
+`/ctx/model/<provider>/<model>.sock` is the only multi-turn model entry. It
+uses the shared JSONL socket protocol from [object-abi.md](object-abi.md).
 
 Examples:
 
@@ -83,11 +180,11 @@ A model socket session is CortexFS session semantics, not provider-native
 session semantics. Native threads, response ids, context caches, and simulated
 message logs are hidden behind the canonical protocol.
 
-`model/<name>.d/session` has only two stable values:
+`model/<provider>/<model>.d/session` has only two stable values:
 
 ```text
-none    no /ctx/model/<name>.sock
-socket  /ctx/model/<name>.sock exists and supports CortexFS sessions
+none    no /ctx/model/<provider>/<model>.sock
+socket  /ctx/model/<provider>/<model>.sock exists and supports CortexFS sessions
 ```
 
 The value never describes provider-native state.
@@ -145,7 +242,7 @@ done
 Example:
 
 ```jsonl
-{"type":"start","run":"r1","model":"qwen"}
+{"type":"start","run":"r1","model":"debug/echo"}
 {"type":"delta","run":"r1","text":"hello"}
 {"type":"message","run":"r1","role":"assistant","content":[{"type":"text","text":"hello"}]}
 {"type":"usage","run":"r1","input_tokens":10,"output_tokens":1}
@@ -163,7 +260,7 @@ Error example:
 
 ## Native Diagnostics
 
-`model/<name>.d/native` may exist for diagnostics only:
+`model/<provider>/<model>.d/native` may exist for diagnostics only:
 
 ```text
 native is diagnostic only

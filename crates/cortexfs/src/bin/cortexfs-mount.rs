@@ -16,7 +16,7 @@ use cortexfs::{
 use fuser::{
     BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, Generation, INodeNo,
     LockOwner, MountOption, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
-    ReplyEntry, ReplyWrite, Request, SessionACL, TimeOrNow, WriteFlags,
+    ReplyEntry, ReplyWrite, ReplyXattr, Request, SessionACL, TimeOrNow, WriteFlags,
 };
 
 const TTL: Duration = Duration::from_secs(1);
@@ -202,7 +202,7 @@ impl Filesystem for CortexFuse {
                 return;
             }
         };
-        let target = match fs::read_link(self.projection.root().join(path)) {
+        let target = match self.projection.readlink(&path) {
             Ok(target) => target,
             Err(_error) => {
                 reply.error(Errno::EINVAL);
@@ -490,6 +490,75 @@ impl Filesystem for CortexFuse {
             Err(error) => reply.error(errno(error)),
         }
     }
+
+    fn setxattr(
+        &self,
+        _req: &Request,
+        _ino: INodeNo,
+        _name: &OsStr,
+        _value: &[u8],
+        _flags: i32,
+        _position: u32,
+        reply: ReplyEmpty,
+    ) {
+        reply.error(Errno::EROFS);
+    }
+
+    fn getxattr(&self, _req: &Request, ino: INodeNo, name: &OsStr, size: u32, reply: ReplyXattr) {
+        let Some(name) = name.to_str() else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        let path = match self.path_for_inode(ino) {
+            Ok(path) => path,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        let attrs = match self.xattrs_for_path(&path) {
+            Ok(attrs) => attrs,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        let Some(value) = attrs
+            .iter()
+            .find_map(|attr| (attr.name == name).then_some(attr.value.as_bytes()))
+        else {
+            reply.error(Errno::ENODATA);
+            return;
+        };
+        reply_xattr_bytes(value, size, reply);
+    }
+
+    fn listxattr(&self, _req: &Request, ino: INodeNo, size: u32, reply: ReplyXattr) {
+        let path = match self.path_for_inode(ino) {
+            Ok(path) => path,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        let attrs = match self.xattrs_for_path(&path) {
+            Ok(attrs) => attrs,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        let mut bytes = Vec::new();
+        for attr in attrs {
+            bytes.extend_from_slice(attr.name.as_bytes());
+            bytes.push(0);
+        }
+        reply_xattr_bytes(&bytes, size, reply);
+    }
+
+    fn removexattr(&self, _req: &Request, _ino: INodeNo, _name: &OsStr, reply: ReplyEmpty) {
+        reply.error(Errno::EROFS);
+    }
 }
 
 impl CortexFuse {
@@ -555,6 +624,74 @@ impl CortexFuse {
             .map(|sockets| sockets.contains(path))
     }
 
+    fn xattrs_for_path(&self, path: &str) -> Result<Vec<CortexXattr>, FuseV1Error> {
+        let attr = self.projected_getattr(path)?;
+        let backing_path = self.projection.root().join(path);
+        let backing_exists = fs::symlink_metadata(&backing_path).is_ok();
+        let overlay = self.has_socket_overlay(path)?;
+        let virtual_projection = self.is_virtual_projection_path(path, backing_exists, overlay);
+        let (origin, storage, virtual_value) = if overlay {
+            ("overlay", "memory", "true")
+        } else if virtual_projection {
+            ("virtual", "memory", "true")
+        } else {
+            ("disk", "disk", "false")
+        };
+        let byte_len = attr.size();
+        let token_estimate = estimate_tokens_from_bytes(byte_len);
+        let mut attrs = vec![
+            CortexXattr::new("user.cortexfs.abi_path", path),
+            CortexXattr::new("user.cortexfs.kind", classify_abi_path(path)),
+            CortexXattr::new("user.cortexfs.origin", origin),
+            CortexXattr::new("user.cortexfs.storage", storage),
+            CortexXattr::new("user.cortexfs.virtual", virtual_value),
+            CortexXattr::new("user.cortexfs.bytes", byte_len.to_string()),
+            CortexXattr::new("user.cortexfs.token_estimate", token_estimate.to_string()),
+            CortexXattr::new(
+                "user.cortexfs.input_token_estimate",
+                token_estimate.to_string(),
+            ),
+            CortexXattr::new("user.cortexfs.output_token_estimate", "0"),
+            CortexXattr::new("user.cortexfs.cache_bytes", "0"),
+            CortexXattr::new("user.cortexfs.cache_entries", "0"),
+            CortexXattr::new("user.cortexfs.cache_state", "none"),
+            CortexXattr::new("user.cortexfs.tokenizer", "byte-estimate-v1"),
+            CortexXattr::new(
+                "user.cortexfs.backing_exists",
+                if backing_exists { "true" } else { "false" },
+            ),
+        ];
+        if backing_exists {
+            attrs.push(CortexXattr::new(
+                "user.cortexfs.backing_path",
+                backing_path.display().to_string(),
+            ));
+        }
+        Ok(attrs)
+    }
+
+    fn is_virtual_projection_path(&self, path: &str, backing_exists: bool, overlay: bool) -> bool {
+        if overlay {
+            return true;
+        }
+        if matches!(path, "model/main" | "model/helper") {
+            return !backing_exists || self.projection.readlink(path).is_ok();
+        }
+        if path == "model/debug"
+            || path == "model/debug/echo"
+            || path.starts_with("model/debug/echo.d/")
+        {
+            return true;
+        }
+        if classify_abi_path(path) == "ctx.tool.exec" {
+            return true;
+        }
+        if !backing_exists && self.projection.getattr(path).is_ok() {
+            return true;
+        }
+        false
+    }
+
     fn node_for_dir_entry(
         &self,
         parent_path: &str,
@@ -562,6 +699,21 @@ impl CortexFuse {
     ) -> Result<FuseV1Node, FuseV1Error> {
         let parent = self.projected_node_for_path(parent_path)?;
         self.projected_lookup(&parent, entry.name())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CortexXattr {
+    name: &'static str,
+    value: String,
+}
+
+impl CortexXattr {
+    fn new(name: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            name,
+            value: value.into(),
+        }
     }
 }
 
@@ -653,6 +805,23 @@ fn usize_from_u32(value: u32) -> usize {
     }
 }
 
+fn reply_xattr_bytes(bytes: &[u8], size: u32, reply: ReplyXattr) {
+    if size == 0 {
+        match u32::try_from(bytes.len()) {
+            Ok(len) => reply.size(len),
+            Err(_error) => reply.error(Errno::ERANGE),
+        }
+    } else if bytes.len() <= usize_from_u32(size) {
+        reply.data(bytes);
+    } else {
+        reply.error(Errno::ERANGE);
+    }
+}
+
+fn estimate_tokens_from_bytes(bytes: u64) -> u64 {
+    if bytes == 0 { 0 } else { bytes.div_ceil(4) }
+}
+
 fn child_path(parent: &str, name: &str) -> Option<String> {
     if name.is_empty() || name.contains('/') {
         return None;
@@ -698,41 +867,8 @@ fn immediate_child_name<'a>(parent: &str, child: &'a str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    use cortexfs::{FUSE_V1_ROOT_INODE, FuseV1Attr, FuseV1FileType};
-    use fuser::{FileType, INodeNo};
-
-    use super::{file_attr, parent_inode};
-
-    #[test]
-    fn file_attr_maps_projection_attributes_to_fuser_attributes() {
-        let attr = FuseV1Attr::new(
-            "tool/fs.read".to_owned(),
-            FuseV1FileType::Regular,
-            1025,
-            0o644,
-        );
-        let mapped = file_attr(77, &attr);
-
-        assert_eq!(mapped.ino, INodeNo(77));
-        assert_eq!(mapped.size, 1025);
-        assert_eq!(mapped.blocks, 3);
-        assert_eq!(mapped.kind, FileType::RegularFile);
-        assert_eq!(mapped.perm, 0o644);
-        assert_eq!(mapped.nlink, 1);
-    }
-
-    #[test]
-    fn parent_inode_uses_known_parent_or_root() {
-        let paths = Mutex::new(HashMap::from([
-            (FUSE_V1_ROOT_INODE, String::new()),
-            (42, "agent/coder.d".to_owned()),
-        ]));
-
-        assert_eq!(parent_inode("agent/coder.d/status", &paths), Ok(42));
-        assert_eq!(parent_inode("agent", &paths), Ok(FUSE_V1_ROOT_INODE));
-        assert_eq!(parent_inode("", &paths), Ok(FUSE_V1_ROOT_INODE));
-    }
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/unit/cortexfs_mount_tests.rs"
+    ));
 }

@@ -23,15 +23,14 @@ Start from this loop:
 /ctx/status
 /usr/bin/ctx or ~/.local/bin/ctx
 /ctx/bin/ctx
-/ctx/model/qwen
-/ctx/model/qwen.sock
-/ctx/model/qwen.d/id
-/ctx/model/qwen.d/driver
-/ctx/model/qwen.d/cap
-/ctx/model/qwen.d/default
-/ctx/model/qwen.d/session
-/ctx/model/qwen.d/status
-/ctx/model/qwen.d/log
+/ctx/model/debug/echo
+/ctx/model/debug/echo.d/id
+/ctx/model/debug/echo.d/driver
+/ctx/model/debug/echo.d/cap
+/ctx/model/debug/echo.d/default
+/ctx/model/debug/echo.d/session
+/ctx/model/debug/echo.d/status
+/ctx/model/debug/echo.d/log
 /ctx/agent/coder
 /ctx/agent/coder.sock
 /ctx/agent/coder.d/{owner,uid,gid,groups,label,iso,parent,life,root,cwd,env,path,mount,model,policy,status,pid,log,meta.json}

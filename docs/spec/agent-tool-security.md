@@ -113,6 +113,23 @@ Linux uid/gid/groups/mode bits
 CortexFS label
 ```
 
+Resource tiers are distinct:
+
+```text
+/ctx/model              system models, visible to all users by default
+/ctx/agent              system agents, visible to all users by default
+/ctx/tool               system tools, visible to all users by default
+/ctx/home/<uid>/model   user-specific models and aliases
+/ctx/home/<uid>/agent   user-specific agent state and user agents
+/ctx/home/<uid>/tool    user-specific tools
+```
+
+Those directories are durable resources. They are not the same thing as an
+agent's runtime view. At runtime, CortexFS/FUSE projects the tools visible to
+one agent in memory from `agent/<name>.d/path`, `policy`, `mount`, uid/gid, and
+mode bits. Do not create placeholder files or symlink copies merely to express
+that a system tool is visible to an agent.
+
 CortexFS does not define MCP config formats, skill formats, project rule
 formats, or prompt package formats. Those are ordinary files.
 
@@ -178,6 +195,11 @@ CTX_HOME=/ctx/home/1000
 HOME=/ctx/home/1000/agent/coder
 CTX_PATH=/ctx/tool:/ctx/home/1000/tool
 ```
+
+`CTX_PATH` names candidate tool source tiers. The runtime-visible tool
+directory can be a filtered in-memory FUSE projection of those tiers for this
+agent. A tool being present in `/ctx/tool` means it is installed system-wide;
+it does not by itself grant any agent execution authority.
 
 ## Mount File
 
@@ -363,7 +385,8 @@ MCP servers are tool sources, not CortexFS root objects. Do not expose:
 /ctx/mcp/figma
 ```
 
-Expose MCP capabilities as ordinary tools:
+After a real MCP adapter is configured, expose its capabilities as ordinary
+tools:
 
 ```text
 /ctx/tool/mcp.github.search_issues
@@ -372,11 +395,12 @@ Expose MCP capabilities as ordinary tools:
 /ctx/tool/mcp.chrome.open
 ```
 
-MCP-backed capabilities may be projected as ordinary tools. CortexFS does not
-define where MCP servers are configured. The agent runtime or tool adapter may
-discover MCP servers from ordinary files visible inside the agent view.
+MCP-backed capabilities may be projected as ordinary tools, but they are not
+default built-ins. CortexFS does not define where MCP servers are configured.
+The agent runtime or tool adapter may discover MCP servers from ordinary files
+visible inside the agent view.
 
-Tool control files remain the ordinary tool ABI:
+Projected tool control files remain the ordinary tool ABI:
 
 ```text
 /ctx/tool/mcp.github.search_issues.d/schema
@@ -402,7 +426,7 @@ Tools are executable capability endpoints:
 echo '{"cmd":"pwd"}' | /ctx/tool/shell.exec
 ```
 
-Optional standard agent lifecycle tools:
+Optional agent lifecycle tools may appear only when implemented:
 
 ```text
 /ctx/tool/agent.create
@@ -426,7 +450,7 @@ Example request:
 {
   "name": "reviewer",
   "label": "reviewer_t",
-  "model": ["qwen"],
+  "model": ["openai/gpt-4o"],
   "tools": ["fs.read"],
   "shared": {
     "project-a": ["read"]
@@ -449,6 +473,11 @@ Agents search for tools by `CTX_PATH`:
 /ctx/home/1000/tool/fs.read
 /ctx/shared/project-a/tool/fs.read
 ```
+
+The search path above describes source tiers. The agent process may see a
+filtered memory projection instead of the raw durable directories. The
+projection must preserve object ABI shape and must not create durable files as
+an authorization side effect.
 
 stdin/stdout is the main tool interface. `schema` describes input and output.
 It does not grant permission.
@@ -545,7 +574,7 @@ Examples:
 ```text
 allow coder_t tool:fs.read execute
 allow coder_t tool:shell.exec execute
-allow coder_t model:qwen use
+allow coder_t model:openai/gpt-4o use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
 allow coder_t network:default connect
@@ -620,7 +649,7 @@ permission.
 There is no root-level `audit/`. Logs and events live near the object:
 
 ```text
-model/<name>.d/log
+model/<provider>/<model>.d/log
 agent/<name>.d/log
 tool/<name>.d/log
 home/<uid>/agent/<agent>/session/<session>/events.jsonl

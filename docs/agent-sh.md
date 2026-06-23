@@ -35,6 +35,10 @@ agent.sh --help
 /ctx/shared
 ```
 
+`/ctx/tool` is the system tool tier. `/ctx/home/<uid>/tool` is the user's own
+tool tier, not a place for default symlink copies of system tools. An actual
+agent runtime may see a filtered in-memory FUSE projection of these tiers.
+
 It does not use root namespaces such as `provider`, `format`, `cluster`,
 `control`, `thread`, `workflow`, `mcp`, or `skill`.
 
@@ -47,6 +51,8 @@ export CTX_PATH="$CTX_ROOT/tool:$CTX_HOME/tool"
 ```
 
 Defaults are derived from the same values when these variables are not set.
+`CTX_PATH` is a list of source tiers; policy, mounts, uid/gid, and mode bits
+still decide what a specific agent may execute.
 
 ## Usage
 

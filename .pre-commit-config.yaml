@@ -18,3 +18,9 @@ repos:
         entry: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
         language: system
         pass_filenames: false
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --locked --workspace --all-targets --all-features
+        language: system
+        pass_filenames: false
