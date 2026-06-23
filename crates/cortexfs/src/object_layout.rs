@@ -3,11 +3,7 @@
 pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> ObjectLayoutReport {
     let mut issues = Vec::new();
     if !is_object_name_for_class(class, name) {
-        issues.push(ObjectLayoutIssue::MissingExecutable(format!(
-            "{}/{}",
-            class.as_str(),
-            name
-        )));
+        issues.push(ObjectLayoutIssue::MissingExecutable(format!("{}/{name}", class.as_str())));
         return ObjectLayoutReport::new(issues);
     }
     if class == ObjectClass::Model && name == DEBUG_ECHO_MODEL {

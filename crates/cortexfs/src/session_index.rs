@@ -101,10 +101,10 @@ fn inspect_session_index_list(content: &str) -> SessionIndexReport {
 
 fn inspect_single_session_index_value(content: &str) -> SessionIndexReport {
     let mut issues = Vec::new();
-    let lines = content.lines().collect::<Vec<_>>();
-    if let Some(first) = lines.first() {
+    let mut lines = content.lines();
+    if let Some(first) = lines.next() {
         inspect_session_index_name(1, first, &mut issues);
-        if lines.len() > 1 {
+        if lines.next().is_some() {
             issues.push(SessionIndexIssue::MultipleValues { line: 2 });
         }
     } else {
