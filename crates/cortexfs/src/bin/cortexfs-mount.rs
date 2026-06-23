@@ -314,25 +314,13 @@ impl Filesystem for CortexFuse {
             reply.error(Errno::EINVAL);
             return;
         }
-        let Some(name) = name.to_str() else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        let parent_path = match self.path_for_inode(parent) {
+        let path = match self.socket_child_path(parent, name) {
             Ok(path) => path,
             Err(error) => {
                 reply.error(errno(error));
                 return;
             }
         };
-        let Some(path) = child_path(&parent_path, name) else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        if !is_projected_socket_path(&path) {
-            reply.error(Errno::EINVAL);
-            return;
-        }
         match self.projected_getattr(&path) {
             Ok(attr) if attr.file_type() != FuseV1FileType::Socket => {
                 reply.error(Errno::EEXIST);
@@ -361,25 +349,13 @@ impl Filesystem for CortexFuse {
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
-        let Some(name) = name.to_str() else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        let parent_path = match self.path_for_inode(parent) {
+        let path = match self.socket_child_path(parent, name) {
             Ok(path) => path,
             Err(error) => {
                 reply.error(errno(error));
                 return;
             }
         };
-        let Some(path) = child_path(&parent_path, name) else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        if !is_projected_socket_path(&path) {
-            reply.error(Errno::EINVAL);
-            return;
-        }
         let removed_overlay = match self.socket_overlays.lock() {
             Ok(mut sockets) => sockets.remove(&path),
             Err(_error) => {
