@@ -289,34 +289,12 @@ alias 只遵守 symlink 语义。不存在 `alias.d` 覆盖；需要默认参数
 ```text
 /ctx/tool/
   fs.read
-  fs.read.d/
-    name
-    description
-    schema
-    cap
-    policy
-    status
-    log
   fs.write
-  fs.write.d/
-    name
-    description
-    schema
-    cap
-    policy
-    status
-    log
   shell.exec
-  shell.exec.d/
-    name
-    description
-    schema
-    cap
-    policy
-    status
-    log
 ```
 
+每个 tool 都是可执行 capability endpoint，同名 `.d/` 保存 `name`、
+`description`、`schema`、`cap`、`policy`、`status` 和 `log` 等控制文件。
 MCP 是 tool 来源，不是新的根命名空间。不要暴露：
 
 ```text
@@ -324,7 +302,8 @@ MCP 是 tool 来源，不是新的根命名空间。不要暴露：
 /ctx/mcp/figma
 ```
 
-如果 MCP adapter 已经真实接入并生成了完整 schema，可以暴露普通 tool：
+如果 MCP adapter 已经真实接入并生成了完整 schema，可以暴露普通 tool，
+但它仍然走普通 tool ABI 和 policy：
 
 ```text
 /ctx/tool/mcp.github.search_issues
@@ -333,37 +312,8 @@ MCP 是 tool 来源，不是新的根命名空间。不要暴露：
 /ctx/tool/mcp.chrome.open
 ```
 
-MCP-backed capability 可以投影成普通 tool，但不属于默认内置工具。
-CortexFS 不定义 MCP server 在哪里配置，也不定义 MCP config 文件格式。
-agent runtime 或 tool adapter 可以从 agent view 里可见的普通文件发现
-MCP server。
-
-投影后的 tool 控制文件仍然只是普通 tool ABI：
-
-```text
-/ctx/tool/mcp.github.search_issues.d/schema
-/ctx/tool/mcp.github.search_issues.d/policy
-/ctx/tool/mcp.github.search_issues.d/status
-/ctx/tool/mcp.github.search_issues.d/log
-```
-
-实现可以提供可选诊断文件：
-
-```text
-/ctx/tool/mcp.github.search_issues.d/origin
-```
-
-`origin` 不是稳定 ABI，严格客户端不能依赖它。MCP config 是 agent 可见
-世界里的普通文件，例如：
-
-```text
-/home/alex/.codex/config.toml  /home/agent/.codex/config.toml  ro  bind,nosuid,nodev,noexec
-/home/alex/project/.mcp.json   /work/.mcp.json                 ro  bind,nosuid,nodev,noexec
-```
-
-最终 agent 看到的仍然是 `mcp.github.search_issues`、
-`mcp.figma.get_file` 这类普通 tool，而不是占位对象。MCP 不新增 root
-namespace、policy class、提交入口或 CortexFS 定义的 server 配置格式。
+MCP config 是 agent view 里的普通文件；MCP 不新增 root namespace、
+policy class、提交入口或 CortexFS 定义的 server 配置格式。
 
 执行：
 
@@ -389,25 +339,6 @@ agent 调 tool 时按 `CTX_PATH` 搜索同名可执行文件：
   coder
   coder.sock
   coder.d/
-    owner
-    uid
-    gid
-    groups
-    label
-    iso
-    parent
-    life
-    root
-    cwd
-    env
-    path
-    mount
-    model
-    policy
-    status
-    pid
-    log
-    meta.json
 ```
 
 执行：
@@ -418,7 +349,9 @@ agent 调 tool 时按 `CTX_PATH` 搜索同名可执行文件：
 echo "继续" | /ctx/agent/coder
 ```
 
-agent 启动时读取自己的 `.d/` 控制文件，按 `uid/gid/label/root/cwd/mount` 建立运行环境。TTY 下无参数执行 agent 时，默认进入交互式 socket 会话。
+agent 启动时读取自己的 `.d/` 控制文件，按 `owner`、`uid/gid/groups`、
+`label`、`root/cwd/mount`、`model`、`path` 和 `policy` 建立运行环境。
+TTY 下无参数执行 agent 时，默认进入交互式 socket 会话。
 
 `agent/coder.sock` 是交互式 agent 会话入口。agent 是高层对象：它可以在 policy 允许下使用 model、tool 和 shared。
 
