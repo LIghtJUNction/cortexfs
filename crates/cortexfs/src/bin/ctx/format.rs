@@ -1,9 +1,16 @@
-fn format_message_stream_issues(issues: &[MessageStreamIssue]) -> String {
+fn format_issue_list<T>(issues: &[T], mut format_issue: impl FnMut(&mut String, &T)) -> String {
     let mut output = String::new();
     for issue in issues {
         if !output.is_empty() {
             output.push_str(", ");
         }
+        format_issue(&mut output, issue);
+    }
+    output
+}
+
+fn format_message_stream_issues(issues: &[MessageStreamIssue]) -> String {
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             MessageStreamIssue::InvalidJson(line) => write!(output, "invalid json line {line}"),
             MessageStreamIssue::MessageNotObject(line) => {
@@ -23,16 +30,11 @@ fn format_message_stream_issues(issues: &[MessageStreamIssue]) -> String {
                 write!(output, "provider native field line {line} {field}")
             }
         };
-    }
-    output
+    })
 }
 
 fn format_context_jsonl_issues(issues: &[ContextJsonlIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             ContextJsonlIssue::InvalidJson(line) => write!(output, "invalid json line {line}"),
             ContextJsonlIssue::RecordNotObject(line) => {
@@ -53,16 +55,11 @@ fn format_context_jsonl_issues(issues: &[ContextJsonlIssue]) -> String {
                 ref value,
             } => write!(output, "invalid field line {line} {field}={value}"),
         };
-    }
-    output
+    })
 }
 
 fn format_event_stream_issues(issues: &[EventStreamIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             EventStreamIssue::InvalidJson(line) => write!(output, "invalid json line {line}"),
             EventStreamIssue::EventNotObject(line) => {
@@ -93,16 +90,11 @@ fn format_event_stream_issues(issues: &[EventStreamIssue]) -> String {
                 write!(output, "invalid agent lifecycle line {line}")
             }
         };
-    }
-    output
+    })
 }
 
 fn format_context_pack_issues(issues: &[ContextPackIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match (issue.item(), issue.source(), issue.source_reason()) {
             (Some(item), Some(source), Some(reason)) => {
                 write!(
@@ -115,16 +107,11 @@ fn format_context_pack_issues(issues: &[ContextPackIssue]) -> String {
             (Some(item), None, None) => write!(output, "{} item {item}", issue.kind()),
             _ => write!(output, "{}", issue.kind()),
         };
-    }
-    output
+    })
 }
 
 fn format_session_index_issues(issues: &[SessionIndexIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             SessionIndexIssue::EmptyValue { line } => write!(output, "empty value line {line}"),
             SessionIndexIssue::MultipleValues { line } => {
@@ -134,16 +121,11 @@ fn format_session_index_issues(issues: &[SessionIndexIssue]) -> String {
                 write!(output, "invalid session name line {line} {value}")
             }
         };
-    }
-    output
+    })
 }
 
 fn format_agent_control_issues(issues: &[AgentControlIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             AgentControlIssue::EmptyValue => write!(output, "empty value"),
             AgentControlIssue::MultipleValues { line } => {
@@ -156,16 +138,11 @@ fn format_agent_control_issues(issues: &[AgentControlIssue]) -> String {
                 write!(output, "invalid value line {line} {value}")
             }
         };
-    }
-    output
+    })
 }
 
 fn format_session_control_issues(issues: &[SessionControlIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             SessionControlIssue::EmptyValue => write!(output, "empty value"),
             SessionControlIssue::MultipleValues { line } => {
@@ -177,16 +154,11 @@ fn format_session_control_issues(issues: &[SessionControlIssue]) -> String {
             SessionControlIssue::InvalidJson => write!(output, "invalid json"),
             SessionControlIssue::NotObject => write!(output, "not object"),
         };
-    }
-    output
+    })
 }
 
 fn format_object_layout_issues(issues: &[ObjectLayoutIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         output.push_str(issue.kind());
         output.push(' ');
         output.push_str(issue.path());
@@ -194,16 +166,11 @@ fn format_object_layout_issues(issues: &[ObjectLayoutIssue]) -> String {
             output.push('=');
             output.push_str(value);
         }
-    }
-    output
+    })
 }
 
 fn format_session_layout_issues(issues: &[SessionLayoutIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         output.push_str(issue.kind());
         output.push(' ');
         output.push_str(issue.path());
@@ -211,16 +178,11 @@ fn format_session_layout_issues(issues: &[SessionLayoutIssue]) -> String {
             output.push('=');
             output.push_str(value);
         }
-    }
-    output
+    })
 }
 
 fn format_shared_queue_layout_issues(issues: &[SharedQueueLayoutIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             SharedQueueLayoutIssue::MissingDirectory(ref path) => {
                 write!(output, "missing directory {path}")
@@ -229,16 +191,11 @@ fn format_shared_queue_layout_issues(issues: &[SharedQueueLayoutIssue]) -> Strin
                 write!(output, "not directory {path}")
             }
         };
-    }
-    output
+    })
 }
 
 fn format_model_capability_issues(issues: &[ModelCapabilityIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             ModelCapabilityIssue::ProviderPrivate {
                 line,
@@ -252,8 +209,7 @@ fn format_model_capability_issues(issues: &[ModelCapabilityIssue]) -> String {
                 ref capability,
             } => write!(output, "unknown capability line {line} {capability}"),
         };
-    }
-    output
+    })
 }
 
 fn format_model_driver_route_error(error: &ModelDriverRouteError) -> String {
@@ -278,11 +234,7 @@ fn format_model_driver_route_error(error: &ModelDriverRouteError) -> String {
 }
 
 fn format_tool_schema_issues(issues: &[ToolSchemaIssue]) -> String {
-    let mut output = String::new();
-    for issue in issues {
-        if !output.is_empty() {
-            output.push_str(", ");
-        }
+    format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             ToolSchemaIssue::InvalidJson => write!(output, "invalid json"),
             ToolSchemaIssue::NotObject => write!(output, "not object"),
@@ -291,6 +243,5 @@ fn format_tool_schema_issues(issues: &[ToolSchemaIssue]) -> String {
                 write!(output, "authority field {field}")
             }
         };
-    }
-    output
+    })
 }
