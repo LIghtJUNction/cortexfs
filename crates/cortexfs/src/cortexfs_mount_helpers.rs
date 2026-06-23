@@ -140,6 +140,15 @@ impl CortexFuse {
             .map(|sockets| sockets.contains(path))
     }
 
+    fn socket_child_path(&self, parent: INodeNo, name: &OsStr) -> Result<String, FuseV1Error> {
+        let name = name.to_str().ok_or(FuseV1Error::InvalidPath)?;
+        let parent_path = self.path_for_inode(parent)?;
+        let path = child_path(&parent_path, name).ok_or(FuseV1Error::InvalidPath)?;
+        is_projected_socket_path(&path)
+            .then_some(path)
+            .ok_or(FuseV1Error::InvalidPath)
+    }
+
     fn xattrs_for_path(&self, path: &str) -> Result<Vec<CortexXattr>, FuseV1Error> {
         let attr = self.projected_getattr(path)?;
         let backing_path = self.projection.root().join(path);
