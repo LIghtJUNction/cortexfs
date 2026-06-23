@@ -660,9 +660,25 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
                 && content.contains("# cortexfs.name=fs.read\n")
                 && !content.contains("#!/bin/sh")
     ));
+    let agent_metadata = projection.read_to_string("agent/coder");
+    assert!(matches!(
+        agent_metadata,
+        Ok(ref content)
+            if content.starts_with(&format!("#!{CORTEXFS_OBJECT_RUNNER}\n"))
+                && content.contains("# cortexfs.object=agent\n")
+                && content.contains("# cortexfs.name=coder\n")
+                && content.contains("# cortexfs.model=debug/echo\n")
+                && !content.contains("reference-tree agent stub")
+    ));
     let tool_attr = projection.getattr("tool/fs.read");
     assert!(matches!(
         tool_attr,
+        Ok(ref attr)
+            if attr.file_type() == FuseV1FileType::Regular && attr.mode() & 0o777 == 0o555
+    ));
+    let agent_attr = projection.getattr("agent/coder");
+    assert!(matches!(
+        agent_attr,
         Ok(ref attr)
             if attr.file_type() == FuseV1FileType::Regular && attr.mode() & 0o777 == 0o555
     ));
@@ -2672,6 +2688,8 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
         &mut socket,
         None,
         AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
@@ -2700,6 +2718,69 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
     let latest = fs::read_to_string(session_root.join("default").join("latest.md"));
     assert!(latest.is_ok());
     assert_eq!(latest.unwrap_or_default(), "hi\n");
+
+    let _ignored = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn agent_executable_socket_runtime_passes_source_root() {
+    let root = unique_test_dir("agent-executable-socket-runtime-source-root");
+    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let session_root = root
+        .join("home")
+        .join("1000")
+        .join("agent")
+        .join("coder")
+        .join("session");
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
+printf '{"type":"delta","run":"%s","text":"%s"}\n' "$CTX_RUN_ID" "$CTX_SOURCE"
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+"#,
+    );
+    let permissions = fs::metadata(&agent_executable);
+    assert!(permissions.is_ok());
+    let Ok(metadata) = permissions else { return };
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(0o755);
+    assert!(fs::set_permissions(&agent_executable, permissions).is_ok());
+
+    let pair = UnixStream::pair();
+    assert!(pair.is_ok());
+    let Ok((mut client, mut socket)) = pair else {
+        return;
+    };
+    assert!(client
+        .write_all(
+            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+        },
+    );
+    assert!(outcome.is_ok());
+    let Ok(outcome) = outcome else { return };
+    assert!(outcome.jsonl().contains(&format!(
+        r#""text":"{}""#,
+        root.to_string_lossy()
+    )));
 
     let _ignored = fs::remove_dir_all(&root);
 }
@@ -2751,6 +2832,8 @@ exit 1
         &mut socket,
         None,
         AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),

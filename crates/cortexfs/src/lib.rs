@@ -4,8 +4,7 @@
 //! before the Agent OS rewrite. This crate intentionally exposes only stable
 //! ABI names while the implementation is redesigned around Rig.
 
-use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
@@ -18,153 +17,55 @@ use nix::sys::socket::{getsockopt, sockopt};
 use serde::Deserialize;
 use serde_json::Value;
 
-/// Default `CortexFS` mount root.
-pub const CTX_ROOT: &str = "/ctx";
+mod abi_constants;
+mod abi_path;
+mod agent_control;
+mod model;
+mod mount_table;
+mod policy;
+mod session_index;
+mod stream;
+mod tool_path;
+mod tool_schema;
 
-/// Rust object runner used by executable object metadata files.
-pub const CORTEXFS_OBJECT_RUNNER: &str = "/usr/bin/cortexfs-object-runner";
-
-/// Root entries reserved by the new Agent OS ABI.
-pub const ROOT_ENTRIES: &[&str] = &["status", "bin", "model", "agent", "tool", "home", "shared"];
-
-/// Object classes exposed as executable files.
-pub const EXEC_OBJECTS: &[&str] = &["model", "agent", "tool"];
-
-/// Maximum object name length.
-pub const MAX_OBJECT_NAME_LEN: usize = 64;
-
-/// Required model control files.
-pub const MODEL_CONTROL_FILES: &[&str] =
-    &["id", "driver", "cap", "default", "session", "status", "log"];
-
-const DEBUG_ECHO_MODEL: &str = "debug/echo";
-const DEBUG_ECHO_PROVIDER: &str = "debug";
-const DEBUG_ECHO_NAME: &str = "echo";
-const DEFAULT_MODEL_ALIAS: &str = "main";
-const HELPER_MODEL_ALIAS: &str = "helper";
-const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/debug/echo";
-const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
-
-/// Stable semantic model capability words in the v1 ABI.
-pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
-    "chat",
-    "stream",
-    "session",
-    "vision",
-    "audio_input",
-    "audio_output",
-    "json_schema",
-    "tool_call_syntax",
-    "reasoning",
-    "embedding",
-    "rerank",
-];
-
-/// Provider/API-format-private capability words forbidden in the v1 ABI.
-pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
-    "openai_responses",
-    "anthropic_messages",
-    "gemini_generate_content",
-    "native_thread",
-    "native_stateful",
-    "native_stateless",
-];
-
-/// Required agent control files.
-pub const AGENT_CONTROL_FILES: &[&str] = &[
-    "owner",
-    "uid",
-    "gid",
-    "groups",
-    "label",
-    "iso",
-    "parent",
-    "life",
-    "root",
-    "cwd",
-    "env",
-    "path",
-    "mount",
-    "model",
-    "policy",
-    "status",
-    "pid",
-    "log",
-    "meta.json",
-];
-
-/// Required tool control files.
-pub const TOOL_CONTROL_FILES: &[&str] = &[
-    "name",
-    "description",
-    "schema",
-    "cap",
-    "policy",
-    "status",
-    "log",
-];
-
-/// Required durable files in a v1 agent session directory.
-pub const SESSION_REQUIRED_FILES: &[&str] = &[
-    "messages.jsonl",
-    "events.jsonl",
-    "latest.md",
-    "state",
-    "cwd",
-    "created_at",
-    "updated_at",
-    "meta.json",
-];
-
-/// Required derived/rebuildable context files for transparency.
-pub const CONTEXT_REQUIRED_FILES: &[&str] = &[
-    "budget",
-    "pack.json",
-    "pack.md",
-    "summary.md",
-    "facts.jsonl",
-    "decisions.jsonl",
-    "todo.md",
-    "refs.jsonl",
-];
-
-/// Required context subdirectories.
-pub const CONTEXT_REQUIRED_DIRS: &[&str] = &["pinned", "swap", "dedup", "child"];
-
-/// Required files in each parent-owned child result directory.
-pub const CHILD_RESULT_REQUIRED_FILES: &[&str] = &[
-    "agent",
-    "session",
-    "status",
-    "handoff.md",
-    "result.md",
-    "refs.jsonl",
-];
-
-/// Required directories in each parent-owned child result directory.
-pub const CHILD_RESULT_REQUIRED_DIRS: &[&str] = &["artifact"];
-
-/// Required directories in a shared project queue.
-pub const SHARED_QUEUE_REQUIRED_DIRS: &[&str] =
-    &["inbox", "pending", "lease", "claimed", "done", "failed"];
-
-/// Maximum v1 JSONL socket request frame size.
-pub const MAX_SOCKET_FRAME_BYTES: usize = 1024 * 1024;
-
-/// Error while resolving tool lookup through `CTX_PATH`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ToolPathError {
-    /// Tool name is not a valid v1 object name.
-    InvalidName,
-    /// Reading a lookup directory failed for a reason other than it not existing.
-    CannotReadDirectory,
-}
-
-/// Maximum payload accepted by the v1 local FUSE projection for one small write.
-pub const MAX_FUSE_V1_SMALL_WRITE_BYTES: usize = 64 * 1024;
-
-/// Stable inode id for the v1 `/ctx` root in a FUSE adapter.
-pub const FUSE_V1_ROOT_INODE: u64 = 1;
+pub use abi_constants::{
+    AGENT_CONTROL_FILES, CHILD_RESULT_REQUIRED_DIRS, CHILD_RESULT_REQUIRED_FILES,
+    CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES, CORTEXFS_OBJECT_RUNNER, CTX_ROOT, EXEC_OBJECTS,
+    FORBIDDEN_MODEL_CAPABILITIES, FUSE_V1_ROOT_INODE, MAX_FUSE_V1_SMALL_WRITE_BYTES,
+    MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES, MODEL_CONTROL_FILES, ROOT_ENTRIES,
+    SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, STABLE_MODEL_CAPABILITIES,
+    TOOL_CONTROL_FILES,
+};
+use abi_constants::{
+    DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
+    DEFAULT_MODEL_ALIAS_TARGET, HELPER_MODEL_ALIAS, SYSTEM_PROVIDER_CONFIG_DIR,
+};
+use abi_path::is_object_name_for_class;
+pub use abi_path::{
+    AbiPathKind, ObjectClass, classify_abi_path, is_model_name, is_object_name, is_root_entry,
+    parse_abi_path,
+};
+pub use agent_control::{
+    AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
+};
+pub use model::{
+    Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
+    ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
+    ModelRegistryError, inspect_model_capabilities, parse_model_driver_routes,
+};
+pub use mount_table::{MountEntry, MountError, MountMode, MountOption, MountTable};
+pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
+pub use session_index::{
+    SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,
+    inspect_session_index, update_session_index,
+};
+pub use stream::{
+    ContextJsonlIssue, ContextJsonlKind, ContextJsonlReport, EventStreamIssue, EventStreamReport,
+    MessageStreamIssue, MessageStreamReport, inspect_context_jsonl, inspect_event_stream_jsonl,
+    inspect_message_stream_jsonl,
+};
+pub use tool_path::{ToolHit, ToolPath, ToolPathError, is_executable_file};
+pub use tool_schema::{ToolSchemaIssue, ToolSchemaReport, inspect_tool_schema_json};
 
 /// File kind exposed by the v1 FUSE projection layer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -237,6 +138,13 @@ pub struct FuseV1Projection {
     provider_config_dir: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct VirtualExecObject {
+    class: ObjectClass,
+    name: String,
+    control_dir: PathBuf,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct ProviderConfig {
     base_url: String,
@@ -256,40 +164,6 @@ struct ProjectedProviderModel {
     base_url: String,
     driver: String,
     cap: String,
-}
-
-/// Policy syntax error for the fixed v0 allowlist.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PolicyError {
-    /// Rule must use the `allow` keyword.
-    ExpectedAllow,
-    /// Rule must have exactly four fields.
-    WrongFieldCount,
-    /// Object must use `class:name` form.
-    InvalidObject,
-    /// Subject type or object name is invalid.
-    InvalidName,
-    /// Object class is not in the fixed v1 set.
-    UnknownClass,
-    /// Permission is not valid for the object class.
-    UnknownPermission,
-}
-
-/// Mount file syntax error for the fixed v0 mount table.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MountError {
-    /// Mount line must have exactly four tab-separated fields.
-    WrongFieldCount,
-    /// Source and target must be absolute paths without tab or newline.
-    InvalidPath,
-    /// Mode must be `ro` or `rw`.
-    InvalidMode,
-    /// Option set must be one of the fixed v0 words.
-    InvalidOption,
-    /// Options other than `-` must not repeat.
-    DuplicateOption,
-    /// `bind` and `rbind` are mutually exclusive.
-    ConflictingBindOption,
 }
 
 /// Error while reading Unix socket peer credentials.
@@ -618,627 +492,6 @@ impl ContextPackBuildError {
             Self::MissingSession => "ENOENT",
             Self::CannotRead | Self::CannotRecord => "EIO",
         }
-    }
-}
-
-/// Canonical JSONL event stream validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EventStreamIssue {
-    /// Line is not valid JSON.
-    InvalidJson(usize),
-    /// Event line is not a JSON object.
-    EventNotObject(usize),
-    /// Event does not have a `type` string.
-    MissingType(usize),
-    /// Event `type` is not in the stable v1 event set.
-    UnknownType { line: usize, event_type: String },
-    /// Event type requires a string `run` field.
-    MissingRun(usize),
-    /// Event contains a provider-native state field.
-    ProviderNativeField { line: usize, field: String },
-    /// Error event does not use a stable errno `code`.
-    InvalidErrorCode(usize),
-    /// Done event has an invalid `status`.
-    InvalidDoneStatus(usize),
-    /// Usage event lacks numeric token counts.
-    InvalidUsage(usize),
-    /// Tool call event lacks stable tool-call syntax.
-    InvalidToolCall(usize),
-    /// Agent lifecycle event lacks stable child-agent syntax.
-    InvalidAgentLifecycle(usize),
-}
-
-/// Result of inspecting a canonical JSONL event stream.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EventStreamReport {
-    issues: Vec<EventStreamIssue>,
-}
-
-/// Canonical durable message history validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MessageStreamIssue {
-    /// Line is not valid JSON.
-    InvalidJson(usize),
-    /// Message line is not a JSON object.
-    MessageNotObject(usize),
-    /// Message does not have a stable `role` string.
-    MissingRole(usize),
-    /// Message `role` is not in the stable v1 role set.
-    InvalidRole { line: usize, role: String },
-    /// Message does not have `content`.
-    MissingContent(usize),
-    /// Message `content` is neither a string nor a canonical content-part array.
-    InvalidContent(usize),
-    /// Message contains a provider-native state field.
-    ProviderNativeField { line: usize, field: String },
-}
-
-/// Result of inspecting `messages.jsonl`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MessageStreamReport {
-    issues: Vec<MessageStreamIssue>,
-}
-
-/// Stable context JSONL file kind.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ContextJsonlKind {
-    /// `context/facts.jsonl`: stable fact records.
-    Facts,
-    /// `context/decisions.jsonl`: accepted decision records.
-    Decisions,
-    /// `context/refs.jsonl`: file, artifact, tool output, and swap refs.
-    Refs,
-    /// `context/swap/index.jsonl`: swapped-out prompt working-set refs.
-    SwapIndex,
-    /// `context/dedup/index.jsonl`: content-addressed dedup refs.
-    DedupIndex,
-}
-
-/// Context JSONL validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ContextJsonlIssue {
-    /// Line is not valid JSON.
-    InvalidJson(usize),
-    /// JSONL record is not a JSON object.
-    RecordNotObject(usize),
-    /// Required string field is missing or not a string.
-    MissingStringField { line: usize, field: String },
-    /// Required number field is missing or not an unsigned integer.
-    MissingNumberField { line: usize, field: String },
-    /// Required string-array field is missing or malformed.
-    MissingStringArrayField { line: usize, field: String },
-    /// Field value is outside the stable v1 syntax for this file.
-    InvalidField {
-        /// One-based JSONL line number.
-        line: usize,
-        /// Field name.
-        field: String,
-        /// Rejected value.
-        value: String,
-    },
-}
-
-/// Result of inspecting a context JSONL file.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ContextJsonlReport {
-    issues: Vec<ContextJsonlIssue>,
-}
-
-/// Tool schema control-file validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ToolSchemaIssue {
-    /// `tool/<name>.d/schema` is not valid JSON.
-    InvalidJson,
-    /// Schema is valid JSON but not an object.
-    NotObject,
-    /// Schema is an object but not a valid JSON Schema document.
-    InvalidSchema,
-    /// Top-level field tries to describe authority instead of input/output.
-    AuthorityField(String),
-}
-
-/// Result of inspecting `tool/<name>.d/schema`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ToolSchemaReport {
-    issues: Vec<ToolSchemaIssue>,
-}
-
-/// Model capability control-file validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ModelCapabilityIssue {
-    /// Capability word is provider/API-format private.
-    ProviderPrivate {
-        /// One-based line number in `cap`.
-        line: usize,
-        /// Capability word from the file.
-        capability: String,
-    },
-    /// Capability word is not in the stable v1 semantic capability set.
-    Unknown {
-        /// One-based line number in `cap`.
-        line: usize,
-        /// Capability word from the file.
-        capability: String,
-    },
-}
-
-/// Result of inspecting `model/<provider>/<model>.d/cap`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ModelCapabilityReport {
-    issues: Vec<ModelCapabilityIssue>,
-}
-
-/// Queryable model capability flag.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Capability {
-    /// Model can consume image input.
-    Vision,
-    /// Model can emit tool-call syntax.
-    Tools,
-    /// Model supports JSON-mode or structured JSON output.
-    JsonMode,
-    /// Model can consume image input.
-    ImageInput,
-    /// Model can produce image output.
-    ImageOutput,
-    /// Model can consume audio input.
-    AudioInput,
-    /// Model can produce audio output.
-    AudioOutput,
-}
-
-/// Provider-neutral model capability declaration.
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "capability files expose independent stable boolean flags"
-)]
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ModelCapabilities {
-    pub context_length: usize,
-    pub vision: bool,
-    pub tools: bool,
-    pub json_mode: bool,
-    pub image_input: bool,
-    pub image_output: bool,
-    pub audio_input: bool,
-    pub audio_output: bool,
-}
-
-/// Provider-neutral model capability lookup table.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ModelCapabilityRegistry {
-    models: HashMap<String, ModelCapabilities>,
-}
-
-/// Error while reading or writing model capability registry data.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ModelRegistryError {
-    /// Registry JSON could not be parsed.
-    InvalidJson,
-    /// Registry JSON has an unexpected shape.
-    InvalidShape,
-    /// Registry cache could not be read.
-    CannotRead,
-    /// Registry cache could not be written.
-    CannotWrite,
-}
-
-/// Model driver call site used to select a driver route.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum ModelDriverUseCase {
-    /// Fallback route when no use-case-specific route is available.
-    Default,
-    /// One-shot execution through `model/<provider>/<model>`.
-    Exec,
-    /// Stateful model socket traffic through `model/<provider>/<model>.sock`.
-    Socket,
-    /// Agent-owned model calls.
-    Agent,
-}
-
-/// Error while parsing `model/<provider>/<model>.d/driver`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ModelDriverRouteError {
-    /// The route table has no usable driver declarations.
-    Empty,
-    /// A route-table line is missing `=`.
-    MissingEquals { line: usize },
-    /// A route-table key is not one of default, exec, socket, or agent.
-    UnknownUseCase { line: usize, value: String },
-    /// A route-table key appears more than once.
-    DuplicateUseCase { line: usize, value: String },
-    /// A driver list is empty or has an empty comma element.
-    EmptyDriver { line: usize },
-    /// A driver name is not a valid stable component.
-    InvalidDriverName { line: usize, value: String },
-}
-
-/// Parsed `driver` control-file route table.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ModelDriverRoutingTable {
-    routes: HashMap<ModelDriverUseCase, Vec<String>>,
-}
-
-/// Stable session index file kind.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SessionIndexKind {
-    /// `session/index/list`: one session name per line.
-    List,
-    /// `session/index/current`: single current session name.
-    Current,
-    /// `session/index/by-cwd/<hash>`: single session name for a cwd hash.
-    ByCwd,
-}
-
-/// Session index validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SessionIndexIssue {
-    /// A required session name value is empty.
-    EmptyValue { line: usize },
-    /// A single-value index file contains more than one line.
-    MultipleValues { line: usize },
-    /// Session name does not use the stable object-name syntax.
-    InvalidSessionName { line: usize, value: String },
-}
-
-/// Result of inspecting a session index file.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SessionIndexReport {
-    issues: Vec<SessionIndexIssue>,
-}
-
-/// Durable session index update error.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SessionIndexUpdateError {
-    /// Session name does not use the stable object-name syntax.
-    InvalidSessionName,
-    /// Optional `by-cwd` key does not use the stable object-name syntax.
-    InvalidByCwdKey,
-    /// The target durable session directory is missing.
-    MissingSession,
-    /// The reserved `session/index` directory or required files are missing.
-    MissingIndex,
-    /// Existing index files are malformed.
-    InvalidIndex,
-    /// Index files could not be read or atomically rewritten.
-    CannotRecord,
-}
-
-impl SessionIndexUpdateError {
-    /// Returns a stable errno name for this update failure.
-    #[must_use]
-    pub const fn errno(self) -> &'static str {
-        match self {
-            Self::InvalidSessionName | Self::InvalidByCwdKey | Self::InvalidIndex => "EINVAL",
-            Self::MissingSession | Self::MissingIndex => "ENOENT",
-            Self::CannotRecord => "EIO",
-        }
-    }
-}
-
-/// Stable agent control file kind with fixed v1 value syntax.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AgentControlKind {
-    /// `agent/<name>.d/owner`: owning Linux uid.
-    Owner,
-    /// `agent/<name>.d/uid`: runtime Linux uid.
-    Uid,
-    /// `agent/<name>.d/gid`: runtime Linux gid.
-    Gid,
-    /// `agent/<name>.d/groups`: supplementary groups, one gid per line.
-    Groups,
-    /// `agent/<name>.d/iso`: isolation profile.
-    Iso,
-    /// `agent/<name>.d/parent`: parent agent/session/run reference.
-    Parent,
-    /// `agent/<name>.d/life`: lifecycle ownership.
-    Life,
-    /// `agent/<name>.d/status`: process lifecycle state.
-    Status,
-    /// `agent/<name>.d/pid`: runtime process id, when running.
-    Pid,
-}
-
-impl AgentControlKind {
-    /// Parses an agent control file name with fixed v1 syntax.
-    #[must_use]
-    pub fn parse(file_name: &str) -> Option<Self> {
-        match file_name {
-            "owner" => Some(Self::Owner),
-            "uid" => Some(Self::Uid),
-            "gid" => Some(Self::Gid),
-            "groups" => Some(Self::Groups),
-            "iso" => Some(Self::Iso),
-            "parent" => Some(Self::Parent),
-            "life" => Some(Self::Life),
-            "status" => Some(Self::Status),
-            "pid" => Some(Self::Pid),
-            _ => None,
-        }
-    }
-}
-
-/// Agent control-file validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AgentControlIssue {
-    /// A required single value is empty.
-    EmptyValue,
-    /// A single-value control file contains more than one line.
-    MultipleValues { line: usize },
-    /// Numeric uid/gid/pid value is malformed.
-    InvalidNumber { line: usize, value: String },
-    /// Fixed vocabulary or parent reference value is malformed.
-    InvalidValue { line: usize, value: String },
-}
-
-/// Result of inspecting a fixed-format agent control file.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AgentControlReport {
-    issues: Vec<AgentControlIssue>,
-}
-
-impl AgentControlReport {
-    /// Creates a report with collected agent control issues.
-    #[must_use]
-    pub const fn new(issues: Vec<AgentControlIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the control file satisfies the fixed v1 syntax.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected agent control issues.
-    #[must_use]
-    pub fn issues(&self) -> &[AgentControlIssue] {
-        &self.issues
-    }
-}
-
-impl SessionIndexReport {
-    /// Creates a report with collected session index issues.
-    #[must_use]
-    pub const fn new(issues: Vec<SessionIndexIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the index file satisfies the fixed v1 format.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected session index issues.
-    #[must_use]
-    pub fn issues(&self) -> &[SessionIndexIssue] {
-        &self.issues
-    }
-}
-
-impl ModelCapabilityReport {
-    /// Creates a report with collected model capability issues.
-    #[must_use]
-    pub const fn new(issues: Vec<ModelCapabilityIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when all capabilities use stable v1 semantic words.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected capability issues.
-    #[must_use]
-    pub fn issues(&self) -> &[ModelCapabilityIssue] {
-        &self.issues
-    }
-}
-
-impl ModelCapabilities {
-    /// Returns whether this declaration supports a capability.
-    #[must_use]
-    pub const fn supports(&self, capability: Capability) -> bool {
-        match capability {
-            Capability::Vision => self.vision,
-            Capability::Tools => self.tools,
-            Capability::JsonMode => self.json_mode,
-            Capability::ImageInput => self.image_input,
-            Capability::ImageOutput => self.image_output,
-            Capability::AudioInput => self.audio_input,
-            Capability::AudioOutput => self.audio_output,
-        }
-    }
-}
-
-impl ModelCapabilityRegistry {
-    /// Creates an empty registry.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Inserts or replaces one model capability declaration.
-    pub fn insert(&mut self, model: String, capabilities: ModelCapabilities) {
-        self.models.insert(model, capabilities);
-    }
-
-    /// Returns one model capability declaration.
-    #[must_use]
-    pub fn get(&self, model: &str) -> Option<&ModelCapabilities> {
-        self.models.get(model)
-    }
-
-    /// Returns whether a model supports a capability.
-    #[must_use]
-    pub fn supports(&self, model: &str, capability: Capability) -> bool {
-        self.get(model)
-            .is_some_and(|capabilities| capabilities.supports(capability))
-    }
-
-    /// Returns the number of known models.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.models.len()
-    }
-
-    /// Returns whether the registry is empty.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.models.is_empty()
-    }
-}
-
-impl ModelDriverUseCase {
-    /// Parses one route-table key.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "default" => Some(Self::Default),
-            "exec" => Some(Self::Exec),
-            "socket" => Some(Self::Socket),
-            "agent" => Some(Self::Agent),
-            _ => None,
-        }
-    }
-
-    /// Returns the route-table key.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Exec => "exec",
-            Self::Socket => "socket",
-            Self::Agent => "agent",
-        }
-    }
-}
-
-impl ModelDriverRoutingTable {
-    /// Creates an empty driver routing table.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Inserts one ordered route list.
-    pub fn insert(&mut self, use_case: ModelDriverUseCase, drivers: Vec<String>) {
-        self.routes.insert(use_case, drivers);
-    }
-
-    /// Returns the exact route list for one use case.
-    #[must_use]
-    pub fn get(&self, use_case: ModelDriverUseCase) -> Option<&[String]> {
-        self.routes.get(&use_case).map(Vec::as_slice)
-    }
-
-    /// Returns the route list for a use case, falling back to `default`.
-    #[must_use]
-    pub fn drivers_for(&self, use_case: ModelDriverUseCase) -> Option<&[String]> {
-        self.get(use_case)
-            .or_else(|| self.get(ModelDriverUseCase::Default))
-    }
-
-    /// Returns the first selected driver for a use case.
-    #[must_use]
-    pub fn primary_driver_for(&self, use_case: ModelDriverUseCase) -> Option<&str> {
-        self.drivers_for(use_case)
-            .and_then(|drivers| drivers.first())
-            .map(String::as_str)
-    }
-
-    /// Returns whether no route is present.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.routes.is_empty()
-    }
-
-    fn route_value(&self, use_case: ModelDriverUseCase) -> String {
-        self.get(use_case)
-            .map(|drivers| drivers.join(","))
-            .unwrap_or_default()
-    }
-}
-
-impl EventStreamReport {
-    /// Creates a report with collected event stream issues.
-    #[must_use]
-    pub const fn new(issues: Vec<EventStreamIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when all events are stable v1 event frames.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected event stream issues.
-    #[must_use]
-    pub fn issues(&self) -> &[EventStreamIssue] {
-        &self.issues
-    }
-}
-
-impl MessageStreamReport {
-    /// Creates a report with collected message stream issues.
-    #[must_use]
-    pub const fn new(issues: Vec<MessageStreamIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when all messages use stable v1 message frames.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected message stream issues.
-    #[must_use]
-    pub fn issues(&self) -> &[MessageStreamIssue] {
-        &self.issues
-    }
-}
-
-impl ContextJsonlReport {
-    /// Creates a report with collected context JSONL issues.
-    #[must_use]
-    pub const fn new(issues: Vec<ContextJsonlIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when all records use the stable v1 context shape.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected context JSONL issues.
-    #[must_use]
-    pub fn issues(&self) -> &[ContextJsonlIssue] {
-        &self.issues
-    }
-}
-
-impl ToolSchemaReport {
-    /// Creates a report with collected tool schema issues.
-    #[must_use]
-    pub const fn new(issues: Vec<ToolSchemaIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the schema is a non-authority JSON object.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected tool schema issues.
-    #[must_use]
-    pub fn issues(&self) -> &[ToolSchemaIssue] {
-        &self.issues
     }
 }
 
@@ -1886,6 +1139,10 @@ pub struct SocketPeerPolicy {
 /// Runtime inputs for dispatching socket `send` frames to an agent executable.
 #[derive(Clone, Copy, Debug)]
 pub struct AgentExecutableSocketRuntime<'a> {
+    /// FUSE ABI root used by executable agents for object calls.
+    pub ctx_root: &'a Path,
+    /// Backing source root used for object control files.
+    pub source_root: &'a Path,
     /// Durable session root for the selected agent.
     pub session_root: &'a Path,
     /// Default chroot cwd when a request does not provide one.
@@ -2899,24 +2156,11 @@ impl FuseV1Projection {
     /// Projects `getattr`.
     pub fn getattr(&self, abi_path: &str) -> Result<FuseV1Attr, FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(attr) = self.virtual_model_attr(&normalized)? {
-            return Ok(attr);
-        }
-        if let Some(attr) = self.virtual_tool_attr(&normalized)? {
+        if let Some(attr) = self.virtual_object_attr(&normalized)? {
             return Ok(attr);
         }
         let path = self.resolve(&normalized)?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
-        if let Some(content) = self.virtual_exec_content(&normalized)? {
-            return Ok(FuseV1Attr::with_owner(
-                normalized,
-                fuse_file_type(metadata.file_type()),
-                u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
-                (metadata.permissions().mode() & !0o222) | 0o555,
-                metadata.uid(),
-                metadata.gid(),
-            ));
-        }
         Ok(FuseV1Attr::with_owner(
             normalized,
             fuse_file_type(metadata.file_type()),
@@ -2991,13 +2235,7 @@ impl FuseV1Projection {
     /// Projects a small text `read`.
     pub fn read_to_string(&self, abi_path: &str) -> Result<String, FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(content) = self.virtual_model_content(&normalized)? {
-            return Ok(content);
-        }
-        if let Some(content) = self.virtual_tool_content(&normalized)? {
-            return Ok(content);
-        }
-        if let Some(content) = self.virtual_exec_content(&normalized)? {
+        if let Some(content) = self.virtual_object_content(&normalized)? {
             return Ok(content);
         }
         let path = self.resolve(&normalized)?;
@@ -3021,13 +2259,7 @@ impl FuseV1Projection {
         size: usize,
     ) -> Result<Vec<u8>, FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(content) = self.virtual_model_content(&normalized)? {
-            return read_bytes_at(content.as_bytes(), offset, size);
-        }
-        if let Some(content) = self.virtual_tool_content(&normalized)? {
-            return read_bytes_at(content.as_bytes(), offset, size);
-        }
-        if let Some(content) = self.virtual_exec_content(&normalized)? {
+        if let Some(content) = self.virtual_object_content(&normalized)? {
             return read_bytes_at(content.as_bytes(), offset, size);
         }
         let path = self.resolve(&normalized)?;
@@ -3059,43 +2291,20 @@ impl FuseV1Projection {
         })
     }
 
-    fn virtual_exec_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
-        let Some(model_name) = model_exec_name(abi_path) else {
-            return Ok(None);
-        };
-        let exec_path = self.root.join("model").join(model_name);
-        if !exec_path.exists() {
-            return Ok(None);
+    fn virtual_object_attr(&self, abi_path: &str) -> Result<Option<FuseV1Attr>, FuseV1Error> {
+        if let Some((file_type, size, mode)) = self.virtual_model_entry(abi_path)? {
+            return Ok(Some(FuseV1Attr::with_owner(
+                abi_path.to_owned(),
+                file_type,
+                size,
+                mode,
+                0,
+                0,
+            )));
         }
-        Ok(Some(model_exec_metadata(
-            model_name,
-            &self.root.join("model").join(format!("{model_name}.d")),
-        )?))
-    }
-
-    fn virtual_model_attr(&self, abi_path: &str) -> Result<Option<FuseV1Attr>, FuseV1Error> {
-        let Some((file_type, size, mode)) = self.virtual_model_entry(abi_path)? else {
+        let Some(content) = self.virtual_object_content(abi_path)? else {
             return Ok(None);
         };
-        Ok(Some(FuseV1Attr::with_owner(
-            abi_path.to_owned(),
-            file_type,
-            size,
-            mode,
-            0,
-            0,
-        )))
-    }
-
-    fn virtual_tool_attr(&self, abi_path: &str) -> Result<Option<FuseV1Attr>, FuseV1Error> {
-        let Some(tool_name) = tool_exec_name(abi_path) else {
-            return Ok(None);
-        };
-        let control_dir = self.root.join("tool").join(format!("{tool_name}.d"));
-        if !control_dir.is_dir() {
-            return Ok(None);
-        }
-        let content = tool_exec_metadata(tool_name, &control_dir)?;
         Ok(Some(FuseV1Attr::with_owner(
             abi_path.to_owned(),
             FuseV1FileType::Regular,
@@ -3190,6 +2399,16 @@ impl FuseV1Projection {
         Ok(Some(entries))
     }
 
+    fn virtual_object_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+        if let Some(content) = self.virtual_model_content(abi_path)? {
+            return Ok(Some(content));
+        }
+        let Some(object) = self.virtual_exec_object(abi_path) else {
+            return Ok(None);
+        };
+        object_exec_metadata(object.class, &object.name, &object.control_dir).map(Some)
+    }
+
     fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
         if abi_path == "model/debug/echo" {
             return Ok(Some(debug_echo_model_metadata()));
@@ -3209,15 +2428,18 @@ impl FuseV1Projection {
         Ok(Some(provider_model_metadata(&model)))
     }
 
-    fn virtual_tool_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
-        let Some(tool_name) = tool_exec_name(abi_path) else {
-            return Ok(None);
-        };
-        let control_dir = self.root.join("tool").join(format!("{tool_name}.d"));
+    fn virtual_exec_object(&self, abi_path: &str) -> Option<VirtualExecObject> {
+        let (class, name) = parse_abi_path(abi_path).executable_object()?;
+        let name = name.into_owned();
+        let control_dir = self.root.join(class.as_str()).join(format!("{name}.d"));
         if !control_dir.is_dir() {
-            return Ok(None);
+            return None;
         }
-        Ok(Some(tool_exec_metadata(tool_name, &control_dir)?))
+        Some(VirtualExecObject {
+            class,
+            name,
+            control_dir,
+        })
     }
 
     /// Projects a same-directory atomic write for v1 control files.
@@ -4307,14 +3529,7 @@ fn handle_agent_executable_socket_request_frame_streaming(
     )?;
     write_socket_runtime_response(stream, &recorder_response)?;
 
-    let agent_frames = run_agent_executable_streaming(
-        stream,
-        runtime.agent_executable,
-        runtime.agent_name,
-        id,
-        session,
-        input,
-    )?;
+    let agent_frames = run_agent_executable_streaming(stream, runtime, id, session, input)?;
     if scope != SocketSessionScope::Temp
         && let Some(text) = assistant_text_from_event_frames(&agent_frames)
     {
@@ -4330,15 +3545,16 @@ fn handle_agent_executable_socket_request_frame_streaming(
 
 fn run_agent_executable_streaming(
     stream: &mut UnixStream,
-    agent_executable: &Path,
-    agent_name: &str,
+    runtime: AgentExecutableSocketRuntime<'_>,
     run_id: &str,
     session: &str,
     input: &str,
 ) -> Result<Vec<String>, SocketRuntimeError> {
-    let mut child = Command::new(agent_executable)
+    let mut child = Command::new(runtime.agent_executable)
         .arg(input)
-        .env("CTX_AGENT", agent_name)
+        .env("CTX_AGENT", runtime.agent_name)
+        .env("CTX_ROOT", runtime.ctx_root)
+        .env("CTX_SOURCE", runtime.source_root)
         .env("CTX_RUN_ID", run_id)
         .env("CTX_SESSION", session)
         .stdout(Stdio::piped())
@@ -5601,582 +4817,6 @@ impl SharedQueueClaim {
     }
 }
 
-/// Fixed mount access mode.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MountMode {
-    /// Read-only mount.
-    ReadOnly,
-    /// Read-write mount.
-    ReadWrite,
-}
-
-impl MountMode {
-    /// Parses `ro` or `rw`.
-    pub fn parse(value: &str) -> Result<Self, MountError> {
-        match value {
-            "ro" => Ok(Self::ReadOnly),
-            "rw" => Ok(Self::ReadWrite),
-            _ => Err(MountError::InvalidMode),
-        }
-    }
-}
-
-/// Fixed v0 mount options.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MountOption {
-    /// Bind mount one path.
-    Bind,
-    /// Recursive bind mount.
-    RecursiveBind,
-    /// Disable set-user-ID and set-group-ID behavior.
-    NoSuid,
-    /// Do not interpret character or block devices.
-    NoDev,
-    /// Do not execute files.
-    NoExec,
-}
-
-impl MountOption {
-    /// Parses one fixed v0 mount option.
-    pub fn parse(value: &str) -> Result<Self, MountError> {
-        match value {
-            "bind" => Ok(Self::Bind),
-            "rbind" => Ok(Self::RecursiveBind),
-            "nosuid" => Ok(Self::NoSuid),
-            "nodev" => Ok(Self::NoDev),
-            "noexec" => Ok(Self::NoExec),
-            _ => Err(MountError::InvalidOption),
-        }
-    }
-}
-
-/// One v0 mount table entry.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MountEntry {
-    source: String,
-    target: String,
-    mode: MountMode,
-    options: Vec<MountOption>,
-}
-
-/// One executable tool found through `CTX_PATH`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolHit {
-    path: PathBuf,
-    control_dir: PathBuf,
-}
-
-impl ToolHit {
-    /// Creates a tool lookup hit and derives the matching `.d/` control dir.
-    #[must_use]
-    pub fn new(path: PathBuf) -> Self {
-        let control_dir = sibling_control_dir(&path);
-        Self { path, control_dir }
-    }
-
-    /// Returns the executable tool path.
-    #[must_use]
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Returns the matching `.d/` control directory for this exact executable.
-    #[must_use]
-    pub fn control_dir(&self) -> &Path {
-        &self.control_dir
-    }
-}
-
-/// Agent/tool search path for executable capability endpoints.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ToolPath {
-    dirs: Vec<PathBuf>,
-}
-
-impl ToolPath {
-    /// Builds a `CTX_PATH` from already split directories.
-    #[must_use]
-    pub fn new(dirs: impl IntoIterator<Item = PathBuf>) -> Self {
-        Self {
-            dirs: dirs.into_iter().collect(),
-        }
-    }
-
-    /// Parses the Unix `CTX_PATH` form. Empty components are ignored so the
-    /// current working directory is never implicitly a tool directory.
-    #[must_use]
-    pub fn parse(value: &str) -> Self {
-        Self::new(
-            value
-                .split(':')
-                .filter(|component| !component.is_empty())
-                .map(PathBuf::from),
-        )
-    }
-
-    /// Returns the v1 default path: global tools first, then user tools.
-    #[must_use]
-    pub fn default(root: &Path, home: &Path) -> Self {
-        Self::new([root.join("tool"), home.join("tool")])
-    }
-
-    /// Returns search directories in left-to-right lookup order.
-    #[must_use]
-    pub fn dirs(&self) -> &[PathBuf] {
-        &self.dirs
-    }
-
-    /// Finds the first executable file matching `name`.
-    pub fn find(&self, name: &str) -> Result<Option<ToolHit>, ToolPathError> {
-        if !is_object_name(name) {
-            return Err(ToolPathError::InvalidName);
-        }
-
-        for dir in &self.dirs {
-            let candidate = dir.join(name);
-            if is_executable_file(&candidate) {
-                return Ok(Some(ToolHit::new(candidate)));
-            }
-        }
-
-        Ok(None)
-    }
-
-    /// Lists executable tool hits in lookup order. Non-executable files,
-    /// sockets, and control directories are not hits.
-    pub fn list(&self) -> Result<Vec<ToolHit>, ToolPathError> {
-        let mut hits = Vec::new();
-        for dir in &self.dirs {
-            append_tool_hits(dir, &mut hits)?;
-        }
-        Ok(hits)
-    }
-}
-
-fn append_tool_hits(dir: &Path, hits: &mut Vec<ToolHit>) -> Result<(), ToolPathError> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(_error) => return Err(ToolPathError::CannotReadDirectory),
-    };
-
-    let mut local = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|_error| ToolPathError::CannotReadDirectory)?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if is_object_name(&name) {
-            let path = entry.path();
-            if is_executable_file(&path) {
-                local.push(ToolHit::new(path));
-            }
-        }
-    }
-    local.sort_by(|left, right| left.path.cmp(&right.path));
-    hits.extend(local);
-    Ok(())
-}
-
-fn sibling_control_dir(path: &Path) -> PathBuf {
-    let mut control = path.as_os_str().to_owned();
-    control.push(".d");
-    PathBuf::from(control)
-}
-
-/// Returns whether the path is an executable regular file.
-#[must_use]
-pub fn is_executable_file(path: &Path) -> bool {
-    fs::metadata(path)
-        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-}
-
-/// Inspects a `model/<provider>/<model>.d/cap` file body for stable v1 capability words.
-#[must_use]
-pub fn inspect_model_capabilities(content: &str) -> ModelCapabilityReport {
-    let mut issues = Vec::new();
-    for (index, raw_line) in content.lines().enumerate() {
-        let line = index + 1;
-        let capability = raw_line.trim();
-        if capability.is_empty() {
-            continue;
-        }
-        if FORBIDDEN_MODEL_CAPABILITIES.contains(&capability) {
-            issues.push(ModelCapabilityIssue::ProviderPrivate {
-                line,
-                capability: capability.to_owned(),
-            });
-        } else if !STABLE_MODEL_CAPABILITIES.contains(&capability) {
-            issues.push(ModelCapabilityIssue::Unknown {
-                line,
-                capability: capability.to_owned(),
-            });
-        }
-    }
-    ModelCapabilityReport::new(issues)
-}
-
-/// Parses `model/<provider>/<model>.d/driver`.
-///
-/// A legacy single-line value such as `debug` is treated as `default=debug`.
-/// Route-table form supports `default`, `exec`, `socket`, and `agent` keys with
-/// comma-separated drivers in priority order.
-pub fn parse_model_driver_routes(
-    content: &str,
-) -> Result<ModelDriverRoutingTable, ModelDriverRouteError> {
-    let significant = content
-        .lines()
-        .enumerate()
-        .filter_map(|(index, line)| {
-            let value = line.trim();
-            (!value.is_empty() && !value.starts_with('#')).then_some((index + 1, value))
-        })
-        .collect::<Vec<_>>();
-
-    if significant.is_empty() {
-        return Err(ModelDriverRouteError::Empty);
-    }
-
-    if significant.len() == 1 {
-        let Some((line, driver)) = significant.first().copied() else {
-            return Err(ModelDriverRouteError::Empty);
-        };
-        if !driver.contains('=') {
-            return parse_driver_list(line, driver).map(|drivers| {
-                let mut table = ModelDriverRoutingTable::new();
-                table.insert(ModelDriverUseCase::Default, drivers);
-                table
-            });
-        }
-    }
-
-    let mut table = ModelDriverRoutingTable::new();
-    for (line, route) in significant {
-        let Some((raw_key, raw_drivers)) = route.split_once('=') else {
-            return Err(ModelDriverRouteError::MissingEquals { line });
-        };
-        let key = raw_key.trim();
-        let Some(use_case) = ModelDriverUseCase::parse(key) else {
-            return Err(ModelDriverRouteError::UnknownUseCase {
-                line,
-                value: key.to_owned(),
-            });
-        };
-        if table.get(use_case).is_some() {
-            return Err(ModelDriverRouteError::DuplicateUseCase {
-                line,
-                value: key.to_owned(),
-            });
-        }
-        table.insert(use_case, parse_driver_list(line, raw_drivers)?);
-    }
-
-    if table.is_empty() {
-        Err(ModelDriverRouteError::Empty)
-    } else {
-        Ok(table)
-    }
-}
-
-fn parse_driver_list(line: usize, value: &str) -> Result<Vec<String>, ModelDriverRouteError> {
-    let mut drivers = Vec::new();
-    for raw_driver in value.split(',') {
-        let driver = raw_driver.trim();
-        if driver.is_empty() {
-            return Err(ModelDriverRouteError::EmptyDriver { line });
-        }
-        if !is_object_name(driver) {
-            return Err(ModelDriverRouteError::InvalidDriverName {
-                line,
-                value: driver.to_owned(),
-            });
-        }
-        drivers.push(driver.to_owned());
-    }
-    if drivers.is_empty() {
-        Err(ModelDriverRouteError::EmptyDriver { line })
-    } else {
-        Ok(drivers)
-    }
-}
-
-/// Inspects a `tool/<name>.d/schema` file body.
-#[must_use]
-pub fn inspect_tool_schema_json(content: &str) -> ToolSchemaReport {
-    let Ok(value) = serde_json::from_str::<Value>(content) else {
-        return ToolSchemaReport::new(vec![ToolSchemaIssue::InvalidJson]);
-    };
-    let Some(object) = value.as_object() else {
-        return ToolSchemaReport::new(vec![ToolSchemaIssue::NotObject]);
-    };
-
-    let mut issues = Vec::new();
-    if !jsonschema::meta::is_valid(&value) {
-        issues.push(ToolSchemaIssue::InvalidSchema);
-    }
-    issues.extend(
-        object
-            .keys()
-            .filter(|field| is_tool_schema_authority_field(field))
-            .map(|field| ToolSchemaIssue::AuthorityField(field.clone())),
-    );
-    ToolSchemaReport::new(issues)
-}
-
-fn is_tool_schema_authority_field(field: &str) -> bool {
-    matches!(
-        field,
-        "policy"
-            | "allow"
-            | "deny"
-            | "authority"
-            | "grant"
-            | "grants"
-            | "permissions"
-            | "capability_grants"
-            | "mount"
-            | "uid"
-            | "gid"
-            | "groups"
-            | "network"
-    )
-}
-
-/// Inspects a fixed-format v1 session index file.
-#[must_use]
-pub fn inspect_session_index(kind: SessionIndexKind, content: &str) -> SessionIndexReport {
-    match kind {
-        SessionIndexKind::List => inspect_session_index_list(content),
-        SessionIndexKind::Current | SessionIndexKind::ByCwd => {
-            inspect_single_session_index_value(content)
-        }
-    }
-}
-
-fn inspect_session_index_list(content: &str) -> SessionIndexReport {
-    let mut issues = Vec::new();
-    for (index, raw_line) in content.lines().enumerate() {
-        inspect_session_index_name(index + 1, raw_line, &mut issues);
-    }
-    SessionIndexReport::new(issues)
-}
-
-fn inspect_single_session_index_value(content: &str) -> SessionIndexReport {
-    let mut issues = Vec::new();
-    let lines = content.lines().collect::<Vec<_>>();
-    if let Some(first) = lines.first() {
-        inspect_session_index_name(1, first, &mut issues);
-        if lines.len() > 1 {
-            issues.push(SessionIndexIssue::MultipleValues { line: 2 });
-        }
-    } else {
-        issues.push(SessionIndexIssue::EmptyValue { line: 1 });
-    }
-    SessionIndexReport::new(issues)
-}
-
-fn inspect_session_index_name(line: usize, raw_line: &str, issues: &mut Vec<SessionIndexIssue>) {
-    let value = raw_line.trim();
-    if value.is_empty() {
-        issues.push(SessionIndexIssue::EmptyValue { line });
-    } else if value != raw_line || !is_object_name(value) {
-        issues.push(SessionIndexIssue::InvalidSessionName {
-            line,
-            value: value.to_owned(),
-        });
-    }
-}
-
-/// Updates the reserved durable session index files for a selected session.
-///
-/// This rewrites `index/current`, de-duplicates and prepends the session in
-/// `index/list`, and optionally writes `index/by-cwd/<key>`. The caller owns
-/// deriving a stable `by-cwd` key from a cwd; this function only preserves the
-/// fixed index file formats.
-pub fn update_session_index(
-    session_root: &Path,
-    session_name: &str,
-    by_cwd_key: Option<&str>,
-) -> Result<(), SessionIndexUpdateError> {
-    if !is_object_name(session_name) {
-        return Err(SessionIndexUpdateError::InvalidSessionName);
-    }
-    if !session_root.join(session_name).is_dir() {
-        return Err(SessionIndexUpdateError::MissingSession);
-    }
-    let index_dir = session_root.join("index");
-    let list_path = index_dir.join("list");
-    let current_path = index_dir.join("current");
-    if !index_dir.is_dir() || !list_path.is_file() || !current_path.is_file() {
-        return Err(SessionIndexUpdateError::MissingIndex);
-    }
-    let by_cwd_path = if let Some(key) = by_cwd_key {
-        if !is_object_name(key) {
-            return Err(SessionIndexUpdateError::InvalidByCwdKey);
-        }
-        let by_cwd_dir = index_dir.join("by-cwd");
-        if !by_cwd_dir.is_dir() {
-            return Err(SessionIndexUpdateError::MissingIndex);
-        }
-        Some(by_cwd_dir.join(key))
-    } else {
-        None
-    };
-
-    let list =
-        fs::read_to_string(&list_path).map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-    if !inspect_session_index(SessionIndexKind::List, &list).is_ok() {
-        return Err(SessionIndexUpdateError::InvalidIndex);
-    }
-    if !inspect_session_index(
-        SessionIndexKind::Current,
-        &fs::read_to_string(&current_path)
-            .map_err(|_error| SessionIndexUpdateError::CannotRecord)?,
-    )
-    .is_ok()
-    {
-        return Err(SessionIndexUpdateError::InvalidIndex);
-    }
-
-    let mut sessions = vec![session_name.to_owned()];
-    sessions.extend(
-        list.lines()
-            .filter(|existing| *existing != session_name)
-            .map(str::to_owned),
-    );
-    atomic_replace_text(&list_path, &format!("{}\n", sessions.join("\n")))
-        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-    atomic_replace_text(&current_path, &format!("{session_name}\n"))
-        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-
-    if let Some(path) = by_cwd_path {
-        atomic_replace_text(&path, &format!("{session_name}\n"))
-            .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-    }
-
-    Ok(())
-}
-
-/// Inspects a fixed-format v1 agent control file body.
-#[must_use]
-pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentControlReport {
-    match kind {
-        AgentControlKind::Groups => inspect_agent_groups_control(content),
-        AgentControlKind::Parent => inspect_optional_agent_parent_control(content),
-        AgentControlKind::Pid => inspect_optional_agent_number_control(content),
-        AgentControlKind::Owner | AgentControlKind::Uid | AgentControlKind::Gid => {
-            inspect_required_agent_number_control(content)
-        }
-        AgentControlKind::Iso | AgentControlKind::Life | AgentControlKind::Status => {
-            inspect_agent_vocab_control(kind, content)
-        }
-    }
-}
-
-fn inspect_required_agent_number_control(content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, true, |line, value, issues| {
-        if value.parse::<u32>().is_err() {
-            issues.push(AgentControlIssue::InvalidNumber {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    })
-}
-
-fn inspect_optional_agent_number_control(content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, false, |line, value, issues| {
-        if !value.is_empty() && value.parse::<u32>().is_err() {
-            issues.push(AgentControlIssue::InvalidNumber {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    })
-}
-
-fn inspect_agent_groups_control(content: &str) -> AgentControlReport {
-    let mut issues = Vec::new();
-    for (index, raw_line) in content.lines().enumerate() {
-        let line = index + 1;
-        let value = raw_line.trim();
-        if value.is_empty() {
-            issues.push(AgentControlIssue::EmptyValue);
-        } else if value != raw_line || value.parse::<u32>().is_err() {
-            issues.push(AgentControlIssue::InvalidNumber {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    }
-    AgentControlReport::new(issues)
-}
-
-fn inspect_optional_agent_parent_control(content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, false, |line, value, issues| {
-        if !value.is_empty() && parent_ref_agent_name(value).is_err() {
-            issues.push(AgentControlIssue::InvalidValue {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    })
-}
-
-fn inspect_agent_vocab_control(kind: AgentControlKind, content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, true, |line, value, issues| {
-        if !agent_vocab_allows(kind, value) {
-            issues.push(AgentControlIssue::InvalidValue {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    })
-}
-
-fn inspect_single_agent_control_value(
-    content: &str,
-    required: bool,
-    validate: impl Fn(usize, &str, &mut Vec<AgentControlIssue>),
-) -> AgentControlReport {
-    let mut issues = Vec::new();
-    let lines = content.lines().collect::<Vec<_>>();
-    let value = lines.first().map_or("", |line| line.trim());
-    if value.is_empty() {
-        if required {
-            issues.push(AgentControlIssue::EmptyValue);
-        }
-    } else if lines.first().is_some_and(|line| *line != value) {
-        issues.push(AgentControlIssue::InvalidValue {
-            line: 1,
-            value: value.to_owned(),
-        });
-    } else {
-        validate(1, value, &mut issues);
-    }
-    if lines.len() > 1 {
-        issues.push(AgentControlIssue::MultipleValues { line: 2 });
-    }
-    AgentControlReport::new(issues)
-}
-
-fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
-    match kind {
-        AgentControlKind::Iso => matches!(value, "shared" | "uid" | "userns"),
-        AgentControlKind::Life => ChildLifecycle::parse(value).is_ok(),
-        AgentControlKind::Status => {
-            matches!(
-                value,
-                "start" | "ready" | "busy" | "idle" | "stopping" | "dead"
-            )
-        }
-        AgentControlKind::Owner
-        | AgentControlKind::Uid
-        | AgentControlKind::Gid
-        | AgentControlKind::Groups
-        | AgentControlKind::Parent
-        | AgentControlKind::Pid => false,
-    }
-}
-
 /// Derives an agent runtime view from the frozen v1 control files under
 /// `ctx_root/agent/<agent_name>.d/`.
 ///
@@ -6524,30 +5164,36 @@ pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, Fus
     let model_type = model_metadata_type(driver);
     let owned_by = model_metadata_owner(name, driver);
     let context_length = model_metadata_context_length(name, driver);
-    Ok(format!(
-        "#!{CORTEXFS_OBJECT_RUNNER}\n\
-         # cortexfs.object=model\n\
-         # cortexfs.id={id}\n\
-         # cortexfs.name={name}\n\
-         # cortexfs.description={description}\n\
-         # cortexfs.type={model_type}\n\
-         # cortexfs.created_at=\n\
-         # cortexfs.owned_by={owned_by}\n\
-         # cortexfs.context_length={context_length}\n\
-         # cortexfs.driver={driver}\n\
-         # cortexfs.driver.default={}\n\
-         # cortexfs.driver.exec={}\n\
-         # cortexfs.driver.socket={}\n\
-         # cortexfs.driver.agent={}\n\
-         # cortexfs.session={session}\n\
-         # cortexfs.status={status}\n\
-         # cortexfs.cap={}\n",
-        driver_routes.route_value(ModelDriverUseCase::Default),
-        driver_routes.route_value(ModelDriverUseCase::Exec),
-        driver_routes.route_value(ModelDriverUseCase::Socket),
-        driver_routes.route_value(ModelDriverUseCase::Agent),
-        cap.lines().collect::<Vec<_>>().join(",")
-    ))
+    Ok(exec_metadata(&[
+        ("object", "model".to_owned()),
+        ("id", id),
+        ("name", name.to_owned()),
+        ("description", description.to_owned()),
+        ("type", model_type.to_owned()),
+        ("created_at", String::new()),
+        ("owned_by", owned_by.to_owned()),
+        ("context_length", context_length.to_string()),
+        ("driver", driver.to_owned()),
+        (
+            "driver.default",
+            driver_routes.route_value(ModelDriverUseCase::Default),
+        ),
+        (
+            "driver.exec",
+            driver_routes.route_value(ModelDriverUseCase::Exec),
+        ),
+        (
+            "driver.socket",
+            driver_routes.route_value(ModelDriverUseCase::Socket),
+        ),
+        (
+            "driver.agent",
+            driver_routes.route_value(ModelDriverUseCase::Agent),
+        ),
+        ("session", session),
+        ("status", status),
+        ("cap", cap.lines().collect::<Vec<_>>().join(",")),
+    ]))
 }
 
 /// Returns executable metadata text for a tool object.
@@ -6562,17 +5208,66 @@ pub fn tool_exec_metadata(name: &str, control_dir: &Path) -> Result<String, Fuse
     let cap = read_object_control_for_metadata(control_dir, "cap").unwrap_or_default();
     let status = read_object_control_for_metadata(control_dir, "status")
         .unwrap_or_else(|_error| "unknown".to_owned());
-    Ok(format!(
-        "#!{CORTEXFS_OBJECT_RUNNER}\n\
-         # cortexfs.object=tool\n\
-         # cortexfs.name={name}\n\
-         # cortexfs.declared_name={declared_name}\n\
-         # cortexfs.description={description}\n\
-         # cortexfs.runner=cortexfs-object-runner\n\
-         # cortexfs.status={status}\n\
-         # cortexfs.cap={}\n",
-        cap.lines().collect::<Vec<_>>().join(",")
-    ))
+    Ok(exec_metadata(&[
+        ("object", "tool".to_owned()),
+        ("name", name.to_owned()),
+        ("declared_name", declared_name),
+        ("description", description),
+        ("runner", "cortexfs-object-runner".to_owned()),
+        ("status", status),
+        ("cap", cap.lines().collect::<Vec<_>>().join(",")),
+    ]))
+}
+
+/// Returns executable metadata text for an agent object.
+pub fn agent_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
+    if !is_object_name(name) {
+        return Err(FuseV1Error::InvalidPath);
+    }
+    let owner = read_object_control_for_metadata(control_dir, "owner").unwrap_or_default();
+    let uid = read_object_control_for_metadata(control_dir, "uid").unwrap_or_default();
+    let gid = read_object_control_for_metadata(control_dir, "gid").unwrap_or_default();
+    let label = read_object_control_for_metadata(control_dir, "label").unwrap_or_default();
+    let model = read_object_control_for_metadata(control_dir, "model").unwrap_or_default();
+    let status = read_object_control_for_metadata(control_dir, "status")
+        .unwrap_or_else(|_error| "unknown".to_owned());
+    let pid = read_object_control_for_metadata(control_dir, "pid").unwrap_or_default();
+    Ok(exec_metadata(&[
+        ("object", "agent".to_owned()),
+        ("name", name.to_owned()),
+        ("runner", "cortexfs-object-runner".to_owned()),
+        ("owner", owner),
+        ("uid", uid),
+        ("gid", gid),
+        ("label", label),
+        ("model", model),
+        ("status", status),
+        ("pid", pid),
+    ]))
+}
+
+fn object_exec_metadata(
+    class: ObjectClass,
+    name: &str,
+    control_dir: &Path,
+) -> Result<String, FuseV1Error> {
+    match class {
+        ObjectClass::Model => model_exec_metadata(name, control_dir),
+        ObjectClass::Agent => agent_exec_metadata(name, control_dir),
+        ObjectClass::Tool => tool_exec_metadata(name, control_dir),
+    }
+}
+
+fn exec_metadata(fields: &[(&str, String)]) -> String {
+    let mut output = format!("#!{CORTEXFS_OBJECT_RUNNER}\n");
+    for field in fields {
+        output.push_str("# cortexfs.");
+        output.push_str(field.0);
+        output.push('=');
+        output.push_str(&field.1);
+        output.push('\n');
+    }
+    output
 }
 
 fn model_metadata_description(name: &str, driver: &str) -> &'static str {
@@ -6921,22 +5616,23 @@ fn reference_agent_stub_script(name: &str) -> String {
     format!(
         r#"#!/bin/sh
 # CortexFS reference-tree agent stub. The selected model is a file ABI choice.
-root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+source_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+ctx_root="${{CTX_ROOT:-/ctx}}"
 run="${{CTX_RUN_ID:-r1}}"
 input="$*"
 if [ -z "$input" ]; then
   input="$(cat)"
 fi
-model="$(tr -d '\n' < "$root/agent/{name}.d/model" 2>/dev/null || true)"
+model="$(tr -d '\n' < "$source_root/agent/{name}.d/model" 2>/dev/null || true)"
 if [ -z "$model" ]; then
   model="debug/echo"
 fi
-if [ ! -x "$root/model/$model" ]; then
+if [ ! -x "$ctx_root/model/$model" ]; then
   printf '{{"type":"error","run":"%s","code":"ENOENT","message":"missing model"}}\n' "$run"
   printf '{{"type":"done","run":"%s","status":"error"}}\n' "$run"
   exit 1
 fi
-CTX_RUN_ID="$run" exec "$root/model/$model" "$input"
+CTX_RUN_ID="$run" exec "$ctx_root/model/$model" "$input"
 "#
     )
 }
@@ -7456,20 +6152,6 @@ fn normalize_fuse_abi_path(abi_path: &str) -> Result<String, FuseV1Error> {
 fn model_exec_name(abi_path: &str) -> Option<&str> {
     let model = abi_path.strip_prefix("model/")?;
     is_model_name(model).then_some(model)
-}
-
-fn tool_exec_name(abi_path: &str) -> Option<&str> {
-    let name = abi_path.strip_prefix("tool/")?;
-    if name.contains('/') {
-        return None;
-    }
-    if name
-        .rsplit_once('.')
-        .is_some_and(|(_stem, suffix)| matches!(suffix, "d" | "sock"))
-    {
-        return None;
-    }
-    is_object_name(name).then_some(name)
 }
 
 fn read_bytes_at(content: &[u8], offset: u64, size: usize) -> Result<Vec<u8>, FuseV1Error> {
@@ -8058,710 +6740,6 @@ impl JsonStringField {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum JsonU64Field {
-    Number(u64),
-    Other(Value),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum JsonStringArrayField {
-    Strings(Vec<String>),
-    Other(Value),
-}
-
-/// Inspects durable `messages.jsonl` for the canonical v1 role/content shape.
-#[must_use]
-pub fn inspect_message_stream_jsonl(content: &str) -> MessageStreamReport {
-    let mut issues = Vec::new();
-    for (index, line) in content.lines().enumerate() {
-        let line_number = index + 1;
-        if line.trim().is_empty() {
-            continue;
-        }
-        inspect_message_stream_line(line_number, line, &mut issues);
-    }
-    MessageStreamReport::new(issues)
-}
-
-fn inspect_message_stream_line(
-    line_number: usize,
-    line: &str,
-    issues: &mut Vec<MessageStreamIssue>,
-) {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
-        issues.push(MessageStreamIssue::InvalidJson(line_number));
-        return;
-    };
-    let Ok(message) = serde_path_to_error::deserialize::<_, MessageLineJson>(
-        &mut serde_json::Deserializer::from_str(line),
-    ) else {
-        issues.push(MessageStreamIssue::MessageNotObject(line_number));
-        return;
-    };
-
-    append_provider_native_message_field_issues(line_number, &value, issues);
-
-    let Some(role) = message.role.as_ref().and_then(JsonStringField::as_str) else {
-        issues.push(MessageStreamIssue::MissingRole(line_number));
-        return;
-    };
-    if !matches!(role, "system" | "user" | "assistant" | "tool") {
-        issues.push(MessageStreamIssue::InvalidRole {
-            line: line_number,
-            role: role.to_owned(),
-        });
-    }
-
-    let Some(content) = message.content.as_ref() else {
-        issues.push(MessageStreamIssue::MissingContent(line_number));
-        return;
-    };
-    if !serde_json::from_value::<MessageContentJson>(content.clone())
-        .is_ok_and(|content| content.is_well_formed())
-    {
-        issues.push(MessageStreamIssue::InvalidContent(line_number));
-    }
-}
-
-#[derive(Deserialize)]
-struct MessageLineJson {
-    role: Option<JsonStringField>,
-    content: Option<Value>,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum MessageContentJson {
-    Text(String),
-    Parts(Vec<MessageContentPartJson>),
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type")]
-enum MessageContentPartJson {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image")]
-    Image { path: String },
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        tool_call_id: String,
-        content: MessageContentJson,
-    },
-}
-
-impl MessageContentJson {
-    fn is_well_formed(&self) -> bool {
-        match *self {
-            Self::Text(ref text) => {
-                let _ = text;
-                true
-            }
-            Self::Parts(ref parts) => parts.iter().all(MessageContentPartJson::is_well_formed),
-        }
-    }
-}
-
-impl MessageContentPartJson {
-    fn is_well_formed(&self) -> bool {
-        match *self {
-            Self::Text { ref text } => {
-                let _ = text;
-                true
-            }
-            Self::Image { ref path } => {
-                let _ = path;
-                true
-            }
-            Self::ToolResult {
-                ref tool_call_id,
-                ref content,
-            } => {
-                let _ = tool_call_id;
-                content.is_well_formed()
-            }
-        }
-    }
-}
-
-fn append_provider_native_message_field_issues(
-    line_number: usize,
-    value: &Value,
-    issues: &mut Vec<MessageStreamIssue>,
-) {
-    for field in provider_native_fields(value) {
-        issues.push(MessageStreamIssue::ProviderNativeField {
-            line: line_number,
-            field: field.to_owned(),
-        });
-    }
-}
-
-/// Inspects a stable context JSONL file body.
-#[must_use]
-pub fn inspect_context_jsonl(kind: ContextJsonlKind, content: &str) -> ContextJsonlReport {
-    let mut issues = Vec::new();
-    for (index, line) in content.lines().enumerate() {
-        let line_number = index + 1;
-        if line.trim().is_empty() {
-            continue;
-        }
-        inspect_context_jsonl_line(kind, line_number, line, &mut issues);
-    }
-    ContextJsonlReport::new(issues)
-}
-
-fn inspect_context_jsonl_line(
-    kind: ContextJsonlKind,
-    line_number: usize,
-    line: &str,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    if !line.trim_start().starts_with('{') {
-        if serde_json::from_str::<Value>(line).is_ok() {
-            issues.push(ContextJsonlIssue::RecordNotObject(line_number));
-        } else {
-            issues.push(ContextJsonlIssue::InvalidJson(line_number));
-        }
-        return;
-    }
-    let Ok(record) = serde_path_to_error::deserialize::<_, ContextJsonlRecordJson>(
-        &mut serde_json::Deserializer::from_str(line),
-    ) else {
-        issues.push(ContextJsonlIssue::InvalidJson(line_number));
-        return;
-    };
-
-    match kind {
-        ContextJsonlKind::Facts => inspect_fact_record(line_number, &record, issues),
-        ContextJsonlKind::Decisions => inspect_decision_record(line_number, &record, issues),
-        ContextJsonlKind::Refs => inspect_ref_record(line_number, &record, issues),
-        ContextJsonlKind::SwapIndex => inspect_swap_index_record(line_number, &record, issues),
-        ContextJsonlKind::DedupIndex => inspect_dedup_index_record(line_number, &record, issues),
-    }
-}
-
-#[derive(Deserialize)]
-struct ContextJsonlRecordJson {
-    id: Option<JsonStringField>,
-    text: Option<JsonStringField>,
-    decision: Option<JsonStringField>,
-    source: Option<JsonStringField>,
-    path: Option<JsonStringField>,
-    kind: Option<JsonStringField>,
-    summary: Option<JsonStringField>,
-    tokens: Option<JsonU64Field>,
-    hash: Option<JsonStringField>,
-    refs: Option<JsonStringArrayField>,
-    bytes: Option<JsonU64Field>,
-}
-
-fn inspect_fact_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
-    require_context_string_field(
-        line,
-        record.text.as_ref(),
-        "text",
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_string_field(
-        line,
-        record.source.as_ref(),
-        "source",
-        issues,
-        is_nonempty_single_line,
-    );
-}
-
-fn inspect_decision_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
-    require_context_string_field(
-        line,
-        record.decision.as_ref(),
-        "decision",
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_string_field(
-        line,
-        record.source.as_ref(),
-        "source",
-        issues,
-        is_nonempty_single_line,
-    );
-}
-
-fn inspect_ref_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
-    require_context_string_field(
-        line,
-        record.path.as_ref(),
-        "path",
-        issues,
-        is_stable_context_ref_path,
-    );
-    require_context_string_field(
-        line,
-        record.kind.as_ref(),
-        "kind",
-        issues,
-        is_context_ref_kind,
-    );
-    require_context_string_field(
-        line,
-        record.summary.as_ref(),
-        "summary",
-        issues,
-        is_nonempty_single_line,
-    );
-}
-
-fn inspect_swap_index_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_hash_id);
-    require_context_string_field(line, record.kind.as_ref(), "kind", issues, is_swap_kind);
-    require_context_string_field(
-        line,
-        record.source.as_ref(),
-        "source",
-        issues,
-        is_swap_source,
-    );
-    require_context_string_field(
-        line,
-        record.summary.as_ref(),
-        "summary",
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
-}
-
-fn inspect_dedup_index_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(
-        line,
-        record.hash.as_ref(),
-        "hash",
-        issues,
-        is_context_hash_id,
-    );
-    require_context_string_array_field(
-        line,
-        record.refs.as_ref(),
-        "refs",
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_number_field(line, record.bytes.as_ref(), "bytes", issues);
-    require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
-}
-
-fn require_context_string_field(
-    line: usize,
-    value: Option<&JsonStringField>,
-    field: &str,
-    issues: &mut Vec<ContextJsonlIssue>,
-    valid: impl Fn(&str) -> bool,
-) {
-    let Some(value) = value.and_then(JsonStringField::as_str) else {
-        issues.push(ContextJsonlIssue::MissingStringField {
-            line,
-            field: field.to_owned(),
-        });
-        return;
-    };
-    if !valid(value) {
-        issues.push(ContextJsonlIssue::InvalidField {
-            line,
-            field: field.to_owned(),
-            value: value.to_owned(),
-        });
-    }
-}
-
-fn require_context_string_array_field(
-    line: usize,
-    values: Option<&JsonStringArrayField>,
-    field: &str,
-    issues: &mut Vec<ContextJsonlIssue>,
-    valid: impl Fn(&str) -> bool,
-) {
-    let Some(values) = json_string_array_values(values) else {
-        issues.push(ContextJsonlIssue::MissingStringArrayField {
-            line,
-            field: field.to_owned(),
-        });
-        return;
-    };
-    if values.is_empty() {
-        issues.push(ContextJsonlIssue::MissingStringArrayField {
-            line,
-            field: field.to_owned(),
-        });
-        return;
-    }
-    for value in values {
-        if !valid(value) {
-            issues.push(ContextJsonlIssue::InvalidField {
-                line,
-                field: field.to_owned(),
-                value: value.clone(),
-            });
-        }
-    }
-}
-
-fn require_context_number_field(
-    line: usize,
-    value: Option<&JsonU64Field>,
-    field: &str,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    if !is_json_u64(value) {
-        issues.push(ContextJsonlIssue::MissingNumberField {
-            line,
-            field: field.to_owned(),
-        });
-    }
-}
-
-fn is_json_u64(value: Option<&JsonU64Field>) -> bool {
-    value.is_some_and(|value| match *value {
-        JsonU64Field::Number(ref number) => {
-            let _ = number;
-            true
-        }
-        JsonU64Field::Other(ref value) => {
-            let _ = value;
-            false
-        }
-    })
-}
-
-fn json_string_array_values(value: Option<&JsonStringArrayField>) -> Option<&[String]> {
-    value.and_then(|value| match *value {
-        JsonStringArrayField::Strings(ref values) => Some(values.as_slice()),
-        JsonStringArrayField::Other(ref value) => {
-            let _ = value;
-            None
-        }
-    })
-}
-
-fn is_context_record_id(value: &str) -> bool {
-    is_object_name(value)
-}
-
-fn is_context_hash_id(value: &str) -> bool {
-    is_object_name(value)
-        && (value.starts_with("sha256-")
-            || value.starts_with("sha256_")
-            || value.starts_with("sha256."))
-}
-
-fn is_nonempty_single_line(value: &str) -> bool {
-    !value.is_empty() && !value.contains('\n') && !value.contains('\0')
-}
-
-fn is_stable_context_ref_path(value: &str) -> bool {
-    is_nonempty_single_line(value)
-        && !value.contains('\t')
-        && !value.split('/').any(|part| part == "." || part == "..")
-}
-
-fn is_context_ref_kind(value: &str) -> bool {
-    matches!(
-        value,
-        "file" | "artifact" | "tool_output" | "swap" | "child_result"
-    )
-}
-
-fn is_swap_kind(value: &str) -> bool {
-    matches!(value, "message_range" | "tool_output" | "file")
-}
-
-fn is_swap_source(value: &str) -> bool {
-    matches!(value, "messages.jsonl" | "events.jsonl")
-        || value.starts_with("context/")
-            && validate_context_pack_source(value).is_ok()
-            && !value.contains('\0')
-}
-
-/// Inspects a model or agent canonical JSONL event stream.
-#[must_use]
-pub fn inspect_event_stream_jsonl(content: &str) -> EventStreamReport {
-    let mut issues = Vec::new();
-    for (index, line) in content.lines().enumerate() {
-        let line_number = index + 1;
-        if line.trim().is_empty() {
-            continue;
-        }
-        inspect_event_stream_line(line_number, line, &mut issues);
-    }
-    EventStreamReport::new(issues)
-}
-
-fn inspect_event_stream_line(line_number: usize, line: &str, issues: &mut Vec<EventStreamIssue>) {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
-        issues.push(EventStreamIssue::InvalidJson(line_number));
-        return;
-    };
-    let Ok(event) = serde_path_to_error::deserialize::<_, EventLineJson>(
-        &mut serde_json::Deserializer::from_str(line),
-    ) else {
-        issues.push(EventStreamIssue::EventNotObject(line_number));
-        return;
-    };
-
-    append_provider_native_field_issues(line_number, &value, issues);
-
-    let Some(event_type) = event.event_type.as_ref().and_then(JsonStringField::as_str) else {
-        issues.push(EventStreamIssue::MissingType(line_number));
-        return;
-    };
-    if !is_canonical_event_type(event_type) {
-        issues.push(EventStreamIssue::UnknownType {
-            line: line_number,
-            event_type: event_type.to_owned(),
-        });
-        return;
-    }
-    if event_requires_run(event_type)
-        && event
-            .run
-            .as_ref()
-            .and_then(JsonStringField::as_str)
-            .is_none()
-    {
-        issues.push(EventStreamIssue::MissingRun(line_number));
-    }
-
-    match event_type {
-        "error" => inspect_error_event(line_number, &event, issues),
-        "done" => inspect_done_event(line_number, &event, issues),
-        "usage" => inspect_usage_event(line_number, &event, issues),
-        "tool_call" => inspect_tool_call_event(line_number, &event, issues),
-        "agent.child.cancel" => inspect_agent_child_cancel_event(line_number, &event, issues),
-        "agent.stop" => inspect_agent_stop_event(line_number, &event, issues),
-        _ => {}
-    }
-}
-
-#[derive(Deserialize)]
-struct EventLineJson {
-    #[serde(rename = "type")]
-    event_type: Option<JsonStringField>,
-    run: Option<JsonStringField>,
-    code: Option<JsonStringField>,
-    status: Option<JsonStringField>,
-    input_tokens: Option<JsonU64Field>,
-    output_tokens: Option<JsonU64Field>,
-    id: Option<JsonStringField>,
-    name: Option<JsonStringField>,
-    parent: Option<JsonStringField>,
-    child: Option<JsonStringField>,
-    reason: Option<JsonStringField>,
-    agent: Option<JsonStringField>,
-}
-
-fn is_canonical_event_type(value: &str) -> bool {
-    matches!(
-        value,
-        "start"
-            | "delta"
-            | "message"
-            | "reasoning_delta"
-            | "reasoning_message"
-            | "tool_call"
-            | "usage"
-            | "error"
-            | "done"
-            | "agent.child.cancel"
-            | "agent.stop"
-    )
-}
-
-fn event_requires_run(event_type: &str) -> bool {
-    !matches!(event_type, "agent.child.cancel" | "agent.stop")
-}
-
-fn append_provider_native_field_issues(
-    line_number: usize,
-    value: &Value,
-    issues: &mut Vec<EventStreamIssue>,
-) {
-    for field in provider_native_fields(value) {
-        issues.push(EventStreamIssue::ProviderNativeField {
-            line: line_number,
-            field: field.to_owned(),
-        });
-    }
-}
-
-fn provider_native_fields(value: &Value) -> Vec<&str> {
-    let mut fields = Vec::new();
-    collect_provider_native_fields(value, &mut fields);
-    fields
-}
-
-fn collect_provider_native_fields<'a>(value: &'a Value, fields: &mut Vec<&'a str>) {
-    if let Some(object) = value.as_object() {
-        for (key, child) in object {
-            if is_provider_native_field(key) {
-                fields.push(key);
-            }
-            collect_provider_native_fields(child, fields);
-        }
-        return;
-    }
-
-    if let Some(items) = value.as_array() {
-        for item in items {
-            collect_provider_native_fields(item, fields);
-        }
-    }
-}
-
-fn is_provider_native_field(key: &str) -> bool {
-    matches!(
-        key,
-        "thread_id"
-            | "response_id"
-            | "conversation_id"
-            | "provider_thread_id"
-            | "provider_response_id"
-            | "native_thread"
-            | "native_state"
-            | "openai_response_id"
-            | "anthropic_message_id"
-            | "gemini_response_id"
-    )
-}
-
-fn inspect_error_event(
-    line_number: usize,
-    event: &EventLineJson,
-    issues: &mut Vec<EventStreamIssue>,
-) {
-    let Some(code) = event.code.as_ref().and_then(JsonStringField::as_str) else {
-        issues.push(EventStreamIssue::InvalidErrorCode(line_number));
-        return;
-    };
-    if !is_stable_errno(code) {
-        issues.push(EventStreamIssue::InvalidErrorCode(line_number));
-    }
-}
-
-fn inspect_done_event(
-    line_number: usize,
-    event: &EventLineJson,
-    issues: &mut Vec<EventStreamIssue>,
-) {
-    if !matches!(
-        event.status.as_ref().and_then(JsonStringField::as_str),
-        Some("ok" | "error" | "cancelled")
-    ) {
-        issues.push(EventStreamIssue::InvalidDoneStatus(line_number));
-    }
-}
-
-fn inspect_usage_event(
-    line_number: usize,
-    event: &EventLineJson,
-    issues: &mut Vec<EventStreamIssue>,
-) {
-    if !is_json_u64(event.input_tokens.as_ref()) || !is_json_u64(event.output_tokens.as_ref()) {
-        issues.push(EventStreamIssue::InvalidUsage(line_number));
-    }
-}
-
-fn inspect_tool_call_event(
-    line_number: usize,
-    event: &EventLineJson,
-    issues: &mut Vec<EventStreamIssue>,
-) {
-    let valid_id = event
-        .id
-        .as_ref()
-        .and_then(JsonStringField::as_str)
-        .is_some_and(is_object_name);
-    let valid_name = event
-        .name
-        .as_ref()
-        .and_then(JsonStringField::as_str)
-        .is_some_and(is_object_name);
-    if !valid_id || !valid_name {
-        issues.push(EventStreamIssue::InvalidToolCall(line_number));
-    }
-}
-
-fn inspect_agent_child_cancel_event(
-    line_number: usize,
-    event: &EventLineJson,
-    issues: &mut Vec<EventStreamIssue>,
-) {
-    let parent = event.parent.as_ref().and_then(JsonStringField::as_str);
-    let child = event.child.as_ref().and_then(JsonStringField::as_str);
-    let reason = event.reason.as_ref().and_then(JsonStringField::as_str);
-    if !parent.is_some_and(is_object_name)
-        || !child.is_some_and(is_object_name)
-        || reason != Some("parent_dead")
-    {
-        issues.push(EventStreamIssue::InvalidAgentLifecycle(line_number));
-    }
-}
-
-fn inspect_agent_stop_event(
-    line_number: usize,
-    event: &EventLineJson,
-    issues: &mut Vec<EventStreamIssue>,
-) {
-    let agent = event.agent.as_ref().and_then(JsonStringField::as_str);
-    let status = event.status.as_ref().and_then(JsonStringField::as_str);
-    if !agent.is_some_and(is_object_name) || status != Some("cancelled") {
-        issues.push(EventStreamIssue::InvalidAgentLifecycle(line_number));
-    }
-}
-
-fn is_stable_errno(code: &str) -> bool {
-    matches!(
-        code,
-        "EACCES"
-            | "EINVAL"
-            | "ENOENT"
-            | "EMSGSIZE"
-            | "EHOSTDOWN"
-            | "ECONNREFUSED"
-            | "EAGAIN"
-            | "EIO"
-            | "EINTR"
-            | "ENOSYS"
-    )
-}
-
 fn inspect_context_pack_item(
     index: usize,
     item: &ContextPackItemJson,
@@ -9100,112 +7078,6 @@ fn newline_terminated(value: &str) -> String {
     }
 }
 
-impl MountEntry {
-    /// Parses `source<TAB>target<TAB>mode<TAB>options`.
-    pub fn parse(line: &str) -> Result<Self, MountError> {
-        let mut fields = line.split('\t');
-        let Some(source) = fields.next() else {
-            return Err(MountError::WrongFieldCount);
-        };
-        let Some(target) = fields.next() else {
-            return Err(MountError::WrongFieldCount);
-        };
-        let Some(mode) = fields.next() else {
-            return Err(MountError::WrongFieldCount);
-        };
-        let Some(options) = fields.next() else {
-            return Err(MountError::WrongFieldCount);
-        };
-        if fields.next().is_some() {
-            return Err(MountError::WrongFieldCount);
-        }
-        if !is_absolute_mount_path(source) || !is_absolute_mount_path(target) {
-            return Err(MountError::InvalidPath);
-        }
-
-        let mode = MountMode::parse(mode)?;
-        let options = parse_mount_options(options)?;
-        Ok(Self {
-            source: source.to_owned(),
-            target: target.to_owned(),
-            mode,
-            options,
-        })
-    }
-
-    /// Returns the source path.
-    #[must_use]
-    pub fn source(&self) -> &str {
-        &self.source
-    }
-
-    /// Returns the target path.
-    #[must_use]
-    pub fn target(&self) -> &str {
-        &self.target
-    }
-
-    /// Returns the mount mode.
-    #[must_use]
-    pub const fn mode(&self) -> MountMode {
-        self.mode
-    }
-
-    /// Returns mount options.
-    #[must_use]
-    pub fn options(&self) -> &[MountOption] {
-        &self.options
-    }
-
-    /// Returns whether this entry is no more permissive than `parent`.
-    ///
-    /// v0 requires the same source and target. A child may narrow `rw` to `ro`
-    /// and may add safety options, but must not remove parent safety options or
-    /// make bind traversal broader.
-    #[must_use]
-    pub fn is_subset_of(&self, parent: &Self) -> bool {
-        self.source == parent.source
-            && self.target == parent.target
-            && mount_mode_allows(parent.mode, self.mode)
-            && mount_options_allow(parent.options(), self.options())
-    }
-}
-
-/// Parsed v0 mount table.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MountTable {
-    entries: Vec<MountEntry>,
-}
-
-impl MountTable {
-    /// Parses a v0 mount table.
-    pub fn parse(content: &str) -> Result<Self, MountError> {
-        let mut entries = Vec::new();
-        for line in content.lines().filter(|line| !line.trim().is_empty()) {
-            entries.push(MountEntry::parse(line)?);
-        }
-        Ok(Self { entries })
-    }
-
-    /// Returns parsed mount entries.
-    #[must_use]
-    pub fn entries(&self) -> &[MountEntry] {
-        &self.entries
-    }
-
-    /// Returns whether every child mount is visible in `parent` with no
-    /// expanded authority.
-    #[must_use]
-    pub fn is_subset_of(&self, parent: &Self) -> bool {
-        self.entries.iter().all(|child| {
-            parent
-                .entries
-                .iter()
-                .any(|parent_entry| child.is_subset_of(parent_entry))
-        })
-    }
-}
-
 /// Decides whether an agent may execute a tool through `CTX_PATH`.
 ///
 /// This is a pure effective-authority check for the stable tool boundary:
@@ -9484,7 +7356,7 @@ fn parent_ref_matches(value: &str, parent_agent: &str) -> Result<bool, ChildAgen
     Ok(parent_ref_agent_name(value)? == parent_agent)
 }
 
-fn parent_ref_agent_name(value: &str) -> Result<&str, ChildAgentDenial> {
+pub(crate) fn parent_ref_agent_name(value: &str) -> Result<&str, ChildAgentDenial> {
     let mut fields = value.split_whitespace();
     let Some(agent) = fields.next() else {
         return Err(ChildAgentDenial::InvalidParentRef);
@@ -9525,7 +7397,7 @@ fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
     file.flush()
 }
 
-fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result<()> {
+pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     temp.write_all(content.as_bytes())?;
@@ -9725,975 +7597,6 @@ fn stable_path_parts(path: &Path) -> Option<Vec<&str>> {
         }
     }
     Some(parts)
-}
-
-fn mount_mode_allows(parent: MountMode, child: MountMode) -> bool {
-    matches!(
-        (parent, child),
-        (
-            MountMode::ReadWrite,
-            MountMode::ReadWrite | MountMode::ReadOnly
-        ) | (MountMode::ReadOnly, MountMode::ReadOnly)
-    )
-}
-
-fn mount_options_allow(parent: &[MountOption], child: &[MountOption]) -> bool {
-    safety_options_preserved(parent, child) && bind_rank(child) <= bind_rank(parent)
-}
-
-fn safety_options_preserved(parent: &[MountOption], child: &[MountOption]) -> bool {
-    [MountOption::NoSuid, MountOption::NoDev, MountOption::NoExec]
-        .into_iter()
-        .all(|option| !parent.contains(&option) || child.contains(&option))
-}
-
-fn bind_rank(options: &[MountOption]) -> u8 {
-    if options.contains(&MountOption::RecursiveBind) {
-        2
-    } else {
-        u8::from(options.contains(&MountOption::Bind))
-    }
-}
-
-fn is_absolute_mount_path(value: &str) -> bool {
-    value.starts_with('/') && !value.contains('\t') && !value.contains('\n')
-}
-
-fn parse_mount_options(value: &str) -> Result<Vec<MountOption>, MountError> {
-    if value == "-" {
-        return Ok(Vec::new());
-    }
-    let mut options = Vec::new();
-    for option in value.split(',') {
-        let option = MountOption::parse(option)?;
-        if options.contains(&option) {
-            return Err(MountError::DuplicateOption);
-        }
-        if matches!(option, MountOption::Bind) && options.contains(&MountOption::RecursiveBind)
-            || matches!(option, MountOption::RecursiveBind) && options.contains(&MountOption::Bind)
-        {
-            return Err(MountError::ConflictingBindOption);
-        }
-        options.push(option);
-    }
-    Ok(options)
-}
-
-/// Fixed v1 policy object classes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PolicyObjectClass {
-    /// Tool executable capability.
-    Tool,
-    /// Model inference endpoint.
-    Model,
-    /// Shared project or collaboration space.
-    Shared,
-    /// Durable session state.
-    Session,
-    /// Agent-visible mount.
-    Mount,
-    /// Agent object lifecycle or files.
-    Agent,
-    /// Network capability.
-    Network,
-}
-
-impl PolicyObjectClass {
-    /// Parses a fixed v1 policy object class.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "tool" => Some(Self::Tool),
-            "model" => Some(Self::Model),
-            "shared" => Some(Self::Shared),
-            "session" => Some(Self::Session),
-            "mount" => Some(Self::Mount),
-            "agent" => Some(Self::Agent),
-            "network" => Some(Self::Network),
-            _ => None,
-        }
-    }
-}
-
-/// Fixed v1 policy permissions.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PolicyPermission {
-    /// Execute a tool.
-    Execute,
-    /// Use a model.
-    Use,
-    /// Read a file, session, mount, shared space, or agent state.
-    Read,
-    /// Write a file, session, mount, shared space, or agent state.
-    Write,
-    /// Resume a session.
-    Resume,
-    /// Create an agent.
-    Create,
-    /// Start an agent.
-    Start,
-    /// Stop an agent.
-    Stop,
-    /// Connect through a network capability.
-    Connect,
-}
-
-impl PolicyPermission {
-    /// Parses a permission that is valid for `class`.
-    #[must_use]
-    pub fn parse_for_class(class: PolicyObjectClass, value: &str) -> Option<Self> {
-        match (class, value) {
-            (PolicyObjectClass::Tool, "execute") => Some(Self::Execute),
-            (PolicyObjectClass::Model, "use") => Some(Self::Use),
-            (
-                PolicyObjectClass::Shared
-                | PolicyObjectClass::Session
-                | PolicyObjectClass::Mount
-                | PolicyObjectClass::Agent,
-                "read",
-            ) => Some(Self::Read),
-            (
-                PolicyObjectClass::Shared
-                | PolicyObjectClass::Session
-                | PolicyObjectClass::Mount
-                | PolicyObjectClass::Agent,
-                "write",
-            ) => Some(Self::Write),
-            (PolicyObjectClass::Session, "resume") => Some(Self::Resume),
-            (PolicyObjectClass::Agent, "create") => Some(Self::Create),
-            (PolicyObjectClass::Agent, "start") => Some(Self::Start),
-            (PolicyObjectClass::Agent, "stop") => Some(Self::Stop),
-            (PolicyObjectClass::Network, "connect") => Some(Self::Connect),
-            _ => None,
-        }
-    }
-}
-
-/// One v0 allow rule.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PolicyRule {
-    subject_type: String,
-    object_class: PolicyObjectClass,
-    object_name: String,
-    permission: PolicyPermission,
-}
-
-impl PolicyRule {
-    /// Parses `allow <subject_type> <object_class>:<object_name> <permission>`.
-    pub fn parse(line: &str) -> Result<Self, PolicyError> {
-        let mut fields = line.split_whitespace();
-        let Some(keyword) = fields.next() else {
-            return Err(PolicyError::WrongFieldCount);
-        };
-        let Some(subject_type) = fields.next() else {
-            return Err(PolicyError::WrongFieldCount);
-        };
-        let Some(object) = fields.next() else {
-            return Err(PolicyError::WrongFieldCount);
-        };
-        let Some(permission) = fields.next() else {
-            return Err(PolicyError::WrongFieldCount);
-        };
-        if fields.next().is_some() {
-            return Err(PolicyError::WrongFieldCount);
-        }
-        if keyword != "allow" {
-            return Err(PolicyError::ExpectedAllow);
-        }
-        if !is_object_name(subject_type) {
-            return Err(PolicyError::InvalidName);
-        }
-        let (class, object_name) = object.split_once(':').ok_or(PolicyError::InvalidObject)?;
-        let object_class = PolicyObjectClass::parse(class).ok_or(PolicyError::UnknownClass)?;
-        let valid_object_name = match object_class {
-            PolicyObjectClass::Model => is_model_name(object_name),
-            PolicyObjectClass::Tool
-            | PolicyObjectClass::Shared
-            | PolicyObjectClass::Session
-            | PolicyObjectClass::Mount
-            | PolicyObjectClass::Agent
-            | PolicyObjectClass::Network => is_object_name(object_name),
-        };
-        if !valid_object_name {
-            return Err(PolicyError::InvalidName);
-        }
-        let permission = PolicyPermission::parse_for_class(object_class, permission)
-            .ok_or(PolicyError::UnknownPermission)?;
-
-        Ok(Self {
-            subject_type: subject_type.to_owned(),
-            object_class,
-            object_name: object_name.to_owned(),
-            permission,
-        })
-    }
-
-    /// Returns the subject type.
-    #[must_use]
-    pub fn subject_type(&self) -> &str {
-        &self.subject_type
-    }
-
-    /// Returns the object class.
-    #[must_use]
-    pub const fn object_class(&self) -> PolicyObjectClass {
-        self.object_class
-    }
-
-    /// Returns the object name.
-    #[must_use]
-    pub fn object_name(&self) -> &str {
-        &self.object_name
-    }
-
-    /// Returns the permission.
-    #[must_use]
-    pub const fn permission(&self) -> PolicyPermission {
-        self.permission
-    }
-}
-
-/// Parsed v0 default-deny allowlist.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PolicyV0 {
-    rules: Vec<PolicyRule>,
-}
-
-impl PolicyV0 {
-    /// Parses a v0 policy file.
-    pub fn parse(content: &str) -> Result<Self, PolicyError> {
-        let mut rules = Vec::new();
-        for line in content.lines().filter(|line| !line.trim().is_empty()) {
-            rules.push(PolicyRule::parse(line)?);
-        }
-        Ok(Self { rules })
-    }
-
-    /// Returns whether a concrete request is allowed.
-    #[must_use]
-    pub fn allows(
-        &self,
-        subject_type: &str,
-        object_class: PolicyObjectClass,
-        object_name: &str,
-        permission: PolicyPermission,
-    ) -> bool {
-        self.rules.iter().any(|rule| {
-            rule.subject_type == subject_type
-                && rule.object_class == object_class
-                && rule.object_name == object_name
-                && rule.permission == permission
-        })
-    }
-
-    /// Returns the parsed allow rules.
-    #[must_use]
-    pub fn rules(&self) -> &[PolicyRule] {
-        &self.rules
-    }
-
-    /// Returns whether every rule is also present in `parent` with the same
-    /// subject, object, and permission.
-    #[must_use]
-    pub fn is_exact_subset_of(&self, parent: &Self) -> bool {
-        self.rules.iter().all(|rule| {
-            parent.allows(
-                rule.subject_type(),
-                rule.object_class(),
-                rule.object_name(),
-                rule.permission(),
-            )
-        })
-    }
-
-    /// Returns whether `child_subject` receives only authority that
-    /// `parent_subject` already has.
-    ///
-    /// This is the v0 child-agent attenuation check. Child labels may differ
-    /// from parent labels, so comparison maps each child rule to the parent
-    /// subject while requiring object class, object name, and permission to
-    /// match exactly.
-    #[must_use]
-    pub fn is_authority_subset_of(
-        &self,
-        parent: &Self,
-        child_subject: &str,
-        parent_subject: &str,
-    ) -> bool {
-        is_object_name(child_subject)
-            && is_object_name(parent_subject)
-            && self.rules.iter().all(|rule| {
-                rule.subject_type() == child_subject
-                    && parent.allows(
-                        parent_subject,
-                        rule.object_class(),
-                        rule.object_name(),
-                        rule.permission(),
-                    )
-            })
-    }
-}
-
-/// Stable executable object classes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ObjectClass {
-    /// Pure inference endpoint.
-    Model,
-    /// Policy-bound orchestrator endpoint.
-    Agent,
-    /// Executable capability endpoint.
-    Tool,
-}
-
-impl ObjectClass {
-    /// Parses a stable object class name.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "model" => Some(Self::Model),
-            "agent" => Some(Self::Agent),
-            "tool" => Some(Self::Tool),
-            _ => None,
-        }
-    }
-
-    /// Returns the ABI directory name for this object class.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Model => "model",
-            Self::Agent => "agent",
-            Self::Tool => "tool",
-        }
-    }
-
-    /// Returns the stable `ctx file` type for an executable object.
-    #[must_use]
-    pub const fn exec_type(self) -> &'static str {
-        match self {
-            Self::Model => "ctx.model.exec",
-            Self::Agent => "ctx.agent.exec",
-            Self::Tool => "ctx.tool.exec",
-        }
-    }
-
-    /// Returns the stable `ctx file` type for an object socket.
-    #[must_use]
-    pub const fn socket_type(self) -> &'static str {
-        match self {
-            Self::Model => "ctx.model.socket",
-            Self::Agent => "ctx.agent.socket",
-            Self::Tool => "ctx.tool.socket",
-        }
-    }
-
-    /// Returns the stable `ctx file` type for an object control path.
-    #[must_use]
-    pub const fn control_type(self) -> &'static str {
-        match self {
-            Self::Model => "ctx.model.control",
-            Self::Agent => "ctx.agent.control",
-            Self::Tool => "ctx.tool.control",
-        }
-    }
-}
-
-/// Returns whether a top-level path component is part of the public ABI.
-#[must_use]
-pub fn is_root_entry(name: &str) -> bool {
-    ROOT_ENTRIES.contains(&name)
-}
-
-/// Returns whether a model, agent, tool, session, or shared object name is valid.
-#[must_use]
-pub fn is_object_name(name: &str) -> bool {
-    if name.is_empty() || name.len() > MAX_OBJECT_NAME_LEN {
-        return false;
-    }
-    if name.strip_suffix(".sock").is_some() || name.strip_suffix(".d").is_some() {
-        return false;
-    }
-
-    name.bytes().enumerate().all(|(index, byte)| {
-        let is_extra = matches!(byte, b'.' | b'_' | b'+' | b'-');
-        let valid = byte.is_ascii_alphanumeric() || is_extra;
-        if index == 0 {
-            byte.is_ascii_alphanumeric()
-        } else {
-            valid
-        }
-    })
-}
-
-/// Returns whether a model name uses the provider/model namespace shape.
-#[must_use]
-pub fn is_model_name(name: &str) -> bool {
-    let Some((provider, model)) = name.split_once('/') else {
-        return false;
-    };
-    !model.contains('/') && is_object_name(provider) && is_object_name(model)
-}
-
-fn is_object_name_for_class(class: ObjectClass, name: &str) -> bool {
-    match class {
-        ObjectClass::Model => is_model_name(name),
-        ObjectClass::Agent | ObjectClass::Tool => is_object_name(name),
-    }
-}
-
-/// Parsed `CortexFS` ABI path shape.
-///
-/// This is the typed companion to the stable `ctx.*` strings returned by
-/// [`classify_abi_path`]. It is intended for internal routing and validation;
-/// the filesystem ABI remains the path shape and stable type strings.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AbiPathKind<'a> {
-    /// Path does not match any stable v1 ABI shape.
-    Unknown,
-    /// `model/<provider>`.
-    ModelDir { provider: &'a str },
-    /// `model/<provider>/<model>`, `agent/<name>`, or `tool/<name>`.
-    ObjectExec {
-        class: ObjectClass,
-        provider: Option<&'a str>,
-        name: &'a str,
-    },
-    /// `model/<provider>/<model>.sock`, `agent/<name>.sock`, or `tool/<name>.sock`.
-    ObjectSocket {
-        class: ObjectClass,
-        provider: Option<&'a str>,
-        name: &'a str,
-    },
-    /// Object control file path under `<name>.d/`.
-    ObjectControl {
-        class: ObjectClass,
-        provider: Option<&'a str>,
-        name: &'a str,
-        file: &'a str,
-    },
-    /// `home/<uid>` and valid descendants not otherwise classified.
-    HomeDir,
-    /// Durable session root, for example `home/<uid>/agent/<agent>/session`.
-    SessionRoot,
-    /// Durable session instance directory.
-    SessionDir { session: &'a str },
-    /// Direct durable session file.
-    SessionFile { session: &'a str, file: &'a str },
-    /// Reserved durable session index file.
-    SessionIndex { kind: SessionIndexKind },
-    /// Durable file below `context/` in a session.
-    SessionContextFile {
-        session: &'a str,
-        first: &'a str,
-        second: Option<&'a str>,
-    },
-    /// `shared/<space>` and valid descendants not otherwise classified.
-    SharedDir { space: &'a str },
-    /// `shared/<space>/tool/<tool>`.
-    SharedToolExec { space: &'a str, name: &'a str },
-    /// `shared/<space>/tool/<tool>.d/<file>`.
-    SharedToolControl {
-        space: &'a str,
-        name: &'a str,
-        file: &'a str,
-    },
-    /// `shared/<space>/queue`.
-    SharedQueueRoot { space: &'a str },
-    /// A fixed child directory below `shared/<space>/queue`.
-    SharedQueueDir { space: &'a str, name: &'a str },
-    /// `shared/<space>/result`.
-    SharedResult { space: &'a str },
-    /// A syntactically valid ordinary file under an ABI-owned subtree.
-    Ordinary,
-}
-
-impl AbiPathKind<'_> {
-    /// Returns the stable `ctx file classify` string for this parsed path.
-    #[must_use]
-    pub fn stable_type(self) -> &'static str {
-        match self {
-            Self::Unknown => "ctx.unknown",
-            Self::ModelDir { .. } => "ctx.model.dir",
-            Self::ObjectExec { class, .. } => class.exec_type(),
-            Self::ObjectSocket { class, .. } => class.socket_type(),
-            Self::ObjectControl { class, .. } => class.control_type(),
-            Self::HomeDir => "ctx.home.dir",
-            Self::SessionRoot | Self::SessionDir { .. } => "ctx.session.dir",
-            Self::SessionFile {
-                file: "messages.jsonl",
-                ..
-            } => "ctx.session.messages",
-            Self::SessionFile {
-                file: "events.jsonl",
-                ..
-            } => "ctx.session.events",
-            Self::SessionFile { .. }
-            | Self::SessionIndex { .. }
-            | Self::SessionContextFile { .. }
-            | Self::Ordinary => "ctx.ordinary",
-            Self::SharedDir { .. } => "ctx.shared.dir",
-            Self::SharedToolExec { .. } => "ctx.shared.tool.exec",
-            Self::SharedToolControl { .. } => "ctx.shared.tool.control",
-            Self::SharedQueueRoot { .. } | Self::SharedQueueDir { .. } => "ctx.shared.queue",
-            Self::SharedResult { .. } => "ctx.shared.result",
-        }
-    }
-}
-
-impl<'a> AbiPathKind<'a> {
-    /// Returns an executable object class and stable name, when this path is an executable object.
-    #[must_use]
-    pub fn executable_object(self) -> Option<(ObjectClass, Cow<'a, str>)> {
-        match self {
-            Self::ObjectExec {
-                class: ObjectClass::Model,
-                provider: Some(provider),
-                name,
-            } => Some((ObjectClass::Model, Cow::Owned(format!("{provider}/{name}")))),
-            Self::ObjectExec { class, name, .. } => Some((class, Cow::Borrowed(name))),
-            _ => None,
-        }
-    }
-
-    /// Returns a model control-file name for `model/<provider>/<model>.d/<file>`.
-    #[must_use]
-    pub const fn model_control_file(self) -> Option<&'a str> {
-        match self {
-            Self::ObjectControl {
-                class: ObjectClass::Model,
-                file,
-                ..
-            } => Some(file),
-            _ => None,
-        }
-    }
-
-    /// Returns a global or shared tool schema path.
-    #[must_use]
-    pub fn is_tool_schema(self) -> bool {
-        matches!(
-            self,
-            Self::ObjectControl {
-                class: ObjectClass::Tool,
-                file: "schema",
-                ..
-            } | Self::SharedToolControl { file: "schema", .. }
-        )
-    }
-
-    /// Returns a control file name for object `.d/` paths that carry policy or mount syntax.
-    #[must_use]
-    pub const fn control_file(self) -> Option<&'a str> {
-        match self {
-            Self::ObjectControl { file, .. } | Self::SharedToolControl { file, .. } => Some(file),
-            _ => None,
-        }
-    }
-
-    /// Returns the fixed agent-control kind, if this is `agent/<name>.d/<file>`.
-    #[must_use]
-    pub fn agent_control_kind(self) -> Option<AgentControlKind> {
-        match self {
-            Self::ObjectControl {
-                class: ObjectClass::Agent,
-                file,
-                ..
-            } => AgentControlKind::parse(file),
-            _ => None,
-        }
-    }
-
-    /// Returns the fixed session-index kind for reserved `session/index/*` files.
-    #[must_use]
-    pub fn session_index_kind(self) -> Option<SessionIndexKind> {
-        match self {
-            Self::SessionIndex { kind } => Some(kind),
-            _ => None,
-        }
-    }
-
-    /// Returns the fixed session control kind for direct session control files.
-    #[must_use]
-    pub fn session_control_kind(self) -> Option<SessionControlKind> {
-        match self {
-            Self::SessionFile { session, file } if is_object_name(session) => {
-                SessionControlKind::parse(file)
-            }
-            _ => None,
-        }
-    }
-
-    /// Returns whether this path is a durable session instance directory.
-    #[must_use]
-    pub fn is_session_instance(self) -> bool {
-        matches!(self, Self::SessionDir { session } if is_object_name(session))
-    }
-
-    /// Returns a stable context JSONL kind for session `context/*` files.
-    #[must_use]
-    pub fn context_jsonl_kind(self) -> Option<ContextJsonlKind> {
-        match self {
-            Self::SessionContextFile {
-                session,
-                first,
-                second,
-            } if is_object_name(session) => match (first, second) {
-                ("facts.jsonl", None) => Some(ContextJsonlKind::Facts),
-                ("decisions.jsonl", None) => Some(ContextJsonlKind::Decisions),
-                ("refs.jsonl", None) => Some(ContextJsonlKind::Refs),
-                ("swap", Some("index.jsonl")) => Some(ContextJsonlKind::SwapIndex),
-                ("dedup", Some("index.jsonl")) => Some(ContextJsonlKind::DedupIndex),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    /// Returns whether this path is `context/pack.json` below a durable session.
-    #[must_use]
-    pub fn is_context_pack(self) -> bool {
-        matches!(
-            self,
-            Self::SessionContextFile {
-                session,
-                first: "pack.json",
-                second: None,
-            } if is_object_name(session)
-        )
-    }
-}
-
-/// Classifies a relative `CortexFS` ABI path by path shape.
-#[must_use]
-pub fn classify_abi_path(path: &str) -> &'static str {
-    parse_abi_path(path).stable_type()
-}
-
-/// Parses a relative `CortexFS` ABI path by path shape.
-#[must_use]
-pub fn parse_abi_path(path: &str) -> AbiPathKind<'_> {
-    let trimmed = path.strip_prefix("./").map_or(path, |value| value);
-
-    if trimmed.is_empty() || trimmed.split('/').any(str::is_empty) {
-        return AbiPathKind::Unknown;
-    }
-
-    let parts = trimmed.split('/').collect::<Vec<_>>();
-    let Some((first, rest)) = parts.split_first() else {
-        return AbiPathKind::Unknown;
-    };
-    match *first {
-        "model" => parse_model_object_path(rest),
-        "agent" => parse_simple_object_path(ObjectClass::Agent, rest),
-        "tool" => parse_simple_object_path(ObjectClass::Tool, rest),
-        "home" => parse_home_path(rest),
-        "shared" => parse_shared_path(rest),
-        _ => AbiPathKind::Unknown,
-    }
-}
-
-fn parse_simple_object_path<'a>(class: ObjectClass, parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((name, rest)) = parts.split_first() else {
-        return AbiPathKind::Unknown;
-    };
-
-    if let Some(object_name) = name.strip_suffix(".sock") {
-        return if rest.is_empty() && is_object_name(object_name) {
-            AbiPathKind::ObjectSocket {
-                class,
-                provider: None,
-                name: object_name,
-            }
-        } else {
-            AbiPathKind::Unknown
-        };
-    }
-
-    if let Some(object_name) = name.strip_suffix(".d") {
-        return if let Some((file, _remaining)) = rest.split_first()
-            && is_object_name(object_name)
-        {
-            AbiPathKind::ObjectControl {
-                class,
-                provider: None,
-                name: object_name,
-                file,
-            }
-        } else {
-            AbiPathKind::Unknown
-        };
-    }
-
-    if rest.is_empty() && is_object_name(name) {
-        AbiPathKind::ObjectExec {
-            class,
-            provider: None,
-            name,
-        }
-    } else {
-        AbiPathKind::Unknown
-    }
-}
-
-fn parse_model_object_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((provider, rest)) = parts.split_first() else {
-        return AbiPathKind::Unknown;
-    };
-    if !is_object_name(provider) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((name, rest)) = rest.split_first() else {
-        return AbiPathKind::ModelDir { provider };
-    };
-
-    if let Some(object_name) = name.strip_suffix(".sock") {
-        return if rest.is_empty() && is_model_name(&format!("{provider}/{object_name}")) {
-            AbiPathKind::ObjectSocket {
-                class: ObjectClass::Model,
-                provider: Some(provider),
-                name: object_name,
-            }
-        } else {
-            AbiPathKind::Unknown
-        };
-    }
-
-    if let Some(object_name) = name.strip_suffix(".d") {
-        return if let Some((file, _remaining)) = rest.split_first()
-            && is_model_name(&format!("{provider}/{object_name}"))
-        {
-            AbiPathKind::ObjectControl {
-                class: ObjectClass::Model,
-                provider: Some(provider),
-                name: object_name,
-                file,
-            }
-        } else {
-            AbiPathKind::Unknown
-        };
-    }
-
-    let model_name = format!("{provider}/{name}");
-    if rest.is_empty() && is_model_name(&model_name) {
-        AbiPathKind::ObjectExec {
-            class: ObjectClass::Model,
-            provider: Some(provider),
-            name,
-        }
-    } else {
-        AbiPathKind::Unknown
-    }
-}
-
-fn parse_home_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((_uid, rest)) = parts.split_first() else {
-        return AbiPathKind::Unknown;
-    };
-
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    match *first {
-        "agent" => parse_home_agent_path(rest),
-        "model" => parse_home_model_path(rest),
-        _ => AbiPathKind::HomeDir,
-    }
-}
-
-fn parse_home_agent_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((agent, rest)) = parts.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    if !is_object_name(agent) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    match *first {
-        "session" => parse_session_path(rest),
-        _ => AbiPathKind::HomeDir,
-    }
-}
-
-fn parse_home_model_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((provider, rest)) = parts.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    let Some((model_dir, rest)) = rest.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    let Some(model) = model_dir.strip_suffix(".d") else {
-        return AbiPathKind::HomeDir;
-    };
-    if !is_model_name(&format!("{provider}/{model}")) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    match *first {
-        "session" => parse_session_path(rest),
-        _ => AbiPathKind::HomeDir,
-    }
-}
-
-fn parse_shared_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((space, rest)) = parts.split_first() else {
-        return AbiPathKind::Unknown;
-    };
-    if !is_object_name(space) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::SharedDir { space };
-    };
-    match *first {
-        "agent" => parse_shared_agent_path(space, rest),
-        "model" => parse_shared_model_path(space, rest),
-        "tool" => parse_shared_tool_path(space, rest),
-        "queue" if rest.is_empty() => AbiPathKind::SharedQueueRoot { space },
-        "queue" => parse_shared_queue_child(space, rest),
-        "result" if rest.is_empty() => AbiPathKind::SharedResult { space },
-        "result" => AbiPathKind::Ordinary,
-        _ => AbiPathKind::SharedDir { space },
-    }
-}
-
-fn parse_shared_queue_child<'a>(space: &'a str, rest: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((name, tail)) = rest.split_first() else {
-        return AbiPathKind::SharedQueueRoot { space };
-    };
-    if tail.is_empty() && is_shared_queue_entry(name) {
-        AbiPathKind::SharedQueueDir { space, name }
-    } else {
-        AbiPathKind::Ordinary
-    }
-}
-
-fn parse_shared_tool_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((name, rest)) = parts.split_first() else {
-        return AbiPathKind::SharedDir { space };
-    };
-    if let Some(tool_name) = name.strip_suffix(".d") {
-        return if let Some((file, _remaining)) = rest.split_first()
-            && is_object_name(tool_name)
-        {
-            AbiPathKind::SharedToolControl {
-                space,
-                name: tool_name,
-                file,
-            }
-        } else {
-            AbiPathKind::Unknown
-        };
-    }
-
-    if rest.is_empty() && is_object_name(name) {
-        AbiPathKind::SharedToolExec { space, name }
-    } else {
-        AbiPathKind::Unknown
-    }
-}
-
-fn parse_shared_agent_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((agent, rest)) = parts.split_first() else {
-        return AbiPathKind::SharedDir { space };
-    };
-    if !is_object_name(agent) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::SharedDir { space };
-    };
-    match *first {
-        "session" => parse_session_path(rest),
-        _ => AbiPathKind::SharedDir { space },
-    }
-}
-
-fn parse_shared_model_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((provider, rest)) = parts.split_first() else {
-        return AbiPathKind::SharedDir { space };
-    };
-    let Some((model_dir, rest)) = rest.split_first() else {
-        return AbiPathKind::SharedDir { space };
-    };
-    let Some(model) = model_dir.strip_suffix(".d") else {
-        return AbiPathKind::SharedDir { space };
-    };
-    if !is_model_name(&format!("{provider}/{model}")) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::SharedDir { space };
-    };
-    match *first {
-        "session" => parse_session_path(rest),
-        _ => AbiPathKind::SharedDir { space },
-    }
-}
-
-fn parse_session_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((session, rest)) = parts.split_first() else {
-        return AbiPathKind::SessionRoot;
-    };
-    if !is_object_name(session) {
-        return AbiPathKind::Unknown;
-    }
-
-    let Some((first, tail)) = rest.split_first() else {
-        return AbiPathKind::SessionDir { session };
-    };
-    if *session == "index" {
-        return if tail.is_empty() && *first == "list" {
-            AbiPathKind::SessionIndex {
-                kind: SessionIndexKind::List,
-            }
-        } else if tail.is_empty() && *first == "current" {
-            AbiPathKind::SessionIndex {
-                kind: SessionIndexKind::Current,
-            }
-        } else if *first == "by-cwd"
-            && tail.len() == 1
-            && tail.first().is_some_and(|hash| !hash.is_empty())
-        {
-            AbiPathKind::SessionIndex {
-                kind: SessionIndexKind::ByCwd,
-            }
-        } else {
-            AbiPathKind::Ordinary
-        };
-    }
-    if *first == "context" {
-        return parse_session_context_path(session, tail);
-    }
-    if tail.is_empty() {
-        AbiPathKind::SessionFile {
-            session,
-            file: first,
-        }
-    } else {
-        AbiPathKind::Ordinary
-    }
-}
-
-fn parse_session_context_path<'a>(session: &'a str, tail: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((first, rest)) = tail.split_first() else {
-        return AbiPathKind::Ordinary;
-    };
-    AbiPathKind::SessionContextFile {
-        session,
-        first,
-        second: rest.first().copied(),
-    }
-}
-
-const fn is_shared_queue_entry(name: &str) -> bool {
-    matches!(
-        name.as_bytes(),
-        b"inbox" | b"pending" | b"lease" | b"claimed" | b"done" | b"failed"
-    )
 }
 
 #[cfg(test)]
