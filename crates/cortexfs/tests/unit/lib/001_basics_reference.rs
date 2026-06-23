@@ -59,91 +59,66 @@ fn abi_paths_classify_by_stable_shape() {
         "meta-llama/llama-4-maverick",
         "x-ai/grok-4",
     ] {
-        assert_eq!(
-            classify_abi_path(&format!("model/{model}")),
-            "ctx.model.exec"
-        );
+        assert_abi_class(&format!("model/{model}"), "ctx.model.exec");
     }
-    assert_eq!(classify_abi_path("model/debug/echo"), "ctx.model.exec");
-    assert_eq!(
-        classify_abi_path("model/debug/echo.sock"),
-        "ctx.model.socket"
-    );
-    assert_eq!(
-        classify_abi_path("model/debug/echo.d/id"),
-        "ctx.model.control"
-    );
-    assert_eq!(classify_abi_path("agent/coder"), "ctx.agent.exec");
-    assert_eq!(classify_abi_path("agent/coder.sock"), "ctx.agent.socket");
-    assert_eq!(
-        classify_abi_path("agent/coder.d/policy"),
-        "ctx.agent.control"
-    );
-    assert_eq!(classify_abi_path("tool/fs.read"), "ctx.tool.exec");
-    assert_eq!(
-        classify_abi_path("tool/fs.read.d/schema"),
-        "ctx.tool.control"
-    );
-    assert_eq!(classify_abi_path("home/1000"), "ctx.home.dir");
-    assert_eq!(
-        classify_abi_path("home/1000/agent/coder/session/default"),
-        "ctx.session.dir"
-    );
-    assert_eq!(
-        classify_abi_path("home/1000/agent/coder/session/default/messages.jsonl"),
-        "ctx.session.messages"
-    );
-    assert_eq!(
-        classify_abi_path("home/1000/agent/coder/session/default/events.jsonl"),
-        "ctx.session.events"
-    );
-    assert_eq!(
-        classify_abi_path("home/1000/model/debug/echo.d/session/default"),
-        "ctx.session.dir"
-    );
-    assert_eq!(
-        classify_abi_path("shared/im-qq-dev/agent/bot/session/group-456/events.jsonl"),
-        "ctx.session.events"
-    );
-    assert_eq!(
-        classify_abi_path("shared/project-a/model/debug/echo.d/session/default/messages.jsonl"),
-        "ctx.session.messages"
-    );
-    assert_eq!(classify_abi_path("shared/project-a"), "ctx.shared.dir");
-    assert_eq!(
-        classify_abi_path("shared/project-a/tool/project.test"),
-        "ctx.shared.tool.exec"
-    );
-    assert_eq!(
-        classify_abi_path("shared/project-a/tool/project.test.d/schema"),
-        "ctx.shared.tool.control"
-    );
-    assert_eq!(
-        classify_abi_path("shared/project-a/queue"),
-        "ctx.shared.queue"
-    );
-    assert_eq!(
-        classify_abi_path("shared/project-a/queue/pending"),
-        "ctx.shared.queue"
-    );
-    assert_eq!(
-        classify_abi_path("shared/project-a/result"),
-        "ctx.shared.result"
-    );
+    for (path, expected) in [
+        ("model/debug/echo", "ctx.model.exec"),
+        ("model/debug/echo.sock", "ctx.model.socket"),
+        ("model/debug/echo.d/id", "ctx.model.control"),
+        ("agent/coder", "ctx.agent.exec"),
+        ("agent/coder.sock", "ctx.agent.socket"),
+        ("agent/coder.d/policy", "ctx.agent.control"),
+        ("tool/fs.read", "ctx.tool.exec"),
+        ("tool/fs.read.d/schema", "ctx.tool.control"),
+        ("home/1000", "ctx.home.dir"),
+        ("home/1000/agent/coder/session/default", "ctx.session.dir"),
+        (
+            "home/1000/agent/coder/session/default/messages.jsonl",
+            "ctx.session.messages",
+        ),
+        (
+            "home/1000/agent/coder/session/default/events.jsonl",
+            "ctx.session.events",
+        ),
+        (
+            "home/1000/model/debug/echo.d/session/default",
+            "ctx.session.dir",
+        ),
+        (
+            "shared/im-qq-dev/agent/bot/session/group-456/events.jsonl",
+            "ctx.session.events",
+        ),
+        (
+            "shared/project-a/model/debug/echo.d/session/default/messages.jsonl",
+            "ctx.session.messages",
+        ),
+        ("shared/project-a", "ctx.shared.dir"),
+        ("shared/project-a/tool/project.test", "ctx.shared.tool.exec"),
+        (
+            "shared/project-a/tool/project.test.d/schema",
+            "ctx.shared.tool.control",
+        ),
+        ("shared/project-a/queue", "ctx.shared.queue"),
+        ("shared/project-a/queue/pending", "ctx.shared.queue"),
+        ("shared/project-a/result", "ctx.shared.result"),
+    ] {
+        assert_abi_class(path, expected);
+    }
 }
 
 #[test]
 fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
-    assert_eq!(classify_abi_path("provider/openai"), "ctx.unknown");
-    assert_eq!(classify_abi_path("mcp/github"), "ctx.unknown");
-    assert_eq!(classify_abi_path("skill/local"), "ctx.unknown");
-    assert_eq!(classify_abi_path("cluster/default"), "ctx.unknown");
-    assert_eq!(
-        classify_abi_path("model/debug/echo.sock.d/id"),
-        "ctx.unknown"
-    );
-    assert_eq!(classify_abi_path("tool/-bad"), "ctx.unknown");
-    assert_eq!(classify_abi_path("agent/coder/extra"), "ctx.unknown");
+    for path in [
+        "provider/openai",
+        "mcp/github",
+        "skill/local",
+        "cluster/default",
+        "model/debug/echo.sock.d/id",
+        "tool/-bad",
+        "agent/coder/extra",
+    ] {
+        assert_abi_class(path, "ctx.unknown");
+    }
 }
 
 #[test]
@@ -446,4 +421,3 @@ fn reference_tree_standard_tools_emit_jsonl() {
     assert!(shell_stdout.contains(r#""text":"shell-ok""#));
     assert!(inspect_event_stream_jsonl(&shell_stdout).is_ok());
 }
-

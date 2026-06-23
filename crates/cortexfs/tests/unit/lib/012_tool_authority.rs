@@ -24,9 +24,7 @@ fn tool_execution_authority_requires_all_layers() {
     assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
     write_fixture_file(&tools.join("fs.read"), 0o755);
 
-    let metadata = fs::metadata(tools.join("fs.read"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&tools.join("fs.read")));
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let agent_policy = allow_tool_policy("coder_t", "fs.read");
     let tool_policy = allow_tool_policy("coder_t", "fs.read");
@@ -51,9 +49,7 @@ fn model_tool_call_syntax_does_not_execute_tools() {
     );
     assert!(model_event.is_ok());
 
-    let metadata = fs::metadata(tools.join("fs.read"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&tools.join("fs.read")));
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let policy = allow_tool_policy("echo_t", "fs.read");
     let tool_path = ToolPath::new([tools]);
@@ -93,9 +89,7 @@ fn prompt_skill_and_mcp_config_cannot_grant_tool_execution() {
     assert!(root.join("work").join("AGENTS.md").is_file());
     assert!(root.join("work").join(".mcp.json").is_file());
 
-    let metadata = fs::metadata(tools.join("fs.read"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&tools.join("fs.read")));
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let empty_policy = PolicyV0::parse("");
     let empty_policy = ok!(empty_policy);
@@ -121,9 +115,7 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
         "{\"type\":\"object\"}\n",
     );
 
-    let metadata = fs::metadata(tools.join("fs.read"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&tools.join("fs.read")));
     let executable_mount = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let noexec_mount = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev,noexec");
     let agent_policy = allow_tool_policy("coder_t", "fs.read");
@@ -206,9 +198,7 @@ fn project_tools_are_visible_only_through_ctx_path_order() {
     let found = with_project.find("project.test");
     assert!(matches!(found, Ok(Some(ref hit)) if hit.path() == project.join("project.test")));
 
-    let metadata = fs::metadata(project.join("project.test"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&project.join("project.test")));
     let mounts = mount_table_for_target(&project, "rw", "bind,nosuid,nodev");
     let policy = allow_tool_policy("coder_t", "project.test");
     let authority = ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy);
@@ -230,9 +220,7 @@ fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
         "{\"servers\":{\"github\":{}}}\n",
     );
 
-    let metadata = fs::metadata(tools.join("mcp.github.search_issues"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&tools.join("mcp.github.search_issues")));
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let tool_path = ToolPath::new([tools]);
     let empty_policy = PolicyV0::parse("");
@@ -265,9 +253,7 @@ fn tool_schema_cannot_grant_execution_authority() {
         "{\"policy\":\"allow coder_t tool:fs.read execute\"}\n",
     );
 
-    let metadata = fs::metadata(tools.join("fs.read"));
-    let metadata = ok!(metadata);
-    let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
+    let identity = ok!(unix_identity_for(&tools.join("fs.read")));
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let tool_path = ToolPath::new([tools]);
     let empty_policy = PolicyV0::parse("");
@@ -316,4 +302,3 @@ fn tool_execution_authority_checks_linux_identity_mode_bits() {
         Err(ToolExecutionDenial::LinuxPermission)
     );
 }
-

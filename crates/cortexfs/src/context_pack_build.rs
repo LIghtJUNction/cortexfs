@@ -391,35 +391,25 @@ fn render_context_pack_markdown(
 ) -> String {
     let mut output = String::new();
     output.push_str("# CortexFS Context Pack\n\n");
-    output.push_str("session: ");
-    output.push_str(session);
-    output.push('\n');
+    push_markdown_kv(&mut output, "session", session);
     if let Some(agent) = agent {
-        output.push_str("agent: ");
-        output.push_str(agent);
-        output.push('\n');
+        push_markdown_kv(&mut output, "agent", agent);
     }
     if let Some(budget) = budget {
-        output.push_str("budget_tokens: ");
-        output.push_str(&budget.to_string());
-        output.push('\n');
+        push_markdown_kv(&mut output, "budget_tokens", &budget.to_string());
     }
     output.push('\n');
 
     for candidate in candidates {
         output.push_str("## ");
         output.push_str(&candidate.kind);
-        output.push_str("\n\nsource: ");
-        output.push_str(&candidate.source);
-        output.push('\n');
-        if let Some(range) = candidate.range.as_deref() {
-            output.push_str("range: ");
-            output.push_str(range);
-            output.push('\n');
-        }
-        output.push_str("tokens: ");
-        output.push_str(&candidate.tokens.to_string());
         output.push_str("\n\n");
+        push_markdown_kv(&mut output, "source", &candidate.source);
+        if let Some(range) = candidate.range.as_deref() {
+            push_markdown_kv(&mut output, "range", range);
+        }
+        push_markdown_kv(&mut output, "tokens", &candidate.tokens.to_string());
+        output.push('\n');
         output.push_str("```text\n");
         output.push_str(&candidate.content);
         if !candidate.content.ends_with('\n') {
@@ -429,6 +419,13 @@ fn render_context_pack_markdown(
     }
 
     output
+}
+
+fn push_markdown_kv(output: &mut String, key: &str, value: &str) {
+    output.push_str(key);
+    output.push_str(": ");
+    output.push_str(value);
+    output.push('\n');
 }
 
 fn directory_entry_names(path: &Path) -> Result<Vec<String>, ContextPackBuildError> {
