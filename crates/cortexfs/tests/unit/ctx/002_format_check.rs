@@ -203,7 +203,7 @@ fn formats_session_control_issues_for_file_check() {
 
 #[test]
 fn file_check_validates_session_control_files() {
-    let root = unique_test_dir("ctx-session-control-check");
+    let root = clean_test_dir("ctx-session-control-check");
     let session = root
         .join("home")
         .join("1000")
@@ -229,13 +229,11 @@ fn file_check_validates_session_control_files() {
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid value"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_agent_control_files() {
-    let root = unique_test_dir("ctx-agent-control-check");
+    let root = clean_test_dir("ctx-agent-control-check");
     let control = root.join("agent").join("coder.d");
     assert!(fs::create_dir_all(&control).is_ok());
     assert!(fs::write(control.join("uid"), "1000\n").is_ok());
@@ -252,13 +250,11 @@ fn file_check_validates_agent_control_files() {
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid value"))
     );
     assert!(file_check(&root, "agent/coder.d/parent").is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_session_index_files() {
-    let root = unique_test_dir("ctx-session-index-check");
+    let root = clean_test_dir("ctx-session-index-check");
     let index = root
         .join("shared")
         .join("im-qq-dev")
@@ -281,13 +277,11 @@ fn file_check_validates_session_index_files() {
         "shared/im-qq-dev/agent/bot/session/index/by-cwd/hash-1"
     )
     .is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_rejects_by_cwd_symlink_index_entries() {
-    let root = unique_test_dir("ctx-session-index-symlink");
+    let root = clean_test_dir("ctx-session-index-symlink");
     let by_cwd = root
         .join("home")
         .join("1000")
@@ -304,118 +298,89 @@ fn file_check_rejects_by_cwd_symlink_index_entries() {
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("by-cwd entry is a symlink"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_model_capability_files() {
-    let root = unique_test_dir("ctx-model-cap-check");
+    let root = clean_test_dir("ctx-model-cap-check");
     let cap = root.join("model").join("openai").join("gpt-4o.d").join("cap");
-    let parent = cap.parent();
-    assert!(parent.is_some());
-    let Some(parent) = parent else { return };
-    assert!(fs::create_dir_all(parent).is_ok());
-    assert!(fs::write(&cap, "chat\nopenai_responses\n").is_ok());
+    write_text_file(&cap, "chat\nopenai_responses\n");
 
     let checked = file_check(&root, "model/openai/gpt-4o.d/cap");
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("provider private capability"))
     );
 
-    assert!(fs::write(&cap, "chat\nstream\n").is_ok());
+    write_text_file(&cap, "chat\nstream\n");
     let checked = file_check(&root, "model/openai/gpt-4o.d/cap");
     assert!(checked.is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_model_driver_route_files() {
-    let root = unique_test_dir("ctx-model-driver-check");
+    let root = clean_test_dir("ctx-model-driver-check");
     let driver = root
         .join("model")
         .join("openai")
         .join("gpt-4o.d")
         .join("driver");
-    let parent = driver.parent();
-    assert!(parent.is_some());
-    let Some(parent) = parent else { return };
-    assert!(fs::create_dir_all(parent).is_ok());
-    assert!(fs::write(&driver, "agent=/bin/sh\n").is_ok());
+    write_text_file(&driver, "agent=/bin/sh\n");
 
     let checked = file_check(&root, "model/openai/gpt-4o.d/driver");
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid driver name"))
     );
 
-    assert!(fs::write(
+    write_text_file(
         &driver,
         "default=openai-chat\nexec=openai-chat\nagent=openai-responses,openai-chat\n"
-    )
-    .is_ok());
+    );
     let checked = file_check(&root, "model/openai/gpt-4o.d/driver");
     assert!(checked.is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_tool_schema_files() {
-    let root = unique_test_dir("ctx-tool-schema-check");
+    let root = clean_test_dir("ctx-tool-schema-check");
     let schema = root.join("tool").join("fs.read.d").join("schema");
-    let parent = schema.parent();
-    assert!(parent.is_some());
-    let Some(parent) = parent else { return };
-    assert!(fs::create_dir_all(parent).is_ok());
-    assert!(fs::write(
+    write_text_file(
         &schema,
         "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}\n"
-    )
-    .is_ok());
+    );
     assert!(file_check(&root, "tool/fs.read.d/schema").is_ok());
 
-    assert!(fs::write(&schema, "{\"policy\":\"allow all\"}\n").is_ok());
+    write_text_file(&schema, "{\"policy\":\"allow all\"}\n");
     let checked = file_check(&root, "tool/fs.read.d/schema");
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("authority field policy"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_shared_tool_schema_files() {
-    let root = unique_test_dir("ctx-shared-tool-schema-check");
+    let root = clean_test_dir("ctx-shared-tool-schema-check");
     let schema = root
         .join("shared")
         .join("project-a")
         .join("tool")
         .join("project.test.d")
         .join("schema");
-    let parent = schema.parent();
-    assert!(parent.is_some());
-    let Some(parent) = parent else { return };
-    assert!(fs::create_dir_all(parent).is_ok());
-    assert!(fs::write(
+    write_text_file(
         &schema,
         "{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"string\"}}}\n"
-    )
-    .is_ok());
+    );
     assert!(file_check(&root, "shared/project-a/tool/project.test.d/schema").is_ok());
 
-    assert!(fs::write(&schema, "{\"authority\":\"local\"}\n").is_ok());
+    write_text_file(&schema, "{\"authority\":\"local\"}\n");
     let checked = file_check(&root, "shared/project-a/tool/project.test.d/schema");
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid tool schema") && error.message.contains("authority field authority"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_shared_queue_roots() {
-    let root = unique_test_dir("ctx-shared-queue-check");
+    let root = clean_test_dir("ctx-shared-queue-check");
     let queue = root.join("shared").join("project-a").join("queue");
     for name in ["inbox", "pending", "lease", "claimed", "done", "failed"] {
         assert!(fs::create_dir_all(queue.join(name)).is_ok());
@@ -428,13 +393,11 @@ fn file_check_validates_shared_queue_roots() {
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid shared queue") && error.message.contains("missing directory lease"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_event_stream_files() {
-    let root = unique_test_dir("ctx-events-check");
+    let root = clean_test_dir("ctx-events-check");
     let events = root
         .join("home")
         .join("1000")
@@ -443,15 +406,10 @@ fn file_check_validates_event_stream_files() {
         .join("session")
         .join("default")
         .join("events.jsonl");
-    let parent = events.parent();
-    assert!(parent.is_some());
-    let Some(parent) = parent else { return };
-    assert!(fs::create_dir_all(parent).is_ok());
-    assert!(fs::write(
+    write_text_file(
         &events,
         "{\"type\":\"start\",\"run\":\"r1\",\"response_id\":\"resp_1\"}\n"
-    )
-    .is_ok());
+    );
 
     let checked = file_check(&root, "home/1000/agent/coder/session/default/events.jsonl");
     assert!(
@@ -467,20 +425,13 @@ fn file_check_validates_event_stream_files() {
         .join("session")
         .join("default")
         .join("events.jsonl");
-    let parent = model_events.parent();
-    assert!(parent.is_some());
-    let Some(parent) = parent else { return };
-    assert!(fs::create_dir_all(parent).is_ok());
-    assert!(fs::write(
+    write_text_file(
         &model_events,
         "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}\n"
-    )
-    .is_ok());
+    );
     assert!(file_check(
         &root,
         "shared/project-a/model/openai/gpt-4o.d/session/default/events.jsonl"
     )
     .is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }

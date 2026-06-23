@@ -8,6 +8,24 @@ fn unique_test_dir(name: &str) -> PathBuf {
     ))
 }
 
+fn clean_test_dir(name: &str) -> PathBuf {
+    let root = unique_test_dir(name);
+    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    root
+}
+
+fn assert_path_matches(paths: &[&str], predicate: fn(&str) -> bool, expected: bool) {
+    for path in paths {
+        assert_eq!(predicate(path), expected, "{path}");
+    }
+}
+
+macro_rules! cmd {
+    ($($arg:literal),* $(,)?) => {
+        parse_command(vec![$($arg.to_owned()),*])
+    };
+}
+
 fn create_complete_session_layout(session: &Path) {
     let context = session.join("context");
     assert!(fs::create_dir_all(&context).is_ok());
