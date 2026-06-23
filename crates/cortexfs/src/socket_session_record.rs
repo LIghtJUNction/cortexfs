@@ -1,3 +1,5 @@
+type SocketRecordResult<T> = Result<T, SocketSessionRecordError>;
+
 /// Records durable filesystem effects for a parsed socket request.
 ///
 /// `send` appends a user message to `messages.jsonl`, appends a canonical
@@ -107,18 +109,10 @@ pub fn record_assistant_response_to_session(
     })
     .to_string();
 
-    append_jsonl_line(&session_dir.join("messages.jsonl"), &message)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    append_jsonl_line(&session_dir.join("events.jsonl"), &event)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    append_jsonl_line(&session_dir.join("events.jsonl"), &done)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("latest.md"), &format!("{content}\n"))
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("state"), "done\n")
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("updated_at"), &unix_timestamp_text())
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    append_session_lines(session_dir, "messages.jsonl", &[&message])?;
+    append_session_lines(session_dir, "events.jsonl", &[&event, &done])?;
+    write_session_file(session_dir, "latest.md", &format!("{content}\n"))?;
+    set_session_state(session_dir, "done")?;
 
     Ok(SocketSessionRecord::new(vec![message], vec![event, done]))
 }
@@ -156,14 +150,8 @@ pub fn record_tool_execution_denial_to_session(
     })
     .to_string();
 
-    append_jsonl_line(&session_dir.join("events.jsonl"), &event)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    append_jsonl_line(&session_dir.join("events.jsonl"), &done)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("state"), "error\n")
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("updated_at"), &unix_timestamp_text())
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    append_session_lines(session_dir, "events.jsonl", &[&event, &done])?;
+    set_session_state(session_dir, "error")?;
 
     Ok(SocketSessionRecord::new(Vec::new(), vec![event, done]))
 }
@@ -212,12 +200,9 @@ pub fn record_tool_execution_result_to_session(
     })
     .to_string();
 
-    append_jsonl_line(&session_dir.join("messages.jsonl"), &message)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    append_jsonl_line(&session_dir.join("events.jsonl"), &event)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("updated_at"), &unix_timestamp_text())
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    append_session_lines(session_dir, "messages.jsonl", &[&message])?;
+    append_session_lines(session_dir, "events.jsonl", &[&event])?;
+    touch_session(session_dir)?;
 
     Ok(SocketSessionRecord::new(vec![message], vec![event]))
 }
@@ -357,17 +342,11 @@ fn record_socket_send_to_session(
     })
     .to_string();
 
-    append_jsonl_line(&session_dir.join("messages.jsonl"), &message)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    append_jsonl_line(&session_dir.join("events.jsonl"), &event)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("state"), "active\n")
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("updated_at"), &unix_timestamp_text())
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    append_session_lines(session_dir, "messages.jsonl", &[&message])?;
+    append_session_lines(session_dir, "events.jsonl", &[&event])?;
+    set_session_state(session_dir, "active")?;
     if let Some(cwd) = cwd {
-        atomic_replace_text(&session_dir.join("cwd"), &format!("{cwd}\n"))
-            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        write_session_file(session_dir, "cwd", &format!("{cwd}\n"))?;
     }
 
     Ok(SocketSessionRecord::new(vec![message], vec![event]))
@@ -385,12 +364,8 @@ fn record_socket_cancel_to_session(
         "status": "cancelled"
     })
     .to_string();
-    append_jsonl_line(&session_dir.join("events.jsonl"), &event)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("state"), "cancelled\n")
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    atomic_replace_text(&session_dir.join("updated_at"), &unix_timestamp_text())
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    append_session_lines(session_dir, "events.jsonl", &[&event])?;
+    set_session_state(session_dir, "cancelled")?;
 
     Ok(SocketSessionRecord::new(Vec::new(), vec![event]))
 }
@@ -438,6 +413,28 @@ fn require_child_context_files(child_dir: &Path) -> Result<(), ChildContextRecor
         }
     }
     Ok(())
+}
+
+fn append_session_lines(dir: &Path, file: &str, lines: &[&str]) -> SocketRecordResult<()> {
+    for line in lines {
+        append_jsonl_line(&dir.join(file), line)
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    }
+    Ok(())
+}
+
+fn write_session_file(dir: &Path, file: &str, content: &str) -> SocketRecordResult<()> {
+    atomic_replace_text(&dir.join(file), content)
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)
+}
+
+fn set_session_state(dir: &Path, state: &str) -> SocketRecordResult<()> {
+    write_session_file(dir, "state", &format!("{state}\n"))?;
+    touch_session(dir)
+}
+
+fn touch_session(dir: &Path) -> SocketRecordResult<()> {
+    write_session_file(dir, "updated_at", &unix_timestamp_text())
 }
 
 fn write_text_file_if_absent(path: &Path, content: &str) -> std::io::Result<()> {
