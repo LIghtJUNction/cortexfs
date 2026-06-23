@@ -12,10 +12,8 @@ fn shared_queue_finish_writes_readable_done_result_and_cleans_lease() {
         result_path,
         Ok(root.join("done").join("job-1.req.json.result"))
     );
-    let result = fs::read_to_string(root.join("done").join("job-1.req.json.result"));
-    assert!(matches!(result, Ok(ref content) if content == "ok\n"));
-    let request = fs::read_to_string(root.join("done").join("job-1.req.json"));
-    assert!(matches!(request, Ok(ref content) if content == "one\n"));
+    assert_file_text(&root.join("done").join("job-1.req.json.result"), "ok\n");
+    assert_file_text(&root.join("done").join("job-1.req.json"), "one\n");
     assert!(!root.join("claimed").join("job-1.req.json").exists());
     assert!(!root.join("lease").join("job-1.req.json").exists());
 }
@@ -38,10 +36,8 @@ fn shared_queue_finish_writes_readable_failed_result() {
         result_path,
         Ok(root.join("failed").join("job-1.req.json.result"))
     );
-    let result = fs::read_to_string(root.join("failed").join("job-1.req.json.result"));
-    assert!(matches!(result, Ok(ref content) if content == "err\n"));
-    let request = fs::read_to_string(root.join("failed").join("job-1.req.json"));
-    assert!(matches!(request, Ok(ref content) if content == "one\n"));
+    assert_file_text(&root.join("failed").join("job-1.req.json.result"), "err\n");
+    assert_file_text(&root.join("failed").join("job-1.req.json"), "one\n");
 }
 
 #[test]

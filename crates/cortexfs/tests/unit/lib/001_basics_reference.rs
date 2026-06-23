@@ -150,8 +150,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let bootstrapped = ok!(bootstrapped);
     assert_eq!(bootstrapped.root(), root.as_path());
 
-    let status = fs::read_to_string(root.join("status"));
-    assert!(matches!(status, Ok(ref content) if content == "ready\n"));
+    assert_file_text(&root.join("status"), "ready\n");
     let status_mode = fs::metadata(root.join("status"))
         .map(|metadata| metadata.permissions().mode() & 0o777);
     assert!(matches!(status_mode, Ok(0o644)));
@@ -292,8 +291,7 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
 
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
-    let agent_model = fs::read_to_string(root.join("agent").join("coder.d").join("model"));
-    assert!(matches!(agent_model, Ok(ref content) if content == "debug/echo\n"));
+    assert_file_text(&root.join("agent").join("coder.d").join("model"), "debug/echo\n");
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(
         matches!(agent_policy, Ok(ref content) if content.contains("model:debug/echo use"))
@@ -403,8 +401,7 @@ fn reference_tree_standard_tools_emit_jsonl() {
         .output();
     let write = ok!(write);
     assert!(write.status.success());
-    let written = fs::read_to_string(&write_target);
-    assert!(matches!(written, Ok(ref content) if content == "stored"));
+    assert_file_text(&write_target, "stored");
     let write_stdout = String::from_utf8(write.stdout);
     let write_stdout = ok!(write_stdout);
     assert!(write_stdout.contains(r#"{"type":"start","run":"r1","tool":"fs.write"}"#));

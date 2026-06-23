@@ -171,6 +171,13 @@ fn os_string(value: OsString) -> Result<String, CliError> {
     })
 }
 
+fn required_arg(
+    values: &mut impl Iterator<Item = String>,
+    message: &str,
+) -> Result<String, CliError> {
+    values.next().ok_or_else(|| CliError::usage(message))
+}
+
 fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let Some(command) = values.next() else {
@@ -191,33 +198,23 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         "mount" => parse_mount_command(values),
         "ls" => parse_ls_command(values),
         "which" => {
-            let Some(class) = values.next() else {
-                return Err(CliError::usage("which requires model, agent, or tool"));
-            };
-            let Some(name) = values.next() else {
-                return Err(CliError::usage("which requires an object name"));
-            };
+            let class = required_arg(&mut values, "which requires model, agent, or tool")?;
+            let name = required_arg(&mut values, "which requires an object name")?;
             let class = ObjectClass::parse(&class)
                 .ok_or_else(|| CliError::usage("which expects model, agent, or tool"))?;
             no_extra_args(values)?;
             Ok(Command::Which(class, name))
         }
         "which-tool" => {
-            let Some(name) = values.next() else {
-                return Err(CliError::usage("which-tool requires a tool name"));
-            };
+            let name = required_arg(&mut values, "which-tool requires a tool name")?;
             no_extra_args(values)?;
             Ok(Command::Which(ObjectClass::Tool, name))
         }
         "path" => {
-            let Some(kind) = values.next() else {
-                return Err(CliError::usage("path requires a kind"));
-            };
+            let kind = required_arg(&mut values, "path requires a kind")?;
             match kind.as_str() {
                 "shared" => {
-                    let Some(name) = values.next() else {
-                        return Err(CliError::usage("path shared requires a name"));
-                    };
+                    let name = required_arg(&mut values, "path shared requires a name")?;
                     no_extra_args(values)?;
                     Ok(Command::PathShared(name))
                 }
@@ -245,19 +242,13 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             })
         }
         "ping" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("ping requires model/NAME or agent/NAME"));
-            };
+            let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
             no_extra_args(values)?;
             Ok(Command::Ping { path })
         }
         "cancel" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("cancel requires model/NAME or agent/NAME"));
-            };
-            let Some(run) = values.next() else {
-                return Err(CliError::usage("cancel requires a run id"));
-            };
+            let path = required_arg(&mut values, "cancel requires model/NAME or agent/NAME")?;
+            let run = required_arg(&mut values, "cancel requires a run id")?;
             no_extra_args(values)?;
             Ok(Command::Cancel { path, run })
         }
@@ -266,9 +257,7 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             Ok(Command::Doctor)
         }
         "exec" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("exec requires an ABI object path"));
-            };
+            let path = required_arg(&mut values, "exec requires an ABI object path")?;
             Ok(Command::Exec {
                 path,
                 args: values.collect(),
@@ -279,9 +268,7 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             Ok(Command::File(args))
         }
         "validate-name" => {
-            let Some(name) = values.next() else {
-                return Err(CliError::usage("validate-name requires a name"));
-            };
+            let name = required_arg(&mut values, "validate-name requires a name")?;
             no_extra_args(values)?;
             Ok(Command::ValidateName(name))
         }
@@ -302,9 +289,7 @@ fn parse_mount_command(mut values: impl Iterator<Item = String>) -> Result<Comma
     while let Some(value) = values.next() {
         match value.as_str() {
             "--source" | "-s" => {
-                let Some(next) = values.next() else {
-                    return Err(CliError::usage("mount --source requires a path"));
-                };
+                let next = required_arg(&mut values, "mount --source requires a path")?;
                 source = Some(PathBuf::from(next));
             }
             _ => {
@@ -323,9 +308,7 @@ fn parse_agent_session(
     mut values: impl Iterator<Item = String>,
     command: &str,
 ) -> Result<(String, Option<String>), CliError> {
-    let Some(agent) = values.next() else {
-        return Err(CliError::usage(format!("{command} requires an agent name")));
-    };
+    let agent = required_arg(&mut values, &format!("{command} requires an agent name"))?;
     let session = values.next();
     no_extra_args(values)?;
     Ok((agent, session))
@@ -334,87 +317,39 @@ fn parse_agent_session(
 fn parse_send(
     mut values: impl Iterator<Item = String>,
 ) -> Result<(String, String, String), CliError> {
-    let Some(agent) = values.next() else {
-        return Err(CliError::usage("send requires an agent name"));
-    };
-    let Some(session) = values.next() else {
-        return Err(CliError::usage("send requires a session name"));
-    };
-    let Some(input) = values.next() else {
-        return Err(CliError::usage("send requires input text"));
-    };
+    let agent = required_arg(&mut values, "send requires an agent name")?;
+    let session = required_arg(&mut values, "send requires a session name")?;
+    let input = required_arg(&mut values, "send requires input text")?;
     no_extra_args(values)?;
     Ok((agent, session, input))
 }
 
 fn parse_file_args(args: Vec<String>) -> Result<FileArgs, CliError> {
     let mut values = args.into_iter();
-    let Some(first) = values.next() else {
-        return Err(CliError::usage("file requires a path or subcommand"));
-    };
+    let first = required_arg(&mut values, "file requires a path or subcommand")?;
 
     let parsed = match first.as_str() {
-        "cat" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("file cat requires a path"));
-            };
-            no_extra_args(values)?;
-            FileArgs {
-                command: FileCommand::Cat,
-                path,
-                value: None,
-            }
-        }
-        "set" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("file set requires a path"));
-            };
-            let Some(value) = values.next() else {
-                return Err(CliError::usage("file set requires a value"));
-            };
-            no_extra_args(values)?;
-            FileArgs {
-                command: FileCommand::Set,
-                path,
-                value: Some(value),
-            }
-        }
-        "append" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("file append requires a path"));
-            };
-            let Some(value) = values.next() else {
-                return Err(CliError::usage("file append requires a value"));
-            };
-            no_extra_args(values)?;
-            FileArgs {
-                command: FileCommand::Append,
-                path,
-                value: Some(value),
-            }
-        }
+        "cat" => parse_file_path_command(values, FileCommand::Cat, "file cat requires a path")?,
+        "set" => parse_file_value_command(
+            values,
+            FileCommand::Set,
+            "file set requires a path",
+            "file set requires a value",
+        )?,
+        "append" => parse_file_value_command(
+            values,
+            FileCommand::Append,
+            "file append requires a path",
+            "file append requires a value",
+        )?,
         "check" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("file check requires a path"));
-            };
-            no_extra_args(values)?;
-            FileArgs {
-                command: FileCommand::Check,
-                path,
-                value: None,
-            }
+            parse_file_path_command(values, FileCommand::Check, "file check requires a path")?
         }
-        "classify" => {
-            let Some(path) = values.next() else {
-                return Err(CliError::usage("file classify requires a path"));
-            };
-            no_extra_args(values)?;
-            FileArgs {
-                command: FileCommand::Classify,
-                path,
-                value: None,
-            }
-        }
+        "classify" => parse_file_path_command(
+            values,
+            FileCommand::Classify,
+            "file classify requires a path",
+        )?,
         _ => {
             no_extra_args(values)?;
             FileArgs {
@@ -426,6 +361,36 @@ fn parse_file_args(args: Vec<String>) -> Result<FileArgs, CliError> {
     };
 
     Ok(parsed)
+}
+
+fn parse_file_path_command(
+    mut values: impl Iterator<Item = String>,
+    command: FileCommand,
+    path_usage: &str,
+) -> Result<FileArgs, CliError> {
+    let path = required_arg(&mut values, path_usage)?;
+    no_extra_args(values)?;
+    Ok(FileArgs {
+        command,
+        path,
+        value: None,
+    })
+}
+
+fn parse_file_value_command(
+    mut values: impl Iterator<Item = String>,
+    command: FileCommand,
+    path_usage: &str,
+    value_usage: &str,
+) -> Result<FileArgs, CliError> {
+    let path = required_arg(&mut values, path_usage)?;
+    let value = required_arg(&mut values, value_usage)?;
+    no_extra_args(values)?;
+    Ok(FileArgs {
+        command,
+        path,
+        value: Some(value),
+    })
 }
 
 fn no_extra_args(mut values: impl Iterator<Item = String>) -> Result<(), CliError> {

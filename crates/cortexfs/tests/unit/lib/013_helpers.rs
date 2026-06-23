@@ -84,6 +84,16 @@ fn write_text_file(path: &Path, content: &str) {
     assert!(fs::write(path, content).is_ok());
 }
 
+fn assert_file_text(path: &Path, expected: &str) {
+    assert!(
+        fs::read_to_string(path)
+            .as_ref()
+            .is_ok_and(|content| content == expected),
+        "{}",
+        path.display()
+    );
+}
+
 fn create_shared_queue_layout(queue: &Path) {
     for dir in SHARED_QUEUE_REQUIRED_DIRS {
         assert!(fs::create_dir_all(queue.join(dir)).is_ok());
