@@ -6,5 +6,6 @@ After=cortexfs.service
 
 [Service]
 Type=simple
+EnvironmentFile=-/etc/cortexfs/*.env
 ExecStart=/usr/bin/cortexfs-agent-runtime --source /var/lib/cortexfs/storage/v1-root --agent %i
 NoNewPrivileges=yes

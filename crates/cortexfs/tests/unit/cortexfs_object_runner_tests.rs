@@ -22,6 +22,6 @@ fn runner_rejects_missing_object_path() {
 fn runner_rejects_unknown_model() {
     assert_eq!(
         run(vec![OsString::from("/ctx/model/openai/gpt-4o")]),
-        Err("model openai/gpt-4o is not handled by this runner".to_owned())
+        Err("missing provider: openai".to_owned())
     );
 }

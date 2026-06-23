@@ -221,7 +221,7 @@ pub fn ensure_durable_session_layout(
         return Err(DurableSessionLayoutError::InvalidCwd);
     }
     if let Some(model) = model
-        && !is_model_name(model)
+        && !abi_path::is_model_reference(model)
     {
         return Err(DurableSessionLayoutError::InvalidModelName);
     }
