@@ -32,7 +32,7 @@ ctx ls tool
 ctx ls home
 ctx ls shared/project-a
 
-ctx which model qwen
+ctx which model openai/gpt-4o
 ctx which agent coder
 ctx which tool fs.read
 
@@ -67,9 +67,10 @@ and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
 Agent lifecycle conveniences such as `ctx agent new`, `ctx agent start`, and
-`ctx agent stop` may exist, but they must be thin wrappers over
-`/ctx/tool/agent.create`, `/ctx/tool/agent.start`, and `/ctx/tool/agent.stop`
-when those tools exist. `ctx` must not decide policy locally.
+`ctx agent stop` may exist, but they must not assume lifecycle tools are default
+built-ins. When `/ctx/tool/agent.create`, `/ctx/tool/agent.start`, and
+`/ctx/tool/agent.stop` exist, the commands must be thin wrappers over them.
+`ctx` must not decide policy locally.
 
 ## Installation Boundary
 
@@ -98,7 +99,7 @@ Examples:
 
 ```text
 ctx ls agent
-ctx file cat model/qwen.d/cap
+ctx file cat model/openai/gpt-4o.d/cap
 ctx file classify tool/fs.read
 ctx exec agent/coder "fix tests"
 ```
@@ -106,7 +107,7 @@ ctx exec agent/coder "fix tests"
 Object strings use ABI path form:
 
 ```text
-model/qwen
+model/openai/gpt-4o
 agent/coder
 tool/fs.read
 ```
@@ -122,7 +123,7 @@ registry, or daemon catalog.
 `ctx which` finds executable objects by ABI class:
 
 ```text
-ctx which model qwen
+ctx which model openai/gpt-4o
 ctx which agent coder
 ctx which tool fs.read
 ```

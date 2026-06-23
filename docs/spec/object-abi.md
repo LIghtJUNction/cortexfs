@@ -16,10 +16,11 @@ and other layered trees. If a small file can say it, put it in `.d/`.
 
 ## Names and Aliases
 
-ABI names under `model`, `agent`, and `tool` are path components. They do not
-parse `provider/model` slash semantics.
+ABI names under `agent` and `tool` are single path components. Model names are
+the exception: `/ctx/model` uses the original provider/model namespace as two
+path components.
 
-Object name syntax:
+Agent, tool, provider, and model path-component syntax:
 
 ```text
 [a-zA-Z0-9][a-zA-Z0-9._+-]{0,63}
@@ -42,9 +43,9 @@ suffix .d
 Rules:
 
 ```text
-the filename is the stable alias
-native ids do not enter root names
-provider id, API format, and base URL do not enter root names
+agent/tool filename is the stable alias
+model stable identity is provider/model using the original model provider
+aggregator name, API format, and base URL do not enter stable model names
 native ids may live in .d/id, .d/driver, or another control file
 short user aliases use symlinks
 ```
@@ -52,10 +53,10 @@ short user aliases use symlinks
 Example:
 
 ```text
-/ctx/model/qwen
-/ctx/model/qwen.d/id = openrouter/qwen/qwen3-235b-a22b
+/ctx/model/openai/gpt-4o
+/ctx/model/openai/gpt-4o.d/id = openai/gpt-4o
 
-/ctx/home/1000/model/coder -> /ctx/model/qwen
+/ctx/home/1000/model/main -> /ctx/model/openai/gpt-4o
 ```
 
 Alias resolution:
@@ -71,20 +72,20 @@ If `coder` needs its own default parameters, create a real object instead of a
 symlink overlay:
 
 ```text
-/ctx/model/coder
-/ctx/model/coder.d/id
-/ctx/model/coder.d/default
+/ctx/model/openai/gpt-4o-coder
+/ctx/model/openai/gpt-4o-coder.d/id
+/ctx/model/openai/gpt-4o-coder.d/default
 ```
 
 ## Exec Protocol
 
-`model/<name>`, `agent/<name>`, and `tool/<name>` are executable files. They
-must accept argv or stdin input:
+`model/<provider>/<model>`, `agent/<name>`, and `tool/<name>` are executable
+files. They must accept argv or stdin input:
 
 ```bash
-/ctx/model/qwen "hello"
-echo "hello" | /ctx/model/qwen
-echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/qwen
+/ctx/model/openai/gpt-4o "hello"
+echo "hello" | /ctx/model/openai/gpt-4o
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-4o
 
 /ctx/agent/coder "fix this project"
 echo '{"task":"fix tests"}' | /ctx/agent/coder
@@ -96,13 +97,25 @@ echo '{"path":"README.md"}' | /ctx/tool/fs.read
 stdout should be JSONL:
 
 ```jsonl
-{"type":"start","run":"r1","model":"qwen"}
+{"type":"start","run":"r1","model":"openai/gpt-4o"}
 {"type":"delta","run":"r1","text":"hello"}
 {"type":"done","run":"r1","status":"ok"}
 ```
 
 Human-readable output can exist as compatibility mode. Machine callers should
 prefer JSONL.
+
+Reading an executable object returns inspectable metadata, not implementation
+code. Built-in model and tool executable files use the common CortexFS object
+runner shebang:
+
+```text
+#!/usr/bin/cortexfs-object-runner
+```
+
+`tool/<name>` must not expose a per-tool shell script as file contents. Tool
+implementation dispatch is runtime behavior behind the common runner; `name.d/`
+remains the inspectable control surface.
 
 Exit codes:
 
@@ -121,15 +134,15 @@ error frames. The exit code is only the process-level summary.
 TTY rules:
 
 ```text
-model/<name>  with no args on a TTY may enter a simple REPL, but is not required to
-agent/<name>  with no args on a TTY must enter an interactive socket session
-tool/<name>   with no args on a TTY should print short usage or read stdin, not start a long session
+model/<provider>/<model>  with no args on a TTY may enter a simple REPL, but is not required to
+agent/<name>              with no args on a TTY must enter an interactive socket session
+tool/<name>               with no args on a TTY should print short usage or read stdin, not start a long session
 ```
 
 ## Socket Protocol
 
-`model/<name>.sock` and `agent/<name>.sock` are Unix domain sockets. The
-protocol is JSONL.
+`model/<provider>/<model>.sock` and `agent/<name>.sock` are Unix domain
+sockets. The protocol is JSONL.
 
 Requests:
 
@@ -143,7 +156,7 @@ Requests:
 Responses:
 
 ```jsonl
-{"type":"start","id":"event-id","run":"run-id","model":"qwen"}
+{"type":"start","id":"event-id","run":"run-id","model":"openai/gpt-4o"}
 {"type":"delta","id":"event-id","run":"run-id","text":"..."}
 {"type":"message","id":"event-id","run":"run-id","role":"assistant","content":[{"type":"text","text":"..."}]}
 {"type":"error","run":"run-id","code":"EACCES","message":"permission denied"}

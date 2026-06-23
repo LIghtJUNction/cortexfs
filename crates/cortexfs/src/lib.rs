@@ -4,20 +4,25 @@
 //! before the Agent OS rewrite. This crate intentionally exposes only stable
 //! ABI names while the implementation is redesigned around Rig.
 
-use std::fmt::Write as FmtWrite;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nix::sys::socket::{getsockopt, sockopt};
+use serde::Deserialize;
 use serde_json::Value;
 
 /// Default `CortexFS` mount root.
 pub const CTX_ROOT: &str = "/ctx";
+
+/// Rust object runner used by executable object metadata files.
+pub const CORTEXFS_OBJECT_RUNNER: &str = "/usr/bin/cortexfs-object-runner";
 
 /// Root entries reserved by the new Agent OS ABI.
 pub const ROOT_ENTRIES: &[&str] = &["status", "bin", "model", "agent", "tool", "home", "shared"];
@@ -31,6 +36,14 @@ pub const MAX_OBJECT_NAME_LEN: usize = 64;
 /// Required model control files.
 pub const MODEL_CONTROL_FILES: &[&str] =
     &["id", "driver", "cap", "default", "session", "status", "log"];
+
+const DEBUG_ECHO_MODEL: &str = "debug/echo";
+const DEBUG_ECHO_PROVIDER: &str = "debug";
+const DEBUG_ECHO_NAME: &str = "echo";
+const DEFAULT_MODEL_ALIAS: &str = "main";
+const HELPER_MODEL_ALIAS: &str = "helper";
+const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/debug/echo";
+const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
 
 /// Stable semantic model capability words in the v1 ABI.
 pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
@@ -221,6 +234,28 @@ pub enum FuseV1Error {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FuseV1Projection {
     root: PathBuf,
+    provider_config_dir: PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ProviderConfig {
+    base_url: String,
+    default_model: Option<String>,
+    #[serde(default)]
+    models: Vec<String>,
+    #[serde(default = "default_provider_enabled")]
+    enabled: bool,
+    #[serde(default)]
+    formats: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProjectedProviderModel {
+    provider: String,
+    model: String,
+    base_url: String,
+    driver: String,
+    cap: String,
 }
 
 /// Policy syntax error for the fixed v0 allowlist.
@@ -696,6 +731,8 @@ pub enum ToolSchemaIssue {
     InvalidJson,
     /// Schema is valid JSON but not an object.
     NotObject,
+    /// Schema is an object but not a valid JSON Schema document.
+    InvalidSchema,
     /// Top-level field tries to describe authority instead of input/output.
     AuthorityField(String),
 }
@@ -725,10 +762,101 @@ pub enum ModelCapabilityIssue {
     },
 }
 
-/// Result of inspecting `model/<name>.d/cap`.
+/// Result of inspecting `model/<provider>/<model>.d/cap`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ModelCapabilityReport {
     issues: Vec<ModelCapabilityIssue>,
+}
+
+/// Queryable model capability flag.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Capability {
+    /// Model can consume image input.
+    Vision,
+    /// Model can emit tool-call syntax.
+    Tools,
+    /// Model supports JSON-mode or structured JSON output.
+    JsonMode,
+    /// Model can consume image input.
+    ImageInput,
+    /// Model can produce image output.
+    ImageOutput,
+    /// Model can consume audio input.
+    AudioInput,
+    /// Model can produce audio output.
+    AudioOutput,
+}
+
+/// Provider-neutral model capability declaration.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "capability files expose independent stable boolean flags"
+)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelCapabilities {
+    pub context_length: usize,
+    pub vision: bool,
+    pub tools: bool,
+    pub json_mode: bool,
+    pub image_input: bool,
+    pub image_output: bool,
+    pub audio_input: bool,
+    pub audio_output: bool,
+}
+
+/// Provider-neutral model capability lookup table.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelCapabilityRegistry {
+    models: HashMap<String, ModelCapabilities>,
+}
+
+/// Error while reading or writing model capability registry data.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelRegistryError {
+    /// Registry JSON could not be parsed.
+    InvalidJson,
+    /// Registry JSON has an unexpected shape.
+    InvalidShape,
+    /// Registry cache could not be read.
+    CannotRead,
+    /// Registry cache could not be written.
+    CannotWrite,
+}
+
+/// Model driver call site used to select a driver route.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ModelDriverUseCase {
+    /// Fallback route when no use-case-specific route is available.
+    Default,
+    /// One-shot execution through `model/<provider>/<model>`.
+    Exec,
+    /// Stateful model socket traffic through `model/<provider>/<model>.sock`.
+    Socket,
+    /// Agent-owned model calls.
+    Agent,
+}
+
+/// Error while parsing `model/<provider>/<model>.d/driver`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ModelDriverRouteError {
+    /// The route table has no usable driver declarations.
+    Empty,
+    /// A route-table line is missing `=`.
+    MissingEquals { line: usize },
+    /// A route-table key is not one of default, exec, socket, or agent.
+    UnknownUseCase { line: usize, value: String },
+    /// A route-table key appears more than once.
+    DuplicateUseCase { line: usize, value: String },
+    /// A driver list is empty or has an empty comma element.
+    EmptyDriver { line: usize },
+    /// A driver name is not a valid stable component.
+    InvalidDriverName { line: usize, value: String },
+}
+
+/// Parsed `driver` control-file route table.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelDriverRoutingTable {
+    routes: HashMap<ModelDriverUseCase, Vec<String>>,
 }
 
 /// Stable session index file kind.
@@ -906,6 +1034,131 @@ impl ModelCapabilityReport {
     #[must_use]
     pub fn issues(&self) -> &[ModelCapabilityIssue] {
         &self.issues
+    }
+}
+
+impl ModelCapabilities {
+    /// Returns whether this declaration supports a capability.
+    #[must_use]
+    pub const fn supports(&self, capability: Capability) -> bool {
+        match capability {
+            Capability::Vision => self.vision,
+            Capability::Tools => self.tools,
+            Capability::JsonMode => self.json_mode,
+            Capability::ImageInput => self.image_input,
+            Capability::ImageOutput => self.image_output,
+            Capability::AudioInput => self.audio_input,
+            Capability::AudioOutput => self.audio_output,
+        }
+    }
+}
+
+impl ModelCapabilityRegistry {
+    /// Creates an empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Inserts or replaces one model capability declaration.
+    pub fn insert(&mut self, model: String, capabilities: ModelCapabilities) {
+        self.models.insert(model, capabilities);
+    }
+
+    /// Returns one model capability declaration.
+    #[must_use]
+    pub fn get(&self, model: &str) -> Option<&ModelCapabilities> {
+        self.models.get(model)
+    }
+
+    /// Returns whether a model supports a capability.
+    #[must_use]
+    pub fn supports(&self, model: &str, capability: Capability) -> bool {
+        self.get(model)
+            .is_some_and(|capabilities| capabilities.supports(capability))
+    }
+
+    /// Returns the number of known models.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.models.len()
+    }
+
+    /// Returns whether the registry is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.models.is_empty()
+    }
+}
+
+impl ModelDriverUseCase {
+    /// Parses one route-table key.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "default" => Some(Self::Default),
+            "exec" => Some(Self::Exec),
+            "socket" => Some(Self::Socket),
+            "agent" => Some(Self::Agent),
+            _ => None,
+        }
+    }
+
+    /// Returns the route-table key.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Exec => "exec",
+            Self::Socket => "socket",
+            Self::Agent => "agent",
+        }
+    }
+}
+
+impl ModelDriverRoutingTable {
+    /// Creates an empty driver routing table.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Inserts one ordered route list.
+    pub fn insert(&mut self, use_case: ModelDriverUseCase, drivers: Vec<String>) {
+        self.routes.insert(use_case, drivers);
+    }
+
+    /// Returns the exact route list for one use case.
+    #[must_use]
+    pub fn get(&self, use_case: ModelDriverUseCase) -> Option<&[String]> {
+        self.routes.get(&use_case).map(Vec::as_slice)
+    }
+
+    /// Returns the route list for a use case, falling back to `default`.
+    #[must_use]
+    pub fn drivers_for(&self, use_case: ModelDriverUseCase) -> Option<&[String]> {
+        self.get(use_case)
+            .or_else(|| self.get(ModelDriverUseCase::Default))
+    }
+
+    /// Returns the first selected driver for a use case.
+    #[must_use]
+    pub fn primary_driver_for(&self, use_case: ModelDriverUseCase) -> Option<&str> {
+        self.drivers_for(use_case)
+            .and_then(|drivers| drivers.first())
+            .map(String::as_str)
+    }
+
+    /// Returns whether no route is present.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.routes.is_empty()
+    }
+
+    fn route_value(&self, use_case: ModelDriverUseCase) -> String {
+        self.get(use_case)
+            .map(|drivers| drivers.join(","))
+            .unwrap_or_default()
     }
 }
 
@@ -1219,6 +1472,15 @@ pub enum ObjectBootstrapError {
     CannotChmod,
 }
 
+/// Error while resolving a provider API key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ApiKeyResolutionError {
+    /// Environment variable, service, or account name is invalid.
+    InvalidName,
+    /// System keychain command failed in an unexpected way.
+    KeychainUnavailable,
+}
+
 /// Linux peer credentials for a connected Unix socket.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PeerCredentials {
@@ -1368,6 +1630,10 @@ pub enum ReferenceTreeError {
     CannotLink,
     /// A documented socket path could not be created or conflicts with an existing path.
     CannotSocket,
+    /// A deprecated reference-tree placeholder could not be removed.
+    CannotRemove,
+    /// A deprecated reference-tree alias could not be removed.
+    CannotUnlink,
 }
 
 /// Socket runtime request handling error.
@@ -1449,7 +1715,9 @@ impl ReferenceTreeError {
             | Self::Session(DurableSessionLayoutError::CannotCreate)
             | Self::Child(ChildContextRecordError::CannotRecord)
             | Self::CannotLink
-            | Self::CannotSocket => "EIO",
+            | Self::CannotSocket
+            | Self::CannotRemove
+            | Self::CannotUnlink => "EIO",
             Self::Object(
                 ObjectBootstrapError::InvalidObjectName
                 | ObjectBootstrapError::InvalidWrapperTarget
@@ -2609,7 +2877,17 @@ impl FuseV1Projection {
     /// Creates a local projection over a `/ctx`-shaped root.
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            provider_config_dir: PathBuf::from(SYSTEM_PROVIDER_CONFIG_DIR),
+        }
+    }
+
+    /// Overrides the provider config directory used for projected models.
+    #[must_use]
+    pub fn with_provider_config_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.provider_config_dir = path.into();
+        self
     }
 
     /// Returns the backing root.
@@ -2620,10 +2898,27 @@ impl FuseV1Projection {
 
     /// Projects `getattr`.
     pub fn getattr(&self, abi_path: &str) -> Result<FuseV1Attr, FuseV1Error> {
-        let path = self.resolve(abi_path)?;
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if let Some(attr) = self.virtual_model_attr(&normalized)? {
+            return Ok(attr);
+        }
+        if let Some(attr) = self.virtual_tool_attr(&normalized)? {
+            return Ok(attr);
+        }
+        let path = self.resolve(&normalized)?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if let Some(content) = self.virtual_exec_content(&normalized)? {
+            return Ok(FuseV1Attr::with_owner(
+                normalized,
+                fuse_file_type(metadata.file_type()),
+                u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
+                (metadata.permissions().mode() & !0o222) | 0o555,
+                metadata.uid(),
+                metadata.gid(),
+            ));
+        }
         Ok(FuseV1Attr::with_owner(
-            normalize_fuse_abi_path(abi_path)?,
+            normalized,
             fuse_file_type(metadata.file_type()),
             metadata.len(),
             metadata.permissions().mode(),
@@ -2661,7 +2956,11 @@ impl FuseV1Projection {
 
     /// Projects `readdir`.
     pub fn readdir(&self, abi_path: &str) -> Result<Vec<FuseV1DirEntry>, FuseV1Error> {
-        let path = self.resolve(abi_path)?;
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if let Some(entries) = self.virtual_model_readdir(&normalized)? {
+            return Ok(entries);
+        }
+        let path = self.resolve(&normalized)?;
         if !path.is_dir() {
             return Err(FuseV1Error::NotDirectory);
         }
@@ -2691,7 +2990,17 @@ impl FuseV1Projection {
 
     /// Projects a small text `read`.
     pub fn read_to_string(&self, abi_path: &str) -> Result<String, FuseV1Error> {
-        let path = self.resolve(abi_path)?;
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if let Some(content) = self.virtual_model_content(&normalized)? {
+            return Ok(content);
+        }
+        if let Some(content) = self.virtual_tool_content(&normalized)? {
+            return Ok(content);
+        }
+        if let Some(content) = self.virtual_exec_content(&normalized)? {
+            return Ok(content);
+        }
+        let path = self.resolve(&normalized)?;
         if path.is_dir() {
             return Err(FuseV1Error::NotFile);
         }
@@ -2711,7 +3020,17 @@ impl FuseV1Projection {
         offset: u64,
         size: usize,
     ) -> Result<Vec<u8>, FuseV1Error> {
-        let path = self.resolve(abi_path)?;
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if let Some(content) = self.virtual_model_content(&normalized)? {
+            return read_bytes_at(content.as_bytes(), offset, size);
+        }
+        if let Some(content) = self.virtual_tool_content(&normalized)? {
+            return read_bytes_at(content.as_bytes(), offset, size);
+        }
+        if let Some(content) = self.virtual_exec_content(&normalized)? {
+            return read_bytes_at(content.as_bytes(), offset, size);
+        }
+        let path = self.resolve(&normalized)?;
         if path.is_dir() {
             return Err(FuseV1Error::NotFile);
         }
@@ -2722,6 +3041,183 @@ impl FuseV1Projection {
         let read = file.read(&mut buffer).map_err(|_error| FuseV1Error::Io)?;
         buffer.truncate(read);
         Ok(buffer)
+    }
+
+    /// Projects a symlink target.
+    pub fn readlink(&self, abi_path: &str) -> Result<PathBuf, FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if let Some(alias) = model_alias_name(&normalized) {
+            return self.default_model_alias_target(alias);
+        }
+        let path = self.resolve(&normalized)?;
+        fs::read_link(path).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                FuseV1Error::NotFound
+            } else {
+                FuseV1Error::InvalidPath
+            }
+        })
+    }
+
+    fn virtual_exec_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+        let Some(model_name) = model_exec_name(abi_path) else {
+            return Ok(None);
+        };
+        let exec_path = self.root.join("model").join(model_name);
+        if !exec_path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(model_exec_metadata(
+            model_name,
+            &self.root.join("model").join(format!("{model_name}.d")),
+        )?))
+    }
+
+    fn virtual_model_attr(&self, abi_path: &str) -> Result<Option<FuseV1Attr>, FuseV1Error> {
+        let Some((file_type, size, mode)) = self.virtual_model_entry(abi_path)? else {
+            return Ok(None);
+        };
+        Ok(Some(FuseV1Attr::with_owner(
+            abi_path.to_owned(),
+            file_type,
+            size,
+            mode,
+            0,
+            0,
+        )))
+    }
+
+    fn virtual_tool_attr(&self, abi_path: &str) -> Result<Option<FuseV1Attr>, FuseV1Error> {
+        let Some(tool_name) = tool_exec_name(abi_path) else {
+            return Ok(None);
+        };
+        let control_dir = self.root.join("tool").join(format!("{tool_name}.d"));
+        if !control_dir.is_dir() {
+            return Ok(None);
+        }
+        let content = tool_exec_metadata(tool_name, &control_dir)?;
+        Ok(Some(FuseV1Attr::with_owner(
+            abi_path.to_owned(),
+            FuseV1FileType::Regular,
+            u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
+            0o555,
+            0,
+            0,
+        )))
+    }
+
+    fn virtual_model_readdir(
+        &self,
+        abi_path: &str,
+    ) -> Result<Option<Vec<FuseV1DirEntry>>, FuseV1Error> {
+        let mut entries = match abi_path {
+            "model" => {
+                let mut provider_names = HashSet::from([DEBUG_ECHO_PROVIDER.to_owned()]);
+                let model_root = self.root.join("model");
+                if model_root.is_dir() {
+                    for name in read_model_provider_dirs(&model_root)? {
+                        provider_names.insert(name);
+                    }
+                }
+                for provider in projected_provider_models(&self.provider_config_dir)?
+                    .into_iter()
+                    .map(|model| model.provider)
+                {
+                    provider_names.insert(provider);
+                }
+                let mut entries = provider_names
+                    .into_iter()
+                    .map(|provider| FuseV1DirEntry::new(provider, FuseV1FileType::Directory))
+                    .collect::<Vec<_>>();
+                entries.push(FuseV1DirEntry::new(
+                    DEFAULT_MODEL_ALIAS.to_owned(),
+                    FuseV1FileType::Symlink,
+                ));
+                entries.push(FuseV1DirEntry::new(
+                    HELPER_MODEL_ALIAS.to_owned(),
+                    FuseV1FileType::Symlink,
+                ));
+                entries
+            }
+            "model/debug" => vec![
+                FuseV1DirEntry::new(DEBUG_ECHO_NAME.to_owned(), FuseV1FileType::Regular),
+                FuseV1DirEntry::new(format!("{DEBUG_ECHO_NAME}.d"), FuseV1FileType::Directory),
+            ],
+            "model/debug/echo.d" => MODEL_CONTROL_FILES
+                .iter()
+                .map(|file| FuseV1DirEntry::new((*file).to_owned(), FuseV1FileType::Regular))
+                .collect(),
+            _ => {
+                if let Some(model) =
+                    projected_provider_model_control_dir(&self.provider_config_dir, abi_path)?
+                {
+                    let _ = model;
+                    MODEL_CONTROL_FILES
+                        .iter()
+                        .map(|file| {
+                            FuseV1DirEntry::new((*file).to_owned(), FuseV1FileType::Regular)
+                        })
+                        .collect()
+                } else if let Some(provider) = abi_path.strip_prefix("model/") {
+                    if provider.contains('/') || provider == DEBUG_ECHO_PROVIDER {
+                        return Ok(None);
+                    }
+                    let models = projected_provider_models_for_provider(
+                        &self.provider_config_dir,
+                        provider,
+                    )?;
+                    if models.is_empty() {
+                        return Ok(None);
+                    }
+                    let mut entries = Vec::new();
+                    for model in models {
+                        entries.push(FuseV1DirEntry::new(
+                            model.model.clone(),
+                            FuseV1FileType::Regular,
+                        ));
+                        entries.push(FuseV1DirEntry::new(
+                            format!("{}.d", model.model),
+                            FuseV1FileType::Directory,
+                        ));
+                    }
+                    entries
+                } else {
+                    return Ok(None);
+                }
+            }
+        };
+        entries.sort_by(|left, right| left.name.cmp(&right.name));
+        Ok(Some(entries))
+    }
+
+    fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+        if abi_path == "model/debug/echo" {
+            return Ok(Some(debug_echo_model_metadata()));
+        }
+        if let Some(file) = abi_path.strip_prefix("model/debug/echo.d/") {
+            return Ok(debug_echo_control_content(file).map(str::to_owned));
+        }
+        let Some(model) = projected_provider_model_for_exec(&self.provider_config_dir, abi_path)?
+        else {
+            let Some((model, file)) =
+                projected_provider_model_control_file(&self.provider_config_dir, abi_path)?
+            else {
+                return Ok(None);
+            };
+            return Ok(provider_model_control_content(&model, file));
+        };
+        Ok(Some(provider_model_metadata(&model)))
+    }
+
+    fn virtual_tool_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+        let Some(tool_name) = tool_exec_name(abi_path) else {
+            return Ok(None);
+        };
+        let control_dir = self.root.join("tool").join(format!("{tool_name}.d"));
+        if !control_dir.is_dir() {
+            return Ok(None);
+        }
+        Ok(Some(tool_exec_metadata(tool_name, &control_dir)?))
     }
 
     /// Projects a same-directory atomic write for v1 control files.
@@ -2758,6 +3254,90 @@ impl FuseV1Projection {
     fn resolve(&self, abi_path: &str) -> Result<PathBuf, FuseV1Error> {
         resolve_fuse_abi_path(&self.root, abi_path)
     }
+
+    fn virtual_model_entry(
+        &self,
+        abi_path: &str,
+    ) -> Result<Option<(FuseV1FileType, u64, u32)>, FuseV1Error> {
+        match abi_path {
+            path if model_alias_name(path).is_some() => Ok(Some((
+                FuseV1FileType::Symlink,
+                u64::try_from(
+                    self.default_model_alias_target(model_alias_name(path).unwrap_or_default())?
+                        .as_os_str()
+                        .len(),
+                )
+                .map_err(|_error| FuseV1Error::Io)?,
+                0o777,
+            ))),
+            "model/debug" | "model/debug/echo.d" => Ok(Some((FuseV1FileType::Directory, 0, 0o755))),
+            "model/debug/echo" => Ok(Some((
+                FuseV1FileType::Regular,
+                u64::try_from(debug_echo_model_metadata().len())
+                    .map_err(|_error| FuseV1Error::Io)?,
+                0o555,
+            ))),
+            path => {
+                if let Some(file) = path.strip_prefix("model/debug/echo.d/") {
+                    let Some(content) = debug_echo_control_content(file) else {
+                        return Ok(None);
+                    };
+                    return Ok(Some((
+                        FuseV1FileType::Regular,
+                        u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
+                        0o644,
+                    )));
+                }
+                if projected_provider_models_for_provider_path(&self.provider_config_dir, path)?
+                    .is_some()
+                {
+                    return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
+                }
+                if let Some(model) =
+                    projected_provider_model_for_exec(&self.provider_config_dir, path)?
+                {
+                    let content = provider_model_metadata(&model);
+                    return Ok(Some((
+                        FuseV1FileType::Regular,
+                        u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
+                        0o555,
+                    )));
+                }
+                if projected_provider_model_control_dir(&self.provider_config_dir, path)?.is_some()
+                {
+                    return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
+                }
+                let Some((model, file)) =
+                    projected_provider_model_control_file(&self.provider_config_dir, path)?
+                else {
+                    return Ok(None);
+                };
+                let Some(content) = provider_model_control_content(&model, file) else {
+                    return Ok(None);
+                };
+                Ok(Some((
+                    FuseV1FileType::Regular,
+                    u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
+                    0o644,
+                )))
+            }
+        }
+    }
+
+    fn default_model_alias_target(&self, alias: &str) -> Result<PathBuf, FuseV1Error> {
+        let path = self.resolve(&format!("model/{alias}"))?;
+        if let Ok(target) = fs::read_link(path)
+            && is_valid_ctx_model_symlink(&target)
+        {
+            return Ok(target);
+        }
+        Ok(PathBuf::from(DEFAULT_MODEL_ALIAS_TARGET))
+    }
+}
+
+fn model_alias_name(abi_path: &str) -> Option<&str> {
+    let alias = abi_path.strip_prefix("model/")?;
+    matches!(alias, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS).then_some(alias)
 }
 
 impl ReferenceTreeBootstrap {
@@ -2772,6 +3352,337 @@ impl ReferenceTreeBootstrap {
     pub fn root(&self) -> &Path {
         &self.root
     }
+}
+
+fn debug_echo_model_metadata() -> String {
+    [
+        format!("#!{CORTEXFS_OBJECT_RUNNER}"),
+        "# cortexfs.object=model".to_owned(),
+        "# cortexfs.id=debug/echo".to_owned(),
+        "# cortexfs.name=debug/echo".to_owned(),
+        "# cortexfs.description=Built-in debug echo model".to_owned(),
+        "# cortexfs.type=debug".to_owned(),
+        "# cortexfs.created_at=".to_owned(),
+        "# cortexfs.owned_by=cortexfs".to_owned(),
+        "# cortexfs.context_length=0".to_owned(),
+        "# cortexfs.driver=debug".to_owned(),
+        "# cortexfs.driver.default=debug".to_owned(),
+        "# cortexfs.driver.exec=debug".to_owned(),
+        "# cortexfs.driver.socket=".to_owned(),
+        "# cortexfs.driver.agent=debug".to_owned(),
+        "# cortexfs.session=none".to_owned(),
+        "# cortexfs.status=idle".to_owned(),
+        "# cortexfs.cap=chat,stream".to_owned(),
+    ]
+    .join("\n")
+        + "\n"
+}
+
+fn debug_echo_control_content(file: &str) -> Option<&'static str> {
+    match file {
+        "id" => Some("debug/echo\n"),
+        "driver" => Some("default=debug\nexec=debug\nagent=debug\n"),
+        "cap" => Some("chat\nstream\n"),
+        "default" | "log" => Some("\n"),
+        "session" => Some("none\n"),
+        "status" => Some("idle\n"),
+        _ => None,
+    }
+}
+
+fn default_provider_enabled() -> bool {
+    true
+}
+
+fn projected_provider_models(
+    config_dir: &Path,
+) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
+    let entries = match fs::read_dir(config_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_error) => return Err(FuseV1Error::Io),
+    };
+    let mut projected = Vec::new();
+    let mut seen = HashSet::new();
+    for entry in entries {
+        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if metadata.file_type().is_dir() {
+            continue;
+        }
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if extension != "json" {
+            continue;
+        }
+        let content = fs::read_to_string(&path).map_err(|_error| FuseV1Error::Io)?;
+        let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
+            continue;
+        };
+        if !config.enabled {
+            continue;
+        }
+        let Some(provider) = provider_name_from_base_url(&config.base_url) else {
+            continue;
+        };
+        let driver = provider_driver_route_table(&config.formats);
+        let cap = provider_capability_text(&config.formats);
+        for model in provider_config_models(&config) {
+            let key = format!("{provider}/{model}");
+            if seen.insert(key) {
+                projected.push(ProjectedProviderModel {
+                    provider: provider.clone(),
+                    model,
+                    base_url: normalize_provider_base_url(&config.base_url),
+                    driver: driver.clone(),
+                    cap: cap.clone(),
+                });
+            }
+        }
+    }
+    projected.sort_by(|left, right| {
+        left.provider
+            .cmp(&right.provider)
+            .then_with(|| left.model.cmp(&right.model))
+    });
+    Ok(projected)
+}
+
+fn projected_provider_models_for_provider(
+    config_dir: &Path,
+    provider: &str,
+) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
+    Ok(projected_provider_models(config_dir)?
+        .into_iter()
+        .filter(|model| model.provider == provider)
+        .collect())
+}
+
+fn projected_provider_models_for_provider_path(
+    config_dir: &Path,
+    abi_path: &str,
+) -> Result<Option<Vec<ProjectedProviderModel>>, FuseV1Error> {
+    let Some(provider) = abi_path.strip_prefix("model/") else {
+        return Ok(None);
+    };
+    if provider.contains('/') || provider == DEBUG_ECHO_PROVIDER {
+        return Ok(None);
+    }
+    let models = projected_provider_models_for_provider(config_dir, provider)?;
+    if models.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(models))
+    }
+}
+
+fn projected_provider_model_for_exec(
+    config_dir: &Path,
+    abi_path: &str,
+) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
+    let Some(model_name) = model_exec_name(abi_path) else {
+        return Ok(None);
+    };
+    Ok(projected_provider_models(config_dir)?
+        .into_iter()
+        .find(|model| format!("{}/{}", model.provider, model.model) == model_name))
+}
+
+fn projected_provider_model_control_dir(
+    config_dir: &Path,
+    abi_path: &str,
+) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
+    let Some(model_name) = abi_path
+        .strip_prefix("model/")
+        .and_then(|path| path.strip_suffix(".d"))
+    else {
+        return Ok(None);
+    };
+    if !is_model_name(model_name) {
+        return Ok(None);
+    }
+    Ok(projected_provider_models(config_dir)?
+        .into_iter()
+        .find(|model| format!("{}/{}", model.provider, model.model) == model_name))
+}
+
+fn projected_provider_model_control_file<'a>(
+    config_dir: &Path,
+    abi_path: &'a str,
+) -> Result<Option<(ProjectedProviderModel, &'a str)>, FuseV1Error> {
+    let Some((dir, file)) = abi_path.rsplit_once('/') else {
+        return Ok(None);
+    };
+    let Some(model) = projected_provider_model_control_dir(config_dir, dir)? else {
+        return Ok(None);
+    };
+    Ok(Some((model, file)))
+}
+
+fn provider_config_models(config: &ProviderConfig) -> Vec<String> {
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(model) = config.default_model.as_deref() {
+        append_provider_model_name(model, &mut models, &mut seen);
+    }
+    for model in &config.models {
+        append_provider_model_name(model, &mut models, &mut seen);
+    }
+    models
+}
+
+fn append_provider_model_name(model: &str, models: &mut Vec<String>, seen: &mut HashSet<String>) {
+    let model = model.trim();
+    if !is_object_name(model) {
+        return;
+    }
+    if seen.insert(model.to_owned()) {
+        models.push(model.to_owned());
+    }
+}
+
+fn provider_name_from_base_url(base_url: &str) -> Option<String> {
+    let mut rest = base_url.trim();
+    if let Some(value) = rest.strip_prefix("https://") {
+        rest = value;
+    } else if let Some(value) = rest.strip_prefix("http://") {
+        rest = value;
+    }
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .rsplit('@')
+        .next()
+        .unwrap_or_default();
+    let host = authority
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    is_object_name(&host).then_some(host)
+}
+
+fn normalize_provider_base_url(base_url: &str) -> String {
+    base_url.trim().to_owned()
+}
+
+fn provider_driver_route_table(formats: &[String]) -> String {
+    let drivers = provider_drivers(formats);
+    let default = drivers
+        .iter()
+        .find(|driver| driver.as_str() == "openai-chat")
+        .or_else(|| drivers.first())
+        .map_or("openai-chat", String::as_str);
+    let agent = if drivers.iter().any(|driver| driver == "openai-responses")
+        && drivers.iter().any(|driver| driver == "openai-chat")
+    {
+        "openai-responses,openai-chat".to_owned()
+    } else {
+        default.to_owned()
+    };
+    format!("default={default}\nexec={default}\nagent={agent}\n")
+}
+
+fn provider_drivers(formats: &[String]) -> Vec<String> {
+    let mut drivers = Vec::new();
+    let mut seen = HashSet::new();
+    for format in formats {
+        let driver = match format.trim() {
+            "openai.responses" => "openai-responses",
+            "openai.chat" | "openai-compatible" => "openai-chat",
+            _ => continue,
+        };
+        if seen.insert(driver) {
+            drivers.push(driver.to_owned());
+        }
+    }
+    if drivers.is_empty() {
+        drivers.push("openai-chat".to_owned());
+    }
+    drivers
+}
+
+fn provider_capability_text(formats: &[String]) -> String {
+    let mut capabilities = vec!["chat", "stream"];
+    if formats
+        .iter()
+        .any(|format| format.trim() == "openai.responses")
+    {
+        capabilities.push("tool_call_syntax");
+    }
+    capabilities.join("\n") + "\n"
+}
+
+fn provider_model_metadata(model: &ProjectedProviderModel) -> String {
+    let name = format!("{}/{}", model.provider, model.model);
+    let routes = parse_model_driver_routes(&model.driver).unwrap_or_default();
+    let driver = routes
+        .primary_driver_for(ModelDriverUseCase::Default)
+        .unwrap_or("openai-chat");
+    format!(
+        "#!{CORTEXFS_OBJECT_RUNNER}\n\
+         # cortexfs.object=model\n\
+         # cortexfs.id={name}\n\
+         # cortexfs.name={name}\n\
+         # cortexfs.description=Configured provider model\n\
+         # cortexfs.type=chat\n\
+         # cortexfs.created_at=\n\
+         # cortexfs.owned_by={}\n\
+         # cortexfs.context_length=0\n\
+         # cortexfs.driver={driver}\n\
+         # cortexfs.driver.default={}\n\
+         # cortexfs.driver.exec={}\n\
+         # cortexfs.driver.socket={}\n\
+         # cortexfs.driver.agent={}\n\
+         # cortexfs.session=none\n\
+         # cortexfs.status=configured\n\
+         # cortexfs.cap={}\n",
+        model.provider,
+        routes.route_value(ModelDriverUseCase::Default),
+        routes.route_value(ModelDriverUseCase::Exec),
+        routes.route_value(ModelDriverUseCase::Socket),
+        routes.route_value(ModelDriverUseCase::Agent),
+        model.cap.lines().collect::<Vec<_>>().join(",")
+    )
+}
+
+fn provider_model_control_content(model: &ProjectedProviderModel, file: &str) -> Option<String> {
+    match file {
+        "id" => Some(format!("{}/{}\n", model.provider, model.model)),
+        "driver" => Some(model.driver.clone()),
+        "cap" => Some(model.cap.clone()),
+        "default" => Some(format!("base_url={}\n", model.base_url)),
+        "session" => Some("none\n".to_owned()),
+        "status" => Some("configured\n".to_owned()),
+        "log" => Some("\n".to_owned()),
+        _ => None,
+    }
+}
+
+fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {
+    let entries = fs::read_dir(model_root).map_err(|_error| FuseV1Error::Io)?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
+        let metadata =
+            fs::symlink_metadata(entry.path()).map_err(|error| fuse_metadata_error(&error))?;
+        if !metadata.is_dir() {
+            continue;
+        }
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_error| FuseV1Error::InvalidPath)?;
+        if is_object_name(&name) {
+            names.push(name);
+        }
+    }
+    names.sort();
+    Ok(names)
 }
 
 impl ObjectBootstrapError {
@@ -2811,23 +3722,14 @@ pub fn parse_socket_request_frame(frame: &str) -> Result<SocketRequest, SocketRe
     }
 
     let frame = trim_jsonl_frame(frame)?;
-    let value =
-        serde_json::from_str::<Value>(frame).map_err(|_error| SocketRequestError::InvalidJson)?;
-    let object = value
-        .as_object()
-        .ok_or(SocketRequestError::RequestNotObject)?;
-    let op = object
-        .get("op")
-        .and_then(Value::as_str)
-        .ok_or(SocketRequestError::MissingOp)?;
-
-    match op {
-        "send" => parse_socket_send_request(object),
-        "resume" => parse_socket_resume_request(object),
-        "cancel" => parse_socket_cancel_request(object),
-        "ping" => Ok(SocketRequest::Ping),
-        other => Err(SocketRequestError::UnknownOp(other.to_owned())),
+    if !frame.trim_start().starts_with('{') {
+        return Err(SocketRequestError::RequestNotObject);
     }
+    let request = serde_path_to_error::deserialize::<_, SocketRequestFrame>(
+        &mut serde_json::Deserializer::from_str(frame),
+    )
+    .map_err(|error| socket_request_deserialize_error(&error, frame))?;
+    request.try_into()
 }
 
 fn trim_jsonl_frame(frame: &str) -> Result<&str, SocketRequestError> {
@@ -2841,123 +3743,135 @@ fn trim_jsonl_frame(frame: &str) -> Result<&str, SocketRequestError> {
     Ok(trimmed)
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "op")]
+enum SocketRequestFrame {
+    #[serde(rename = "send")]
+    Send {
+        id: String,
+        #[serde(default = "default_socket_session")]
+        session: String,
+        #[serde(default)]
+        scope: SocketSessionScopeFrame,
+        cwd: Option<String>,
+        input: String,
+    },
+    #[serde(rename = "resume")]
+    Resume {
+        #[serde(default = "default_socket_session")]
+        session: String,
+        after: Option<String>,
+    },
+    #[serde(rename = "cancel")]
+    Cancel { id: String },
+    #[serde(rename = "ping")]
+    Ping,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SocketSessionScopeFrame {
+    #[default]
+    Private,
+    Shared,
+    Temp,
+}
+
+impl From<SocketSessionScopeFrame> for SocketSessionScope {
+    fn from(scope: SocketSessionScopeFrame) -> Self {
+        match scope {
+            SocketSessionScopeFrame::Private => Self::Private,
+            SocketSessionScopeFrame::Shared => Self::Shared,
+            SocketSessionScopeFrame::Temp => Self::Temp,
+        }
+    }
+}
+
+impl TryFrom<SocketRequestFrame> for SocketRequest {
+    type Error = SocketRequestError;
+
+    fn try_from(request: SocketRequestFrame) -> Result<Self, Self::Error> {
+        match request {
+            SocketRequestFrame::Send {
+                id,
+                session,
+                scope,
+                cwd,
+                input,
+            } => parse_socket_send_request(id, session, scope.into(), cwd, input),
+            SocketRequestFrame::Resume { session, after } => {
+                parse_socket_resume_request(session, after)
+            }
+            SocketRequestFrame::Cancel { id } => parse_socket_cancel_request(id),
+            SocketRequestFrame::Ping => Ok(Self::Ping),
+        }
+    }
+}
+
 fn parse_socket_send_request(
-    object: &serde_json::Map<String, Value>,
+    id: String,
+    session: String,
+    scope: SocketSessionScope,
+    cwd: Option<String>,
+    input: String,
 ) -> Result<SocketRequest, SocketRequestError> {
-    let id = required_socket_string(object, "id")?;
-    validate_socket_object_field("id", id)?;
-    let session = optional_socket_session(object)?;
-    let scope = optional_socket_scope(object)?;
-    let cwd = optional_socket_cwd(object)?;
-    let input = required_socket_string(object, "input")?;
+    validate_socket_object_field("id", &id)?;
+    validate_socket_object_field("session", &session)?;
+    validate_optional_socket_cwd(cwd.as_deref())?;
     if input.contains('\0') {
         return Err(SocketRequestError::InvalidField {
             field: "input",
-            value: input.to_owned(),
+            value: input,
         });
     }
 
     Ok(SocketRequest::Send {
-        id: id.to_owned(),
+        id,
         session,
         scope,
         cwd,
-        input: input.to_owned(),
+        input,
     })
 }
 
 fn parse_socket_resume_request(
-    object: &serde_json::Map<String, Value>,
+    session: String,
+    after: Option<String>,
 ) -> Result<SocketRequest, SocketRequestError> {
-    let session = optional_socket_session(object)?;
-    let after = optional_socket_object_field(object, "after")?;
+    validate_socket_object_field("session", &session)?;
+    validate_optional_socket_object_field("after", after.as_deref())?;
     Ok(SocketRequest::Resume { session, after })
 }
 
-fn parse_socket_cancel_request(
-    object: &serde_json::Map<String, Value>,
-) -> Result<SocketRequest, SocketRequestError> {
-    let id = required_socket_string(object, "id")?;
-    validate_socket_object_field("id", id)?;
-    Ok(SocketRequest::Cancel { id: id.to_owned() })
+fn parse_socket_cancel_request(id: String) -> Result<SocketRequest, SocketRequestError> {
+    validate_socket_object_field("id", &id)?;
+    Ok(SocketRequest::Cancel { id })
 }
 
-fn required_socket_string<'a>(
-    object: &'a serde_json::Map<String, Value>,
+fn default_socket_session() -> String {
+    "default".to_owned()
+}
+
+fn validate_optional_socket_cwd(cwd: Option<&str>) -> Result<(), SocketRequestError> {
+    if let Some(cwd) = cwd
+        && !is_stable_chroot_absolute_path(cwd)
+    {
+        return Err(SocketRequestError::InvalidField {
+            field: "cwd",
+            value: cwd.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_optional_socket_object_field(
     field: &'static str,
-) -> Result<&'a str, SocketRequestError> {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or(SocketRequestError::MissingStringField(field))
-}
-
-fn optional_socket_session(
-    object: &serde_json::Map<String, Value>,
-) -> Result<String, SocketRequestError> {
-    match object.get("session") {
-        None => Ok("default".to_owned()),
-        Some(value) => {
-            let Some(session) = value.as_str() else {
-                return Err(SocketRequestError::MissingStringField("session"));
-            };
-            validate_socket_object_field("session", session)?;
-            Ok(session.to_owned())
-        }
+    value: Option<&str>,
+) -> Result<(), SocketRequestError> {
+    if let Some(value) = value {
+        validate_socket_object_field(field, value)?;
     }
-}
-
-fn optional_socket_scope(
-    object: &serde_json::Map<String, Value>,
-) -> Result<SocketSessionScope, SocketRequestError> {
-    match object.get("scope") {
-        None => Ok(SocketSessionScope::Private),
-        Some(value) => {
-            let Some(scope) = value.as_str() else {
-                return Err(SocketRequestError::MissingStringField("scope"));
-            };
-            SocketSessionScope::parse(scope).ok_or_else(|| SocketRequestError::InvalidField {
-                field: "scope",
-                value: scope.to_owned(),
-            })
-        }
-    }
-}
-
-fn optional_socket_cwd(
-    object: &serde_json::Map<String, Value>,
-) -> Result<Option<String>, SocketRequestError> {
-    match object.get("cwd") {
-        None => Ok(None),
-        Some(value) => {
-            let Some(cwd) = value.as_str() else {
-                return Err(SocketRequestError::MissingStringField("cwd"));
-            };
-            if !is_stable_chroot_absolute_path(cwd) {
-                return Err(SocketRequestError::InvalidField {
-                    field: "cwd",
-                    value: cwd.to_owned(),
-                });
-            }
-            Ok(Some(cwd.to_owned()))
-        }
-    }
-}
-
-fn optional_socket_object_field(
-    object: &serde_json::Map<String, Value>,
-    field: &'static str,
-) -> Result<Option<String>, SocketRequestError> {
-    match object.get(field) {
-        None => Ok(None),
-        Some(value) => {
-            let Some(text) = value.as_str() else {
-                return Err(SocketRequestError::MissingStringField(field));
-            };
-            validate_socket_object_field(field, text)?;
-            Ok(Some(text.to_owned()))
-        }
-    }
+    Ok(())
 }
 
 fn validate_socket_object_field(
@@ -2972,6 +3886,101 @@ fn validate_socket_object_field(
             value: value.to_owned(),
         })
     }
+}
+
+fn socket_request_deserialize_error(
+    error: &serde_path_to_error::Error<serde_json::Error>,
+    frame: &str,
+) -> SocketRequestError {
+    if error.inner().is_syntax() || error.inner().is_eof() {
+        return SocketRequestError::InvalidJson;
+    }
+    if let Some(error) = socket_request_stable_field_error(frame) {
+        return error;
+    }
+    let message = error.inner().to_string();
+    if message.contains("missing field `op`") {
+        return SocketRequestError::MissingOp;
+    }
+    if message.contains("unknown variant")
+        && message.contains("private")
+        && message.contains("shared")
+        && message.contains("temp")
+    {
+        return socket_request_scope_error(message);
+    }
+    match error.path().to_string().as_str() {
+        "." => SocketRequestError::RequestNotObject,
+        "op" => socket_request_unknown_op_error(message.as_str())
+            .unwrap_or(SocketRequestError::MissingOp),
+        "id" => SocketRequestError::MissingStringField("id"),
+        "session" => SocketRequestError::MissingStringField("session"),
+        "scope" => socket_request_scope_error(message),
+        "cwd" => SocketRequestError::MissingStringField("cwd"),
+        "after" => SocketRequestError::MissingStringField("after"),
+        "input" => SocketRequestError::MissingStringField("input"),
+        _ => SocketRequestError::InvalidJson,
+    }
+}
+
+fn socket_request_stable_field_error(frame: &str) -> Option<SocketRequestError> {
+    let value = serde_json::from_str::<Value>(frame).ok()?;
+    let object = value.as_object()?;
+    let op = object.get("op")?.as_str()?;
+    match op {
+        "send" => socket_string_field_error(object, "id")
+            .or_else(|| socket_string_field_error(object, "session"))
+            .or_else(|| socket_string_field_error(object, "scope"))
+            .or_else(|| socket_scope_value_error(object))
+            .or_else(|| socket_string_field_error(object, "cwd"))
+            .or_else(|| socket_string_field_error(object, "input")),
+        "resume" => socket_string_field_error(object, "session")
+            .or_else(|| socket_string_field_error(object, "after")),
+        "cancel" => socket_string_field_error(object, "id"),
+        _ => None,
+    }
+}
+
+fn socket_string_field_error(
+    object: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Option<SocketRequestError> {
+    object
+        .get(field)
+        .filter(|value| !value.is_string())
+        .map(|_value| SocketRequestError::MissingStringField(field))
+}
+
+fn socket_scope_value_error(object: &serde_json::Map<String, Value>) -> Option<SocketRequestError> {
+    let scope = object.get("scope")?.as_str()?;
+    SocketSessionScope::parse(scope)
+        .is_none()
+        .then(|| SocketRequestError::InvalidField {
+            field: "scope",
+            value: scope.to_owned(),
+        })
+}
+
+fn socket_request_scope_error(message: String) -> SocketRequestError {
+    let value = quoted_json_error_value(&message).unwrap_or(message);
+    SocketRequestError::InvalidField {
+        field: "scope",
+        value,
+    }
+}
+
+fn socket_request_unknown_op_error(message: &str) -> Option<SocketRequestError> {
+    if !message.contains("unknown variant") {
+        return None;
+    }
+    let value = quoted_json_error_value(message)?;
+    Some(SocketRequestError::UnknownOp(value))
+}
+
+fn quoted_json_error_value(message: &str) -> Option<String> {
+    let start = message.find('`')? + 1;
+    let end = message.get(start..)?.find('`')? + start;
+    message.get(start..end).map(ToOwned::to_owned)
 }
 
 /// Ensures `session_root/<session>/` has the durable v1 session layout.
@@ -2993,7 +4002,7 @@ pub fn ensure_durable_session_layout(
         return Err(DurableSessionLayoutError::InvalidCwd);
     }
     if let Some(model) = model
-        && !is_object_name(model)
+        && !is_model_name(model)
     {
         return Err(DurableSessionLayoutError::InvalidModelName);
     }
@@ -3020,7 +4029,7 @@ pub fn ensure_durable_session_layout(
     write_text_file_if_missing(&session_dir.join("cwd"), &format!("{cwd}\n"))?;
     write_text_file_if_missing(&session_dir.join("created_at"), &now)?;
     write_text_file_if_missing(&session_dir.join("updated_at"), &now)?;
-    write_text_file_if_missing(
+    write_text_file(
         &session_dir.join("meta.json"),
         &durable_session_meta_json(model, scope),
     )?;
@@ -3083,7 +4092,7 @@ fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
 fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
     if path.exists() {
         return if path.is_file() {
-            Ok(())
+            set_text_file_permissions(path)
         } else {
             Err(DurableSessionLayoutError::CannotCreate)
         };
@@ -3091,7 +4100,21 @@ fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableS
     if let Some(parent) = path.parent() {
         create_dir(parent)?;
     }
-    fs::write(path, content).map_err(|_error| DurableSessionLayoutError::CannotCreate)
+    fs::write(path, content).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    set_text_file_permissions(path)
+}
+
+fn write_text_file(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
+    if let Some(parent) = path.parent() {
+        create_dir(parent)?;
+    }
+    fs::write(path, content).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    set_text_file_permissions(path)
+}
+
+fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
 /// Handles one JSONL socket request frame against a durable session root.
@@ -3198,11 +4221,8 @@ pub fn serve_agent_executable_socket_stream_once(
             return Err(error);
         }
     };
-    match handle_agent_executable_socket_request_frame(runtime, &frame) {
-        Ok(response) => {
-            write_socket_runtime_response(stream, &response)?;
-            Ok(response)
-        }
+    match handle_agent_executable_socket_request_frame_streaming(stream, runtime, &frame) {
+        Ok(response) => Ok(response),
         Err(error) => {
             let response = socket_runtime_error_response(&error);
             write_socket_runtime_response(stream, &response)?;
@@ -3255,7 +4275,8 @@ pub fn serve_unix_socket_stream_once(
     }
 }
 
-fn handle_agent_executable_socket_request_frame(
+fn handle_agent_executable_socket_request_frame_streaming(
+    stream: &mut UnixStream,
     runtime: AgentExecutableSocketRuntime<'_>,
     frame: &str,
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
@@ -3268,12 +4289,14 @@ fn handle_agent_executable_socket_request_frame(
         ..
     } = request
     else {
-        return handle_socket_request(
+        let response = handle_socket_request(
             runtime.session_root,
             runtime.default_cwd,
             runtime.model,
             &request,
-        );
+        )?;
+        write_socket_runtime_response(stream, &response)?;
+        return Ok(response);
     };
 
     let recorder_response = handle_socket_request(
@@ -3282,14 +4305,16 @@ fn handle_agent_executable_socket_request_frame(
         runtime.model,
         &request,
     )?;
-    let agent_output = run_agent_executable(
+    write_socket_runtime_response(stream, &recorder_response)?;
+
+    let agent_frames = run_agent_executable_streaming(
+        stream,
         runtime.agent_executable,
         runtime.agent_name,
         id,
         session,
         input,
     )?;
-    let agent_frames = canonical_agent_event_frames(&agent_output)?;
     if scope != SocketSessionScope::Temp
         && let Some(text) = assistant_text_from_event_frames(&agent_frames)
     {
@@ -3299,43 +4324,51 @@ fn handle_agent_executable_socket_request_frame(
     }
 
     let mut frames = recorder_response.frames().to_vec();
-    frames.extend(
-        agent_frames
-            .into_iter()
-            .filter(|line| event_type(line).as_deref() != Some("start")),
-    );
+    frames.extend(agent_frames);
     Ok(SocketRuntimeResponse::new(frames))
 }
 
-fn run_agent_executable(
+fn run_agent_executable_streaming(
+    stream: &mut UnixStream,
     agent_executable: &Path,
     agent_name: &str,
     run_id: &str,
     session: &str,
     input: &str,
-) -> Result<String, SocketRuntimeError> {
-    let output = Command::new(agent_executable)
+) -> Result<Vec<String>, SocketRuntimeError> {
+    let mut child = Command::new(agent_executable)
         .arg(input)
         .env("CTX_AGENT", agent_name)
         .env("CTX_RUN_ID", run_id)
         .env("CTX_SESSION", session)
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    if !output.status.success() {
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let mut frames = Vec::new();
+    for line in BufReader::new(stdout).lines() {
+        let line = line.map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !inspect_event_stream_jsonl(&line).is_ok() {
+            return Err(SocketRuntimeError::InvalidAgentOutput);
+        }
+        if event_type(&line).as_deref() != Some("start") {
+            write_socket_frame(stream, &line)?;
+            frames.push(line);
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    if !status.success() && frames.is_empty() {
         return Err(SocketRuntimeError::CannotRunAgent);
     }
-    String::from_utf8(output.stdout).map_err(|_error| SocketRuntimeError::InvalidAgentOutput)
-}
-
-fn canonical_agent_event_frames(output: &str) -> Result<Vec<String>, SocketRuntimeError> {
-    if !inspect_event_stream_jsonl(output).is_ok() {
-        return Err(SocketRuntimeError::InvalidAgentOutput);
-    }
-    Ok(output
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(str::to_owned)
-        .collect())
+    Ok(frames)
 }
 
 fn event_type(line: &str) -> Option<String> {
@@ -3417,6 +4450,14 @@ fn write_socket_runtime_response(
 ) -> Result<(), SocketRuntimeError> {
     stream
         .write_all(response.jsonl().as_bytes())
+        .and_then(|()| stream.flush())
+        .map_err(|_error| SocketRuntimeError::CannotWriteResponse)
+}
+
+fn write_socket_frame(stream: &mut UnixStream, frame: &str) -> Result<(), SocketRuntimeError> {
+    stream
+        .write_all(frame.as_bytes())
+        .and_then(|()| stream.write_all(b"\n"))
         .and_then(|()| stream.flush())
         .map_err(|_error| SocketRuntimeError::CannotWriteResponse)
 }
@@ -4297,22 +5338,35 @@ fn render_context_pack_markdown(
 ) -> String {
     let mut output = String::new();
     output.push_str("# CortexFS Context Pack\n\n");
-    let _ = writeln!(output, "session: {session}");
+    output.push_str("session: ");
+    output.push_str(session);
+    output.push('\n');
     if let Some(agent) = agent {
-        let _ = writeln!(output, "agent: {agent}");
+        output.push_str("agent: ");
+        output.push_str(agent);
+        output.push('\n');
     }
     if let Some(budget) = budget {
-        let _ = writeln!(output, "budget_tokens: {budget}");
+        output.push_str("budget_tokens: ");
+        output.push_str(&budget.to_string());
+        output.push('\n');
     }
     output.push('\n');
 
     for candidate in candidates {
-        let _ = write!(output, "## {}\n\n", candidate.kind);
-        let _ = writeln!(output, "source: {}", candidate.source);
+        output.push_str("## ");
+        output.push_str(&candidate.kind);
+        output.push_str("\n\nsource: ");
+        output.push_str(&candidate.source);
+        output.push('\n');
         if let Some(range) = candidate.range.as_deref() {
-            let _ = writeln!(output, "range: {range}");
+            output.push_str("range: ");
+            output.push_str(range);
+            output.push('\n');
         }
-        let _ = write!(output, "tokens: {}\n\n", candidate.tokens);
+        output.push_str("tokens: ");
+        output.push_str(&candidate.tokens.to_string());
+        output.push_str("\n\n");
         output.push_str("```text\n");
         output.push_str(&candidate.content);
         if !candidate.content.ends_with('\n') {
@@ -4735,7 +5789,7 @@ pub fn is_executable_file(path: &Path) -> bool {
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
-/// Inspects a `model/<name>.d/cap` file body for stable v1 capability words.
+/// Inspects a `model/<provider>/<model>.d/cap` file body for stable v1 capability words.
 #[must_use]
 pub fn inspect_model_capabilities(content: &str) -> ModelCapabilityReport {
     let mut issues = Vec::new();
@@ -4760,6 +5814,90 @@ pub fn inspect_model_capabilities(content: &str) -> ModelCapabilityReport {
     ModelCapabilityReport::new(issues)
 }
 
+/// Parses `model/<provider>/<model>.d/driver`.
+///
+/// A legacy single-line value such as `debug` is treated as `default=debug`.
+/// Route-table form supports `default`, `exec`, `socket`, and `agent` keys with
+/// comma-separated drivers in priority order.
+pub fn parse_model_driver_routes(
+    content: &str,
+) -> Result<ModelDriverRoutingTable, ModelDriverRouteError> {
+    let significant = content
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let value = line.trim();
+            (!value.is_empty() && !value.starts_with('#')).then_some((index + 1, value))
+        })
+        .collect::<Vec<_>>();
+
+    if significant.is_empty() {
+        return Err(ModelDriverRouteError::Empty);
+    }
+
+    if significant.len() == 1 {
+        let Some((line, driver)) = significant.first().copied() else {
+            return Err(ModelDriverRouteError::Empty);
+        };
+        if !driver.contains('=') {
+            return parse_driver_list(line, driver).map(|drivers| {
+                let mut table = ModelDriverRoutingTable::new();
+                table.insert(ModelDriverUseCase::Default, drivers);
+                table
+            });
+        }
+    }
+
+    let mut table = ModelDriverRoutingTable::new();
+    for (line, route) in significant {
+        let Some((raw_key, raw_drivers)) = route.split_once('=') else {
+            return Err(ModelDriverRouteError::MissingEquals { line });
+        };
+        let key = raw_key.trim();
+        let Some(use_case) = ModelDriverUseCase::parse(key) else {
+            return Err(ModelDriverRouteError::UnknownUseCase {
+                line,
+                value: key.to_owned(),
+            });
+        };
+        if table.get(use_case).is_some() {
+            return Err(ModelDriverRouteError::DuplicateUseCase {
+                line,
+                value: key.to_owned(),
+            });
+        }
+        table.insert(use_case, parse_driver_list(line, raw_drivers)?);
+    }
+
+    if table.is_empty() {
+        Err(ModelDriverRouteError::Empty)
+    } else {
+        Ok(table)
+    }
+}
+
+fn parse_driver_list(line: usize, value: &str) -> Result<Vec<String>, ModelDriverRouteError> {
+    let mut drivers = Vec::new();
+    for raw_driver in value.split(',') {
+        let driver = raw_driver.trim();
+        if driver.is_empty() {
+            return Err(ModelDriverRouteError::EmptyDriver { line });
+        }
+        if !is_object_name(driver) {
+            return Err(ModelDriverRouteError::InvalidDriverName {
+                line,
+                value: driver.to_owned(),
+            });
+        }
+        drivers.push(driver.to_owned());
+    }
+    if drivers.is_empty() {
+        Err(ModelDriverRouteError::EmptyDriver { line })
+    } else {
+        Ok(drivers)
+    }
+}
+
 /// Inspects a `tool/<name>.d/schema` file body.
 #[must_use]
 pub fn inspect_tool_schema_json(content: &str) -> ToolSchemaReport {
@@ -4770,11 +5908,16 @@ pub fn inspect_tool_schema_json(content: &str) -> ToolSchemaReport {
         return ToolSchemaReport::new(vec![ToolSchemaIssue::NotObject]);
     };
 
-    let issues = object
-        .keys()
-        .filter(|field| is_tool_schema_authority_field(field))
-        .map(|field| ToolSchemaIssue::AuthorityField(field.clone()))
-        .collect();
+    let mut issues = Vec::new();
+    if !jsonschema::meta::is_valid(&value) {
+        issues.push(ToolSchemaIssue::InvalidSchema);
+    }
+    issues.extend(
+        object
+            .keys()
+            .filter(|field| is_tool_schema_authority_field(field))
+            .map(|field| ToolSchemaIssue::AuthorityField(field.clone())),
+    );
     ToolSchemaReport::new(issues)
 }
 
@@ -5086,7 +6229,7 @@ pub fn derive_agent_runtime_view(
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("mount".to_owned()))?;
 
     let model = read_required_agent_control_value(&control_dir, "model")?;
-    if !is_object_name(&model) {
+    if !is_model_name(&model) {
         return Err(AgentRuntimeViewError::InvalidControlFile(
             "model".to_owned(),
         ));
@@ -5224,6 +6367,80 @@ fn parse_agent_env_control(content: &str) -> Result<Vec<(String, String)>, Agent
     Ok(env)
 }
 
+/// Resolves an API key with the stable priority: environment, system keychain,
+/// then unconfigured.
+pub fn resolve_api_key(
+    env_name: &str,
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, ApiKeyResolutionError> {
+    resolve_api_key_with(
+        env_name,
+        service,
+        account,
+        env_var_secret,
+        system_keychain_secret,
+    )
+}
+
+/// Testable core for API key resolution.
+pub fn resolve_api_key_with<E, K>(
+    env_name: &str,
+    service: &str,
+    account: &str,
+    env_lookup: E,
+    keychain_lookup: K,
+) -> Result<Option<String>, ApiKeyResolutionError>
+where
+    E: FnOnce(&str) -> Result<String, std::env::VarError>,
+    K: FnOnce(&str, &str) -> Result<Option<String>, ApiKeyResolutionError>,
+{
+    if !is_valid_env_key(env_name)
+        || !is_valid_secret_lookup_part(service)
+        || !is_valid_secret_lookup_part(account)
+    {
+        return Err(ApiKeyResolutionError::InvalidName);
+    }
+    match env_lookup(env_name) {
+        Ok(value) if !value.trim().is_empty() => return Ok(Some(value)),
+        Ok(_value) => {}
+        Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_value)) => {
+            return Err(ApiKeyResolutionError::InvalidName);
+        }
+    }
+    keychain_lookup(service, account)
+}
+
+fn env_var_secret(name: &str) -> Result<String, std::env::VarError> {
+    std::env::var(name)
+}
+
+fn system_keychain_secret(
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, ApiKeyResolutionError> {
+    let entry = match keyring::Entry::new(service, account) {
+        Ok(entry) => entry,
+        Err(keyring::Error::NoDefaultStore) => return Ok(None),
+        Err(_error) => return Err(ApiKeyResolutionError::KeychainUnavailable),
+    };
+    let secret = match entry.get_password() {
+        Ok(secret) => secret,
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(_error) => return Err(ApiKeyResolutionError::KeychainUnavailable),
+    };
+    if secret.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(secret))
+    }
+}
+
+fn is_valid_secret_lookup_part(value: &str) -> bool {
+    !value.is_empty() && !value.contains('\0') && !value.contains('\n')
+}
+
 fn validate_agent_ctx_path(value: &str) -> Result<(), AgentRuntimeViewError> {
     if value
         .split(':')
@@ -5288,6 +6505,133 @@ fn optional_single_agent_control_value(
     }
 }
 
+/// Returns executable metadata text for a model object.
+pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
+    if !is_model_name(name) {
+        return Err(FuseV1Error::InvalidPath);
+    }
+    let id = read_object_control_for_metadata(control_dir, "id")?;
+    let driver_content = read_object_control_for_metadata(control_dir, "driver")?;
+    let driver_routes =
+        parse_model_driver_routes(&driver_content).map_err(|_error| FuseV1Error::InvalidContent)?;
+    let driver = driver_routes
+        .primary_driver_for(ModelDriverUseCase::Default)
+        .unwrap_or("");
+    let session = read_object_control_for_metadata(control_dir, "session")?;
+    let status = read_object_control_for_metadata(control_dir, "status")?;
+    let cap = read_object_control_for_metadata(control_dir, "cap")?;
+    let description = model_metadata_description(name, driver);
+    let model_type = model_metadata_type(driver);
+    let owned_by = model_metadata_owner(name, driver);
+    let context_length = model_metadata_context_length(name, driver);
+    Ok(format!(
+        "#!{CORTEXFS_OBJECT_RUNNER}\n\
+         # cortexfs.object=model\n\
+         # cortexfs.id={id}\n\
+         # cortexfs.name={name}\n\
+         # cortexfs.description={description}\n\
+         # cortexfs.type={model_type}\n\
+         # cortexfs.created_at=\n\
+         # cortexfs.owned_by={owned_by}\n\
+         # cortexfs.context_length={context_length}\n\
+         # cortexfs.driver={driver}\n\
+         # cortexfs.driver.default={}\n\
+         # cortexfs.driver.exec={}\n\
+         # cortexfs.driver.socket={}\n\
+         # cortexfs.driver.agent={}\n\
+         # cortexfs.session={session}\n\
+         # cortexfs.status={status}\n\
+         # cortexfs.cap={}\n",
+        driver_routes.route_value(ModelDriverUseCase::Default),
+        driver_routes.route_value(ModelDriverUseCase::Exec),
+        driver_routes.route_value(ModelDriverUseCase::Socket),
+        driver_routes.route_value(ModelDriverUseCase::Agent),
+        cap.lines().collect::<Vec<_>>().join(",")
+    ))
+}
+
+/// Returns executable metadata text for a tool object.
+pub fn tool_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
+    if !is_object_name(name) {
+        return Err(FuseV1Error::InvalidPath);
+    }
+    let declared_name = read_object_control_for_metadata(control_dir, "name")
+        .unwrap_or_else(|_error| name.to_owned());
+    let description =
+        read_object_control_for_metadata(control_dir, "description").unwrap_or_default();
+    let cap = read_object_control_for_metadata(control_dir, "cap").unwrap_or_default();
+    let status = read_object_control_for_metadata(control_dir, "status")
+        .unwrap_or_else(|_error| "unknown".to_owned());
+    Ok(format!(
+        "#!{CORTEXFS_OBJECT_RUNNER}\n\
+         # cortexfs.object=tool\n\
+         # cortexfs.name={name}\n\
+         # cortexfs.declared_name={declared_name}\n\
+         # cortexfs.description={description}\n\
+         # cortexfs.runner=cortexfs-object-runner\n\
+         # cortexfs.status={status}\n\
+         # cortexfs.cap={}\n",
+        cap.lines().collect::<Vec<_>>().join(",")
+    ))
+}
+
+fn model_metadata_description(name: &str, driver: &str) -> &'static str {
+    if name == "debug/echo" && driver == "debug" {
+        "Built-in debug echo model"
+    } else {
+        ""
+    }
+}
+
+fn model_metadata_type(driver: &str) -> &str {
+    if driver == "debug" { "debug" } else { "chat" }
+}
+
+fn model_metadata_owner(name: &str, driver: &str) -> &'static str {
+    if name == "debug/echo" && driver == "debug" {
+        "cortexfs"
+    } else {
+        ""
+    }
+}
+
+fn model_metadata_context_length(_name: &str, _driver: &str) -> u64 {
+    0
+}
+
+/// Runs the built-in debug echo model and writes canonical JSONL.
+pub fn run_echo_model<I, S, W>(args: I, mut stdout: W) -> std::io::Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+    W: Write,
+{
+    let mut input = args
+        .into_iter()
+        .map(|value| value.as_ref().to_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if input.is_empty() {
+        std::io::stdin().read_to_string(&mut input)?;
+    }
+    let run = std::env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    let text = serde_json::to_string(&input).unwrap_or_else(|_error| "\"\"".to_owned());
+    stdout.write_all(
+        format!(r#"{{"type":"start","run":"{run}","model":"debug/echo"}}"#).as_bytes(),
+    )?;
+    stdout.write_all(b"\n")?;
+    stdout.write_all(format!(r#"{{"type":"delta","run":"{run}","text":{text}}}"#).as_bytes())?;
+    stdout.write_all(b"\n")?;
+    stdout.write_all(format!(r#"{{"type":"done","run":"{run}","status":"ok"}}"#).as_bytes())?;
+    stdout.write_all(b"\n")
+}
+
+fn read_object_control_for_metadata(control_dir: &Path, file: &str) -> Result<String, FuseV1Error> {
+    fs::read_to_string(control_dir.join(file))
+        .map(|content| content.trim_end_matches('\n').to_owned())
+        .map_err(|error| fuse_metadata_error(&error))
+}
+
 fn policy_subject_from_label(label: &str) -> Option<&str> {
     if is_object_name(label) {
         return Some(label);
@@ -5326,7 +6670,7 @@ pub fn install_executable_object_wrapper(
     wrapper_target: &str,
     control_overrides: &[(&str, &str)],
 ) -> Result<ObjectBootstrap, ObjectBootstrapError> {
-    if !is_object_name(name) {
+    if !is_object_name_for_class(class, name) {
         return Err(ObjectBootstrapError::InvalidObjectName);
     }
     if !is_valid_wrapper_target(wrapper_target) {
@@ -5400,8 +6744,9 @@ fn validate_object_control_content(
 fn validate_model_control_content(file: &str, content: &str) -> Result<(), ObjectBootstrapError> {
     match file {
         "cap" if inspect_model_capabilities(content).is_ok() => Ok(()),
+        "driver" if parse_model_driver_routes(content).is_ok() => Ok(()),
         "session" if matches!(content.trim(), "none" | "socket") => Ok(()),
-        "cap" | "session" => Err(ObjectBootstrapError::InvalidControlValue),
+        "cap" | "driver" | "session" => Err(ObjectBootstrapError::InvalidControlValue),
         _ if !content.contains('\0') => Ok(()),
         _ => Err(ObjectBootstrapError::InvalidControlValue),
     }
@@ -5497,12 +6842,13 @@ fn executable_wrapper_script(wrapper_target: &str) -> String {
 pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
     create_reference_root(root)?;
     ensure_reference_bin(root)?;
-    ensure_reference_model(root)?;
     ensure_reference_agent(root, "coder")?;
     ensure_reference_agent(root, "reviewer")?;
+    remove_deprecated_reference_placeholder_tools(root)?;
     ensure_reference_global_tools(root)?;
     ensure_reference_home(root)?;
-    ensure_reference_shared_project(root)?;
+    remove_deprecated_reference_home_tool_aliases(root)?;
+    migrate_reference_legacy_session_meta_models(root)?;
     Ok(ReferenceTreeBootstrap::new(root.to_path_buf()))
 }
 
@@ -5525,49 +6871,6 @@ fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
     set_reference_executable(&ctx)
 }
 
-fn ensure_reference_model(root: &Path) -> Result<(), ReferenceTreeError> {
-    install_executable_object_wrapper(
-        root,
-        ObjectClass::Model,
-        "qwen",
-        "/bin/false",
-        &[
-            ("id", "qwen"),
-            ("driver", "rig"),
-            ("cap", "chat\nstream\nsession\ntool_call_syntax"),
-            ("default", ""),
-            ("session", "socket"),
-            ("status", "idle"),
-            ("log", ""),
-        ],
-    )
-    .map_err(ReferenceTreeError::Object)?;
-    write_reference_text(
-        &root.join("model").join("qwen"),
-        reference_model_stub_script(),
-    )?;
-    set_reference_executable(&root.join("model").join("qwen"))?;
-    ensure_reference_socket(&root.join("model").join("qwen.sock"))
-}
-
-fn reference_model_stub_script() -> &'static str {
-    r#"#!/bin/sh
-# CortexFS reference-tree model stub.
-run="$CTX_RUN_ID"
-if [ -z "$run" ]; then
-  run="r1"
-fi
-input="$*"
-if [ -z "$input" ]; then
-  input="$(cat)"
-fi
-json_text="$(printf '%s' "$input" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-printf '{"type":"start","run":"%s","model":"qwen"}\n' "$run"
-printf '{"type":"delta","run":"%s","text":"%s"}\n' "$run" "$json_text"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
-"#
-}
-
 fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(root, ObjectClass::Agent, name, "/bin/false", &[])
         .map_err(ReferenceTreeError::Object)?;
@@ -5575,16 +6878,12 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
     let label = format!("user_u:agent_r:{name}_t:s0\n");
     let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
     let policy_subject = format!("{name}_t");
-    let selected_model = if root.join("model").join("main").exists() {
-        "main"
-    } else {
-        "qwen"
-    };
+    let selected_model = DEBUG_ECHO_MODEL;
     let policy = format!(
         "allow {policy_subject} model:{selected_model} use\nallow {policy_subject} tool:fs.read execute\n"
     );
     let mount = format!(
-        "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n/ctx/shared/project-a\t/shared/project-a\trw\trbind,nosuid,nodev\n"
+        "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n"
     );
     let overrides = [
         ("owner", "1000\n".to_owned()),
@@ -5598,10 +6897,7 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
         ("root", home_root),
         ("cwd", "/work\n".to_owned()),
         ("env", "CTX_ROOT=/ctx\n".to_owned()),
-        (
-            "path",
-            "/ctx/tool:/ctx/home/1000/tool:/ctx/shared/project-a/tool\n".to_owned(),
-        ),
+        ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
         ("model", format!("{selected_model}\n")),
         ("policy", policy),
@@ -5633,7 +6929,7 @@ if [ -z "$input" ]; then
 fi
 model="$(tr -d '\n' < "$root/agent/{name}.d/model" 2>/dev/null || true)"
 if [ -z "$model" ]; then
-  model="qwen"
+  model="debug/echo"
 fi
 if [ ! -x "$root/model/$model" ]; then
   printf '{{"type":"error","run":"%s","code":"ENOENT","message":"missing model"}}\n' "$run"
@@ -5646,44 +6942,155 @@ CTX_RUN_ID="$run" exec "$root/model/$model" "$input"
 }
 
 fn ensure_reference_global_tools(root: &Path) -> Result<(), ReferenceTreeError> {
-    for tool in [
-        "fs.read",
-        "fs.write",
-        "shell.exec",
-        "mcp.github.search_issues",
-        "agent.create",
-        "agent.start",
-        "agent.stop",
-    ] {
+    for tool in REFERENCE_GLOBAL_TOOLS {
         install_executable_object_wrapper(
             root,
             ObjectClass::Tool,
-            tool,
+            tool.name,
             "/bin/false",
             &[
-                ("name", tool),
-                ("description", "CortexFS reference-tree tool"),
-                ("schema", "{\"type\":\"object\"}"),
-                ("cap", ""),
-                ("policy", ""),
+                ("name", tool.name),
+                ("description", tool.description),
+                ("schema", tool.schema),
+                ("cap", tool.cap),
+                ("policy", tool.policy),
                 ("status", "idle"),
                 ("log", ""),
             ],
         )
         .map_err(ReferenceTreeError::Object)?;
-        if let Some(script) = reference_tool_stub_script(tool) {
-            write_reference_text(&root.join("tool").join(tool), script)?;
-            set_reference_executable(&root.join("tool").join(tool))?;
+        if let Some(script) = reference_tool_stub_script(tool.name) {
+            write_reference_text(&root.join("tool").join(tool.name), script)?;
+            set_reference_executable(&root.join("tool").join(tool.name))?;
         }
     }
-    write_reference_text(
-        &root
-            .join("tool")
-            .join("mcp.github.search_issues.d")
-            .join("origin"),
-        "mcp:github\n",
-    )
+    Ok(())
 }
+
+fn remove_deprecated_reference_placeholder_tools(root: &Path) -> Result<(), ReferenceTreeError> {
+    for tool in DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS {
+        remove_deprecated_reference_placeholder_tool(root, tool)?;
+    }
+    Ok(())
+}
+
+fn remove_deprecated_reference_placeholder_tool(
+    root: &Path,
+    name: &str,
+) -> Result<(), ReferenceTreeError> {
+    let executable = root.join("tool").join(name);
+    let control_dir = root.join("tool").join(format!("{name}.d"));
+    if !executable.exists() && !control_dir.exists() {
+        return Ok(());
+    }
+    if !is_deprecated_reference_placeholder_tool(&executable, &control_dir) {
+        return Ok(());
+    }
+    match fs::remove_file(&executable) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_error) => return Err(ReferenceTreeError::CannotRemove),
+    }
+    match fs::remove_dir_all(&control_dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_error) => return Err(ReferenceTreeError::CannotRemove),
+    }
+    Ok(())
+}
+
+fn is_deprecated_reference_placeholder_tool(executable: &Path, control_dir: &Path) -> bool {
+    let Ok(wrapper) = fs::read_to_string(executable) else {
+        return false;
+    };
+    let Ok(description) = fs::read_to_string(control_dir.join("description")) else {
+        return false;
+    };
+    wrapper == executable_wrapper_script("/bin/false")
+        && description.trim_end_matches('\n') == "CortexFS reference-tree tool"
+}
+
+struct ReferenceToolSpec {
+    name: &'static str,
+    description: &'static str,
+    schema: &'static str,
+    cap: &'static str,
+    policy: &'static str,
+}
+
+const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
+    ReferenceToolSpec {
+        name: "fs.read",
+        description: "Read a UTF-8 text file from the agent-visible filesystem.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fs.read input",
+  "description": "Read one UTF-8 text file visible to the tool process.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Path to a UTF-8 text file visible to the tool process."
+    }
+  }
+}"#,
+        cap: "fs.read",
+        policy: "allow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute",
+    },
+    ReferenceToolSpec {
+        name: "fs.write",
+        description: "Write UTF-8 text to a file path visible to the tool process.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fs.write input",
+  "description": "Write UTF-8 text to one path visible to the tool process.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "content"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Path to write."
+    },
+    "content": {
+      "type": "string",
+      "description": "UTF-8 content to write."
+    }
+  }
+}"#,
+        cap: "fs.write",
+        policy: "",
+    },
+    ReferenceToolSpec {
+        name: "shell.exec",
+        description: "Run a shell command in the tool process environment and return stdout/stderr.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "shell.exec input",
+  "description": "Run one shell command in the tool process environment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cmd"],
+  "properties": {
+    "cmd": {
+      "type": "string",
+      "description": "Command line passed to sh -c."
+    }
+  }
+}"#,
+        cap: "shell.exec",
+        policy: "",
+    },
+];
+
+const DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS: &[&str] = &[
+    "mcp.github.search_issues",
+    "agent.create",
+    "agent.start",
+    "agent.stop",
+];
 
 fn reference_tool_stub_script(name: &str) -> Option<&'static str> {
     match name {
@@ -5784,85 +7191,137 @@ fi
 fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
     let agent_root = root.join("home").join("1000").join("agent").join("coder");
     create_reference_dir(&agent_root.join("root"))?;
-    ensure_durable_session_layout(
-        &agent_root.join("session"),
-        "default",
-        "/work",
-        Some("qwen"),
-        SocketSessionScope::Private,
-    )
-    .map_err(ReferenceTreeError::Session)?;
-    let default_session = agent_root.join("session").join("default");
-    record_child_handoff_to_parent_context(
-        &default_session,
-        "rev-123",
-        "reviewer",
-        "default",
-        "Review the current design slice.",
-    )
-    .map_err(ReferenceTreeError::Child)?;
-    record_child_result_to_parent_context(
-        &default_session,
-        "rev-123",
-        ChildContextStatus::Done,
-        "Reference tree child result placeholder.",
-        "",
-    )
-    .map_err(ReferenceTreeError::Child)?;
-    let cwd_key = session_index_key_for_cwd("/work").ok_or(ReferenceTreeError::CannotCreate)?;
-    write_reference_text(
-        &agent_root
-            .join("session")
-            .join("index")
-            .join("by-cwd")
-            .join(cwd_key),
-        "default\n",
-    )?;
+    create_reference_dir(&agent_root.join("session").join("index").join("by-cwd"))?;
     create_reference_dir(&agent_root.join("data"))?;
     create_reference_dir(&agent_root.join("cache"))?;
     create_reference_dir(&agent_root.join("log"))?;
+    create_reference_dir(&root.join("home").join("1000").join("tool"))?;
+    create_reference_dir(&root.join("home").join("1000").join("model"))?;
 
-    ensure_reference_symlink(
-        &root.join("home").join("1000").join("tool").join("fs.read"),
-        Path::new("/ctx/tool/fs.read"),
-    )?;
-    ensure_reference_symlink(
+    ensure_reference_model_alias(
         &root.join("home").join("1000").join("model").join("coder"),
-        Path::new("/ctx/model/qwen"),
+        Path::new("/ctx/model/debug/echo"),
     )
 }
 
-fn ensure_reference_shared_project(root: &Path) -> Result<(), ReferenceTreeError> {
-    let project = root.join("shared").join("project-a");
-    create_reference_dir(&project.join("data"))?;
-    ensure_reference_project_tool(&project)?;
-    ensure_durable_session_layout(
-        &project.join("agent").join("coder").join("session"),
-        "design-review",
-        "/work",
-        Some("qwen"),
-        SocketSessionScope::Shared,
-    )
-    .map_err(ReferenceTreeError::Session)?;
-    create_reference_dir(&project.join("queue"))?;
-    for dir in SHARED_QUEUE_REQUIRED_DIRS {
-        create_reference_dir(&project.join("queue").join(dir))?;
+fn remove_deprecated_reference_home_tool_aliases(root: &Path) -> Result<(), ReferenceTreeError> {
+    let alias = root.join("home").join("1000").join("tool").join("fs.read");
+    match fs::read_link(&alias) {
+        Ok(target) if target == Path::new("/ctx/tool/fs.read") => {
+            fs::remove_file(alias).map_err(|_error| ReferenceTreeError::CannotUnlink)
+        }
+        Ok(_) | Err(_) => Ok(()),
     }
-    create_reference_dir(&project.join("result"))
 }
 
-fn ensure_reference_project_tool(project: &Path) -> Result<(), ReferenceTreeError> {
-    let tool = project.join("tool").join("project.test");
-    write_reference_text(
-        &tool,
-        "#!/bin/sh\n# CortexFS reference project tool placeholder.\nexit 0\n",
-    )?;
-    set_reference_executable(&tool)?;
-    let control = project.join("tool").join("project.test.d");
-    write_reference_text(&control.join("schema"), "{\"type\":\"object\"}\n")?;
-    write_reference_text(&control.join("policy"), "\n")?;
-    write_reference_text(&control.join("status"), "idle\n")?;
-    write_reference_text(&control.join("log"), "\n")
+fn migrate_reference_legacy_session_meta_models(root: &Path) -> Result<(), ReferenceTreeError> {
+    let mut meta_paths = Vec::new();
+    collect_reference_agent_session_meta_paths(&root.join("home"), &mut meta_paths)?;
+    collect_reference_shared_agent_session_meta_paths(&root.join("shared"), &mut meta_paths)?;
+    for meta_path in meta_paths {
+        migrate_reference_session_meta_model(&meta_path)?;
+    }
+    Ok(())
+}
+
+fn collect_reference_agent_session_meta_paths(
+    home_root: &Path,
+    meta_paths: &mut Vec<PathBuf>,
+) -> Result<(), ReferenceTreeError> {
+    let Ok(users) = fs::read_dir(home_root) else {
+        return Ok(());
+    };
+    for user in users {
+        let user = user.map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        if user
+            .file_type()
+            .map_err(|_error| ReferenceTreeError::CannotCreate)?
+            .is_dir()
+        {
+            collect_reference_session_meta_paths(&user.path().join("agent"), meta_paths)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_reference_shared_agent_session_meta_paths(
+    shared_root: &Path,
+    meta_paths: &mut Vec<PathBuf>,
+) -> Result<(), ReferenceTreeError> {
+    let Ok(spaces) = fs::read_dir(shared_root) else {
+        return Ok(());
+    };
+    for space in spaces {
+        let space = space.map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        if space
+            .file_type()
+            .map_err(|_error| ReferenceTreeError::CannotCreate)?
+            .is_dir()
+        {
+            collect_reference_session_meta_paths(&space.path().join("agent"), meta_paths)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_reference_session_meta_paths(
+    agent_root: &Path,
+    meta_paths: &mut Vec<PathBuf>,
+) -> Result<(), ReferenceTreeError> {
+    let Ok(agents) = fs::read_dir(agent_root) else {
+        return Ok(());
+    };
+    for agent in agents {
+        let agent = agent.map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        if !agent
+            .file_type()
+            .map_err(|_error| ReferenceTreeError::CannotCreate)?
+            .is_dir()
+        {
+            continue;
+        }
+        let session_root = agent.path().join("session");
+        let Ok(sessions) = fs::read_dir(session_root) else {
+            continue;
+        };
+        for session in sessions {
+            let session = session.map_err(|_error| ReferenceTreeError::CannotCreate)?;
+            if session
+                .file_type()
+                .map_err(|_error| ReferenceTreeError::CannotCreate)?
+                .is_dir()
+            {
+                let meta_path = session.path().join("meta.json");
+                if meta_path.is_file() {
+                    meta_paths.push(meta_path);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn migrate_reference_session_meta_model(meta_path: &Path) -> Result<(), ReferenceTreeError> {
+    let content =
+        fs::read_to_string(meta_path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    let Ok(mut value) = serde_json::from_str::<Value>(&content) else {
+        return Ok(());
+    };
+    let Some(object) = value.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(model) = object.get("model").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    if is_model_name(model) || !is_object_name(model) {
+        return Ok(());
+    }
+
+    object.insert("model".to_owned(), serde_json::json!("debug/echo"));
+    let content =
+        serde_json::to_string(&value).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    atomic_replace_text(meta_path, &format!("{content}\n"))
+        .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError> {
@@ -5917,21 +7376,43 @@ fn set_reference_socket_permissions(path: &Path) -> Result<(), ReferenceTreeErro
     fs::set_permissions(path, permissions).map_err(|_error| ReferenceTreeError::CannotSocket)
 }
 
-fn ensure_reference_symlink(path: &Path, target: &Path) -> Result<(), ReferenceTreeError> {
+fn ensure_reference_model_alias(path: &Path, target: &Path) -> Result<(), ReferenceTreeError> {
     if let Ok(existing) = fs::read_link(path) {
-        return if existing == target {
-            Ok(())
+        if existing == target || is_valid_ctx_model_symlink(&existing) {
+            return Ok(());
+        }
+        if is_legacy_ctx_model_symlink(&existing) {
+            fs::remove_file(path).map_err(|_error| ReferenceTreeError::CannotLink)?;
         } else {
-            Err(ReferenceTreeError::CannotLink)
-        };
-    }
-    if path.exists() {
+            return Err(ReferenceTreeError::CannotLink);
+        }
+    } else if path.exists() {
         return Err(ReferenceTreeError::CannotLink);
     }
     if let Some(parent) = path.parent() {
         create_reference_dir(parent)?;
     }
     symlink(target, path).map_err(|_error| ReferenceTreeError::CannotLink)
+}
+
+fn is_valid_ctx_model_symlink(target: &Path) -> bool {
+    let Some(target) = target.to_str() else {
+        return false;
+    };
+    let Some(model) = target.strip_prefix("/ctx/model/") else {
+        return false;
+    };
+    is_model_name(model)
+}
+
+fn is_legacy_ctx_model_symlink(target: &Path) -> bool {
+    let Some(target) = target.to_str() else {
+        return false;
+    };
+    let Some(model) = target.strip_prefix("/ctx/model/") else {
+        return false;
+    };
+    is_object_name(model)
 }
 
 fn resolve_fuse_abi_path(root: &Path, abi_path: &str) -> Result<PathBuf, FuseV1Error> {
@@ -5970,6 +7451,37 @@ fn normalize_fuse_abi_path(abi_path: &str) -> Result<String, FuseV1Error> {
         }
     }
     Ok(parts.join("/"))
+}
+
+fn model_exec_name(abi_path: &str) -> Option<&str> {
+    let model = abi_path.strip_prefix("model/")?;
+    is_model_name(model).then_some(model)
+}
+
+fn tool_exec_name(abi_path: &str) -> Option<&str> {
+    let name = abi_path.strip_prefix("tool/")?;
+    if name.contains('/') {
+        return None;
+    }
+    if name
+        .rsplit_once('.')
+        .is_some_and(|(_stem, suffix)| matches!(suffix, "d" | "sock"))
+    {
+        return None;
+    }
+    is_object_name(name).then_some(name)
+}
+
+fn read_bytes_at(content: &[u8], offset: u64, size: usize) -> Result<Vec<u8>, FuseV1Error> {
+    let start = usize::try_from(offset).map_err(|_error| FuseV1Error::Io)?;
+    if start >= content.len() {
+        return Ok(Vec::new());
+    }
+    let end = start.saturating_add(size).min(content.len());
+    content
+        .get(start..end)
+        .map(<[u8]>::to_vec)
+        .ok_or(FuseV1Error::Io)
 }
 
 fn fuse_join_child_path(parent: &str, name: &str) -> Result<String, FuseV1Error> {
@@ -6053,12 +7565,15 @@ fn set_executable_mode(path: &Path) -> Result<(), ObjectBootstrapError> {
 #[must_use]
 pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> ObjectLayoutReport {
     let mut issues = Vec::new();
-    if !is_object_name(name) {
+    if !is_object_name_for_class(class, name) {
         issues.push(ObjectLayoutIssue::MissingExecutable(format!(
             "{}/{}",
             class.as_str(),
             name
         )));
+        return ObjectLayoutReport::new(issues);
+    }
+    if class == ObjectClass::Model && name == DEBUG_ECHO_MODEL {
         return ObjectLayoutReport::new(issues);
     }
 
@@ -6076,6 +7591,7 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
 
     inspect_object_socket(root, class, name, &control_dir, &mut issues);
     inspect_model_capability_control(class, name, &control_dir, &mut issues);
+    inspect_model_driver_control(class, name, &control_dir, &mut issues);
     inspect_tool_schema_control(class, name, &control_dir, &mut issues);
     inspect_agent_control_files(class, name, &control_dir, &mut issues);
     ObjectLayoutReport::new(issues)
@@ -6161,6 +7677,44 @@ fn inspect_model_capability_control(
     }
 }
 
+fn inspect_model_driver_control(
+    class: ObjectClass,
+    name: &str,
+    control_dir: &Path,
+    issues: &mut Vec<ObjectLayoutIssue>,
+) {
+    if class != ObjectClass::Model {
+        return;
+    }
+
+    let Ok(content) = fs::read_to_string(control_dir.join("driver")) else {
+        return;
+    };
+    if let Err(error) = parse_model_driver_routes(&content) {
+        issues.push(ObjectLayoutIssue::InvalidControlValue {
+            path: format!("model/{name}.d/driver"),
+            value: model_driver_route_error_value(&error),
+        });
+    }
+}
+
+fn model_driver_route_error_value(error: &ModelDriverRouteError) -> String {
+    match *error {
+        ModelDriverRouteError::Empty => "empty".to_owned(),
+        ModelDriverRouteError::MissingEquals { line } => format!("line {line} missing ="),
+        ModelDriverRouteError::UnknownUseCase { line, ref value } => {
+            format!("line {line} unknown use case {value}")
+        }
+        ModelDriverRouteError::DuplicateUseCase { line, ref value } => {
+            format!("line {line} duplicate use case {value}")
+        }
+        ModelDriverRouteError::EmptyDriver { line } => format!("line {line} empty driver"),
+        ModelDriverRouteError::InvalidDriverName { line, ref value } => {
+            format!("line {line} invalid driver {value}")
+        }
+    }
+}
+
 fn inspect_tool_schema_control(
     class: ObjectClass,
     name: &str,
@@ -6185,7 +7739,9 @@ fn inspect_tool_schema_control(
 fn tool_schema_issue_value(issue: &ToolSchemaIssue) -> &str {
     match *issue {
         ToolSchemaIssue::AuthorityField(ref field) => field,
-        ToolSchemaIssue::InvalidJson | ToolSchemaIssue::NotObject => "",
+        ToolSchemaIssue::InvalidJson
+        | ToolSchemaIssue::NotObject
+        | ToolSchemaIssue::InvalidSchema => "",
     }
 }
 
@@ -6253,7 +7809,7 @@ fn require_unix_socket(
     required: bool,
     issues: &mut Vec<ObjectLayoutIssue>,
 ) {
-    match fs::symlink_metadata(path) {
+    match fs::metadata(path) {
         Ok(metadata) if metadata.file_type().is_socket() => {}
         Ok(_metadata) => issues.push(ObjectLayoutIssue::NotSocket(label.to_owned())),
         Err(_error) if required => issues.push(ObjectLayoutIssue::MissingSocket(label.to_owned())),
@@ -6369,43 +7925,58 @@ fn inspect_single_session_control_value(
 }
 
 fn inspect_session_meta_json(content: &str) -> SessionControlReport {
-    let Ok(value) = serde_json::from_str::<Value>(content) else {
+    if !content.trim_start().starts_with('{') {
+        if serde_json::from_str::<Value>(content).is_ok() {
+            return SessionControlReport::new(vec![SessionControlIssue::NotObject]);
+        }
         return SessionControlReport::new(vec![SessionControlIssue::InvalidJson]);
-    };
-    let Some(object) = value.as_object() else {
-        return SessionControlReport::new(vec![SessionControlIssue::NotObject]);
+    }
+    let Ok(meta) = serde_path_to_error::deserialize::<_, SessionMetaJson>(
+        &mut serde_json::Deserializer::from_str(content),
+    ) else {
+        return SessionControlReport::new(vec![SessionControlIssue::InvalidJson]);
     };
 
     let mut issues = Vec::new();
-    inspect_optional_meta_string(object, "client", &mut issues, |_| true);
-    inspect_optional_meta_string(object, "model", &mut issues, is_object_name);
-    inspect_optional_meta_string(object, "scope", &mut issues, |scope| {
+    inspect_optional_meta_string(meta.client.as_ref(), "client", &mut issues, |_| true);
+    inspect_optional_meta_string(meta.model.as_ref(), "model", &mut issues, is_model_name);
+    inspect_optional_meta_string(meta.scope.as_ref(), "scope", &mut issues, |scope| {
         matches!(scope, "private" | "shared" | "temp")
     });
     SessionControlReport::new(issues)
 }
 
+#[derive(Deserialize)]
+struct SessionMetaJson {
+    client: Option<JsonStringField>,
+    model: Option<JsonStringField>,
+    scope: Option<JsonStringField>,
+}
+
 fn inspect_optional_meta_string(
-    object: &serde_json::Map<String, Value>,
+    value: Option<&JsonStringField>,
     field: &str,
     issues: &mut Vec<SessionControlIssue>,
     valid: impl Fn(&str) -> bool,
 ) {
-    let Some(value) = object.get(field) else {
-        return;
-    };
-    let Some(text) = value.as_str() else {
-        issues.push(SessionControlIssue::InvalidValue {
-            line: 1,
-            value: field.to_owned(),
-        });
-        return;
-    };
-    if !valid(text) {
-        issues.push(SessionControlIssue::InvalidValue {
-            line: 1,
-            value: text.to_owned(),
-        });
+    match value {
+        None => {}
+        Some(value) => match *value {
+            JsonStringField::String(ref text) if !valid(text) => {
+                issues.push(SessionControlIssue::InvalidValue {
+                    line: 1,
+                    value: text.clone(),
+                });
+            }
+            JsonStringField::String(_) => {}
+            JsonStringField::Other(ref value) => {
+                let _ = value;
+                issues.push(SessionControlIssue::InvalidValue {
+                    line: 1,
+                    value: field.to_owned(),
+                });
+            }
+        },
     }
 }
 
@@ -6430,19 +8001,75 @@ fn is_stable_chroot_absolute_path(value: &str) -> bool {
 /// source references.
 #[must_use]
 pub fn inspect_context_pack_json(content: &str) -> ContextPackReport {
-    let Ok(value) = serde_json::from_str::<Value>(content) else {
+    let Ok(pack) = serde_path_to_error::deserialize::<_, ContextPackJson>(
+        &mut serde_json::Deserializer::from_str(content),
+    ) else {
+        if serde_json::from_str::<Value>(content).is_ok() {
+            return ContextPackReport::new(vec![ContextPackIssue::ItemsNotArray]);
+        }
         return ContextPackReport::new(vec![ContextPackIssue::InvalidJson]);
-    };
-    let Some(items) = value.get("items").and_then(Value::as_array) else {
-        return ContextPackReport::new(vec![ContextPackIssue::ItemsNotArray]);
     };
 
     let mut issues = Vec::new();
-    for (index, item) in items.iter().enumerate() {
+    for (index, item) in pack.items.iter().enumerate() {
         inspect_context_pack_item(index, item, &mut issues);
     }
 
     ContextPackReport::new(issues)
+}
+
+#[derive(Deserialize)]
+struct ContextPackJson {
+    items: Vec<ContextPackItemJson>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ContextPackItemJson {
+    Object {
+        source: Option<ContextPackSourceJson>,
+    },
+    Other(Value),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ContextPackSourceJson {
+    String(String),
+    Other(Value),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum JsonStringField {
+    String(String),
+    Other(Value),
+}
+
+impl JsonStringField {
+    fn as_str(&self) -> Option<&str> {
+        match *self {
+            Self::String(ref value) => Some(value),
+            Self::Other(ref value) => {
+                let _ = value;
+                None
+            }
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum JsonU64Field {
+    Number(u64),
+    Other(Value),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum JsonStringArrayField {
+    Strings(Vec<String>),
+    Other(Value),
 }
 
 /// Inspects durable `messages.jsonl` for the canonical v1 role/content shape.
@@ -6468,14 +8095,16 @@ fn inspect_message_stream_line(
         issues.push(MessageStreamIssue::InvalidJson(line_number));
         return;
     };
-    let Some(object) = value.as_object() else {
+    let Ok(message) = serde_path_to_error::deserialize::<_, MessageLineJson>(
+        &mut serde_json::Deserializer::from_str(line),
+    ) else {
         issues.push(MessageStreamIssue::MessageNotObject(line_number));
         return;
     };
 
     append_provider_native_message_field_issues(line_number, &value, issues);
 
-    let Some(role) = object.get("role").and_then(Value::as_str) else {
+    let Some(role) = message.role.as_ref().and_then(JsonStringField::as_str) else {
         issues.push(MessageStreamIssue::MissingRole(line_number));
         return;
     };
@@ -6486,38 +8115,75 @@ fn inspect_message_stream_line(
         });
     }
 
-    let Some(content) = object.get("content") else {
+    let Some(content) = message.content.as_ref() else {
         issues.push(MessageStreamIssue::MissingContent(line_number));
         return;
     };
-    if !is_canonical_message_content(content) {
+    if !serde_json::from_value::<MessageContentJson>(content.clone())
+        .is_ok_and(|content| content.is_well_formed())
+    {
         issues.push(MessageStreamIssue::InvalidContent(line_number));
     }
 }
 
-fn is_canonical_message_content(value: &Value) -> bool {
-    if value.as_str().is_some() {
-        return true;
-    }
-    value
-        .as_array()
-        .is_some_and(|parts| parts.iter().all(is_canonical_message_content_part))
+#[derive(Deserialize)]
+struct MessageLineJson {
+    role: Option<JsonStringField>,
+    content: Option<Value>,
 }
 
-fn is_canonical_message_content_part(value: &Value) -> bool {
-    let Some(object) = value.as_object() else {
-        return false;
-    };
-    match object.get("type").and_then(Value::as_str) {
-        Some("text") => object.get("text").and_then(Value::as_str).is_some(),
-        Some("image") => object.get("path").and_then(Value::as_str).is_some(),
-        Some("tool_result") => {
-            object.get("tool_call_id").and_then(Value::as_str).is_some()
-                && object
-                    .get("content")
-                    .is_some_and(is_canonical_message_content)
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum MessageContentJson {
+    Text(String),
+    Parts(Vec<MessageContentPartJson>),
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum MessageContentPartJson {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image { path: String },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_call_id: String,
+        content: MessageContentJson,
+    },
+}
+
+impl MessageContentJson {
+    fn is_well_formed(&self) -> bool {
+        match *self {
+            Self::Text(ref text) => {
+                let _ = text;
+                true
+            }
+            Self::Parts(ref parts) => parts.iter().all(MessageContentPartJson::is_well_formed),
         }
-        _ => false,
+    }
+}
+
+impl MessageContentPartJson {
+    fn is_well_formed(&self) -> bool {
+        match *self {
+            Self::Text { ref text } => {
+                let _ = text;
+                true
+            }
+            Self::Image { ref path } => {
+                let _ = path;
+                true
+            }
+            Self::ToolResult {
+                ref tool_call_id,
+                ref content,
+            } => {
+                let _ = tool_call_id;
+                content.is_well_formed()
+            }
+        }
     }
 }
 
@@ -6526,23 +8192,11 @@ fn append_provider_native_message_field_issues(
     value: &Value,
     issues: &mut Vec<MessageStreamIssue>,
 ) {
-    if let Some(object) = value.as_object() {
-        for (key, child) in object {
-            if is_provider_native_field(key) {
-                issues.push(MessageStreamIssue::ProviderNativeField {
-                    line: line_number,
-                    field: key.clone(),
-                });
-            }
-            append_provider_native_message_field_issues(line_number, child, issues);
-        }
-        return;
-    }
-
-    if let Some(items) = value.as_array() {
-        for item in items {
-            append_provider_native_message_field_issues(line_number, item, issues);
-        }
+    for field in provider_native_fields(value) {
+        issues.push(MessageStreamIssue::ProviderNativeField {
+            line: line_number,
+            field: field.to_owned(),
+        });
     }
 }
 
@@ -6566,86 +8220,173 @@ fn inspect_context_jsonl_line(
     line: &str,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
-        issues.push(ContextJsonlIssue::InvalidJson(line_number));
+    if !line.trim_start().starts_with('{') {
+        if serde_json::from_str::<Value>(line).is_ok() {
+            issues.push(ContextJsonlIssue::RecordNotObject(line_number));
+        } else {
+            issues.push(ContextJsonlIssue::InvalidJson(line_number));
+        }
         return;
-    };
-    let Some(object) = value.as_object() else {
-        issues.push(ContextJsonlIssue::RecordNotObject(line_number));
+    }
+    let Ok(record) = serde_path_to_error::deserialize::<_, ContextJsonlRecordJson>(
+        &mut serde_json::Deserializer::from_str(line),
+    ) else {
+        issues.push(ContextJsonlIssue::InvalidJson(line_number));
         return;
     };
 
     match kind {
-        ContextJsonlKind::Facts => inspect_fact_record(line_number, object, issues),
-        ContextJsonlKind::Decisions => inspect_decision_record(line_number, object, issues),
-        ContextJsonlKind::Refs => inspect_ref_record(line_number, object, issues),
-        ContextJsonlKind::SwapIndex => inspect_swap_index_record(line_number, object, issues),
-        ContextJsonlKind::DedupIndex => inspect_dedup_index_record(line_number, object, issues),
+        ContextJsonlKind::Facts => inspect_fact_record(line_number, &record, issues),
+        ContextJsonlKind::Decisions => inspect_decision_record(line_number, &record, issues),
+        ContextJsonlKind::Refs => inspect_ref_record(line_number, &record, issues),
+        ContextJsonlKind::SwapIndex => inspect_swap_index_record(line_number, &record, issues),
+        ContextJsonlKind::DedupIndex => inspect_dedup_index_record(line_number, &record, issues),
     }
+}
+
+#[derive(Deserialize)]
+struct ContextJsonlRecordJson {
+    id: Option<JsonStringField>,
+    text: Option<JsonStringField>,
+    decision: Option<JsonStringField>,
+    source: Option<JsonStringField>,
+    path: Option<JsonStringField>,
+    kind: Option<JsonStringField>,
+    summary: Option<JsonStringField>,
+    tokens: Option<JsonU64Field>,
+    hash: Option<JsonStringField>,
+    refs: Option<JsonStringArrayField>,
+    bytes: Option<JsonU64Field>,
 }
 
 fn inspect_fact_record(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, object, "id", issues, is_context_record_id);
-    require_context_string_field(line, object, "text", issues, is_nonempty_single_line);
-    require_context_string_field(line, object, "source", issues, is_nonempty_single_line);
+    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
+    require_context_string_field(
+        line,
+        record.text.as_ref(),
+        "text",
+        issues,
+        is_nonempty_single_line,
+    );
+    require_context_string_field(
+        line,
+        record.source.as_ref(),
+        "source",
+        issues,
+        is_nonempty_single_line,
+    );
 }
 
 fn inspect_decision_record(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, object, "id", issues, is_context_record_id);
-    require_context_string_field(line, object, "decision", issues, is_nonempty_single_line);
-    require_context_string_field(line, object, "source", issues, is_nonempty_single_line);
+    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
+    require_context_string_field(
+        line,
+        record.decision.as_ref(),
+        "decision",
+        issues,
+        is_nonempty_single_line,
+    );
+    require_context_string_field(
+        line,
+        record.source.as_ref(),
+        "source",
+        issues,
+        is_nonempty_single_line,
+    );
 }
 
 fn inspect_ref_record(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, object, "id", issues, is_context_record_id);
-    require_context_string_field(line, object, "path", issues, is_stable_context_ref_path);
-    require_context_string_field(line, object, "kind", issues, is_context_ref_kind);
-    require_context_string_field(line, object, "summary", issues, is_nonempty_single_line);
+    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
+    require_context_string_field(
+        line,
+        record.path.as_ref(),
+        "path",
+        issues,
+        is_stable_context_ref_path,
+    );
+    require_context_string_field(
+        line,
+        record.kind.as_ref(),
+        "kind",
+        issues,
+        is_context_ref_kind,
+    );
+    require_context_string_field(
+        line,
+        record.summary.as_ref(),
+        "summary",
+        issues,
+        is_nonempty_single_line,
+    );
 }
 
 fn inspect_swap_index_record(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, object, "id", issues, is_context_hash_id);
-    require_context_string_field(line, object, "kind", issues, is_swap_kind);
-    require_context_string_field(line, object, "source", issues, is_swap_source);
-    require_context_string_field(line, object, "summary", issues, is_nonempty_single_line);
-    require_context_number_field(line, object, "tokens", issues);
+    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_hash_id);
+    require_context_string_field(line, record.kind.as_ref(), "kind", issues, is_swap_kind);
+    require_context_string_field(
+        line,
+        record.source.as_ref(),
+        "source",
+        issues,
+        is_swap_source,
+    );
+    require_context_string_field(
+        line,
+        record.summary.as_ref(),
+        "summary",
+        issues,
+        is_nonempty_single_line,
+    );
+    require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
 }
 
 fn inspect_dedup_index_record(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, object, "hash", issues, is_context_hash_id);
-    require_context_string_array_field(line, object, "refs", issues, is_nonempty_single_line);
-    require_context_number_field(line, object, "bytes", issues);
-    require_context_number_field(line, object, "tokens", issues);
+    require_context_string_field(
+        line,
+        record.hash.as_ref(),
+        "hash",
+        issues,
+        is_context_hash_id,
+    );
+    require_context_string_array_field(
+        line,
+        record.refs.as_ref(),
+        "refs",
+        issues,
+        is_nonempty_single_line,
+    );
+    require_context_number_field(line, record.bytes.as_ref(), "bytes", issues);
+    require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
 }
 
 fn require_context_string_field(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    value: Option<&JsonStringField>,
     field: &str,
     issues: &mut Vec<ContextJsonlIssue>,
     valid: impl Fn(&str) -> bool,
 ) {
-    let Some(value) = object.get(field).and_then(Value::as_str) else {
+    let Some(value) = value.and_then(JsonStringField::as_str) else {
         issues.push(ContextJsonlIssue::MissingStringField {
             line,
             field: field.to_owned(),
@@ -6663,12 +8404,12 @@ fn require_context_string_field(
 
 fn require_context_string_array_field(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    values: Option<&JsonStringArrayField>,
     field: &str,
     issues: &mut Vec<ContextJsonlIssue>,
     valid: impl Fn(&str) -> bool,
 ) {
-    let Some(values) = object.get(field).and_then(Value::as_array) else {
+    let Some(values) = json_string_array_values(values) else {
         issues.push(ContextJsonlIssue::MissingStringArrayField {
             line,
             field: field.to_owned(),
@@ -6683,18 +8424,11 @@ fn require_context_string_array_field(
         return;
     }
     for value in values {
-        let Some(text) = value.as_str() else {
-            issues.push(ContextJsonlIssue::MissingStringArrayField {
-                line,
-                field: field.to_owned(),
-            });
-            return;
-        };
-        if !valid(text) {
+        if !valid(value) {
             issues.push(ContextJsonlIssue::InvalidField {
                 line,
                 field: field.to_owned(),
-                value: text.to_owned(),
+                value: value.clone(),
             });
         }
     }
@@ -6702,16 +8436,39 @@ fn require_context_string_array_field(
 
 fn require_context_number_field(
     line: usize,
-    object: &serde_json::Map<String, Value>,
+    value: Option<&JsonU64Field>,
     field: &str,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    if object.get(field).and_then(Value::as_u64).is_none() {
+    if !is_json_u64(value) {
         issues.push(ContextJsonlIssue::MissingNumberField {
             line,
             field: field.to_owned(),
         });
     }
+}
+
+fn is_json_u64(value: Option<&JsonU64Field>) -> bool {
+    value.is_some_and(|value| match *value {
+        JsonU64Field::Number(ref number) => {
+            let _ = number;
+            true
+        }
+        JsonU64Field::Other(ref value) => {
+            let _ = value;
+            false
+        }
+    })
+}
+
+fn json_string_array_values(value: Option<&JsonStringArrayField>) -> Option<&[String]> {
+    value.and_then(|value| match *value {
+        JsonStringArrayField::Strings(ref values) => Some(values.as_slice()),
+        JsonStringArrayField::Other(ref value) => {
+            let _ = value;
+            None
+        }
+    })
 }
 
 fn is_context_record_id(value: &str) -> bool {
@@ -6772,14 +8529,16 @@ fn inspect_event_stream_line(line_number: usize, line: &str, issues: &mut Vec<Ev
         issues.push(EventStreamIssue::InvalidJson(line_number));
         return;
     };
-    let Some(object) = value.as_object() else {
+    let Ok(event) = serde_path_to_error::deserialize::<_, EventLineJson>(
+        &mut serde_json::Deserializer::from_str(line),
+    ) else {
         issues.push(EventStreamIssue::EventNotObject(line_number));
         return;
     };
 
     append_provider_native_field_issues(line_number, &value, issues);
 
-    let Some(event_type) = object.get("type").and_then(Value::as_str) else {
+    let Some(event_type) = event.event_type.as_ref().and_then(JsonStringField::as_str) else {
         issues.push(EventStreamIssue::MissingType(line_number));
         return;
     };
@@ -6790,19 +8549,42 @@ fn inspect_event_stream_line(line_number: usize, line: &str, issues: &mut Vec<Ev
         });
         return;
     }
-    if event_requires_run(event_type) && object.get("run").and_then(Value::as_str).is_none() {
+    if event_requires_run(event_type)
+        && event
+            .run
+            .as_ref()
+            .and_then(JsonStringField::as_str)
+            .is_none()
+    {
         issues.push(EventStreamIssue::MissingRun(line_number));
     }
 
     match event_type {
-        "error" => inspect_error_event(line_number, object, issues),
-        "done" => inspect_done_event(line_number, object, issues),
-        "usage" => inspect_usage_event(line_number, object, issues),
-        "tool_call" => inspect_tool_call_event(line_number, object, issues),
-        "agent.child.cancel" => inspect_agent_child_cancel_event(line_number, object, issues),
-        "agent.stop" => inspect_agent_stop_event(line_number, object, issues),
+        "error" => inspect_error_event(line_number, &event, issues),
+        "done" => inspect_done_event(line_number, &event, issues),
+        "usage" => inspect_usage_event(line_number, &event, issues),
+        "tool_call" => inspect_tool_call_event(line_number, &event, issues),
+        "agent.child.cancel" => inspect_agent_child_cancel_event(line_number, &event, issues),
+        "agent.stop" => inspect_agent_stop_event(line_number, &event, issues),
         _ => {}
     }
+}
+
+#[derive(Deserialize)]
+struct EventLineJson {
+    #[serde(rename = "type")]
+    event_type: Option<JsonStringField>,
+    run: Option<JsonStringField>,
+    code: Option<JsonStringField>,
+    status: Option<JsonStringField>,
+    input_tokens: Option<JsonU64Field>,
+    output_tokens: Option<JsonU64Field>,
+    id: Option<JsonStringField>,
+    name: Option<JsonStringField>,
+    parent: Option<JsonStringField>,
+    child: Option<JsonStringField>,
+    reason: Option<JsonStringField>,
+    agent: Option<JsonStringField>,
 }
 
 fn is_canonical_event_type(value: &str) -> bool {
@@ -6831,22 +8613,34 @@ fn append_provider_native_field_issues(
     value: &Value,
     issues: &mut Vec<EventStreamIssue>,
 ) {
+    for field in provider_native_fields(value) {
+        issues.push(EventStreamIssue::ProviderNativeField {
+            line: line_number,
+            field: field.to_owned(),
+        });
+    }
+}
+
+fn provider_native_fields(value: &Value) -> Vec<&str> {
+    let mut fields = Vec::new();
+    collect_provider_native_fields(value, &mut fields);
+    fields
+}
+
+fn collect_provider_native_fields<'a>(value: &'a Value, fields: &mut Vec<&'a str>) {
     if let Some(object) = value.as_object() {
         for (key, child) in object {
             if is_provider_native_field(key) {
-                issues.push(EventStreamIssue::ProviderNativeField {
-                    line: line_number,
-                    field: key.clone(),
-                });
+                fields.push(key);
             }
-            append_provider_native_field_issues(line_number, child, issues);
+            collect_provider_native_fields(child, fields);
         }
         return;
     }
 
     if let Some(items) = value.as_array() {
         for item in items {
-            append_provider_native_field_issues(line_number, item, issues);
+            collect_provider_native_fields(item, fields);
         }
     }
 }
@@ -6869,10 +8663,10 @@ fn is_provider_native_field(key: &str) -> bool {
 
 fn inspect_error_event(
     line_number: usize,
-    object: &serde_json::Map<String, Value>,
+    event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
-    let Some(code) = object.get("code").and_then(Value::as_str) else {
+    let Some(code) = event.code.as_ref().and_then(JsonStringField::as_str) else {
         issues.push(EventStreamIssue::InvalidErrorCode(line_number));
         return;
     };
@@ -6883,11 +8677,11 @@ fn inspect_error_event(
 
 fn inspect_done_event(
     line_number: usize,
-    object: &serde_json::Map<String, Value>,
+    event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
     if !matches!(
-        object.get("status").and_then(Value::as_str),
+        event.status.as_ref().and_then(JsonStringField::as_str),
         Some("ok" | "error" | "cancelled")
     ) {
         issues.push(EventStreamIssue::InvalidDoneStatus(line_number));
@@ -6896,31 +8690,28 @@ fn inspect_done_event(
 
 fn inspect_usage_event(
     line_number: usize,
-    object: &serde_json::Map<String, Value>,
+    event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
-    if object.get("input_tokens").and_then(Value::as_u64).is_none()
-        || object
-            .get("output_tokens")
-            .and_then(Value::as_u64)
-            .is_none()
-    {
+    if !is_json_u64(event.input_tokens.as_ref()) || !is_json_u64(event.output_tokens.as_ref()) {
         issues.push(EventStreamIssue::InvalidUsage(line_number));
     }
 }
 
 fn inspect_tool_call_event(
     line_number: usize,
-    object: &serde_json::Map<String, Value>,
+    event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
-    let valid_id = object
-        .get("id")
-        .and_then(Value::as_str)
+    let valid_id = event
+        .id
+        .as_ref()
+        .and_then(JsonStringField::as_str)
         .is_some_and(is_object_name);
-    let valid_name = object
-        .get("name")
-        .and_then(Value::as_str)
+    let valid_name = event
+        .name
+        .as_ref()
+        .and_then(JsonStringField::as_str)
         .is_some_and(is_object_name);
     if !valid_id || !valid_name {
         issues.push(EventStreamIssue::InvalidToolCall(line_number));
@@ -6929,12 +8720,12 @@ fn inspect_tool_call_event(
 
 fn inspect_agent_child_cancel_event(
     line_number: usize,
-    object: &serde_json::Map<String, Value>,
+    event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
-    let parent = object.get("parent").and_then(Value::as_str);
-    let child = object.get("child").and_then(Value::as_str);
-    let reason = object.get("reason").and_then(Value::as_str);
+    let parent = event.parent.as_ref().and_then(JsonStringField::as_str);
+    let child = event.child.as_ref().and_then(JsonStringField::as_str);
+    let reason = event.reason.as_ref().and_then(JsonStringField::as_str);
     if !parent.is_some_and(is_object_name)
         || !child.is_some_and(is_object_name)
         || reason != Some("parent_dead")
@@ -6945,11 +8736,11 @@ fn inspect_agent_child_cancel_event(
 
 fn inspect_agent_stop_event(
     line_number: usize,
-    object: &serde_json::Map<String, Value>,
+    event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
-    let agent = object.get("agent").and_then(Value::as_str);
-    let status = object.get("status").and_then(Value::as_str);
+    let agent = event.agent.as_ref().and_then(JsonStringField::as_str);
+    let status = event.status.as_ref().and_then(JsonStringField::as_str);
     if !agent.is_some_and(is_object_name) || status != Some("cancelled") {
         issues.push(EventStreamIssue::InvalidAgentLifecycle(line_number));
     }
@@ -6971,25 +8762,36 @@ fn is_stable_errno(code: &str) -> bool {
     )
 }
 
-fn inspect_context_pack_item(index: usize, item: &Value, issues: &mut Vec<ContextPackIssue>) {
-    let Some(object) = item.as_object() else {
-        issues.push(ContextPackIssue::ItemNotObject(index));
-        return;
-    };
-    let Some(source) = object.get("source") else {
-        issues.push(ContextPackIssue::MissingSource(index));
-        return;
-    };
-    let Some(source) = source.as_str() else {
-        issues.push(ContextPackIssue::SourceNotString(index));
-        return;
-    };
-    if let Err(reason) = validate_context_pack_source(source) {
-        issues.push(ContextPackIssue::InvalidSource {
-            item: index,
-            source: source.to_owned(),
-            reason,
-        });
+fn inspect_context_pack_item(
+    index: usize,
+    item: &ContextPackItemJson,
+    issues: &mut Vec<ContextPackIssue>,
+) {
+    match *item {
+        ContextPackItemJson::Other(ref value) => {
+            let _ = value;
+            issues.push(ContextPackIssue::ItemNotObject(index));
+        }
+        ContextPackItemJson::Object { source: None } => {
+            issues.push(ContextPackIssue::MissingSource(index));
+        }
+        ContextPackItemJson::Object {
+            source: Some(ContextPackSourceJson::Other(ref value)),
+        } => {
+            let _ = value;
+            issues.push(ContextPackIssue::SourceNotString(index));
+        }
+        ContextPackItemJson::Object {
+            source: Some(ContextPackSourceJson::String(ref source)),
+        } => {
+            if let Err(reason) = validate_context_pack_source(source) {
+                issues.push(ContextPackIssue::InvalidSource {
+                    item: index,
+                    source: source.clone(),
+                    reason,
+                });
+            }
+        }
     }
 }
 
@@ -7725,13 +9527,14 @@ fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
 
 fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("file");
-    let temp_path = parent.join(format!(".{file_name}.tmp.{}", std::process::id()));
-    fs::write(&temp_path, content)?;
-    fs::rename(&temp_path, path)
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.write_all(content.as_bytes())?;
+    temp.flush()?;
+    temp.as_file()
+        .set_permissions(fs::Permissions::from_mode(0o644))?;
+    temp.persist(path)
+        .map(|_file| ())
+        .map_err(std::io::Error::from)
 }
 
 fn unix_timestamp_text() -> String {
@@ -8101,10 +9904,19 @@ impl PolicyRule {
             return Err(PolicyError::InvalidName);
         }
         let (class, object_name) = object.split_once(':').ok_or(PolicyError::InvalidObject)?;
-        if !is_object_name(object_name) {
+        let object_class = PolicyObjectClass::parse(class).ok_or(PolicyError::UnknownClass)?;
+        let valid_object_name = match object_class {
+            PolicyObjectClass::Model => is_model_name(object_name),
+            PolicyObjectClass::Tool
+            | PolicyObjectClass::Shared
+            | PolicyObjectClass::Session
+            | PolicyObjectClass::Mount
+            | PolicyObjectClass::Agent
+            | PolicyObjectClass::Network => is_object_name(object_name),
+        };
+        if !valid_object_name {
             return Err(PolicyError::InvalidName);
         }
-        let object_class = PolicyObjectClass::parse(class).ok_or(PolicyError::UnknownClass)?;
         let permission = PolicyPermission::parse_for_class(object_class, permission)
             .ok_or(PolicyError::UnknownPermission)?;
 
@@ -8313,4991 +10125,581 @@ pub fn is_object_name(name: &str) -> bool {
     })
 }
 
+/// Returns whether a model name uses the provider/model namespace shape.
+#[must_use]
+pub fn is_model_name(name: &str) -> bool {
+    let Some((provider, model)) = name.split_once('/') else {
+        return false;
+    };
+    !model.contains('/') && is_object_name(provider) && is_object_name(model)
+}
+
+fn is_object_name_for_class(class: ObjectClass, name: &str) -> bool {
+    match class {
+        ObjectClass::Model => is_model_name(name),
+        ObjectClass::Agent | ObjectClass::Tool => is_object_name(name),
+    }
+}
+
+/// Parsed `CortexFS` ABI path shape.
+///
+/// This is the typed companion to the stable `ctx.*` strings returned by
+/// [`classify_abi_path`]. It is intended for internal routing and validation;
+/// the filesystem ABI remains the path shape and stable type strings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AbiPathKind<'a> {
+    /// Path does not match any stable v1 ABI shape.
+    Unknown,
+    /// `model/<provider>`.
+    ModelDir { provider: &'a str },
+    /// `model/<provider>/<model>`, `agent/<name>`, or `tool/<name>`.
+    ObjectExec {
+        class: ObjectClass,
+        provider: Option<&'a str>,
+        name: &'a str,
+    },
+    /// `model/<provider>/<model>.sock`, `agent/<name>.sock`, or `tool/<name>.sock`.
+    ObjectSocket {
+        class: ObjectClass,
+        provider: Option<&'a str>,
+        name: &'a str,
+    },
+    /// Object control file path under `<name>.d/`.
+    ObjectControl {
+        class: ObjectClass,
+        provider: Option<&'a str>,
+        name: &'a str,
+        file: &'a str,
+    },
+    /// `home/<uid>` and valid descendants not otherwise classified.
+    HomeDir,
+    /// Durable session root, for example `home/<uid>/agent/<agent>/session`.
+    SessionRoot,
+    /// Durable session instance directory.
+    SessionDir { session: &'a str },
+    /// Direct durable session file.
+    SessionFile { session: &'a str, file: &'a str },
+    /// Reserved durable session index file.
+    SessionIndex { kind: SessionIndexKind },
+    /// Durable file below `context/` in a session.
+    SessionContextFile {
+        session: &'a str,
+        first: &'a str,
+        second: Option<&'a str>,
+    },
+    /// `shared/<space>` and valid descendants not otherwise classified.
+    SharedDir { space: &'a str },
+    /// `shared/<space>/tool/<tool>`.
+    SharedToolExec { space: &'a str, name: &'a str },
+    /// `shared/<space>/tool/<tool>.d/<file>`.
+    SharedToolControl {
+        space: &'a str,
+        name: &'a str,
+        file: &'a str,
+    },
+    /// `shared/<space>/queue`.
+    SharedQueueRoot { space: &'a str },
+    /// A fixed child directory below `shared/<space>/queue`.
+    SharedQueueDir { space: &'a str, name: &'a str },
+    /// `shared/<space>/result`.
+    SharedResult { space: &'a str },
+    /// A syntactically valid ordinary file under an ABI-owned subtree.
+    Ordinary,
+}
+
+impl AbiPathKind<'_> {
+    /// Returns the stable `ctx file classify` string for this parsed path.
+    #[must_use]
+    pub fn stable_type(self) -> &'static str {
+        match self {
+            Self::Unknown => "ctx.unknown",
+            Self::ModelDir { .. } => "ctx.model.dir",
+            Self::ObjectExec { class, .. } => class.exec_type(),
+            Self::ObjectSocket { class, .. } => class.socket_type(),
+            Self::ObjectControl { class, .. } => class.control_type(),
+            Self::HomeDir => "ctx.home.dir",
+            Self::SessionRoot | Self::SessionDir { .. } => "ctx.session.dir",
+            Self::SessionFile {
+                file: "messages.jsonl",
+                ..
+            } => "ctx.session.messages",
+            Self::SessionFile {
+                file: "events.jsonl",
+                ..
+            } => "ctx.session.events",
+            Self::SessionFile { .. }
+            | Self::SessionIndex { .. }
+            | Self::SessionContextFile { .. }
+            | Self::Ordinary => "ctx.ordinary",
+            Self::SharedDir { .. } => "ctx.shared.dir",
+            Self::SharedToolExec { .. } => "ctx.shared.tool.exec",
+            Self::SharedToolControl { .. } => "ctx.shared.tool.control",
+            Self::SharedQueueRoot { .. } | Self::SharedQueueDir { .. } => "ctx.shared.queue",
+            Self::SharedResult { .. } => "ctx.shared.result",
+        }
+    }
+}
+
+impl<'a> AbiPathKind<'a> {
+    /// Returns an executable object class and stable name, when this path is an executable object.
+    #[must_use]
+    pub fn executable_object(self) -> Option<(ObjectClass, Cow<'a, str>)> {
+        match self {
+            Self::ObjectExec {
+                class: ObjectClass::Model,
+                provider: Some(provider),
+                name,
+            } => Some((ObjectClass::Model, Cow::Owned(format!("{provider}/{name}")))),
+            Self::ObjectExec { class, name, .. } => Some((class, Cow::Borrowed(name))),
+            _ => None,
+        }
+    }
+
+    /// Returns a model control-file name for `model/<provider>/<model>.d/<file>`.
+    #[must_use]
+    pub const fn model_control_file(self) -> Option<&'a str> {
+        match self {
+            Self::ObjectControl {
+                class: ObjectClass::Model,
+                file,
+                ..
+            } => Some(file),
+            _ => None,
+        }
+    }
+
+    /// Returns a global or shared tool schema path.
+    #[must_use]
+    pub fn is_tool_schema(self) -> bool {
+        matches!(
+            self,
+            Self::ObjectControl {
+                class: ObjectClass::Tool,
+                file: "schema",
+                ..
+            } | Self::SharedToolControl { file: "schema", .. }
+        )
+    }
+
+    /// Returns a control file name for object `.d/` paths that carry policy or mount syntax.
+    #[must_use]
+    pub const fn control_file(self) -> Option<&'a str> {
+        match self {
+            Self::ObjectControl { file, .. } | Self::SharedToolControl { file, .. } => Some(file),
+            _ => None,
+        }
+    }
+
+    /// Returns the fixed agent-control kind, if this is `agent/<name>.d/<file>`.
+    #[must_use]
+    pub fn agent_control_kind(self) -> Option<AgentControlKind> {
+        match self {
+            Self::ObjectControl {
+                class: ObjectClass::Agent,
+                file,
+                ..
+            } => AgentControlKind::parse(file),
+            _ => None,
+        }
+    }
+
+    /// Returns the fixed session-index kind for reserved `session/index/*` files.
+    #[must_use]
+    pub fn session_index_kind(self) -> Option<SessionIndexKind> {
+        match self {
+            Self::SessionIndex { kind } => Some(kind),
+            _ => None,
+        }
+    }
+
+    /// Returns the fixed session control kind for direct session control files.
+    #[must_use]
+    pub fn session_control_kind(self) -> Option<SessionControlKind> {
+        match self {
+            Self::SessionFile { session, file } if is_object_name(session) => {
+                SessionControlKind::parse(file)
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns whether this path is a durable session instance directory.
+    #[must_use]
+    pub fn is_session_instance(self) -> bool {
+        matches!(self, Self::SessionDir { session } if is_object_name(session))
+    }
+
+    /// Returns a stable context JSONL kind for session `context/*` files.
+    #[must_use]
+    pub fn context_jsonl_kind(self) -> Option<ContextJsonlKind> {
+        match self {
+            Self::SessionContextFile {
+                session,
+                first,
+                second,
+            } if is_object_name(session) => match (first, second) {
+                ("facts.jsonl", None) => Some(ContextJsonlKind::Facts),
+                ("decisions.jsonl", None) => Some(ContextJsonlKind::Decisions),
+                ("refs.jsonl", None) => Some(ContextJsonlKind::Refs),
+                ("swap", Some("index.jsonl")) => Some(ContextJsonlKind::SwapIndex),
+                ("dedup", Some("index.jsonl")) => Some(ContextJsonlKind::DedupIndex),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Returns whether this path is `context/pack.json` below a durable session.
+    #[must_use]
+    pub fn is_context_pack(self) -> bool {
+        matches!(
+            self,
+            Self::SessionContextFile {
+                session,
+                first: "pack.json",
+                second: None,
+            } if is_object_name(session)
+        )
+    }
+}
+
 /// Classifies a relative `CortexFS` ABI path by path shape.
 #[must_use]
 pub fn classify_abi_path(path: &str) -> &'static str {
+    parse_abi_path(path).stable_type()
+}
+
+/// Parses a relative `CortexFS` ABI path by path shape.
+#[must_use]
+pub fn parse_abi_path(path: &str) -> AbiPathKind<'_> {
     let trimmed = path.strip_prefix("./").map_or(path, |value| value);
 
     if trimmed.is_empty() || trimmed.split('/').any(str::is_empty) {
-        return "ctx.unknown";
+        return AbiPathKind::Unknown;
     }
 
-    let mut parts = trimmed.split('/');
-    let Some(first) = parts.next() else {
-        return "ctx.unknown";
+    let parts = trimmed.split('/').collect::<Vec<_>>();
+    let Some((first, rest)) = parts.split_first() else {
+        return AbiPathKind::Unknown;
     };
-
-    match ObjectClass::parse(first) {
-        Some(class) => classify_object_path(class, parts),
-        None => classify_non_object_path(first, parts),
+    match *first {
+        "model" => parse_model_object_path(rest),
+        "agent" => parse_simple_object_path(ObjectClass::Agent, rest),
+        "tool" => parse_simple_object_path(ObjectClass::Tool, rest),
+        "home" => parse_home_path(rest),
+        "shared" => parse_shared_path(rest),
+        _ => AbiPathKind::Unknown,
     }
 }
 
-fn classify_object_path<'a>(
-    class: ObjectClass,
-    mut parts: impl Iterator<Item = &'a str>,
-) -> &'static str {
-    let Some(name) = parts.next() else {
-        return "ctx.unknown";
+fn parse_simple_object_path<'a>(class: ObjectClass, parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((name, rest)) = parts.split_first() else {
+        return AbiPathKind::Unknown;
     };
 
     if let Some(object_name) = name.strip_suffix(".sock") {
-        if parts.next().is_some() {
-            return "ctx.unknown";
-        }
-        if is_object_name(object_name) {
-            return class.socket_type();
-        }
-        return "ctx.unknown";
-    }
-
-    if let Some(object_name) = name.strip_suffix(".d") {
-        let has_control_path = parts.next().is_some();
-        if is_object_name(object_name) {
-            return if has_control_path {
-                class.control_type()
-            } else {
-                "ctx.unknown"
-            };
-        }
-        return "ctx.unknown";
-    }
-
-    if parts.next().is_some() {
-        return "ctx.unknown";
-    }
-
-    if is_object_name(name) {
-        class.exec_type()
-    } else {
-        "ctx.unknown"
-    }
-}
-
-fn classify_non_object_path<'a>(first: &str, parts: impl Iterator<Item = &'a str>) -> &'static str {
-    match first {
-        "home" => classify_home_path(parts),
-        "shared" => classify_shared_path(parts),
-        _ => "ctx.unknown",
-    }
-}
-
-fn classify_home_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(_uid) = parts.next() else {
-        return "ctx.unknown";
-    };
-
-    match parts.next() {
-        Some("agent") => classify_agent_home_path(parts),
-        Some("model") => classify_model_home_path(parts),
-        None | Some(_) => "ctx.home.dir",
-    }
-}
-
-fn classify_agent_home_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(agent) = parts.next() else {
-        return "ctx.home.dir";
-    };
-    if !is_object_name(agent) {
-        return "ctx.unknown";
-    }
-
-    match parts.next() {
-        Some("session") => classify_session_path(parts),
-        None | Some(_) => "ctx.home.dir",
-    }
-}
-
-fn classify_model_home_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(model_dir) = parts.next() else {
-        return "ctx.home.dir";
-    };
-    let Some(model) = model_dir.strip_suffix(".d") else {
-        return "ctx.home.dir";
-    };
-    if !is_object_name(model) {
-        return "ctx.unknown";
-    }
-
-    match parts.next() {
-        Some("session") => classify_session_path(parts),
-        None | Some(_) => "ctx.home.dir",
-    }
-}
-
-fn classify_shared_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(space) = parts.next() else {
-        return "ctx.unknown";
-    };
-    if !is_object_name(space) {
-        return "ctx.unknown";
-    }
-
-    match parts.next() {
-        Some("agent") => classify_shared_agent_path(parts),
-        Some("model") => classify_shared_model_path(parts),
-        Some("tool") => classify_shared_tool_path(parts),
-        Some("queue") => classify_shared_queue_path(parts),
-        Some("result") => {
-            if parts.next().is_none() {
-                "ctx.shared.result"
-            } else {
-                "ctx.ordinary"
+        return if rest.is_empty() && is_object_name(object_name) {
+            AbiPathKind::ObjectSocket {
+                class,
+                provider: None,
+                name: object_name,
             }
-        }
-        None | Some(_) => "ctx.shared.dir",
-    }
-}
-
-fn classify_shared_tool_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(name) = parts.next() else {
-        return "ctx.shared.dir";
-    };
-
-    if let Some(tool_name) = name.strip_suffix(".d") {
-        return if is_object_name(tool_name) && parts.next().is_some() {
-            "ctx.shared.tool.control"
         } else {
-            "ctx.unknown"
+            AbiPathKind::Unknown
         };
     }
 
-    if parts.next().is_none() && is_object_name(name) {
-        "ctx.shared.tool.exec"
-    } else {
-        "ctx.unknown"
-    }
-}
-
-fn classify_shared_queue_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    match parts.next() {
-        None => "ctx.shared.queue",
-        Some("inbox" | "pending" | "lease" | "claimed" | "done" | "failed")
-            if parts.next().is_none() =>
+    if let Some(object_name) = name.strip_suffix(".d") {
+        return if let Some((file, _remaining)) = rest.split_first()
+            && is_object_name(object_name)
         {
-            "ctx.shared.queue"
+            AbiPathKind::ObjectControl {
+                class,
+                provider: None,
+                name: object_name,
+                file,
+            }
+        } else {
+            AbiPathKind::Unknown
+        };
+    }
+
+    if rest.is_empty() && is_object_name(name) {
+        AbiPathKind::ObjectExec {
+            class,
+            provider: None,
+            name,
         }
-        Some(_) => "ctx.ordinary",
+    } else {
+        AbiPathKind::Unknown
     }
 }
 
-fn classify_shared_agent_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(agent) = parts.next() else {
-        return "ctx.shared.dir";
+fn parse_model_object_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((provider, rest)) = parts.split_first() else {
+        return AbiPathKind::Unknown;
+    };
+    if !is_object_name(provider) {
+        return AbiPathKind::Unknown;
+    }
+    let Some((name, rest)) = rest.split_first() else {
+        return AbiPathKind::ModelDir { provider };
+    };
+
+    if let Some(object_name) = name.strip_suffix(".sock") {
+        return if rest.is_empty() && is_model_name(&format!("{provider}/{object_name}")) {
+            AbiPathKind::ObjectSocket {
+                class: ObjectClass::Model,
+                provider: Some(provider),
+                name: object_name,
+            }
+        } else {
+            AbiPathKind::Unknown
+        };
+    }
+
+    if let Some(object_name) = name.strip_suffix(".d") {
+        return if let Some((file, _remaining)) = rest.split_first()
+            && is_model_name(&format!("{provider}/{object_name}"))
+        {
+            AbiPathKind::ObjectControl {
+                class: ObjectClass::Model,
+                provider: Some(provider),
+                name: object_name,
+                file,
+            }
+        } else {
+            AbiPathKind::Unknown
+        };
+    }
+
+    let model_name = format!("{provider}/{name}");
+    if rest.is_empty() && is_model_name(&model_name) {
+        AbiPathKind::ObjectExec {
+            class: ObjectClass::Model,
+            provider: Some(provider),
+            name,
+        }
+    } else {
+        AbiPathKind::Unknown
+    }
+}
+
+fn parse_home_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((_uid, rest)) = parts.split_first() else {
+        return AbiPathKind::Unknown;
+    };
+
+    let Some((first, rest)) = rest.split_first() else {
+        return AbiPathKind::HomeDir;
+    };
+    match *first {
+        "agent" => parse_home_agent_path(rest),
+        "model" => parse_home_model_path(rest),
+        _ => AbiPathKind::HomeDir,
+    }
+}
+
+fn parse_home_agent_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((agent, rest)) = parts.split_first() else {
+        return AbiPathKind::HomeDir;
     };
     if !is_object_name(agent) {
-        return "ctx.unknown";
+        return AbiPathKind::Unknown;
     }
-
-    match parts.next() {
-        Some("session") => classify_session_path(parts),
-        None | Some(_) => "ctx.shared.dir",
+    let Some((first, rest)) = rest.split_first() else {
+        return AbiPathKind::HomeDir;
+    };
+    match *first {
+        "session" => parse_session_path(rest),
+        _ => AbiPathKind::HomeDir,
     }
 }
 
-fn classify_shared_model_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(model_dir) = parts.next() else {
-        return "ctx.shared.dir";
+fn parse_home_model_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((provider, rest)) = parts.split_first() else {
+        return AbiPathKind::HomeDir;
+    };
+    let Some((model_dir, rest)) = rest.split_first() else {
+        return AbiPathKind::HomeDir;
     };
     let Some(model) = model_dir.strip_suffix(".d") else {
-        return "ctx.shared.dir";
+        return AbiPathKind::HomeDir;
     };
-    if !is_object_name(model) {
-        return "ctx.unknown";
+    if !is_model_name(&format!("{provider}/{model}")) {
+        return AbiPathKind::Unknown;
     }
-
-    match parts.next() {
-        Some("session") => classify_session_path(parts),
-        None | Some(_) => "ctx.shared.dir",
+    let Some((first, rest)) = rest.split_first() else {
+        return AbiPathKind::HomeDir;
+    };
+    match *first {
+        "session" => parse_session_path(rest),
+        _ => AbiPathKind::HomeDir,
     }
 }
 
-fn classify_session_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'static str {
-    let Some(session) = parts.next() else {
-        return "ctx.session.dir";
+fn parse_shared_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((space, rest)) = parts.split_first() else {
+        return AbiPathKind::Unknown;
     };
-    if !is_object_name(session) {
-        return "ctx.unknown";
+    if !is_object_name(space) {
+        return AbiPathKind::Unknown;
+    }
+    let Some((first, rest)) = rest.split_first() else {
+        return AbiPathKind::SharedDir { space };
+    };
+    match *first {
+        "agent" => parse_shared_agent_path(space, rest),
+        "model" => parse_shared_model_path(space, rest),
+        "tool" => parse_shared_tool_path(space, rest),
+        "queue" if rest.is_empty() => AbiPathKind::SharedQueueRoot { space },
+        "queue" => parse_shared_queue_child(space, rest),
+        "result" if rest.is_empty() => AbiPathKind::SharedResult { space },
+        "result" => AbiPathKind::Ordinary,
+        _ => AbiPathKind::SharedDir { space },
+    }
+}
+
+fn parse_shared_queue_child<'a>(space: &'a str, rest: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((name, tail)) = rest.split_first() else {
+        return AbiPathKind::SharedQueueRoot { space };
+    };
+    if tail.is_empty() && is_shared_queue_entry(name) {
+        AbiPathKind::SharedQueueDir { space, name }
+    } else {
+        AbiPathKind::Ordinary
+    }
+}
+
+fn parse_shared_tool_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((name, rest)) = parts.split_first() else {
+        return AbiPathKind::SharedDir { space };
+    };
+    if let Some(tool_name) = name.strip_suffix(".d") {
+        return if let Some((file, _remaining)) = rest.split_first()
+            && is_object_name(tool_name)
+        {
+            AbiPathKind::SharedToolControl {
+                space,
+                name: tool_name,
+                file,
+            }
+        } else {
+            AbiPathKind::Unknown
+        };
     }
 
-    match parts.next() {
-        None => "ctx.session.dir",
-        Some("messages.jsonl") if parts.next().is_none() => "ctx.session.messages",
-        Some("events.jsonl") if parts.next().is_none() => "ctx.session.events",
-        Some(_) => "ctx.ordinary",
+    if rest.is_empty() && is_object_name(name) {
+        AbiPathKind::SharedToolExec { space, name }
+    } else {
+        AbiPathKind::Unknown
     }
+}
+
+fn parse_shared_agent_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((agent, rest)) = parts.split_first() else {
+        return AbiPathKind::SharedDir { space };
+    };
+    if !is_object_name(agent) {
+        return AbiPathKind::Unknown;
+    }
+    let Some((first, rest)) = rest.split_first() else {
+        return AbiPathKind::SharedDir { space };
+    };
+    match *first {
+        "session" => parse_session_path(rest),
+        _ => AbiPathKind::SharedDir { space },
+    }
+}
+
+fn parse_shared_model_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((provider, rest)) = parts.split_first() else {
+        return AbiPathKind::SharedDir { space };
+    };
+    let Some((model_dir, rest)) = rest.split_first() else {
+        return AbiPathKind::SharedDir { space };
+    };
+    let Some(model) = model_dir.strip_suffix(".d") else {
+        return AbiPathKind::SharedDir { space };
+    };
+    if !is_model_name(&format!("{provider}/{model}")) {
+        return AbiPathKind::Unknown;
+    }
+    let Some((first, rest)) = rest.split_first() else {
+        return AbiPathKind::SharedDir { space };
+    };
+    match *first {
+        "session" => parse_session_path(rest),
+        _ => AbiPathKind::SharedDir { space },
+    }
+}
+
+fn parse_session_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((session, rest)) = parts.split_first() else {
+        return AbiPathKind::SessionRoot;
+    };
+    if !is_object_name(session) {
+        return AbiPathKind::Unknown;
+    }
+
+    let Some((first, tail)) = rest.split_first() else {
+        return AbiPathKind::SessionDir { session };
+    };
+    if *session == "index" {
+        return if tail.is_empty() && *first == "list" {
+            AbiPathKind::SessionIndex {
+                kind: SessionIndexKind::List,
+            }
+        } else if tail.is_empty() && *first == "current" {
+            AbiPathKind::SessionIndex {
+                kind: SessionIndexKind::Current,
+            }
+        } else if *first == "by-cwd"
+            && tail.len() == 1
+            && tail.first().is_some_and(|hash| !hash.is_empty())
+        {
+            AbiPathKind::SessionIndex {
+                kind: SessionIndexKind::ByCwd,
+            }
+        } else {
+            AbiPathKind::Ordinary
+        };
+    }
+    if *first == "context" {
+        return parse_session_context_path(session, tail);
+    }
+    if tail.is_empty() {
+        AbiPathKind::SessionFile {
+            session,
+            file: first,
+        }
+    } else {
+        AbiPathKind::Ordinary
+    }
+}
+
+fn parse_session_context_path<'a>(session: &'a str, tail: &[&'a str]) -> AbiPathKind<'a> {
+    let Some((first, rest)) = tail.split_first() else {
+        return AbiPathKind::Ordinary;
+    };
+    AbiPathKind::SessionContextFile {
+        session,
+        first,
+        second: rest.first().copied(),
+    }
+}
+
+const fn is_shared_queue_entry(name: &str) -> bool {
+    matches!(
+        name.as_bytes(),
+        b"inbox" | b"pending" | b"lease" | b"claimed" | b"done" | b"failed"
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AGENT_CONTROL_FILES, AgentControlIssue, AgentControlKind, AgentExecutableSocketRuntime,
-        AgentRuntimeViewError, AgentUnixIdentity, CTX_ROOT, ChildAgentAuthority,
-        ChildAgentControls, ChildAgentDenial, ChildAgentRequest, ChildContextRecordError,
-        ChildContextStatus, ChildLifecycle, ContextJsonlIssue, ContextJsonlKind,
-        ContextPackBuildError, ContextPackIssue, ContextPackSourceError, DurableSessionLayoutError,
-        EXEC_OBJECTS, EventStreamIssue, FUSE_V1_ROOT_INODE, FuseV1Error, FuseV1FileType,
-        FuseV1Projection, IndexedSocketSessionRecordError, MAX_FUSE_V1_SMALL_WRITE_BYTES,
-        MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES, MODEL_CONTROL_FILES, MessageStreamIssue,
-        ModelCapabilityIssue, MountEntry, MountError, MountMode, MountOption, MountTable,
-        ObjectBootstrapError, ObjectClass, ObjectLayoutIssue, OwnedChildCancellationError,
-        PeerCredentials, PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0,
-        ReferenceTreeError, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, SessionAccess,
-        SessionAccessAuthority, SessionAccessDenial, SessionControlIssue, SessionControlKind,
-        SessionIndexIssue, SessionIndexKind, SessionIndexUpdateError, SessionLayoutIssue,
-        SharedAccess, SharedAccessAuthority, SharedAccessDenial, SharedQueueLayoutIssue,
-        SharedQueueOutcome, SharedQueueRecoverError, SocketPeerPolicy, SocketRequest,
-        SocketRequestError, SocketRuntimeError, SocketSessionRecordError, SocketSessionScope,
-        TOOL_CONTROL_FILES, ToolExecutionAuthority, ToolExecutionDenial, ToolExecutionPrincipal,
-        ToolHit, ToolPath, ToolPathError, ToolSchemaIssue, authorize_child_agent,
-        authorize_session_access, authorize_shared_access, authorize_tool_execution,
-        claim_next_shared_queue_job, classify_abi_path, derive_agent_runtime_view,
-        ensure_durable_session_layout, ensure_v1_reference_tree, finish_shared_queue_job,
-        handle_socket_request_frame, inspect_agent_control, inspect_context_jsonl,
-        inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
-        inspect_model_capabilities, inspect_object_layout, inspect_session_control,
-        inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
-        inspect_tool_schema_json, install_executable_object_wrapper, is_object_name, is_root_entry,
-        owned_child_cancellation_events, parse_socket_request_frame, peer_credentials,
-        rebuild_context_pack, record_assistant_response_to_session,
-        record_child_handoff_to_parent_context, record_child_result_to_parent_context,
-        record_indexed_socket_send_to_session, record_owned_child_cancellation,
-        record_socket_request_to_session, record_tool_execution_denial_to_session,
-        record_tool_execution_result_to_session, recover_shared_queue_job,
-        serve_agent_executable_socket_stream_once, serve_unix_socket_listener_once,
-        serve_unix_socket_stream_once, session_index_key_for_cwd, socket_runtime_error_response,
-        update_session_index, validate_context_pack_source,
-    };
-    use std::fs;
-    use std::io::{Read, Write};
-    use std::net::Shutdown;
-    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
-    use std::os::unix::net::{UnixListener, UnixStream};
-    use std::path::{Path, PathBuf};
-    use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn root_is_ctx() {
-        assert_eq!(CTX_ROOT, "/ctx");
-    }
-
-    #[test]
-    fn root_keeps_only_short_agent_os_entries() {
-        assert!(is_root_entry("model"));
-        assert!(is_root_entry("agent"));
-        assert!(is_root_entry("tool"));
-        assert!(!is_root_entry("provider"));
-        assert!(!is_root_entry("format"));
-        assert!(!is_root_entry("db"));
-        assert!(!is_root_entry("vector"));
-        assert!(!is_root_entry("mcp"));
-        assert!(!is_root_entry("cluster"));
-        assert!(!is_root_entry("audit"));
-        assert!(!is_root_entry("control"));
-        assert!(!is_root_entry("AGENTS.rc"));
-    }
-
-    #[test]
-    fn executable_objects_are_model_agent_tool() {
-        assert_eq!(EXEC_OBJECTS, ["model", "agent", "tool"]);
-        assert_eq!(ObjectClass::parse("model"), Some(ObjectClass::Model));
-        assert_eq!(ObjectClass::parse("agent"), Some(ObjectClass::Agent));
-        assert_eq!(ObjectClass::parse("tool"), Some(ObjectClass::Tool));
-        assert_eq!(ObjectClass::parse("provider"), None);
-    }
-
-    #[test]
-    fn object_names_are_small_ascii_path_components() {
-        assert!(is_object_name("qwen"));
-        assert!(is_object_name("fs.read"));
-        assert!(is_object_name("mcp.github.search_issues"));
-        assert!(is_object_name("agent_1+dev-2"));
-        assert!(is_object_name(&"a".repeat(MAX_OBJECT_NAME_LEN)));
-
-        assert!(!is_object_name(""));
-        assert!(!is_object_name("."));
-        assert!(!is_object_name(".."));
-        assert!(!is_object_name("-bad"));
-        assert!(!is_object_name("_bad"));
-        assert!(!is_object_name("bad/name"));
-        assert!(!is_object_name("bad\nname"));
-        assert!(!is_object_name("qwen.sock"));
-        assert!(!is_object_name("qwen.d"));
-        assert!(!is_object_name("中文"));
-        assert!(!is_object_name(&"a".repeat(MAX_OBJECT_NAME_LEN + 1)));
-    }
-
-    #[test]
-    fn abi_paths_classify_by_stable_shape() {
-        assert_eq!(classify_abi_path("model/qwen"), "ctx.model.exec");
-        assert_eq!(classify_abi_path("model/qwen.sock"), "ctx.model.socket");
-        assert_eq!(classify_abi_path("model/qwen.d/id"), "ctx.model.control");
-        assert_eq!(classify_abi_path("agent/coder"), "ctx.agent.exec");
-        assert_eq!(classify_abi_path("agent/coder.sock"), "ctx.agent.socket");
-        assert_eq!(
-            classify_abi_path("agent/coder.d/policy"),
-            "ctx.agent.control"
-        );
-        assert_eq!(classify_abi_path("tool/fs.read"), "ctx.tool.exec");
-        assert_eq!(
-            classify_abi_path("tool/fs.read.d/schema"),
-            "ctx.tool.control"
-        );
-        assert_eq!(classify_abi_path("home/1000"), "ctx.home.dir");
-        assert_eq!(
-            classify_abi_path("home/1000/agent/coder/session/default"),
-            "ctx.session.dir"
-        );
-        assert_eq!(
-            classify_abi_path("home/1000/agent/coder/session/default/messages.jsonl"),
-            "ctx.session.messages"
-        );
-        assert_eq!(
-            classify_abi_path("home/1000/agent/coder/session/default/events.jsonl"),
-            "ctx.session.events"
-        );
-        assert_eq!(
-            classify_abi_path("home/1000/model/qwen.d/session/default"),
-            "ctx.session.dir"
-        );
-        assert_eq!(
-            classify_abi_path("shared/im-qq-dev/agent/bot/session/group-456/events.jsonl"),
-            "ctx.session.events"
-        );
-        assert_eq!(
-            classify_abi_path("shared/project-a/model/qwen.d/session/default/messages.jsonl"),
-            "ctx.session.messages"
-        );
-        assert_eq!(classify_abi_path("shared/project-a"), "ctx.shared.dir");
-        assert_eq!(
-            classify_abi_path("shared/project-a/tool/project.test"),
-            "ctx.shared.tool.exec"
-        );
-        assert_eq!(
-            classify_abi_path("shared/project-a/tool/project.test.d/schema"),
-            "ctx.shared.tool.control"
-        );
-        assert_eq!(
-            classify_abi_path("shared/project-a/queue"),
-            "ctx.shared.queue"
-        );
-        assert_eq!(
-            classify_abi_path("shared/project-a/queue/pending"),
-            "ctx.shared.queue"
-        );
-        assert_eq!(
-            classify_abi_path("shared/project-a/result"),
-            "ctx.shared.result"
-        );
-    }
-
-    #[test]
-    fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
-        assert_eq!(classify_abi_path("provider/openai"), "ctx.unknown");
-        assert_eq!(classify_abi_path("mcp/github"), "ctx.unknown");
-        assert_eq!(classify_abi_path("skill/local"), "ctx.unknown");
-        assert_eq!(classify_abi_path("cluster/default"), "ctx.unknown");
-        assert_eq!(classify_abi_path("model/qwen.sock.d/id"), "ctx.unknown");
-        assert_eq!(classify_abi_path("tool/-bad"), "ctx.unknown");
-        assert_eq!(classify_abi_path("agent/coder/extra"), "ctx.unknown");
-    }
-
-    #[test]
-    fn reference_tree_bootstrap_materializes_documented_v1_shape() {
-        let root = unique_test_dir("reference-tree");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-
-        let bootstrapped = ensure_v1_reference_tree(&root);
-        assert!(bootstrapped.is_ok());
-        let Ok(bootstrapped) = bootstrapped else {
-            return;
-        };
-        assert_eq!(bootstrapped.root(), root.as_path());
-
-        let status = fs::read_to_string(root.join("status"));
-        assert!(matches!(status, Ok(ref content) if content == "ready\n"));
-        assert!(root.join("bin").join("ctx").is_file());
-        let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))
-            .map(|metadata| metadata.permissions().mode() & 0o777);
-        assert!(matches!(agent_socket_mode, Ok(0o777)));
-        assert!(!root.join("mcp").exists());
-        assert!(!root.join("skill").exists());
-        assert!(!root.join("memory").exists());
-
-        assert!(inspect_object_layout(&root, ObjectClass::Model, "qwen").is_ok());
-        assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
-        assert!(inspect_object_layout(&root, ObjectClass::Agent, "reviewer").is_ok());
-        for tool in [
-            "fs.read",
-            "fs.write",
-            "shell.exec",
-            "mcp.github.search_issues",
-            "agent.create",
-            "agent.start",
-            "agent.stop",
-        ] {
-            assert!(inspect_object_layout(&root, ObjectClass::Tool, tool).is_ok());
-        }
-        let origin = fs::read_to_string(
-            root.join("tool")
-                .join("mcp.github.search_issues.d")
-                .join("origin"),
-        );
-        assert!(matches!(origin, Ok(ref content) if content == "mcp:github\n"));
-
-        let private_session = root
-            .join("home")
-            .join("1000")
-            .join("agent")
-            .join("coder")
-            .join("session")
-            .join("default");
-        assert!(inspect_session_layout(&private_session).is_ok());
-        assert!(
-            private_session
-                .join("context")
-                .join("swap")
-                .join("chunk")
-                .is_dir()
-        );
-        assert!(
-            private_session
-                .join("context")
-                .join("dedup")
-                .join("blob")
-                .is_dir()
-        );
-        assert!(
-            private_session
-                .join("context")
-                .join("child")
-                .join("rev-123")
-                .join("artifact")
-                .is_dir()
-        );
-        let child_agent = fs::read_to_string(
-            private_session
-                .join("context")
-                .join("child")
-                .join("rev-123")
-                .join("agent"),
-        );
-        assert!(matches!(child_agent, Ok(ref content) if content == "reviewer\n"));
-        let cwd_key = session_index_key_for_cwd("/work");
-        assert!(cwd_key.is_some());
-        let Some(cwd_key) = cwd_key else { return };
-        assert!(
-            root.join("home")
-                .join("1000")
-                .join("agent")
-                .join("coder")
-                .join("session")
-                .join("index")
-                .join("by-cwd")
-                .join(cwd_key)
-                .is_file()
-        );
-
-        let tool_link = fs::read_link(root.join("home").join("1000").join("tool").join("fs.read"));
-        assert!(matches!(tool_link, Ok(ref target) if target == Path::new("/ctx/tool/fs.read")));
-        let model_link = fs::read_link(root.join("home").join("1000").join("model").join("coder"));
-        assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/qwen")));
-
-        let shared = root.join("shared").join("project-a");
-        assert!(shared.join("data").is_dir());
-        assert!(shared.join("result").is_dir());
-        assert!(inspect_shared_queue_layout(&shared.join("queue")).is_ok());
-        assert!(shared.join("tool").join("project.test").is_file());
-        for file in ["schema", "policy", "status", "log"] {
-            assert!(
-                shared
-                    .join("tool")
-                    .join("project.test.d")
-                    .join(file)
-                    .is_file()
-            );
-        }
-        assert!(
-            inspect_session_layout(
-                &shared
-                    .join("agent")
-                    .join("coder")
-                    .join("session")
-                    .join("design-review")
-            )
-            .is_ok()
-        );
-
-        assert_eq!(ensure_v1_reference_tree(&root), Ok(bootstrapped));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn reference_tree_model_exec_emits_one_shot_jsonl() {
-        let root = unique_test_dir("reference-tree-model-exec");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-
-        let output = Command::new(root.join("model").join("qwen"))
-            .arg("hello")
-            .output();
-        assert!(output.is_ok());
-        let Ok(output) = output else { return };
-        assert!(output.status.success());
-        let stdout = String::from_utf8(output.stdout);
-        assert!(stdout.is_ok());
-        let Ok(stdout) = stdout else { return };
-        assert!(stdout.contains(r#"{"type":"start","run":"r1","model":"qwen"}"#));
-        assert!(stdout.contains(r#"{"type":"delta","run":"r1","text":"hello"}"#));
-        assert!(stdout.contains(r#"{"type":"done","run":"r1","status":"ok"}"#));
-        assert!(inspect_event_stream_jsonl(&stdout).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn reference_tree_agent_exec_emits_one_shot_jsonl() {
-        let root = unique_test_dir("reference-tree-agent-exec");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-
-        let output = Command::new(root.join("agent").join("coder"))
-            .arg("fix tests")
-            .output();
-        assert!(output.is_ok());
-        let Ok(output) = output else { return };
-        assert!(output.status.success());
-        let stdout = String::from_utf8(output.stdout);
-        assert!(stdout.is_ok());
-        let Ok(stdout) = stdout else { return };
-        assert!(stdout.contains(r#"{"type":"start","run":"r1","model":"qwen"}"#));
-        assert!(stdout.contains(r#"{"type":"delta","run":"r1","text":"fix tests"}"#));
-        assert!(stdout.contains(r#"{"type":"done","run":"r1","status":"ok"}"#));
-        assert!(inspect_event_stream_jsonl(&stdout).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn reference_tree_standard_tools_emit_jsonl() {
-        let root = unique_test_dir("reference-tree-tool-exec");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-
-        let data = root.join("shared").join("project-a").join("data");
-        let read_target = data.join("readme.txt");
-        write_text_file(&read_target, "visible");
-        let read_arg = format!(r#"{{"path":"{}"}}"#, read_target.display());
-        let read = Command::new(root.join("tool").join("fs.read"))
-            .arg(read_arg)
-            .output();
-        assert!(read.is_ok());
-        let Ok(read) = read else { return };
-        assert!(read.status.success());
-        let read_stdout = String::from_utf8(read.stdout);
-        assert!(read_stdout.is_ok());
-        let Ok(read_stdout) = read_stdout else {
-            return;
-        };
-        assert!(read_stdout.contains(r#"{"type":"start","run":"r1","tool":"fs.read"}"#));
-        assert!(read_stdout.contains(r#""text":"visible""#));
-        assert!(inspect_event_stream_jsonl(&read_stdout).is_ok());
-
-        let write_target = data.join("written.txt");
-        let write_arg = format!(
-            r#"{{"path":"{}","content":"stored"}}"#,
-            write_target.display()
-        );
-        let write = Command::new(root.join("tool").join("fs.write"))
-            .arg(write_arg)
-            .output();
-        assert!(write.is_ok());
-        let Ok(write) = write else { return };
-        assert!(write.status.success());
-        let written = fs::read_to_string(&write_target);
-        assert!(matches!(written, Ok(ref content) if content == "stored"));
-        let write_stdout = String::from_utf8(write.stdout);
-        assert!(write_stdout.is_ok());
-        let Ok(write_stdout) = write_stdout else {
-            return;
-        };
-        assert!(write_stdout.contains(r#"{"type":"start","run":"r1","tool":"fs.write"}"#));
-        assert!(inspect_event_stream_jsonl(&write_stdout).is_ok());
-
-        let shell = Command::new(root.join("tool").join("shell.exec"))
-            .arg(r#"{"cmd":"printf shell-ok"}"#)
-            .output();
-        assert!(shell.is_ok());
-        let Ok(shell) = shell else { return };
-        assert!(shell.status.success());
-        let shell_stdout = String::from_utf8(shell.stdout);
-        assert!(shell_stdout.is_ok());
-        let Ok(shell_stdout) = shell_stdout else {
-            return;
-        };
-        assert!(shell_stdout.contains(r#"{"type":"start","run":"r1","tool":"shell.exec"}"#));
-        assert!(shell_stdout.contains(r#""text":"shell-ok""#));
-        assert!(inspect_event_stream_jsonl(&shell_stdout).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn fuse_v1_projection_exposes_reference_tree_ops() {
-        let root = unique_test_dir("fuse-v1-projection");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-        let projection = FuseV1Projection::new(&root);
-
-        let root_node = projection.root_node();
-        assert!(root_node.is_ok());
-        let Ok(root_node) = root_node else { return };
-        assert_eq!(root_node.inode(), FUSE_V1_ROOT_INODE);
-        assert_eq!(root_node.abi_path(), "");
-        assert_eq!(root_node.attr().file_type(), FuseV1FileType::Directory);
-
-        let root_attr = projection.getattr_node(&root_node);
-        assert!(matches!(
-            root_attr,
-            Ok(ref attr)
-                if attr.abi_path().is_empty()
-                    && attr.file_type() == FuseV1FileType::Directory
-        ));
-
-        let entries = projection.readdir_node(&root_node);
-        assert!(entries.is_ok());
-        let Ok(entries) = entries else { return };
-        let names = entries
-            .iter()
-            .map(super::FuseV1DirEntry::name)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            names,
-            ["agent", "bin", "home", "model", "shared", "status", "tool"]
-        );
-
-        let model_node = projection.lookup(&root_node, "model");
-        assert!(matches!(
-            model_node,
-            Ok(ref node)
-                if node.abi_path() == "model"
-                    && node.attr().file_type() == FuseV1FileType::Directory
-        ));
-        let Ok(model_node) = model_node else { return };
-        let qwen_node = projection.lookup(&model_node, "qwen");
-        assert!(matches!(
-            qwen_node,
-            Ok(ref node)
-                if node.abi_path() == "model/qwen"
-                    && node.inode() != FUSE_V1_ROOT_INODE
-                    && node.attr().file_type() == FuseV1FileType::Regular
-        ));
-        let qwen_again = projection.node_for_path("model/qwen");
-        assert!(
-            matches!((qwen_node, qwen_again), (Ok(ref left), Ok(ref right)) if left.inode() == right.inode())
-        );
-        assert_eq!(
-            projection.lookup(&root_node, "../escape"),
-            Err(FuseV1Error::InvalidPath)
-        );
-        assert_eq!(
-            projection.lookup(&root_node, "missing"),
-            Err(FuseV1Error::NotFound)
-        );
-
-        let socket_attr = projection.getattr("model/qwen.sock");
-        assert!(matches!(
-            socket_attr,
-            Ok(ref attr)
-                if attr.file_type() == FuseV1FileType::Socket && attr.mode() & 0o777 == 0o777
-        ));
-        let symlink_attr = projection.getattr("home/1000/tool/fs.read");
-        assert!(matches!(
-            symlink_attr,
-            Ok(ref attr) if attr.file_type() == FuseV1FileType::Symlink
-        ));
-
-        assert_eq!(
-            projection.read_to_string("status"),
-            Ok("ready\n".to_owned())
-        );
-        assert_eq!(projection.read_at("status", 1, 3), Ok(b"ead".to_vec()));
-        assert_eq!(projection.read_at("status", 128, 8), Ok(Vec::new()));
-        assert!(
-            projection
-                .write_control_file("agent/coder.d/cwd", "/work/project\n")
-                .is_ok()
-        );
-        assert_eq!(
-            projection.read_to_string("agent/coder.d/cwd"),
-            Ok("/work/project\n".to_owned())
-        );
-
-        assert_eq!(
-            projection.write_control_file("status", "busy\n"),
-            Err(FuseV1Error::NotControlFile)
-        );
-        assert!(
-            projection
-                .write_control_file_at("agent/coder.d/status", 0, b"busy\n")
-                .is_ok()
-        );
-        assert_eq!(
-            projection.read_to_string("agent/coder.d/status"),
-            Ok("busy\n".to_owned())
-        );
-        assert_eq!(
-            projection.write_control_file_at("agent/coder.d/status", 1, b"idle\n"),
-            Err(FuseV1Error::InvalidOffset)
-        );
-        assert_eq!(
-            projection.write_control_file_at("agent/coder.d/status", 0, &[0xff]),
-            Err(FuseV1Error::InvalidContent)
-        );
-        assert_eq!(
-            projection.write_control_file("../escape", "no\n"),
-            Err(FuseV1Error::InvalidPath)
-        );
-        assert_eq!(
-            projection.write_control_file(
-                "agent/coder.d/cwd",
-                &"x".repeat(MAX_FUSE_V1_SMALL_WRITE_BYTES + 1)
-            ),
-            Err(FuseV1Error::TooLarge)
-        );
-        assert_eq!(FuseV1Error::TooLarge.errno(), "EMSGSIZE");
-        assert_eq!(FuseV1Error::InvalidOffset.errno(), "EINVAL");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn reference_tree_bootstrap_rejects_conflicting_symlink_and_socket_paths() {
-        let root = unique_test_dir("reference-tree-conflict");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_text_file(
-            &root.join("home").join("1000").join("tool").join("fs.read"),
-            "not link\n",
-        );
-        assert_eq!(
-            ensure_v1_reference_tree(&root),
-            Err(ReferenceTreeError::CannotLink)
-        );
-
-        assert!(fs::remove_dir_all(&root).is_ok());
-        write_text_file(&root.join("model").join("qwen.sock"), "not socket\n");
-        assert_eq!(
-            ensure_v1_reference_tree(&root),
-            Err(ReferenceTreeError::CannotSocket)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
-        let root = unique_test_dir("reference-tree-stale-socket-symlink");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(root.join("agent")).is_ok());
-        assert!(
-            symlink(
-                "/run/cortexfs/agent/coder.sock",
-                root.join("agent").join("coder.sock")
-            )
-            .is_ok()
-        );
-
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-        let metadata = fs::symlink_metadata(root.join("agent").join("coder.sock"));
-        assert!(matches!(metadata, Ok(ref metadata) if metadata.file_type().is_socket()));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn object_layout_accepts_model_agent_and_tool_triples() {
-        let root = unique_test_dir("object-layout-ok");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Model, "qwen", "socket");
-        create_complete_object_layout(&root, ObjectClass::Agent, "coder", "");
-        create_complete_object_layout(&root, ObjectClass::Tool, "fs.read", "");
-        let _model_socket = bind_socket(&root.join("model").join("qwen.sock"));
-        let _agent_socket = bind_socket(&root.join("agent").join("coder.sock"));
-
-        let model = inspect_object_layout(&root, ObjectClass::Model, "qwen");
-        let agent = inspect_object_layout(&root, ObjectClass::Agent, "coder");
-        let tool = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
-        assert!(model.is_ok());
-        assert!(agent.is_ok());
-        assert!(tool.is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
-        let root = unique_test_dir("object-bootstrap");
-        let target = root.join("runtime").join("echo-jsonl");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_fixture_file(&target, 0o755);
-
-        let model = install_executable_object_wrapper(
-            &root,
-            ObjectClass::Model,
-            "qwen",
-            &target.display().to_string(),
-            &[
-                ("cap", "chat\nstream\ntool_call_syntax"),
-                ("session", "none"),
-                ("id", "local/qwen"),
-            ],
-        );
-        assert!(model.is_ok());
-        let Ok(model) = model else { return };
-        let tool = install_executable_object_wrapper(
-            &root,
-            ObjectClass::Tool,
-            "fs.read",
-            &target.display().to_string(),
-            &[
-                ("description", "Read a visible file"),
-                ("schema", "{\"type\":\"object\",\"properties\":{}}"),
-                ("policy", "allow coder_t tool:fs.read execute"),
-            ],
-        );
-        assert!(tool.is_ok());
-        let Ok(tool) = tool else { return };
-
-        assert_eq!(model.executable(), root.join("model").join("qwen"));
-        assert_eq!(tool.control_dir(), root.join("tool").join("fs.read.d"));
-        assert!(inspect_object_layout(&root, ObjectClass::Model, "qwen").is_ok());
-        assert!(inspect_object_layout(&root, ObjectClass::Tool, "fs.read").is_ok());
-
-        let wrapper = fs::read_to_string(root.join("tool").join("fs.read"));
-        assert!(wrapper.is_ok());
-        let Ok(wrapper) = wrapper else { return };
-        assert!(wrapper.starts_with("#!/bin/sh\n"));
-        assert!(wrapper.contains("exec '"));
-        let permissions = fs::metadata(root.join("tool").join("fs.read"))
-            .map(|metadata| metadata.permissions().mode());
-        assert!(permissions.is_ok());
-        let Ok(permissions) = permissions else {
-            return;
-        };
-        assert_ne!(permissions & 0o111, 0);
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
-        let root = unique_test_dir("object-bootstrap-bad");
-        let target = root.join("runtime").join("agent");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_fixture_file(&target, 0o755);
-
-        assert_eq!(
-            install_executable_object_wrapper(
-                &root,
-                ObjectClass::Tool,
-                "bad/name",
-                &target.display().to_string(),
-                &[],
-            ),
-            Err(ObjectBootstrapError::InvalidObjectName)
-        );
-        assert_eq!(
-            install_executable_object_wrapper(&root, ObjectClass::Tool, "fs.read", "bad\ncmd", &[]),
-            Err(ObjectBootstrapError::InvalidWrapperTarget)
-        );
-        assert_eq!(
-            install_executable_object_wrapper(
-                &root,
-                ObjectClass::Tool,
-                "fs.read",
-                &target.display().to_string(),
-                &[("authority", "root")],
-            ),
-            Err(ObjectBootstrapError::InvalidControlFile)
-        );
-        assert_eq!(
-            install_executable_object_wrapper(
-                &root,
-                ObjectClass::Tool,
-                "fs.read",
-                &target.display().to_string(),
-                &[("schema", "{\"authority\":\"root\"}")],
-            ),
-            Err(ObjectBootstrapError::InvalidControlValue)
-        );
-
-        let agent = install_executable_object_wrapper(
-            &root,
-            ObjectClass::Agent,
-            "coder",
-            &target.display().to_string(),
-            &[("uid", "1000"), ("gid", "1000"), ("owner", "1000")],
-        );
-        assert!(agent.is_ok());
-        let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
-        assert!(!report.is_ok());
-        assert!(report.issues().contains(&ObjectLayoutIssue::MissingSocket(
-            "agent/coder.sock".to_owned()
-        )));
-        let _agent_socket = bind_socket(&root.join("agent").join("coder.sock"));
-        assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
-        assert_eq!(ObjectBootstrapError::InvalidControlValue.errno(), "EINVAL");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn object_layout_reports_missing_parts() {
-        let root = unique_test_dir("object-layout-bad");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(root.join("agent")).is_ok());
-        write_text_file(&root.join("agent").join("coder"), "#!/bin/sh\n");
-
-        let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
-        assert!(!report.is_ok());
-        assert!(
-            report
-                .issues()
-                .contains(&ObjectLayoutIssue::NotExecutable("agent/coder".to_owned()))
-        );
-        assert!(
-            report
-                .issues()
-                .contains(&ObjectLayoutIssue::MissingControlDirectory(
-                    "agent/coder.d".to_owned()
-                ))
-        );
-        assert!(report.issues().contains(&ObjectLayoutIssue::MissingSocket(
-            "agent/coder.sock".to_owned()
-        )));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn model_session_control_decides_socket_requirement() {
-        let root = unique_test_dir("object-layout-model-session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Model, "qwen", "none");
-
-        let no_socket = inspect_object_layout(&root, ObjectClass::Model, "qwen");
-        assert!(no_socket.is_ok());
-
-        write_text_file(
-            &root.join("model").join("qwen.d").join("session"),
-            "socket\n",
-        );
-        let missing_socket = inspect_object_layout(&root, ObjectClass::Model, "qwen");
-        assert!(
-            missing_socket
-                .issues()
-                .contains(&ObjectLayoutIssue::MissingSocket(
-                    "model/qwen.sock".to_owned()
-                ))
-        );
-
-        write_text_file(
-            &root.join("model").join("qwen.d").join("session"),
-            "native_thread\n",
-        );
-        let invalid = inspect_object_layout(&root, ObjectClass::Model, "qwen");
-        assert!(
-            invalid
-                .issues()
-                .contains(&ObjectLayoutIssue::InvalidControlValue {
-                    path: "model/qwen.d/session".to_owned(),
-                    value: "native_thread".to_owned()
-                })
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn model_capabilities_accept_only_stable_words() {
-        let valid = inspect_model_capabilities("chat\nstream\ntool_call_syntax\n\n");
-        assert!(valid.is_ok());
-
-        let invalid = inspect_model_capabilities("openai_responses\nnative_thread\nvendor_magic\n");
-        assert_eq!(
-            invalid.issues(),
-            &[
-                ModelCapabilityIssue::ProviderPrivate {
-                    line: 1,
-                    capability: "openai_responses".to_owned()
-                },
-                ModelCapabilityIssue::ProviderPrivate {
-                    line: 2,
-                    capability: "native_thread".to_owned()
-                },
-                ModelCapabilityIssue::Unknown {
-                    line: 3,
-                    capability: "vendor_magic".to_owned()
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn model_object_layout_rejects_provider_private_capabilities() {
-        let root = unique_test_dir("object-layout-model-cap");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Model, "qwen", "none");
-        write_text_file(
-            &root.join("model").join("qwen.d").join("cap"),
-            "chat\nnative_thread\n",
-        );
-
-        let report = inspect_object_layout(&root, ObjectClass::Model, "qwen");
-        assert!(
-            report
-                .issues()
-                .contains(&ObjectLayoutIssue::InvalidControlValue {
-                    path: "model/qwen.d/cap".to_owned(),
-                    value: "native_thread".to_owned()
-                })
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_schema_accepts_json_schema_shape_without_authority() {
-        let report = inspect_tool_schema_json(
-            r#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}"#,
-        );
-        assert!(report.is_ok());
-        assert!(report.issues().is_empty());
-    }
-
-    #[test]
-    fn tool_schema_rejects_invalid_json_and_authority_fields() {
-        assert_eq!(
-            inspect_tool_schema_json("not-json").issues(),
-            &[ToolSchemaIssue::InvalidJson]
-        );
-        assert_eq!(
-            inspect_tool_schema_json("[]").issues(),
-            &[ToolSchemaIssue::NotObject]
-        );
-        assert_eq!(
-            inspect_tool_schema_json(r#"{"policy":"allow all","permissions":["tool:*"]}"#).issues(),
-            &[
-                ToolSchemaIssue::AuthorityField("permissions".to_owned()),
-                ToolSchemaIssue::AuthorityField("policy".to_owned())
-            ]
-        );
-    }
-
-    #[test]
-    fn tool_object_layout_rejects_authority_shaped_schema() {
-        let root = unique_test_dir("object-layout-tool-schema");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Tool, "fs.read", "none");
-        write_text_file(
-            &root.join("tool").join("fs.read.d").join("schema"),
-            "{\"policy\":\"allow all\"}\n",
-        );
-
-        let report = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
-        assert!(
-            report
-                .issues()
-                .contains(&ObjectLayoutIssue::InvalidControlValue {
-                    path: "tool/fs.read.d/schema".to_owned(),
-                    value: "policy".to_owned()
-                })
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn agent_controls_accept_fixed_v1_values() {
-        assert!(inspect_agent_control(AgentControlKind::Owner, "1000\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Uid, "1000\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Gid, "100\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Groups, "10\n20\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Groups, "").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Iso, "shared\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Iso, "uid\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Life, "owned\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Parent, "\n").is_ok());
-        assert!(
-            inspect_agent_control(
-                AgentControlKind::Parent,
-                "agent:coder session:default run:r1\n"
-            )
-            .is_ok()
-        );
-        assert!(inspect_agent_control(AgentControlKind::Status, "idle\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Pid, "\n").is_ok());
-        assert!(inspect_agent_control(AgentControlKind::Pid, "1234\n").is_ok());
-    }
-
-    #[test]
-    fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
-        assert_eq!(
-            inspect_agent_control(AgentControlKind::Uid, "not-a-uid\n").issues(),
-            &[AgentControlIssue::InvalidNumber {
-                line: 1,
-                value: "not-a-uid".to_owned()
-            }]
-        );
-        assert_eq!(
-            inspect_agent_control(AgentControlKind::Groups, "10\nbad\n").issues(),
-            &[AgentControlIssue::InvalidNumber {
-                line: 2,
-                value: "bad".to_owned()
-            }]
-        );
-        assert_eq!(
-            inspect_agent_control(AgentControlKind::Life, "detached\n").issues(),
-            &[AgentControlIssue::InvalidValue {
-                line: 1,
-                value: "detached".to_owned()
-            }]
-        );
-        assert_eq!(
-            inspect_agent_control(AgentControlKind::Parent, "coder session:default\n").issues(),
-            &[AgentControlIssue::InvalidValue {
-                line: 1,
-                value: "coder session:default".to_owned()
-            }]
-        );
-        assert_eq!(
-            inspect_agent_control(AgentControlKind::Status, "running\nextra\n").issues(),
-            &[
-                AgentControlIssue::InvalidValue {
-                    line: 1,
-                    value: "running".to_owned()
-                },
-                AgentControlIssue::MultipleValues { line: 2 }
-            ]
-        );
-    }
-
-    #[test]
-    fn agent_object_layout_rejects_invalid_control_values() {
-        let root = unique_test_dir("object-layout-agent-controls");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-        let control = root.join("agent").join("coder.d");
-        write_text_file(&control.join("iso"), "container\n");
-        write_text_file(&control.join("uid"), "bad\n");
-
-        let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
-        assert!(
-            report
-                .issues()
-                .contains(&ObjectLayoutIssue::InvalidControlValue {
-                    path: "agent/coder.d/iso".to_owned(),
-                    value: "container".to_owned()
-                })
-        );
-        assert!(
-            report
-                .issues()
-                .contains(&ObjectLayoutIssue::InvalidControlValue {
-                    path: "agent/coder.d/uid".to_owned(),
-                    value: "bad".to_owned()
-                })
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn agent_runtime_view_derives_identity_environment_policy_and_view() {
-        let root = unique_test_dir("agent-runtime-view");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-        let control = root.join("agent").join("coder.d");
-        write_text_file(
-            &control.join("env"),
-            "CTX_ROOT=/ignored\nHOME=/ignored\nRUST_LOG=info\n",
-        );
-
-        let view = derive_agent_runtime_view(&root, "coder");
-        assert!(view.is_ok());
-        let Ok(view) = view else { return };
-
-        assert_eq!(view.agent_name(), "coder");
-        assert_eq!(view.control_dir(), control.as_path());
-        assert_eq!(view.ctx_root(), root.as_path());
-        assert_eq!(view.ctx_home(), root.join("home").join("1000").as_path());
-        assert_eq!(
-            view.home(),
-            root.join("home")
-                .join("1000")
-                .join("agent")
-                .join("coder")
-                .as_path()
-        );
-        assert_eq!(view.owner(), 1000);
-        assert_eq!(view.identity().uid(), 1000);
-        assert_eq!(view.identity().gid(), 100);
-        assert_eq!(view.identity().groups(), &[10, 20]);
-        assert_eq!(view.label(), "user_u:agent_r:coder_t:s0");
-        assert_eq!(view.policy_subject(), "coder_t");
-        assert_eq!(view.iso(), "shared");
-        assert_eq!(view.parent(), None);
-        assert_eq!(view.lifecycle(), ChildLifecycle::Owned);
-        assert_eq!(view.root(), Path::new("/ctx/home/1000/agent/coder/root"));
-        assert_eq!(view.cwd(), Path::new("/work"));
-        assert_eq!(view.model(), "qwen");
-        assert_eq!(
-            view.tool_path().dirs(),
-            [
-                PathBuf::from("/ctx/tool"),
-                PathBuf::from("/ctx/home/1000/tool")
-            ]
-        );
-        assert_eq!(view.mount_table().entries().len(), 1);
-        assert!(view.policy().allows(
-            "coder_t",
-            PolicyObjectClass::Model,
-            "qwen",
-            PolicyPermission::Use,
-        ));
-        assert_eq!(
-            env_value(view.env(), "CTX_ROOT").map(str::to_owned),
-            Some(root.display().to_string())
-        );
-        assert_eq!(
-            env_value(view.env(), "CTX_HOME").map(str::to_owned),
-            Some(root.join("home").join("1000").display().to_string())
-        );
-        assert_eq!(
-            env_value(view.env(), "HOME").map(str::to_owned),
-            Some(
-                root.join("home")
-                    .join("1000")
-                    .join("agent")
-                    .join("coder")
-                    .display()
-                    .to_string()
-            )
-        );
-        assert_eq!(
-            env_value(view.env(), "CTX_PATH"),
-            Some("/ctx/tool:/ctx/home/1000/tool")
-        );
-        assert_eq!(env_value(view.env(), "RUST_LOG"), Some("info"));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn agent_runtime_view_rejects_invalid_control_files() {
-        let cases = [
-            ("uid", "not-a-uid\n"),
-            ("groups", "10\nbad\n"),
-            ("label", "user_u:agent_r:bad/name:s0\n"),
-            ("root", "../root\n"),
-            ("cwd", "/work/../secret\n"),
-            ("env", "1BAD=value\n"),
-            ("path", "/ctx/tool:../tool\n"),
-            ("mount", "bad\n"),
-            ("model", "bad/name\n"),
-            ("policy", "allow bad\n"),
-        ];
-
-        for (file, value) in cases {
-            let root = unique_test_dir(&format!("agent-runtime-invalid-{file}"));
-            assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-            create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-            write_text_file(&root.join("agent").join("coder.d").join(file), value);
-
-            assert_eq!(
-                derive_agent_runtime_view(&root, "coder"),
-                Err(AgentRuntimeViewError::InvalidControlFile(file.to_owned()))
-            );
-            assert_eq!(
-                AgentRuntimeViewError::InvalidControlFile(file.to_owned()).errno(),
-                "EINVAL"
-            );
-
-            let _ignored = fs::remove_dir_all(&root);
-        }
-    }
-
-    #[test]
-    fn agent_runtime_view_reports_missing_controls_and_bad_agent_names() {
-        let root = unique_test_dir("agent-runtime-missing");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-        assert_eq!(
-            derive_agent_runtime_view(&root, "bad/name"),
-            Err(AgentRuntimeViewError::InvalidAgentName)
-        );
-
-        let model = root.join("agent").join("coder.d").join("model");
-        assert!(fs::remove_file(model).is_ok());
-        assert_eq!(
-            derive_agent_runtime_view(&root, "coder"),
-            Err(AgentRuntimeViewError::MissingControlFile(
-                "model".to_owned()
-            ))
-        );
-        assert_eq!(
-            AgentRuntimeViewError::MissingControlFile("model".to_owned()).errno(),
-            "ENOENT"
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
-        let root = unique_test_dir("agent-runtime-no-text-grant");
-        let allowed = root.join("tool");
-        let env_only = root.join("env-tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
-        write_fixture_file(&env_only.join("fs.read"), 0o755);
-        write_text_file(
-            &root.join("work").join("AGENTS.md"),
-            "The agent may execute fs.read.\n",
-        );
-        write_text_file(
-            &root.join("work").join(".mcp.json"),
-            "{\"servers\":{\"fs\":{\"tools\":[\"fs.read\"]}}}\n",
-        );
-
-        let control = root.join("agent").join("coder.d");
-        write_text_file(&control.join("path"), &format!("{}\n", allowed.display()));
-        write_text_file(
-            &control.join("env"),
-            &format!("CTX_PATH={}\nAGENT_RULES=allow\n", env_only.display()),
-        );
-        write_text_file(
-            &control.join("policy"),
-            "allow coder_t tool:fs.read execute\n",
-        );
-
-        let view = derive_agent_runtime_view(&root, "coder");
-        assert!(view.is_ok());
-        let Ok(view) = view else { return };
-        assert_eq!(
-            env_value(view.env(), "CTX_PATH").map(str::to_owned),
-            Some(allowed.display().to_string())
-        );
-        assert_eq!(env_value(view.env(), "AGENT_RULES"), Some("allow"));
-
-        let metadata = fs::metadata(env_only.join("fs.read"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_target(&env_only, "rw", "bind,nosuid,nodev");
-        let tool_policy = allow_tool_policy("coder_t", "fs.read");
-        let denied = authorize_tool_execution(
-            view.tool_path(),
-            "fs.read",
-            ToolExecutionAuthority::new(
-                &identity,
-                &mounts,
-                view.policy_subject(),
-                view.policy(),
-                &tool_policy,
-            ),
-        );
-        assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_peer_credentials_come_from_kernel() {
-        let pair = UnixStream::pair();
-        assert!(pair.is_ok());
-        let Ok((left, right)) = pair else { return };
-
-        let left_peer = peer_credentials(&left);
-        let right_peer = peer_credentials(&right);
-        assert!(left_peer.is_ok());
-        assert!(right_peer.is_ok());
-        let Ok(left_peer) = left_peer else { return };
-        let Ok(right_peer) = right_peer else { return };
-
-        assert_eq!(left_peer.uid(), right_peer.uid());
-        assert_eq!(left_peer.gid(), right_peer.gid());
-        assert!(left_peer.pid().is_some());
-        assert!(SocketPeerPolicy::uid(left_peer.uid()).allows(left_peer));
-        assert!(SocketPeerPolicy::gid(left_peer.gid()).allows(left_peer));
-        assert!(SocketPeerPolicy::uid_gid(left_peer.uid(), left_peer.gid()).allows(left_peer));
-    }
-
-    #[test]
-    fn socket_peer_policy_rejects_mismatched_identity() {
-        let peer = PeerCredentials::new(Some(1), 1000, 100);
-        assert!(SocketPeerPolicy::uid(1000).allows(peer));
-        assert!(SocketPeerPolicy::gid(100).allows(peer));
-        assert!(SocketPeerPolicy::uid_gid(1000, 100).allows(peer));
-        assert!(!SocketPeerPolicy::uid(1001).allows(peer));
-        assert!(!SocketPeerPolicy::gid(101).allows(peer));
-        assert!(!SocketPeerPolicy::uid_gid(1000, 101).allows(peer));
-    }
-
-    #[test]
-    fn socket_request_parser_accepts_stable_request_frames() {
-        assert_eq!(
-            parse_socket_request_frame(
-                r#"{"op":"send","id":"msg-1","session":"default","scope":"shared","cwd":"/work","input":"hello","thread_id":"ignored"}
-"#
-            ),
-            Ok(SocketRequest::Send {
-                id: "msg-1".to_owned(),
-                session: "default".to_owned(),
-                scope: SocketSessionScope::Shared,
-                cwd: Some("/work".to_owned()),
-                input: "hello".to_owned()
-            })
-        );
-        assert_eq!(
-            parse_socket_request_frame(
-                r#"{"op":"resume","session":"default","after":"event-123"}"#
-            ),
-            Ok(SocketRequest::Resume {
-                session: "default".to_owned(),
-                after: Some("event-123".to_owned())
-            })
-        );
-        assert_eq!(
-            parse_socket_request_frame(r#"{"op":"cancel","id":"run-1"}"#),
-            Ok(SocketRequest::Cancel {
-                id: "run-1".to_owned()
-            })
-        );
-        assert_eq!(
-            parse_socket_request_frame(r#"{"op":"ping"}"#),
-            Ok(SocketRequest::Ping)
-        );
-    }
-
-    #[test]
-    fn socket_request_parser_defaults_session_and_scope() {
-        assert_eq!(
-            parse_socket_request_frame(r#"{"op":"send","id":"msg-1","input":"hello"}"#),
-            Ok(SocketRequest::Send {
-                id: "msg-1".to_owned(),
-                session: "default".to_owned(),
-                scope: SocketSessionScope::Private,
-                cwd: None,
-                input: "hello".to_owned()
-            })
-        );
-        assert_eq!(
-            parse_socket_request_frame(r#"{"op":"resume"}"#),
-            Ok(SocketRequest::Resume {
-                session: "default".to_owned(),
-                after: None
-            })
-        );
-        assert_eq!(SocketSessionScope::Temp.as_str(), "temp");
-    }
-
-    #[test]
-    fn socket_request_parser_reports_stable_errno_for_bad_frames() {
-        let oversized = "x".repeat(MAX_SOCKET_FRAME_BYTES + 1);
-        let error = parse_socket_request_frame(&oversized);
-        assert!(matches!(
-            error,
-            Err(SocketRequestError::FrameTooLarge { bytes }) if bytes == MAX_SOCKET_FRAME_BYTES + 1
-        ));
-        assert_eq!(
-            error.err().as_ref().map(SocketRequestError::errno),
-            Some("EMSGSIZE")
-        );
-
-        let invalid = parse_socket_request_frame("{}");
-        assert_eq!(invalid, Err(SocketRequestError::MissingOp));
-        assert_eq!(
-            invalid.err().as_ref().map(SocketRequestError::errno),
-            Some("EINVAL")
-        );
-    }
-
-    #[test]
-    fn socket_request_parser_rejects_invalid_ops_and_fields() {
-        assert_eq!(
-            parse_socket_request_frame(""),
-            Err(SocketRequestError::EmptyFrame)
-        );
-        assert_eq!(
-            parse_socket_request_frame("{\"op\":\"ping\"}\n{\"op\":\"ping\"}\n"),
-            Err(SocketRequestError::MultipleFrames)
-        );
-        assert_eq!(
-            parse_socket_request_frame("[1]"),
-            Err(SocketRequestError::RequestNotObject)
-        );
-        assert_eq!(
-            parse_socket_request_frame(r#"{"op":"native_thread"}"#),
-            Err(SocketRequestError::UnknownOp("native_thread".to_owned()))
-        );
-        assert_eq!(
-            parse_socket_request_frame(r#"{"op":"send","id":"bad/id","input":"hello"}"#),
-            Err(SocketRequestError::InvalidField {
-                field: "id",
-                value: "bad/id".to_owned()
-            })
-        );
-        assert_eq!(
-            parse_socket_request_frame(
-                r#"{"op":"send","id":"msg-1","scope":"global","input":"hello"}"#
-            ),
-            Err(SocketRequestError::InvalidField {
-                field: "scope",
-                value: "global".to_owned()
-            })
-        );
-        assert_eq!(
-            parse_socket_request_frame(
-                r#"{"op":"send","id":"msg-1","cwd":"/work/../secret","input":"hello"}"#
-            ),
-            Err(SocketRequestError::InvalidField {
-                field: "cwd",
-                value: "/work/../secret".to_owned()
-            })
-        );
-        assert_eq!(
-            parse_socket_request_frame(r#"{"op":"send","id":"msg-1","input":42}"#),
-            Err(SocketRequestError::MissingStringField("input"))
-        );
-    }
-
-    #[test]
-    fn socket_session_recorder_appends_send_to_durable_history() {
-        let root = unique_test_dir("socket-session-send");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(&session.join("messages.jsonl"), "");
-        write_text_file(&session.join("events.jsonl"), "");
-
-        let request = parse_socket_request_frame(
-            r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
-        );
-        assert!(request.is_ok());
-        let Ok(request) = request else { return };
-        let recorded = record_socket_request_to_session(&session, &request);
-        assert!(recorded.is_ok());
-        let Ok(recorded) = recorded else { return };
-        assert_eq!(recorded.messages().len(), 1);
-        assert_eq!(recorded.events().len(), 1);
-
-        let messages = fs::read_to_string(session.join("messages.jsonl"));
-        assert!(messages.is_ok());
-        let Ok(messages) = messages else { return };
-        let events = fs::read_to_string(session.join("events.jsonl"));
-        assert!(events.is_ok());
-        let Ok(events) = events else { return };
-        assert!(inspect_message_stream_jsonl(&messages).is_ok());
-        assert!(inspect_event_stream_jsonl(&events).is_ok());
-        assert!(messages.contains("\"role\":\"user\""));
-        assert!(messages.contains("\"content\":\"hello\""));
-        assert!(events.contains("\"type\":\"start\""));
-        let state = fs::read_to_string(session.join("state"));
-        assert!(state.is_ok());
-        let Ok(state) = state else { return };
-        assert_eq!(state, "active\n");
-        let cwd = fs::read_to_string(session.join("cwd"));
-        assert!(cwd.is_ok());
-        let Ok(cwd) = cwd else { return };
-        assert_eq!(cwd, "/work/project\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_session_recorder_cancels_without_deleting_history() {
-        let root = unique_test_dir("socket-session-cancel");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(
-            &session.join("messages.jsonl"),
-            "{\"role\":\"user\",\"content\":\"keep me\"}\n",
-        );
-        write_text_file(&session.join("events.jsonl"), "");
-
-        let request = parse_socket_request_frame(r#"{"op":"cancel","id":"run-1"}"#);
-        assert!(request.is_ok());
-        let Ok(request) = request else { return };
-        let recorded = record_socket_request_to_session(&session, &request);
-        assert!(recorded.is_ok());
-        let Ok(recorded) = recorded else { return };
-        assert!(recorded.messages().is_empty());
-        assert_eq!(recorded.events().len(), 1);
-
-        let messages = fs::read_to_string(session.join("messages.jsonl"));
-        assert!(messages.is_ok());
-        let Ok(messages) = messages else { return };
-        let events = fs::read_to_string(session.join("events.jsonl"));
-        assert!(events.is_ok());
-        let Ok(events) = events else { return };
-        assert_eq!(messages, "{\"role\":\"user\",\"content\":\"keep me\"}\n");
-        assert!(inspect_event_stream_jsonl(&events).is_ok());
-        assert!(events.contains("\"status\":\"cancelled\""));
-        let state = fs::read_to_string(session.join("state"));
-        assert!(state.is_ok());
-        let Ok(state) = state else { return };
-        assert_eq!(state, "cancelled\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn assistant_response_recorder_updates_latest_without_replacing_history() {
-        let root = unique_test_dir("assistant-response-record");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(
-            &session.join("messages.jsonl"),
-            "{\"role\":\"user\",\"content\":\"hello\"}\n",
-        );
-        write_text_file(
-            &session.join("events.jsonl"),
-            "{\"type\":\"start\",\"id\":\"run-1\",\"run\":\"run-1\"}\n",
-        );
-        write_text_file(&session.join("latest.md"), "old\n");
-
-        let recorded = record_assistant_response_to_session(&session, "run-1", "hello back");
-        assert!(recorded.is_ok());
-        let Ok(recorded) = recorded else { return };
-        assert_eq!(recorded.messages().len(), 1);
-        assert_eq!(recorded.events().len(), 2);
-
-        let messages = fs::read_to_string(session.join("messages.jsonl"));
-        assert!(messages.is_ok());
-        let Ok(messages) = messages else { return };
-        let events = fs::read_to_string(session.join("events.jsonl"));
-        assert!(events.is_ok());
-        let Ok(events) = events else { return };
-        let latest = fs::read_to_string(session.join("latest.md"));
-        assert!(latest.is_ok());
-        let Ok(latest) = latest else { return };
-        let state = fs::read_to_string(session.join("state"));
-        assert!(state.is_ok());
-        let Ok(state) = state else { return };
-
-        assert!(inspect_message_stream_jsonl(&messages).is_ok());
-        assert!(inspect_event_stream_jsonl(&events).is_ok());
-        assert!(messages.contains("\"role\":\"user\""));
-        assert!(messages.contains("\"role\":\"assistant\""));
-        assert!(events.contains("\"type\":\"message\""));
-        assert!(events.contains("\"status\":\"ok\""));
-        assert_eq!(latest, "hello back\n");
-        assert_eq!(state, "done\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_denial_recorder_makes_permission_failure_inspectable() {
-        let root = unique_test_dir("tool-denial-record");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(
-            &session.join("events.jsonl"),
-            "{\"type\":\"start\",\"id\":\"run-1\",\"run\":\"run-1\"}\n",
-        );
-
-        let recorded = record_tool_execution_denial_to_session(
-            &session,
-            "run-1",
-            "fs.read",
-            ToolExecutionDenial::AgentPolicy,
-        );
-        assert!(recorded.is_ok());
-        let Ok(recorded) = recorded else { return };
-        assert!(recorded.messages().is_empty());
-        assert_eq!(recorded.events().len(), 2);
-
-        let events = fs::read_to_string(session.join("events.jsonl"));
-        assert!(events.is_ok());
-        let Ok(events) = events else { return };
-        let state = fs::read_to_string(session.join("state"));
-        assert!(state.is_ok());
-        let Ok(state) = state else { return };
-
-        assert!(inspect_event_stream_jsonl(&events).is_ok());
-        assert!(events.contains("\"type\":\"error\""));
-        assert!(events.contains("\"tool\":\"fs.read\""));
-        assert!(events.contains("\"code\":\"EACCES\""));
-        assert!(events.contains("\"status\":\"error\""));
-        assert_eq!(state, "error\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_denial_recorder_rejects_invalid_tool_names() {
-        let root = unique_test_dir("tool-denial-record-bad");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-
-        assert_eq!(
-            record_tool_execution_denial_to_session(
-                &session,
-                "run-1",
-                "bad/tool",
-                ToolExecutionDenial::InvalidToolName,
-            ),
-            Err(SocketSessionRecordError::InvalidField("tool"))
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_result_recorder_appends_inspectable_tool_message_and_event() {
-        let root = unique_test_dir("tool-result-record");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(
-            &session.join("messages.jsonl"),
-            "{\"role\":\"user\",\"content\":\"read README\"}\n",
-        );
-        write_text_file(
-            &session.join("events.jsonl"),
-            "{\"type\":\"start\",\"id\":\"run-1\",\"run\":\"run-1\"}\n",
-        );
-
-        let recorded = record_tool_execution_result_to_session(
-            &session,
-            "run-1",
-            "call-1",
-            "fs.read",
-            "file contents",
-        );
-        assert!(recorded.is_ok());
-        let Ok(recorded) = recorded else { return };
-        assert_eq!(recorded.messages().len(), 1);
-        assert_eq!(recorded.events().len(), 1);
-
-        let messages = fs::read_to_string(session.join("messages.jsonl"));
-        assert!(messages.is_ok());
-        let Ok(messages) = messages else { return };
-        let events = fs::read_to_string(session.join("events.jsonl"));
-        assert!(events.is_ok());
-        let Ok(events) = events else { return };
-
-        assert!(inspect_message_stream_jsonl(&messages).is_ok());
-        assert!(inspect_event_stream_jsonl(&events).is_ok());
-        assert!(messages.contains("\"role\":\"tool\""));
-        assert!(messages.contains("\"type\":\"tool_result\""));
-        assert!(messages.contains("\"tool_call_id\":\"call-1\""));
-        assert!(events.contains("\"name\":\"fs.read\""));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_result_recorder_rejects_invalid_fields_without_executing() {
-        let root = unique_test_dir("tool-result-record-bad");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-
-        assert_eq!(
-            record_tool_execution_result_to_session(
-                &session, "run-1", "call-1", "bad/tool", "content",
-            ),
-            Err(SocketSessionRecordError::InvalidField("tool"))
-        );
-        assert_eq!(
-            record_tool_execution_result_to_session(
-                &session,
-                "run-1",
-                "call-1",
-                "fs.read",
-                "bad\0content",
-            ),
-            Err(SocketSessionRecordError::InvalidField("content"))
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
-        let root = unique_test_dir("socket-session-reject");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-
-        let temp = parse_socket_request_frame(
-            r#"{"op":"send","id":"msg-1","session":"default","scope":"temp","input":"hello"}"#,
-        );
-        assert!(temp.is_ok());
-        let Ok(temp) = temp else { return };
-        assert_eq!(
-            record_socket_request_to_session(&session, &temp),
-            Err(SocketSessionRecordError::TempSessionNotDurable)
-        );
-
-        let resume = parse_socket_request_frame(r#"{"op":"resume","session":"default"}"#);
-        assert!(resume.is_ok());
-        let Ok(resume) = resume else { return };
-        assert_eq!(
-            record_socket_request_to_session(&session, &resume),
-            Err(SocketSessionRecordError::UnsupportedRequest)
-        );
-
-        let mismatch = parse_socket_request_frame(
-            r#"{"op":"send","id":"msg-2","session":"other","input":"hello"}"#,
-        );
-        assert!(mismatch.is_ok());
-        let Ok(mismatch) = mismatch else { return };
-        assert_eq!(
-            record_socket_request_to_session(&session, &mismatch),
-            Err(SocketSessionRecordError::SessionMismatch)
-        );
-        assert_eq!(SocketSessionRecordError::SessionMismatch.errno(), "EINVAL");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn indexed_socket_send_records_history_and_updates_session_index() {
-        let root = unique_test_dir("indexed-socket-send");
-        let session_root = root.join("session");
-        let session = session_root.join("default");
-        let previous = session_root.join("review-1");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        create_complete_session_layout(&previous);
-        write_text_file(&session.join("messages.jsonl"), "");
-        write_text_file(&session.join("events.jsonl"), "");
-        write_text_file(
-            &session_root.join("index").join("list"),
-            "review-1\ndefault\n",
-        );
-        write_text_file(&session_root.join("index").join("current"), "review-1\n");
-        assert!(fs::create_dir_all(session_root.join("index").join("by-cwd")).is_ok());
-
-        let request = parse_socket_request_frame(
-            r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
-        );
-        assert!(request.is_ok());
-        let Ok(request) = request else { return };
-        let recorded = record_indexed_socket_send_to_session(&session_root, &request);
-        assert!(recorded.is_ok());
-        let Ok(recorded) = recorded else { return };
-        assert_eq!(recorded.messages().len(), 1);
-        assert_eq!(recorded.events().len(), 1);
-
-        let by_cwd_key = session_index_key_for_cwd("/work/project");
-        assert!(by_cwd_key.is_some());
-        let Some(by_cwd_key) = by_cwd_key else { return };
-        let messages = fs::read_to_string(session.join("messages.jsonl"));
-        assert!(messages.is_ok());
-        let Ok(messages) = messages else { return };
-        let events = fs::read_to_string(session.join("events.jsonl"));
-        assert!(events.is_ok());
-        let Ok(events) = events else { return };
-        let list = fs::read_to_string(session_root.join("index").join("list"));
-        assert!(list.is_ok());
-        let Ok(list) = list else { return };
-        let current = fs::read_to_string(session_root.join("index").join("current"));
-        assert!(current.is_ok());
-        let Ok(current) = current else { return };
-        let by_cwd = fs::read_to_string(session_root.join("index").join("by-cwd").join(by_cwd_key));
-        assert!(by_cwd.is_ok());
-        let Ok(by_cwd) = by_cwd else { return };
-
-        assert!(messages.contains("\"role\":\"user\""));
-        assert!(events.contains("\"type\":\"start\""));
-        assert_eq!(list, "default\nreview-1\n");
-        assert_eq!(current, "default\n");
-        assert_eq!(by_cwd, "default\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn indexed_socket_send_rejects_non_send_requests() {
-        let root = unique_test_dir("indexed-socket-non-send");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-
-        let resume = parse_socket_request_frame(r#"{"op":"resume","session":"default"}"#);
-        assert!(resume.is_ok());
-        let Ok(resume) = resume else { return };
-        assert_eq!(
-            record_indexed_socket_send_to_session(&session_root, &resume),
-            Err(IndexedSocketSessionRecordError::Session(
-                SocketSessionRecordError::UnsupportedRequest
-            ))
-        );
-
-        let cancel = parse_socket_request_frame(r#"{"op":"cancel","id":"run-1"}"#);
-        assert!(cancel.is_ok());
-        let Ok(cancel) = cancel else { return };
-        assert_eq!(
-            record_indexed_socket_send_to_session(&session_root, &cancel),
-            Err(IndexedSocketSessionRecordError::Session(
-                SocketSessionRecordError::UnsupportedRequest
-            ))
-        );
-
-        let ping = parse_socket_request_frame(r#"{"op":"ping"}"#);
-        assert!(ping.is_ok());
-        let Ok(ping) = ping else { return };
-        assert_eq!(
-            record_indexed_socket_send_to_session(&session_root, &ping),
-            Err(IndexedSocketSessionRecordError::Session(
-                SocketSessionRecordError::UnsupportedRequest
-            ))
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn indexed_socket_send_rejects_temp_sessions_before_index_update() {
-        let root = unique_test_dir("indexed-socket-temp");
-        let session_root = root.join("session");
-        let session = session_root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(&session_root.join("index").join("list"), "default\n");
-        write_text_file(&session_root.join("index").join("current"), "default\n");
-        assert!(fs::create_dir_all(session_root.join("index").join("by-cwd")).is_ok());
-
-        let temp = parse_socket_request_frame(
-            r#"{"op":"send","id":"msg-1","session":"default","scope":"temp","cwd":"/work","input":"hello"}"#,
-        );
-        assert!(temp.is_ok());
-        let Ok(temp) = temp else { return };
-        assert_eq!(
-            record_indexed_socket_send_to_session(&session_root, &temp),
-            Err(IndexedSocketSessionRecordError::Session(
-                SocketSessionRecordError::TempSessionNotDurable
-            ))
-        );
-        let list = fs::read_to_string(session_root.join("index").join("list"));
-        assert!(list.is_ok());
-        let Ok(list) = list else { return };
-        assert_eq!(list, "default\n");
-        assert!(
-            !session_root
-                .join("index")
-                .join("by-cwd")
-                .join("cwd")
-                .exists()
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn durable_session_layout_helper_creates_inspectable_session_and_index() {
-        let root = unique_test_dir("durable-session-layout");
-        let session_root = root.join("session");
-        let session = session_root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-
-        let ensured = ensure_durable_session_layout(
-            &session_root,
-            "default",
-            "/work/project",
-            Some("qwen"),
-            SocketSessionScope::Private,
-        );
-        assert_eq!(ensured, Ok(()));
-        assert!(inspect_session_layout(&session).is_ok());
-
-        let list = fs::read_to_string(session_root.join("index").join("list"));
-        assert!(list.is_ok());
-        let Ok(list) = list else { return };
-        let current = fs::read_to_string(session_root.join("index").join("current"));
-        assert!(current.is_ok());
-        let Ok(current) = current else { return };
-        let meta = fs::read_to_string(session.join("meta.json"));
-        assert!(meta.is_ok());
-        let Ok(meta) = meta else { return };
-        let pack = fs::read_to_string(session.join("context").join("pack.json"));
-        assert!(pack.is_ok());
-        let Ok(pack) = pack else { return };
-
-        assert_eq!(list, "default\n");
-        assert_eq!(current, "default\n");
-        assert!(meta.contains("\"model\":\"qwen\""));
-        assert!(meta.contains("\"scope\":\"private\""));
-        assert!(inspect_context_pack_json(&pack).is_ok());
-
-        let request = parse_socket_request_frame(
-            r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
-        );
-        assert!(request.is_ok());
-        let Ok(request) = request else { return };
-        assert!(record_indexed_socket_send_to_session(&session_root, &request).is_ok());
-        let state = fs::read_to_string(session.join("state"));
-        assert!(state.is_ok());
-        let Ok(state) = state else { return };
-        assert_eq!(state, "active\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn durable_session_layout_helper_rejects_invalid_durable_inputs() {
-        let root = unique_test_dir("durable-session-layout-invalid");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-
-        assert_eq!(
-            ensure_durable_session_layout(
-                &session_root,
-                "bad/name",
-                "/work",
-                None,
-                SocketSessionScope::Private,
-            ),
-            Err(DurableSessionLayoutError::InvalidSessionName)
-        );
-        assert_eq!(
-            ensure_durable_session_layout(
-                &session_root,
-                "default",
-                "../host",
-                None,
-                SocketSessionScope::Private,
-            ),
-            Err(DurableSessionLayoutError::InvalidCwd)
-        );
-        assert_eq!(
-            ensure_durable_session_layout(
-                &session_root,
-                "default",
-                "/work",
-                Some("bad/model"),
-                SocketSessionScope::Private,
-            ),
-            Err(DurableSessionLayoutError::InvalidModelName)
-        );
-        assert_eq!(
-            ensure_durable_session_layout(
-                &session_root,
-                "default",
-                "/work",
-                None,
-                SocketSessionScope::Temp,
-            ),
-            Err(DurableSessionLayoutError::TempSessionNotDurable)
-        );
-        assert_eq!(DurableSessionLayoutError::InvalidCwd.errno(), "EINVAL");
-        assert!(!session_root.exists());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_runtime_handles_ping_send_resume_and_cancel() {
-        let root = unique_test_dir("socket-runtime");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-
-        let ping =
-            handle_socket_request_frame(&session_root, "/work", Some("qwen"), r#"{"op":"ping"}"#);
-        assert!(ping.is_ok());
-        let Ok(ping) = ping else { return };
-        assert_eq!(ping.jsonl(), "{\"type\":\"pong\"}\n");
-
-        let send = handle_socket_request_frame(
-            &session_root,
-            "/work",
-            Some("qwen"),
-            r#"{"op":"send","id":"msg-1","session":"default","input":"hello"}"#,
-        );
-        assert!(send.is_ok());
-        let Ok(send) = send else { return };
-        assert_eq!(send.frames().len(), 1);
-        assert!(send.jsonl().contains("\"type\":\"start\""));
-        assert!(send.jsonl().contains("\"run\":\"msg-1\""));
-        assert!(inspect_session_layout(&session_root.join("default")).is_ok());
-
-        let second = handle_socket_request_frame(
-            &session_root,
-            "/work",
-            Some("qwen"),
-            r#"{"op":"send","id":"msg-2","session":"default","input":"again"}"#,
-        );
-        assert!(second.is_ok());
-
-        let resume_all = handle_socket_request_frame(
-            &session_root,
-            "/work",
-            Some("qwen"),
-            r#"{"op":"resume","session":"default"}"#,
-        );
-        assert!(resume_all.is_ok());
-        let Ok(resume_all) = resume_all else { return };
-        assert_eq!(resume_all.frames().len(), 2);
-        assert!(resume_all.jsonl().contains("\"run\":\"msg-1\""));
-        assert!(resume_all.jsonl().contains("\"run\":\"msg-2\""));
-
-        let resume_after = handle_socket_request_frame(
-            &session_root,
-            "/work",
-            Some("qwen"),
-            r#"{"op":"resume","session":"default","after":"msg-1"}"#,
-        );
-        assert!(resume_after.is_ok());
-        let Ok(resume_after) = resume_after else {
-            return;
-        };
-        assert_eq!(resume_after.frames().len(), 1);
-        assert!(!resume_after.jsonl().contains("\"run\":\"msg-1\""));
-        assert!(resume_after.jsonl().contains("\"run\":\"msg-2\""));
-
-        let cancel = handle_socket_request_frame(
-            &session_root,
-            "/work",
-            Some("qwen"),
-            r#"{"op":"cancel","id":"msg-2"}"#,
-        );
-        assert!(cancel.is_ok());
-        let Ok(cancel) = cancel else { return };
-        assert!(cancel.jsonl().contains("\"status\":\"cancelled\""));
-        let state = fs::read_to_string(session_root.join("default").join("state"));
-        assert!(state.is_ok());
-        let Ok(state) = state else { return };
-        assert_eq!(state, "cancelled\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_runtime_temp_send_does_not_create_durable_session() {
-        let root = unique_test_dir("socket-runtime-temp");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-
-        let send = handle_socket_request_frame(
-            &session_root,
-            "/work",
-            Some("qwen"),
-            r#"{"op":"send","id":"msg-1","session":"scratch","scope":"temp","input":"hello"}"#,
-        );
-        assert!(send.is_ok());
-        let Ok(send) = send else { return };
-        assert_eq!(send.frames().len(), 1);
-        assert!(send.jsonl().contains("\"type\":\"start\""));
-        assert!(send.jsonl().contains("\"model\":\"qwen\""));
-        assert!(!session_root.exists());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_runtime_errors_convert_to_stable_error_frames() {
-        let root = unique_test_dir("socket-runtime-error");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-
-        let error = handle_socket_request_frame(
-            &session_root,
-            "/work/../bad",
-            Some("qwen"),
-            r#"{"op":"send","id":"msg-1","session":"default","input":"hello"}"#,
-        );
-        assert_eq!(
-            error,
-            Err(SocketRuntimeError::SessionLayout(
-                DurableSessionLayoutError::InvalidCwd
-            ))
-        );
-        let Err(error) = error else { return };
-        let response = socket_runtime_error_response(&error);
-        assert_eq!(
-            response.jsonl(),
-            "{\"code\":\"EINVAL\",\"message\":\"EINVAL\",\"type\":\"error\"}\n"
-        );
-        let Some(frame) = response.frames().first() else {
-            return;
-        };
-        let parsed = serde_json::from_str::<serde_json::Value>(frame);
-        assert!(parsed.is_ok());
-        let Ok(parsed) = parsed else { return };
-        assert_eq!(
-            parsed.get("type").and_then(serde_json::Value::as_str),
-            Some("error")
-        );
-        assert_eq!(
-            parsed.get("code").and_then(serde_json::Value::as_str),
-            Some("EINVAL")
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
-        let root = unique_test_dir("socket-stream-runtime");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        let pair = UnixStream::pair();
-        assert!(pair.is_ok());
-        let Ok((mut client, mut socket)) = pair else {
-            return;
-        };
-        let peer = peer_credentials(&socket);
-        assert!(peer.is_ok());
-        let Ok(peer) = peer else { return };
-        let policy = SocketPeerPolicy::uid_gid(peer.uid(), peer.gid());
-
-        assert!(
-            client
-                .write_all(
-                    br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
-"#,
-                )
-                .is_ok()
-        );
-        assert!(client.shutdown(Shutdown::Write).is_ok());
-
-        let outcome = serve_unix_socket_stream_once(
-            &mut socket,
-            Some(policy),
-            &session_root,
-            "/work",
-            Some("qwen"),
-        );
-        assert!(outcome.is_ok());
-        let Ok(outcome) = outcome else { return };
-        assert_eq!(outcome.frames().len(), 1);
-
-        let mut buffer = [0_u8; 256];
-        let read = client.read(&mut buffer);
-        assert!(read.is_ok());
-        let Ok(read) = read else { return };
-        let Some(bytes) = buffer.get(..read) else {
-            return;
-        };
-        let response = String::from_utf8_lossy(bytes);
-        assert!(response.contains("\"type\":\"start\""));
-        assert!(response.contains("\"run\":\"msg-1\""));
-        assert!(inspect_session_layout(&session_root.join("default")).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
-        let root = unique_test_dir("socket-stream-runtime-deny");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        let pair = UnixStream::pair();
-        assert!(pair.is_ok());
-        let Ok((mut client, mut socket)) = pair else {
-            return;
-        };
-        let peer = peer_credentials(&socket);
-        assert!(peer.is_ok());
-        let Ok(peer) = peer else { return };
-        let denied_uid = if peer.uid() == u32::MAX {
-            peer.uid() - 1
-        } else {
-            peer.uid() + 1
-        };
-        let policy = SocketPeerPolicy::uid(denied_uid);
-
-        assert!(
-            client
-                .write_all(
-                    br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
-"#,
-                )
-                .is_ok()
-        );
-        assert!(client.shutdown(Shutdown::Write).is_ok());
-
-        let outcome = serve_unix_socket_stream_once(
-            &mut socket,
-            Some(policy),
-            &session_root,
-            "/work",
-            Some("qwen"),
-        );
-        assert_eq!(outcome, Err(SocketRuntimeError::PeerDenied));
-
-        let mut buffer = [0_u8; 256];
-        let read = client.read(&mut buffer);
-        assert!(read.is_ok());
-        let Ok(read) = read else { return };
-        let Some(bytes) = buffer.get(..read) else {
-            return;
-        };
-        let response = String::from_utf8_lossy(bytes);
-        assert!(response.contains("\"type\":\"error\""));
-        assert!(response.contains("\"code\":\"EACCES\""));
-        assert!(!session_root.exists());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn socket_listener_runtime_accepts_and_serves_one_connection() {
-        let root = unique_test_dir("socket-listener-runtime");
-        let session_root = root.join("session");
-        let socket_path = root.join("agent.sock");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(&root).is_ok());
-        let listener = UnixListener::bind(&socket_path);
-        assert!(listener.is_ok());
-        let Ok(listener) = listener else { return };
-
-        let client = UnixStream::connect(&socket_path);
-        assert!(client.is_ok());
-        let Ok(mut client) = client else { return };
-        assert!(
-            client
-                .write_all(
-                    br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
-"#,
-                )
-                .is_ok()
-        );
-        assert!(client.shutdown(Shutdown::Write).is_ok());
-
-        let outcome =
-            serve_unix_socket_listener_once(&listener, None, &session_root, "/work", Some("qwen"));
-        assert!(outcome.is_ok());
-        let Ok(outcome) = outcome else { return };
-        assert_eq!(outcome.frames().len(), 1);
-
-        let mut buffer = [0_u8; 256];
-        let read = client.read(&mut buffer);
-        assert!(read.is_ok());
-        let Ok(read) = read else { return };
-        let Some(bytes) = buffer.get(..read) else {
-            return;
-        };
-        let response = String::from_utf8_lossy(bytes);
-        assert!(response.contains("\"type\":\"start\""));
-        assert!(response.contains("\"run\":\"msg-1\""));
-        assert!(inspect_session_layout(&session_root.join("default")).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn agent_executable_socket_runtime_returns_visible_message() {
-        let root = unique_test_dir("agent-executable-socket-runtime");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-        let session_root = root
-            .join("home")
-            .join("1000")
-            .join("agent")
-            .join("coder")
-            .join("session");
-        let agent_executable = root.join("agent").join("coder");
-        let pair = UnixStream::pair();
-        assert!(pair.is_ok());
-        let Ok((mut client, mut socket)) = pair else {
-            return;
-        };
-
-        assert!(
-            client
-                .write_all(
-                    br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
-"#,
-                )
-                .is_ok()
-        );
-        assert!(client.shutdown(Shutdown::Write).is_ok());
-
-        let outcome = serve_agent_executable_socket_stream_once(
-            &mut socket,
-            None,
-            AgentExecutableSocketRuntime {
-                session_root: &session_root,
-                default_cwd: "/work",
-                model: Some("qwen"),
-                agent_name: "coder",
-                agent_executable: &agent_executable,
-            },
-        );
-        assert!(outcome.is_ok());
-        let Ok(outcome) = outcome else { return };
-        assert_eq!(outcome.frames().len(), 3);
-        assert!(outcome.jsonl().contains("\"type\":\"start\""));
-        assert!(outcome.jsonl().contains("\"type\":\"delta\""));
-        assert!(outcome.jsonl().contains("\"text\":\"hi\""));
-        assert!(outcome.jsonl().contains("\"type\":\"done\""));
-
-        let mut buffer = [0_u8; 512];
-        let read = client.read(&mut buffer);
-        assert!(read.is_ok());
-        let Ok(read) = read else { return };
-        let Some(bytes) = buffer.get(..read) else {
-            return;
-        };
-        let response = String::from_utf8_lossy(bytes);
-        assert!(response.contains("\"type\":\"delta\""));
-        assert!(response.contains("\"text\":\"hi\""));
-        let latest = fs::read_to_string(session_root.join("default").join("latest.md"));
-        assert!(latest.is_ok());
-        assert_eq!(latest.unwrap_or_default(), "hi\n");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn policy_v0_allows_only_exact_rules() {
-        let parsed = PolicyV0::parse(
-            "\
-allow coder_t tool:fs.read execute
-allow coder_t model:qwen use
-allow coder_t shared:project-a read
-",
-        );
-        assert!(parsed.is_ok());
-        let Ok(policy) = parsed else { return };
-
-        assert!(policy.allows(
-            "coder_t",
-            PolicyObjectClass::Tool,
-            "fs.read",
-            PolicyPermission::Execute
-        ));
-        assert!(policy.allows(
-            "coder_t",
-            PolicyObjectClass::Model,
-            "qwen",
-            PolicyPermission::Use
-        ));
-        assert!(!policy.allows(
-            "coder_t",
-            PolicyObjectClass::Tool,
-            "shell.exec",
-            PolicyPermission::Execute
-        ));
-        assert!(!policy.allows(
-            "reviewer_t",
-            PolicyObjectClass::Tool,
-            "fs.read",
-            PolicyPermission::Execute
-        ));
-        assert!(!policy.allows(
-            "coder_t",
-            PolicyObjectClass::Shared,
-            "project-a",
-            PolicyPermission::Write
-        ));
-    }
-
-    #[test]
-    fn policy_v0_checks_child_authority_subset() {
-        let parent = PolicyV0::parse(
-            "\
-allow coder_t tool:fs.read execute
-allow coder_t model:qwen use
-allow coder_t shared:project-a read
-allow coder_t session:default resume
-",
-        );
-        assert!(parent.is_ok());
-        let Ok(parent) = parent else { return };
-
-        let child = PolicyV0::parse(
-            "\
-allow reviewer_t tool:fs.read execute
-allow reviewer_t model:qwen use
-allow reviewer_t shared:project-a read
-",
-        );
-        assert!(child.is_ok());
-        let Ok(child) = child else { return };
-        assert!(child.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
-        assert!(!child.is_exact_subset_of(&parent));
-
-        let expanded_tool = PolicyV0::parse(
-            "\
-allow reviewer_t tool:shell.exec execute
-",
-        );
-        assert!(expanded_tool.is_ok());
-        let Ok(expanded_tool) = expanded_tool else {
-            return;
-        };
-        assert!(!expanded_tool.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
-
-        let wrong_subject = PolicyV0::parse(
-            "\
-allow other_t tool:fs.read execute
-",
-        );
-        assert!(wrong_subject.is_ok());
-        let Ok(wrong_subject) = wrong_subject else {
-            return;
-        };
-        assert!(!wrong_subject.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
-    }
-
-    #[test]
-    fn policy_v0_rejects_invalid_rules() {
-        assert_eq!(
-            PolicyRule::parse("deny coder_t tool:fs.read execute"),
-            Err(PolicyError::ExpectedAllow)
-        );
-        assert_eq!(
-            PolicyRule::parse("allow coder_t provider:openai use"),
-            Err(PolicyError::UnknownClass)
-        );
-        assert_eq!(
-            PolicyRule::parse("allow coder_t tool:fs.read use"),
-            Err(PolicyError::UnknownPermission)
-        );
-        assert_eq!(
-            PolicyRule::parse("allow coder_t tool:* execute"),
-            Err(PolicyError::InvalidName)
-        );
-        assert_eq!(
-            PolicyRule::parse("allow coder_t tool:fs.read execute extra"),
-            Err(PolicyError::WrongFieldCount)
-        );
-    }
-
-    #[test]
-    fn mount_table_parses_fixed_v0_format() {
-        let parsed = MountTable::parse(
-            "\
-/ctx\t/ctx\tro\trbind,nosuid,nodev,noexec
-/home/me/project\t/work\trw\trbind,nosuid,nodev
-/tmp\t/tmp\trw\t-
-",
-        );
-        assert!(parsed.is_ok());
-        let Ok(table) = parsed else { return };
-        assert_eq!(table.entries().len(), 3);
-
-        let Some(first) = table.entries().first() else {
-            return;
-        };
-        assert_eq!(first.source(), "/ctx");
-        assert_eq!(first.target(), "/ctx");
-        assert_eq!(first.mode(), MountMode::ReadOnly);
-        assert_eq!(
-            first.options(),
-            [
-                MountOption::RecursiveBind,
-                MountOption::NoSuid,
-                MountOption::NoDev,
-                MountOption::NoExec
-            ]
-        );
-
-        let Some(last) = table.entries().last() else {
-            return;
-        };
-        assert!(last.options().is_empty());
-    }
-
-    #[test]
-    fn mount_table_checks_child_attenuation() {
-        let parent = MountTable::parse(
-            "\
-/home/me/project\t/work\trw\trbind,nosuid,nodev
-/ctx/shared/project-a\t/shared/project-a\tro\trbind,nosuid,nodev,noexec
-",
-        );
-        assert!(parent.is_ok());
-        let Ok(parent) = parent else { return };
-
-        let narrowed = MountTable::parse(
-            "\
-/home/me/project\t/work\tro\tbind,nosuid,nodev,noexec
-/ctx/shared/project-a\t/shared/project-a\tro\tbind,nosuid,nodev,noexec
-",
-        );
-        assert!(narrowed.is_ok());
-        let Ok(narrowed) = narrowed else { return };
-        assert!(narrowed.is_subset_of(&parent));
-
-        let write_expansion = MountTable::parse(
-            "\
-/ctx/shared/project-a\t/shared/project-a\trw\tbind,nosuid,nodev,noexec
-",
-        );
-        assert!(write_expansion.is_ok());
-        let Ok(write_expansion) = write_expansion else {
-            return;
-        };
-        assert!(!write_expansion.is_subset_of(&parent));
-
-        let removed_safety = MountTable::parse(
-            "\
-/ctx/shared/project-a\t/shared/project-a\tro\tbind,nosuid,nodev
-",
-        );
-        assert!(removed_safety.is_ok());
-        let Ok(removed_safety) = removed_safety else {
-            return;
-        };
-        assert!(!removed_safety.is_subset_of(&parent));
-
-        let hidden_parent_path = MountTable::parse(
-            "\
-/secret\t/secret\tro\tbind,nosuid,nodev,noexec
-",
-        );
-        assert!(hidden_parent_path.is_ok());
-        let Ok(hidden_parent_path) = hidden_parent_path else {
-            return;
-        };
-        assert!(!hidden_parent_path.is_subset_of(&parent));
-    }
-
-    #[test]
-    fn mount_table_rejects_invalid_v0_format() {
-        assert_eq!(
-            MountEntry::parse("ctx\t/ctx\tro\trbind"),
-            Err(MountError::InvalidPath)
-        );
-        assert_eq!(
-            MountEntry::parse("/ctx\tctx\tro\trbind"),
-            Err(MountError::InvalidPath)
-        );
-        assert_eq!(
-            MountEntry::parse("/ctx\t/ctx\tbad\trbind"),
-            Err(MountError::InvalidMode)
-        );
-        assert_eq!(
-            MountEntry::parse("/ctx\t/ctx\tro\tbind,rbind"),
-            Err(MountError::ConflictingBindOption)
-        );
-        assert_eq!(
-            MountEntry::parse("/ctx\t/ctx\tro\trbind,rbind"),
-            Err(MountError::DuplicateOption)
-        );
-        assert_eq!(
-            MountEntry::parse("/ctx\t/ctx\tro\tdev"),
-            Err(MountError::InvalidOption)
-        );
-        assert_eq!(
-            MountEntry::parse("/ctx\t/ctx\tro"),
-            Err(MountError::WrongFieldCount)
-        );
-    }
-
-    #[test]
-    fn child_agent_authority_accepts_attenuated_owned_child() {
-        let parent_identity = AgentUnixIdentity::new(1000, 100, [10, 20, 30]);
-        let child_identity = AgentUnixIdentity::new(1000, 100, [10, 30]);
-        let parent_policy = PolicyV0::parse(
-            "\
-allow coder_t tool:fs.read execute
-allow coder_t model:qwen use
-allow coder_t shared:project-a read
-",
-        );
-        assert!(parent_policy.is_ok());
-        let Ok(parent_policy) = parent_policy else {
-            return;
-        };
-        let child_policy = PolicyV0::parse(
-            "\
-allow reviewer_t tool:fs.read execute
-allow reviewer_t shared:project-a read
-",
-        );
-        assert!(child_policy.is_ok());
-        let Ok(child_policy) = child_policy else {
-            return;
-        };
-        let parent_mounts = MountTable::parse(
-            "\
-/work\t/work\trw\trbind,nosuid,nodev
-/ctx/shared/project-a\t/shared/project-a\tro\trbind,nosuid,nodev,noexec
-",
-        );
-        assert!(parent_mounts.is_ok());
-        let Ok(parent_mounts) = parent_mounts else {
-            return;
-        };
-        let child_mounts = MountTable::parse(
-            "\
-/work\t/work\tro\tbind,nosuid,nodev,noexec
-/ctx/shared/project-a\t/shared/project-a\tro\tbind,nosuid,nodev,noexec
-",
-        );
-        assert!(child_mounts.is_ok());
-        let Ok(child_mounts) = child_mounts else {
-            return;
-        };
-
-        let request = ChildAgentRequest::new(
-            "reviewer",
-            "agent:coder session:default run:r123",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
-        );
-        let authority = ChildAgentAuthority::new(
-            "coder",
-            &parent_identity,
-            "coder_t",
-            &parent_policy,
-            &parent_mounts,
-        );
-        assert_eq!(authorize_child_agent(request, authority), Ok(()));
-    }
-
-    #[test]
-    fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
-        let parent_identity = AgentUnixIdentity::new(1000, 100, [10]);
-        let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
-        let expanded_identity = AgentUnixIdentity::new(1001, 100, [10]);
-        let expanded_groups = AgentUnixIdentity::new(1000, 100, [10, 20]);
-        let parent_policy = allow_tool_policy("coder_t", "fs.read");
-        let child_policy = allow_tool_policy("reviewer_t", "fs.read");
-        let expanded_policy = allow_tool_policy("reviewer_t", "shell.exec");
-        let parent_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-        assert!(parent_mounts.is_ok());
-        let Ok(parent_mounts) = parent_mounts else {
-            return;
-        };
-        let child_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-        assert!(child_mounts.is_ok());
-        let Ok(child_mounts) = child_mounts else {
-            return;
-        };
-        let expanded_mounts = MountTable::parse("/work\t/work\trw\tbind,nosuid,nodev,noexec\n");
-        assert!(expanded_mounts.is_ok());
-        let Ok(expanded_mounts) = expanded_mounts else {
-            return;
-        };
-        let authority = ChildAgentAuthority::new(
-            "coder",
-            &parent_identity,
-            "coder_t",
-            &parent_policy,
-            &parent_mounts,
-        );
-
-        let base = ChildAgentRequest::new(
-            "reviewer",
-            "agent:coder",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
-        );
-        assert_eq!(authorize_child_agent(base, authority), Ok(()));
-
-        let identity_request = ChildAgentRequest::new(
-            "reviewer",
-            "agent:coder",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(
-                &expanded_identity,
-                "reviewer_t",
-                &child_policy,
-                &child_mounts,
-            ),
-        );
-        assert_eq!(
-            authorize_child_agent(identity_request, authority),
-            Err(ChildAgentDenial::IdentityExpansion)
-        );
-
-        let group_request = ChildAgentRequest::new(
-            "reviewer",
-            "agent:coder",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(&expanded_groups, "reviewer_t", &child_policy, &child_mounts),
-        );
-        assert_eq!(
-            authorize_child_agent(group_request, authority),
-            Err(ChildAgentDenial::GroupExpansion)
-        );
-
-        let policy_request = ChildAgentRequest::new(
-            "reviewer",
-            "agent:coder",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(
-                &child_identity,
-                "reviewer_t",
-                &expanded_policy,
-                &child_mounts,
-            ),
-        );
-        assert_eq!(
-            authorize_child_agent(policy_request, authority),
-            Err(ChildAgentDenial::PolicyExpansion)
-        );
-
-        let mount_request = ChildAgentRequest::new(
-            "reviewer",
-            "agent:coder",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(
-                &child_identity,
-                "reviewer_t",
-                &child_policy,
-                &expanded_mounts,
-            ),
-        );
-        assert_eq!(
-            authorize_child_agent(mount_request, authority),
-            Err(ChildAgentDenial::MountExpansion)
-        );
-    }
-
-    #[test]
-    fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
-        let parent_identity = AgentUnixIdentity::new(1000, 100, [10]);
-        let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
-        let parent_policy = allow_tool_policy("coder_t", "fs.read");
-        let child_policy = allow_tool_policy("reviewer_t", "fs.read");
-        let parent_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-        assert!(parent_mounts.is_ok());
-        let Ok(parent_mounts) = parent_mounts else {
-            return;
-        };
-        let child_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-        assert!(child_mounts.is_ok());
-        let Ok(child_mounts) = child_mounts else {
-            return;
-        };
-        let authority = ChildAgentAuthority::new(
-            "coder",
-            &parent_identity,
-            "coder_t",
-            &parent_policy,
-            &parent_mounts,
-        );
-
-        let mismatch = ChildAgentRequest::new(
-            "reviewer",
-            "agent:planner",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
-        );
-        assert_eq!(
-            authorize_child_agent(mismatch, authority),
-            Err(ChildAgentDenial::ParentMismatch)
-        );
-
-        let bad_ref = ChildAgentRequest::new(
-            "reviewer",
-            "parent:coder",
-            ChildLifecycle::Owned,
-            ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
-        );
-        assert_eq!(
-            authorize_child_agent(bad_ref, authority),
-            Err(ChildAgentDenial::InvalidParentRef)
-        );
-
-        assert_eq!(
-            ChildLifecycle::parse("detached"),
-            Err(ChildAgentDenial::UnsupportedLifecycle)
-        );
-    }
-
-    #[test]
-    fn owned_child_cancellation_records_state_and_events_without_deleting_history() {
-        let root = unique_test_dir("owned-child-cancel");
-        let parent_session = root.join("home").join("1000").join("agent").join("coder");
-        let child_session = root.join("home").join("1000").join("agent").join("rev-123");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_text_file(&parent_session.join("events.jsonl"), "");
-        create_complete_session_layout(&child_session);
-        write_text_file(
-            &child_session.join("messages.jsonl"),
-            "{\"role\":\"user\",\"content\":\"review this\"}\n",
-        );
-        write_text_file(&child_session.join("events.jsonl"), "");
-
-        let recorded =
-            record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session);
-        assert!(recorded.is_ok());
-        let Ok(events) = recorded else { return };
-        let child_state = fs::read_to_string(child_session.join("state"));
-        assert!(child_state.is_ok());
-        let Ok(child_state) = child_state else { return };
-        assert_eq!(child_state, "cancelled\n");
-        let child_messages = fs::read_to_string(child_session.join("messages.jsonl"));
-        assert!(child_messages.is_ok());
-        let Ok(child_messages) = child_messages else {
-            return;
-        };
-        assert_eq!(
-            child_messages,
-            "{\"role\":\"user\",\"content\":\"review this\"}\n"
-        );
-
-        let parent_events = fs::read_to_string(parent_session.join("events.jsonl"));
-        assert!(parent_events.is_ok());
-        let Ok(parent_events) = parent_events else {
-            return;
-        };
-        let child_events = fs::read_to_string(child_session.join("events.jsonl"));
-        assert!(child_events.is_ok());
-        let Ok(child_events) = child_events else {
-            return;
-        };
-        assert_eq!(parent_events, format!("{}\n", events.parent_event()));
-        assert_eq!(child_events, format!("{}\n", events.child_event()));
-        assert!(inspect_event_stream_jsonl(&events.jsonl()).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn owned_child_cancellation_rejects_bad_names_and_missing_history() {
-        let root = unique_test_dir("owned-child-cancel-bad");
-        let parent_session = root.join("parent");
-        let child_session = root.join("child");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_text_file(&parent_session.join("events.jsonl"), "");
-        write_text_file(&child_session.join("events.jsonl"), "");
-        write_text_file(&child_session.join("state"), "idle\n");
-
-        assert_eq!(
-            owned_child_cancellation_events("bad/parent", "rev-123"),
-            Err(OwnedChildCancellationError::InvalidParentName)
-        );
-        assert_eq!(
-            record_owned_child_cancellation("coder", "bad/child", &parent_session, &child_session),
-            Err(OwnedChildCancellationError::InvalidChildName)
-        );
-        assert_eq!(
-            record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session),
-            Err(OwnedChildCancellationError::MissingChildHistory)
-        );
-        assert_eq!(
-            OwnedChildCancellationError::MissingChildHistory.errno(),
-            "ENOENT"
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn child_context_recorder_creates_handoff_and_result_channel() {
-        let root = unique_test_dir("child-context-record");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-
-        let handoff = record_child_handoff_to_parent_context(
-            &session,
-            "rev-2",
-            "reviewer",
-            "default",
-            "Task: review mount ABI\n",
-        );
-        assert_eq!(handoff, Ok(()));
-
-        let child = session.join("context").join("child").join("rev-2");
-        let agent = fs::read_to_string(child.join("agent"));
-        assert!(agent.is_ok());
-        let Ok(agent) = agent else { return };
-        let status = fs::read_to_string(child.join("status"));
-        assert!(status.is_ok());
-        let Ok(status) = status else { return };
-        let handoff = fs::read_to_string(child.join("handoff.md"));
-        assert!(handoff.is_ok());
-        let Ok(handoff) = handoff else { return };
-
-        assert_eq!(agent, "reviewer\n");
-        assert_eq!(status, "pending\n");
-        assert_eq!(handoff, "Task: review mount ABI\n");
-        assert!(validate_context_pack_source("context/child/rev-2/handoff.md").is_ok());
-
-        let refs = r#"{"id":"r1","path":"artifact/report.md","kind":"artifact","summary":"review report"}"#;
-        let result = record_child_result_to_parent_context(
-            &session,
-            "rev-2",
-            ChildContextStatus::Done,
-            "Summary: ok",
-            refs,
-        );
-        assert_eq!(result, Ok(()));
-
-        let result_md = fs::read_to_string(child.join("result.md"));
-        assert!(result_md.is_ok());
-        let Ok(result_md) = result_md else { return };
-        let refs_jsonl = fs::read_to_string(child.join("refs.jsonl"));
-        assert!(refs_jsonl.is_ok());
-        let Ok(refs_jsonl) = refs_jsonl else {
-            return;
-        };
-        let status = fs::read_to_string(child.join("status"));
-        assert!(status.is_ok());
-        let Ok(status) = status else { return };
-
-        assert_eq!(result_md, "Summary: ok\n");
-        assert_eq!(status, "done\n");
-        assert!(inspect_context_jsonl(ContextJsonlKind::Refs, &refs_jsonl).is_ok());
-        assert!(validate_context_pack_source("context/child/rev-2/result.md").is_ok());
-        assert!(validate_context_pack_source("context/child/rev-2/refs.jsonl").is_ok());
-        assert!(inspect_session_layout(&session).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn child_context_recorder_rejects_bad_names_status_and_refs() {
-        let root = unique_test_dir("child-context-record-bad");
-        let session = root.join("default");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-
-        assert_eq!(
-            record_child_handoff_to_parent_context(
-                &session,
-                "bad/child",
-                "reviewer",
-                "default",
-                "Task: no\n",
-            ),
-            Err(ChildContextRecordError::InvalidChildName)
-        );
-        assert_eq!(
-            record_child_handoff_to_parent_context(
-                &session,
-                "rev-2",
-                "reviewer",
-                "default",
-                "Task: no\n",
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            record_child_result_to_parent_context(
-                &session,
-                "rev-2",
-                ChildContextStatus::Pending,
-                "not terminal",
-                "",
-            ),
-            Err(ChildContextRecordError::InvalidStatus)
-        );
-        assert_eq!(
-            record_child_result_to_parent_context(
-                &session,
-                "rev-2",
-                ChildContextStatus::Done,
-                "done",
-                "{\"path\":\"../secret\"}\n",
-            ),
-            Err(ChildContextRecordError::InvalidRefs)
-        );
-        assert_eq!(ChildContextRecordError::InvalidRefs.errno(), "EINVAL");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_layout_inspector_accepts_transparent_context_tree() {
-        let root = unique_test_dir("session-layout-ok");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&root);
-
-        let report = inspect_session_layout(&root);
-        assert!(report.is_ok());
-        assert!(report.issues().is_empty());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_layout_inspector_reports_missing_and_wrong_types() {
-        let root = unique_test_dir("session-layout-bad");
-        let context = root.join("context");
-        let child = context.join("child").join("rev-1");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(root.join("messages.jsonl")).is_ok());
-        assert!(fs::create_dir_all(&child).is_ok());
-        assert!(fs::write(child.join("agent"), "reviewer\n").is_ok());
-        assert!(fs::create_dir_all(context.join("pack.md")).is_ok());
-
-        let report = inspect_session_layout(&root);
-        assert!(!report.is_ok());
-        assert!(
-            report
-                .issues()
-                .contains(&SessionLayoutIssue::NotFile("messages.jsonl".to_owned()))
-        );
-        assert!(
-            report
-                .issues()
-                .contains(&SessionLayoutIssue::MissingFile("events.jsonl".to_owned()))
-        );
-        assert!(
-            report
-                .issues()
-                .contains(&SessionLayoutIssue::NotFile("context/pack.md".to_owned()))
-        );
-        assert!(report.issues().contains(&SessionLayoutIssue::MissingFile(
-            "context/child/rev-1/result.md".to_owned()
-        )));
-        assert!(
-            report
-                .issues()
-                .contains(&SessionLayoutIssue::MissingDirectory(
-                    "context/child/rev-1/artifact".to_owned()
-                ))
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_controls_accept_fixed_v1_values() {
-        assert!(inspect_session_control(SessionControlKind::State, "active\n").is_ok());
-        assert!(inspect_session_control(SessionControlKind::State, "cancelled\n").is_ok());
-        assert!(inspect_session_control(SessionControlKind::Cwd, "/work/project\n").is_ok());
-        assert!(
-            inspect_session_control(
-                SessionControlKind::MetaJson,
-                "{\"client\":\"ctx\",\"model\":\"qwen\",\"scope\":\"shared\"}\n"
-            )
-            .is_ok()
-        );
-        assert!(inspect_session_control(SessionControlKind::MetaJson, "{}\n").is_ok());
-    }
-
-    #[test]
-    fn session_controls_reject_invalid_state_cwd_and_meta() {
-        assert_eq!(
-            inspect_session_control(SessionControlKind::State, "running\n").issues(),
-            &[SessionControlIssue::InvalidValue {
-                line: 1,
-                value: "running".to_owned()
-            }]
-        );
-        assert_eq!(
-            inspect_session_control(SessionControlKind::Cwd, "../work\n").issues(),
-            &[SessionControlIssue::InvalidValue {
-                line: 1,
-                value: "../work".to_owned()
-            }]
-        );
-        assert_eq!(
-            inspect_session_control(SessionControlKind::Cwd, "/work/../secret\n").issues(),
-            &[SessionControlIssue::InvalidValue {
-                line: 1,
-                value: "/work/../secret".to_owned()
-            }]
-        );
-        assert_eq!(
-            inspect_session_control(SessionControlKind::MetaJson, "{").issues(),
-            &[SessionControlIssue::InvalidJson]
-        );
-        assert_eq!(
-            inspect_session_control(SessionControlKind::MetaJson, "[]\n").issues(),
-            &[SessionControlIssue::NotObject]
-        );
-        assert_eq!(
-            inspect_session_control(SessionControlKind::MetaJson, "{\"scope\":\"global\"}\n")
-                .issues(),
-            &[SessionControlIssue::InvalidValue {
-                line: 1,
-                value: "global".to_owned()
-            }]
-        );
-    }
-
-    #[test]
-    fn session_layout_inspector_rejects_invalid_control_values() {
-        let root = unique_test_dir("session-layout-control-bad");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&root);
-        write_text_file(&root.join("state"), "running\n");
-        write_text_file(&root.join("cwd"), "/work/../secret\n");
-        write_text_file(&root.join("meta.json"), "{\"model\":\"bad/model\"}\n");
-
-        let report = inspect_session_layout(&root);
-        assert!(
-            report
-                .issues()
-                .contains(&SessionLayoutIssue::InvalidFileValue {
-                    path: "state".to_owned(),
-                    value: "running".to_owned()
-                })
-        );
-        assert!(
-            report
-                .issues()
-                .contains(&SessionLayoutIssue::InvalidFileValue {
-                    path: "cwd".to_owned(),
-                    value: "/work/../secret".to_owned()
-                })
-        );
-        assert!(
-            report
-                .issues()
-                .contains(&SessionLayoutIssue::InvalidFileValue {
-                    path: "meta.json".to_owned(),
-                    value: "bad/model".to_owned()
-                })
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_index_accepts_fixed_formats() {
-        assert!(inspect_session_index(SessionIndexKind::List, "default\nreview-1\n").is_ok());
-        assert!(inspect_session_index(SessionIndexKind::Current, "default\n").is_ok());
-        assert!(inspect_session_index(SessionIndexKind::ByCwd, "worktree-1").is_ok());
-        assert!(inspect_session_index(SessionIndexKind::List, "").is_ok());
-    }
-
-    #[test]
-    fn session_index_rejects_invalid_names_and_multi_value_files() {
-        let list = inspect_session_index(SessionIndexKind::List, "default\nbad/name\n\n spaced\n");
-        assert_eq!(
-            list.issues(),
-            &[
-                SessionIndexIssue::InvalidSessionName {
-                    line: 2,
-                    value: "bad/name".to_owned()
-                },
-                SessionIndexIssue::EmptyValue { line: 3 },
-                SessionIndexIssue::InvalidSessionName {
-                    line: 4,
-                    value: "spaced".to_owned()
-                }
-            ]
-        );
-
-        let current = inspect_session_index(SessionIndexKind::Current, "default\nother\n");
-        assert_eq!(
-            current.issues(),
-            &[SessionIndexIssue::MultipleValues { line: 2 }]
-        );
-
-        let empty = inspect_session_index(SessionIndexKind::ByCwd, "");
-        assert_eq!(empty.issues(), &[SessionIndexIssue::EmptyValue { line: 1 }]);
-    }
-
-    #[test]
-    fn session_index_update_sets_current_and_deduplicated_list() {
-        let root = unique_test_dir("session-index-update");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(session_root.join("index").join("by-cwd")).is_ok());
-        assert!(fs::create_dir_all(session_root.join("default")).is_ok());
-        assert!(fs::create_dir_all(session_root.join("review-1")).is_ok());
-        write_text_file(
-            &session_root.join("index").join("list"),
-            "default\nreview-1\n",
-        );
-        write_text_file(&session_root.join("index").join("current"), "default\n");
-
-        let updated = update_session_index(&session_root, "review-1", Some("cwd-hash-1"));
-        assert_eq!(updated, Ok(()));
-        let list = fs::read_to_string(session_root.join("index").join("list"));
-        assert!(list.is_ok());
-        let Ok(list) = list else { return };
-        let current = fs::read_to_string(session_root.join("index").join("current"));
-        assert!(current.is_ok());
-        let Ok(current) = current else { return };
-        let by_cwd =
-            fs::read_to_string(session_root.join("index").join("by-cwd").join("cwd-hash-1"));
-        assert!(by_cwd.is_ok());
-        let Ok(by_cwd) = by_cwd else { return };
-
-        assert_eq!(list, "review-1\ndefault\n");
-        assert_eq!(current, "review-1\n");
-        assert_eq!(by_cwd, "review-1\n");
-        assert!(inspect_session_index(SessionIndexKind::List, &list).is_ok());
-        assert!(inspect_session_index(SessionIndexKind::Current, &current).is_ok());
-        assert!(inspect_session_index(SessionIndexKind::ByCwd, &by_cwd).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_index_update_rejects_missing_and_invalid_index_state() {
-        let root = unique_test_dir("session-index-update-bad");
-        let session_root = root.join("session");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(session_root.join("index").join("by-cwd")).is_ok());
-        assert!(fs::create_dir_all(session_root.join("default")).is_ok());
-        write_text_file(&session_root.join("index").join("list"), "bad/name\n");
-        write_text_file(&session_root.join("index").join("current"), "default\n");
-
-        assert_eq!(
-            update_session_index(&session_root, "bad/name", None),
-            Err(SessionIndexUpdateError::InvalidSessionName)
-        );
-        assert_eq!(
-            update_session_index(&session_root, "missing", None),
-            Err(SessionIndexUpdateError::MissingSession)
-        );
-        assert_eq!(
-            update_session_index(&session_root, "default", Some("bad/key")),
-            Err(SessionIndexUpdateError::InvalidByCwdKey)
-        );
-        assert_eq!(
-            update_session_index(&session_root, "default", None),
-            Err(SessionIndexUpdateError::InvalidIndex)
-        );
-        assert_eq!(SessionIndexUpdateError::InvalidIndex.errno(), "EINVAL");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn context_pack_sources_are_session_relative_and_inspectable() {
-        let report = inspect_context_pack_json(
-            r#"{
-  "session": "default",
-  "agent": "coder",
-  "items": [
-    {"kind": "summary", "source": "context/summary.md"},
-    {"kind": "messages", "source": "messages.jsonl"},
-    {"kind": "child_result", "source": "context/child/rev-1/result.md"},
-    {"kind": "child_refs", "source": "context/child/rev-1/refs.jsonl"},
-    {"kind": "artifact", "source": "context/child/rev-1/artifact/report.md"},
-    {"kind": "pinned", "source": "context/pinned/system.md"}
-  ]
-}"#,
-        );
-        assert!(report.is_ok());
-        assert!(validate_context_pack_source("context/facts.jsonl").is_ok());
-    }
-
-    #[test]
-    fn context_pack_sources_reject_escapes_and_child_history() {
-        assert_eq!(
-            validate_context_pack_source(
-                "/ctx/shared/im-a/agent/bot/session/group-1/messages.jsonl"
-            ),
-            Err(ContextPackSourceError::Absolute)
-        );
-        assert_eq!(
-            validate_context_pack_source("../other/messages.jsonl"),
-            Err(ContextPackSourceError::ParentComponent)
-        );
-        assert_eq!(
-            validate_context_pack_source("session/other/messages.jsonl"),
-            Err(ContextPackSourceError::UnsupportedSessionPath)
-        );
-        assert_eq!(
-            validate_context_pack_source("context/child/rev-1/messages.jsonl"),
-            Err(ContextPackSourceError::UnsupportedChildPath)
-        );
-
-        let report = inspect_context_pack_json(
-            r#"{
-  "items": [
-    {"kind": "ok", "source": "context/summary.md"},
-    {"kind": "absolute", "source": "/ctx/shared/im-b/agent/bot/session/channel-2/messages.jsonl"},
-    {"kind": "child_full_history", "source": "context/child/rev-1/messages.jsonl"},
-    {"kind": "missing"},
-    {"kind": "not_string", "source": 42}
-  ]
-}"#,
-        );
-        assert!(!report.is_ok());
-        assert_eq!(
-            report.issues(),
-            [
-                ContextPackIssue::InvalidSource {
-                    item: 1,
-                    source: "/ctx/shared/im-b/agent/bot/session/channel-2/messages.jsonl"
-                        .to_owned(),
-                    reason: ContextPackSourceError::Absolute
-                },
-                ContextPackIssue::InvalidSource {
-                    item: 2,
-                    source: "context/child/rev-1/messages.jsonl".to_owned(),
-                    reason: ContextPackSourceError::UnsupportedChildPath
-                },
-                ContextPackIssue::MissingSource(3),
-                ContextPackIssue::SourceNotString(4)
-            ]
-        );
-    }
-
-    #[test]
-    fn context_pack_rebuild_writes_inspectable_sources_without_child_history() {
-        let root = unique_test_dir("context-pack-rebuild");
-        let session = root.join("default");
-        let context = session.join("context");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(
-            &session.join("messages.jsonl"),
-            "{\"role\":\"system\",\"content\":\"base rules\"}\n{\"role\":\"user\",\"content\":\"fix tests\"}\n{\"role\":\"assistant\",\"content\":\"working\"}\n",
-        );
-        write_text_file(&context.join("budget"), "0\n");
-        write_text_file(
-            &context.join("pinned").join("system.md"),
-            "Pinned system text\n",
-        );
-        write_text_file(&context.join("summary.md"), "Short summary\n");
-        write_text_file(
-            &context.join("facts.jsonl"),
-            "{\"id\":\"f1\",\"text\":\"Root ABI is frozen.\",\"source\":\"messages:1-2\"}\n",
-        );
-        write_text_file(
-            &context.join("decisions.jsonl"),
-            "{\"id\":\"d1\",\"decision\":\"Do not add provider root.\",\"source\":\"messages:3\"}\n",
-        );
-        write_text_file(&context.join("todo.md"), "Keep FUSE small\n");
-        write_text_file(
-            &context.join("refs.jsonl"),
-            "{\"id\":\"r1\",\"path\":\"docs/spec/16-context.md\",\"kind\":\"file\",\"summary\":\"context spec\"}\n",
-        );
-        write_text_file(
-            &context.join("child").join("rev-1").join("result.md"),
-            "Child says ok\n",
-        );
-        write_text_file(
-            &context.join("child").join("rev-1").join("refs.jsonl"),
-            "{\"id\":\"cr1\",\"path\":\"artifact/report.md\",\"kind\":\"artifact\",\"summary\":\"child report\"}\n",
-        );
-        write_text_file(
-            &context.join("child").join("rev-1").join("messages.jsonl"),
-            "{\"role\":\"user\",\"content\":\"must not be packed\"}\n",
-        );
-
-        let built = rebuild_context_pack(&session, Some("coder"), 2);
-        assert!(built.is_ok());
-        let Ok(built) = built else { return };
-
-        let pack_json = fs::read_to_string(context.join("pack.json"));
-        assert!(pack_json.is_ok());
-        let Ok(pack_json) = pack_json else { return };
-        let pack_md = fs::read_to_string(context.join("pack.md"));
-        assert!(pack_md.is_ok());
-        let Ok(pack_md) = pack_md else { return };
-
-        assert_eq!(built.pack_json(), pack_json);
-        assert_eq!(built.pack_md(), pack_md);
-        assert!(inspect_context_pack_json(&pack_json).is_ok());
-        assert!(pack_json.contains("\"source\":\"context/pinned/system.md\""));
-        assert!(pack_json.contains("\"source\":\"messages.jsonl\""));
-        assert!(pack_json.contains("\"range\":\"tail:2\""));
-        assert!(pack_json.contains("\"source\":\"context/child/rev-1/result.md\""));
-        assert!(pack_json.contains("\"source\":\"context/child/rev-1/refs.jsonl\""));
-        assert!(!pack_json.contains("context/child/rev-1/messages.jsonl"));
-        assert!(pack_md.contains("Pinned system text"));
-        assert!(pack_md.contains("Child says ok"));
-        assert!(pack_md.contains("\"role\":\"assistant\""));
-        assert!(!pack_md.contains("must not be packed"));
-        assert!(built.items().iter().all(|item| {
-            validate_context_pack_source(item.source()).is_ok()
-                && item.source() != "context/child/rev-1/messages.jsonl"
-        }));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn context_pack_rebuild_respects_budget_and_validates_inputs() {
-        let root = unique_test_dir("context-pack-rebuild-budget");
-        let session = root.join("default");
-        let context = session.join("context");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_complete_session_layout(&session);
-        write_text_file(
-            &session.join("messages.jsonl"),
-            "{\"role\":\"user\",\"content\":\"one two three four five six\"}\n",
-        );
-        write_text_file(&context.join("budget"), "2\n");
-        write_text_file(&context.join("summary.md"), "one two\n");
-        write_text_file(&context.join("facts.jsonl"), "");
-        write_text_file(&context.join("decisions.jsonl"), "");
-        write_text_file(&context.join("todo.md"), "");
-        write_text_file(&context.join("refs.jsonl"), "");
-        write_text_file(&context.join("child").join("rev-1").join("result.md"), "");
-        write_text_file(&context.join("child").join("rev-1").join("refs.jsonl"), "");
-
-        let built = rebuild_context_pack(&session, Some("coder"), 5);
-        assert!(built.is_ok());
-        let Ok(built) = built else { return };
-        assert_eq!(built.items().len(), 1);
-        assert_eq!(
-            built
-                .items()
-                .first()
-                .map(super::ContextPackBuiltItem::source),
-            Some("context/summary.md")
-        );
-        assert!(!built.pack_json().contains("messages.jsonl"));
-
-        write_text_file(&context.join("budget"), " 2\n");
-        assert_eq!(
-            rebuild_context_pack(&session, Some("coder"), 5),
-            Err(ContextPackBuildError::InvalidBudget)
-        );
-        write_text_file(&context.join("budget"), "0\n");
-        write_text_file(
-            &session.join("messages.jsonl"),
-            "{\"role\":\"native_thread\"}\n",
-        );
-        assert_eq!(
-            rebuild_context_pack(&session, Some("coder"), 5),
-            Err(ContextPackBuildError::InvalidMessages)
-        );
-        write_text_file(
-            &session.join("messages.jsonl"),
-            "{\"role\":\"user\",\"content\":\"ok\"}\n",
-        );
-        assert_eq!(
-            rebuild_context_pack(&session, Some("bad/agent"), 5),
-            Err(ContextPackBuildError::InvalidAgentName)
-        );
-        assert!(fs::create_dir_all(context.join("child").join(".bad")).is_ok());
-        assert_eq!(
-            rebuild_context_pack(&session, Some("coder"), 5),
-            Err(ContextPackBuildError::InvalidChildName)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn context_pack_rejects_invalid_json_shape() {
-        assert_eq!(
-            inspect_context_pack_json("{").issues(),
-            &[ContextPackIssue::InvalidJson]
-        );
-        assert_eq!(
-            inspect_context_pack_json(r#"{"items": {"source": "messages.jsonl"}}"#).issues(),
-            &[ContextPackIssue::ItemsNotArray]
-        );
-        assert_eq!(
-            inspect_context_pack_json(r#"{"items": ["messages.jsonl"]}"#).issues(),
-            &[ContextPackIssue::ItemNotObject(0)]
-        );
-    }
-
-    #[test]
-    fn message_stream_accepts_canonical_role_content_frames() {
-        let report = inspect_message_stream_jsonl(
-            r#"{"role":"system","content":"You are concise."}
-{"role":"user","content":[{"type":"text","text":"hello"}]}
-{"role":"assistant","content":[{"type":"text","text":"hi"}]}
-{"role":"tool","content":[{"type":"tool_result","tool_call_id":"call-1","content":"ok"}]}
-"#,
-        );
-        assert!(report.is_ok());
-        assert!(report.issues().is_empty());
-    }
-
-    #[test]
-    fn message_stream_rejects_native_state_and_bad_shape() {
-        let report = inspect_message_stream_jsonl(
-            r#"not-json
-[]
-{"content":"missing role"}
-{"role":"developer","content":"private role"}
-{"role":"assistant","response_id":"resp-1","content":"hi"}
-{"role":"assistant","content":[{"type":"provider_blob","text":"x"}]}
-{"role":"assistant"}
-"#,
-        );
-        assert_eq!(
-            report.issues(),
-            [
-                MessageStreamIssue::InvalidJson(1),
-                MessageStreamIssue::MessageNotObject(2),
-                MessageStreamIssue::MissingRole(3),
-                MessageStreamIssue::InvalidRole {
-                    line: 4,
-                    role: "developer".to_owned()
-                },
-                MessageStreamIssue::ProviderNativeField {
-                    line: 5,
-                    field: "response_id".to_owned()
-                },
-                MessageStreamIssue::InvalidContent(6),
-                MessageStreamIssue::MissingContent(7)
-            ]
-        );
-    }
-
-    #[test]
-    fn context_jsonl_accepts_spec_record_shapes() {
-        assert!(
-            inspect_context_jsonl(
-                ContextJsonlKind::Facts,
-                r#"{"id":"f1","text":"CortexFS root is small.","source":"messages:12-18"}
-"#
-            )
-            .is_ok()
-        );
-        assert!(
-            inspect_context_jsonl(
-                ContextJsonlKind::Decisions,
-                r#"{"id":"d1","decision":"Child agents are owned.","source":"user:latest"}
-"#
-            )
-            .is_ok()
-        );
-        assert!(
-            inspect_context_jsonl(
-                ContextJsonlKind::Refs,
-                r#"{"id":"r1","path":"/work/DESIGN.md","kind":"file","summary":"design"}
-{"id":"r2","path":"context/swap/chunk/sha256-abc","kind":"swap","summary":"old design"}
-"#
-            )
-            .is_ok()
-        );
-        assert!(
-            inspect_context_jsonl(
-                ContextJsonlKind::SwapIndex,
-                r#"{"id":"sha256-abc","kind":"message_range","source":"messages.jsonl","summary":"initial design","tokens":18000}
-{"id":"sha256-def","kind":"tool_output","source":"events.jsonl","summary":"test output","tokens":45000}
-"#
-            )
-            .is_ok()
-        );
-        assert!(
-            inspect_context_jsonl(
-                ContextJsonlKind::DedupIndex,
-                r#"{"hash":"sha256-abc","refs":["messages:1-40","swap:old-design"],"bytes":12000,"tokens":3000}
-"#
-            )
-            .is_ok()
-        );
-    }
-
-    #[test]
-    fn context_jsonl_rejects_invalid_records() {
-        let facts = inspect_context_jsonl(
-            ContextJsonlKind::Facts,
-            "not-json\n[]\n{\"id\":\"bad/id\",\"text\":\"ok\"}\n",
-        );
-        assert_eq!(
-            facts.issues(),
-            [
-                ContextJsonlIssue::InvalidJson(1),
-                ContextJsonlIssue::RecordNotObject(2),
-                ContextJsonlIssue::InvalidField {
-                    line: 3,
-                    field: "id".to_owned(),
-                    value: "bad/id".to_owned()
-                },
-                ContextJsonlIssue::MissingStringField {
-                    line: 3,
-                    field: "source".to_owned()
-                }
-            ]
-        );
-
-        let refs = inspect_context_jsonl(
-            ContextJsonlKind::Refs,
-            r#"{"id":"r1","path":"../secret","kind":"provider_thread","summary":"bad"}
-"#,
-        );
-        assert_eq!(
-            refs.issues(),
-            [
-                ContextJsonlIssue::InvalidField {
-                    line: 1,
-                    field: "path".to_owned(),
-                    value: "../secret".to_owned()
-                },
-                ContextJsonlIssue::InvalidField {
-                    line: 1,
-                    field: "kind".to_owned(),
-                    value: "provider_thread".to_owned()
-                }
-            ]
-        );
-
-        let dedup = inspect_context_jsonl(
-            ContextJsonlKind::DedupIndex,
-            r#"{"hash":"md5-old","refs":[],"bytes":"120","tokens":3000}
-"#,
-        );
-        assert_eq!(
-            dedup.issues(),
-            [
-                ContextJsonlIssue::InvalidField {
-                    line: 1,
-                    field: "hash".to_owned(),
-                    value: "md5-old".to_owned()
-                },
-                ContextJsonlIssue::MissingStringArrayField {
-                    line: 1,
-                    field: "refs".to_owned()
-                },
-                ContextJsonlIssue::MissingNumberField {
-                    line: 1,
-                    field: "bytes".to_owned()
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn event_stream_accepts_canonical_model_jsonl() {
-        let report = inspect_event_stream_jsonl(
-            r#"{"type":"start","run":"r1","model":"qwen"}
-{"type":"delta","run":"r1","text":"hello"}
-{"type":"message","run":"r1","role":"assistant","content":[{"type":"text","text":"hello"}]}
-{"type":"tool_call","run":"r1","id":"call-1","name":"fs.read","arguments":{"path":"README.md"}}
-{"type":"usage","run":"r1","input_tokens":10,"output_tokens":1}
-{"type":"done","run":"r1","status":"ok"}
-"#,
-        );
-        assert!(report.is_ok());
-        assert!(report.issues().is_empty());
-    }
-
-    #[test]
-    fn event_stream_accepts_stable_error_frames() {
-        let report = inspect_event_stream_jsonl(
-            r#"{"type":"error","run":"r1","code":"EACCES","message":"permission denied"}
-{"type":"done","run":"r1","status":"error"}
-"#,
-        );
-        assert!(report.is_ok());
-    }
-
-    #[test]
-    fn event_stream_accepts_child_lifecycle_frames() {
-        let report = inspect_event_stream_jsonl(
-            r#"{"type":"agent.child.cancel","parent":"coder","child":"rev-123","reason":"parent_dead"}
-{"type":"agent.stop","agent":"rev-123","status":"cancelled"}
-"#,
-        );
-        assert!(report.is_ok());
-        assert!(report.issues().is_empty());
-    }
-
-    #[test]
-    fn event_stream_rejects_provider_native_state_and_unknown_events() {
-        let report = inspect_event_stream_jsonl(
-            r#"{"type":"start","run":"r1","model":"qwen","response_id":"resp_123"}
-{"type":"native_thread","run":"r1","thread_id":"thread_123"}
-{"type":"message","run":"r1","content":[{"type":"text","text":"x","provider_response_id":"abc"}]}
-"#,
-        );
-        assert_eq!(
-            report.issues(),
-            [
-                EventStreamIssue::ProviderNativeField {
-                    line: 1,
-                    field: "response_id".to_owned()
-                },
-                EventStreamIssue::ProviderNativeField {
-                    line: 2,
-                    field: "thread_id".to_owned()
-                },
-                EventStreamIssue::UnknownType {
-                    line: 2,
-                    event_type: "native_thread".to_owned()
-                },
-                EventStreamIssue::ProviderNativeField {
-                    line: 3,
-                    field: "provider_response_id".to_owned()
-                }
-            ]
-        );
-    }
-
-    #[test]
-    fn event_stream_rejects_invalid_shape_and_specialized_frames() {
-        let report = inspect_event_stream_jsonl(
-            r#"not-json
-[]
-{"run":"r1"}
-{"type":"delta","text":"missing run"}
-{"type":"error","run":"r1","code":"PROVIDER_DENIED"}
-{"type":"done","run":"r1","status":"maybe"}
-{"type":"usage","run":"r1","input_tokens":"10","output_tokens":1}
-{"type":"tool_call","run":"r1","id":"bad/id","name":"fs.read"}
-{"type":"agent.child.cancel","parent":"bad/parent","child":"rev-1","reason":"manual"}
-{"type":"agent.stop","agent":"rev-1","status":"dead"}
-"#,
-        );
-        assert_eq!(
-            report.issues(),
-            [
-                EventStreamIssue::InvalidJson(1),
-                EventStreamIssue::EventNotObject(2),
-                EventStreamIssue::MissingType(3),
-                EventStreamIssue::MissingRun(4),
-                EventStreamIssue::InvalidErrorCode(5),
-                EventStreamIssue::InvalidDoneStatus(6),
-                EventStreamIssue::InvalidUsage(7),
-                EventStreamIssue::InvalidToolCall(8),
-                EventStreamIssue::InvalidAgentLifecycle(9),
-                EventStreamIssue::InvalidAgentLifecycle(10)
-            ]
-        );
-    }
-
-    #[test]
-    fn shared_queue_layout_inspector_checks_recommended_dirs() {
-        let root = unique_test_dir("shared-queue-layout");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        for dir in SHARED_QUEUE_REQUIRED_DIRS {
-            assert!(fs::create_dir_all(root.join(dir)).is_ok());
-        }
-        let report = inspect_shared_queue_layout(&root);
-        assert!(report.is_ok());
-
-        assert!(fs::remove_dir_all(root.join("failed")).is_ok());
-        assert!(fs::remove_dir_all(root.join("done")).is_ok());
-        assert!(fs::write(root.join("done"), "not a dir\n").is_ok());
-        let report = inspect_shared_queue_layout(&root);
-        assert!(!report.is_ok());
-        assert!(
-            report
-                .issues()
-                .contains(&SharedQueueLayoutIssue::MissingDirectory(
-                    "failed".to_owned()
-                ))
-        );
-        assert!(
-            report
-                .issues()
-                .contains(&SharedQueueLayoutIssue::NotDirectory("done".to_owned()))
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_queue_claim_uses_atomic_claim_directories() {
-        let root = unique_test_dir("shared-queue-claim");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_shared_queue_layout(&root);
-        write_text_file(&root.join("pending").join("job-2.req.json"), "two\n");
-        write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
-        write_text_file(&root.join("pending").join(".ignored"), "bad\n");
-        assert!(fs::create_dir_all(root.join("pending").join("not-file")).is_ok());
-
-        let first = claim_next_shared_queue_job(&root, "worker-a");
-        assert!(first.is_ok());
-        let Ok(Some(first)) = first else { return };
-        assert_eq!(first.job_name(), "job-1.req.json");
-        let claimed_content = fs::read_to_string(first.claimed_path());
-        assert!(matches!(claimed_content, Ok(ref content) if content == "one\n"));
-        let lease_worker = fs::read_to_string(first.lease_path().join("worker"));
-        assert!(matches!(lease_worker, Ok(ref content) if content == "worker-a\n"));
-        assert!(!root.join("pending").join("job-1.req.json").exists());
-
-        let second = claim_next_shared_queue_job(&root, "worker-b");
-        assert!(second.is_ok());
-        let Ok(Some(second)) = second else { return };
-        assert_eq!(second.job_name(), "job-2.req.json");
-
-        let none = claim_next_shared_queue_job(&root, "worker-c");
-        assert_eq!(none, Ok(None));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_queue_claim_skips_existing_claim_lock() {
-        let root = unique_test_dir("shared-queue-claim-lock");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_shared_queue_layout(&root);
-        write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
-        write_text_file(&root.join("pending").join("job-2.req.json"), "two\n");
-        assert!(fs::create_dir_all(root.join("claimed").join("job-1.req.json")).is_ok());
-
-        let claimed = claim_next_shared_queue_job(&root, "worker-a");
-        assert!(claimed.is_ok());
-        let Ok(Some(claimed)) = claimed else { return };
-        assert_eq!(claimed.job_name(), "job-2.req.json");
-        assert!(root.join("pending").join("job-1.req.json").exists());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_queue_recovery_requeues_claimed_job_with_lease() {
-        let root = unique_test_dir("shared-queue-recover");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_shared_queue_layout(&root);
-        write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
-
-        let claimed = claim_next_shared_queue_job(&root, "worker-a");
-        assert!(claimed.is_ok());
-        let Ok(Some(claimed)) = claimed else { return };
-        assert!(claimed.claimed_path().is_file());
-        assert!(claimed.lease_path().join("worker").is_file());
-
-        let recovered = recover_shared_queue_job(&root, "job-1.req.json");
-        assert_eq!(recovered, Ok(root.join("pending").join("job-1.req.json")));
-        let recovered_content = fs::read_to_string(root.join("pending").join("job-1.req.json"));
-        assert!(matches!(recovered_content, Ok(ref content) if content == "one\n"));
-        assert!(!root.join("claimed").join("job-1.req.json").exists());
-        assert!(!root.join("lease").join("job-1.req.json").exists());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_queue_recovery_requires_existing_claim_and_lease() {
-        let root = unique_test_dir("shared-queue-recover-missing");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_shared_queue_layout(&root);
-        assert_eq!(
-            recover_shared_queue_job(&root, "job-1.req.json"),
-            Err(SharedQueueRecoverError::MissingClaim)
-        );
-
-        let claim_dir = root.join("claimed").join("job-1.req.json");
-        assert!(fs::create_dir_all(&claim_dir).is_ok());
-        write_text_file(&claim_dir.join("job-1.req.json"), "one\n");
-        assert_eq!(
-            recover_shared_queue_job(&root, "job-1.req.json"),
-            Err(SharedQueueRecoverError::MissingLease)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_queue_finish_writes_readable_done_result_and_cleans_lease() {
-        let root = unique_test_dir("shared-queue-finish-done");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_shared_queue_layout(&root);
-        write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
-
-        let claimed = claim_next_shared_queue_job(&root, "worker-a");
-        assert!(claimed.is_ok());
-        let Ok(Some(claimed)) = claimed else { return };
-        let result_path =
-            finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"ok\n");
-        assert_eq!(
-            result_path,
-            Ok(root.join("done").join("job-1.req.json.result"))
-        );
-        let result = fs::read_to_string(root.join("done").join("job-1.req.json.result"));
-        assert!(matches!(result, Ok(ref content) if content == "ok\n"));
-        let request = fs::read_to_string(root.join("done").join("job-1.req.json"));
-        assert!(matches!(request, Ok(ref content) if content == "one\n"));
-        assert!(!root.join("claimed").join("job-1.req.json").exists());
-        assert!(!root.join("lease").join("job-1.req.json").exists());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_queue_finish_writes_readable_failed_result() {
-        let root = unique_test_dir("shared-queue-finish-failed");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        create_shared_queue_layout(&root);
-        write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
-
-        let claimed = claim_next_shared_queue_job(&root, "worker-a");
-        assert!(claimed.is_ok());
-        let Ok(Some(claimed)) = claimed else { return };
-        let result_path = finish_shared_queue_job(
-            &root,
-            claimed.job_name(),
-            SharedQueueOutcome::Failed,
-            b"err\n",
-        );
-        assert_eq!(
-            result_path,
-            Ok(root.join("failed").join("job-1.req.json.result"))
-        );
-        let result = fs::read_to_string(root.join("failed").join("job-1.req.json.result"));
-        assert!(matches!(result, Ok(ref content) if content == "err\n"));
-        let request = fs::read_to_string(root.join("failed").join("job-1.req.json"));
-        assert!(matches!(request, Ok(ref content) if content == "one\n"));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_access_authority_requires_mount_linux_permission_and_policy() {
-        let root = unique_test_dir("shared-authority-ok");
-        let shared = root.join("shared-project-a");
-        let file = shared.join("data.txt");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(&shared).is_ok());
-        write_fixture_file(&file, 0o400);
-
-        let metadata = fs::metadata(&file);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_source_target(
-            "/ctx/shared/project-a",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev,noexec",
-        );
-        let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
-        let authority = SharedAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
-
-        assert_eq!(
-            authorize_shared_access("project-a", &file, SharedAccess::Read, authority),
-            Ok(())
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_access_authority_denies_write_on_read_only_mount() {
-        let root = unique_test_dir("shared-authority-ro");
-        let shared = root.join("shared-project-a");
-        let file = shared.join("data.txt");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(&shared).is_ok());
-        write_fixture_file(&file, 0o600);
-
-        let metadata = fs::metadata(&file);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_source_target(
-            "/ctx/shared/project-a",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev",
-        );
-        let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Write);
-        let authority = SharedAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
-
-        assert_eq!(
-            authorize_shared_access("project-a", &file, SharedAccess::Write, authority),
-            Err(SharedAccessDenial::ReadOnlyMount)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_access_authority_denies_missing_policy_and_wrong_space() {
-        let root = unique_test_dir("shared-authority-policy");
-        let shared = root.join("shared-project-a");
-        let file = shared.join("data.txt");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(&shared).is_ok());
-        write_fixture_file(&file, 0o400);
-
-        let metadata = fs::metadata(&file);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_source_target(
-            "/ctx/shared/project-a",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev",
-        );
-        let wrong_mounts = mount_table_for_source_target(
-            "/ctx/shared/project-b",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev",
-        );
-        let empty_policy = PolicyV0::parse("");
-        assert!(empty_policy.is_ok());
-        let Ok(empty_policy) = empty_policy else {
-            return;
-        };
-        let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
-
-        assert_eq!(
-            authorize_shared_access(
-                "project-a",
-                &file,
-                SharedAccess::Read,
-                SharedAccessAuthority::new(&identity, &mounts, "coder_t", &empty_policy),
-            ),
-            Err(SharedAccessDenial::Policy)
-        );
-        assert_eq!(
-            authorize_shared_access(
-                "project-a",
-                &file,
-                SharedAccess::Read,
-                SharedAccessAuthority::new(&identity, &wrong_mounts, "coder_t", &policy),
-            ),
-            Err(SharedAccessDenial::WrongSharedPath)
-        );
-        assert_eq!(
-            authorize_shared_access(
-                "project-a",
-                &file,
-                SharedAccess::Read,
-                SharedAccessAuthority::new(&identity, &MountTable::default(), "coder_t", &policy,),
-            ),
-            Err(SharedAccessDenial::NotMounted)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn shared_access_authority_checks_linux_mode_bits() {
-        let root = unique_test_dir("shared-authority-linux");
-        let shared = root.join("shared-project-a");
-        let file = shared.join("data.txt");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(&shared).is_ok());
-        write_fixture_file(&file, 0o400);
-
-        let metadata = fs::metadata(&file);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let other_identity = AgentUnixIdentity::new(
-            metadata.uid().saturating_add(1),
-            metadata.gid().saturating_add(1),
-            [],
-        );
-        let mounts = mount_table_for_source_target(
-            "/ctx/shared/project-a",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev",
-        );
-        let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
-        let authority = SharedAccessAuthority::new(&other_identity, &mounts, "coder_t", &policy);
-
-        assert_eq!(
-            authorize_shared_access("project-a", &file, SharedAccess::Read, authority),
-            Err(SharedAccessDenial::LinuxPermission)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_access_authority_allows_explicit_im_channel_session() {
-        let root = unique_test_dir("session-authority-im-ok");
-        let shared = root.join("im-qq-dev");
-        let messages = shared
-            .join("agent")
-            .join("bot")
-            .join("session")
-            .join("group-456")
-            .join("messages.jsonl");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_fixture_file(&messages, 0o600);
-
-        let metadata = fs::metadata(&messages);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_source_target(
-            "/ctx/shared/im-qq-dev",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev,noexec",
-        );
-        let policy = policy_with_rules([
-            "allow bot_t shared:im-qq-dev read",
-            "allow bot_t session:group-456 read",
-        ]);
-        let authority = SessionAccessAuthority::new(&identity, &mounts, "bot_t", &policy);
-
-        assert_eq!(
-            authorize_session_access(&messages, SessionAccess::Read, authority),
-            Ok(())
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_access_authority_denies_cross_channel_without_session_policy() {
-        let root = unique_test_dir("session-authority-im-deny");
-        let shared = root.join("im-qq-dev");
-        let allowed = shared
-            .join("agent")
-            .join("bot")
-            .join("session")
-            .join("group-456")
-            .join("messages.jsonl");
-        let other = shared
-            .join("agent")
-            .join("bot")
-            .join("session")
-            .join("group-999")
-            .join("messages.jsonl");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_fixture_file(&allowed, 0o600);
-        write_fixture_file(&other, 0o600);
-
-        let metadata = fs::metadata(&allowed);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_source_target(
-            "/ctx/shared/im-qq-dev",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev,noexec",
-        );
-        let policy = policy_with_rules([
-            "allow bot_t shared:im-qq-dev read",
-            "allow bot_t session:group-456 read",
-        ]);
-        let authority = SessionAccessAuthority::new(&identity, &mounts, "bot_t", &policy);
-
-        assert_eq!(
-            authorize_session_access(&allowed, SessionAccess::Read, authority),
-            Ok(())
-        );
-        assert_eq!(
-            authorize_session_access(&other, SessionAccess::Read, authority),
-            Err(SessionAccessDenial::SessionPolicy)
-        );
-        assert_eq!(SessionAccessDenial::SessionPolicy.errno(), "EACCES");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_access_authority_requires_shared_policy_and_mount_write_mode() {
-        let root = unique_test_dir("session-authority-shared-policy");
-        let shared = root.join("im-slack-company");
-        let messages = shared
-            .join("agent")
-            .join("bot")
-            .join("session")
-            .join("channel-789")
-            .join("messages.jsonl");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_fixture_file(&messages, 0o600);
-
-        let metadata = fs::metadata(&messages);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let ro_mounts = mount_table_for_source_target(
-            "/ctx/shared/im-slack-company",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev,noexec",
-        );
-        let writable_mounts = mount_table_for_source_target(
-            "/ctx/shared/im-slack-company",
-            &shared,
-            "rw",
-            "bind,nosuid,nodev",
-        );
-        let session_only = policy_with_rules(["allow bot_t session:channel-789 read"]);
-        let read_policy = policy_with_rules([
-            "allow bot_t shared:im-slack-company read",
-            "allow bot_t session:channel-789 write",
-        ]);
-
-        assert_eq!(
-            authorize_session_access(
-                &messages,
-                SessionAccess::Read,
-                SessionAccessAuthority::new(&identity, &ro_mounts, "bot_t", &session_only),
-            ),
-            Err(SessionAccessDenial::SharedPolicy)
-        );
-        assert_eq!(
-            authorize_session_access(
-                &messages,
-                SessionAccess::Write,
-                SessionAccessAuthority::new(&identity, &ro_mounts, "bot_t", &read_policy),
-            ),
-            Err(SessionAccessDenial::ReadOnlyMount)
-        );
-        assert_eq!(
-            authorize_session_access(
-                &messages,
-                SessionAccess::Write,
-                SessionAccessAuthority::new(&identity, &writable_mounts, "bot_t", &read_policy),
-            ),
-            Err(SessionAccessDenial::SharedPolicy)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_access_authority_enforces_private_home_uid() {
-        let root = unique_test_dir("session-authority-private-uid");
-        let home = root.join("home-1000");
-        let messages = home
-            .join("agent")
-            .join("coder")
-            .join("session")
-            .join("default")
-            .join("messages.jsonl");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_fixture_file(&messages, 0o644);
-
-        let metadata = fs::metadata(&messages);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let owner_identity = AgentUnixIdentity::new(1000, metadata.gid(), []);
-        let other_identity = AgentUnixIdentity::new(1001, metadata.gid(), []);
-        let mounts = mount_table_for_source_target(
-            "/ctx/home/1000",
-            &home,
-            "ro",
-            "bind,nosuid,nodev,noexec",
-        );
-        let policy = policy_with_rules(["allow coder_t session:default read"]);
-
-        assert_eq!(
-            authorize_session_access(
-                &messages,
-                SessionAccess::Read,
-                SessionAccessAuthority::new(&owner_identity, &mounts, "coder_t", &policy),
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            authorize_session_access(
-                &messages,
-                SessionAccess::Read,
-                SessionAccessAuthority::new(&other_identity, &mounts, "coder_t", &policy),
-            ),
-            Err(SessionAccessDenial::LinuxPermission)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn session_access_authority_rejects_unmounted_and_non_session_paths() {
-        let root = unique_test_dir("session-authority-path-shape");
-        let shared = root.join("project-a");
-        let file = shared.join("data").join("note.txt");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        write_fixture_file(&file, 0o644);
-
-        let metadata = fs::metadata(&file);
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_source_target(
-            "/ctx/shared/project-a",
-            &shared,
-            "ro",
-            "bind,nosuid,nodev,noexec",
-        );
-        let policy = policy_with_rules([
-            "allow coder_t shared:project-a read",
-            "allow coder_t session:default read",
-        ]);
-
-        assert_eq!(
-            authorize_session_access(
-                &file,
-                SessionAccess::Read,
-                SessionAccessAuthority::new(&identity, &mounts, "coder_t", &policy),
-            ),
-            Err(SessionAccessDenial::InvalidSessionPath)
-        );
-        assert_eq!(
-            authorize_session_access(
-                &file,
-                SessionAccess::Read,
-                SessionAccessAuthority::new(&identity, &MountTable::default(), "coder_t", &policy),
-            ),
-            Err(SessionAccessDenial::NotMounted)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn ctx_path_parses_without_implicit_current_directory() {
-        let path = ToolPath::parse(":/ctx/tool::/ctx/home/1000/tool:");
-        assert_eq!(
-            path.dirs(),
-            [
-                PathBuf::from("/ctx/tool"),
-                PathBuf::from("/ctx/home/1000/tool")
-            ]
-        );
-    }
-
-    #[test]
-    fn tool_lookup_uses_first_executable_hit() {
-        let root = unique_test_dir("tool-lookup");
-        let global = root.join("global-tool");
-        let user = root.join("user-tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(&global).is_ok());
-        assert!(fs::create_dir_all(&user).is_ok());
-
-        write_fixture_file(&global.join("fs.read"), 0o644);
-        write_fixture_file(&global.join("fs.write"), 0o755);
-        write_fixture_file(&user.join("fs.read"), 0o755);
-        assert!(fs::create_dir_all(user.join("fs.read.d")).is_ok());
-
-        let path = ToolPath::new([global.clone(), user.clone()]);
-        let found = path.find("fs.read");
-        assert!(matches!(found, Ok(Some(ref hit)) if hit.path() == user.join("fs.read")));
-        assert!(matches!(found, Ok(Some(ref hit)) if hit.control_dir() == user.join("fs.read.d")));
-
-        write_fixture_file(&global.join("fs.read"), 0o755);
-        let found = path.find("fs.read");
-        assert!(matches!(found, Ok(Some(ref hit)) if hit.path() == global.join("fs.read")));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_listing_ignores_non_executable_and_control_entries() {
-        let root = unique_test_dir("tool-list");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
-        write_fixture_file(&tools.join("fs.read"), 0o755);
-        write_fixture_file(&tools.join("not.exec"), 0o644);
-        write_fixture_file(&tools.join("bad.sock"), 0o755);
-
-        let hits = ToolPath::new([tools.clone()]).list();
-        assert!(hits.is_ok());
-        let Ok(hits) = hits else { return };
-        let expected = tools.join("fs.read");
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits.first().map(ToolHit::path), Some(expected.as_path()));
-
-        let invalid = ToolPath::new([tools]).find("../bad");
-        assert_eq!(invalid, Err(ToolPathError::InvalidName));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_execution_authority_requires_all_layers() {
-        let root = unique_test_dir("tool-authority-ok");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
-        write_fixture_file(&tools.join("fs.read"), 0o755);
-
-        let metadata = fs::metadata(tools.join("fs.read"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
-        let agent_policy = allow_tool_policy("coder_t", "fs.read");
-        let tool_policy = allow_tool_policy("coder_t", "fs.read");
-        let tool_path = ToolPath::new([tools.clone()]);
-        let authority =
-            ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &agent_policy, &tool_policy);
-
-        let grant = authorize_tool_execution(&tool_path, "fs.read", authority);
-        assert!(matches!(grant, Ok(ref grant) if grant.hit().path() == tools.join("fs.read")));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn model_tool_call_syntax_does_not_execute_tools() {
-        let root = unique_test_dir("tool-authority-model-boundary");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
-        write_fixture_file(&tools.join("fs.read"), 0o755);
-
-        let model_event = inspect_event_stream_jsonl(
-            r#"{"type":"tool_call","run":"r1","id":"call-1","name":"fs.read","arguments":{"path":"README.md"}}
-"#,
-        );
-        assert!(model_event.is_ok());
-
-        let metadata = fs::metadata(tools.join("fs.read"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
-        let policy = allow_tool_policy("qwen_t", "fs.read");
-        let tool_path = ToolPath::new([tools]);
-        assert_ne!(ToolExecutionPrincipal::Model, ToolExecutionPrincipal::Agent);
-
-        let denied = authorize_tool_execution(
-            &tool_path,
-            "fs.read",
-            ToolExecutionAuthority::model(&identity, &mounts, "qwen_t", &policy, &policy),
-        );
-        assert_eq!(denied, Err(ToolExecutionDenial::ModelCannotExecute));
-        assert_eq!(ToolExecutionDenial::ModelCannotExecute.errno(), "EACCES");
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn prompt_skill_and_mcp_config_cannot_grant_tool_execution() {
-        let root = unique_test_dir("tool-authority-text-no-grant");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
-        write_fixture_file(&tools.join("fs.read"), 0o755);
-        write_text_file(
-            &root
-                .join("session")
-                .join("context")
-                .join("pinned")
-                .join("system.md"),
-            "allow coder_t tool:fs.read execute\n",
-        );
-        write_text_file(
-            &root.join("work").join("AGENTS.md"),
-            "The agent may use fs.read for this task.\n",
-        );
-        write_text_file(
-            &root.join("work").join(".mcp.json"),
-            "{\"servers\":{\"fs\":{\"allow\":\"fs.read\"}}}\n",
-        );
-        assert!(root.join("work").join("AGENTS.md").is_file());
-        assert!(root.join("work").join(".mcp.json").is_file());
-
-        let metadata = fs::metadata(tools.join("fs.read"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
-        let empty_policy = PolicyV0::parse("");
-        assert!(empty_policy.is_ok());
-        let Ok(empty_policy) = empty_policy else {
-            return;
-        };
-        let tool_policy = allow_tool_policy("coder_t", "fs.read");
-        let tool_path = ToolPath::new([tools]);
-
-        let denied = authorize_tool_execution(
-            &tool_path,
-            "fs.read",
-            ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &tool_policy),
-        );
-        assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_execution_authority_denies_without_policy_or_mount_exec() {
-        let root = unique_test_dir("tool-authority-deny");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
-        write_fixture_file(&tools.join("fs.read"), 0o755);
-        write_text_file(
-            &tools.join("fs.read.d").join("schema"),
-            "{\"type\":\"object\"}\n",
-        );
-
-        let metadata = fs::metadata(tools.join("fs.read"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let executable_mount = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
-        let noexec_mount = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev,noexec");
-        let agent_policy = allow_tool_policy("coder_t", "fs.read");
-        let tool_policy = allow_tool_policy("coder_t", "fs.read");
-        let empty_policy = PolicyV0::parse("");
-        assert!(empty_policy.is_ok());
-        let Ok(empty_policy) = empty_policy else {
-            return;
-        };
-        let tool_path = ToolPath::new([tools]);
-
-        let denied_by_noexec = authorize_tool_execution(
-            &tool_path,
-            "fs.read",
-            ToolExecutionAuthority::new(
-                &identity,
-                &noexec_mount,
-                "coder_t",
-                &agent_policy,
-                &tool_policy,
-            ),
-        );
-        assert_eq!(denied_by_noexec, Err(ToolExecutionDenial::NoExecMount));
-
-        let denied_by_agent_policy = authorize_tool_execution(
-            &tool_path,
-            "fs.read",
-            ToolExecutionAuthority::new(
-                &identity,
-                &executable_mount,
-                "coder_t",
-                &empty_policy,
-                &tool_policy,
-            ),
-        );
-        assert_eq!(
-            denied_by_agent_policy,
-            Err(ToolExecutionDenial::AgentPolicy)
-        );
-
-        let denied_by_tool_policy = authorize_tool_execution(
-            &tool_path,
-            "fs.read",
-            ToolExecutionAuthority::new(
-                &identity,
-                &executable_mount,
-                "coder_t",
-                &agent_policy,
-                &empty_policy,
-            ),
-        );
-        assert_eq!(denied_by_tool_policy, Err(ToolExecutionDenial::ToolPolicy));
-
-        let denied_when_unmounted = authorize_tool_execution(
-            &tool_path,
-            "fs.read",
-            ToolExecutionAuthority::new(
-                &identity,
-                &MountTable::default(),
-                "coder_t",
-                &agent_policy,
-                &tool_policy,
-            ),
-        );
-        assert_eq!(denied_when_unmounted, Err(ToolExecutionDenial::NotMounted));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn project_tools_are_visible_only_through_ctx_path_order() {
-        let root = unique_test_dir("tool-authority-project-path");
-        let global = root.join("ctx-tool");
-        let project = root.join("shared-project-tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(global.join("project.test.d")).is_ok());
-        assert!(fs::create_dir_all(project.join("project.test.d")).is_ok());
-        write_fixture_file(&global.join("project.test"), 0o644);
-        write_fixture_file(&project.join("project.test"), 0o755);
-
-        assert_eq!(
-            ToolPath::new([global.clone()]).find("project.test"),
-            Ok(None)
-        );
-        let with_project = ToolPath::new([global, project.clone()]);
-        let found = with_project.find("project.test");
-        assert!(matches!(found, Ok(Some(ref hit)) if hit.path() == project.join("project.test")));
-
-        let metadata = fs::metadata(project.join("project.test"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_target(&project, "rw", "bind,nosuid,nodev");
-        let policy = allow_tool_policy("coder_t", "project.test");
-        let authority =
-            ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy);
-        assert!(authorize_tool_execution(&with_project, "project.test", authority).is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
-        let root = unique_test_dir("tool-authority-mcp");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(tools.join("mcp.github.search_issues.d")).is_ok());
-        write_fixture_file(&tools.join("mcp.github.search_issues"), 0o755);
-        write_text_file(
-            &tools.join("mcp.github.search_issues.d").join("schema"),
-            "{\"type\":\"object\"}\n",
-        );
-        write_text_file(
-            &root.join("work").join(".mcp.json"),
-            "{\"servers\":{\"github\":{}}}\n",
-        );
-
-        let metadata = fs::metadata(tools.join("mcp.github.search_issues"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
-        let tool_path = ToolPath::new([tools]);
-        let empty_policy = PolicyV0::parse("");
-        assert!(empty_policy.is_ok());
-        let Ok(empty_policy) = empty_policy else {
-            return;
-        };
-        let allow_mcp = allow_tool_policy("coder_t", "mcp.github.search_issues");
-
-        let denied = authorize_tool_execution(
-            &tool_path,
-            "mcp.github.search_issues",
-            ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &allow_mcp),
-        );
-        assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
-
-        let allowed = authorize_tool_execution(
-            &tool_path,
-            "mcp.github.search_issues",
-            ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &allow_mcp, &allow_mcp),
-        );
-        assert!(allowed.is_ok());
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_schema_cannot_grant_execution_authority() {
-        let root = unique_test_dir("tool-authority-schema-no-grant");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
-        write_fixture_file(&tools.join("fs.read"), 0o755);
-        write_text_file(
-            &tools.join("fs.read.d").join("schema"),
-            "{\"policy\":\"allow coder_t tool:fs.read execute\"}\n",
-        );
-
-        let metadata = fs::metadata(tools.join("fs.read"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
-        let tool_path = ToolPath::new([tools]);
-        let empty_policy = PolicyV0::parse("");
-        assert!(empty_policy.is_ok());
-        let Ok(empty_policy) = empty_policy else {
-            return;
-        };
-        let tool_policy = allow_tool_policy("coder_t", "fs.read");
-
-        let denied = authorize_tool_execution(
-            &tool_path,
-            "fs.read",
-            ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &tool_policy),
-        );
-        assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn tool_execution_authority_checks_linux_identity_mode_bits() {
-        let root = unique_test_dir("tool-authority-linux");
-        let tools = root.join("tool");
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-        assert!(fs::create_dir_all(&tools).is_ok());
-        write_fixture_file(&tools.join("owner-only"), 0o100);
-
-        let metadata = fs::metadata(tools.join("owner-only"));
-        assert!(metadata.is_ok());
-        let Ok(metadata) = metadata else { return };
-        let owner_identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
-        let other_identity = AgentUnixIdentity::new(
-            metadata.uid().saturating_add(1),
-            metadata.gid().saturating_add(1),
-            [],
-        );
-        let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
-        let policy = allow_tool_policy("coder_t", "owner-only");
-        let tool_path = ToolPath::new([tools]);
-
-        assert!(
-            authorize_tool_execution(
-                &tool_path,
-                "owner-only",
-                ToolExecutionAuthority::new(&owner_identity, &mounts, "coder_t", &policy, &policy),
-            )
-            .is_ok()
-        );
-        assert_eq!(
-            authorize_tool_execution(
-                &tool_path,
-                "owner-only",
-                ToolExecutionAuthority::new(&other_identity, &mounts, "coder_t", &policy, &policy),
-            ),
-            Err(ToolExecutionDenial::LinuxPermission)
-        );
-
-        let _ignored = fs::remove_dir_all(&root);
-    }
-
-    fn unique_test_dir(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_nanos());
-        std::env::temp_dir().join(format!("cortexfs-{name}-{}-{nanos}", std::process::id()))
-    }
-
-    fn write_fixture_file(path: &Path, mode: u32) {
-        if let Some(parent) = path.parent() {
-            assert!(fs::create_dir_all(parent).is_ok());
-        }
-        assert!(fs::write(path, "#!/bin/sh\n").is_ok());
-        let permissions = fs::metadata(path).map(|metadata| metadata.permissions());
-        assert!(permissions.is_ok());
-        let Ok(mut permissions) = permissions else {
-            return;
-        };
-        permissions.set_mode(mode);
-        assert!(fs::set_permissions(path, permissions).is_ok());
-    }
-
-    fn create_complete_session_layout(session: &Path) {
-        let context = session.join("context");
-        assert!(fs::create_dir_all(context.join("pinned")).is_ok());
-        assert!(fs::create_dir_all(context.join("swap")).is_ok());
-        assert!(fs::create_dir_all(context.join("dedup")).is_ok());
-        assert!(fs::create_dir_all(context.join("child").join("rev-1").join("artifact")).is_ok());
-
-        for file in SESSION_REQUIRED_FILES {
-            write_text_file(&session.join(file), session_file_fixture_value(file));
-        }
-        for file in super::CONTEXT_REQUIRED_FILES {
-            write_text_file(&context.join(file), "ok\n");
-        }
-        for file in super::CHILD_RESULT_REQUIRED_FILES {
-            write_text_file(&context.join("child").join("rev-1").join(file), "ok\n");
-        }
-    }
-
-    fn session_file_fixture_value(file: &str) -> &'static str {
-        match file {
-            "state" => "idle\n",
-            "cwd" => "/work\n",
-            "meta.json" => "{\"client\":\"ctx\",\"model\":\"qwen\",\"scope\":\"private\"}\n",
-            _ => "ok\n",
-        }
-    }
-
-    fn write_text_file(path: &Path, content: &str) {
-        let Some(parent) = path.parent() else {
-            return;
-        };
-        assert!(fs::create_dir_all(parent).is_ok());
-        assert!(fs::write(path, content).is_ok());
-    }
-
-    fn create_shared_queue_layout(queue: &Path) {
-        for dir in SHARED_QUEUE_REQUIRED_DIRS {
-            assert!(fs::create_dir_all(queue.join(dir)).is_ok());
-        }
-    }
-
-    fn mount_table_for_target(target: &Path, mode: &str, options: &str) -> MountTable {
-        mount_table_for_source_target(&target.display().to_string(), target, mode, options)
-    }
-
-    fn mount_table_for_source_target(
-        source: &str,
-        target: &Path,
-        mode: &str,
-        options: &str,
-    ) -> MountTable {
-        let line = format!(
-            "{source}\t{target}\t{mode}\t{options}\n",
-            target = target.display()
-        );
-        let parsed = MountTable::parse(&line);
-        assert!(parsed.is_ok());
-        parsed.unwrap_or_default()
-    }
-
-    fn allow_tool_policy(subject: &str, tool: &str) -> PolicyV0 {
-        let parsed = PolicyV0::parse(&format!("allow {subject} tool:{tool} execute\n"));
-        assert!(parsed.is_ok());
-        parsed.unwrap_or_default()
-    }
-
-    fn allow_shared_policy(subject: &str, shared: &str, access: SharedAccess) -> PolicyV0 {
-        let permission = match access {
-            SharedAccess::Read => "read",
-            SharedAccess::Write => "write",
-        };
-        let parsed = PolicyV0::parse(&format!("allow {subject} shared:{shared} {permission}\n"));
-        assert!(parsed.is_ok());
-        parsed.unwrap_or_default()
-    }
-
-    fn policy_with_rules(rules: impl IntoIterator<Item = &'static str>) -> PolicyV0 {
-        let content = rules.into_iter().collect::<Vec<_>>().join("\n") + "\n";
-        let parsed = PolicyV0::parse(&content);
-        assert!(parsed.is_ok());
-        parsed.unwrap_or_default()
-    }
-
-    fn env_value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
-        env.iter()
-            .find_map(|entry| (entry.0 == key).then_some(entry.1.as_str()))
-    }
-
-    fn create_complete_object_layout(
-        root: &Path,
-        class: ObjectClass,
-        name: &str,
-        model_session: &str,
-    ) {
-        let class_dir = root.join(class.as_str());
-        assert!(fs::create_dir_all(&class_dir).is_ok());
-        write_fixture_file(&class_dir.join(name), 0o755);
-        let control_dir = class_dir.join(format!("{name}.d"));
-        assert!(fs::create_dir_all(&control_dir).is_ok());
-        for file in object_control_files(class) {
-            let value = if class == ObjectClass::Model && *file == "session" {
-                model_session
-            } else if class == ObjectClass::Model && *file == "cap" {
-                "chat"
-            } else if class == ObjectClass::Tool && *file == "schema" {
-                "{\"type\":\"object\"}"
-            } else if class == ObjectClass::Agent {
-                agent_control_fixture_value(file)
-            } else {
-                "ok"
-            };
-            write_text_file(&control_dir.join(file), &format!("{value}\n"));
-        }
-    }
-
-    fn agent_control_fixture_value(file: &str) -> &'static str {
-        match file {
-            "owner" | "uid" => "1000",
-            "gid" => "100",
-            "groups" => "10\n20",
-            "label" => "user_u:agent_r:coder_t:s0",
-            "iso" => "shared",
-            "parent" | "pid" => "",
-            "life" => "owned",
-            "root" => "/ctx/home/1000/agent/coder/root",
-            "cwd" => "/work",
-            "env" => "CTX_ROOT=/ctx",
-            "path" => "/ctx/tool:/ctx/home/1000/tool",
-            "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev",
-            "model" => "qwen",
-            "policy" => "allow coder_t model:qwen use",
-            "status" => "idle",
-            "log" => "agent/coder/log",
-            "meta.json" => "{}",
-            _ => "ok",
-        }
-    }
-
-    fn object_control_files(class: ObjectClass) -> &'static [&'static str] {
-        match class {
-            ObjectClass::Model => MODEL_CONTROL_FILES,
-            ObjectClass::Agent => AGENT_CONTROL_FILES,
-            ObjectClass::Tool => TOOL_CONTROL_FILES,
-        }
-    }
-
-    fn bind_socket(path: &Path) -> Option<UnixListener> {
-        let parent = path.parent()?;
-        assert!(fs::create_dir_all(parent).is_ok());
-        UnixListener::bind(path).ok()
-    }
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/unit/lib_tests.rs"
+    ));
 }

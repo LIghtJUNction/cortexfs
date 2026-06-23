@@ -24,9 +24,10 @@ getattr
 read
 write small control files
 atomic replace
-exec wrapper
+read-only executable object projection
 Unix socket path projection
 session files
+read-only CortexFS extended attributes
 ```
 
 Do not add these to v1 FUSE:
@@ -52,11 +53,11 @@ Path semantics stay simple:
 
 ```text
 status                 dynamic
-model/<name>           dynamic executable entry
-model/<name>.sock      dynamic socket; existence means session=socket
-model/<name>.d/status  dynamic
-model/<name>.d/log     dynamic or durable, implementation choice
-model/<name>.d/id      durable or config projection
+model/<provider>/<model>           dynamic executable entry
+model/<provider>/<model>.sock      dynamic socket; existence means session=socket
+model/<provider>/<model>.d/status  dynamic
+model/<provider>/<model>.d/log     dynamic or durable, implementation choice
+model/<provider>/<model>.d/id      durable or config projection
 agent/<name>           dynamic executable entry
 agent/<name>.sock      dynamic socket
 agent/<name>.d/status  dynamic
@@ -79,10 +80,48 @@ agent/<name>.d/log     dynamic or durable, implementation choice
 tool/<name>            dynamic executable entry
 tool/<name>.d/schema   durable
 home/<uid>/model/*     durable alias or user model entry
-home/<uid>/tool/*      durable alias or user tool
-home/<uid>/agent/*     durable agent data
+home/<uid>/tool/*      durable user tool
+home/<uid>/agent/*     durable user agent state
 home/<uid>/            durable
 shared/<name>/         durable
 ```
 
 Clients do not get to depend on the backend choice.
+
+The agent runtime-visible tool view may be a dynamic in-memory projection over
+system, user, and shared tool source tiers. That projection is not durable
+state and must not be represented by writing placeholder files or default
+symlinks into `home/<uid>/tool`.
+
+## Extended Attributes
+
+FUSE exposes read-only `user.cortexfs.*` extended attributes so agents can
+inspect a path before reading full contents:
+
+```text
+user.cortexfs.abi_path               ABI path relative to /ctx
+user.cortexfs.kind                   stable ctx.* path classification
+user.cortexfs.origin                 virtual, disk, or overlay
+user.cortexfs.storage                memory or disk
+user.cortexfs.virtual                true or false
+user.cortexfs.backing_exists         true or false
+user.cortexfs.backing_path           implementation path, when one exists
+user.cortexfs.bytes                  projected byte size
+user.cortexfs.token_estimate         fast token estimate for read planning
+user.cortexfs.input_token_estimate   estimated input cost if read into context
+user.cortexfs.output_token_estimate  estimated generated output; 0 when unknown
+user.cortexfs.cache_bytes            cached bytes known to CortexFS; 0 when none
+user.cortexfs.cache_entries          cache entry count; 0 when none
+user.cortexfs.cache_state            none, partial, warm, or stale
+user.cortexfs.tokenizer              tokenizer/estimator id
+```
+
+`origin=virtual storage=memory` means the file is projected by CortexFS rather
+than read from a durable backing file. `origin=disk storage=disk` means the
+visible content comes from the backing filesystem. `origin=overlay
+storage=memory` is used for runtime overlays such as live socket paths.
+
+Token counts are estimates unless a runtime later writes exact tokenizer
+metadata. The default estimator is `byte-estimate-v1`, a cheap read-before-read
+heuristic that does not scan full file contents. These xattrs are not control
+files; `setxattr` and `removexattr` must fail.

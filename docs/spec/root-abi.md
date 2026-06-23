@@ -20,17 +20,35 @@ Meaning:
 ```text
 status   current mount status
 bin/     CortexFS ABI helper commands
-model/   executable model entries
-agent/   executable agent entries
-tool/    global executable tool entries
+model/   system executable model entries, visible to all users by default
+agent/   system executable agent entries, visible to all users by default
+tool/    system executable tool entries, visible to all users by default
 home/    CortexFS home for Linux users
 shared/  shared space for users and agents
 ```
 
+Resource tiers:
+
+```text
+/ctx/model              system models
+/ctx/agent              system agents
+/ctx/tool               system tools
+/ctx/home/<uid>/model   user-specific models and aliases
+/ctx/home/<uid>/agent   user-specific agent state and user agents
+/ctx/home/<uid>/tool    user-specific tools
+```
+
+The system tiers are durable shared resources. The user tiers are durable
+per-user resources. An agent's runtime-visible tool set is a separate in-memory
+FUSE projection derived from its controls, policy, mounts, and Linux identity;
+it is not materialized by copying or symlinking tools into the durable user
+tree.
+
 ## v1 Reference Tree
 
-This is the normative v1 shape. Concrete object names such as `qwen`,
-`coder`, `reviewer`, `1000`, and `project-a` are examples of valid entries.
+This is the normative v1 shape. Concrete object names such as `debug/echo`,
+`openai/gpt-4o`, `coder`, `reviewer`, `1000`, and `project-a` are examples of
+valid entries.
 
 ```text
 /ctx/
@@ -40,16 +58,30 @@ This is the normative v1 shape. Concrete object names such as `qwen`,
     ctx
 
   model/
-    qwen
-    qwen.sock
-    qwen.d/
-      id
-      driver
-      cap
-      default
-      session
-      status
-      log
+    main -> /ctx/model/debug/echo
+    helper -> /ctx/model/debug/echo
+
+    debug/
+      echo
+      echo.d/
+        id
+        driver
+        cap
+        default
+        session
+        status
+        log
+
+    openai/
+      gpt-4o
+      gpt-4o.d/
+        id
+        driver
+        cap
+        default
+        session
+        status
+        log
 
   agent/
     coder
@@ -129,47 +161,6 @@ This is the normative v1 shape. Concrete object names such as `qwen`,
       status
       log
 
-    mcp.github.search_issues
-    mcp.github.search_issues.d/
-      name
-      description
-      schema
-      cap
-      policy
-      status
-      log
-      origin
-
-    agent.create
-    agent.create.d/
-      name
-      description
-      schema
-      cap
-      policy
-      status
-      log
-
-    agent.start
-    agent.start.d/
-      name
-      description
-      schema
-      cap
-      policy
-      status
-      log
-
-    agent.stop
-    agent.stop.d/
-      name
-      description
-      schema
-      cap
-      policy
-      status
-      log
-
   home/
     1000/
       agent/
@@ -177,59 +168,17 @@ This is the normative v1 shape. Concrete object names such as `qwen`,
           root/
           session/
             index/
-              list
-              current
               by-cwd/
-                <hash>
-
-            default/
-              messages.jsonl
-              events.jsonl
-              latest.md
-              state
-              cwd
-              created_at
-              updated_at
-              meta.json
-
-              context/
-                budget
-                pack.json
-                pack.md
-                summary.md
-                facts.jsonl
-                decisions.jsonl
-                todo.md
-                refs.jsonl
-
-                pinned/
-                swap/
-                  index.jsonl
-                  chunk/
-
-                dedup/
-                  index.jsonl
-                  blob/
-
-                child/
-                  rev-123/
-                    agent
-                    session
-                    status
-                    handoff.md
-                    result.md
-                    refs.jsonl
-                    artifact/
 
           data/
           cache/
           log/
 
       tool/
-        fs.read -> /ctx/tool/fs.read
 
       model/
-        coder -> /ctx/model/qwen
+        main -> /ctx/model/openai/gpt-4o
+        coder -> /ctx/model/debug/echo
 
   shared/
     project-a/
@@ -245,16 +194,8 @@ This is the normative v1 shape. Concrete object names such as `qwen`,
       agent/
         coder/
           session/
-            design-review/
-              messages.jsonl
-              events.jsonl
-              latest.md
-              state
-              cwd
-              created_at
-              updated_at
-              meta.json
-              context/
+            index/
+              by-cwd/
 
       queue/
         inbox/
