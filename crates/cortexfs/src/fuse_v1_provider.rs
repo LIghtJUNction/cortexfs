@@ -40,31 +40,13 @@ fn default_provider_enabled() -> bool {
 
 fn projected_provider_models(
     config_dir: &Path,
+    cache_dir: &Path,
 ) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
-    let entries = match fs::read_dir(config_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_error) => return Err(FuseV1Error::Io),
-    };
+    let configs = read_provider_configs(config_dir)?;
     let mut projected = Vec::new();
     let mut seen = HashSet::new();
-    for entry in entries {
-        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
-        if metadata.file_type().is_dir() {
-            continue;
-        }
-        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        if extension != "json" {
-            continue;
-        }
-        let content = fs::read_to_string(&path).map_err(|_error| FuseV1Error::Io)?;
-        let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
-            continue;
-        };
+    for entry in configs {
+        let config = entry.config;
         if !config.enabled {
             continue;
         }
@@ -73,7 +55,7 @@ fn projected_provider_models(
         };
         let driver = provider_driver_route_table(&config.formats);
         let cap = provider_capability_text(&config.formats);
-        for model in provider_config_models(&config) {
+        for model in provider_config_models(&config, cache_dir, &provider) {
             let key = format!("{provider}/{model}");
             if seen.insert(key) {
                 projected.push(ProjectedProviderModel {
@@ -94,11 +76,45 @@ fn projected_provider_models(
     Ok(projected)
 }
 
+struct ProviderConfigEntry {
+    config: ProviderConfig,
+}
+
+fn read_provider_configs(config_dir: &Path) -> Result<Vec<ProviderConfigEntry>, FuseV1Error> {
+    let entries = match fs::read_dir(config_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_error) => return Err(FuseV1Error::Io),
+    };
+    let mut configs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if metadata.file_type().is_dir() {
+            continue;
+        }
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if extension != "json" {
+            continue;
+        }
+        let content = fs::read_to_string(&path).map_err(|_error| FuseV1Error::Io)?;
+        let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
+            continue;
+        };
+        configs.push(ProviderConfigEntry { config });
+    }
+    Ok(configs)
+}
+
 fn projected_provider_models_for_provider(
     config_dir: &Path,
+    cache_dir: &Path,
     provider: &str,
 ) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
-    Ok(projected_provider_models(config_dir)?
+    Ok(projected_provider_models(config_dir, cache_dir)?
         .into_iter()
         .filter(|model| model.provider == provider)
         .collect())
@@ -106,6 +122,7 @@ fn projected_provider_models_for_provider(
 
 fn projected_provider_models_for_provider_path(
     config_dir: &Path,
+    cache_dir: &Path,
     abi_path: &str,
 ) -> Result<Option<Vec<ProjectedProviderModel>>, FuseV1Error> {
     let Some(provider) = abi_path.strip_prefix("model/") else {
@@ -114,7 +131,7 @@ fn projected_provider_models_for_provider_path(
     if provider.contains('/') || provider == DEBUG_ECHO_PROVIDER {
         return Ok(None);
     }
-    let models = projected_provider_models_for_provider(config_dir, provider)?;
+    let models = projected_provider_models_for_provider(config_dir, cache_dir, provider)?;
     if models.is_empty() {
         Ok(None)
     } else {
@@ -124,18 +141,20 @@ fn projected_provider_models_for_provider_path(
 
 fn projected_provider_model_for_exec(
     config_dir: &Path,
+    cache_dir: &Path,
     abi_path: &str,
 ) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
     let Some(model_name) = model_exec_name(abi_path) else {
         return Ok(None);
     };
-    Ok(projected_provider_models(config_dir)?
+    Ok(projected_provider_models(config_dir, cache_dir)?
         .into_iter()
         .find(|model| format!("{}/{}", model.provider, model.model) == model_name))
 }
 
 fn projected_provider_model_control_dir(
     config_dir: &Path,
+    cache_dir: &Path,
     abi_path: &str,
 ) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
     let Some(model_name) = abi_path
@@ -147,25 +166,26 @@ fn projected_provider_model_control_dir(
     if !is_model_name(model_name) {
         return Ok(None);
     }
-    Ok(projected_provider_models(config_dir)?
+    Ok(projected_provider_models(config_dir, cache_dir)?
         .into_iter()
         .find(|model| format!("{}/{}", model.provider, model.model) == model_name))
 }
 
 fn projected_provider_model_control_file<'a>(
     config_dir: &Path,
+    cache_dir: &Path,
     abi_path: &'a str,
 ) -> Result<Option<(ProjectedProviderModel, &'a str)>, FuseV1Error> {
     let Some((dir, file)) = abi_path.rsplit_once('/') else {
         return Ok(None);
     };
-    let Some(model) = projected_provider_model_control_dir(config_dir, dir)? else {
+    let Some(model) = projected_provider_model_control_dir(config_dir, cache_dir, dir)? else {
         return Ok(None);
     };
     Ok(Some((model, file)))
 }
 
-fn provider_config_models(config: &ProviderConfig) -> Vec<String> {
+fn provider_config_models(config: &ProviderConfig, cache_dir: &Path, provider: &str) -> Vec<String> {
     let mut models = Vec::new();
     let mut seen = HashSet::new();
     if let Some(model) = config.default_model.as_deref() {
@@ -173,6 +193,9 @@ fn provider_config_models(config: &ProviderConfig) -> Vec<String> {
     }
     for model in &config.models {
         append_provider_model_name(model, &mut models, &mut seen);
+    }
+    for model in provider_cached_models(cache_dir, provider) {
+        append_provider_model_name(&model, &mut models, &mut seen);
     }
     models
 }
@@ -188,6 +211,11 @@ fn append_provider_model_name(model: &str, models: &mut Vec<String>, seen: &mut 
 }
 
 fn provider_name_from_base_url(base_url: &str) -> Option<String> {
+    let host = provider_host(base_url)?;
+    is_object_name(&host).then_some(host)
+}
+
+fn provider_host(base_url: &str) -> Option<String> {
     let mut rest = base_url.trim();
     if let Some(value) = rest.strip_prefix("https://") {
         rest = value;
@@ -207,7 +235,7 @@ fn provider_name_from_base_url(base_url: &str) -> Option<String> {
         .unwrap_or_default()
         .trim_end_matches('.')
         .to_ascii_lowercase();
-    is_object_name(&host).then_some(host)
+    (!host.is_empty()).then_some(host)
 }
 
 fn normalize_provider_base_url(base_url: &str) -> String {

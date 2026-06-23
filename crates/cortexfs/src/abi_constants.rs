@@ -29,6 +29,7 @@ pub(super) const DEFAULT_MODEL_ALIAS: &str = "main";
 pub(super) const HELPER_MODEL_ALIAS: &str = "helper";
 pub(super) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/debug/echo";
 pub(super) const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+pub(super) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";
 
 /// Stable semantic model capability words in the v1 ABI.
 pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[

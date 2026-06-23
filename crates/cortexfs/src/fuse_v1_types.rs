@@ -67,6 +67,7 @@ pub enum FuseV1Error {
 pub struct FuseV1Projection {
     root: PathBuf,
     provider_config_dir: PathBuf,
+    provider_model_cache_dir: PathBuf,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,6 +87,13 @@ struct ProviderConfig {
     enabled: bool,
     #[serde(default)]
     formats: Vec<String>,
+    api_key_env: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ProviderModelCache {
+    #[serde(default)]
+    models: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

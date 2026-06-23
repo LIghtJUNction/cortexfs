@@ -5,6 +5,7 @@ impl FuseV1Projection {
         Self {
             root: root.into(),
             provider_config_dir: PathBuf::from(SYSTEM_PROVIDER_CONFIG_DIR),
+            provider_model_cache_dir: PathBuf::from(SYSTEM_PROVIDER_MODEL_CACHE_DIR),
         }
     }
 
@@ -13,6 +14,18 @@ impl FuseV1Projection {
     pub fn with_provider_config_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.provider_config_dir = path.into();
         self
+    }
+
+    /// Overrides the provider model cache directory used for projected models.
+    #[must_use]
+    pub fn with_provider_model_cache_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.provider_model_cache_dir = path.into();
+        self
+    }
+
+    /// Refreshes the provider model-list cache used by this projection.
+    pub fn refresh_provider_model_cache(&self) -> Result<(), FuseV1Error> {
+        refresh_provider_model_cache(&self.provider_config_dir, &self.provider_model_cache_dir)
     }
 
     /// Returns the backing root.
@@ -196,7 +209,10 @@ impl FuseV1Projection {
                         provider_names.insert(name);
                     }
                 }
-                for provider in projected_provider_models(&self.provider_config_dir)?
+                for provider in projected_provider_models(
+                    &self.provider_config_dir,
+                    &self.provider_model_cache_dir,
+                )?
                     .into_iter()
                     .map(|model| model.provider)
                 {
@@ -223,7 +239,11 @@ impl FuseV1Projection {
             "model/debug/echo.d" => model_control_dir_entries(),
             _ => {
                 if let Some(model) =
-                    projected_provider_model_control_dir(&self.provider_config_dir, abi_path)?
+                    projected_provider_model_control_dir(
+                        &self.provider_config_dir,
+                        &self.provider_model_cache_dir,
+                        abi_path,
+                    )?
                 {
                     let _ = model;
                     model_control_dir_entries()
@@ -233,6 +253,7 @@ impl FuseV1Projection {
                     }
                     let models = projected_provider_models_for_provider(
                         &self.provider_config_dir,
+                        &self.provider_model_cache_dir,
                         provider,
                     )?;
                     if models.is_empty() {
@@ -276,10 +297,17 @@ impl FuseV1Projection {
         if let Some(file) = abi_path.strip_prefix("model/debug/echo.d/") {
             return Ok(debug_echo_control_content(file).map(str::to_owned));
         }
-        let Some(model) = projected_provider_model_for_exec(&self.provider_config_dir, abi_path)?
+        let Some(model) = projected_provider_model_for_exec(
+            &self.provider_config_dir,
+            &self.provider_model_cache_dir,
+            abi_path,
+        )?
         else {
-            let Some((model, file)) =
-                projected_provider_model_control_file(&self.provider_config_dir, abi_path)?
+            let Some((model, file)) = projected_provider_model_control_file(
+                &self.provider_config_dir,
+                &self.provider_model_cache_dir,
+                abi_path,
+            )?
             else {
                 return Ok(None);
             };
@@ -361,23 +389,38 @@ impl FuseV1Projection {
                     };
                     return virtual_regular_entry(content, 0o644);
                 }
-                if projected_provider_models_for_provider_path(&self.provider_config_dir, path)?
-                    .is_some()
+                if projected_provider_models_for_provider_path(
+                    &self.provider_config_dir,
+                    &self.provider_model_cache_dir,
+                    path,
+                )?
+                .is_some()
                 {
                     return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
                 }
-                if let Some(model) =
-                    projected_provider_model_for_exec(&self.provider_config_dir, path)?
+                if let Some(model) = projected_provider_model_for_exec(
+                    &self.provider_config_dir,
+                    &self.provider_model_cache_dir,
+                    path,
+                )?
                 {
                     let content = provider_model_metadata(&model);
                     return virtual_regular_entry(&content, 0o555);
                 }
-                if projected_provider_model_control_dir(&self.provider_config_dir, path)?.is_some()
+                if projected_provider_model_control_dir(
+                    &self.provider_config_dir,
+                    &self.provider_model_cache_dir,
+                    path,
+                )?
+                .is_some()
                 {
                     return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
                 }
-                let Some((model, file)) =
-                    projected_provider_model_control_file(&self.provider_config_dir, path)?
+                let Some((model, file)) = projected_provider_model_control_file(
+                    &self.provider_config_dir,
+                    &self.provider_model_cache_dir,
+                    path,
+                )?
                 else {
                     return Ok(None);
                 };
