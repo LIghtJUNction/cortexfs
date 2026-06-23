@@ -5885,11 +5885,23 @@ fn set_reference_executable(path: &Path) -> Result<(), ReferenceTreeError> {
 
 fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
-        return if metadata.file_type().is_socket() {
-            set_reference_socket_permissions(path)
+        let file_type = metadata.file_type();
+        if file_type.is_socket() {
+            return set_reference_socket_permissions(path);
+        }
+        if file_type.is_symlink() {
+            match fs::metadata(path) {
+                Ok(target) if target.file_type().is_socket() => {
+                    return set_reference_socket_permissions(path);
+                }
+                Ok(_target) => return Err(ReferenceTreeError::CannotSocket),
+                Err(_error) => {
+                    fs::remove_file(path).map_err(|_error| ReferenceTreeError::CannotSocket)?;
+                }
+            }
         } else {
-            Err(ReferenceTreeError::CannotSocket)
-        };
+            return Err(ReferenceTreeError::CannotSocket);
+        }
     }
     if let Some(parent) = path.parent() {
         create_reference_dir(parent)?;
@@ -8559,7 +8571,7 @@ mod tests {
     use std::fs;
     use std::io::{Read, Write};
     use std::net::Shutdown;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -9080,6 +9092,26 @@ mod tests {
             ensure_v1_reference_tree(&root),
             Err(ReferenceTreeError::CannotSocket)
         );
+
+        let _ignored = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
+        let root = unique_test_dir("reference-tree-stale-socket-symlink");
+        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+        assert!(fs::create_dir_all(root.join("agent")).is_ok());
+        assert!(
+            symlink(
+                "/run/cortexfs/agent/coder.sock",
+                root.join("agent").join("coder.sock")
+            )
+            .is_ok()
+        );
+
+        assert!(ensure_v1_reference_tree(&root).is_ok());
+        let metadata = fs::symlink_metadata(root.join("agent").join("coder.sock"));
+        assert!(matches!(metadata, Ok(ref metadata) if metadata.file_type().is_socket()));
 
         let _ignored = fs::remove_dir_all(&root);
     }
