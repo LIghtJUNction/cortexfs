@@ -59,12 +59,10 @@ fn doctor_objects(root: &Path) -> Result<bool, CliError> {
 
 fn object_names_for_doctor(dir: &Path, class: ObjectClass) -> Result<Vec<String>, CliError> {
     if class != ObjectClass::Model {
-        return read_dir_names(dir).map(|names| {
-            names
-                .into_iter()
-                .filter(|name| is_object_name(name))
-                .collect()
-        });
+        return Ok(read_dir_names(dir)?
+            .into_iter()
+            .filter(|name| is_object_name(name))
+            .collect());
     }
 
     let mut names = Vec::new();
@@ -169,17 +167,7 @@ fn collect_home_sessions(
         return Ok(());
     }
     for uid in read_dir_names(&home)? {
-        let uid_root = home.join(&uid);
-        collect_agent_sessions(
-            &uid_root.join("agent"),
-            &format!("home/{uid}/agent"),
-            sessions,
-        )?;
-        collect_model_sessions(
-            &uid_root.join("model"),
-            &format!("home/{uid}/model"),
-            sessions,
-        )?;
+        collect_space_sessions(&home.join(&uid), &format!("home/{uid}"), sessions)?;
     }
     Ok(())
 }
@@ -196,19 +184,18 @@ fn collect_shared_sessions(
         if !is_object_name(&space) {
             continue;
         }
-        let space_root = shared.join(&space);
-        collect_agent_sessions(
-            &space_root.join("agent"),
-            &format!("shared/{space}/agent"),
-            sessions,
-        )?;
-        collect_model_sessions(
-            &space_root.join("model"),
-            &format!("shared/{space}/model"),
-            sessions,
-        )?;
+        collect_space_sessions(&shared.join(&space), &format!("shared/{space}"), sessions)?;
     }
     Ok(())
+}
+
+fn collect_space_sessions(
+    root: &Path,
+    label_prefix: &str,
+    sessions: &mut Vec<(String, PathBuf)>,
+) -> Result<(), CliError> {
+    collect_agent_sessions(&root.join("agent"), &format!("{label_prefix}/agent"), sessions)?;
+    collect_model_sessions(&root.join("model"), &format!("{label_prefix}/model"), sessions)
 }
 
 fn collect_agent_sessions(
