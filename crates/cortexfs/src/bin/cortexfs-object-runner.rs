@@ -3,13 +3,15 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 use cortexfs::run_echo_model;
 use serde_json::Value;
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 const DEFAULT_CTX_ROOT: &str = "/ctx";
+
+include!("../cortexfs_object_runner_provider.rs");
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -25,21 +27,56 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let (object_path, input) = split_object_args(args)?;
     let object = ObjectPath::parse(&object_path)?;
     match (object.class.as_str(), object.name.as_str()) {
-        ("model", "debug/echo") => {
-            let stdout = io::stdout();
-            run_echo_model(
-                input.iter().map(|value| value.to_string_lossy()),
-                stdout.lock(),
-            )
-            .map_err(|error| format!("echo model failed: {error}"))
-        }
-        ("model", name) => Err(format!("model {name} is not handled by this runner")),
+        ("model", name) => run_model(name, &input),
         ("agent", name) => run_agent(name, &input),
         ("tool", name) => run_tool(name, &input),
         (class, _name) => Err(format!(
             "object class {class} is not handled by this runner"
         )),
     }
+}
+
+fn run_model(name: &str, args: &[OsString]) -> Result<(), String> {
+    let name = resolve_model_name(name)?;
+    if name == "debug/echo" {
+        let stdout = io::stdout();
+        return run_echo_model(
+            args.iter().map(|value| value.to_string_lossy()),
+            stdout.lock(),
+        )
+        .map_err(|error| format!("echo model failed: {error}"));
+    }
+    let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
+    run_provider_model(&name, &input)
+}
+
+fn resolve_model_name(name: &str) -> Result<String, String> {
+    if name.contains('/') {
+        return Ok(name.to_owned());
+    }
+    let ctx_root =
+        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let target = fs::read_link(ctx_root.join("model").join(name))
+        .map_err(|_error| format!("missing model alias: {name}"))?;
+    let Some(target) = target.to_str() else {
+        return Err(format!("invalid model alias: {name}"));
+    };
+    target
+        .strip_prefix("/ctx/model/")
+        .filter(|model| model.contains('/'))
+        .map(str::to_owned)
+        .ok_or_else(|| format!("invalid model alias target: {name}"))
+}
+
+fn run_provider_model(name: &str, input: &str) -> Result<(), String> {
+    let content = provider_chat_completion(name, input)?;
+    let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    write_model_start(&mut stdout, &run, name)
+        .and_then(|()| write_model_delta(&mut stdout, &run, &content))
+        .and_then(|()| write_tool_done(&mut stdout, &run, "ok"))
+        .map_err(|error| format!("cannot write output: {error}"))
 }
 
 fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
@@ -188,6 +225,24 @@ fn run_shell_exec(run: &str, input: &str, stdout: &mut impl Write) -> Result<(),
 fn json_string_field(input: &str, field: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(input).ok()?;
     value.get(field)?.as_str().map(str::to_owned)
+}
+
+fn write_model_start(stdout: &mut impl Write, run: &str, model: &str) -> io::Result<()> {
+    writeln!(
+        stdout,
+        r#"{{"type":"start","run":{},"model":{}}}"#,
+        json_string(run),
+        json_string(model)
+    )
+}
+
+fn write_model_delta(stdout: &mut impl Write, run: &str, text: &str) -> io::Result<()> {
+    writeln!(
+        stdout,
+        r#"{{"type":"delta","run":{},"text":{}}}"#,
+        json_string(run),
+        json_string(text)
+    )
 }
 
 fn write_tool_start(stdout: &mut impl Write, run: &str, tool: &str) -> io::Result<()> {

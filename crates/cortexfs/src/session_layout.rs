@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::{
     CHILD_RESULT_REQUIRED_DIRS, CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_DIRS,
-    CONTEXT_REQUIRED_FILES, JsonStringField, SESSION_REQUIRED_FILES, is_model_name,
+    CONTEXT_REQUIRED_FILES, JsonStringField, SESSION_REQUIRED_FILES, abi_path,
     is_stable_chroot_absolute_path,
 };
 
@@ -224,7 +224,12 @@ fn inspect_session_meta_json(content: &str) -> SessionControlReport {
 
     let mut issues = Vec::new();
     inspect_optional_meta_string(meta.client.as_ref(), "client", &mut issues, |_| true);
-    inspect_optional_meta_string(meta.model.as_ref(), "model", &mut issues, is_model_name);
+    inspect_optional_meta_string(
+        meta.model.as_ref(),
+        "model",
+        &mut issues,
+        abi_path::is_model_reference,
+    );
     inspect_optional_meta_string(meta.scope.as_ref(), "scope", &mut issues, |scope| {
         matches!(scope, "private" | "shared" | "temp")
     });

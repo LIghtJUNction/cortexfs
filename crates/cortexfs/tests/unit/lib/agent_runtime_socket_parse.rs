@@ -7,6 +7,8 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
         &control.join("env"),
         "CTX_ROOT=/ignored\nHOME=/ignored\nRUST_LOG=info\n",
     );
+    write_text_file(&control.join("model"), "main\n");
+    write_text_file(&control.join("policy"), "allow coder_t model:main use\n");
 
     let view = derive_agent_runtime_view(&root, "coder");
     let view = ok!(view);
@@ -29,7 +31,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(view.lifecycle(), ChildLifecycle::Owned);
     assert_eq!(view.root(), Path::new("/ctx/home/1000/agent/coder/root"));
     assert_eq!(view.cwd(), Path::new("/work"));
-    assert_eq!(view.model(), "debug/echo");
+    assert_eq!(view.model(), "main");
     assert_eq!(
         view.tool_path().dirs(),
         [
@@ -41,7 +43,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert!(view.policy().allows(
         "coder_t",
         PolicyObjectClass::Model,
-        "debug/echo",
+        "main",
         PolicyPermission::Use,
     ));
     assert_eq!(

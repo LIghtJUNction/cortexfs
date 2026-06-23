@@ -33,12 +33,11 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     let session_root = root.join("session");
     let session = session_root.join("default");
 
-
     let ensured = ensure_durable_session_layout(
         &session_root,
         "default",
         "/work/project",
-        Some("debug/echo"),
+        Some("main"),
         SocketSessionScope::Private,
     );
     assert_eq!(ensured, Ok(()));
@@ -51,7 +50,7 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
 
     assert_file_text(&session_root.join("index").join("list"), "default\n");
     assert_file_text(&session_root.join("index").join("current"), "default\n");
-    assert!(meta.contains("\"model\":\"debug/echo\""));
+    assert!(meta.contains("\"model\":\"main\""));
     assert!(meta.contains("\"scope\":\"private\""));
     assert!(inspect_context_pack_json(&pack).is_ok());
 
