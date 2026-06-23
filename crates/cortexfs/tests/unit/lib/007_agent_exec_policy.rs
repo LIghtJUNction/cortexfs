@@ -69,8 +69,6 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
     let latest = fs::read_to_string(session_root.join("default").join("latest.md"));
     assert!(latest.is_ok());
     assert_eq!(latest.unwrap_or_default(), "hi\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -125,8 +123,6 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
         r#""text":"{}""#,
         root.to_string_lossy()
     )));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -193,8 +189,6 @@ exit 1
     let response = String::from_utf8_lossy(bytes);
     assert!(response.contains("\"code\":\"EHOSTDOWN\""));
     assert!(response.contains("\"message\":\"model unavailable\""));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]

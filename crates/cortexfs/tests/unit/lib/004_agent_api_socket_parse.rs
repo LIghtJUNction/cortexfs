@@ -73,8 +73,6 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
         Some("/ctx/tool:/ctx/home/1000/tool")
     );
     assert_eq!(env_value(view.env(), "RUST_LOG"), Some("info"));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -93,8 +91,7 @@ fn agent_runtime_view_rejects_invalid_control_files() {
     ];
 
     for (file, value) in cases {
-        let root = unique_test_dir(&format!("agent-runtime-invalid-{file}"));
-        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+        let root = clean_test_dir(&format!("agent-runtime-invalid-{file}"));
         create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
         write_text_file(&root.join("agent").join("coder.d").join(file), value);
 
@@ -106,8 +103,6 @@ fn agent_runtime_view_rejects_invalid_control_files() {
             AgentRuntimeViewError::InvalidControlFile(file.to_owned()).errno(),
             "EINVAL"
         );
-
-        let _ignored = fs::remove_dir_all(&root);
     }
 }
 
@@ -132,8 +127,6 @@ fn agent_runtime_view_reports_missing_controls_and_bad_agent_names() {
         AgentRuntimeViewError::MissingControlFile("model".to_owned()).errno(),
         "ENOENT"
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -189,8 +182,6 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
         ),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]

@@ -57,8 +57,6 @@ fn context_pack_rebuild_respects_budget_and_validates_inputs() {
         rebuild_context_pack(&session, Some("coder"), 5),
         Err(ContextPackBuildError::InvalidChildName)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -352,8 +350,6 @@ fn shared_queue_layout_inspector_checks_recommended_dirs() {
     assert!(report
         .issues()
         .contains(&SharedQueueLayoutIssue::NotDirectory("done".to_owned())));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -380,8 +376,6 @@ fn shared_queue_claim_uses_atomic_claim_directories() {
 
     let none = claim_next_shared_queue_job(&root, "worker-c");
     assert_eq!(none, Ok(None));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -396,8 +390,6 @@ fn shared_queue_claim_skips_existing_claim_lock() {
     let Some(claimed) = ok!(claimed) else { return };
     assert_eq!(claimed.job_name(), "job-2.req.json");
     assert!(root.join("pending").join("job-1.req.json").exists());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -417,8 +409,6 @@ fn shared_queue_recovery_requeues_claimed_job_with_lease() {
     assert!(matches!(recovered_content, Ok(ref content) if content == "one\n"));
     assert!(!root.join("claimed").join("job-1.req.json").exists());
     assert!(!root.join("lease").join("job-1.req.json").exists());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -437,7 +427,5 @@ fn shared_queue_recovery_requires_existing_claim_and_lease() {
         recover_shared_queue_job(&root, "job-1.req.json"),
         Err(SharedQueueRecoverError::MissingLease)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 

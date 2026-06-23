@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -41,9 +40,8 @@ fn parent_inode_uses_known_parent_or_root() {
 #[test]
 fn xattrs_describe_virtual_memory_and_disk_backing() {
     let root = unique_mount_test_dir("xattrs");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(ensure_v1_reference_tree(&root).is_ok());
-    let fs = CortexFuse::new(root.clone());
+    let fs = CortexFuse::new(root);
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };
 
@@ -97,7 +95,6 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
         Some("false")
     );
 
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 fn xattr_value<'a>(attrs: &'a [super::CortexXattr], name: &str) -> Option<&'a str> {
