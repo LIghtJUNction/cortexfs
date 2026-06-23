@@ -247,8 +247,6 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(!root.join("shared").join("project-a").exists());
 
     assert_eq!(ensure_v1_reference_tree(&root), Ok(bootstrapped));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -281,8 +279,6 @@ fn reference_tree_model_exec_is_readonly_metadata() {
         .getattr("model/debug/echo.d/driver")
         .map(|attr| attr.mode() & 0o777);
     assert!(matches!(driver_permissions, Ok(0o644)));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -349,8 +345,6 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
             .join("meta.json"),
     );
     assert!(matches!(shared_meta, Ok(ref content) if content.contains("\"model\":\"debug/echo\"")));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -367,8 +361,6 @@ fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
 
     let model_link = fs::read_link(root.join("home").join("1000").join("model").join("coder"));
     assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/openai/gpt-4o")));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -392,8 +384,6 @@ fn model_exec_metadata_exposes_driver_route_table() {
     assert!(metadata.contains("# cortexfs.driver.exec=openai-chat\n"));
     assert!(metadata.contains("# cortexfs.driver.socket=\n"));
     assert!(metadata.contains("# cortexfs.driver.agent=openai-responses,openai-chat\n"));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -455,7 +445,5 @@ fn reference_tree_standard_tools_emit_jsonl() {
     assert!(shell_stdout.contains(r#"{"type":"start","run":"r1","tool":"shell.exec"}"#));
     assert!(shell_stdout.contains(r#""text":"shell-ok""#));
     assert!(inspect_event_stream_jsonl(&shell_stdout).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 

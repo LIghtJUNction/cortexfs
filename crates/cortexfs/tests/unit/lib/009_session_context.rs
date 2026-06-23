@@ -46,8 +46,6 @@ fn child_context_recorder_rejects_bad_names_status_and_refs() {
         Err(ChildContextRecordError::InvalidRefs)
     );
     assert_eq!(ChildContextRecordError::InvalidRefs.errno(), "EINVAL");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -58,8 +56,6 @@ fn session_layout_inspector_accepts_transparent_context_tree() {
     let report = inspect_session_layout(&root);
     assert!(report.is_ok());
     assert!(report.issues().is_empty());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -91,8 +87,6 @@ fn session_layout_inspector_reports_missing_and_wrong_types() {
         .contains(&SessionLayoutIssue::MissingDirectory(
             "context/child/rev-1/artifact".to_owned()
         )));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -175,8 +169,6 @@ fn session_layout_inspector_rejects_invalid_control_values() {
             path: "meta.json".to_owned(),
             value: "bad/model/extra".to_owned()
         }));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -243,8 +235,6 @@ fn session_index_update_sets_current_and_deduplicated_list() {
     assert!(inspect_session_index(SessionIndexKind::List, &list).is_ok());
     assert!(inspect_session_index(SessionIndexKind::Current, &current).is_ok());
     assert!(inspect_session_index(SessionIndexKind::ByCwd, &by_cwd).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -273,8 +263,6 @@ fn session_index_update_rejects_missing_and_invalid_index_state() {
         Err(SessionIndexUpdateError::InvalidIndex)
     );
     assert_eq!(SessionIndexUpdateError::InvalidIndex.errno(), "EINVAL");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -415,7 +403,5 @@ fn context_pack_rebuild_writes_inspectable_sources_without_child_history() {
         validate_context_pack_source(item.source()).is_ok()
             && item.source() != "context/child/rev-1/messages.jsonl"
     }));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 

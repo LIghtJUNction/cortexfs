@@ -161,8 +161,6 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
         projection.getattr("home/1000/tool/fs.read"),
         Err(FuseV1Error::NotFound)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -217,8 +215,6 @@ fn fuse_v1_projection_reads_and_writes_control_files() {
     );
     assert_eq!(FuseV1Error::TooLarge.errno(), "EMSGSIZE");
     assert_eq!(FuseV1Error::InvalidOffset.errno(), "EINVAL");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -274,8 +270,6 @@ fn fuse_v1_projection_projects_configured_provider_models() {
     );
     let attr = projection.getattr("model/api.lmm.best/gpt-5.4-mini");
     assert!(matches!(attr, Ok(ref attr) if attr.mode() & 0o777 == 0o555));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -306,8 +300,6 @@ fn fuse_v1_projection_skips_disabled_provider_models() {
         projection.getattr("model/api.lmm.best"),
         Err(FuseV1Error::NotFound)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -325,8 +317,6 @@ fn reference_tree_bootstrap_rejects_conflicting_symlink_and_socket_paths() {
         ensure_v1_reference_tree(&root),
         Err(ReferenceTreeError::CannotSocket)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -342,8 +332,6 @@ fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
     assert!(ensure_v1_reference_tree(&root).is_ok());
     let metadata = fs::symlink_metadata(root.join("agent").join("coder.sock"));
     assert!(matches!(metadata, Ok(ref metadata) if metadata.file_type().is_socket()));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -361,8 +349,6 @@ fn object_layout_accepts_model_agent_and_tool_triples() {
     assert!(model.is_ok());
     assert!(agent.is_ok());
     assert!(tool.is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -410,6 +396,4 @@ fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
         .map(|metadata| metadata.permissions().mode());
     let permissions = ok!(permissions);
     assert_ne!(permissions & 0o111, 0);
-
-    let _ignored = fs::remove_dir_all(&root);
 }

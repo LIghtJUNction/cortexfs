@@ -27,8 +27,6 @@ fn indexed_socket_send_rejects_temp_sessions_before_index_update() {
         .join("by-cwd")
         .join("cwd")
         .exists());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -82,8 +80,6 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     let state = fs::read_to_string(session.join("state"));
     let state = ok!(state);
     assert_eq!(state, "active\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -134,8 +130,6 @@ fn durable_session_layout_helper_rejects_invalid_durable_inputs() {
     );
     assert_eq!(DurableSessionLayoutError::InvalidCwd.errno(), "EINVAL");
     assert!(!session_root.exists());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -202,8 +196,6 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
     let state = fs::read_to_string(session_root.join("default").join("state"));
     let state = ok!(state);
     assert_eq!(state, "cancelled\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -223,8 +215,6 @@ fn socket_runtime_temp_send_does_not_create_durable_session() {
     assert!(send.jsonl().contains("\"type\":\"start\""));
     assert!(send.jsonl().contains("\"model\":\"debug/echo\""));
     assert!(!session_root.exists());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -264,8 +254,6 @@ fn socket_runtime_errors_convert_to_stable_error_frames() {
         parsed.get("code").and_then(serde_json::Value::as_str),
         Some("EINVAL")
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -307,8 +295,6 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
     assert!(response.contains("\"type\":\"start\""));
     assert!(response.contains("\"run\":\"msg-1\""));
     assert!(inspect_session_layout(&session_root.join("default")).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -354,8 +340,6 @@ fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
     assert!(response.contains("\"type\":\"error\""));
     assert!(response.contains("\"code\":\"EACCES\""));
     assert!(!session_root.exists());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -392,6 +376,4 @@ fn socket_listener_runtime_accepts_and_serves_one_connection() {
     assert!(response.contains("\"type\":\"start\""));
     assert!(response.contains("\"run\":\"msg-1\""));
     assert!(inspect_session_layout(&session_root.join("default")).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }

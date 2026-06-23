@@ -31,8 +31,6 @@ fn socket_session_recorder_appends_send_to_durable_history() {
     let cwd = fs::read_to_string(session.join("cwd"));
     let cwd = ok!(cwd);
     assert_eq!(cwd, "/work/project\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -64,8 +62,6 @@ fn socket_session_recorder_cancels_without_deleting_history() {
     let state = fs::read_to_string(session.join("state"));
     let state = ok!(state);
     assert_eq!(state, "cancelled\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -106,8 +102,6 @@ fn assistant_response_recorder_updates_latest_without_replacing_history() {
     assert!(events.contains("\"status\":\"ok\""));
     assert_eq!(latest, "hello back\n");
     assert_eq!(state, "done\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -142,8 +136,6 @@ fn tool_denial_recorder_makes_permission_failure_inspectable() {
     assert!(events.contains("\"code\":\"EACCES\""));
     assert!(events.contains("\"status\":\"error\""));
     assert_eq!(state, "error\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -162,8 +154,6 @@ fn tool_denial_recorder_rejects_invalid_tool_names() {
         ),
         Err(SocketSessionRecordError::InvalidField("tool"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -203,8 +193,6 @@ fn tool_result_recorder_appends_inspectable_tool_message_and_event() {
     assert!(messages.contains("\"type\":\"tool_result\""));
     assert!(messages.contains("\"tool_call_id\":\"call-1\""));
     assert!(events.contains("\"name\":\"fs.read\""));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -228,8 +216,6 @@ fn tool_result_recorder_rejects_invalid_fields_without_executing() {
         ),
         Err(SocketSessionRecordError::InvalidField("content"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -264,8 +250,6 @@ fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
         Err(SocketSessionRecordError::SessionMismatch)
     );
     assert_eq!(SocketSessionRecordError::SessionMismatch.errno(), "EINVAL");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -314,8 +298,6 @@ fn indexed_socket_send_records_history_and_updates_session_index() {
     assert_eq!(list, "default\nreview-1\n");
     assert_eq!(current, "default\n");
     assert_eq!(by_cwd, "default\n");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -350,6 +332,4 @@ fn indexed_socket_send_rejects_non_send_requests() {
             SocketSessionRecordError::UnsupportedRequest
         ))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }

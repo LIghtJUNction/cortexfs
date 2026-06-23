@@ -219,8 +219,6 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
     assert_eq!(parent_events, format!("{}\n", events.parent_event()));
     assert_eq!(child_events, format!("{}\n", events.child_event()));
     assert!(inspect_event_stream_jsonl(&events.jsonl()).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -249,8 +247,6 @@ fn owned_child_cancellation_rejects_bad_names_and_missing_history() {
         OwnedChildCancellationError::MissingChildHistory.errno(),
         "ENOENT"
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -306,7 +302,5 @@ fn child_context_recorder_creates_handoff_and_result_channel() {
     assert!(validate_context_pack_source("context/child/rev-2/result.md").is_ok());
     assert!(validate_context_pack_source("context/child/rev-2/refs.jsonl").is_ok());
     assert!(inspect_session_layout(&session).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 

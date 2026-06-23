@@ -18,8 +18,6 @@ fn shared_queue_finish_writes_readable_done_result_and_cleans_lease() {
     assert!(matches!(request, Ok(ref content) if content == "one\n"));
     assert!(!root.join("claimed").join("job-1.req.json").exists());
     assert!(!root.join("lease").join("job-1.req.json").exists());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -44,8 +42,6 @@ fn shared_queue_finish_writes_readable_failed_result() {
     assert!(matches!(result, Ok(ref content) if content == "err\n"));
     let request = fs::read_to_string(root.join("failed").join("job-1.req.json"));
     assert!(matches!(request, Ok(ref content) if content == "one\n"));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -72,8 +68,6 @@ fn shared_access_authority_requires_mount_linux_permission_and_policy() {
         authorize_shared_access("project-a", &file, SharedAccess::Read, authority),
         Ok(())
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -96,8 +90,6 @@ fn shared_access_authority_denies_write_on_read_only_mount() {
         authorize_shared_access("project-a", &file, SharedAccess::Write, authority),
         Err(SharedAccessDenial::ReadOnlyMount)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -146,8 +138,6 @@ fn shared_access_authority_denies_missing_policy_and_wrong_space() {
         ),
         Err(SharedAccessDenial::NotMounted)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -174,13 +164,11 @@ fn shared_access_authority_checks_linux_mode_bits() {
         authorize_shared_access("project-a", &file, SharedAccess::Read, authority),
         Err(SharedAccessDenial::LinuxPermission)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn session_access_authority_allows_explicit_im_channel_session() {
-    let root = unique_test_dir("session-authority-im-ok");
+    let root = clean_test_dir("session-authority-im-ok");
     let shared = root.join("im-qq-dev");
     let messages = shared
         .join("agent")
@@ -188,7 +176,6 @@ fn session_access_authority_allows_explicit_im_channel_session() {
         .join("session")
         .join("group-456")
         .join("messages.jsonl");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     write_fixture_file(&messages, 0o600);
 
     let metadata = fs::metadata(&messages);
@@ -210,13 +197,11 @@ fn session_access_authority_allows_explicit_im_channel_session() {
         authorize_session_access(&messages, SessionAccess::Read, authority),
         Ok(())
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn session_access_authority_denies_cross_channel_without_session_policy() {
-    let root = unique_test_dir("session-authority-im-deny");
+    let root = clean_test_dir("session-authority-im-deny");
     let shared = root.join("im-qq-dev");
     let allowed = shared
         .join("agent")
@@ -230,7 +215,6 @@ fn session_access_authority_denies_cross_channel_without_session_policy() {
         .join("session")
         .join("group-999")
         .join("messages.jsonl");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     write_fixture_file(&allowed, 0o600);
     write_fixture_file(&other, 0o600);
 
@@ -258,13 +242,11 @@ fn session_access_authority_denies_cross_channel_without_session_policy() {
         Err(SessionAccessDenial::SessionPolicy)
     );
     assert_eq!(SessionAccessDenial::SessionPolicy.errno(), "EACCES");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn session_access_authority_requires_shared_policy_and_mount_write_mode() {
-    let root = unique_test_dir("session-authority-shared-policy");
+    let root = clean_test_dir("session-authority-shared-policy");
     let shared = root.join("im-slack-company");
     let messages = shared
         .join("agent")
@@ -272,7 +254,6 @@ fn session_access_authority_requires_shared_policy_and_mount_write_mode() {
         .join("session")
         .join("channel-789")
         .join("messages.jsonl");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     write_fixture_file(&messages, 0o600);
 
     let metadata = fs::metadata(&messages);
@@ -320,13 +301,11 @@ fn session_access_authority_requires_shared_policy_and_mount_write_mode() {
         ),
         Err(SessionAccessDenial::SharedPolicy)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn session_access_authority_enforces_private_home_uid() {
-    let root = unique_test_dir("session-authority-private-uid");
+    let root = clean_test_dir("session-authority-private-uid");
     let home = root.join("home-1000");
     let messages = home
         .join("agent")
@@ -334,7 +313,6 @@ fn session_access_authority_enforces_private_home_uid() {
         .join("session")
         .join("default")
         .join("messages.jsonl");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     write_fixture_file(&messages, 0o644);
 
     let metadata = fs::metadata(&messages);
@@ -361,8 +339,6 @@ fn session_access_authority_enforces_private_home_uid() {
         ),
         Err(SessionAccessDenial::LinuxPermission)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -403,8 +379,6 @@ fn session_access_authority_rejects_unmounted_and_non_session_paths() {
         ),
         Err(SessionAccessDenial::NotMounted)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -440,7 +414,4 @@ fn tool_lookup_uses_first_executable_hit() {
     write_fixture_file(&global.join("fs.read"), 0o755);
     let found = path.find("fs.read");
     assert!(matches!(found, Ok(Some(ref hit)) if hit.path() == global.join("fs.read")));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
-

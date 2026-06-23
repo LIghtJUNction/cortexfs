@@ -15,8 +15,6 @@ fn tool_listing_ignores_non_executable_and_control_entries() {
 
     let invalid = ToolPath::new([tools]).find("../bad");
     assert_eq!(invalid, Err(ToolPathError::InvalidName));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -38,8 +36,6 @@ fn tool_execution_authority_requires_all_layers() {
 
     let grant = authorize_tool_execution(&tool_path, "fs.read", authority);
     assert!(matches!(grant, Ok(ref grant) if grant.hit().path() == tools.join("fs.read")));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -70,8 +66,6 @@ fn model_tool_call_syntax_does_not_execute_tools() {
     );
     assert_eq!(denied, Err(ToolExecutionDenial::ModelCannotExecute));
     assert_eq!(ToolExecutionDenial::ModelCannotExecute.errno(), "EACCES");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -114,8 +108,6 @@ fn prompt_skill_and_mcp_config_cannot_grant_tool_execution() {
         ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &tool_policy),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -194,8 +186,6 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
         ),
     );
     assert_eq!(denied_when_unmounted, Err(ToolExecutionDenial::NotMounted));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -223,8 +213,6 @@ fn project_tools_are_visible_only_through_ctx_path_order() {
     let policy = allow_tool_policy("coder_t", "project.test");
     let authority = ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy);
     assert!(authorize_tool_execution(&with_project, "project.test", authority).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -264,8 +252,6 @@ fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
         ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &allow_mcp, &allow_mcp),
     );
     assert!(allowed.is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -294,8 +280,6 @@ fn tool_schema_cannot_grant_execution_authority() {
         ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &empty_policy, &tool_policy),
     );
     assert_eq!(denied, Err(ToolExecutionDenial::AgentPolicy));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -331,7 +315,5 @@ fn tool_execution_authority_checks_linux_identity_mode_bits() {
         ),
         Err(ToolExecutionDenial::LinuxPermission)
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 

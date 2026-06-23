@@ -56,8 +56,6 @@ fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
     let _agent_socket = bind_socket(&root.join("agent").join("coder.sock"));
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
     assert_eq!(ObjectBootstrapError::InvalidControlValue.errno(), "EINVAL");
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -69,8 +67,6 @@ fn object_layout_accepts_socket_symlink_to_live_unix_socket() {
     assert!(symlink(runtime_socket, root.join("agent").join("coder.sock")).is_ok());
 
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -92,8 +88,6 @@ fn object_layout_reports_missing_parts() {
     assert!(report.issues().contains(&ObjectLayoutIssue::MissingSocket(
         "agent/coder.sock".to_owned()
     )));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -134,8 +128,6 @@ fn model_session_control_decides_socket_requirement() {
             path: "model/openai/gpt-4o.d/session".to_owned(),
             value: "native_thread".to_owned()
         }));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -256,8 +248,6 @@ fn model_object_layout_rejects_provider_private_capabilities() {
             path: "model/openai/gpt-4o.d/cap".to_owned(),
             value: "native_thread".to_owned()
         }));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -280,8 +270,6 @@ fn model_object_layout_rejects_invalid_driver_routes() {
             path: "model/openai/gpt-4o.d/driver".to_owned(),
             value: "line 1 invalid driver /bin/sh".to_owned()
         }));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -328,8 +316,6 @@ fn tool_object_layout_rejects_authority_shaped_schema() {
             path: "tool/fs.read.d/schema".to_owned(),
             value: "policy".to_owned()
         }));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -416,6 +402,4 @@ fn agent_object_layout_rejects_invalid_control_values() {
             path: "agent/coder.d/uid".to_owned(),
             value: "bad".to_owned()
         }));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
