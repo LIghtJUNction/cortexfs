@@ -62,9 +62,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
     let response = String::from_utf8_lossy(bytes);
     assert!(response.contains("\"type\":\"delta\""));
     assert!(response.contains("\"text\":\"hi\""));
-    let latest = fs::read_to_string(session_root.join("default").join("latest.md"));
-    assert!(latest.is_ok());
-    assert_eq!(latest.unwrap_or_default(), "hi\n");
+    assert_file_text(&session_root.join("default").join("latest.md"), "hi\n");
 }
 
 #[test]
