@@ -25,12 +25,8 @@ fn socket_session_recorder_appends_send_to_durable_history() {
     assert!(messages.contains("\"role\":\"user\""));
     assert!(messages.contains("\"content\":\"hello\""));
     assert!(events.contains("\"type\":\"start\""));
-    let state = fs::read_to_string(session.join("state"));
-    let state = ok!(state);
-    assert_eq!(state, "active\n");
-    let cwd = fs::read_to_string(session.join("cwd"));
-    let cwd = ok!(cwd);
-    assert_eq!(cwd, "/work/project\n");
+    assert_file_text(&session.join("state"), "active\n");
+    assert_file_text(&session.join("cwd"), "/work/project\n");
 }
 
 #[test]
@@ -52,16 +48,15 @@ fn socket_session_recorder_cancels_without_deleting_history() {
     assert!(recorded.messages().is_empty());
     assert_eq!(recorded.events().len(), 1);
 
-    let messages = fs::read_to_string(session.join("messages.jsonl"));
-    let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
     let events = ok!(events);
-    assert_eq!(messages, "{\"role\":\"user\",\"content\":\"keep me\"}\n");
+    assert_file_text(
+        &session.join("messages.jsonl"),
+        "{\"role\":\"user\",\"content\":\"keep me\"}\n",
+    );
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(events.contains("\"status\":\"cancelled\""));
-    let state = fs::read_to_string(session.join("state"));
-    let state = ok!(state);
-    assert_eq!(state, "cancelled\n");
+    assert_file_text(&session.join("state"), "cancelled\n");
 }
 
 #[test]
@@ -89,19 +84,14 @@ fn assistant_response_recorder_updates_latest_without_replacing_history() {
     let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
     let events = ok!(events);
-    let latest = fs::read_to_string(session.join("latest.md"));
-    let latest = ok!(latest);
-    let state = fs::read_to_string(session.join("state"));
-    let state = ok!(state);
-
     assert!(inspect_message_stream_jsonl(&messages).is_ok());
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(messages.contains("\"role\":\"user\""));
     assert!(messages.contains("\"role\":\"assistant\""));
     assert!(events.contains("\"type\":\"message\""));
     assert!(events.contains("\"status\":\"ok\""));
-    assert_eq!(latest, "hello back\n");
-    assert_eq!(state, "done\n");
+    assert_file_text(&session.join("latest.md"), "hello back\n");
+    assert_file_text(&session.join("state"), "done\n");
 }
 
 #[test]
@@ -127,15 +117,12 @@ fn tool_denial_recorder_makes_permission_failure_inspectable() {
 
     let events = fs::read_to_string(session.join("events.jsonl"));
     let events = ok!(events);
-    let state = fs::read_to_string(session.join("state"));
-    let state = ok!(state);
-
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(events.contains("\"type\":\"error\""));
     assert!(events.contains("\"tool\":\"fs.read\""));
     assert!(events.contains("\"code\":\"EACCES\""));
     assert!(events.contains("\"status\":\"error\""));
-    assert_eq!(state, "error\n");
+    assert_file_text(&session.join("state"), "error\n");
 }
 
 #[test]
@@ -286,18 +273,15 @@ fn indexed_socket_send_records_history_and_updates_session_index() {
     let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
     let events = ok!(events);
-    let list = fs::read_to_string(session_root.join("index").join("list"));
-    let list = ok!(list);
-    let current = fs::read_to_string(session_root.join("index").join("current"));
-    let current = ok!(current);
-    let by_cwd = fs::read_to_string(session_root.join("index").join("by-cwd").join(by_cwd_key));
-    let by_cwd = ok!(by_cwd);
 
     assert!(messages.contains("\"role\":\"user\""));
     assert!(events.contains("\"type\":\"start\""));
-    assert_eq!(list, "default\nreview-1\n");
-    assert_eq!(current, "default\n");
-    assert_eq!(by_cwd, "default\n");
+    assert_file_text(&session_root.join("index").join("list"), "default\nreview-1\n");
+    assert_file_text(&session_root.join("index").join("current"), "default\n");
+    assert_file_text(
+        &session_root.join("index").join("by-cwd").join(by_cwd_key),
+        "default\n",
+    );
 }
 
 #[test]

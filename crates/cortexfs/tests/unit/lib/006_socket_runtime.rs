@@ -19,9 +19,7 @@ fn indexed_socket_send_rejects_temp_sessions_before_index_update() {
             SocketSessionRecordError::TempSessionNotDurable
         ))
     );
-    let list = fs::read_to_string(session_root.join("index").join("list"));
-    let list = ok!(list);
-    assert_eq!(list, "default\n");
+    assert_file_text(&session_root.join("index").join("list"), "default\n");
     assert!(!session_root
         .join("index")
         .join("by-cwd")
@@ -46,17 +44,13 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     assert_eq!(ensured, Ok(()));
     assert!(inspect_session_layout(&session).is_ok());
 
-    let list = fs::read_to_string(session_root.join("index").join("list"));
-    let list = ok!(list);
-    let current = fs::read_to_string(session_root.join("index").join("current"));
-    let current = ok!(current);
     let meta = fs::read_to_string(session.join("meta.json"));
     let meta = ok!(meta);
     let pack = fs::read_to_string(session.join("context").join("pack.json"));
     let pack = ok!(pack);
 
-    assert_eq!(list, "default\n");
-    assert_eq!(current, "default\n");
+    assert_file_text(&session_root.join("index").join("list"), "default\n");
+    assert_file_text(&session_root.join("index").join("current"), "default\n");
     assert!(meta.contains("\"model\":\"debug/echo\""));
     assert!(meta.contains("\"scope\":\"private\""));
     assert!(inspect_context_pack_json(&pack).is_ok());
@@ -77,9 +71,7 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     );
     let request = ok!(request);
     assert!(record_indexed_socket_send_to_session(&session_root, &request).is_ok());
-    let state = fs::read_to_string(session.join("state"));
-    let state = ok!(state);
-    assert_eq!(state, "active\n");
+    assert_file_text(&session.join("state"), "active\n");
 }
 
 #[test]
@@ -193,9 +185,7 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
     );
     let cancel = ok!(cancel);
     assert!(cancel.jsonl().contains("\"status\":\"cancelled\""));
-    let state = fs::read_to_string(session_root.join("default").join("state"));
-    let state = ok!(state);
-    assert_eq!(state, "cancelled\n");
+    assert_file_text(&session_root.join("default").join("state"), "cancelled\n");
 }
 
 #[test]

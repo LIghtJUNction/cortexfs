@@ -202,22 +202,20 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
     let recorded =
         record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session);
     let events = ok!(recorded);
-    let child_state = fs::read_to_string(child_session.join("state"));
-    let child_state = ok!(child_state);
-    assert_eq!(child_state, "cancelled\n");
-    let child_messages = fs::read_to_string(child_session.join("messages.jsonl"));
-    let child_messages = ok!(child_messages);
-    assert_eq!(
-        child_messages,
-        "{\"role\":\"user\",\"content\":\"review this\"}\n"
+    assert_file_text(&child_session.join("state"), "cancelled\n");
+    assert_file_text(
+        &child_session.join("messages.jsonl"),
+        "{\"role\":\"user\",\"content\":\"review this\"}\n",
     );
 
-    let parent_events = fs::read_to_string(parent_session.join("events.jsonl"));
-    let parent_events = ok!(parent_events);
-    let child_events = fs::read_to_string(child_session.join("events.jsonl"));
-    let child_events = ok!(child_events);
-    assert_eq!(parent_events, format!("{}\n", events.parent_event()));
-    assert_eq!(child_events, format!("{}\n", events.child_event()));
+    assert_file_text(
+        &parent_session.join("events.jsonl"),
+        &format!("{}\n", events.parent_event()),
+    );
+    assert_file_text(
+        &child_session.join("events.jsonl"),
+        &format!("{}\n", events.child_event()),
+    );
     assert!(inspect_event_stream_jsonl(&events.jsonl()).is_ok());
 }
 
@@ -266,16 +264,9 @@ fn child_context_recorder_creates_handoff_and_result_channel() {
     assert_eq!(handoff, Ok(()));
 
     let child = session.join("context").join("child").join("rev-2");
-    let agent = fs::read_to_string(child.join("agent"));
-    let agent = ok!(agent);
-    let status = fs::read_to_string(child.join("status"));
-    let status = ok!(status);
-    let handoff = fs::read_to_string(child.join("handoff.md"));
-    let handoff = ok!(handoff);
-
-    assert_eq!(agent, "reviewer\n");
-    assert_eq!(status, "pending\n");
-    assert_eq!(handoff, "Task: review mount ABI\n");
+    assert_file_text(&child.join("agent"), "reviewer\n");
+    assert_file_text(&child.join("status"), "pending\n");
+    assert_file_text(&child.join("handoff.md"), "Task: review mount ABI\n");
     assert!(validate_context_pack_source("context/child/rev-2/handoff.md").is_ok());
 
     let refs =
@@ -289,18 +280,13 @@ fn child_context_recorder_creates_handoff_and_result_channel() {
     );
     assert_eq!(result, Ok(()));
 
-    let result_md = fs::read_to_string(child.join("result.md"));
-    let result_md = ok!(result_md);
     let refs_jsonl = fs::read_to_string(child.join("refs.jsonl"));
     let refs_jsonl = ok!(refs_jsonl);
-    let status = fs::read_to_string(child.join("status"));
-    let status = ok!(status);
 
-    assert_eq!(result_md, "Summary: ok\n");
-    assert_eq!(status, "done\n");
+    assert_file_text(&child.join("result.md"), "Summary: ok\n");
+    assert_file_text(&child.join("status"), "done\n");
     assert!(inspect_context_jsonl(ContextJsonlKind::Refs, &refs_jsonl).is_ok());
     assert!(validate_context_pack_source("context/child/rev-2/result.md").is_ok());
     assert!(validate_context_pack_source("context/child/rev-2/refs.jsonl").is_ok());
     assert!(inspect_session_layout(&session).is_ok());
 }
-

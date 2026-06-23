@@ -220,21 +220,13 @@ impl FuseV1Projection {
                 FuseV1DirEntry::new(DEBUG_ECHO_NAME.to_owned(), FuseV1FileType::Regular),
                 FuseV1DirEntry::new(format!("{DEBUG_ECHO_NAME}.d"), FuseV1FileType::Directory),
             ],
-            "model/debug/echo.d" => MODEL_CONTROL_FILES
-                .iter()
-                .map(|file| FuseV1DirEntry::new((*file).to_owned(), FuseV1FileType::Regular))
-                .collect(),
+            "model/debug/echo.d" => model_control_dir_entries(),
             _ => {
                 if let Some(model) =
                     projected_provider_model_control_dir(&self.provider_config_dir, abi_path)?
                 {
                     let _ = model;
-                    MODEL_CONTROL_FILES
-                        .iter()
-                        .map(|file| {
-                            FuseV1DirEntry::new((*file).to_owned(), FuseV1FileType::Regular)
-                        })
-                        .collect()
+                    model_control_dir_entries()
                 } else if let Some(provider) = abi_path.strip_prefix("model/") {
                     if provider.contains('/') || provider == DEBUG_ECHO_PROVIDER {
                         return Ok(None);
@@ -361,22 +353,13 @@ impl FuseV1Projection {
                 0o777,
             ))),
             "model/debug" | "model/debug/echo.d" => Ok(Some((FuseV1FileType::Directory, 0, 0o755))),
-            "model/debug/echo" => Ok(Some((
-                FuseV1FileType::Regular,
-                u64::try_from(debug_echo_model_metadata().len())
-                    .map_err(|_error| FuseV1Error::Io)?,
-                0o555,
-            ))),
+            "model/debug/echo" => virtual_regular_entry(&debug_echo_model_metadata(), 0o555),
             path => {
                 if let Some(file) = path.strip_prefix("model/debug/echo.d/") {
                     let Some(content) = debug_echo_control_content(file) else {
                         return Ok(None);
                     };
-                    return Ok(Some((
-                        FuseV1FileType::Regular,
-                        u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
-                        0o644,
-                    )));
+                    return virtual_regular_entry(content, 0o644);
                 }
                 if projected_provider_models_for_provider_path(&self.provider_config_dir, path)?
                     .is_some()
@@ -387,11 +370,7 @@ impl FuseV1Projection {
                     projected_provider_model_for_exec(&self.provider_config_dir, path)?
                 {
                     let content = provider_model_metadata(&model);
-                    return Ok(Some((
-                        FuseV1FileType::Regular,
-                        u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
-                        0o555,
-                    )));
+                    return virtual_regular_entry(&content, 0o555);
                 }
                 if projected_provider_model_control_dir(&self.provider_config_dir, path)?.is_some()
                 {
@@ -405,11 +384,7 @@ impl FuseV1Projection {
                 let Some(content) = provider_model_control_content(&model, file) else {
                     return Ok(None);
                 };
-                Ok(Some((
-                    FuseV1FileType::Regular,
-                    u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
-                    0o644,
-                )))
+                virtual_regular_entry(&content, 0o644)
             }
         }
     }
@@ -428,4 +403,22 @@ impl FuseV1Projection {
 fn model_alias_name(abi_path: &str) -> Option<&str> {
     let alias = abi_path.strip_prefix("model/")?;
     matches!(alias, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS).then_some(alias)
+}
+
+fn model_control_dir_entries() -> Vec<FuseV1DirEntry> {
+    MODEL_CONTROL_FILES
+        .iter()
+        .map(|file| FuseV1DirEntry::new((*file).to_owned(), FuseV1FileType::Regular))
+        .collect()
+}
+
+fn virtual_regular_entry(
+    content: &str,
+    mode: u32,
+) -> Result<Option<(FuseV1FileType, u64, u32)>, FuseV1Error> {
+    Ok(Some((
+        FuseV1FileType::Regular,
+        u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
+        mode,
+    )))
 }
