@@ -148,8 +148,7 @@ fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
 
 #[test]
 fn reference_tree_bootstrap_materializes_documented_v1_shape() {
-    let root = unique_test_dir("reference-tree");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("reference-tree");
     for tool in [
         "mcp.github.search_issues",
         "agent.create",
@@ -259,9 +258,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
 
 #[test]
 fn reference_tree_model_exec_is_readonly_metadata() {
-    let root = unique_test_dir("reference-tree-model-metadata");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let root = reference_tree("reference-tree-model-metadata");
     let projection =
         FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
 
@@ -296,8 +293,7 @@ fn reference_tree_model_exec_is_readonly_metadata() {
 
 #[test]
 fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
-    let root = unique_test_dir("reference-tree-legacy-model-alias");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("reference-tree-legacy-model-alias");
     assert!(fs::create_dir_all(root.join("model")).is_ok());
     assert!(fs::create_dir_all(root.join("home").join("1000").join("model")).is_ok());
     assert!(symlink("gpt-5.4-mini", root.join("model").join("main")).is_ok());
@@ -365,8 +361,7 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
 
 #[test]
 fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
-    let root = unique_test_dir("reference-tree-valid-model-alias");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("reference-tree-valid-model-alias");
     assert!(fs::create_dir_all(root.join("home").join("1000").join("model")).is_ok());
     assert!(symlink(
         "/ctx/model/openai/gpt-4o",
@@ -384,9 +379,9 @@ fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
 
 #[test]
 fn model_exec_metadata_exposes_driver_route_table() {
-    let root = unique_test_dir("model-driver-metadata");
+    let root = clean_test_dir("model-driver-metadata");
     let control = root.join("model").join("openai").join("gpt-4o.d");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     write_text_file(&control.join("id"), "openai/gpt-4o\n");
     write_text_file(
         &control.join("driver"),
@@ -424,9 +419,7 @@ fn echo_model_runner_emits_one_shot_jsonl() {
 
 #[test]
 fn reference_tree_standard_tools_emit_jsonl() {
-    let root = unique_test_dir("reference-tree-tool-exec");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let root = reference_tree("reference-tree-tool-exec");
 
     let data = root.join("shared").join("project-a").join("data");
     let read_target = data.join("readme.txt");

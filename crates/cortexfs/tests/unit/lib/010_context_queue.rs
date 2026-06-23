@@ -1,9 +1,9 @@
 #[test]
 fn context_pack_rebuild_respects_budget_and_validates_inputs() {
-    let root = unique_test_dir("context-pack-rebuild-budget");
+    let root = clean_test_dir("context-pack-rebuild-budget");
     let session = root.join("default");
     let context = session.join("context");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(
         &session.join("messages.jsonl"),
@@ -333,8 +333,7 @@ fn event_stream_rejects_invalid_shape_and_specialized_frames() {
 
 #[test]
 fn shared_queue_layout_inspector_checks_recommended_dirs() {
-    let root = unique_test_dir("shared-queue-layout");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("shared-queue-layout");
     for dir in SHARED_QUEUE_REQUIRED_DIRS {
         assert!(fs::create_dir_all(root.join(dir)).is_ok());
     }
@@ -360,8 +359,7 @@ fn shared_queue_layout_inspector_checks_recommended_dirs() {
 
 #[test]
 fn shared_queue_claim_uses_atomic_claim_directories() {
-    let root = unique_test_dir("shared-queue-claim");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("shared-queue-claim");
     create_shared_queue_layout(&root);
     write_text_file(&root.join("pending").join("job-2.req.json"), "two\n");
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
@@ -391,8 +389,7 @@ fn shared_queue_claim_uses_atomic_claim_directories() {
 
 #[test]
 fn shared_queue_claim_skips_existing_claim_lock() {
-    let root = unique_test_dir("shared-queue-claim-lock");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("shared-queue-claim-lock");
     create_shared_queue_layout(&root);
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
     write_text_file(&root.join("pending").join("job-2.req.json"), "two\n");
@@ -409,8 +406,7 @@ fn shared_queue_claim_skips_existing_claim_lock() {
 
 #[test]
 fn shared_queue_recovery_requeues_claimed_job_with_lease() {
-    let root = unique_test_dir("shared-queue-recover");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("shared-queue-recover");
     create_shared_queue_layout(&root);
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
 
@@ -432,8 +428,7 @@ fn shared_queue_recovery_requeues_claimed_job_with_lease() {
 
 #[test]
 fn shared_queue_recovery_requires_existing_claim_and_lease() {
-    let root = unique_test_dir("shared-queue-recover-missing");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("shared-queue-recover-missing");
     create_shared_queue_layout(&root);
     assert_eq!(
         recover_shared_queue_job(&root, "job-1.req.json"),

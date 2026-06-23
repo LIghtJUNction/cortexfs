@@ -5,6 +5,18 @@ fn unique_test_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("cortexfs-{name}-{}-{nanos}", std::process::id()))
 }
 
+fn clean_test_dir(name: &str) -> PathBuf {
+    let root = unique_test_dir(name);
+    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    root
+}
+
+fn reference_tree(name: &str) -> PathBuf {
+    let root = clean_test_dir(name);
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    root
+}
+
 fn write_fixture_file(path: &Path, mode: u32) {
     if let Some(parent) = path.parent() {
         assert!(fs::create_dir_all(parent).is_ok());

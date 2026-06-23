@@ -1,7 +1,6 @@
 #[test]
 fn shared_queue_finish_writes_readable_done_result_and_cleans_lease() {
-    let root = unique_test_dir("shared-queue-finish-done");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("shared-queue-finish-done");
     create_shared_queue_layout(&root);
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
 
@@ -26,8 +25,7 @@ fn shared_queue_finish_writes_readable_done_result_and_cleans_lease() {
 
 #[test]
 fn shared_queue_finish_writes_readable_failed_result() {
-    let root = unique_test_dir("shared-queue-finish-failed");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("shared-queue-finish-failed");
     create_shared_queue_layout(&root);
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
 
@@ -54,10 +52,9 @@ fn shared_queue_finish_writes_readable_failed_result() {
 
 #[test]
 fn shared_access_authority_requires_mount_linux_permission_and_policy() {
-    let root = unique_test_dir("shared-authority-ok");
+    let root = clean_test_dir("shared-authority-ok");
     let shared = root.join("shared-project-a");
     let file = shared.join("data.txt");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(&shared).is_ok());
     write_fixture_file(&file, 0o400);
 
@@ -84,10 +81,9 @@ fn shared_access_authority_requires_mount_linux_permission_and_policy() {
 
 #[test]
 fn shared_access_authority_denies_write_on_read_only_mount() {
-    let root = unique_test_dir("shared-authority-ro");
+    let root = clean_test_dir("shared-authority-ro");
     let shared = root.join("shared-project-a");
     let file = shared.join("data.txt");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(&shared).is_ok());
     write_fixture_file(&file, 0o600);
 
@@ -110,10 +106,9 @@ fn shared_access_authority_denies_write_on_read_only_mount() {
 
 #[test]
 fn shared_access_authority_denies_missing_policy_and_wrong_space() {
-    let root = unique_test_dir("shared-authority-policy");
+    let root = clean_test_dir("shared-authority-policy");
     let shared = root.join("shared-project-a");
     let file = shared.join("data.txt");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(&shared).is_ok());
     write_fixture_file(&file, 0o400);
 
@@ -165,10 +160,9 @@ fn shared_access_authority_denies_missing_policy_and_wrong_space() {
 
 #[test]
 fn shared_access_authority_checks_linux_mode_bits() {
-    let root = unique_test_dir("shared-authority-linux");
+    let root = clean_test_dir("shared-authority-linux");
     let shared = root.join("shared-project-a");
     let file = shared.join("data.txt");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(&shared).is_ok());
     write_fixture_file(&file, 0o400);
 
@@ -386,10 +380,10 @@ fn session_access_authority_enforces_private_home_uid() {
 
 #[test]
 fn session_access_authority_rejects_unmounted_and_non_session_paths() {
-    let root = unique_test_dir("session-authority-path-shape");
+    let root = clean_test_dir("session-authority-path-shape");
     let shared = root.join("project-a");
     let file = shared.join("data").join("note.txt");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     write_fixture_file(&file, 0o644);
 
     let metadata = fs::metadata(&file);
@@ -441,10 +435,9 @@ fn ctx_path_parses_without_implicit_current_directory() {
 
 #[test]
 fn tool_lookup_uses_first_executable_hit() {
-    let root = unique_test_dir("tool-lookup");
+    let root = clean_test_dir("tool-lookup");
     let global = root.join("global-tool");
     let user = root.join("user-tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(&global).is_ok());
     assert!(fs::create_dir_all(&user).is_ok());
 

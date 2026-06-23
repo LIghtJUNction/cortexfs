@@ -1,8 +1,7 @@
 #[test]
 fn tool_listing_ignores_non_executable_and_control_entries() {
-    let root = unique_test_dir("tool-list");
+    let root = clean_test_dir("tool-list");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
     write_fixture_file(&tools.join("fs.read"), 0o755);
     write_fixture_file(&tools.join("not.exec"), 0o644);
@@ -23,9 +22,8 @@ fn tool_listing_ignores_non_executable_and_control_entries() {
 
 #[test]
 fn tool_execution_authority_requires_all_layers() {
-    let root = unique_test_dir("tool-authority-ok");
+    let root = clean_test_dir("tool-authority-ok");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
     write_fixture_file(&tools.join("fs.read"), 0o755);
 
@@ -48,9 +46,8 @@ fn tool_execution_authority_requires_all_layers() {
 
 #[test]
 fn model_tool_call_syntax_does_not_execute_tools() {
-    let root = unique_test_dir("tool-authority-model-boundary");
+    let root = clean_test_dir("tool-authority-model-boundary");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
     write_fixture_file(&tools.join("fs.read"), 0o755);
 
@@ -82,9 +79,8 @@ fn model_tool_call_syntax_does_not_execute_tools() {
 
 #[test]
 fn prompt_skill_and_mcp_config_cannot_grant_tool_execution() {
-    let root = unique_test_dir("tool-authority-text-no-grant");
+    let root = clean_test_dir("tool-authority-text-no-grant");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
     write_fixture_file(&tools.join("fs.read"), 0o755);
     write_text_file(
@@ -131,9 +127,8 @@ fn prompt_skill_and_mcp_config_cannot_grant_tool_execution() {
 
 #[test]
 fn tool_execution_authority_denies_without_policy_or_mount_exec() {
-    let root = unique_test_dir("tool-authority-deny");
+    let root = clean_test_dir("tool-authority-deny");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
     write_fixture_file(&tools.join("fs.read"), 0o755);
     write_text_file(
@@ -216,10 +211,9 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
 
 #[test]
 fn project_tools_are_visible_only_through_ctx_path_order() {
-    let root = unique_test_dir("tool-authority-project-path");
+    let root = clean_test_dir("tool-authority-project-path");
     let global = root.join("ctx-tool");
     let project = root.join("shared-project-tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(global.join("project.test.d")).is_ok());
     assert!(fs::create_dir_all(project.join("project.test.d")).is_ok());
     write_fixture_file(&global.join("project.test"), 0o644);
@@ -247,9 +241,8 @@ fn project_tools_are_visible_only_through_ctx_path_order() {
 
 #[test]
 fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
-    let root = unique_test_dir("tool-authority-mcp");
+    let root = clean_test_dir("tool-authority-mcp");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(tools.join("mcp.github.search_issues.d")).is_ok());
     write_fixture_file(&tools.join("mcp.github.search_issues"), 0o755);
     write_text_file(
@@ -293,9 +286,8 @@ fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
 
 #[test]
 fn tool_schema_cannot_grant_execution_authority() {
-    let root = unique_test_dir("tool-authority-schema-no-grant");
+    let root = clean_test_dir("tool-authority-schema-no-grant");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(tools.join("fs.read.d")).is_ok());
     write_fixture_file(&tools.join("fs.read"), 0o755);
     write_text_file(
@@ -328,9 +320,8 @@ fn tool_schema_cannot_grant_execution_authority() {
 
 #[test]
 fn tool_execution_authority_checks_linux_identity_mode_bits() {
-    let root = unique_test_dir("tool-authority-linux");
+    let root = clean_test_dir("tool-authority-linux");
     let tools = root.join("tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(&tools).is_ok());
     write_fixture_file(&tools.join("owner-only"), 0o100);
 

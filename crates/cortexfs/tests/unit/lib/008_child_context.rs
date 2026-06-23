@@ -214,10 +214,10 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
 
 #[test]
 fn owned_child_cancellation_records_state_and_events_without_deleting_history() {
-    let root = unique_test_dir("owned-child-cancel");
+    let root = clean_test_dir("owned-child-cancel");
     let parent_session = root.join("home").join("1000").join("agent").join("coder");
     let child_session = root.join("home").join("1000").join("agent").join("rev-123");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     write_text_file(&parent_session.join("events.jsonl"), "");
     create_complete_session_layout(&child_session);
     write_text_file(
@@ -263,10 +263,10 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
 
 #[test]
 fn owned_child_cancellation_rejects_bad_names_and_missing_history() {
-    let root = unique_test_dir("owned-child-cancel-bad");
+    let root = clean_test_dir("owned-child-cancel-bad");
     let parent_session = root.join("parent");
     let child_session = root.join("child");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     write_text_file(&parent_session.join("events.jsonl"), "");
     write_text_file(&child_session.join("events.jsonl"), "");
     write_text_file(&child_session.join("state"), "idle\n");
@@ -293,9 +293,9 @@ fn owned_child_cancellation_rejects_bad_names_and_missing_history() {
 
 #[test]
 fn child_context_recorder_creates_handoff_and_result_channel() {
-    let root = unique_test_dir("child-context-record");
+    let root = clean_test_dir("child-context-record");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
 
     let handoff = record_child_handoff_to_parent_context(

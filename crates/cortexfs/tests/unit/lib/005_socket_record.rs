@@ -1,8 +1,8 @@
 #[test]
 fn socket_session_recorder_appends_send_to_durable_history() {
-    let root = unique_test_dir("socket-session-send");
+    let root = clean_test_dir("socket-session-send");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(&session.join("messages.jsonl"), "");
     write_text_file(&session.join("events.jsonl"), "");
@@ -43,9 +43,9 @@ fn socket_session_recorder_appends_send_to_durable_history() {
 
 #[test]
 fn socket_session_recorder_cancels_without_deleting_history() {
-    let root = unique_test_dir("socket-session-cancel");
+    let root = clean_test_dir("socket-session-cancel");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(
         &session.join("messages.jsonl"),
@@ -81,9 +81,9 @@ fn socket_session_recorder_cancels_without_deleting_history() {
 
 #[test]
 fn assistant_response_recorder_updates_latest_without_replacing_history() {
-    let root = unique_test_dir("assistant-response-record");
+    let root = clean_test_dir("assistant-response-record");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(
         &session.join("messages.jsonl"),
@@ -128,9 +128,9 @@ fn assistant_response_recorder_updates_latest_without_replacing_history() {
 
 #[test]
 fn tool_denial_recorder_makes_permission_failure_inspectable() {
-    let root = unique_test_dir("tool-denial-record");
+    let root = clean_test_dir("tool-denial-record");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(
         &session.join("events.jsonl"),
@@ -167,9 +167,9 @@ fn tool_denial_recorder_makes_permission_failure_inspectable() {
 
 #[test]
 fn tool_denial_recorder_rejects_invalid_tool_names() {
-    let root = unique_test_dir("tool-denial-record-bad");
+    let root = clean_test_dir("tool-denial-record-bad");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
 
     assert_eq!(
@@ -187,9 +187,9 @@ fn tool_denial_recorder_rejects_invalid_tool_names() {
 
 #[test]
 fn tool_result_recorder_appends_inspectable_tool_message_and_event() {
-    let root = unique_test_dir("tool-result-record");
+    let root = clean_test_dir("tool-result-record");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(
         &session.join("messages.jsonl"),
@@ -231,9 +231,9 @@ fn tool_result_recorder_appends_inspectable_tool_message_and_event() {
 
 #[test]
 fn tool_result_recorder_rejects_invalid_fields_without_executing() {
-    let root = unique_test_dir("tool-result-record-bad");
+    let root = clean_test_dir("tool-result-record-bad");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
 
     assert_eq!(
@@ -256,9 +256,9 @@ fn tool_result_recorder_rejects_invalid_fields_without_executing() {
 
 #[test]
 fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
-    let root = unique_test_dir("socket-session-reject");
+    let root = clean_test_dir("socket-session-reject");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
 
     let temp = parse_socket_request_frame(
@@ -295,11 +295,11 @@ fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
 
 #[test]
 fn indexed_socket_send_records_history_and_updates_session_index() {
-    let root = unique_test_dir("indexed-socket-send");
+    let root = clean_test_dir("indexed-socket-send");
     let session_root = root.join("session");
     let session = session_root.join("default");
     let previous = session_root.join("review-1");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     create_complete_session_layout(&previous);
     write_text_file(&session.join("messages.jsonl"), "");
@@ -352,9 +352,9 @@ fn indexed_socket_send_records_history_and_updates_session_index() {
 
 #[test]
 fn indexed_socket_send_rejects_non_send_requests() {
-    let root = unique_test_dir("indexed-socket-non-send");
+    let root = clean_test_dir("indexed-socket-non-send");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
 
     let resume = parse_socket_request_frame(r#"{"op":"resume","session":"default"}"#);
     assert!(resume.is_ok());
