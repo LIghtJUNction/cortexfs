@@ -84,32 +84,9 @@ pub fn serve_agent_executable_socket_stream_once(
     peer_policy: Option<SocketPeerPolicy>,
     runtime: AgentExecutableSocketRuntime<'_>,
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
-    if let Some(policy) = peer_policy {
-        let peer = peer_credentials(stream).map_err(SocketRuntimeError::PeerCredential)?;
-        if !policy.allows(peer) {
-            let error = SocketRuntimeError::PeerDenied;
-            let response = socket_runtime_error_response(&error);
-            write_socket_runtime_response(stream, &response)?;
-            return Err(error);
-        }
-    }
-
-    let frame = match read_socket_request_frame_from_stream(stream) {
-        Ok(frame) => frame,
-        Err(error) => {
-            let response = socket_runtime_error_response(&error);
-            write_socket_runtime_response(stream, &response)?;
-            return Err(error);
-        }
-    };
-    match handle_agent_executable_socket_request_frame_streaming(stream, runtime, &frame) {
-        Ok(response) => Ok(response),
-        Err(error) => {
-            let response = socket_runtime_error_response(&error);
-            write_socket_runtime_response(stream, &response)?;
-            Err(error)
-        }
-    }
+    serve_socket_stream_with(stream, peer_policy, |stream, frame| {
+        handle_agent_executable_socket_request_frame_streaming(stream, runtime, frame)
+    })
 }
 
 /// Serves one connected Unix socket stream request.
@@ -124,6 +101,18 @@ pub fn serve_unix_socket_stream_once(
     session_root: &Path,
     default_cwd: &str,
     model: Option<&str>,
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    serve_socket_stream_with(stream, peer_policy, |stream, frame| {
+        let response = handle_socket_request_frame(session_root, default_cwd, model, frame)?;
+        write_socket_runtime_response(stream, &response)?;
+        Ok(response)
+    })
+}
+
+fn serve_socket_stream_with(
+    stream: &mut UnixStream,
+    peer_policy: Option<SocketPeerPolicy>,
+    dispatch: impl FnOnce(&mut UnixStream, &str) -> Result<SocketRuntimeResponse, SocketRuntimeError>,
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
     if let Some(policy) = peer_policy {
         let peer = peer_credentials(stream).map_err(SocketRuntimeError::PeerCredential)?;
@@ -143,11 +132,8 @@ pub fn serve_unix_socket_stream_once(
             return Err(error);
         }
     };
-    match handle_socket_request_frame(session_root, default_cwd, model, &frame) {
-        Ok(response) => {
-            write_socket_runtime_response(stream, &response)?;
-            Ok(response)
-        }
+    match dispatch(stream, &frame) {
+        Ok(response) => Ok(response),
         Err(error) => {
             let response = socket_runtime_error_response(&error);
             write_socket_runtime_response(stream, &response)?;
