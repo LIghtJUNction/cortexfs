@@ -19,6 +19,7 @@ use serde_json::Value;
 
 mod abi_constants;
 mod abi_path;
+mod abi_path_parse;
 mod agent_control;
 mod context_jsonl;
 mod context_pack;
