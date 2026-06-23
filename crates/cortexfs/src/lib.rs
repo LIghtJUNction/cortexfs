@@ -5575,8 +5575,13 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
     let label = format!("user_u:agent_r:{name}_t:s0\n");
     let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
     let policy_subject = format!("{name}_t");
+    let selected_model = if root.join("model").join("main").exists() {
+        "main"
+    } else {
+        "qwen"
+    };
     let policy = format!(
-        "allow {policy_subject} model:qwen use\nallow {policy_subject} tool:fs.read execute\n"
+        "allow {policy_subject} model:{selected_model} use\nallow {policy_subject} tool:fs.read execute\n"
     );
     let mount = format!(
         "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n/ctx/shared/project-a\t/shared/project-a\trw\trbind,nosuid,nodev\n"
@@ -5598,7 +5603,7 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
             "/ctx/tool:/ctx/home/1000/tool:/ctx/shared/project-a/tool\n".to_owned(),
         ),
         ("mount", mount),
-        ("model", "qwen\n".to_owned()),
+        ("model", format!("{selected_model}\n")),
         ("policy", policy),
         ("status", "idle\n".to_owned()),
         ("pid", "\n".to_owned()),
@@ -5619,16 +5624,23 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
 fn reference_agent_stub_script(name: &str) -> String {
     format!(
         r#"#!/bin/sh
-# CortexFS reference-tree agent stub.
+# CortexFS reference-tree agent stub. The selected model is a file ABI choice.
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 run="${{CTX_RUN_ID:-r1}}"
 input="$*"
 if [ -z "$input" ]; then
   input="$(cat)"
 fi
-json_text="$(printf '%s' "$input" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-printf '{{"type":"start","run":"%s","agent":"{name}"}}\n' "$run"
-printf '{{"type":"message","run":"%s","role":"assistant","content":[{{"type":"text","text":"%s"}}]}}\n' "$run" "$json_text"
-printf '{{"type":"done","run":"%s","status":"ok"}}\n' "$run"
+model="$(tr -d '\n' < "$root/agent/{name}.d/model" 2>/dev/null || true)"
+if [ -z "$model" ]; then
+  model="qwen"
+fi
+if [ ! -x "$root/model/$model" ]; then
+  printf '{{"type":"error","run":"%s","code":"ENOENT","message":"missing model"}}\n' "$run"
+  printf '{{"type":"done","run":"%s","status":"error"}}\n' "$run"
+  exit 1
+fi
+CTX_RUN_ID="$run" exec "$root/model/$model" "$input"
 "#
     )
 }
@@ -8848,10 +8860,8 @@ mod tests {
         let stdout = String::from_utf8(output.stdout);
         assert!(stdout.is_ok());
         let Ok(stdout) = stdout else { return };
-        assert!(stdout.contains(r#"{"type":"start","run":"r1","agent":"coder"}"#));
-        assert!(stdout.contains(
-            r#"{"type":"message","run":"r1","role":"assistant","content":[{"type":"text","text":"fix tests"}]}"#
-        ));
+        assert!(stdout.contains(r#"{"type":"start","run":"r1","model":"qwen"}"#));
+        assert!(stdout.contains(r#"{"type":"delta","run":"r1","text":"fix tests"}"#));
         assert!(stdout.contains(r#"{"type":"done","run":"r1","status":"ok"}"#));
         assert!(inspect_event_stream_jsonl(&stdout).is_ok());
 
@@ -10697,7 +10707,7 @@ mod tests {
         let Ok(outcome) = outcome else { return };
         assert_eq!(outcome.frames().len(), 3);
         assert!(outcome.jsonl().contains("\"type\":\"start\""));
-        assert!(outcome.jsonl().contains("\"type\":\"message\""));
+        assert!(outcome.jsonl().contains("\"type\":\"delta\""));
         assert!(outcome.jsonl().contains("\"text\":\"hi\""));
         assert!(outcome.jsonl().contains("\"type\":\"done\""));
 
@@ -10709,7 +10719,7 @@ mod tests {
             return;
         };
         let response = String::from_utf8_lossy(bytes);
-        assert!(response.contains("\"type\":\"message\""));
+        assert!(response.contains("\"type\":\"delta\""));
         assert!(response.contains("\"text\":\"hi\""));
         let latest = fs::read_to_string(session_root.join("default").join("latest.md"));
         assert!(latest.is_ok());
