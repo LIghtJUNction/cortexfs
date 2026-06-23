@@ -18,7 +18,7 @@ fn list_names(root: &Path, target: &LsTarget) -> Result<Vec<String>, CliError> {
 fn list_kind_names(root: &Path, kind: ObjectClass) -> Result<Vec<String>, CliError> {
     Ok(read_dir_names(&root.join(kind.as_str()))?
         .into_iter()
-        .filter(|name| is_visible_object(name))
+        .filter(|name| is_object_name(name))
         .collect())
 }
 
@@ -70,10 +70,6 @@ fn normalized_ls_path(path: &str) -> String {
     }
 
     trimmed.to_owned()
-}
-
-fn is_visible_object(name: &str) -> bool {
-    is_object_name(name)
 }
 
 fn read_dir_names(dir: &Path) -> Result<Vec<String>, CliError> {
