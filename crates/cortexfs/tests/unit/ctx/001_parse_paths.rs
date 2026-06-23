@@ -1,10 +1,6 @@
 #[test]
 fn parses_spec_which_command() {
-    let command = parse_command(vec![
-        "which".to_owned(),
-        "tool".to_owned(),
-        "fs.read".to_owned(),
-    ]);
+    let command = cmd!("which", "tool", "fs.read");
     assert!(matches!(
         command,
         Ok(Command::Which(ObjectClass::Tool, ref name)) if name == "fs.read"
@@ -13,12 +9,7 @@ fn parses_spec_which_command() {
 
 #[test]
 fn parses_file_set_command() {
-    let command = parse_command(vec![
-        "file".to_owned(),
-        "set".to_owned(),
-        "agent/coder.d/cwd".to_owned(),
-        "/work".to_owned(),
-    ]);
+    let command = cmd!("file", "set", "agent/coder.d/cwd", "/work");
     assert!(matches!(
         command,
         Ok(Command::File(ref args))
@@ -30,11 +21,7 @@ fn parses_file_set_command() {
 
 #[test]
 fn parses_file_classify_command() {
-    let explicit = parse_command(vec![
-        "file".to_owned(),
-        "classify".to_owned(),
-        "tool/fs.read".to_owned(),
-    ]);
+    let explicit = cmd!("file", "classify", "tool/fs.read");
     assert!(matches!(
         explicit,
         Ok(Command::File(ref args))
@@ -43,7 +30,7 @@ fn parses_file_classify_command() {
                 && args.value.is_none()
     ));
 
-    let shorthand = parse_command(vec!["file".to_owned(), "tool/fs.read".to_owned()]);
+    let shorthand = cmd!("file", "tool/fs.read");
     assert!(matches!(
         shorthand,
         Ok(Command::File(ref args))
@@ -55,16 +42,16 @@ fn parses_file_classify_command() {
 
 #[test]
 fn parses_ls_path_command() {
-    let root = parse_command(vec!["ls".to_owned()]);
+    let root = cmd!("ls");
     assert!(matches!(root, Ok(Command::Ls(LsTarget::Root))));
 
-    let home = parse_command(vec!["ls".to_owned(), "home".to_owned()]);
+    let home = cmd!("ls", "home");
     assert!(matches!(
         home,
         Ok(Command::Ls(LsTarget::Path(ref path))) if path == "home"
     ));
 
-    let tool = parse_command(vec!["ls".to_owned(), "tool".to_owned()]);
+    let tool = cmd!("ls", "tool");
     assert!(matches!(
         tool,
         Ok(Command::Ls(LsTarget::Path(ref path))) if path == "tool"
@@ -73,7 +60,7 @@ fn parses_ls_path_command() {
 
 #[test]
 fn parses_session_file_commands() {
-    let history = parse_command(vec!["history".to_owned(), "coder".to_owned()]);
+    let history = cmd!("history", "coder");
     assert!(matches!(
         history,
         Ok(Command::History {
@@ -82,11 +69,7 @@ fn parses_session_file_commands() {
         }) if agent == "coder"
     ));
 
-    let latest = parse_command(vec![
-        "latest".to_owned(),
-        "coder".to_owned(),
-        "default".to_owned(),
-    ]);
+    let latest = cmd!("latest", "coder", "default");
     assert!(matches!(
         latest,
         Ok(Command::Latest {
@@ -95,11 +78,7 @@ fn parses_session_file_commands() {
         }) if agent == "coder" && session == "default"
     ));
 
-    let resume = parse_command(vec![
-        "resume".to_owned(),
-        "coder".to_owned(),
-        "default".to_owned(),
-    ]);
+    let resume = cmd!("resume", "coder", "default");
     assert!(matches!(
         resume,
         Ok(Command::Resume {
@@ -108,12 +87,7 @@ fn parses_session_file_commands() {
         }) if agent == "coder" && session == "default"
     ));
 
-    let send = parse_command(vec![
-        "send".to_owned(),
-        "coder".to_owned(),
-        "default".to_owned(),
-        "hello".to_owned(),
-    ]);
+    let send = cmd!("send", "coder", "default", "hello");
     assert!(matches!(
         send,
         Ok(Command::Send {
@@ -123,17 +97,13 @@ fn parses_session_file_commands() {
         }) if agent == "coder" && session == "default" && input == "hello"
     ));
 
-    let ping = parse_command(vec!["ping".to_owned(), "agent/coder".to_owned()]);
+    let ping = cmd!("ping", "agent/coder");
     assert!(matches!(
         ping,
         Ok(Command::Ping { ref path }) if path == "agent/coder"
     ));
 
-    let cancel = parse_command(vec![
-        "cancel".to_owned(),
-        "agent/coder".to_owned(),
-        "run-1".to_owned(),
-    ]);
+    let cancel = cmd!("cancel", "agent/coder", "run-1");
     assert!(matches!(
         cancel,
         Ok(Command::Cancel { ref path, ref run }) if path == "agent/coder" && run == "run-1"
@@ -142,13 +112,10 @@ fn parses_session_file_commands() {
 
 #[test]
 fn parses_bootstrap_and_mount_commands() {
-    let bootstrap = parse_command(vec!["bootstrap".to_owned()]);
+    let bootstrap = cmd!("bootstrap");
     assert!(matches!(bootstrap, Ok(Command::Bootstrap { source: None })));
 
-    let bootstrap_source = parse_command(vec![
-        "bootstrap".to_owned(),
-        "/tmp/cortexfs-source".to_owned(),
-    ]);
+    let bootstrap_source = cmd!("bootstrap", "/tmp/cortexfs-source");
     assert!(matches!(
         bootstrap_source,
         Ok(Command::Bootstrap {
@@ -156,12 +123,12 @@ fn parses_bootstrap_and_mount_commands() {
         }) if source == Path::new("/tmp/cortexfs-source")
     ));
 
-    let mount = parse_command(vec![
-        "mount".to_owned(),
-        "--source".to_owned(),
-        "/tmp/cortexfs-source".to_owned(),
-        "/tmp/cortexfs-mount".to_owned(),
-    ]);
+    let mount = cmd!(
+        "mount",
+        "--source",
+        "/tmp/cortexfs-source",
+        "/tmp/cortexfs-mount"
+    );
     assert!(matches!(
         mount,
         Ok(Command::Mount {
@@ -174,11 +141,7 @@ fn parses_bootstrap_and_mount_commands() {
 
 #[test]
 fn parses_exec_command_with_arguments() {
-    let command = parse_command(vec![
-        "exec".to_owned(),
-        "agent/coder".to_owned(),
-        "fix tests".to_owned(),
-    ]);
+    let command = cmd!("exec", "agent/coder", "fix tests");
     assert!(matches!(
         command,
         Ok(Command::Exec {
@@ -202,8 +165,7 @@ fn abi_path_resolution_rejects_escape() {
 
 #[test]
 fn ls_lists_abi_paths_and_keeps_object_filtering() {
-    let root = unique_test_dir("ctx-ls-paths");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("ctx-ls-paths");
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
     let home = list_names(&root, &LsTarget::Path("home".to_owned()));
@@ -224,33 +186,29 @@ fn ls_lists_abi_paths_and_keeps_object_filtering() {
             if names.contains(&"fs.read".to_owned())
                 && !names.contains(&"fs.read.d".to_owned())
     ));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn detects_durable_session_instance_paths() {
-    assert!(is_durable_session_instance_path(
-        "home/1000/agent/coder/session/default"
-    ));
-    assert!(is_durable_session_instance_path(
-        "shared/im-qq-dev/agent/bot/session/group-456"
-    ));
-    assert!(is_durable_session_instance_path(
-        "home/1000/model/openai/gpt-4o.d/session/default"
-    ));
-    assert!(is_durable_session_instance_path(
-        "shared/project-a/model/openai/gpt-4o.d/session/default"
-    ));
-    assert!(!is_durable_session_instance_path(
-        "home/1000/agent/coder/session"
-    ));
-    assert!(!is_durable_session_instance_path(
-        "home/1000/agent/coder/session/default/messages.jsonl"
-    ));
-    assert!(!is_durable_session_instance_path(
-        "shared/project-a/model/openai/gpt-4o/session/default"
-    ));
+    assert_path_matches(
+        &[
+            "home/1000/agent/coder/session/default",
+            "shared/im-qq-dev/agent/bot/session/group-456",
+            "home/1000/model/openai/gpt-4o.d/session/default",
+            "shared/project-a/model/openai/gpt-4o.d/session/default",
+        ],
+        is_durable_session_instance_path,
+        true,
+    );
+    assert_path_matches(
+        &[
+            "home/1000/agent/coder/session",
+            "home/1000/agent/coder/session/default/messages.jsonl",
+            "shared/project-a/model/openai/gpt-4o/session/default",
+        ],
+        is_durable_session_instance_path,
+        false,
+    );
 }
 
 #[test]
@@ -275,53 +233,57 @@ fn detects_session_control_paths() {
 
 #[test]
 fn detects_private_and_shared_context_pack_paths() {
-    assert!(is_context_pack_path(
-        "home/1000/agent/coder/session/default/context/pack.json"
-    ));
-    assert!(is_context_pack_path(
-        "shared/im-qq-dev/agent/bot/session/group-456/context/pack.json"
-    ));
-    assert!(!is_context_pack_path(
-        "home/1000/agent/coder/session/default/context/pack.md"
-    ));
-    assert!(!is_context_pack_path(
-        "home/1000/agent/bad/name/session/default/context/pack.json"
-    ));
+    assert_path_matches(
+        &[
+            "home/1000/agent/coder/session/default/context/pack.json",
+            "shared/im-qq-dev/agent/bot/session/group-456/context/pack.json",
+        ],
+        is_context_pack_path,
+        true,
+    );
+    assert_path_matches(
+        &[
+            "home/1000/agent/coder/session/default/context/pack.md",
+            "home/1000/agent/bad/name/session/default/context/pack.json",
+        ],
+        is_context_pack_path,
+        false,
+    );
 }
 
 #[test]
 fn detects_private_and_shared_event_stream_paths() {
-    assert!(is_session_events_path(
-        "home/1000/agent/coder/session/default/events.jsonl"
-    ));
-    assert!(is_session_events_path(
-        "shared/im-qq-dev/agent/bot/session/group-456/events.jsonl"
-    ));
-    assert!(is_session_events_path(
-        "home/1000/model/openai/gpt-4o.d/session/default/events.jsonl"
-    ));
-    assert!(is_session_events_path(
-        "shared/project-a/model/openai/gpt-4o.d/session/default/events.jsonl"
-    ));
-    assert!(!is_session_events_path(
-        "home/1000/agent/coder/session/default/messages.jsonl"
-    ));
-    assert!(!is_session_events_path(
-        "shared/im-qq-dev/agent/bad/name/session/group-456/events.jsonl"
-    ));
+    assert_path_matches(
+        &[
+            "home/1000/agent/coder/session/default/events.jsonl",
+            "shared/im-qq-dev/agent/bot/session/group-456/events.jsonl",
+            "home/1000/model/openai/gpt-4o.d/session/default/events.jsonl",
+            "shared/project-a/model/openai/gpt-4o.d/session/default/events.jsonl",
+        ],
+        is_session_events_path,
+        true,
+    );
+    assert_path_matches(
+        &[
+            "home/1000/agent/coder/session/default/messages.jsonl",
+            "shared/im-qq-dev/agent/bad/name/session/group-456/events.jsonl",
+        ],
+        is_session_events_path,
+        false,
+    );
 }
 
 #[test]
 fn detects_private_and_shared_message_stream_paths() {
-    assert!(is_session_messages_path(
-        "home/1000/agent/coder/session/default/messages.jsonl"
-    ));
-    assert!(is_session_messages_path(
-        "shared/im-qq-dev/agent/bot/session/group-456/messages.jsonl"
-    ));
-    assert!(is_session_messages_path(
-        "home/1000/model/openai/gpt-4o.d/session/default/messages.jsonl"
-    ));
+    assert_path_matches(
+        &[
+            "home/1000/agent/coder/session/default/messages.jsonl",
+            "shared/im-qq-dev/agent/bot/session/group-456/messages.jsonl",
+            "home/1000/model/openai/gpt-4o.d/session/default/messages.jsonl",
+        ],
+        is_session_messages_path,
+        true,
+    );
     assert!(!is_session_messages_path(
         "home/1000/agent/coder/session/default/events.jsonl"
     ));
@@ -401,56 +363,79 @@ fn detects_executable_object_paths() {
 
 #[test]
 fn detects_model_capability_paths() {
-    assert!(is_model_capability_path("model/openai/gpt-4o.d/cap"));
-    assert!(is_model_capability_path("model/google/gemini-2.5-pro.d/cap"));
-    assert!(!is_model_capability_path("tool/fs.read.d/cap"));
-    assert!(!is_model_capability_path("model/openai/gpt-4o/cap"));
-    assert!(!is_model_capability_path("model/openai/gpt-4o.d/native"));
+    assert_path_matches(
+        &["model/openai/gpt-4o.d/cap", "model/google/gemini-2.5-pro.d/cap"],
+        is_model_capability_path,
+        true,
+    );
+    assert_path_matches(
+        &["tool/fs.read.d/cap", "model/openai/gpt-4o/cap", "model/openai/gpt-4o.d/native"],
+        is_model_capability_path,
+        false,
+    );
 }
 
 #[test]
 fn detects_model_driver_paths() {
-    assert!(is_model_driver_path("model/openai/gpt-4o.d/driver"));
-    assert!(is_model_driver_path("model/anthropic/claude-sonnet-4.d/driver"));
-    assert!(!is_model_driver_path("model/openai/gpt-4o/driver"));
-    assert!(!is_model_driver_path("model/openai/gpt-4o.d/cap"));
+    assert_path_matches(
+        &["model/openai/gpt-4o.d/driver", "model/anthropic/claude-sonnet-4.d/driver"],
+        is_model_driver_path,
+        true,
+    );
+    assert_path_matches(
+        &["model/openai/gpt-4o/driver", "model/openai/gpt-4o.d/cap"],
+        is_model_driver_path,
+        false,
+    );
 }
 
 #[test]
 fn detects_tool_schema_paths() {
-    assert!(is_tool_schema_path("tool/fs.read.d/schema"));
-    assert!(is_tool_schema_path(
-        "tool/mcp.github.search_issues.d/schema"
-    ));
-    assert!(!is_tool_schema_path("tool/fs.read/schema"));
-    assert!(!is_tool_schema_path("model/openai/gpt-4o.d/schema"));
-    assert!(!is_tool_schema_path("tool/bad/name.d/schema"));
+    assert_path_matches(
+        &["tool/fs.read.d/schema", "tool/mcp.github.search_issues.d/schema"],
+        is_tool_schema_path,
+        true,
+    );
+    assert_path_matches(
+        &["tool/fs.read/schema", "model/openai/gpt-4o.d/schema", "tool/bad/name.d/schema"],
+        is_tool_schema_path,
+        false,
+    );
 }
 
 #[test]
 fn detects_shared_tool_schema_paths() {
-    assert!(is_shared_tool_schema_path(
-        "shared/project-a/tool/project.test.d/schema"
-    ));
-    assert!(is_shared_tool_schema_path(
-        "shared/project-a/tool/mcp.github.search_issues.d/schema"
-    ));
-    assert!(!is_shared_tool_schema_path(
-        "shared/project-a/tool/project.test.d/policy"
-    ));
-    assert!(!is_shared_tool_schema_path("tool/project.test.d/schema"));
-    assert!(!is_shared_tool_schema_path(
-        "shared/project-a/tool/bad/name.d/schema"
-    ));
+    assert_path_matches(
+        &[
+            "shared/project-a/tool/project.test.d/schema",
+            "shared/project-a/tool/mcp.github.search_issues.d/schema",
+        ],
+        is_shared_tool_schema_path,
+        true,
+    );
+    assert_path_matches(
+        &[
+            "shared/project-a/tool/project.test.d/policy",
+            "tool/project.test.d/schema",
+            "shared/project-a/tool/bad/name.d/schema",
+        ],
+        is_shared_tool_schema_path,
+        false,
+    );
 }
 
 #[test]
 fn detects_shared_queue_root_paths() {
-    assert!(is_shared_queue_root_path("shared/project-a/queue"));
-    assert!(is_shared_queue_root_path("shared/im-qq-dev/queue"));
-    assert!(!is_shared_queue_root_path("shared/project-a/queue/pending"));
-    assert!(!is_shared_queue_root_path("shared/project-a/result"));
-    assert!(!is_shared_queue_root_path("shared/bad/name/queue"));
+    assert_path_matches(
+        &["shared/project-a/queue", "shared/im-qq-dev/queue"],
+        is_shared_queue_root_path,
+        true,
+    );
+    assert_path_matches(
+        &["shared/project-a/queue/pending", "shared/project-a/result", "shared/bad/name/queue"],
+        is_shared_queue_root_path,
+        false,
+    );
 }
 
 #[test]

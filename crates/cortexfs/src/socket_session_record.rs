@@ -80,34 +80,20 @@ pub fn record_assistant_response_to_session(
         .map_err(|_error| SocketSessionRecordError::SessionMismatch)?;
     require_socket_session_files(session_dir)?;
 
+    let content_parts = text_content_parts(content);
     let message = serde_json::json!({
         "role": "assistant",
-        "content": [
-            {
-                "type": "text",
-                "text": content
-            }
-        ]
+        "content": content_parts
     })
     .to_string();
     let event = serde_json::json!({
         "type": "message",
         "run": run_id,
         "role": "assistant",
-        "content": [
-            {
-                "type": "text",
-                "text": content
-            }
-        ]
+        "content": content_parts
     })
     .to_string();
-    let done = serde_json::json!({
-        "type": "done",
-        "run": run_id,
-        "status": "ok"
-    })
-    .to_string();
+    let done = done_event_json(run_id, "ok");
 
     append_session_lines(session_dir, "messages.jsonl", &[&message])?;
     append_session_lines(session_dir, "events.jsonl", &[&event, &done])?;
@@ -143,12 +129,7 @@ pub fn record_tool_execution_denial_to_session(
         "message": "tool execution denied"
     })
     .to_string();
-    let done = serde_json::json!({
-        "type": "done",
-        "run": run_id,
-        "status": "error"
-    })
-    .to_string();
+    let done = done_event_json(run_id, "error");
 
     append_session_lines(session_dir, "events.jsonl", &[&event, &done])?;
     set_session_state(session_dir, "error")?;
@@ -358,16 +339,19 @@ fn record_socket_cancel_to_session(
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
     require_socket_session_files(session_dir)?;
 
-    let event = serde_json::json!({
-        "type": "done",
-        "run": run_id,
-        "status": "cancelled"
-    })
-    .to_string();
+    let event = done_event_json(run_id, "cancelled");
     append_session_lines(session_dir, "events.jsonl", &[&event])?;
     set_session_state(session_dir, "cancelled")?;
 
     Ok(SocketSessionRecord::new(Vec::new(), vec![event]))
+}
+
+fn text_content_parts(content: &str) -> Value {
+    serde_json::json!([{ "type": "text", "text": content }])
+}
+
+fn done_event_json(run_id: &str, status: &str) -> String {
+    serde_json::json!({ "type": "done", "run": run_id, "status": status }).to_string()
 }
 
 fn validate_child_context_names(

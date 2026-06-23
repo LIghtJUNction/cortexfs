@@ -1,6 +1,6 @@
 #[test]
 fn file_check_validates_message_stream_files() {
-    let root = unique_test_dir("ctx-messages-check");
+    let root = clean_test_dir("ctx-messages-check");
     let messages = root
         .join("home")
         .join("1000")
@@ -9,15 +9,10 @@ fn file_check_validates_message_stream_files() {
         .join("session")
         .join("default")
         .join("messages.jsonl");
-    let parent = messages.parent();
-    assert!(parent.is_some());
-    let Some(parent) = parent else { return };
-    assert!(fs::create_dir_all(parent).is_ok());
-    assert!(fs::write(
+    write_text_file(
         &messages,
         "{\"role\":\"assistant\",\"response_id\":\"resp_1\",\"content\":\"hello\"}\n"
-    )
-    .is_ok());
+    );
 
     let checked = file_check(
         &root,
@@ -27,23 +22,20 @@ fn file_check_validates_message_stream_files() {
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("provider native field"))
     );
 
-    assert!(fs::write(
+    write_text_file(
         &messages,
         "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}\n"
-    )
-    .is_ok());
+    );
     assert!(file_check(
         &root,
         "home/1000/agent/coder/session/default/messages.jsonl"
     )
     .is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_context_jsonl_files() {
-    let root = unique_test_dir("ctx-context-jsonl-check");
+    let root = clean_test_dir("ctx-context-jsonl-check");
     let context = root
         .join("shared")
         .join("project-a")
@@ -53,18 +45,14 @@ fn file_check_validates_context_jsonl_files() {
         .join("default")
         .join("context");
     assert!(fs::create_dir_all(context.join("swap")).is_ok());
-    assert!(fs::write(
-        context.join("facts.jsonl"),
+    write_text_file(
+        &context.join("facts.jsonl"),
         "{\"id\":\"f1\",\"text\":\"root is frozen\",\"source\":\"messages:1-2\"}\n"
-    )
-    .is_ok());
-    assert!(
-            fs::write(
-                context.join("swap").join("index.jsonl"),
-                "{\"id\":\"sha256-abc\",\"kind\":\"message_range\",\"source\":\"provider_thread\",\"summary\":\"bad\",\"tokens\":\"10\"}\n"
-            )
-            .is_ok()
-        );
+    );
+    write_text_file(
+        &context.join("swap").join("index.jsonl"),
+        "{\"id\":\"sha256-abc\",\"kind\":\"message_range\",\"source\":\"provider_thread\",\"summary\":\"bad\",\"tokens\":\"10\"}\n",
+    );
 
     assert!(file_check(
         &root,
@@ -78,13 +66,11 @@ fn file_check_validates_context_jsonl_files() {
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid context jsonl"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn file_check_validates_shared_and_model_session_layouts() {
-    let root = unique_test_dir("ctx-shared-model-session-check");
+    let root = clean_test_dir("ctx-shared-model-session-check");
     let shared_agent = root
         .join("shared")
         .join("im-qq-dev")
@@ -118,26 +104,20 @@ fn file_check_validates_shared_and_model_session_layouts() {
     assert!(
         matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("missing file messages.jsonl"))
     );
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn doctor_validates_reference_tree_objects_sessions_and_queue() {
-    let root = unique_test_dir("ctx-doctor-reference-tree");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("ctx-doctor-reference-tree");
     let ensured = ensure_v1_reference_tree(&root);
     assert!(ensured.is_ok());
 
     assert!(doctor(&root).is_ok());
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn doctor_reports_reference_tree_layout_breakage() {
-    let root = unique_test_dir("ctx-doctor-reference-tree-bad");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("ctx-doctor-reference-tree-bad");
     let ensured = ensure_v1_reference_tree(&root);
     assert!(ensured.is_ok());
     assert!(fs::remove_file(root.join("tool").join("fs.read.d").join("schema")).is_ok());
@@ -156,8 +136,6 @@ fn doctor_reports_reference_tree_layout_breakage() {
         checked,
         Err(ref error) if error.code == 69 && error.message.contains("doctor found ABI problems")
     ));
-
-    let _ignored = fs::remove_dir_all(&root);
 }
 
 #[test]
