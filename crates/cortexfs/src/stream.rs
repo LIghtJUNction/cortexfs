@@ -42,25 +42,7 @@ pub struct EventStreamReport {
     issues: Vec<EventStreamIssue>,
 }
 
-impl EventStreamReport {
-    /// Creates a report with collected event stream issues.
-    #[must_use]
-    pub const fn new(issues: Vec<EventStreamIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when all events are stable v1 event frames.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected event stream issues.
-    #[must_use]
-    pub fn issues(&self) -> &[EventStreamIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(EventStreamReport, EventStreamIssue);
 
 /// Inspects a model or agent canonical JSONL event stream.
 #[must_use]

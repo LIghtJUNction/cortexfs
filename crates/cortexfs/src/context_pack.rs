@@ -85,25 +85,7 @@ pub struct ContextPackReport {
     issues: Vec<ContextPackIssue>,
 }
 
-impl ContextPackReport {
-    /// Creates a report with collected context pack issues.
-    #[must_use]
-    pub const fn new(issues: Vec<ContextPackIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when all pack items identify allowed session-relative sources.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected pack issues.
-    #[must_use]
-    pub fn issues(&self) -> &[ContextPackIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(ContextPackReport, ContextPackIssue);
 
 /// One source selected into a rebuilt context pack.
 #[derive(Clone, Debug, Eq, PartialEq)]

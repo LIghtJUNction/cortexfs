@@ -119,25 +119,7 @@ pub struct ModelDriverRoutingTable {
     routes: HashMap<ModelDriverUseCase, Vec<String>>,
 }
 
-impl ModelCapabilityReport {
-    /// Creates a report with collected model capability issues.
-    #[must_use]
-    pub const fn new(issues: Vec<ModelCapabilityIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when all capabilities use stable v1 semantic words.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected capability issues.
-    #[must_use]
-    pub fn issues(&self) -> &[ModelCapabilityIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(ModelCapabilityReport, ModelCapabilityIssue);
 
 impl ModelCapabilities {
     /// Returns whether this declaration supports a capability.

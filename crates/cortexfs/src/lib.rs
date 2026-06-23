@@ -17,6 +17,27 @@ use nix::sys::socket::{getsockopt, sockopt};
 use serde::Deserialize;
 use serde_json::Value;
 
+macro_rules! impl_issue_report {
+    ($report:ty, $issue:ty) => {
+        impl $report {
+            #[must_use]
+            pub const fn new(issues: Vec<$issue>) -> Self {
+                Self { issues }
+            }
+
+            #[must_use]
+            pub fn is_ok(&self) -> bool {
+                self.issues.is_empty()
+            }
+
+            #[must_use]
+            pub fn issues(&self) -> &[$issue] {
+                &self.issues
+            }
+        }
+    };
+}
+
 mod abi_constants;
 mod abi_path;
 mod abi_path_parse;
@@ -105,25 +126,7 @@ include!("authority_types.rs");
 
 include!("child_agent_types.rs");
 
-impl ObjectLayoutReport {
-    /// Creates a report with collected layout issues.
-    #[must_use]
-    pub const fn new(issues: Vec<ObjectLayoutIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the object satisfies the v1 layout.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected layout issues.
-    #[must_use]
-    pub fn issues(&self) -> &[ObjectLayoutIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(ObjectLayoutReport, ObjectLayoutIssue);
 
 impl ObjectBootstrap {
     /// Creates a bootstrap result.

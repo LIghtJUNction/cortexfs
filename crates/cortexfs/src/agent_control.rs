@@ -61,25 +61,7 @@ pub struct AgentControlReport {
     issues: Vec<AgentControlIssue>,
 }
 
-impl AgentControlReport {
-    /// Creates a report with collected agent control issues.
-    #[must_use]
-    pub const fn new(issues: Vec<AgentControlIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the control file satisfies the fixed v1 syntax.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected agent control issues.
-    #[must_use]
-    pub fn issues(&self) -> &[AgentControlIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(AgentControlReport, AgentControlIssue);
 
 /// Inspects a fixed-format v1 agent control file body.
 #[must_use]

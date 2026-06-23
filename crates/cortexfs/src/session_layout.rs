@@ -98,45 +98,8 @@ pub struct SessionLayoutReport {
     issues: Vec<SessionLayoutIssue>,
 }
 
-impl SessionLayoutReport {
-    /// Creates a report with collected layout issues.
-    #[must_use]
-    pub const fn new(issues: Vec<SessionLayoutIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the session satisfies the v1 layout.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected layout issues.
-    #[must_use]
-    pub fn issues(&self) -> &[SessionLayoutIssue] {
-        &self.issues
-    }
-}
-
-impl SessionControlReport {
-    /// Creates a report with collected session control issues.
-    #[must_use]
-    pub const fn new(issues: Vec<SessionControlIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the control file satisfies the fixed v1 syntax.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected session control issues.
-    #[must_use]
-    pub fn issues(&self) -> &[SessionControlIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(SessionLayoutReport, SessionLayoutIssue);
+impl_issue_report!(SessionControlReport, SessionControlIssue);
 
 /// Inspects a durable session directory for the v1 transparency/context layout.
 #[must_use]

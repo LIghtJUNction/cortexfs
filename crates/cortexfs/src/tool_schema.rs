@@ -19,25 +19,7 @@ pub struct ToolSchemaReport {
     issues: Vec<ToolSchemaIssue>,
 }
 
-impl ToolSchemaReport {
-    /// Creates a report with collected tool schema issues.
-    #[must_use]
-    pub const fn new(issues: Vec<ToolSchemaIssue>) -> Self {
-        Self { issues }
-    }
-
-    /// Returns true when the schema is valid and authority-neutral.
-    #[must_use]
-    pub fn is_ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    /// Returns all detected schema issues.
-    #[must_use]
-    pub fn issues(&self) -> &[ToolSchemaIssue] {
-        &self.issues
-    }
-}
+impl_issue_report!(ToolSchemaReport, ToolSchemaIssue);
 
 /// Inspects a `tool/<name>.d/schema` file body.
 #[must_use]
