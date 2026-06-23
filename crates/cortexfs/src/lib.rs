@@ -20,7 +20,9 @@ use serde_json::Value;
 mod abi_constants;
 mod abi_path;
 mod agent_control;
+mod context_jsonl;
 mod context_pack;
+mod message_stream;
 mod model;
 mod mount_table;
 mod policy;
@@ -5216,6 +5218,13 @@ enum JsonStringField {
     Other(Value),
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum JsonU64Field {
+    Number(u64),
+    Other(Value),
+}
+
 impl JsonStringField {
     fn as_str(&self) -> Option<&str> {
         match *self {
@@ -5226,6 +5235,59 @@ impl JsonStringField {
             }
         }
     }
+}
+
+fn is_json_u64(value: Option<&JsonU64Field>) -> bool {
+    value.is_some_and(|value| match *value {
+        JsonU64Field::Number(ref number) => {
+            let _ = number;
+            true
+        }
+        JsonU64Field::Other(ref value) => {
+            let _ = value;
+            false
+        }
+    })
+}
+
+fn provider_native_fields(value: &Value) -> Vec<&str> {
+    let mut fields = Vec::new();
+    collect_provider_native_fields(value, &mut fields);
+    fields
+}
+
+fn collect_provider_native_fields<'a>(value: &'a Value, fields: &mut Vec<&'a str>) {
+    if let Some(object) = value.as_object() {
+        for (key, child) in object {
+            if is_provider_native_field(key) {
+                fields.push(key);
+            }
+            collect_provider_native_fields(child, fields);
+        }
+        return;
+    }
+
+    if let Some(items) = value.as_array() {
+        for item in items {
+            collect_provider_native_fields(item, fields);
+        }
+    }
+}
+
+fn is_provider_native_field(key: &str) -> bool {
+    matches!(
+        key,
+        "thread_id"
+            | "response_id"
+            | "conversation_id"
+            | "provider_thread_id"
+            | "provider_response_id"
+            | "native_thread"
+            | "native_state"
+            | "openai_response_id"
+            | "anthropic_message_id"
+            | "gemini_response_id"
+    )
 }
 
 /// Decides whether an agent may execute a tool through `CTX_PATH`.
