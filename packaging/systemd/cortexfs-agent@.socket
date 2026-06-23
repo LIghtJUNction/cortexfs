@@ -5,10 +5,12 @@ Requires=cortexfs.service
 After=cortexfs.service
 
 [Socket]
-ListenStream=/ctx/agent/%i.sock
+ListenStream=/run/cortexfs/agent/%i.sock
 SocketMode=0666
 RemoveOnStop=yes
-ExecStartPre=/usr/bin/rm -f /ctx/agent/%i.sock
+ExecStartPre=/usr/bin/install -d -m 0755 /run/cortexfs/agent
+ExecStartPre=/usr/bin/rm -f /run/cortexfs/agent/%i.sock /var/lib/cortexfs/storage/v1-root/agent/%i.sock
+ExecStartPre=/usr/bin/ln -s /run/cortexfs/agent/%i.sock /var/lib/cortexfs/storage/v1-root/agent/%i.sock
 
 [Install]
 WantedBy=sockets.target
