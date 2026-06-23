@@ -3,6 +3,7 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Mutex;
@@ -191,6 +192,24 @@ impl Filesystem for CortexFuse {
             Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
             Err(error) => reply.error(errno(error)),
         }
+    }
+
+    fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
+        let path = match self.path_for_inode(ino) {
+            Ok(path) => path,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        let target = match fs::read_link(self.projection.root().join(path)) {
+            Ok(target) => target,
+            Err(_error) => {
+                reply.error(Errno::EINVAL);
+                return;
+            }
+        };
+        reply.data(target.as_os_str().as_bytes());
     }
 
     fn setattr(
