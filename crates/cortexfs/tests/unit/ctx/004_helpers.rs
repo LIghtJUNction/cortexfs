@@ -20,6 +20,19 @@ fn assert_path_matches(paths: &[&str], predicate: fn(&str) -> bool, expected: bo
     }
 }
 
+macro_rules! assert_path_kind {
+    ($path:expr, $classifier:expr, $expected:expr) => {
+        assert_eq!($classifier($path), $expected, "{}", $path);
+    };
+}
+
+fn assert_file_check_error_contains(root: &Path, path: &str, fragments: &[&str]) {
+    let checked = file_check(root, path);
+    assert!(checked.as_ref().is_err_and(|error| {
+        error.code == 2 && fragments.iter().all(|fragment| error.message.contains(fragment))
+    }), "{path}");
+}
+
 macro_rules! cmd {
     ($($arg:literal),* $(,)?) => {
         parse_command(vec![$($arg.to_owned()),*])

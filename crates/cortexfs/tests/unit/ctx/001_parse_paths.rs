@@ -213,22 +213,23 @@ fn detects_durable_session_instance_paths() {
 
 #[test]
 fn detects_session_control_paths() {
-    assert_eq!(
-        session_control_path_kind("home/1000/agent/coder/session/default/state"),
-        Some(SessionControlKind::State)
-    );
-    assert_eq!(
-        session_control_path_kind("shared/im-qq-dev/agent/bot/session/group-456/cwd"),
-        Some(SessionControlKind::Cwd)
-    );
-    assert_eq!(
-        session_control_path_kind("home/1000/model/openai/gpt-4o.d/session/default/meta.json"),
-        Some(SessionControlKind::MetaJson)
-    );
-    assert_eq!(
-        session_control_path_kind("home/1000/agent/coder/session/default/messages.jsonl"),
-        None
-    );
+    for (path, expected) in [
+        (
+            "home/1000/agent/coder/session/default/state",
+            Some(SessionControlKind::State),
+        ),
+        (
+            "shared/im-qq-dev/agent/bot/session/group-456/cwd",
+            Some(SessionControlKind::Cwd),
+        ),
+        (
+            "home/1000/model/openai/gpt-4o.d/session/default/meta.json",
+            Some(SessionControlKind::MetaJson),
+        ),
+        ("home/1000/agent/coder/session/default/messages.jsonl", None),
+    ] {
+        assert_path_kind!(path, session_control_path_kind, expected);
+    }
 }
 
 #[test]
@@ -291,74 +292,65 @@ fn detects_private_and_shared_message_stream_paths() {
 
 #[test]
 fn detects_context_jsonl_paths() {
-    assert_eq!(
-        context_jsonl_path_kind("home/1000/agent/coder/session/default/context/facts.jsonl"),
-        Some(ContextJsonlKind::Facts)
-    );
-    assert_eq!(
-        context_jsonl_path_kind(
-            "shared/im-qq-dev/agent/bot/session/group-456/context/decisions.jsonl"
+    for (path, expected) in [
+        (
+            "home/1000/agent/coder/session/default/context/facts.jsonl",
+            Some(ContextJsonlKind::Facts),
         ),
-        Some(ContextJsonlKind::Decisions)
-    );
-    assert_eq!(
-        context_jsonl_path_kind(
-            "home/1000/model/openai/gpt-4o.d/session/default/context/swap/index.jsonl"
+        (
+            "shared/im-qq-dev/agent/bot/session/group-456/context/decisions.jsonl",
+            Some(ContextJsonlKind::Decisions),
         ),
-        Some(ContextJsonlKind::SwapIndex)
-    );
-    assert_eq!(
-        context_jsonl_path_kind(
-            "shared/project-a/model/openai/gpt-4o.d/session/default/context/dedup/index.jsonl"
+        (
+            "home/1000/model/openai/gpt-4o.d/session/default/context/swap/index.jsonl",
+            Some(ContextJsonlKind::SwapIndex),
         ),
-        Some(ContextJsonlKind::DedupIndex)
-    );
-    assert_eq!(
-        context_jsonl_path_kind("home/1000/agent/coder/session/default/context/pack.json"),
-        None
-    );
+        (
+            "shared/project-a/model/openai/gpt-4o.d/session/default/context/dedup/index.jsonl",
+            Some(ContextJsonlKind::DedupIndex),
+        ),
+        ("home/1000/agent/coder/session/default/context/pack.json", None),
+    ] {
+        assert_path_kind!(path, context_jsonl_path_kind, expected);
+    }
 }
 
 #[test]
 fn detects_private_and_shared_session_index_paths() {
-    assert_eq!(
-        session_index_path_kind("home/1000/agent/coder/session/index/list"),
-        Some(SessionIndexKind::List)
-    );
-    assert_eq!(
-        session_index_path_kind("home/1000/agent/coder/session/index/current"),
-        Some(SessionIndexKind::Current)
-    );
-    assert_eq!(
-        session_index_path_kind("shared/im-qq-dev/agent/bot/session/index/by-cwd/hash-1"),
-        Some(SessionIndexKind::ByCwd)
-    );
-    assert_eq!(
-        session_index_path_kind("home/1000/agent/coder/session/default"),
-        None
-    );
-    assert_eq!(
-        session_index_path_kind("home/1000/agent/bad/name/session/index/list"),
-        None
-    );
+    for (path, expected) in [
+        (
+            "home/1000/agent/coder/session/index/list",
+            Some(SessionIndexKind::List),
+        ),
+        (
+            "home/1000/agent/coder/session/index/current",
+            Some(SessionIndexKind::Current),
+        ),
+        (
+            "shared/im-qq-dev/agent/bot/session/index/by-cwd/hash-1",
+            Some(SessionIndexKind::ByCwd),
+        ),
+        ("home/1000/agent/coder/session/default", None),
+        ("home/1000/agent/bad/name/session/index/list", None),
+    ] {
+        assert_path_kind!(path, session_index_path_kind, expected);
+    }
 }
 
 #[test]
 fn detects_executable_object_paths() {
-    assert_eq!(
-        executable_object_path("model/openai/gpt-4o"),
-        Some((ObjectClass::Model, "openai/gpt-4o".to_owned()))
-    );
-    assert_eq!(
-        executable_object_path("agent/coder"),
-        Some((ObjectClass::Agent, "coder".to_owned()))
-    );
-    assert_eq!(
-        executable_object_path("tool/fs.read"),
-        Some((ObjectClass::Tool, "fs.read".to_owned()))
-    );
-    assert_eq!(executable_object_path("tool/fs.read.d/schema"), None);
-    assert_eq!(executable_object_path("home/1000"), None);
+    for (path, expected) in [
+        (
+            "model/openai/gpt-4o",
+            Some((ObjectClass::Model, "openai/gpt-4o".to_owned())),
+        ),
+        ("agent/coder", Some((ObjectClass::Agent, "coder".to_owned()))),
+        ("tool/fs.read", Some((ObjectClass::Tool, "fs.read".to_owned()))),
+        ("tool/fs.read.d/schema", None),
+        ("home/1000", None),
+    ] {
+        assert_path_kind!(path, executable_object_path, expected);
+    }
 }
 
 #[test]
@@ -440,19 +432,14 @@ fn detects_shared_queue_root_paths() {
 
 #[test]
 fn detects_agent_control_paths_with_fixed_value_syntax() {
-    assert_eq!(
-        agent_control_path_kind("agent/coder.d/uid"),
-        Some(AgentControlKind::Uid)
-    );
-    assert_eq!(
-        agent_control_path_kind("agent/coder.d/life"),
-        Some(AgentControlKind::Life)
-    );
-    assert_eq!(
-        agent_control_path_kind("agent/rev-1.d/parent"),
-        Some(AgentControlKind::Parent)
-    );
-    assert_eq!(agent_control_path_kind("agent/coder.d/label"), None);
-    assert_eq!(agent_control_path_kind("model/openai/gpt-4o.d/session"), None);
-    assert_eq!(agent_control_path_kind("agent/bad/name.d/uid"), None);
+    for (path, expected) in [
+        ("agent/coder.d/uid", Some(AgentControlKind::Uid)),
+        ("agent/coder.d/life", Some(AgentControlKind::Life)),
+        ("agent/rev-1.d/parent", Some(AgentControlKind::Parent)),
+        ("agent/coder.d/label", None),
+        ("model/openai/gpt-4o.d/session", None),
+        ("agent/bad/name.d/uid", None),
+    ] {
+        assert_path_kind!(path, agent_control_path_kind, expected);
+    }
 }

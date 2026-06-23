@@ -14,12 +14,10 @@ fn file_check_validates_message_stream_files() {
         "{\"role\":\"assistant\",\"response_id\":\"resp_1\",\"content\":\"hello\"}\n"
     );
 
-    let checked = file_check(
+    assert_file_check_error_contains(
         &root,
         "home/1000/agent/coder/session/default/messages.jsonl",
-    );
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("provider native field"))
+        &["provider native field"],
     );
 
     write_text_file(
@@ -59,12 +57,10 @@ fn file_check_validates_context_jsonl_files() {
         "shared/project-a/agent/coder/session/default/context/facts.jsonl"
     )
     .is_ok());
-    let checked = file_check(
+    assert_file_check_error_contains(
         &root,
         "shared/project-a/agent/coder/session/default/context/swap/index.jsonl",
-    );
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid context jsonl"))
+        &["invalid context jsonl"],
     );
 }
 
@@ -97,12 +93,10 @@ fn file_check_validates_shared_and_model_session_layouts() {
     .is_ok());
 
     assert!(fs::remove_file(model_session.join("messages.jsonl")).is_ok());
-    let checked = file_check(
+    assert_file_check_error_contains(
         &root,
         "home/1000/model/openai/gpt-4o.d/session/default",
-    );
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("missing file messages.jsonl"))
+        &["missing file messages.jsonl"],
     );
 }
 

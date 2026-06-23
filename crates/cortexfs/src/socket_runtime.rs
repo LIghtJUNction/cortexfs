@@ -438,23 +438,16 @@ fn current_or_default_session_name(session_root: &Path) -> Result<String, Socket
 }
 
 fn socket_start_frame(run_id: &str, model: Option<&str>) -> String {
-    let value = model.map_or_else(
-        || {
-            serde_json::json!({
-                "type": "start",
-                "id": run_id,
-                "run": run_id
-            })
-        },
-        |model| {
-            serde_json::json!({
-                "type": "start",
-                "id": run_id,
-                "run": run_id,
-                "model": model
-            })
-        },
-    );
+    let mut value = serde_json::json!({
+        "type": "start",
+        "id": run_id,
+        "run": run_id
+    });
+    if let Some(model) = model
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("model".to_owned(), serde_json::json!(model));
+    }
     value.to_string()
 }
 

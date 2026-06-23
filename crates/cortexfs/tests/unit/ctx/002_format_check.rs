@@ -225,9 +225,10 @@ fn file_check_validates_session_control_files() {
     assert!(file_check(&root, "home/1000/agent/coder/session/default/meta.json").is_ok());
 
     assert!(fs::write(session.join("cwd"), "../host\n").is_ok());
-    let checked = file_check(&root, "home/1000/agent/coder/session/default/cwd");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid value"))
+    assert_file_check_error_contains(
+        &root,
+        "home/1000/agent/coder/session/default/cwd",
+        &["invalid value"],
     );
 }
 
@@ -245,10 +246,7 @@ fn file_check_validates_agent_control_files() {
     .is_ok());
 
     assert!(file_check(&root, "agent/coder.d/uid").is_ok());
-    let checked = file_check(&root, "agent/coder.d/life");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid value"))
-    );
+    assert_file_check_error_contains(&root, "agent/coder.d/life", &["invalid value"]);
     assert!(file_check(&root, "agent/coder.d/parent").is_ok());
 }
 
@@ -267,9 +265,10 @@ fn file_check_validates_session_index_files() {
     assert!(fs::write(index.join("current"), "group-456\n").is_ok());
     assert!(fs::write(index.join("by-cwd").join("hash-1"), "group-456\n").is_ok());
 
-    let checked = file_check(&root, "shared/im-qq-dev/agent/bot/session/index/list");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid session name"))
+    assert_file_check_error_contains(
+        &root,
+        "shared/im-qq-dev/agent/bot/session/index/list",
+        &["invalid session name"],
     );
     assert!(file_check(&root, "shared/im-qq-dev/agent/bot/session/index/current").is_ok());
     assert!(file_check(
@@ -294,9 +293,10 @@ fn file_check_rejects_by_cwd_symlink_index_entries() {
     assert!(fs::write(by_cwd.join("target"), "default\n").is_ok());
     assert!(std::os::unix::fs::symlink("target", by_cwd.join("hash-1")).is_ok());
 
-    let checked = file_check(&root, "home/1000/agent/coder/session/index/by-cwd/hash-1");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("by-cwd entry is a symlink"))
+    assert_file_check_error_contains(
+        &root,
+        "home/1000/agent/coder/session/index/by-cwd/hash-1",
+        &["by-cwd entry is a symlink"],
     );
 }
 
@@ -306,9 +306,10 @@ fn file_check_validates_model_capability_files() {
     let cap = root.join("model").join("openai").join("gpt-4o.d").join("cap");
     write_text_file(&cap, "chat\nopenai_responses\n");
 
-    let checked = file_check(&root, "model/openai/gpt-4o.d/cap");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("provider private capability"))
+    assert_file_check_error_contains(
+        &root,
+        "model/openai/gpt-4o.d/cap",
+        &["provider private capability"],
     );
 
     write_text_file(&cap, "chat\nstream\n");
@@ -326,9 +327,10 @@ fn file_check_validates_model_driver_route_files() {
         .join("driver");
     write_text_file(&driver, "agent=/bin/sh\n");
 
-    let checked = file_check(&root, "model/openai/gpt-4o.d/driver");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid driver name"))
+    assert_file_check_error_contains(
+        &root,
+        "model/openai/gpt-4o.d/driver",
+        &["invalid driver name"],
     );
 
     write_text_file(
@@ -350,10 +352,7 @@ fn file_check_validates_tool_schema_files() {
     assert!(file_check(&root, "tool/fs.read.d/schema").is_ok());
 
     write_text_file(&schema, "{\"policy\":\"allow all\"}\n");
-    let checked = file_check(&root, "tool/fs.read.d/schema");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("authority field policy"))
-    );
+    assert_file_check_error_contains(&root, "tool/fs.read.d/schema", &["authority field policy"]);
 }
 
 #[test]
@@ -372,9 +371,10 @@ fn file_check_validates_shared_tool_schema_files() {
     assert!(file_check(&root, "shared/project-a/tool/project.test.d/schema").is_ok());
 
     write_text_file(&schema, "{\"authority\":\"local\"}\n");
-    let checked = file_check(&root, "shared/project-a/tool/project.test.d/schema");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid tool schema") && error.message.contains("authority field authority"))
+    assert_file_check_error_contains(
+        &root,
+        "shared/project-a/tool/project.test.d/schema",
+        &["invalid tool schema", "authority field authority"],
     );
 }
 
@@ -389,9 +389,10 @@ fn file_check_validates_shared_queue_roots() {
     assert!(file_check(&root, "shared/project-a/queue").is_ok());
 
     assert!(fs::remove_dir(queue.join("lease")).is_ok());
-    let checked = file_check(&root, "shared/project-a/queue");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("invalid shared queue") && error.message.contains("missing directory lease"))
+    assert_file_check_error_contains(
+        &root,
+        "shared/project-a/queue",
+        &["invalid shared queue", "missing directory lease"],
     );
 }
 
@@ -411,9 +412,10 @@ fn file_check_validates_event_stream_files() {
         "{\"type\":\"start\",\"run\":\"r1\",\"response_id\":\"resp_1\"}\n"
     );
 
-    let checked = file_check(&root, "home/1000/agent/coder/session/default/events.jsonl");
-    assert!(
-        matches!(checked, Err(ref error) if error.code == 2 && error.message.contains("provider native field"))
+    assert_file_check_error_contains(
+        &root,
+        "home/1000/agent/coder/session/default/events.jsonl",
+        &["provider native field"],
     );
 
     let model_events = root

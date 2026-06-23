@@ -146,10 +146,8 @@ fn write_reference_text(path: &Path, content: &str) -> Result<(), ReferenceTreeE
 }
 
 fn set_reference_executable(path: &Path) -> Result<(), ReferenceTreeError> {
-    let metadata = fs::metadata(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    let mut permissions = metadata.permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).map_err(|_error| ReferenceTreeError::CannotCreate)
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
@@ -180,10 +178,8 @@ fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
 }
 
 fn set_reference_socket_permissions(path: &Path) -> Result<(), ReferenceTreeError> {
-    let metadata = fs::metadata(path).map_err(|_error| ReferenceTreeError::CannotSocket)?;
-    let mut permissions = metadata.permissions();
-    permissions.set_mode(0o777);
-    fs::set_permissions(path, permissions).map_err(|_error| ReferenceTreeError::CannotSocket)
+    fs::set_permissions(path, fs::Permissions::from_mode(0o777))
+        .map_err(|_error| ReferenceTreeError::CannotSocket)
 }
 
 fn ensure_reference_model_alias(path: &Path, target: &Path) -> Result<(), ReferenceTreeError> {
