@@ -10,6 +10,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nix::sys::socket::{getsockopt, sockopt};
@@ -1394,6 +1395,10 @@ pub enum SocketRuntimeError {
     CannotWriteResponse,
     /// Unix socket listener could not accept a connection.
     CannotAcceptConnection,
+    /// Agent executable could not be run.
+    CannotRunAgent,
+    /// Agent executable returned invalid canonical event JSONL.
+    InvalidAgentOutput,
 }
 
 impl SocketRuntimeError {
@@ -1411,7 +1416,9 @@ impl SocketRuntimeError {
             | Self::PeerCredential(_)
             | Self::CannotReadFrame
             | Self::CannotWriteResponse
-            | Self::CannotAcceptConnection => "EIO",
+            | Self::CannotAcceptConnection
+            | Self::CannotRunAgent
+            | Self::InvalidAgentOutput => "EIO",
         }
     }
 }
@@ -1606,6 +1613,21 @@ impl PeerCredentials {
 pub struct SocketPeerPolicy {
     uid: Option<u32>,
     gid: Option<u32>,
+}
+
+/// Runtime inputs for dispatching socket `send` frames to an agent executable.
+#[derive(Clone, Copy, Debug)]
+pub struct AgentExecutableSocketRuntime<'a> {
+    /// Durable session root for the selected agent.
+    pub session_root: &'a Path,
+    /// Default chroot cwd when a request does not provide one.
+    pub default_cwd: &'a str,
+    /// Selected model object name from `agent/<name>.d/model`.
+    pub model: Option<&'a str>,
+    /// Agent object name.
+    pub agent_name: &'a str,
+    /// ABI executable object to invoke for `send`.
+    pub agent_executable: &'a Path,
 }
 
 impl SocketPeerPolicy {
@@ -3136,6 +3158,59 @@ pub fn serve_unix_socket_listener_once(
     serve_unix_socket_stream_once(&mut stream, peer_policy, session_root, default_cwd, model)
 }
 
+/// Accepts one Unix socket connection and dispatches `send` to an agent executable.
+///
+/// This is the reference socket-activated agent runtime path. It preserves the
+/// durable socket request semantics, then runs the ABI executable object for
+/// `send` requests and returns its canonical JSONL events to the client.
+pub fn serve_agent_executable_socket_listener_once(
+    listener: &UnixListener,
+    peer_policy: Option<SocketPeerPolicy>,
+    runtime: AgentExecutableSocketRuntime<'_>,
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    let (mut stream, _addr) = listener
+        .accept()
+        .map_err(|_error| SocketRuntimeError::CannotAcceptConnection)?;
+    serve_agent_executable_socket_stream_once(&mut stream, peer_policy, runtime)
+}
+
+/// Serves one connected stream and dispatches `send` to an agent executable.
+pub fn serve_agent_executable_socket_stream_once(
+    stream: &mut UnixStream,
+    peer_policy: Option<SocketPeerPolicy>,
+    runtime: AgentExecutableSocketRuntime<'_>,
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    if let Some(policy) = peer_policy {
+        let peer = peer_credentials(stream).map_err(SocketRuntimeError::PeerCredential)?;
+        if !policy.allows(peer) {
+            let error = SocketRuntimeError::PeerDenied;
+            let response = socket_runtime_error_response(&error);
+            write_socket_runtime_response(stream, &response)?;
+            return Err(error);
+        }
+    }
+
+    let frame = match read_socket_request_frame_from_stream(stream) {
+        Ok(frame) => frame,
+        Err(error) => {
+            let response = socket_runtime_error_response(&error);
+            write_socket_runtime_response(stream, &response)?;
+            return Err(error);
+        }
+    };
+    match handle_agent_executable_socket_request_frame(runtime, &frame) {
+        Ok(response) => {
+            write_socket_runtime_response(stream, &response)?;
+            Ok(response)
+        }
+        Err(error) => {
+            let response = socket_runtime_error_response(&error);
+            write_socket_runtime_response(stream, &response)?;
+            Err(error)
+        }
+    }
+}
+
 /// Serves one connected Unix socket stream request.
 ///
 /// This helper enforces optional kernel peer credentials before reading a
@@ -3178,6 +3253,134 @@ pub fn serve_unix_socket_stream_once(
             Err(error)
         }
     }
+}
+
+fn handle_agent_executable_socket_request_frame(
+    runtime: AgentExecutableSocketRuntime<'_>,
+    frame: &str,
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    let request = parse_socket_request_frame(frame).map_err(SocketRuntimeError::Request)?;
+    let SocketRequest::Send {
+        ref id,
+        ref session,
+        scope,
+        ref input,
+        ..
+    } = request
+    else {
+        return handle_socket_request(
+            runtime.session_root,
+            runtime.default_cwd,
+            runtime.model,
+            &request,
+        );
+    };
+
+    let recorder_response = handle_socket_request(
+        runtime.session_root,
+        runtime.default_cwd,
+        runtime.model,
+        &request,
+    )?;
+    let agent_output = run_agent_executable(
+        runtime.agent_executable,
+        runtime.agent_name,
+        id,
+        session,
+        input,
+    )?;
+    let agent_frames = canonical_agent_event_frames(&agent_output)?;
+    if scope != SocketSessionScope::Temp
+        && let Some(text) = assistant_text_from_event_frames(&agent_frames)
+    {
+        let session_dir = runtime.session_root.join(session);
+        record_assistant_response_to_session(&session_dir, id, &text)
+            .map_err(SocketRuntimeError::Record)?;
+    }
+
+    let mut frames = recorder_response.frames().to_vec();
+    frames.extend(
+        agent_frames
+            .into_iter()
+            .filter(|line| event_type(line).as_deref() != Some("start")),
+    );
+    Ok(SocketRuntimeResponse::new(frames))
+}
+
+fn run_agent_executable(
+    agent_executable: &Path,
+    agent_name: &str,
+    run_id: &str,
+    session: &str,
+    input: &str,
+) -> Result<String, SocketRuntimeError> {
+    let output = Command::new(agent_executable)
+        .arg(input)
+        .env("CTX_AGENT", agent_name)
+        .env("CTX_RUN_ID", run_id)
+        .env("CTX_SESSION", session)
+        .output()
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    if !output.status.success() {
+        return Err(SocketRuntimeError::CannotRunAgent);
+    }
+    String::from_utf8(output.stdout).map_err(|_error| SocketRuntimeError::InvalidAgentOutput)
+}
+
+fn canonical_agent_event_frames(output: &str) -> Result<Vec<String>, SocketRuntimeError> {
+    if !inspect_event_stream_jsonl(output).is_ok() {
+        return Err(SocketRuntimeError::InvalidAgentOutput);
+    }
+    Ok(output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+fn event_type(line: &str) -> Option<String> {
+    serde_json::from_str::<Value>(line)
+        .ok()
+        .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_owned))
+}
+
+fn assistant_text_from_event_frames(frames: &[String]) -> Option<String> {
+    let mut output = String::new();
+    for frame in frames {
+        let Ok(value) = serde_json::from_str::<Value>(frame) else {
+            continue;
+        };
+        let event_type = value.get("type").and_then(Value::as_str);
+        if matches!(event_type, Some("delta" | "reasoning_delta"))
+            && let Some(text) = value.get("text").and_then(Value::as_str)
+        {
+            output.push_str(text);
+            continue;
+        }
+        if matches!(event_type, Some("message" | "reasoning_message"))
+            && value.get("role").and_then(Value::as_str) == Some("assistant")
+            && let Some(text) = message_event_text(&value)
+        {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(&text);
+        }
+    }
+    (!output.is_empty()).then_some(output)
+}
+
+fn message_event_text(value: &Value) -> Option<String> {
+    let parts = value.get("content")?.as_array()?;
+    let mut text = String::new();
+    for part in parts {
+        if part.get("type").and_then(Value::as_str) == Some("text")
+            && let Some(value) = part.get("text").and_then(Value::as_str)
+        {
+            text.push_str(value);
+        }
+    }
+    (!text.is_empty()).then_some(text)
 }
 
 fn read_socket_request_frame_from_stream(
@@ -8304,41 +8507,42 @@ fn classify_session_path<'a>(mut parts: impl Iterator<Item = &'a str>) -> &'stat
 #[cfg(test)]
 mod tests {
     use super::{
-        AGENT_CONTROL_FILES, AgentControlIssue, AgentControlKind, AgentRuntimeViewError,
-        AgentUnixIdentity, CTX_ROOT, ChildAgentAuthority, ChildAgentControls, ChildAgentDenial,
-        ChildAgentRequest, ChildContextRecordError, ChildContextStatus, ChildLifecycle,
-        ContextJsonlIssue, ContextJsonlKind, ContextPackBuildError, ContextPackIssue,
-        ContextPackSourceError, DurableSessionLayoutError, EXEC_OBJECTS, EventStreamIssue,
-        FUSE_V1_ROOT_INODE, FuseV1Error, FuseV1FileType, FuseV1Projection,
-        IndexedSocketSessionRecordError, MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN,
-        MAX_SOCKET_FRAME_BYTES, MODEL_CONTROL_FILES, MessageStreamIssue, ModelCapabilityIssue,
-        MountEntry, MountError, MountMode, MountOption, MountTable, ObjectBootstrapError,
-        ObjectClass, ObjectLayoutIssue, OwnedChildCancellationError, PeerCredentials, PolicyError,
-        PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0, ReferenceTreeError,
-        SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, SessionAccess, SessionAccessAuthority,
-        SessionAccessDenial, SessionControlIssue, SessionControlKind, SessionIndexIssue,
-        SessionIndexKind, SessionIndexUpdateError, SessionLayoutIssue, SharedAccess,
-        SharedAccessAuthority, SharedAccessDenial, SharedQueueLayoutIssue, SharedQueueOutcome,
-        SharedQueueRecoverError, SocketPeerPolicy, SocketRequest, SocketRequestError,
-        SocketRuntimeError, SocketSessionRecordError, SocketSessionScope, TOOL_CONTROL_FILES,
-        ToolExecutionAuthority, ToolExecutionDenial, ToolExecutionPrincipal, ToolHit, ToolPath,
-        ToolPathError, ToolSchemaIssue, authorize_child_agent, authorize_session_access,
-        authorize_shared_access, authorize_tool_execution, claim_next_shared_queue_job,
-        classify_abi_path, derive_agent_runtime_view, ensure_durable_session_layout,
-        ensure_v1_reference_tree, finish_shared_queue_job, handle_socket_request_frame,
-        inspect_agent_control, inspect_context_jsonl, inspect_context_pack_json,
-        inspect_event_stream_jsonl, inspect_message_stream_jsonl, inspect_model_capabilities,
-        inspect_object_layout, inspect_session_control, inspect_session_index,
-        inspect_session_layout, inspect_shared_queue_layout, inspect_tool_schema_json,
-        install_executable_object_wrapper, is_object_name, is_root_entry,
+        AGENT_CONTROL_FILES, AgentControlIssue, AgentControlKind, AgentExecutableSocketRuntime,
+        AgentRuntimeViewError, AgentUnixIdentity, CTX_ROOT, ChildAgentAuthority,
+        ChildAgentControls, ChildAgentDenial, ChildAgentRequest, ChildContextRecordError,
+        ChildContextStatus, ChildLifecycle, ContextJsonlIssue, ContextJsonlKind,
+        ContextPackBuildError, ContextPackIssue, ContextPackSourceError, DurableSessionLayoutError,
+        EXEC_OBJECTS, EventStreamIssue, FUSE_V1_ROOT_INODE, FuseV1Error, FuseV1FileType,
+        FuseV1Projection, IndexedSocketSessionRecordError, MAX_FUSE_V1_SMALL_WRITE_BYTES,
+        MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES, MODEL_CONTROL_FILES, MessageStreamIssue,
+        ModelCapabilityIssue, MountEntry, MountError, MountMode, MountOption, MountTable,
+        ObjectBootstrapError, ObjectClass, ObjectLayoutIssue, OwnedChildCancellationError,
+        PeerCredentials, PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0,
+        ReferenceTreeError, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, SessionAccess,
+        SessionAccessAuthority, SessionAccessDenial, SessionControlIssue, SessionControlKind,
+        SessionIndexIssue, SessionIndexKind, SessionIndexUpdateError, SessionLayoutIssue,
+        SharedAccess, SharedAccessAuthority, SharedAccessDenial, SharedQueueLayoutIssue,
+        SharedQueueOutcome, SharedQueueRecoverError, SocketPeerPolicy, SocketRequest,
+        SocketRequestError, SocketRuntimeError, SocketSessionRecordError, SocketSessionScope,
+        TOOL_CONTROL_FILES, ToolExecutionAuthority, ToolExecutionDenial, ToolExecutionPrincipal,
+        ToolHit, ToolPath, ToolPathError, ToolSchemaIssue, authorize_child_agent,
+        authorize_session_access, authorize_shared_access, authorize_tool_execution,
+        claim_next_shared_queue_job, classify_abi_path, derive_agent_runtime_view,
+        ensure_durable_session_layout, ensure_v1_reference_tree, finish_shared_queue_job,
+        handle_socket_request_frame, inspect_agent_control, inspect_context_jsonl,
+        inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
+        inspect_model_capabilities, inspect_object_layout, inspect_session_control,
+        inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
+        inspect_tool_schema_json, install_executable_object_wrapper, is_object_name, is_root_entry,
         owned_child_cancellation_events, parse_socket_request_frame, peer_credentials,
         rebuild_context_pack, record_assistant_response_to_session,
         record_child_handoff_to_parent_context, record_child_result_to_parent_context,
         record_indexed_socket_send_to_session, record_owned_child_cancellation,
         record_socket_request_to_session, record_tool_execution_denial_to_session,
         record_tool_execution_result_to_session, recover_shared_queue_job,
-        serve_unix_socket_listener_once, serve_unix_socket_stream_once, session_index_key_for_cwd,
-        socket_runtime_error_response, update_session_index, validate_context_pack_source,
+        serve_agent_executable_socket_stream_once, serve_unix_socket_listener_once,
+        serve_unix_socket_stream_once, session_index_key_for_cwd, socket_runtime_error_response,
+        update_session_index, validate_context_pack_source,
     };
     use std::fs;
     use std::io::{Read, Write};
@@ -10446,6 +10650,70 @@ mod tests {
         assert!(response.contains("\"type\":\"start\""));
         assert!(response.contains("\"run\":\"msg-1\""));
         assert!(inspect_session_layout(&session_root.join("default")).is_ok());
+
+        let _ignored = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn agent_executable_socket_runtime_returns_visible_message() {
+        let root = unique_test_dir("agent-executable-socket-runtime");
+        assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+        assert!(ensure_v1_reference_tree(&root).is_ok());
+        let session_root = root
+            .join("home")
+            .join("1000")
+            .join("agent")
+            .join("coder")
+            .join("session");
+        let agent_executable = root.join("agent").join("coder");
+        let pair = UnixStream::pair();
+        assert!(pair.is_ok());
+        let Ok((mut client, mut socket)) = pair else {
+            return;
+        };
+
+        assert!(
+            client
+                .write_all(
+                    br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+                )
+                .is_ok()
+        );
+        assert!(client.shutdown(Shutdown::Write).is_ok());
+
+        let outcome = serve_agent_executable_socket_stream_once(
+            &mut socket,
+            None,
+            AgentExecutableSocketRuntime {
+                session_root: &session_root,
+                default_cwd: "/work",
+                model: Some("qwen"),
+                agent_name: "coder",
+                agent_executable: &agent_executable,
+            },
+        );
+        assert!(outcome.is_ok());
+        let Ok(outcome) = outcome else { return };
+        assert_eq!(outcome.frames().len(), 3);
+        assert!(outcome.jsonl().contains("\"type\":\"start\""));
+        assert!(outcome.jsonl().contains("\"type\":\"message\""));
+        assert!(outcome.jsonl().contains("\"text\":\"hi\""));
+        assert!(outcome.jsonl().contains("\"type\":\"done\""));
+
+        let mut buffer = [0_u8; 512];
+        let read = client.read(&mut buffer);
+        assert!(read.is_ok());
+        let Ok(read) = read else { return };
+        let Some(bytes) = buffer.get(..read) else {
+            return;
+        };
+        let response = String::from_utf8_lossy(bytes);
+        assert!(response.contains("\"type\":\"message\""));
+        assert!(response.contains("\"text\":\"hi\""));
+        let latest = fs::read_to_string(session_root.join("default").join("latest.md"));
+        assert!(latest.is_ok());
+        assert_eq!(latest.unwrap_or_default(), "hi\n");
 
         let _ignored = fs::remove_dir_all(&root);
     }

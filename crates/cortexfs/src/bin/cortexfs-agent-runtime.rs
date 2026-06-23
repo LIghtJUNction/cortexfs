@@ -4,7 +4,10 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cortexfs::{SocketPeerPolicy, derive_agent_runtime_view, serve_unix_socket_listener_once};
+use cortexfs::{
+    AgentExecutableSocketRuntime, SocketPeerPolicy, derive_agent_runtime_view,
+    serve_agent_executable_socket_listener_once,
+};
 use listenfd::ListenFd;
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
@@ -36,12 +39,17 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let session_root = view.home().join("session");
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
-    serve_unix_socket_listener_once(
+    let agent_executable = config.source.join("agent").join(&config.agent);
+    serve_agent_executable_socket_listener_once(
         &listener,
         Some(peer_policy),
-        &session_root,
-        &default_cwd,
-        Some(view.model()),
+        AgentExecutableSocketRuntime {
+            session_root: &session_root,
+            default_cwd: &default_cwd,
+            model: Some(view.model()),
+            agent_name: view.agent_name(),
+            agent_executable: &agent_executable,
+        },
     )
     .map(|_response| ())
     .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
