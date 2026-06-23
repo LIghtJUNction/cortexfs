@@ -1,7 +1,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
@@ -69,13 +69,13 @@ fn resolve_model_name(name: &str) -> Result<String, String> {
 }
 
 fn run_provider_model(name: &str, input: &str) -> Result<(), String> {
-    let content = provider_chat_completion(name, input)?;
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     write_model_start(&mut stdout, &run, name)
-        .and_then(|()| write_model_delta(&mut stdout, &run, &content))
-        .and_then(|()| write_tool_done(&mut stdout, &run, "ok"))
+        .map_err(|error| format!("cannot write output: {error}"))?;
+    provider_chat_completion(name, input, &run, &mut stdout)?;
+    write_tool_done(&mut stdout, &run, "ok")
         .map_err(|error| format!("cannot write output: {error}"))
 }
 
@@ -104,18 +104,28 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
             .and_then(|()| write_tool_error(&mut stdout, &run, "ENOENT", "missing model"))
             .map_err(|error| format!("cannot write output: {error}"));
     }
-    let output = Command::new(model_path)
+    let mut child = Command::new(model_path)
         .arg(input)
         .env("CTX_RUN_ID", &run)
-        .output()
+        .stdout(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("cannot run agent model: {error}"))?;
+    let child_stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "cannot read agent model output".to_owned())?;
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
-    stdout
-        .write_all(&output.stdout)
-        .and_then(|()| stdout.write_all(&output.stderr))
-        .map_err(|error| format!("cannot write output: {error}"))?;
-    if output.status.success() {
+    for line in BufReader::new(child_stdout).lines() {
+        let line = line.map_err(|error| format!("cannot read agent model output: {error}"))?;
+        writeln!(stdout, "{line}")
+            .and_then(|()| stdout.flush())
+            .map_err(|error| format!("cannot write output: {error}"))?;
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("cannot run agent model: {error}"))?;
+    if status.success() {
         Ok(())
     } else {
         Err("agent model failed".to_owned())
