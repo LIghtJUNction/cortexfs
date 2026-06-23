@@ -10,32 +10,26 @@ fn socket_session_recorder_appends_send_to_durable_history() {
     let request = parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
     );
-    assert!(request.is_ok());
-    let Ok(request) = request else { return };
+    let request = ok!(request);
     let recorded = record_socket_request_to_session(&session, &request);
-    assert!(recorded.is_ok());
-    let Ok(recorded) = recorded else { return };
+    let recorded = ok!(recorded);
     assert_eq!(recorded.messages().len(), 1);
     assert_eq!(recorded.events().len(), 1);
 
     let messages = fs::read_to_string(session.join("messages.jsonl"));
-    assert!(messages.is_ok());
-    let Ok(messages) = messages else { return };
+    let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
-    assert!(events.is_ok());
-    let Ok(events) = events else { return };
+    let events = ok!(events);
     assert!(inspect_message_stream_jsonl(&messages).is_ok());
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(messages.contains("\"role\":\"user\""));
     assert!(messages.contains("\"content\":\"hello\""));
     assert!(events.contains("\"type\":\"start\""));
     let state = fs::read_to_string(session.join("state"));
-    assert!(state.is_ok());
-    let Ok(state) = state else { return };
+    let state = ok!(state);
     assert_eq!(state, "active\n");
     let cwd = fs::read_to_string(session.join("cwd"));
-    assert!(cwd.is_ok());
-    let Ok(cwd) = cwd else { return };
+    let cwd = ok!(cwd);
     assert_eq!(cwd, "/work/project\n");
 
     let _ignored = fs::remove_dir_all(&root);
@@ -54,26 +48,21 @@ fn socket_session_recorder_cancels_without_deleting_history() {
     write_text_file(&session.join("events.jsonl"), "");
 
     let request = parse_socket_request_frame(r#"{"op":"cancel","id":"run-1"}"#);
-    assert!(request.is_ok());
-    let Ok(request) = request else { return };
+    let request = ok!(request);
     let recorded = record_socket_request_to_session(&session, &request);
-    assert!(recorded.is_ok());
-    let Ok(recorded) = recorded else { return };
+    let recorded = ok!(recorded);
     assert!(recorded.messages().is_empty());
     assert_eq!(recorded.events().len(), 1);
 
     let messages = fs::read_to_string(session.join("messages.jsonl"));
-    assert!(messages.is_ok());
-    let Ok(messages) = messages else { return };
+    let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
-    assert!(events.is_ok());
-    let Ok(events) = events else { return };
+    let events = ok!(events);
     assert_eq!(messages, "{\"role\":\"user\",\"content\":\"keep me\"}\n");
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(events.contains("\"status\":\"cancelled\""));
     let state = fs::read_to_string(session.join("state"));
-    assert!(state.is_ok());
-    let Ok(state) = state else { return };
+    let state = ok!(state);
     assert_eq!(state, "cancelled\n");
 
     let _ignored = fs::remove_dir_all(&root);
@@ -96,23 +85,18 @@ fn assistant_response_recorder_updates_latest_without_replacing_history() {
     write_text_file(&session.join("latest.md"), "old\n");
 
     let recorded = record_assistant_response_to_session(&session, "run-1", "hello back");
-    assert!(recorded.is_ok());
-    let Ok(recorded) = recorded else { return };
+    let recorded = ok!(recorded);
     assert_eq!(recorded.messages().len(), 1);
     assert_eq!(recorded.events().len(), 2);
 
     let messages = fs::read_to_string(session.join("messages.jsonl"));
-    assert!(messages.is_ok());
-    let Ok(messages) = messages else { return };
+    let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
-    assert!(events.is_ok());
-    let Ok(events) = events else { return };
+    let events = ok!(events);
     let latest = fs::read_to_string(session.join("latest.md"));
-    assert!(latest.is_ok());
-    let Ok(latest) = latest else { return };
+    let latest = ok!(latest);
     let state = fs::read_to_string(session.join("state"));
-    assert!(state.is_ok());
-    let Ok(state) = state else { return };
+    let state = ok!(state);
 
     assert!(inspect_message_stream_jsonl(&messages).is_ok());
     assert!(inspect_event_stream_jsonl(&events).is_ok());
@@ -143,17 +127,14 @@ fn tool_denial_recorder_makes_permission_failure_inspectable() {
         "fs.read",
         ToolExecutionDenial::AgentPolicy,
     );
-    assert!(recorded.is_ok());
-    let Ok(recorded) = recorded else { return };
+    let recorded = ok!(recorded);
     assert!(recorded.messages().is_empty());
     assert_eq!(recorded.events().len(), 2);
 
     let events = fs::read_to_string(session.join("events.jsonl"));
-    assert!(events.is_ok());
-    let Ok(events) = events else { return };
+    let events = ok!(events);
     let state = fs::read_to_string(session.join("state"));
-    assert!(state.is_ok());
-    let Ok(state) = state else { return };
+    let state = ok!(state);
 
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(events.contains("\"type\":\"error\""));
@@ -207,17 +188,14 @@ fn tool_result_recorder_appends_inspectable_tool_message_and_event() {
         "fs.read",
         "file contents",
     );
-    assert!(recorded.is_ok());
-    let Ok(recorded) = recorded else { return };
+    let recorded = ok!(recorded);
     assert_eq!(recorded.messages().len(), 1);
     assert_eq!(recorded.events().len(), 1);
 
     let messages = fs::read_to_string(session.join("messages.jsonl"));
-    assert!(messages.is_ok());
-    let Ok(messages) = messages else { return };
+    let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
-    assert!(events.is_ok());
-    let Ok(events) = events else { return };
+    let events = ok!(events);
 
     assert!(inspect_message_stream_jsonl(&messages).is_ok());
     assert!(inspect_event_stream_jsonl(&events).is_ok());
@@ -264,16 +242,14 @@ fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
     let temp = parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","scope":"temp","input":"hello"}"#,
     );
-    assert!(temp.is_ok());
-    let Ok(temp) = temp else { return };
+    let temp = ok!(temp);
     assert_eq!(
         record_socket_request_to_session(&session, &temp),
         Err(SocketSessionRecordError::TempSessionNotDurable)
     );
 
     let resume = parse_socket_request_frame(r#"{"op":"resume","session":"default"}"#);
-    assert!(resume.is_ok());
-    let Ok(resume) = resume else { return };
+    let resume = ok!(resume);
     assert_eq!(
         record_socket_request_to_session(&session, &resume),
         Err(SocketSessionRecordError::UnsupportedRequest)
@@ -282,8 +258,7 @@ fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
     let mismatch = parse_socket_request_frame(
         r#"{"op":"send","id":"msg-2","session":"other","input":"hello"}"#,
     );
-    assert!(mismatch.is_ok());
-    let Ok(mismatch) = mismatch else { return };
+    let mismatch = ok!(mismatch);
     assert_eq!(
         record_socket_request_to_session(&session, &mismatch),
         Err(SocketSessionRecordError::SessionMismatch)
@@ -314,11 +289,9 @@ fn indexed_socket_send_records_history_and_updates_session_index() {
     let request = parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
     );
-    assert!(request.is_ok());
-    let Ok(request) = request else { return };
+    let request = ok!(request);
     let recorded = record_indexed_socket_send_to_session(&session_root, &request);
-    assert!(recorded.is_ok());
-    let Ok(recorded) = recorded else { return };
+    let recorded = ok!(recorded);
     assert_eq!(recorded.messages().len(), 1);
     assert_eq!(recorded.events().len(), 1);
 
@@ -326,20 +299,15 @@ fn indexed_socket_send_records_history_and_updates_session_index() {
     assert!(by_cwd_key.is_some());
     let Some(by_cwd_key) = by_cwd_key else { return };
     let messages = fs::read_to_string(session.join("messages.jsonl"));
-    assert!(messages.is_ok());
-    let Ok(messages) = messages else { return };
+    let messages = ok!(messages);
     let events = fs::read_to_string(session.join("events.jsonl"));
-    assert!(events.is_ok());
-    let Ok(events) = events else { return };
+    let events = ok!(events);
     let list = fs::read_to_string(session_root.join("index").join("list"));
-    assert!(list.is_ok());
-    let Ok(list) = list else { return };
+    let list = ok!(list);
     let current = fs::read_to_string(session_root.join("index").join("current"));
-    assert!(current.is_ok());
-    let Ok(current) = current else { return };
+    let current = ok!(current);
     let by_cwd = fs::read_to_string(session_root.join("index").join("by-cwd").join(by_cwd_key));
-    assert!(by_cwd.is_ok());
-    let Ok(by_cwd) = by_cwd else { return };
+    let by_cwd = ok!(by_cwd);
 
     assert!(messages.contains("\"role\":\"user\""));
     assert!(events.contains("\"type\":\"start\""));
@@ -357,8 +325,7 @@ fn indexed_socket_send_rejects_non_send_requests() {
 
 
     let resume = parse_socket_request_frame(r#"{"op":"resume","session":"default"}"#);
-    assert!(resume.is_ok());
-    let Ok(resume) = resume else { return };
+    let resume = ok!(resume);
     assert_eq!(
         record_indexed_socket_send_to_session(&session_root, &resume),
         Err(IndexedSocketSessionRecordError::Session(
@@ -367,8 +334,7 @@ fn indexed_socket_send_rejects_non_send_requests() {
     );
 
     let cancel = parse_socket_request_frame(r#"{"op":"cancel","id":"run-1"}"#);
-    assert!(cancel.is_ok());
-    let Ok(cancel) = cancel else { return };
+    let cancel = ok!(cancel);
     assert_eq!(
         record_indexed_socket_send_to_session(&session_root, &cancel),
         Err(IndexedSocketSessionRecordError::Session(
@@ -377,8 +343,7 @@ fn indexed_socket_send_rejects_non_send_requests() {
     );
 
     let ping = parse_socket_request_frame(r#"{"op":"ping"}"#);
-    assert!(ping.is_ok());
-    let Ok(ping) = ping else { return };
+    let ping = ok!(ping);
     assert_eq!(
         record_indexed_socket_send_to_session(&session_root, &ping),
         Err(IndexedSocketSessionRecordError::Session(

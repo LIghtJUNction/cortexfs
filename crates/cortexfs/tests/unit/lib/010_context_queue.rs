@@ -19,8 +19,7 @@ fn context_pack_rebuild_respects_budget_and_validates_inputs() {
     write_text_file(&context.join("child").join("rev-1").join("refs.jsonl"), "");
 
     let built = rebuild_context_pack(&session, Some("coder"), 5);
-    assert!(built.is_ok());
-    let Ok(built) = built else { return };
+    let built = ok!(built);
     assert_eq!(built.items().len(), 1);
     assert_eq!(
         built
@@ -367,8 +366,7 @@ fn shared_queue_claim_uses_atomic_claim_directories() {
     assert!(fs::create_dir_all(root.join("pending").join("not-file")).is_ok());
 
     let first = claim_next_shared_queue_job(&root, "worker-a");
-    assert!(first.is_ok());
-    let Ok(Some(first)) = first else { return };
+    let Some(first) = ok!(first) else { return };
     assert_eq!(first.job_name(), "job-1.req.json");
     let claimed_content = fs::read_to_string(first.claimed_path());
     assert!(matches!(claimed_content, Ok(ref content) if content == "one\n"));
@@ -377,8 +375,7 @@ fn shared_queue_claim_uses_atomic_claim_directories() {
     assert!(!root.join("pending").join("job-1.req.json").exists());
 
     let second = claim_next_shared_queue_job(&root, "worker-b");
-    assert!(second.is_ok());
-    let Ok(Some(second)) = second else { return };
+    let Some(second) = ok!(second) else { return };
     assert_eq!(second.job_name(), "job-2.req.json");
 
     let none = claim_next_shared_queue_job(&root, "worker-c");
@@ -396,8 +393,7 @@ fn shared_queue_claim_skips_existing_claim_lock() {
     assert!(fs::create_dir_all(root.join("claimed").join("job-1.req.json")).is_ok());
 
     let claimed = claim_next_shared_queue_job(&root, "worker-a");
-    assert!(claimed.is_ok());
-    let Ok(Some(claimed)) = claimed else { return };
+    let Some(claimed) = ok!(claimed) else { return };
     assert_eq!(claimed.job_name(), "job-2.req.json");
     assert!(root.join("pending").join("job-1.req.json").exists());
 
@@ -411,8 +407,7 @@ fn shared_queue_recovery_requeues_claimed_job_with_lease() {
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
 
     let claimed = claim_next_shared_queue_job(&root, "worker-a");
-    assert!(claimed.is_ok());
-    let Ok(Some(claimed)) = claimed else { return };
+    let Some(claimed) = ok!(claimed) else { return };
     assert!(claimed.claimed_path().is_file());
     assert!(claimed.lease_path().join("worker").is_file());
 

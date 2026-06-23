@@ -9,40 +9,28 @@ allow coder_t model:debug/echo use
 allow coder_t shared:project-a read
 ",
     );
-    assert!(parent_policy.is_ok());
-    let Ok(parent_policy) = parent_policy else {
-        return;
-    };
+    let parent_policy = ok!(parent_policy);
     let child_policy = PolicyV0::parse(
         "\
 allow reviewer_t tool:fs.read execute
 allow reviewer_t shared:project-a read
 ",
     );
-    assert!(child_policy.is_ok());
-    let Ok(child_policy) = child_policy else {
-        return;
-    };
+    let child_policy = ok!(child_policy);
     let parent_mounts = MountTable::parse(
         "\
 /work\t/work\trw\trbind,nosuid,nodev
 /ctx/shared/project-a\t/shared/project-a\tro\trbind,nosuid,nodev,noexec
 ",
     );
-    assert!(parent_mounts.is_ok());
-    let Ok(parent_mounts) = parent_mounts else {
-        return;
-    };
+    let parent_mounts = ok!(parent_mounts);
     let child_mounts = MountTable::parse(
         "\
 /work\t/work\tro\tbind,nosuid,nodev,noexec
 /ctx/shared/project-a\t/shared/project-a\tro\tbind,nosuid,nodev,noexec
 ",
     );
-    assert!(child_mounts.is_ok());
-    let Ok(child_mounts) = child_mounts else {
-        return;
-    };
+    let child_mounts = ok!(child_mounts);
 
     let request = ChildAgentRequest::new(
         "reviewer",
@@ -70,20 +58,11 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
     let child_policy = allow_tool_policy("reviewer_t", "fs.read");
     let expanded_policy = allow_tool_policy("reviewer_t", "shell.exec");
     let parent_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-    assert!(parent_mounts.is_ok());
-    let Ok(parent_mounts) = parent_mounts else {
-        return;
-    };
+    let parent_mounts = ok!(parent_mounts);
     let child_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-    assert!(child_mounts.is_ok());
-    let Ok(child_mounts) = child_mounts else {
-        return;
-    };
+    let child_mounts = ok!(child_mounts);
     let expanded_mounts = MountTable::parse("/work\t/work\trw\tbind,nosuid,nodev,noexec\n");
-    assert!(expanded_mounts.is_ok());
-    let Ok(expanded_mounts) = expanded_mounts else {
-        return;
-    };
+    let expanded_mounts = ok!(expanded_mounts);
     let authority = ChildAgentAuthority::new(
         "coder",
         &parent_identity,
@@ -167,15 +146,9 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
     let parent_policy = allow_tool_policy("coder_t", "fs.read");
     let child_policy = allow_tool_policy("reviewer_t", "fs.read");
     let parent_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-    assert!(parent_mounts.is_ok());
-    let Ok(parent_mounts) = parent_mounts else {
-        return;
-    };
+    let parent_mounts = ok!(parent_mounts);
     let child_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
-    assert!(child_mounts.is_ok());
-    let Ok(child_mounts) = child_mounts else {
-        return;
-    };
+    let child_mounts = ok!(child_mounts);
     let authority = ChildAgentAuthority::new(
         "coder",
         &parent_identity,
@@ -228,32 +201,21 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
 
     let recorded =
         record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session);
-    assert!(recorded.is_ok());
-    let Ok(events) = recorded else { return };
+    let events = ok!(recorded);
     let child_state = fs::read_to_string(child_session.join("state"));
-    assert!(child_state.is_ok());
-    let Ok(child_state) = child_state else { return };
+    let child_state = ok!(child_state);
     assert_eq!(child_state, "cancelled\n");
     let child_messages = fs::read_to_string(child_session.join("messages.jsonl"));
-    assert!(child_messages.is_ok());
-    let Ok(child_messages) = child_messages else {
-        return;
-    };
+    let child_messages = ok!(child_messages);
     assert_eq!(
         child_messages,
         "{\"role\":\"user\",\"content\":\"review this\"}\n"
     );
 
     let parent_events = fs::read_to_string(parent_session.join("events.jsonl"));
-    assert!(parent_events.is_ok());
-    let Ok(parent_events) = parent_events else {
-        return;
-    };
+    let parent_events = ok!(parent_events);
     let child_events = fs::read_to_string(child_session.join("events.jsonl"));
-    assert!(child_events.is_ok());
-    let Ok(child_events) = child_events else {
-        return;
-    };
+    let child_events = ok!(child_events);
     assert_eq!(parent_events, format!("{}\n", events.parent_event()));
     assert_eq!(child_events, format!("{}\n", events.child_event()));
     assert!(inspect_event_stream_jsonl(&events.jsonl()).is_ok());
@@ -309,14 +271,11 @@ fn child_context_recorder_creates_handoff_and_result_channel() {
 
     let child = session.join("context").join("child").join("rev-2");
     let agent = fs::read_to_string(child.join("agent"));
-    assert!(agent.is_ok());
-    let Ok(agent) = agent else { return };
+    let agent = ok!(agent);
     let status = fs::read_to_string(child.join("status"));
-    assert!(status.is_ok());
-    let Ok(status) = status else { return };
+    let status = ok!(status);
     let handoff = fs::read_to_string(child.join("handoff.md"));
-    assert!(handoff.is_ok());
-    let Ok(handoff) = handoff else { return };
+    let handoff = ok!(handoff);
 
     assert_eq!(agent, "reviewer\n");
     assert_eq!(status, "pending\n");
@@ -335,16 +294,11 @@ fn child_context_recorder_creates_handoff_and_result_channel() {
     assert_eq!(result, Ok(()));
 
     let result_md = fs::read_to_string(child.join("result.md"));
-    assert!(result_md.is_ok());
-    let Ok(result_md) = result_md else { return };
+    let result_md = ok!(result_md);
     let refs_jsonl = fs::read_to_string(child.join("refs.jsonl"));
-    assert!(refs_jsonl.is_ok());
-    let Ok(refs_jsonl) = refs_jsonl else {
-        return;
-    };
+    let refs_jsonl = ok!(refs_jsonl);
     let status = fs::read_to_string(child.join("status"));
-    assert!(status.is_ok());
-    let Ok(status) = status else { return };
+    let status = ok!(status);
 
     assert_eq!(result_md, "Summary: ok\n");
     assert_eq!(status, "done\n");

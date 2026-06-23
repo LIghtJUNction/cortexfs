@@ -5,8 +5,7 @@ fn shared_queue_finish_writes_readable_done_result_and_cleans_lease() {
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
 
     let claimed = claim_next_shared_queue_job(&root, "worker-a");
-    assert!(claimed.is_ok());
-    let Ok(Some(claimed)) = claimed else { return };
+    let Some(claimed) = ok!(claimed) else { return };
     let result_path =
         finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"ok\n");
     assert_eq!(
@@ -30,8 +29,7 @@ fn shared_queue_finish_writes_readable_failed_result() {
     write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
 
     let claimed = claim_next_shared_queue_job(&root, "worker-a");
-    assert!(claimed.is_ok());
-    let Ok(Some(claimed)) = claimed else { return };
+    let Some(claimed) = ok!(claimed) else { return };
     let result_path = finish_shared_queue_job(
         &root,
         claimed.job_name(),
@@ -59,8 +57,7 @@ fn shared_access_authority_requires_mount_linux_permission_and_policy() {
     write_fixture_file(&file, 0o400);
 
     let metadata = fs::metadata(&file);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_source_target(
         "/ctx/shared/project-a",
@@ -88,8 +85,7 @@ fn shared_access_authority_denies_write_on_read_only_mount() {
     write_fixture_file(&file, 0o600);
 
     let metadata = fs::metadata(&file);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts =
         mount_table_for_source_target("/ctx/shared/project-a", &shared, "ro", "bind,nosuid,nodev");
@@ -113,18 +109,14 @@ fn shared_access_authority_denies_missing_policy_and_wrong_space() {
     write_fixture_file(&file, 0o400);
 
     let metadata = fs::metadata(&file);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts =
         mount_table_for_source_target("/ctx/shared/project-a", &shared, "ro", "bind,nosuid,nodev");
     let wrong_mounts =
         mount_table_for_source_target("/ctx/shared/project-b", &shared, "ro", "bind,nosuid,nodev");
     let empty_policy = PolicyV0::parse("");
-    assert!(empty_policy.is_ok());
-    let Ok(empty_policy) = empty_policy else {
-        return;
-    };
+    let empty_policy = ok!(empty_policy);
     let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
 
     assert_eq!(
@@ -167,8 +159,7 @@ fn shared_access_authority_checks_linux_mode_bits() {
     write_fixture_file(&file, 0o400);
 
     let metadata = fs::metadata(&file);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let other_identity = AgentUnixIdentity::new(
         metadata.uid().saturating_add(1),
         metadata.gid().saturating_add(1),
@@ -201,8 +192,7 @@ fn session_access_authority_allows_explicit_im_channel_session() {
     write_fixture_file(&messages, 0o600);
 
     let metadata = fs::metadata(&messages);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_source_target(
         "/ctx/shared/im-qq-dev",
@@ -245,8 +235,7 @@ fn session_access_authority_denies_cross_channel_without_session_policy() {
     write_fixture_file(&other, 0o600);
 
     let metadata = fs::metadata(&allowed);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_source_target(
         "/ctx/shared/im-qq-dev",
@@ -287,8 +276,7 @@ fn session_access_authority_requires_shared_policy_and_mount_write_mode() {
     write_fixture_file(&messages, 0o600);
 
     let metadata = fs::metadata(&messages);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let ro_mounts = mount_table_for_source_target(
         "/ctx/shared/im-slack-company",
@@ -350,8 +338,7 @@ fn session_access_authority_enforces_private_home_uid() {
     write_fixture_file(&messages, 0o644);
 
     let metadata = fs::metadata(&messages);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let owner_identity = AgentUnixIdentity::new(1000, metadata.gid(), []);
     let other_identity = AgentUnixIdentity::new(1001, metadata.gid(), []);
     let mounts =
@@ -387,8 +374,7 @@ fn session_access_authority_rejects_unmounted_and_non_session_paths() {
     write_fixture_file(&file, 0o644);
 
     let metadata = fs::metadata(&file);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_source_target(
         "/ctx/shared/project-a",

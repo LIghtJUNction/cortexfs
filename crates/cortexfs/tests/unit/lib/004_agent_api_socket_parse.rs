@@ -9,8 +9,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     );
 
     let view = derive_agent_runtime_view(&root, "coder");
-    assert!(view.is_ok());
-    let Ok(view) = view else { return };
+    let view = ok!(view);
 
     assert_eq!(view.agent_name(), "coder");
     assert_eq!(view.control_dir(), control.as_path());
@@ -166,8 +165,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
     );
 
     let view = derive_agent_runtime_view(&root, "coder");
-    assert!(view.is_ok());
-    let Ok(view) = view else { return };
+    let view = ok!(view);
     assert_eq!(
         env_value(view.env(), "CTX_PATH").map(str::to_owned),
         Some(allowed.display().to_string())
@@ -175,8 +173,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
     assert_eq!(env_value(view.env(), "AGENT_RULES"), Some("allow"));
 
     let metadata = fs::metadata(env_only.join("fs.read"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_target(&env_only, "rw", "bind,nosuid,nodev");
     let tool_policy = allow_tool_policy("coder_t", "fs.read");
@@ -253,15 +250,10 @@ fn api_key_resolution_reports_unconfigured_without_environment_or_keychain() {
 #[test]
 fn socket_peer_credentials_come_from_kernel() {
     let pair = UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((left, right)) = pair else { return };
+    let (left, right) = ok!(pair);
 
-    let left_peer = peer_credentials(&left);
-    let right_peer = peer_credentials(&right);
-    assert!(left_peer.is_ok());
-    assert!(right_peer.is_ok());
-    let Ok(left_peer) = left_peer else { return };
-    let Ok(right_peer) = right_peer else { return };
+    let left_peer = ok!(peer_credentials(&left));
+    let right_peer = ok!(peer_credentials(&right));
 
     assert_eq!(left_peer.uid(), right_peer.uid());
     assert_eq!(left_peer.gid(), right_peer.gid());
@@ -407,4 +399,3 @@ fn socket_request_parser_rejects_invalid_ops_and_fields() {
         Err(SocketRequestError::MissingStringField("input"))
     );
 }
-

@@ -5,6 +5,15 @@ fn unique_test_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("cortexfs-{name}-{}-{nanos}", std::process::id()))
 }
 
+macro_rules! ok {
+    ($result:expr) => {{
+        let result = $result;
+        assert!(result.is_ok());
+        let Ok(value) = result else { return };
+        value
+    }};
+}
+
 fn clean_test_dir(name: &str) -> PathBuf {
     let root = unique_test_dir(name);
     assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
@@ -23,10 +32,7 @@ fn write_fixture_file(path: &Path, mode: u32) {
     }
     assert!(fs::write(path, "#!/bin/sh\n").is_ok());
     let permissions = fs::metadata(path).map(|metadata| metadata.permissions());
-    assert!(permissions.is_ok());
-    let Ok(mut permissions) = permissions else {
-        return;
-    };
+    let mut permissions = ok!(permissions);
     permissions.set_mode(mode);
     assert!(fs::set_permissions(path, permissions).is_ok());
 }
