@@ -364,10 +364,8 @@ fn shared_queue_claim_uses_atomic_claim_directories() {
     let first = claim_next_shared_queue_job(&root, "worker-a");
     let Some(first) = ok!(first) else { return };
     assert_eq!(first.job_name(), "job-1.req.json");
-    let claimed_content = fs::read_to_string(first.claimed_path());
-    assert!(matches!(claimed_content, Ok(ref content) if content == "one\n"));
-    let lease_worker = fs::read_to_string(first.lease_path().join("worker"));
-    assert!(matches!(lease_worker, Ok(ref content) if content == "worker-a\n"));
+    assert_file_text(first.claimed_path(), "one\n");
+    assert_file_text(&first.lease_path().join("worker"), "worker-a\n");
     assert!(!root.join("pending").join("job-1.req.json").exists());
 
     let second = claim_next_shared_queue_job(&root, "worker-b");
@@ -405,8 +403,7 @@ fn shared_queue_recovery_requeues_claimed_job_with_lease() {
 
     let recovered = recover_shared_queue_job(&root, "job-1.req.json");
     assert_eq!(recovered, Ok(root.join("pending").join("job-1.req.json")));
-    let recovered_content = fs::read_to_string(root.join("pending").join("job-1.req.json"));
-    assert!(matches!(recovered_content, Ok(ref content) if content == "one\n"));
+    assert_file_text(&root.join("pending").join("job-1.req.json"), "one\n");
     assert!(!root.join("claimed").join("job-1.req.json").exists());
     assert!(!root.join("lease").join("job-1.req.json").exists());
 }
@@ -428,4 +425,3 @@ fn shared_queue_recovery_requires_existing_claim_and_lease() {
         Err(SharedQueueRecoverError::MissingLease)
     );
 }
-

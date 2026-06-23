@@ -75,19 +75,25 @@ impl CortexFuse {
     }
 }
 
+macro_rules! path_for_inode_or_reply {
+    ($fuse:expr, $inode:expr, $reply:expr) => {
+        match $fuse.path_for_inode($inode) {
+            Ok(path) => path,
+            Err(error) => {
+                $reply.error(errno(error));
+                return;
+            }
+        }
+    };
+}
+
 impl Filesystem for CortexFuse {
     fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         let Some(name) = name.to_str() else {
             reply.error(Errno::EINVAL);
             return;
         };
-        let parent_path = match self.path_for_inode(parent) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let parent_path = path_for_inode_or_reply!(self, parent, reply);
         let parent_node = match self.projected_node_for_path(&parent_path) {
             Ok(node) => node,
             Err(error) => {
@@ -102,13 +108,7 @@ impl Filesystem for CortexFuse {
     }
 
     fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<FileHandle>, reply: ReplyAttr) {
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         match self.projected_getattr(&path) {
             Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
             Err(error) => reply.error(errno(error)),
@@ -116,13 +116,7 @@ impl Filesystem for CortexFuse {
     }
 
     fn readlink(&self, _req: &Request, ino: INodeNo, reply: ReplyData) {
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         let target = match self.projection.readlink(&path) {
             Ok(target) => target,
             Err(_error) => {
@@ -159,13 +153,7 @@ impl Filesystem for CortexFuse {
             reply.error(Errno::EINVAL);
             return;
         };
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         if let Err(error) = self.projection.write_control_file_at(&path, 0, b"") {
             reply.error(errno(error));
             return;
@@ -184,13 +172,7 @@ impl Filesystem for CortexFuse {
         offset: u64,
         mut reply: ReplyDirectory,
     ) {
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         let entries = match self.projected_readdir(&path) {
             Ok(entries) => entries,
             Err(error) => {
@@ -259,13 +241,7 @@ impl Filesystem for CortexFuse {
         _lock_owner: Option<LockOwner>,
         reply: ReplyData,
     ) {
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         match self.projection.read_at(&path, offset, usize_from_u32(size)) {
             Ok(bytes) => reply.data(&bytes),
             Err(error) => reply.error(errno(error)),
@@ -284,13 +260,7 @@ impl Filesystem for CortexFuse {
         _lock_owner: Option<LockOwner>,
         reply: ReplyWrite,
     ) {
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         match self.projection.write_control_file_at(&path, offset, data) {
             Ok(()) => match u32::try_from(data.len()) {
                 Ok(count) => reply.written(count),
@@ -406,13 +376,7 @@ impl Filesystem for CortexFuse {
             reply.error(Errno::EINVAL);
             return;
         };
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         let attrs = match self.xattrs_for_path(&path) {
             Ok(attrs) => attrs,
             Err(error) => {
@@ -431,13 +395,7 @@ impl Filesystem for CortexFuse {
     }
 
     fn listxattr(&self, _req: &Request, ino: INodeNo, size: u32, reply: ReplyXattr) {
-        let path = match self.path_for_inode(ino) {
-            Ok(path) => path,
-            Err(error) => {
-                reply.error(errno(error));
-                return;
-            }
-        };
+        let path = path_for_inode_or_reply!(self, ino, reply);
         let attrs = match self.xattrs_for_path(&path) {
             Ok(attrs) => attrs,
             Err(error) => {
