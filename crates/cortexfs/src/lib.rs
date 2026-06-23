@@ -5,6 +5,7 @@
 //! ABI names while the implementation is redesigned around Rig.
 
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
@@ -70,6 +71,7 @@ pub use abi_constants::{
 use abi_constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
     DEFAULT_MODEL_ALIAS_TARGET, HELPER_MODEL_ALIAS, SYSTEM_PROVIDER_CONFIG_DIR,
+    SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi_path::is_object_name_for_class;
 pub use abi_path::{
@@ -168,6 +170,8 @@ impl ReferenceTreeBootstrap {
 }
 
 include!("fuse_v1_provider.rs");
+
+include!("provider_model_discovery.rs");
 
 impl ObjectBootstrapError {
     /// Returns a stable errno name for this object bootstrap failure.

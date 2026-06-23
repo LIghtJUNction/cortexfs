@@ -199,7 +199,7 @@ pub fn resolve_api_key(
         env_name,
         service,
         account,
-        |name| std::env::var(name),
+        |name| env::var(name),
         system_keychain_secret,
     )
 }
@@ -213,7 +213,7 @@ pub fn resolve_api_key_with<E, K>(
     keychain_lookup: K,
 ) -> Result<Option<String>, ApiKeyResolutionError>
 where
-    E: FnOnce(&str) -> Result<String, std::env::VarError>,
+    E: FnOnce(&str) -> Result<String, env::VarError>,
     K: FnOnce(&str, &str) -> Result<Option<String>, ApiKeyResolutionError>,
 {
     if !is_valid_env_key(env_name)
@@ -225,8 +225,8 @@ where
     match env_lookup(env_name) {
         Ok(value) if !value.trim().is_empty() => return Ok(Some(value)),
         Ok(_value) => {}
-        Err(std::env::VarError::NotPresent) => {}
-        Err(std::env::VarError::NotUnicode(_value)) => {
+        Err(env::VarError::NotPresent) => {}
+        Err(env::VarError::NotUnicode(_value)) => {
             return Err(ApiKeyResolutionError::InvalidName);
         }
     }

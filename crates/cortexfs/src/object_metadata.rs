@@ -162,7 +162,7 @@ where
     if input.is_empty() {
         std::io::stdin().read_to_string(&mut input)?;
     }
-    let run = std::env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let text = serde_json::to_string(&input).unwrap_or_else(|_error| "\"\"".to_owned());
     stdout.write_all(
         format!(r#"{{"type":"start","run":"{run}","model":"debug/echo"}}"#).as_bytes(),

@@ -221,6 +221,7 @@ fn fuse_v1_projection_reads_and_writes_control_files() {
 fn fuse_v1_projection_projects_configured_provider_models() {
     let root = reference_tree("fuse-v1-provider-model");
     let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
     write_text_file(
         &providers.join("api.lmm.best.json"),
         r#"{
@@ -231,7 +232,13 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 }
 "#,
     );
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    write_text_file(
+        &cache.join("api.lmm.best.models.json"),
+        r#"{"models":["gpt-5.4","gpt-5.4-mini","gpt-5.5","bad/name"]}"#,
+    );
+    let projection = FuseV1Projection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
 
     let model_entries = projection.readdir("model");
     assert!(model_entries.is_ok());
@@ -249,7 +256,17 @@ fn fuse_v1_projection_projects_configured_provider_models() {
         .into_iter()
         .map(|entry| entry.name().to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(provider_names, ["gpt-5.4-mini", "gpt-5.4-mini.d"]);
+    assert_eq!(
+        provider_names,
+        [
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-mini.d",
+            "gpt-5.4.d",
+            "gpt-5.5",
+            "gpt-5.5.d"
+        ]
+    );
 
     let metadata = projection.read_to_string("model/api.lmm.best/gpt-5.4-mini");
     assert!(matches!(
