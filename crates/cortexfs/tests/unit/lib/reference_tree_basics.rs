@@ -206,7 +206,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(user_tool_dir.is_dir());
     assert!(!user_tool_dir.join("fs.read").exists());
     let model_link = fs::read_link(ctx_home(&root).join("model").join("coder"));
-    assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/debug/echo")));
+    assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/main")));
 
     assert!(root.join("shared").is_dir());
     assert!(!root.join("shared").join("project-a").exists());
@@ -279,16 +279,16 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
 
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
-    assert_file_text(&root.join("agent").join("coder.d").join("model"), "debug/echo\n");
+    assert_file_text(&root.join("agent").join("coder.d").join("model"), "main\n");
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(
-        matches!(agent_policy, Ok(ref content) if content.contains("model:debug/echo use"))
+        matches!(agent_policy, Ok(ref content) if content.contains("model:main use"))
     );
     let model_link = fs::read_link(user_model.join("coder"));
-    assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/debug/echo")));
+    assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/main")));
     let private_meta =
         fs::read_to_string(agent_session_root(&root, "coder").join("default").join("meta.json"));
-    assert!(matches!(private_meta, Ok(ref content) if content.contains("\"model\":\"debug/echo\"")));
+    assert!(matches!(private_meta, Ok(ref content) if content.contains("\"model\":\"main\"")));
     let shared_meta = fs::read_to_string(shared_meta_path);
     assert!(matches!(shared_meta, Ok(ref content) if content.contains("\"model\":\"debug/echo\"")));
 }

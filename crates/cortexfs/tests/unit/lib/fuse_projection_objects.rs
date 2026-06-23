@@ -66,6 +66,26 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
         projection.readlink("model/helper"),
         Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
+    assert!(projection
+        .set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4"))
+        .is_ok());
+    assert_eq!(
+        projection.readlink("model/main"),
+        Ok(PathBuf::from("/ctx/model/api.lmm.best/gpt-5.4"))
+    );
+    assert_eq!(
+        projection.set_model_alias("model/test", Path::new("api.lmm.best/gpt-5.4")),
+        Err(FuseV1Error::NotControlFile)
+    );
+    assert_eq!(
+        projection.set_model_alias("model/main", Path::new("main")),
+        Err(FuseV1Error::InvalidPath)
+    );
+    assert!(projection.remove_model_alias("model/main").is_ok());
+    assert_eq!(
+        projection.readlink("model/main"),
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
+    );
     let debug_node = projection.lookup(&model_node, "debug");
     assert!(matches!(
         debug_node,
@@ -123,7 +143,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
             if content.starts_with(&format!("#!{CORTEXFS_OBJECT_RUNNER}\n"))
                 && content.contains("# cortexfs.object=agent\n")
                 && content.contains("# cortexfs.name=coder\n")
-                && content.contains("# cortexfs.model=debug/echo\n")
+                && content.contains("# cortexfs.model=main\n")
                 && !content.contains("reference-tree agent stub")
     ));
     let tool_attr = projection.getattr("tool/fs.read");

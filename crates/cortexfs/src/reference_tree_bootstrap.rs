@@ -44,7 +44,7 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
     let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
     let policy_subject = format!("{name}_t");
     let policy = format!(
-        "allow {policy_subject} model:{DEBUG_ECHO_MODEL} use\nallow {policy_subject} tool:fs.read execute\n"
+        "allow {policy_subject} model:{DEFAULT_MODEL_ALIAS} use\nallow {policy_subject} tool:fs.read execute\n"
     );
     let mount = format!(
         "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n"
@@ -63,7 +63,7 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
         ("env", "CTX_ROOT=/ctx\n".to_owned()),
         ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
-        ("model", format!("{DEBUG_ECHO_MODEL}\n")),
+        ("model", format!("{DEFAULT_MODEL_ALIAS}\n")),
         ("policy", policy),
         ("status", "idle\n".to_owned()),
         ("pid", "\n".to_owned()),
@@ -94,7 +94,7 @@ if [ -z "$input" ]; then
 fi
 model="$(tr -d '\n' < "$source_root/agent/{name}.d/model" 2>/dev/null || true)"
 if [ -z "$model" ]; then
-  model="debug/echo"
+  model="main"
 fi
 if [ ! -x "$ctx_root/model/$model" ]; then
   printf '{{"type":"error","run":"%s","code":"ENOENT","message":"missing model"}}\n' "$run"

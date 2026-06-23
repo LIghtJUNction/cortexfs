@@ -11,12 +11,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
     FUSE_V1_ROOT_INODE, FuseV1Attr, FuseV1DirEntry, FuseV1Error, FuseV1FileType, FuseV1Node,
-    FuseV1Projection, classify_abi_path,
+    FuseV1Projection, classify_abi_path, is_object_name,
 };
 use fuser::{
     BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, Generation, INodeNo,
-    LockOwner, MountOption, OpenFlags, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
-    ReplyEntry, ReplyWrite, ReplyXattr, Request, SessionACL, TimeOrNow, WriteFlags,
+    LockOwner, MountOption, OpenFlags, RenameFlags, ReplyAttr, ReplyData, ReplyDirectory,
+    ReplyEmpty, ReplyEntry, ReplyWrite, ReplyXattr, Request, SessionACL, TimeOrNow, WriteFlags,
 };
 
 #[derive(Debug)]
@@ -72,6 +72,20 @@ impl CortexFuse {
             .lock()
             .map_err(|_error| FuseV1Error::Io)?
             .retain(|_inode, known| known != path);
+        Ok(())
+    }
+
+    fn rename_path(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
+        for known in self
+            .paths
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)?
+            .values_mut()
+        {
+            if known == from {
+                to.clone_into(known);
+            }
+        }
         Ok(())
     }
 }
@@ -320,6 +334,17 @@ impl Filesystem for CortexFuse {
     }
 
     fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        match self.unlink_model_path(parent, name) {
+            Ok(true) => {
+                reply.ok();
+                return;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        }
         let path = match self.socket_child_path(parent, name) {
             Ok(path) => path,
             Err(error) => {
@@ -356,6 +381,47 @@ impl Filesystem for CortexFuse {
             }
             Ok(_attr) => reply.error(Errno::EINVAL),
             Err(error) => reply.error(errno(error)),
+        }
+    }
+
+    fn symlink(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        link_name: &OsStr,
+        target: &Path,
+        reply: ReplyEntry,
+    ) {
+        let path = match self.model_symlink_child_path(parent, link_name) {
+            Ok(path) => path,
+            Err(error) => {
+                reply.error(errno(error));
+                return;
+            }
+        };
+        match self.projection.set_model_alias_symlink(&path, target) {
+            Ok(node) => self.reply_entry(&node, reply),
+            Err(error) => reply.error(errno(error)),
+        }
+    }
+
+    fn rename(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        newparent: INodeNo,
+        newname: &OsStr,
+        flags: RenameFlags,
+        reply: ReplyEmpty,
+    ) {
+        if flags.is_empty() {
+            match self.rename_model_alias_path(parent, name, newparent, newname) {
+                Ok(()) => reply.ok(),
+                Err(error) => reply.error(errno(error)),
+            }
+        } else {
+            reply.error(Errno::EINVAL);
         }
     }
 

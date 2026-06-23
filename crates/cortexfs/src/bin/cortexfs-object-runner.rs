@@ -51,11 +51,11 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let model = fs::read_to_string(source.join("agent").join(format!("{name}.d")).join("model"))
         .map_or_else(
-            |_error| "debug/echo".to_owned(),
+            |_error| "main".to_owned(),
             |content| content.trim().to_owned(),
         );
     let model = if model.is_empty() {
-        "debug/echo".to_owned()
+        "main".to_owned()
     } else {
         model
     };
