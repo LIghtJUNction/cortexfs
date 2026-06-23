@@ -277,21 +277,15 @@ pub fn ensure_durable_session_layout(
 }
 
 fn durable_session_meta_json(model: Option<&str>, scope: SocketSessionScope) -> String {
-    let value = model.map_or_else(
-        || {
-            serde_json::json!({
-                "client": "ctx",
-                "scope": scope.as_str()
-            })
-        },
-        |model| {
-            serde_json::json!({
-            "client": "ctx",
-            "model": model,
-            "scope": scope.as_str()
-            })
-        },
-    );
+    let mut value = serde_json::json!({
+        "client": "ctx",
+        "scope": scope.as_str()
+    });
+    if let Some(model) = model
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("model".to_owned(), serde_json::json!(model));
+    }
     format!("{value}\n")
 }
 
@@ -357,10 +351,8 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn set_executable_mode(path: &Path) -> Result<(), ObjectBootstrapError> {
-    let metadata = fs::metadata(path).map_err(|_error| ObjectBootstrapError::CannotChmod)?;
-    let mut permissions = metadata.permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).map_err(|_error| ObjectBootstrapError::CannotChmod)
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        .map_err(|_error| ObjectBootstrapError::CannotChmod)
 }
 
 include!("object_layout.rs");

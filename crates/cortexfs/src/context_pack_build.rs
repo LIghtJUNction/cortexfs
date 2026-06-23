@@ -304,13 +304,13 @@ fn append_child_result_candidates(
         append_context_file_candidate(context, "child_result", &result_source, None, candidates)?;
 
         let refs_source = format!("context/child/{child}/refs.jsonl");
-        let refs = read_context_source(context, &refs_source)?;
-        if !refs.trim().is_empty() {
-            if !inspect_context_jsonl(ContextJsonlKind::Refs, &refs).is_ok() {
-                return Err(ContextPackBuildError::InvalidContextJsonl);
-            }
-            candidates.push(PackCandidate::new("child_refs", &refs_source, None, refs));
-        }
+        append_context_jsonl_candidate(
+            context,
+            "child_refs",
+            &refs_source,
+            ContextJsonlKind::Refs,
+            candidates,
+        )?;
     }
     Ok(())
 }
