@@ -79,7 +79,8 @@ object-abi.md           executable, socket, and .d object triple
 model-abi.md            one model ABI, model exec, model socket, event stream
 session-abi.md          durable history and session indexes
 16-context.md           context pack, compression, swap, dedup, and GC
-agent-tool-security.md  agent, tool, mount, policy, shared, logs
+agent-tool-security.md  agent identity, view, mount, and creation
+tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
 17-child-agents.md      child handoff, attenuation, owned lifecycle, cancellation
 ctx-coreutils.md        ctx command contract
 phase-1.md              v1 migration target and acceptance checks
