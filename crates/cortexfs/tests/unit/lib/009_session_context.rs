@@ -1,8 +1,8 @@
 #[test]
 fn child_context_recorder_rejects_bad_names_status_and_refs() {
-    let root = unique_test_dir("child-context-record-bad");
+    let root = clean_test_dir("child-context-record-bad");
     let session = root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
 
     assert_eq!(
@@ -52,8 +52,7 @@ fn child_context_recorder_rejects_bad_names_status_and_refs() {
 
 #[test]
 fn session_layout_inspector_accepts_transparent_context_tree() {
-    let root = unique_test_dir("session-layout-ok");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("session-layout-ok");
     create_complete_session_layout(&root);
 
     let report = inspect_session_layout(&root);
@@ -65,10 +64,9 @@ fn session_layout_inspector_accepts_transparent_context_tree() {
 
 #[test]
 fn session_layout_inspector_reports_missing_and_wrong_types() {
-    let root = unique_test_dir("session-layout-bad");
+    let root = clean_test_dir("session-layout-bad");
     let context = root.join("context");
     let child = context.join("child").join("rev-1");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(root.join("messages.jsonl")).is_ok());
     assert!(fs::create_dir_all(&child).is_ok());
     assert!(fs::write(child.join("agent"), "reviewer\n").is_ok());
@@ -152,8 +150,7 @@ fn session_controls_reject_invalid_state_cwd_and_meta() {
 
 #[test]
 fn session_layout_inspector_rejects_invalid_control_values() {
-    let root = unique_test_dir("session-layout-control-bad");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("session-layout-control-bad");
     create_complete_session_layout(&root);
     write_text_file(&root.join("state"), "running\n");
     write_text_file(&root.join("cwd"), "/work/../secret\n");
@@ -220,9 +217,8 @@ fn session_index_rejects_invalid_names_and_multi_value_files() {
 
 #[test]
 fn session_index_update_sets_current_and_deduplicated_list() {
-    let root = unique_test_dir("session-index-update");
+    let root = clean_test_dir("session-index-update");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(session_root.join("index").join("by-cwd")).is_ok());
     assert!(fs::create_dir_all(session_root.join("default")).is_ok());
     assert!(fs::create_dir_all(session_root.join("review-1")).is_ok());
@@ -256,9 +252,8 @@ fn session_index_update_sets_current_and_deduplicated_list() {
 
 #[test]
 fn session_index_update_rejects_missing_and_invalid_index_state() {
-    let root = unique_test_dir("session-index-update-bad");
+    let root = clean_test_dir("session-index-update-bad");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(session_root.join("index").join("by-cwd")).is_ok());
     assert!(fs::create_dir_all(session_root.join("default")).is_ok());
     write_text_file(&session_root.join("index").join("list"), "bad/name\n");
@@ -357,10 +352,10 @@ fn context_pack_sources_reject_escapes_and_child_history() {
 
 #[test]
 fn context_pack_rebuild_writes_inspectable_sources_without_child_history() {
-    let root = unique_test_dir("context-pack-rebuild");
+    let root = clean_test_dir("context-pack-rebuild");
     let session = root.join("default");
     let context = session.join("context");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(
         &session.join("messages.jsonl"),

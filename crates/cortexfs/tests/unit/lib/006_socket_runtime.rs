@@ -1,9 +1,9 @@
 #[test]
 fn indexed_socket_send_rejects_temp_sessions_before_index_update() {
-    let root = unique_test_dir("indexed-socket-temp");
+    let root = clean_test_dir("indexed-socket-temp");
     let session_root = root.join("session");
     let session = session_root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_session_layout(&session);
     write_text_file(&session_root.join("index").join("list"), "default\n");
     write_text_file(&session_root.join("index").join("current"), "default\n");
@@ -35,10 +35,10 @@ fn indexed_socket_send_rejects_temp_sessions_before_index_update() {
 
 #[test]
 fn durable_session_layout_helper_creates_inspectable_session_and_index() {
-    let root = unique_test_dir("durable-session-layout");
+    let root = clean_test_dir("durable-session-layout");
     let session_root = root.join("session");
     let session = session_root.join("default");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
 
     let ensured = ensure_durable_session_layout(
         &session_root,
@@ -96,9 +96,9 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
 
 #[test]
 fn durable_session_layout_helper_rejects_invalid_durable_inputs() {
-    let root = unique_test_dir("durable-session-layout-invalid");
+    let root = clean_test_dir("durable-session-layout-invalid");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
 
     assert_eq!(
         ensure_durable_session_layout(
@@ -148,9 +148,9 @@ fn durable_session_layout_helper_rejects_invalid_durable_inputs() {
 
 #[test]
 fn socket_runtime_handles_ping_send_resume_and_cancel() {
-    let root = unique_test_dir("socket-runtime");
+    let root = clean_test_dir("socket-runtime");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
 
     let ping =
         handle_socket_request_frame(&session_root, "/work", Some("debug/echo"), r#"{"op":"ping"}"#);
@@ -224,9 +224,9 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
 
 #[test]
 fn socket_runtime_temp_send_does_not_create_durable_session() {
-    let root = unique_test_dir("socket-runtime-temp");
+    let root = clean_test_dir("socket-runtime-temp");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
 
     let send = handle_socket_request_frame(
         &session_root,
@@ -246,9 +246,9 @@ fn socket_runtime_temp_send_does_not_create_durable_session() {
 
 #[test]
 fn socket_runtime_errors_convert_to_stable_error_frames() {
-    let root = unique_test_dir("socket-runtime-error");
+    let root = clean_test_dir("socket-runtime-error");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
 
     let error = handle_socket_request_frame(
         &session_root,
@@ -288,9 +288,9 @@ fn socket_runtime_errors_convert_to_stable_error_frames() {
 
 #[test]
 fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
-    let root = unique_test_dir("socket-stream-runtime");
+    let root = clean_test_dir("socket-stream-runtime");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     let pair = UnixStream::pair();
     assert!(pair.is_ok());
     let Ok((mut client, mut socket)) = pair else {
@@ -337,9 +337,9 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
 
 #[test]
 fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
-    let root = unique_test_dir("socket-stream-runtime-deny");
+    let root = clean_test_dir("socket-stream-runtime-deny");
     let session_root = root.join("session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     let pair = UnixStream::pair();
     assert!(pair.is_ok());
     let Ok((mut client, mut socket)) = pair else {
@@ -389,10 +389,9 @@ fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
 
 #[test]
 fn socket_listener_runtime_accepts_and_serves_one_connection() {
-    let root = unique_test_dir("socket-listener-runtime");
+    let root = clean_test_dir("socket-listener-runtime");
     let session_root = root.join("session");
     let socket_path = root.join("agent.sock");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
     assert!(fs::create_dir_all(&root).is_ok());
     let listener = UnixListener::bind(&socket_path);
     assert!(listener.is_ok());

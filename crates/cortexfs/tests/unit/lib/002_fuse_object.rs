@@ -4,9 +4,7 @@
     reason = "single projection smoke test keeps related FUSE ABI assertions together"
 )]
 fn fuse_v1_projection_exposes_reference_tree_ops() {
-    let root = unique_test_dir("fuse-v1-projection");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let root = reference_tree("fuse-v1-projection");
     write_fixture_file(&root.join("model").join("qwen"), 0o755);
     assert!(fs::create_dir_all(root.join("model").join("qwen.d")).is_ok());
     assert!(symlink("qwen", root.join("model").join("main")).is_ok());
@@ -174,9 +172,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
 
 #[test]
 fn fuse_v1_projection_reads_and_writes_control_files() {
-    let root = unique_test_dir("fuse-v1-projection-control-files");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let root = reference_tree("fuse-v1-projection-control-files");
     let projection =
         FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
 
@@ -232,9 +228,7 @@ fn fuse_v1_projection_reads_and_writes_control_files() {
 
 #[test]
 fn fuse_v1_projection_projects_configured_provider_models() {
-    let root = unique_test_dir("fuse-v1-provider-model");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let root = reference_tree("fuse-v1-provider-model");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("api.lmm.best.json"),
@@ -291,9 +285,7 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 
 #[test]
 fn fuse_v1_projection_skips_disabled_provider_models() {
-    let root = unique_test_dir("fuse-v1-disabled-provider-model");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let root = reference_tree("fuse-v1-disabled-provider-model");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("api.lmm.best.json"),
@@ -325,8 +317,7 @@ fn fuse_v1_projection_skips_disabled_provider_models() {
 
 #[test]
 fn reference_tree_bootstrap_rejects_conflicting_symlink_and_socket_paths() {
-    let root = unique_test_dir("reference-tree-conflict");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("reference-tree-conflict");
     write_text_file(&root.join("home").join("1000").join("model").join("coder"), "not link\n");
     assert_eq!(
         ensure_v1_reference_tree(&root),
@@ -345,8 +336,7 @@ fn reference_tree_bootstrap_rejects_conflicting_symlink_and_socket_paths() {
 
 #[test]
 fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
-    let root = unique_test_dir("reference-tree-stale-socket-symlink");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("reference-tree-stale-socket-symlink");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
     assert!(symlink(
         root.join("missing-runtime.sock"),
@@ -363,8 +353,7 @@ fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
 
 #[test]
 fn object_layout_accepts_model_agent_and_tool_triples() {
-    let root = unique_test_dir("object-layout-ok");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-ok");
     create_complete_object_layout(&root, ObjectClass::Model, "debug/echo", "socket");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "");
     create_complete_object_layout(&root, ObjectClass::Tool, "fs.read", "");
@@ -383,9 +372,9 @@ fn object_layout_accepts_model_agent_and_tool_triples() {
 
 #[test]
 fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
-    let root = unique_test_dir("object-bootstrap");
+    let root = clean_test_dir("object-bootstrap");
     let target = root.join("runtime").join("echo-jsonl");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     write_fixture_file(&target, 0o755);
 
     let model = install_executable_object_wrapper(

@@ -1,8 +1,8 @@
 #[test]
 fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
-    let root = unique_test_dir("object-bootstrap-bad");
+    let root = clean_test_dir("object-bootstrap-bad");
     let target = root.join("runtime").join("agent");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     write_fixture_file(&target, 0o755);
 
     assert_eq!(
@@ -62,8 +62,7 @@ fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
 
 #[test]
 fn object_layout_accepts_socket_symlink_to_live_unix_socket() {
-    let root = unique_test_dir("object-layout-socket-symlink");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-socket-symlink");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
     let runtime_socket = root.join("runtime").join("coder.sock");
     let _listener = bind_socket(&runtime_socket);
@@ -76,8 +75,7 @@ fn object_layout_accepts_socket_symlink_to_live_unix_socket() {
 
 #[test]
 fn object_layout_reports_missing_parts() {
-    let root = unique_test_dir("object-layout-bad");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-bad");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
     write_text_file(&root.join("agent").join("coder"), "#!/bin/sh\n");
 
@@ -100,8 +98,7 @@ fn object_layout_reports_missing_parts() {
 
 #[test]
 fn model_session_control_decides_socket_requirement() {
-    let root = unique_test_dir("object-layout-model-session");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-model-session");
     create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
 
     let no_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
@@ -243,8 +240,7 @@ fn model_driver_routes_reject_invalid_route_tables() {
 
 #[test]
 fn model_object_layout_rejects_provider_private_capabilities() {
-    let root = unique_test_dir("object-layout-model-cap");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-model-cap");
     create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
     write_text_file(
         &root
@@ -268,8 +264,7 @@ fn model_object_layout_rejects_provider_private_capabilities() {
 
 #[test]
 fn model_object_layout_rejects_invalid_driver_routes() {
-    let root = unique_test_dir("object-layout-model-driver");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-model-driver");
     create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
     write_text_file(
         &root
@@ -321,8 +316,7 @@ fn tool_schema_rejects_invalid_json_and_authority_fields() {
 
 #[test]
 fn tool_object_layout_rejects_authority_shaped_schema() {
-    let root = unique_test_dir("object-layout-tool-schema");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-tool-schema");
     create_complete_object_layout(&root, ObjectClass::Tool, "fs.read", "none");
     write_text_file(
         &root.join("tool").join("fs.read.d").join("schema"),
@@ -405,8 +399,7 @@ fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
 
 #[test]
 fn agent_object_layout_rejects_invalid_control_values() {
-    let root = unique_test_dir("object-layout-agent-controls");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("object-layout-agent-controls");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
     let control = root.join("agent").join("coder.d");
     write_text_file(&control.join("iso"), "container\n");

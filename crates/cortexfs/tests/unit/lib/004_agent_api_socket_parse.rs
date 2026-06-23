@@ -1,7 +1,6 @@
 #[test]
 fn agent_runtime_view_derives_identity_environment_policy_and_view() {
-    let root = unique_test_dir("agent-runtime-view");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("agent-runtime-view");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
     let control = root.join("agent").join("coder.d");
     write_text_file(
@@ -115,8 +114,7 @@ fn agent_runtime_view_rejects_invalid_control_files() {
 
 #[test]
 fn agent_runtime_view_reports_missing_controls_and_bad_agent_names() {
-    let root = unique_test_dir("agent-runtime-missing");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+    let root = clean_test_dir("agent-runtime-missing");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
     assert_eq!(
         derive_agent_runtime_view(&root, "bad/name"),
@@ -141,10 +139,10 @@ fn agent_runtime_view_reports_missing_controls_and_bad_agent_names() {
 
 #[test]
 fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
-    let root = unique_test_dir("agent-runtime-no-text-grant");
+    let root = clean_test_dir("agent-runtime-no-text-grant");
     let allowed = root.join("tool");
     let env_only = root.join("env-tool");
-    assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
+
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
     write_fixture_file(&env_only.join("fs.read"), 0o755);
     write_text_file(

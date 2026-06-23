@@ -471,4 +471,3 @@ fn detects_agent_control_paths_with_fixed_value_syntax() {
     assert_eq!(agent_control_path_kind("model/openai/gpt-4o.d/session"), None);
     assert_eq!(agent_control_path_kind("agent/bad/name.d/uid"), None);
 }
-
