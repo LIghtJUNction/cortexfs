@@ -12,8 +12,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
         FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
 
     let root_node = projection.root_node();
-    assert!(root_node.is_ok());
-    let Ok(root_node) = root_node else { return };
+    let root_node = ok!(root_node);
     assert_eq!(root_node.inode(), FUSE_V1_ROOT_INODE);
     assert_eq!(root_node.abi_path(), "");
     assert_eq!(root_node.attr().file_type(), FuseV1FileType::Directory);
@@ -27,8 +26,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
     ));
 
     let entries = projection.readdir_node(&root_node);
-    assert!(entries.is_ok());
-    let Ok(entries) = entries else { return };
+    let entries = ok!(entries);
     let names = entries
         .iter()
         .map(super::FuseV1DirEntry::name)
@@ -47,10 +45,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
     ));
     let Ok(model_node) = model_node else { return };
     let model_entries = projection.readdir("model");
-    assert!(model_entries.is_ok());
-    let Ok(model_entries) = model_entries else {
-        return;
-    };
+    let model_entries = ok!(model_entries);
     let model_names = model_entries
         .iter()
         .map(super::FuseV1DirEntry::name)
@@ -388,8 +383,7 @@ fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
             ("id", "debug/echo"),
         ],
     );
-    assert!(model.is_ok());
-    let Ok(model) = model else { return };
+    let model = ok!(model);
     let tool = install_executable_object_wrapper(
         &root,
         ObjectClass::Tool,
@@ -401,8 +395,7 @@ fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
             ("policy", "allow coder_t tool:fs.read execute"),
         ],
     );
-    assert!(tool.is_ok());
-    let Ok(tool) = tool else { return };
+    let tool = ok!(tool);
 
     assert_eq!(model.executable(), root.join("model").join("debug").join("echo"));
     assert_eq!(tool.control_dir(), root.join("tool").join("fs.read.d"));
@@ -410,16 +403,12 @@ fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
     assert!(inspect_object_layout(&root, ObjectClass::Tool, "fs.read").is_ok());
 
     let wrapper = fs::read_to_string(root.join("tool").join("fs.read"));
-    assert!(wrapper.is_ok());
-    let Ok(wrapper) = wrapper else { return };
+    let wrapper = ok!(wrapper);
     assert!(wrapper.starts_with("#!/bin/sh\n"));
     assert!(wrapper.contains("exec '"));
     let permissions = fs::metadata(root.join("tool").join("fs.read"))
         .map(|metadata| metadata.permissions().mode());
-    assert!(permissions.is_ok());
-    let Ok(permissions) = permissions else {
-        return;
-    };
+    let permissions = ok!(permissions);
     assert_ne!(permissions & 0o111, 0);
 
     let _ignored = fs::remove_dir_all(&root);

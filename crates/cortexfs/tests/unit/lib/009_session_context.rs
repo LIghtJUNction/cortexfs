@@ -231,14 +231,11 @@ fn session_index_update_sets_current_and_deduplicated_list() {
     let updated = update_session_index(&session_root, "review-1", Some("cwd-hash-1"));
     assert_eq!(updated, Ok(()));
     let list = fs::read_to_string(session_root.join("index").join("list"));
-    assert!(list.is_ok());
-    let Ok(list) = list else { return };
+    let list = ok!(list);
     let current = fs::read_to_string(session_root.join("index").join("current"));
-    assert!(current.is_ok());
-    let Ok(current) = current else { return };
+    let current = ok!(current);
     let by_cwd = fs::read_to_string(session_root.join("index").join("by-cwd").join("cwd-hash-1"));
-    assert!(by_cwd.is_ok());
-    let Ok(by_cwd) = by_cwd else { return };
+    let by_cwd = ok!(by_cwd);
 
     assert_eq!(list, "review-1\ndefault\n");
     assert_eq!(current, "review-1\n");
@@ -394,15 +391,12 @@ fn context_pack_rebuild_writes_inspectable_sources_without_child_history() {
     );
 
     let built = rebuild_context_pack(&session, Some("coder"), 2);
-    assert!(built.is_ok());
-    let Ok(built) = built else { return };
+    let built = ok!(built);
 
     let pack_json = fs::read_to_string(context.join("pack.json"));
-    assert!(pack_json.is_ok());
-    let Ok(pack_json) = pack_json else { return };
+    let pack_json = ok!(pack_json);
     let pack_md = fs::read_to_string(context.join("pack.md"));
-    assert!(pack_md.is_ok());
-    let Ok(pack_md) = pack_md else { return };
+    let pack_md = ok!(pack_md);
 
     assert_eq!(built.pack_json(), pack_json);
     assert_eq!(built.pack_md(), pack_md);

@@ -8,8 +8,7 @@ fn tool_listing_ignores_non_executable_and_control_entries() {
     write_fixture_file(&tools.join("bad.sock"), 0o755);
 
     let hits = ToolPath::new([tools.clone()]).list();
-    assert!(hits.is_ok());
-    let Ok(hits) = hits else { return };
+    let hits = ok!(hits);
     let expected = tools.join("fs.read");
     assert_eq!(hits.len(), 1);
     assert_eq!(hits.first().map(ToolHit::path), Some(expected.as_path()));
@@ -28,8 +27,7 @@ fn tool_execution_authority_requires_all_layers() {
     write_fixture_file(&tools.join("fs.read"), 0o755);
 
     let metadata = fs::metadata(tools.join("fs.read"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let agent_policy = allow_tool_policy("coder_t", "fs.read");
@@ -58,8 +56,7 @@ fn model_tool_call_syntax_does_not_execute_tools() {
     assert!(model_event.is_ok());
 
     let metadata = fs::metadata(tools.join("fs.read"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let policy = allow_tool_policy("echo_t", "fs.read");
@@ -103,15 +100,11 @@ fn prompt_skill_and_mcp_config_cannot_grant_tool_execution() {
     assert!(root.join("work").join(".mcp.json").is_file());
 
     let metadata = fs::metadata(tools.join("fs.read"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let empty_policy = PolicyV0::parse("");
-    assert!(empty_policy.is_ok());
-    let Ok(empty_policy) = empty_policy else {
-        return;
-    };
+    let empty_policy = ok!(empty_policy);
     let tool_policy = allow_tool_policy("coder_t", "fs.read");
     let tool_path = ToolPath::new([tools]);
 
@@ -137,18 +130,14 @@ fn tool_execution_authority_denies_without_policy_or_mount_exec() {
     );
 
     let metadata = fs::metadata(tools.join("fs.read"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let executable_mount = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let noexec_mount = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev,noexec");
     let agent_policy = allow_tool_policy("coder_t", "fs.read");
     let tool_policy = allow_tool_policy("coder_t", "fs.read");
     let empty_policy = PolicyV0::parse("");
-    assert!(empty_policy.is_ok());
-    let Ok(empty_policy) = empty_policy else {
-        return;
-    };
+    let empty_policy = ok!(empty_policy);
     let tool_path = ToolPath::new([tools]);
 
     let denied_by_noexec = authorize_tool_execution(
@@ -228,8 +217,7 @@ fn project_tools_are_visible_only_through_ctx_path_order() {
     assert!(matches!(found, Ok(Some(ref hit)) if hit.path() == project.join("project.test")));
 
     let metadata = fs::metadata(project.join("project.test"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_target(&project, "rw", "bind,nosuid,nodev");
     let policy = allow_tool_policy("coder_t", "project.test");
@@ -255,16 +243,12 @@ fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
     );
 
     let metadata = fs::metadata(tools.join("mcp.github.search_issues"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let tool_path = ToolPath::new([tools]);
     let empty_policy = PolicyV0::parse("");
-    assert!(empty_policy.is_ok());
-    let Ok(empty_policy) = empty_policy else {
-        return;
-    };
+    let empty_policy = ok!(empty_policy);
     let allow_mcp = allow_tool_policy("coder_t", "mcp.github.search_issues");
 
     let denied = authorize_tool_execution(
@@ -296,16 +280,12 @@ fn tool_schema_cannot_grant_execution_authority() {
     );
 
     let metadata = fs::metadata(tools.join("fs.read"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
     let tool_path = ToolPath::new([tools]);
     let empty_policy = PolicyV0::parse("");
-    assert!(empty_policy.is_ok());
-    let Ok(empty_policy) = empty_policy else {
-        return;
-    };
+    let empty_policy = ok!(empty_policy);
     let tool_policy = allow_tool_policy("coder_t", "fs.read");
 
     let denied = authorize_tool_execution(
@@ -326,8 +306,7 @@ fn tool_execution_authority_checks_linux_identity_mode_bits() {
     write_fixture_file(&tools.join("owner-only"), 0o100);
 
     let metadata = fs::metadata(tools.join("owner-only"));
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     let owner_identity = AgentUnixIdentity::new(metadata.uid(), metadata.gid(), []);
     let other_identity = AgentUnixIdentity::new(
         metadata.uid().saturating_add(1),

@@ -12,8 +12,7 @@ fn indexed_socket_send_rejects_temp_sessions_before_index_update() {
     let temp = parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","scope":"temp","cwd":"/work","input":"hello"}"#,
     );
-    assert!(temp.is_ok());
-    let Ok(temp) = temp else { return };
+    let temp = ok!(temp);
     assert_eq!(
         record_indexed_socket_send_to_session(&session_root, &temp),
         Err(IndexedSocketSessionRecordError::Session(
@@ -21,8 +20,7 @@ fn indexed_socket_send_rejects_temp_sessions_before_index_update() {
         ))
     );
     let list = fs::read_to_string(session_root.join("index").join("list"));
-    assert!(list.is_ok());
-    let Ok(list) = list else { return };
+    let list = ok!(list);
     assert_eq!(list, "default\n");
     assert!(!session_root
         .join("index")
@@ -51,17 +49,13 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     assert!(inspect_session_layout(&session).is_ok());
 
     let list = fs::read_to_string(session_root.join("index").join("list"));
-    assert!(list.is_ok());
-    let Ok(list) = list else { return };
+    let list = ok!(list);
     let current = fs::read_to_string(session_root.join("index").join("current"));
-    assert!(current.is_ok());
-    let Ok(current) = current else { return };
+    let current = ok!(current);
     let meta = fs::read_to_string(session.join("meta.json"));
-    assert!(meta.is_ok());
-    let Ok(meta) = meta else { return };
+    let meta = ok!(meta);
     let pack = fs::read_to_string(session.join("context").join("pack.json"));
-    assert!(pack.is_ok());
-    let Ok(pack) = pack else { return };
+    let pack = ok!(pack);
 
     assert_eq!(list, "default\n");
     assert_eq!(current, "default\n");
@@ -83,12 +77,10 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     let request = parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
     );
-    assert!(request.is_ok());
-    let Ok(request) = request else { return };
+    let request = ok!(request);
     assert!(record_indexed_socket_send_to_session(&session_root, &request).is_ok());
     let state = fs::read_to_string(session.join("state"));
-    assert!(state.is_ok());
-    let Ok(state) = state else { return };
+    let state = ok!(state);
     assert_eq!(state, "active\n");
 
     let _ignored = fs::remove_dir_all(&root);
@@ -154,8 +146,7 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
 
     let ping =
         handle_socket_request_frame(&session_root, "/work", Some("debug/echo"), r#"{"op":"ping"}"#);
-    assert!(ping.is_ok());
-    let Ok(ping) = ping else { return };
+    let ping = ok!(ping);
     assert_eq!(ping.jsonl(), "{\"type\":\"pong\"}\n");
 
     let send = handle_socket_request_frame(
@@ -164,8 +155,7 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
         Some("debug/echo"),
         r#"{"op":"send","id":"msg-1","session":"default","input":"hello"}"#,
     );
-    assert!(send.is_ok());
-    let Ok(send) = send else { return };
+    let send = ok!(send);
     assert_eq!(send.frames().len(), 1);
     assert!(send.jsonl().contains("\"type\":\"start\""));
     assert!(send.jsonl().contains("\"run\":\"msg-1\""));
@@ -185,8 +175,7 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
         Some("debug/echo"),
         r#"{"op":"resume","session":"default"}"#,
     );
-    assert!(resume_all.is_ok());
-    let Ok(resume_all) = resume_all else { return };
+    let resume_all = ok!(resume_all);
     assert_eq!(resume_all.frames().len(), 2);
     assert!(resume_all.jsonl().contains("\"run\":\"msg-1\""));
     assert!(resume_all.jsonl().contains("\"run\":\"msg-2\""));
@@ -197,10 +186,7 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
         Some("debug/echo"),
         r#"{"op":"resume","session":"default","after":"msg-1"}"#,
     );
-    assert!(resume_after.is_ok());
-    let Ok(resume_after) = resume_after else {
-        return;
-    };
+    let resume_after = ok!(resume_after);
     assert_eq!(resume_after.frames().len(), 1);
     assert!(!resume_after.jsonl().contains("\"run\":\"msg-1\""));
     assert!(resume_after.jsonl().contains("\"run\":\"msg-2\""));
@@ -211,12 +197,10 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
         Some("debug/echo"),
         r#"{"op":"cancel","id":"msg-2"}"#,
     );
-    assert!(cancel.is_ok());
-    let Ok(cancel) = cancel else { return };
+    let cancel = ok!(cancel);
     assert!(cancel.jsonl().contains("\"status\":\"cancelled\""));
     let state = fs::read_to_string(session_root.join("default").join("state"));
-    assert!(state.is_ok());
-    let Ok(state) = state else { return };
+    let state = ok!(state);
     assert_eq!(state, "cancelled\n");
 
     let _ignored = fs::remove_dir_all(&root);
@@ -234,8 +218,7 @@ fn socket_runtime_temp_send_does_not_create_durable_session() {
         Some("debug/echo"),
         r#"{"op":"send","id":"msg-1","session":"scratch","scope":"temp","input":"hello"}"#,
     );
-    assert!(send.is_ok());
-    let Ok(send) = send else { return };
+    let send = ok!(send);
     assert_eq!(send.frames().len(), 1);
     assert!(send.jsonl().contains("\"type\":\"start\""));
     assert!(send.jsonl().contains("\"model\":\"debug/echo\""));
@@ -272,8 +255,7 @@ fn socket_runtime_errors_convert_to_stable_error_frames() {
         return;
     };
     let parsed = serde_json::from_str::<serde_json::Value>(frame);
-    assert!(parsed.is_ok());
-    let Ok(parsed) = parsed else { return };
+    let parsed = ok!(parsed);
     assert_eq!(
         parsed.get("type").and_then(serde_json::Value::as_str),
         Some("error")
@@ -292,13 +274,9 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
     let session_root = root.join("session");
 
     let pair = UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((mut client, mut socket)) = pair else {
-        return;
-    };
+    let (mut client, mut socket) = ok!(pair);
     let peer = peer_credentials(&socket);
-    assert!(peer.is_ok());
-    let Ok(peer) = peer else { return };
+    let peer = ok!(peer);
     let policy = SocketPeerPolicy::uid_gid(peer.uid(), peer.gid());
 
     assert!(client
@@ -316,14 +294,12 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
         "/work",
         Some("debug/echo"),
     );
-    assert!(outcome.is_ok());
-    let Ok(outcome) = outcome else { return };
+    let outcome = ok!(outcome);
     assert_eq!(outcome.frames().len(), 1);
 
     let mut buffer = [0_u8; 256];
     let read = client.read(&mut buffer);
-    assert!(read.is_ok());
-    let Ok(read) = read else { return };
+    let read = ok!(read);
     let Some(bytes) = buffer.get(..read) else {
         return;
     };
@@ -341,13 +317,9 @@ fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
     let session_root = root.join("session");
 
     let pair = UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((mut client, mut socket)) = pair else {
-        return;
-    };
+    let (mut client, mut socket) = ok!(pair);
     let peer = peer_credentials(&socket);
-    assert!(peer.is_ok());
-    let Ok(peer) = peer else { return };
+    let peer = ok!(peer);
     let denied_uid = if peer.uid() == u32::MAX {
         peer.uid() - 1
     } else {
@@ -374,8 +346,7 @@ fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
 
     let mut buffer = [0_u8; 256];
     let read = client.read(&mut buffer);
-    assert!(read.is_ok());
-    let Ok(read) = read else { return };
+    let read = ok!(read);
     let Some(bytes) = buffer.get(..read) else {
         return;
     };
@@ -394,12 +365,10 @@ fn socket_listener_runtime_accepts_and_serves_one_connection() {
     let socket_path = root.join("agent.sock");
     assert!(fs::create_dir_all(&root).is_ok());
     let listener = UnixListener::bind(&socket_path);
-    assert!(listener.is_ok());
-    let Ok(listener) = listener else { return };
+    let listener = ok!(listener);
 
     let client = UnixStream::connect(&socket_path);
-    assert!(client.is_ok());
-    let Ok(mut client) = client else { return };
+    let mut client = ok!(client);
     assert!(client
         .write_all(
             br#"{"op":"send","id":"msg-1","session":"default","input":"hello"}
@@ -410,14 +379,12 @@ fn socket_listener_runtime_accepts_and_serves_one_connection() {
 
     let outcome =
         serve_unix_socket_listener_once(&listener, None, &session_root, "/work", Some("debug/echo"));
-    assert!(outcome.is_ok());
-    let Ok(outcome) = outcome else { return };
+    let outcome = ok!(outcome);
     assert_eq!(outcome.frames().len(), 1);
 
     let mut buffer = [0_u8; 256];
     let read = client.read(&mut buffer);
-    assert!(read.is_ok());
-    let Ok(read) = read else { return };
+    let read = ok!(read);
     let Some(bytes) = buffer.get(..read) else {
         return;
     };

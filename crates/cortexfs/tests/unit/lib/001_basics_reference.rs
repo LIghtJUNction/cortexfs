@@ -172,10 +172,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     .is_ok());
 
     let bootstrapped = ensure_v1_reference_tree(&root);
-    assert!(bootstrapped.is_ok());
-    let Ok(bootstrapped) = bootstrapped else {
-        return;
-    };
+    let bootstrapped = ok!(bootstrapped);
     assert_eq!(bootstrapped.root(), root.as_path());
 
     let status = fs::read_to_string(root.join("status"));
@@ -214,12 +211,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         ("shell.exec", &["cmd"][..]),
     ] {
         let schema = fs::read_to_string(root.join("tool").join(format!("{tool}.d/schema")));
-        assert!(schema.is_ok());
-        let Ok(schema) = schema else { return };
+        let schema = ok!(schema);
         assert!(inspect_tool_schema_json(&schema).is_ok());
         let parsed = serde_json::from_str::<serde_json::Value>(&schema);
-        assert!(parsed.is_ok());
-        let Ok(parsed) = parsed else { return };
+        let parsed = ok!(parsed);
         for field in required {
             assert!(parsed
                 .pointer("/required")
@@ -263,8 +258,7 @@ fn reference_tree_model_exec_is_readonly_metadata() {
         FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
 
     let metadata = projection.read_to_string("model/debug/echo");
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     assert!(metadata.starts_with(&format!("#!{CORTEXFS_OBJECT_RUNNER}\n")));
     assert!(metadata.contains("# cortexfs.object=model\n"));
     assert!(metadata.contains("# cortexfs.id=debug/echo\n"));
@@ -392,8 +386,7 @@ fn model_exec_metadata_exposes_driver_route_table() {
     write_text_file(&control.join("status"), "idle\n");
 
     let metadata = model_exec_metadata("openai/gpt-4o", &control);
-    assert!(metadata.is_ok());
-    let Ok(metadata) = metadata else { return };
+    let metadata = ok!(metadata);
     assert!(metadata.contains("# cortexfs.driver=openai-chat\n"));
     assert!(metadata.contains("# cortexfs.driver.default=openai-chat\n"));
     assert!(metadata.contains("# cortexfs.driver.exec=openai-chat\n"));
@@ -409,8 +402,7 @@ fn echo_model_runner_emits_one_shot_jsonl() {
     let result = run_echo_model(["fix tests"], &mut stdout);
     assert!(result.is_ok());
     let stdout = String::from_utf8(stdout);
-    assert!(stdout.is_ok());
-    let Ok(stdout) = stdout else { return };
+    let stdout = ok!(stdout);
     assert!(stdout.contains(r#"{"type":"start","run":"r1","model":"debug/echo"}"#));
     assert!(stdout.contains(r#"{"type":"delta","run":"r1","text":"fix tests"}"#));
     assert!(stdout.contains(r#"{"type":"done","run":"r1","status":"ok"}"#));
@@ -428,14 +420,10 @@ fn reference_tree_standard_tools_emit_jsonl() {
     let read = Command::new(root.join("tool").join("fs.read"))
         .arg(read_arg)
         .output();
-    assert!(read.is_ok());
-    let Ok(read) = read else { return };
+    let read = ok!(read);
     assert!(read.status.success());
     let read_stdout = String::from_utf8(read.stdout);
-    assert!(read_stdout.is_ok());
-    let Ok(read_stdout) = read_stdout else {
-        return;
-    };
+    let read_stdout = ok!(read_stdout);
     assert!(read_stdout.contains(r#"{"type":"start","run":"r1","tool":"fs.read"}"#));
     assert!(read_stdout.contains(r#""text":"visible""#));
     assert!(inspect_event_stream_jsonl(&read_stdout).is_ok());
@@ -448,30 +436,22 @@ fn reference_tree_standard_tools_emit_jsonl() {
     let write = Command::new(root.join("tool").join("fs.write"))
         .arg(write_arg)
         .output();
-    assert!(write.is_ok());
-    let Ok(write) = write else { return };
+    let write = ok!(write);
     assert!(write.status.success());
     let written = fs::read_to_string(&write_target);
     assert!(matches!(written, Ok(ref content) if content == "stored"));
     let write_stdout = String::from_utf8(write.stdout);
-    assert!(write_stdout.is_ok());
-    let Ok(write_stdout) = write_stdout else {
-        return;
-    };
+    let write_stdout = ok!(write_stdout);
     assert!(write_stdout.contains(r#"{"type":"start","run":"r1","tool":"fs.write"}"#));
     assert!(inspect_event_stream_jsonl(&write_stdout).is_ok());
 
     let shell = Command::new(root.join("tool").join("shell.exec"))
         .arg(r#"{"cmd":"printf shell-ok"}"#)
         .output();
-    assert!(shell.is_ok());
-    let Ok(shell) = shell else { return };
+    let shell = ok!(shell);
     assert!(shell.status.success());
     let shell_stdout = String::from_utf8(shell.stdout);
-    assert!(shell_stdout.is_ok());
-    let Ok(shell_stdout) = shell_stdout else {
-        return;
-    };
+    let shell_stdout = ok!(shell_stdout);
     assert!(shell_stdout.contains(r#"{"type":"start","run":"r1","tool":"shell.exec"}"#));
     assert!(shell_stdout.contains(r#""text":"shell-ok""#));
     assert!(inspect_event_stream_jsonl(&shell_stdout).is_ok());

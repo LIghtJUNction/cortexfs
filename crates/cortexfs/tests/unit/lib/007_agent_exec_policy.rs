@@ -22,16 +22,12 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 "#,
     );
     let permissions = fs::metadata(&agent_executable);
-    assert!(permissions.is_ok());
-    let Ok(metadata) = permissions else { return };
+    let metadata = ok!(permissions);
     let mut permissions = metadata.permissions();
     permissions.set_mode(0o755);
     assert!(fs::set_permissions(&agent_executable, permissions).is_ok());
     let pair = UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((mut client, mut socket)) = pair else {
-        return;
-    };
+    let (mut client, mut socket) = ok!(pair);
 
     assert!(client
         .write_all(
@@ -54,8 +50,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
             agent_executable: &agent_executable,
         },
     );
-    assert!(outcome.is_ok());
-    let Ok(outcome) = outcome else { return };
+    let outcome = ok!(outcome);
     assert_eq!(outcome.frames().len(), 3);
     assert!(outcome.jsonl().contains("\"type\":\"start\""));
     assert!(outcome.jsonl().contains("\"type\":\"delta\""));
@@ -64,8 +59,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 
     let mut buffer = [0_u8; 512];
     let read = client.read(&mut buffer);
-    assert!(read.is_ok());
-    let Ok(read) = read else { return };
+    let read = ok!(read);
     let Some(bytes) = buffer.get(..read) else {
         return;
     };
@@ -98,17 +92,13 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     let permissions = fs::metadata(&agent_executable);
-    assert!(permissions.is_ok());
-    let Ok(metadata) = permissions else { return };
+    let metadata = ok!(permissions);
     let mut permissions = metadata.permissions();
     permissions.set_mode(0o755);
     assert!(fs::set_permissions(&agent_executable, permissions).is_ok());
 
     let pair = UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((mut client, mut socket)) = pair else {
-        return;
-    };
+    let (mut client, mut socket) = ok!(pair);
     assert!(client
         .write_all(
             br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
@@ -130,8 +120,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             agent_executable: &agent_executable,
         },
     );
-    assert!(outcome.is_ok());
-    let Ok(outcome) = outcome else { return };
+    let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains(&format!(
         r#""text":"{}""#,
         root.to_string_lossy()
@@ -160,18 +149,12 @@ exit 1
 "#,
     );
     let permissions = fs::metadata(&agent_executable).map(|metadata| metadata.permissions());
-    assert!(permissions.is_ok());
-    let Ok(mut permissions) = permissions else {
-        return;
-    };
+    let mut permissions = ok!(permissions);
     permissions.set_mode(0o755);
     assert!(fs::set_permissions(&agent_executable, permissions).is_ok());
 
     let pair = UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((mut client, mut socket)) = pair else {
-        return;
-    };
+    let (mut client, mut socket) = ok!(pair);
 
     assert!(client
         .write_all(
@@ -194,8 +177,7 @@ exit 1
             agent_executable: &agent_executable,
         },
     );
-    assert!(outcome.is_ok());
-    let Ok(outcome) = outcome else { return };
+    let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("\"code\":\"EHOSTDOWN\""));
     assert!(outcome
         .jsonl()
@@ -204,8 +186,7 @@ exit 1
 
     let mut buffer = [0_u8; 512];
     let read = client.read(&mut buffer);
-    assert!(read.is_ok());
-    let Ok(read) = read else { return };
+    let read = ok!(read);
     let Some(bytes) = buffer.get(..read) else {
         return;
     };
@@ -225,8 +206,7 @@ allow coder_t model:debug/echo use
 allow coder_t shared:project-a read
 ",
     );
-    assert!(parsed.is_ok());
-    let Ok(policy) = parsed else { return };
+    let policy = ok!(parsed);
 
     assert!(policy.allows(
         "coder_t",
@@ -270,8 +250,7 @@ allow coder_t shared:project-a read
 allow coder_t session:default resume
 ",
     );
-    assert!(parent.is_ok());
-    let Ok(parent) = parent else { return };
+    let parent = ok!(parent);
 
     let child = PolicyV0::parse(
         "\
@@ -280,8 +259,7 @@ allow reviewer_t model:debug/echo use
 allow reviewer_t shared:project-a read
 ",
     );
-    assert!(child.is_ok());
-    let Ok(child) = child else { return };
+    let child = ok!(child);
     assert!(child.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
     assert!(!child.is_exact_subset_of(&parent));
 
@@ -290,10 +268,7 @@ allow reviewer_t shared:project-a read
 allow reviewer_t tool:shell.exec execute
 ",
     );
-    assert!(expanded_tool.is_ok());
-    let Ok(expanded_tool) = expanded_tool else {
-        return;
-    };
+    let expanded_tool = ok!(expanded_tool);
     assert!(!expanded_tool.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
 
     let wrong_subject = PolicyV0::parse(
@@ -301,10 +276,7 @@ allow reviewer_t tool:shell.exec execute
 allow other_t tool:fs.read execute
 ",
     );
-    assert!(wrong_subject.is_ok());
-    let Ok(wrong_subject) = wrong_subject else {
-        return;
-    };
+    let wrong_subject = ok!(wrong_subject);
     assert!(!wrong_subject.is_authority_subset_of(&parent, "reviewer_t", "coder_t"));
 }
 
@@ -341,8 +313,7 @@ fn mount_table_parses_fixed_v0_format() {
 /tmp\t/tmp\trw\t-
 ",
     );
-    assert!(parsed.is_ok());
-    let Ok(table) = parsed else { return };
+    let table = ok!(parsed);
     assert_eq!(table.entries().len(), 3);
 
     let Some(first) = table.entries().first() else {
@@ -375,8 +346,7 @@ fn mount_table_checks_child_attenuation() {
 /ctx/shared/project-a\t/shared/project-a\tro\trbind,nosuid,nodev,noexec
 ",
     );
-    assert!(parent.is_ok());
-    let Ok(parent) = parent else { return };
+    let parent = ok!(parent);
 
     let narrowed = MountTable::parse(
         "\
@@ -384,8 +354,7 @@ fn mount_table_checks_child_attenuation() {
 /ctx/shared/project-a\t/shared/project-a\tro\tbind,nosuid,nodev,noexec
 ",
     );
-    assert!(narrowed.is_ok());
-    let Ok(narrowed) = narrowed else { return };
+    let narrowed = ok!(narrowed);
     assert!(narrowed.is_subset_of(&parent));
 
     let write_expansion = MountTable::parse(
@@ -393,10 +362,7 @@ fn mount_table_checks_child_attenuation() {
 /ctx/shared/project-a\t/shared/project-a\trw\tbind,nosuid,nodev,noexec
 ",
     );
-    assert!(write_expansion.is_ok());
-    let Ok(write_expansion) = write_expansion else {
-        return;
-    };
+    let write_expansion = ok!(write_expansion);
     assert!(!write_expansion.is_subset_of(&parent));
 
     let removed_safety = MountTable::parse(
@@ -404,10 +370,7 @@ fn mount_table_checks_child_attenuation() {
 /ctx/shared/project-a\t/shared/project-a\tro\tbind,nosuid,nodev
 ",
     );
-    assert!(removed_safety.is_ok());
-    let Ok(removed_safety) = removed_safety else {
-        return;
-    };
+    let removed_safety = ok!(removed_safety);
     assert!(!removed_safety.is_subset_of(&parent));
 
     let hidden_parent_path = MountTable::parse(
@@ -415,10 +378,7 @@ fn mount_table_checks_child_attenuation() {
 /secret\t/secret\tro\tbind,nosuid,nodev,noexec
 ",
     );
-    assert!(hidden_parent_path.is_ok());
-    let Ok(hidden_parent_path) = hidden_parent_path else {
-        return;
-    };
+    let hidden_parent_path = ok!(hidden_parent_path);
     assert!(!hidden_parent_path.is_subset_of(&parent));
 }
 

@@ -166,8 +166,7 @@ fn model_capabilities_accept_only_stable_words() {
 #[test]
 fn model_driver_routes_support_legacy_and_use_case_specific_drivers() {
     let legacy = parse_model_driver_routes("debug\n");
-    assert!(legacy.is_ok());
-    let Ok(legacy) = legacy else { return };
+    let legacy = ok!(legacy);
     assert_eq!(
         legacy.drivers_for(ModelDriverUseCase::Exec),
         Some([String::from("debug")].as_slice())
@@ -185,8 +184,7 @@ socket=openai-chat
 agent=openai-responses,openai-chat
 ",
     );
-    assert!(routed.is_ok());
-    let Ok(routed) = routed else { return };
+    let routed = ok!(routed);
     assert_eq!(
         routed.drivers_for(ModelDriverUseCase::Exec),
         Some([String::from("openai-chat")].as_slice())
