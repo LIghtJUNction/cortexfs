@@ -109,15 +109,11 @@ fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     for (label, session_dir) in discover_session_dirs(root)? {
         let report = inspect_session_layout(&session_dir);
-        if report.is_ok() {
-            print_line(&format!("ok {label}"))?;
-        } else {
-            ok = false;
-            print_line(&format!(
-                "invalid {label}: {}",
-                format_session_layout_issues(report.issues())
-            ))?;
-        }
+        ok &= print_doctor_report(
+            &label,
+            report.is_ok(),
+            &format_session_layout_issues(report.issues()),
+        )?;
     }
     Ok(ok)
 }
@@ -137,15 +133,20 @@ fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
             continue;
         }
         let report = inspect_shared_queue_layout(&queue);
-        if report.is_ok() {
-            print_line(&format!("ok shared/{space}/queue"))?;
-        } else {
-            ok = false;
-            print_line(&format!(
-                "invalid shared/{space}/queue: {}",
-                format_shared_queue_layout_issues(report.issues())
-            ))?;
-        }
+        ok &= print_doctor_report(
+            &format!("shared/{space}/queue"),
+            report.is_ok(),
+            &format_shared_queue_layout_issues(report.issues()),
+        )?;
+    }
+    Ok(ok)
+}
+
+fn print_doctor_report(label: &str, ok: bool, issues: &str) -> Result<bool, CliError> {
+    if ok {
+        print_line(&format!("ok {label}"))?;
+    } else {
+        print_line(&format!("invalid {label}: {issues}"))?;
     }
     Ok(ok)
 }

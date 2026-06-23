@@ -199,7 +199,7 @@ pub fn resolve_api_key(
         env_name,
         service,
         account,
-        env_var_secret,
+        |name| std::env::var(name),
         system_keychain_secret,
     )
 }
@@ -231,10 +231,6 @@ where
         }
     }
     keychain_lookup(service, account)
-}
-
-fn env_var_secret(name: &str) -> Result<String, std::env::VarError> {
-    std::env::var(name)
 }
 
 fn system_keychain_secret(

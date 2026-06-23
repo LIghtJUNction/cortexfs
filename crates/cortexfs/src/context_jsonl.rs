@@ -130,7 +130,7 @@ fn inspect_text_source_record(
     text_value: Option<&JsonStringField>,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
+    require_context_string_field(line, record.id.as_ref(), "id", issues, is_object_name);
     require_context_string_field(
         line,
         text_value,
@@ -152,7 +152,7 @@ fn inspect_ref_record(
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
 ) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_record_id);
+    require_context_string_field(line, record.id.as_ref(), "id", issues, is_object_name);
     require_context_string_field(
         line,
         record.path.as_ref(),
@@ -300,10 +300,6 @@ fn json_string_array_values(value: Option<&JsonStringArrayField>) -> Option<&[St
             None
         }
     })
-}
-
-fn is_context_record_id(value: &str) -> bool {
-    is_object_name(value)
 }
 
 fn is_context_hash_id(value: &str) -> bool {

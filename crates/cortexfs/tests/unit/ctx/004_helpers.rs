@@ -33,6 +33,86 @@ fn assert_file_check_error_contains(root: &Path, path: &str, fragments: &[&str])
     }), "{path}");
 }
 
+fn is_model_capability_path(path: &str) -> bool {
+    parse_abi_path(path).model_control_file() == Some("cap")
+}
+
+fn is_model_driver_path(path: &str) -> bool {
+    parse_abi_path(path).model_control_file() == Some("driver")
+}
+
+fn is_tool_schema_path(path: &str) -> bool {
+    matches!(
+        parse_abi_path(path),
+        AbiPathKind::ObjectControl {
+            class: ObjectClass::Tool,
+            file: "schema",
+            ..
+        }
+    )
+}
+
+fn is_shared_tool_schema_path(path: &str) -> bool {
+    matches!(
+        parse_abi_path(path),
+        AbiPathKind::SharedToolControl { file: "schema", .. }
+    )
+}
+
+fn is_shared_queue_root_path(path: &str) -> bool {
+    matches!(parse_abi_path(path), AbiPathKind::SharedQueueRoot { .. })
+}
+
+fn agent_control_path_kind(path: &str) -> Option<AgentControlKind> {
+    parse_abi_path(path).agent_control_kind()
+}
+
+fn is_durable_session_instance_path(path: &str) -> bool {
+    parse_abi_path(path).is_session_instance()
+}
+
+fn session_index_path_kind(path: &str) -> Option<SessionIndexKind> {
+    parse_abi_path(path).session_index_kind()
+}
+
+fn is_session_events_path(path: &str) -> bool {
+    matches!(
+        parse_abi_path(path),
+        AbiPathKind::SessionFile {
+            file: "events.jsonl",
+            ..
+        }
+    )
+}
+
+fn is_session_messages_path(path: &str) -> bool {
+    matches!(
+        parse_abi_path(path),
+        AbiPathKind::SessionFile {
+            file: "messages.jsonl",
+            ..
+        }
+    )
+}
+
+fn session_control_path_kind(path: &str) -> Option<SessionControlKind> {
+    parse_abi_path(path).session_control_kind()
+}
+
+fn is_context_pack_path(path: &str) -> bool {
+    parse_abi_path(path).is_context_pack()
+}
+
+fn context_jsonl_path_kind(path: &str) -> Option<ContextJsonlKind> {
+    parse_abi_path(path).context_jsonl_kind()
+}
+
+fn executable_object_path(path: &str) -> Option<(ObjectClass, String)> {
+    parse_abi_path(path)
+        .executable_object()
+        .map(|(class, name)| (class, name.into_owned()))
+}
+
 fn fixture_path(root: &Path, parts: &[&str]) -> PathBuf {
     let mut path = root.to_path_buf();
     path.extend(parts.iter().copied());
