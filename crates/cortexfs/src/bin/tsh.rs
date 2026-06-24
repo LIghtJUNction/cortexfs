@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, BufRead, Read, Write};
@@ -44,10 +45,11 @@ fn main() -> ExitCode {
 fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let (root, command) = parse_args(args)?;
     let mut cache = DynamicToolCache::new(tool_cache_capacity());
+    let mut context = ToolContext::default();
     match command {
         TshCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
         TshCommand::List => list_tools(&root).map(|()| ExitCode::SUCCESS),
-        TshCommand::Repl => run_repl(&root, &mut cache),
+        TshCommand::Repl => run_repl(&root, &mut cache, &mut context),
         TshCommand::Tool { name, args } => run_tool(&root, &mut cache, &name, args),
     }
 }
@@ -132,6 +134,12 @@ repl:
   type TOOL        explain whether TOOL is a builtin or visible tool
   command -v TOOL  print the command that tsh would run
   help TOOL        show metadata for a visible tool
+  load TOOL        load tool metadata into this tsh context
+  unload TOOL      remove unpinned tool metadata from this tsh context
+  loads            list loaded tool context entries
+  pin TOOL         load TOOL and keep it from context/cache eviction
+  unpin TOOL       allow a pinned tool to be unloaded/evicted again
+  pins             list pinned tool context entries
   bash             enter an interactive shell tool
   fs.read PATH     read a file through the fs.read tool
   exit             leave tsh
@@ -176,7 +184,53 @@ fn list_tools_with_mode(root: &Path, mode: ToolListMode) -> Result<(), TshError>
     stdout.flush().map_err(|error| write_error_to_tsh(&error))
 }
 
-fn run_repl(root: &Path, cache: &mut DynamicToolCache) -> Result<ExitCode, TshError> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LoadedTool {
+    name: String,
+    path: PathBuf,
+    description: String,
+    schema: Option<String>,
+    dynamic_resident: bool,
+    pinned: bool,
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct ToolContext {
+    tools: BTreeMap<String, LoadedTool>,
+}
+
+impl ToolContext {
+    fn insert(&mut self, tool: LoadedTool) {
+        let _old = self.tools.insert(tool.name.clone(), tool);
+    }
+
+    fn get_mut(&mut self, name: &str) -> Option<&mut LoadedTool> {
+        self.tools.get_mut(name)
+    }
+
+    fn remove_unpinned(&mut self, name: &str) -> Result<Option<LoadedTool>, TshError> {
+        if self.tools.get(name).is_some_and(|tool| tool.pinned) {
+            return Err(TshError::unavailable(format!(
+                "{name} is pinned; run `unpin {name}` before unload"
+            )));
+        }
+        Ok(self.tools.remove(name))
+    }
+
+    fn values(&self) -> impl Iterator<Item = &LoadedTool> {
+        self.tools.values()
+    }
+
+    fn pinned_values(&self) -> impl Iterator<Item = &LoadedTool> {
+        self.tools.values().filter(|tool| tool.pinned)
+    }
+}
+
+fn run_repl(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
+) -> Result<ExitCode, TshError> {
     loop {
         write_stdout("tsh> ")?;
         let mut line = String::new();
@@ -227,6 +281,36 @@ fn run_repl(root: &Path, cache: &mut DynamicToolCache) -> Result<ExitCode, TshEr
             }
             Some("command") => {
                 if let Err(error) = repl_command(root, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("load") => {
+                if let Err(error) = repl_load(root, cache, context, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("unload") => {
+                if let Err(error) = repl_unload(root, cache, context, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("loads") => {
+                if let Err(error) = repl_loads(context, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("pin") => {
+                if let Err(error) = repl_pin(root, cache, context, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("unpin") => {
+                if let Err(error) = repl_unpin(root, cache, context, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("pins") => {
+                if let Err(error) = repl_pins(context, &words) {
                     report_repl_error(&error)?;
                 }
             }
@@ -308,6 +392,149 @@ fn repl_command(root: &Path, words: &[String]) -> Result<(), TshError> {
     write_stdout("tsh: command supports only `command -v TOOL`\n")
 }
 
+fn repl_load(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
+    words: &[String],
+) -> Result<(), TshError> {
+    if words.len() != 2 {
+        return write_stdout("tsh: load requires one tool name\n");
+    }
+    let Some(name) = words.get(1) else {
+        return write_stdout("tsh: load requires one tool name\n");
+    };
+    let loaded = load_tool_context(root, cache, name, false)?;
+    let loaded_name = loaded.name.clone();
+    let path = loaded.path.clone();
+    let dynamic_resident = loaded.dynamic_resident;
+    context.insert(loaded);
+    let state = if dynamic_resident {
+        "metadata+resident"
+    } else {
+        "metadata"
+    };
+    write_stdout(&format!(
+        "loaded {loaded_name}\t{}\t{state}\n",
+        path.display()
+    ))
+}
+
+fn repl_unload(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
+    words: &[String],
+) -> Result<(), TshError> {
+    if words.len() != 2 {
+        return write_stdout("tsh: unload requires one tool name\n");
+    }
+    let Some(name) = words.get(1) else {
+        return write_stdout("tsh: unload requires one tool name\n");
+    };
+    let loaded = context.remove_unpinned(name)?;
+    let Some(loaded) = loaded else {
+        return write_stdout(&format!("{name} is not loaded\n"));
+    };
+    let hit = resolve_tool_hit(root, name)?;
+    let _was_pinned = cache.unpin_path(hit.path());
+    write_stdout(&format!(
+        "unloaded {}\t{}\n",
+        loaded.name,
+        loaded.path.display()
+    ))
+}
+
+fn repl_loads(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
+    if words.len() != 1 {
+        return write_stdout("tsh: loads does not accept arguments\n");
+    }
+    print_loaded_tools(context.values())
+}
+
+fn repl_pin(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
+    words: &[String],
+) -> Result<(), TshError> {
+    if words.len() != 2 {
+        return write_stdout("tsh: pin requires one tool name\n");
+    }
+    let Some(name) = words.get(1) else {
+        return write_stdout("tsh: pin requires one tool name\n");
+    };
+    let loaded = load_tool_context(root, cache, name, true)?;
+    let loaded_name = loaded.name.clone();
+    let path = loaded.path.clone();
+    let dynamic_resident = loaded.dynamic_resident;
+    context.insert(loaded);
+    let state = if dynamic_resident {
+        "pinned metadata+resident"
+    } else {
+        "pinned metadata"
+    };
+    write_stdout(&format!("{state} {loaded_name}\t{}\n", path.display()))
+}
+
+fn repl_unpin(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
+    words: &[String],
+) -> Result<(), TshError> {
+    if words.len() != 2 {
+        return write_stdout("tsh: unpin requires one tool name\n");
+    }
+    let Some(name) = words.get(1) else {
+        return write_stdout("tsh: unpin requires one tool name\n");
+    };
+    let hit = resolve_tool_hit(root, name)?;
+    let memory_unpinned = cache.unpin_path(hit.path());
+    if let Some(loaded) = context.get_mut(name) {
+        loaded.pinned = false;
+        if !memory_unpinned {
+            loaded.dynamic_resident = false;
+        }
+        write_stdout(&format!("unpinned {name}\t{}\n", hit.path().display()))
+    } else {
+        write_stdout(&format!("{name} is not loaded\n"))
+    }
+}
+
+fn repl_pins(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
+    if words.len() != 1 {
+        return write_stdout("tsh: pins does not accept arguments\n");
+    }
+    print_loaded_tools(context.pinned_values())
+}
+
+fn print_loaded_tools<'a>(tools: impl Iterator<Item = &'a LoadedTool>) -> Result<(), TshError> {
+    let mut stdout = io::stdout().lock();
+    for tool in tools {
+        let state = match (tool.pinned, tool.dynamic_resident) {
+            (true, true) => "pinned,resident",
+            (true, false) => "pinned",
+            (false, true) => "resident",
+            (false, false) => "metadata",
+        };
+        if tool.description.is_empty() {
+            writeln!(stdout, "{}\t{}\t{state}", tool.name, tool.path.display())
+                .map_err(|error| write_error_to_tsh(&error))?;
+        } else {
+            writeln!(
+                stdout,
+                "{}\t{}\t{state}\t{}",
+                tool.name,
+                tool.path.display(),
+                tool.description
+            )
+            .map_err(|error| write_error_to_tsh(&error))?;
+        }
+    }
+    stdout.flush().map_err(|error| write_error_to_tsh(&error))
+}
+
 fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
@@ -344,6 +571,12 @@ fn print_builtin_help(name: &str) -> Result<(), TshError> {
         "which" => "which TOOL\n  print the resolved tool path\n",
         "type" => "type TOOL\n  show whether TOOL is a tsh builtin or visible tool\n",
         "command" => "command -v TOOL\n  print the command that tsh would run\n",
+        "load" => "load TOOL\n  load tool metadata into this tsh context\n",
+        "unload" => "unload TOOL\n  remove unpinned tool metadata from this tsh context\n",
+        "loads" => "loads\n  list loaded tool context entries\n",
+        "pin" => "pin TOOL\n  load TOOL and keep it from context/cache eviction\n",
+        "unpin" => "unpin TOOL\n  allow a pinned tool to be unloaded/evicted again\n",
+        "pins" => "pins\n  list pinned tool context entries\n",
         _ => "unknown builtin\n",
     };
     write_stdout(text)
@@ -396,7 +629,19 @@ fn run_repl_tool(
 fn is_tsh_builtin(name: &str) -> bool {
     matches!(
         name,
-        "exit" | "quit" | "help" | "tools" | "which" | "type" | "command"
+        "exit"
+            | "quit"
+            | "help"
+            | "tools"
+            | "which"
+            | "type"
+            | "command"
+            | "load"
+            | "unload"
+            | "loads"
+            | "pin"
+            | "unpin"
+            | "pins"
     )
 }
 
@@ -514,6 +759,36 @@ fn tool_cache_capacity() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(32)
+}
+
+fn resolve_tool_hit(root: &Path, name: &str) -> Result<cortexfs::ToolHit, TshError> {
+    let tool_path = ctx_tool_path(root)?;
+    let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
+        return command_not_found(name);
+    };
+    Ok(hit)
+}
+
+fn load_tool_context(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    name: &str,
+    pinned: bool,
+) -> Result<LoadedTool, TshError> {
+    let hit = resolve_tool_hit(root, name)?;
+    let dynamic_resident = if pinned {
+        cache.pin_path(hit.path()).is_ok()
+    } else {
+        cache.get_or_load(hit.path()).is_ok()
+    };
+    Ok(LoadedTool {
+        name: name.to_owned(),
+        path: hit.path().to_path_buf(),
+        description: tool_description(&hit),
+        schema: tool_schema(&hit),
+        dynamic_resident,
+        pinned,
+    })
 }
 
 fn tool_description(hit: &cortexfs::ToolHit) -> String {
