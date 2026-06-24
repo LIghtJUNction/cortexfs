@@ -12,12 +12,12 @@ const DEFAULT_COLS: u16 = 80;
 const DEFAULT_SHELL: &str = "tsh";
 
 #[derive(Debug, Eq, PartialEq)]
-struct TeError {
+struct CtxtermError {
     code: u8,
     message: String,
 }
 
-impl TeError {
+impl CtxtermError {
     fn usage(message: impl Into<String>) -> Self {
         Self {
             code: 2,
@@ -37,22 +37,22 @@ fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(code) => code,
         Err(error) => {
-            let _ignored = write_error(&format!("te: {}", error.message));
+            let _ignored = write_error(&format!("ctxterm: {}", error.message));
             ExitCode::from(error.code)
         }
     }
 }
 
-fn run(args: Vec<OsString>) -> Result<ExitCode, TeError> {
+fn run(args: Vec<OsString>) -> Result<ExitCode, CtxtermError> {
     let command = parse_args(args)?;
     match command {
-        TeCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
-        TeCommand::Run { program, args } => run_pty(&program, args),
+        CtxtermCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
+        CtxtermCommand::Run { program, args } => run_pty(&program, args),
     }
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum TeCommand {
+enum CtxtermCommand {
     Help,
     Run {
         program: OsString,
@@ -60,71 +60,72 @@ enum TeCommand {
     },
 }
 
-fn parse_args(args: Vec<OsString>) -> Result<TeCommand, TeError> {
+fn parse_args(args: Vec<OsString>) -> Result<CtxtermCommand, CtxtermError> {
     let mut values = args.into_iter();
     let Some(first) = values.next() else {
-        return Ok(TeCommand::Run {
+        return Ok(CtxtermCommand::Run {
             program: OsString::from(DEFAULT_SHELL),
             args: Vec::new(),
         });
     };
     if first == "--help" || first == "-h" {
-        return Ok(TeCommand::Help);
+        return Ok(CtxtermCommand::Help);
     }
     if first == "--" {
         let Some(program) = values.next() else {
-            return Err(TeError::usage("-- requires a command"));
+            return Err(CtxtermError::usage("-- requires a command"));
         };
-        return Ok(TeCommand::Run {
+        return Ok(CtxtermCommand::Run {
             program,
             args: values.collect(),
         });
     }
-    Ok(TeCommand::Run {
+    Ok(CtxtermCommand::Run {
         program: first,
         args: values.collect(),
     })
 }
 
-fn print_help() -> Result<(), TeError> {
+fn print_help() -> Result<(), CtxtermError> {
     write_stdout(
         "\
-te - CortexFS agent terminal emulator
+ctxterm - CortexFS agent terminal emulator
 
 usage:
-  te
-  te -- COMMAND [ARG...]
+  ctxterm
+  ctxterm -- COMMAND [ARG...]
 
 default:
-  te starts tsh
+  ctxterm starts tsh
 ",
     )
 }
 
-fn run_pty(program: &OsStr, args: Vec<OsString>) -> Result<ExitCode, TeError> {
+fn run_pty(program: &OsStr, args: Vec<OsString>) -> Result<ExitCode, CtxtermError> {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(pty_size())
-        .map_err(|error| TeError::unavailable(format!("cannot open pty: {error}")))?;
+        .map_err(|error| CtxtermError::unavailable(format!("cannot open pty: {error}")))?;
     let mut command = CommandBuilder::new(program);
-    let cwd = env::current_dir()
-        .map_err(|error| TeError::unavailable(format!("cannot read current directory: {error}")))?;
+    let cwd = env::current_dir().map_err(|error| {
+        CtxtermError::unavailable(format!("cannot read current directory: {error}"))
+    })?;
     command.cwd(cwd.as_os_str());
     command.args(args);
     let mut child = pair
         .slave
         .spawn_command(command)
-        .map_err(|error| TeError::unavailable(format!("cannot run command: {error}")))?;
+        .map_err(|error| CtxtermError::unavailable(format!("cannot run command: {error}")))?;
     drop(pair.slave);
 
     let mut reader = pair
         .master
         .try_clone_reader()
-        .map_err(|error| TeError::unavailable(format!("cannot open pty reader: {error}")))?;
+        .map_err(|error| CtxtermError::unavailable(format!("cannot open pty reader: {error}")))?;
     let mut writer = pair
         .master
         .take_writer()
-        .map_err(|error| TeError::unavailable(format!("cannot open pty writer: {error}")))?;
+        .map_err(|error| CtxtermError::unavailable(format!("cannot open pty writer: {error}")))?;
 
     let output = thread::spawn(move || {
         let mut stdout = io::stdout().lock();
@@ -137,11 +138,11 @@ fn run_pty(program: &OsStr, args: Vec<OsString>) -> Result<ExitCode, TeError> {
 
     let status = child
         .wait()
-        .map_err(|error| TeError::unavailable(format!("cannot wait for command: {error}")))?;
+        .map_err(|error| CtxtermError::unavailable(format!("cannot wait for command: {error}")))?;
     match output.join() {
         Ok(Ok(())) => {}
-        Ok(Err(error)) => return Err(write_error_to_te(&error)),
-        Err(_error) => return Err(TeError::unavailable("pty output thread failed")),
+        Ok(Err(error)) => return Err(write_error_to_ctxterm(&error)),
+        Err(_error) => return Err(CtxtermError::unavailable("pty output thread failed")),
     }
     Ok(exit_code(&status))
 }
@@ -163,12 +164,12 @@ fn exit_code(status: &portable_pty::ExitStatus) -> ExitCode {
     u8::try_from(status.exit_code()).map_or_else(|_error| ExitCode::from(1), ExitCode::from)
 }
 
-fn write_stdout(message: &str) -> Result<(), TeError> {
+fn write_stdout(message: &str) -> Result<(), CtxtermError> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(message.as_bytes())
         .and_then(|()| stdout.flush())
-        .map_err(|error| write_error_to_te(&error))
+        .map_err(|error| write_error_to_ctxterm(&error))
 }
 
 fn write_error(message: &str) -> io::Result<()> {
@@ -176,20 +177,20 @@ fn write_error(message: &str) -> io::Result<()> {
     writeln!(stderr, "{message}")
 }
 
-fn write_error_to_te(error: &io::Error) -> TeError {
-    TeError::unavailable(format!("cannot write output: {error}"))
+fn write_error_to_ctxterm(error: &io::Error) -> CtxtermError {
+    CtxtermError::unavailable(format!("cannot write output: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{TeCommand, parse_args};
+    use super::{CtxtermCommand, parse_args};
     use std::ffi::OsString;
 
     #[test]
-    fn te_defaults_to_tsh() {
+    fn ctxterm_defaults_to_tsh() {
         assert_eq!(
             parse_args(Vec::new()),
-            Ok(TeCommand::Run {
+            Ok(CtxtermCommand::Run {
                 program: OsString::from("tsh"),
                 args: Vec::new()
             })
@@ -197,14 +198,14 @@ mod tests {
     }
 
     #[test]
-    fn te_accepts_explicit_command_after_separator() {
+    fn ctxterm_accepts_explicit_command_after_separator() {
         assert_eq!(
             parse_args(vec![
                 OsString::from("--"),
                 OsString::from("tsh"),
                 OsString::from("--list"),
             ]),
-            Ok(TeCommand::Run {
+            Ok(CtxtermCommand::Run {
                 program: OsString::from("tsh"),
                 args: vec![OsString::from("--list")]
             })

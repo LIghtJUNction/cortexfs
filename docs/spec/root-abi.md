@@ -56,7 +56,7 @@ examples of valid entries.
 
   bin/
     ctx
-    te
+    ctxterm
     tsh
 
   model/

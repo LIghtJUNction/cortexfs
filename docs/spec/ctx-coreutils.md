@@ -99,12 +99,12 @@ chroots, or scripts:
 
 ```text
 /ctx/bin/ctx
-/ctx/bin/te
+/ctx/bin/ctxterm
 /ctx/bin/tsh
 ```
 
 The first implementation may expose only `ctx`, but agent terminal runtimes
-should use `te` and `tsh` when present. The placement rule is:
+should use `ctxterm` and `tsh` when present. The placement rule is:
 
 ```text
 human CLI              system PATH, usually one ctx binary
@@ -112,7 +112,7 @@ agent capability       /ctx/tool
 runtime ABI helper     /ctx/bin
 ```
 
-`te` is the agent terminal emulator. It owns the pseudo-terminal and starts
+`ctxterm` is the agent terminal emulator. It owns the pseudo-terminal and starts
 `tsh` by default. `tsh` is the tool shell that runs inside that terminal. `tsh`
 resolves command names through `CTX_PATH`, not `PATH`, and must not execute
 arbitrary host commands directly. A command such as `bash` works only when a
