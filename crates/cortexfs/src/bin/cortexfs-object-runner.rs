@@ -5,7 +5,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
-use cortexfs::run_echo_model;
+use cortexfs::{resolve_api_key_from_env_names, run_echo_model};
 use serde_json::Value;
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
@@ -74,7 +74,11 @@ fn run_provider_model(name: &str, input: &str) -> Result<(), String> {
     let mut stdout = stdout.lock();
     write_model_start(&mut stdout, &run, name)
         .map_err(|error| format!("cannot write output: {error}"))?;
-    provider_chat_completion(name, input, &run, &mut stdout)?;
+    if let Err(error) = provider_chat_completion(name, input, &run, &mut stdout) {
+        write_tool_error(&mut stdout, &run, "EIO", &error)
+            .map_err(|error| format!("cannot write output: {error}"))?;
+        return Err(error);
+    }
     write_tool_done(&mut stdout, &run, "ok")
         .map_err(|error| format!("cannot write output: {error}"))
 }

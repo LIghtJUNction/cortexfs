@@ -7,7 +7,7 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         let Some(provider) = provider_name_from_base_url(&config.config.base_url) else {
             continue;
         };
-        let Some(api_key) = provider_api_key(&config.config) else {
+        let Some(api_key) = provider_api_key(&config.config, &provider) else {
             continue;
         };
         let Ok(models) = fetch_provider_models(&config.config.base_url, &api_key) else {
@@ -47,16 +47,14 @@ fn provider_model_cache_path(cache_dir: &Path, provider: &str) -> PathBuf {
     cache_dir.join(format!("{provider}.models.json"))
 }
 
-fn provider_api_key(config: &ProviderConfig) -> Option<String> {
-    for name in provider_api_key_env_names(config) {
-        let Ok(value) = env::var(name) else {
-            continue;
-        };
-        if !value.trim().is_empty() {
-            return Some(value);
-        }
-    }
-    None
+fn provider_api_key(config: &ProviderConfig, provider: &str) -> Option<String> {
+    resolve_api_key_from_env_names(
+        &provider_api_key_env_names(config),
+        &provider_keychain_service(provider),
+        "default",
+    )
+    .ok()
+    .flatten()
 }
 
 fn provider_api_key_env_names(config: &ProviderConfig) -> Vec<String> {
@@ -102,6 +100,10 @@ fn is_env_name(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
+}
+
+fn provider_keychain_service(provider: &str) -> String {
+    format!("cortexfs:{provider}")
 }
 
 #[derive(Deserialize)]

@@ -195,13 +195,55 @@ pub fn resolve_api_key(
     service: &str,
     account: &str,
 ) -> Result<Option<String>, ApiKeyResolutionError> {
-    resolve_api_key_with(
-        env_name,
+    resolve_api_key_from_env_names(&[env_name.to_owned()], service, account)
+}
+
+/// Resolves an API key from candidate environment variables with the stable
+/// priority: environment, system keychain, then unconfigured.
+pub fn resolve_api_key_from_env_names(
+    env_names: &[String],
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, ApiKeyResolutionError> {
+    resolve_api_key_from_env_names_with(
+        env_names,
         service,
         account,
         |name| env::var(name),
         system_keychain_secret,
     )
+}
+
+/// Testable core for API key resolution from multiple environment candidates.
+pub fn resolve_api_key_from_env_names_with<E, K>(
+    env_names: &[String],
+    service: &str,
+    account: &str,
+    env_lookup: E,
+    keychain_lookup: K,
+) -> Result<Option<String>, ApiKeyResolutionError>
+where
+    E: Fn(&str) -> Result<String, env::VarError>,
+    K: FnOnce(&str, &str) -> Result<Option<String>, ApiKeyResolutionError>,
+{
+    if env_names.is_empty()
+        || env_names.iter().any(|name| !is_valid_env_key(name))
+        || !is_valid_secret_lookup_part(service)
+        || !is_valid_secret_lookup_part(account)
+    {
+        return Err(ApiKeyResolutionError::InvalidName);
+    }
+    for env_name in env_names {
+        match env_lookup(env_name) {
+            Ok(value) if !value.trim().is_empty() => return Ok(Some(value)),
+            Ok(_value) => {}
+            Err(env::VarError::NotPresent) => {}
+            Err(env::VarError::NotUnicode(_value)) => {
+                return Err(ApiKeyResolutionError::InvalidName);
+            }
+        }
+    }
+    keychain_lookup(service, account)
 }
 
 /// Testable core for API key resolution.
