@@ -111,6 +111,27 @@ fn parses_session_file_commands() {
 }
 
 #[test]
+fn parses_subcommand_help_before_required_args() {
+    let latest = cmd!("latest", "--help");
+    assert!(matches!(
+        latest,
+        Ok(Command::HelpTopic(ref topic)) if topic == "latest"
+    ));
+
+    let agent = cmd!("agent", "--help");
+    assert!(matches!(
+        agent,
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent"
+    ));
+
+    let agent_watch = cmd!("agent", "watch", "--help");
+    assert!(matches!(
+        agent_watch,
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent watch"
+    ));
+}
+
+#[test]
 fn parses_agent_lifecycle_commands() {
     let new = cmd!(
         "agent",
