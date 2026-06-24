@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;

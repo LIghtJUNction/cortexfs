@@ -425,10 +425,7 @@ fn stream_terminal_socket(socket: &Path, write: bool) -> Result<ExitCode, CliErr
     let mut reader = stream
         .try_clone()
         .map_err(|error| CliError::unavailable(format!("cannot clone terminal socket: {error}")))?;
-    let output = std::thread::spawn(move || {
-        let mut stdout = io::stdout().lock();
-        io::copy(&mut reader, &mut stdout).and_then(|_bytes| stdout.flush())
-    });
+    let output = std::thread::spawn(move || copy_reader_to_stdout(&mut reader));
     if write {
         let _raw_mode = RawTerminalMode::maybe_new().map_err(|error| {
             CliError::unavailable(format!("cannot enter raw terminal mode: {error}"))
@@ -442,6 +439,7 @@ fn stream_terminal_socket(socket: &Path, write: bool) -> Result<ExitCode, CliErr
         });
         match input.join() {
             Ok(Ok(_bytes)) => {}
+            Ok(Err(error)) if is_terminal_disconnect(&error) => {}
             Ok(Err(error)) => {
                 return Err(CliError::unavailable(format!("terminal input failed: {error}")));
             }
@@ -450,12 +448,37 @@ fn stream_terminal_socket(socket: &Path, write: bool) -> Result<ExitCode, CliErr
     }
     match output.join() {
         Ok(Ok(())) => {}
+        Ok(Err(error)) if is_terminal_disconnect(&error) => {}
         Ok(Err(error)) => {
             return Err(CliError::unavailable(format!("terminal output failed: {error}")));
         }
         Err(_error) => return Err(CliError::unavailable("terminal output thread failed")),
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn copy_reader_to_stdout(mut reader: impl Read) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    let mut buffer = [0; 8192];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let Some(chunk) = buffer.get(..read) else {
+            return Err(io::Error::other("terminal output read exceeded buffer"));
+        };
+        stdout.write_all(chunk)?;
+        stdout.flush()?;
+    }
+    Ok(())
+}
+
+fn is_terminal_disconnect(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+    )
 }
 
 #[derive(Debug)]
