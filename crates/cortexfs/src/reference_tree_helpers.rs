@@ -4,6 +4,10 @@ fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
     }
     create_reference_dir(&root.join("home").join("1000").join("tool"))?;
     create_reference_dir(&root.join("home").join("1000").join("model"))?;
+    write_reference_text(
+        &root.join("home").join("1000").join(".tshrc"),
+        "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n",
+    )?;
 
     ensure_reference_model_alias(
         &root.join("home").join("1000").join("model").join("coder"),

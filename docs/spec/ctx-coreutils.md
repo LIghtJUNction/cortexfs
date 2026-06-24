@@ -118,6 +118,13 @@ resolves command names through `CTX_PATH`, not `PATH`, and must not execute
 arbitrary host commands directly. A command such as `bash` works only when a
 tool named `bash` is visible through `CTX_PATH`.
 
+When `CTX_PATH` is not set, `tsh` reads `CTX_HOME/.tshrc` if it exists. The
+file is data-only and supports a single stable setting:
+
+```text
+CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
+```
+
 Do not let `/ctx/bin` become a second `/usr/bin`.
 
 ## Path Model

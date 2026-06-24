@@ -165,6 +165,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(!root.join("mcp").exists());
     assert!(!root.join("skill").exists());
     assert!(!root.join("memory").exists());
+    assert_file_text(
+        &root.join("home").join("1000").join(".tshrc"),
+        "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n",
+    );
 
     assert!(inspect_object_layout(&root, ObjectClass::Model, "debug/echo").is_ok());
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "base").is_ok());
