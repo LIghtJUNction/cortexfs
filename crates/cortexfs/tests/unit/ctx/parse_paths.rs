@@ -338,13 +338,16 @@ fn agent_start_builds_sandboxed_terminal_command() {
     let bwrap = agent_bwrap_args(&root, &args, &args.mounts, &socket);
     assert!(contains_arg_triplet(&bwrap, "--bind", "/ctx", "/ctx"));
     assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
+    assert!(contains_ro_bind_stub(&bwrap, "/etc/profile"));
+    assert!(contains_ro_bind_stub(&bwrap, "/etc/bash.bashrc"));
+    assert!(contains_arg_pair(&bwrap, "--tmpfs", "/etc/profile.d"));
     assert!(contains_arg_pair(&bwrap, "--chdir", "/workspace"));
     assert!(contains_arg_pair(&bwrap, "--listen", socket.to_str().unwrap_or_default()));
     assert_eq!(bwrap.last().map(String::as_str), Some("/ctx/bin/tsh"));
 }
 
 #[test]
-fn agent_start_systemd_command_unsets_ctx_path_and_sets_ctx_home() {
+fn agent_start_systemd_command_uses_sanitized_environment() {
     let root = PathBuf::from("/ctx");
     let args = AgentStartArgs {
         name: "coder".to_owned(),
@@ -366,9 +369,18 @@ fn agent_start_systemd_command_unsets_ctx_path_and_sets_ctx_home() {
         Ok(ref command)
             if command.program == "systemd-run"
                 && command.args.contains(&"--user".to_owned())
-                && command.args.contains(&"-u".to_owned())
-                && command.args.contains(&"CTX_PATH".to_owned())
+                && command.args.contains(&"-i".to_owned())
+                && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
+                && command.args.contains(&"CTX_ROOT=/ctx".to_owned())
                 && command.args.contains(&"CTX_HOME=/ctx/home/1000".to_owned())
+                && command.args.contains(&"HOME=/workspace".to_owned())
+                && command.args.contains(&"USER=coder".to_owned())
+                && command.args.contains(&"LOGNAME=coder".to_owned())
+                && command.args.contains(&"SHELL=/usr/bin/bash".to_owned())
+                && command.args.contains(&"TERM=xterm-256color".to_owned())
+                && command.args.contains(&"LANG=C.UTF-8".to_owned())
+                && command.args.contains(&"/usr/bin/bwrap".to_owned())
+                && !command.args.contains(&"CTX_PATH".to_owned())
     ));
 }
 
@@ -399,6 +411,16 @@ fn contains_arg_triplet(args: &[String], first: &str, second: &str, third: &str)
         .any(|window| window.first().map(String::as_str) == Some(first)
             && window.get(1).map(String::as_str) == Some(second)
             && window.get(2).map(String::as_str) == Some(third))
+}
+
+fn contains_ro_bind_stub(args: &[String], target: &str) -> bool {
+    args.windows(3).any(|window| {
+        window.first().map(String::as_str) == Some("--ro-bind")
+            && window
+                .get(1)
+                .is_some_and(|source| source.ends_with("/.empty-shell-startup"))
+            && window.get(2).map(String::as_str) == Some(target)
+    })
 }
 
 fn create_agent_fixture(root: &Path, name: &str, parent: &str, status: &str, pid: &str) {

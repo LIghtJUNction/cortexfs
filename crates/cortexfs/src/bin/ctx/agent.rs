@@ -121,10 +121,17 @@ fn agent_start_systemd_command(
             "--unit".to_owned(),
             unit.to_owned(),
             "/usr/bin/env".to_owned(),
-            "-u".to_owned(),
-            "CTX_PATH".to_owned(),
+            "-i".to_owned(),
+            "PATH=/usr/bin:/bin".to_owned(),
+            format!("CTX_ROOT={}", root.display()),
             format!("CTX_HOME={}", ctx_home(root)?.display()),
-            "bwrap".to_owned(),
+            format!("HOME={}", args.cwd),
+            format!("USER={}", args.name),
+            format!("LOGNAME={}", args.name),
+            "SHELL=/usr/bin/bash".to_owned(),
+            "TERM=xterm-256color".to_owned(),
+            "LANG=C.UTF-8".to_owned(),
+            "/usr/bin/bwrap".to_owned(),
         ],
     };
     command.args.extend(agent_bwrap_args(root, args, mounts, socket));
@@ -154,6 +161,8 @@ fn agent_bwrap_args(
         "--ro-bind".to_owned(),
         "/etc".to_owned(),
         "/etc".to_owned(),
+        "--tmpfs".to_owned(),
+        "/etc/profile.d".to_owned(),
         "--symlink".to_owned(),
         "usr/bin".to_owned(),
         "/bin".to_owned(),
@@ -182,6 +191,16 @@ fn agent_bwrap_args(
         });
         bwrap.push(mount.source.clone());
         bwrap.push(mount.target.clone());
+    }
+    if let Some(startup_stub) = shell_startup_stub_path(socket) {
+        bwrap.extend([
+            "--ro-bind".to_owned(),
+            startup_stub.display().to_string(),
+            "/etc/profile".to_owned(),
+            "--ro-bind".to_owned(),
+            startup_stub.display().to_string(),
+            "/etc/bash.bashrc".to_owned(),
+        ]);
     }
     bwrap.extend([
         "--chdir".to_owned(),
@@ -254,6 +273,12 @@ fn ensure_agent_terminal_socket(
         fs::create_dir_all(parent).map_err(|error| {
             CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
         })?;
+        fs::write(parent.join(".empty-shell-startup"), "").map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot create {}: {error}",
+                parent.join(".empty-shell-startup").display()
+            ))
+        })?;
     }
     match fs::read_link(socket) {
         Ok(target) if target == runtime_socket => {}
@@ -312,13 +337,21 @@ fn current_uid_for_ctx(root: &Path) -> Result<String, CliError> {
 }
 
 fn socket_runtime_dir(socket: &Path) -> Option<PathBuf> {
-    let target = fs::read_link(socket).ok()?;
-    let target = if target.is_absolute() {
-        target
-    } else {
-        socket.parent()?.join(target)
-    };
-    target.parent().map(Path::to_path_buf)
+    socket_bind_path(socket).parent().map(Path::to_path_buf)
+}
+
+fn socket_bind_path(socket: &Path) -> PathBuf {
+    match fs::read_link(socket) {
+        Ok(target) if target.is_absolute() => target,
+        Ok(target) => socket
+            .parent()
+            .map_or_else(|| target.clone(), |parent| parent.join(&target)),
+        Err(_error) => socket.to_path_buf(),
+    }
+}
+
+fn shell_startup_stub_path(socket: &Path) -> Option<PathBuf> {
+    socket_runtime_dir(socket).map(|directory| directory.join(".empty-shell-startup"))
 }
 
 fn agent_terminal_unit(name: &str, session: &str) -> String {

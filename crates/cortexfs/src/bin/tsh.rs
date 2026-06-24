@@ -119,6 +119,14 @@ principles:
   when CTX_PATH is unset, tsh may read CTX_HOME/.tshrc
   tsh never falls back to PATH for tool lookup
   bash, tmux, and zellij are tools, not built-ins
+
+repl:
+  help             show this help
+  tools            list visible tools
+  which TOOL       print the resolved tool path
+  bash             enter an interactive shell tool
+  fs.read PATH     read a file through the fs.read tool
+  exit             leave tsh
 ",
     )
 }
@@ -158,13 +166,51 @@ fn run_repl(root: &Path) -> Result<ExitCode, TshError> {
             Some("exit" | "quit") => return parse_exit_code(&words),
             Some("help") => print_help()?,
             Some("tools") => list_tools(root)?,
+            Some("which") => repl_which(root, &words)?,
             Some(name) => {
                 let args = words.iter().skip(1).map(OsString::from).collect::<Vec<_>>();
-                let _code = run_tool(root, name, args)?;
+                let _code = run_repl_tool(root, name, args)?;
             }
             None => {}
         }
     }
+}
+
+fn repl_which(root: &Path, words: &[String]) -> Result<(), TshError> {
+    if words.len() == 2 {
+        let Some(name) = words.get(1) else {
+            return write_stdout("tsh: which requires a tool name\n");
+        };
+        print_tool_path(root, name)
+    } else if words.len() == 1 {
+        write_stdout("tsh: which requires a tool name\n")
+    } else {
+        write_stdout("tsh: which accepts one tool name\n")
+    }
+}
+
+fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
+    let tool_path = ctx_tool_path(root)?;
+    let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
+        return write_stdout(&format!(
+            "tsh: tool not found in CTX_PATH: {name}\ntry: tools\n"
+        ));
+    };
+    write_stdout(&format!("{}\n", hit.path().display()))
+}
+
+fn run_repl_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
+    if args.is_empty() && !is_interactive_tool(name) {
+        write_stdout(&format!(
+            "tsh: {name} needs input; pass arguments instead of leaving stdin open\ntry: {name} PATH or {name} '{{\"path\":\"PATH\"}}'\n"
+        ))?;
+        return Ok(ExitCode::from(2));
+    }
+    run_tool(root, name, args)
+}
+
+fn is_interactive_tool(name: &str) -> bool {
+    matches!(name, "bash" | "tmux" | "zellij" | "tsh")
 }
 
 fn parse_exit_code(words: &[String]) -> Result<ExitCode, TshError> {
@@ -220,7 +266,7 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
         return Err(TshError::unavailable(format!(
-            "tool not found in CTX_PATH: {name}"
+            "tool not found in CTX_PATH: {name}; try `tools` or `bash`"
         )));
     };
     let status = ProcessCommand::new(hit.path())
@@ -348,7 +394,9 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 
 #[cfg(test)]
 mod tests {
-    use super::{TshCommand, parse_args, parse_repl_line, parse_tshrc_ctx_path};
+    use super::{
+        TshCommand, is_interactive_tool, parse_args, parse_repl_line, parse_tshrc_ctx_path,
+    };
     use std::ffi::OsString;
     use std::path::PathBuf;
 
@@ -399,5 +447,13 @@ CTX_PATH=/ctx/home/1000/tool:/ctx/tool
         assert_eq!(parse_tshrc_ctx_path("# empty\n\n"), Ok(None));
         assert!(parse_tshrc_ctx_path("export CTX_PATH=/ctx/tool\n").is_err());
         assert!(parse_tshrc_ctx_path("CTX_PATH=\n").is_err());
+    }
+
+    #[test]
+    fn classifies_repl_interactive_tools() {
+        assert!(is_interactive_tool("bash"));
+        assert!(is_interactive_tool("tmux"));
+        assert!(is_interactive_tool("zellij"));
+        assert!(!is_interactive_tool("fs.read"));
     }
 }
