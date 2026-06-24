@@ -4,7 +4,7 @@
 //! implement [`Tool`]. The same value can then be exposed as a normal `CLI`
 //! binary with [`run_cli`] or called directly in-process through [`Registry`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsString;
 use std::ffi::c_void;
@@ -371,6 +371,7 @@ pub struct DynamicToolCache {
     window_capacity: usize,
     clock: u64,
     frequencies: BTreeMap<String, u64>,
+    pinned: BTreeSet<String>,
     entries: BTreeMap<String, CachedDynamicTool>,
 }
 
@@ -399,6 +400,7 @@ impl DynamicToolCache {
             window_capacity,
             clock: 0,
             frequencies: BTreeMap::new(),
+            pinned: BTreeSet::new(),
             entries: BTreeMap::new(),
         }
     }
@@ -419,6 +421,40 @@ impl DynamicToolCache {
     #[must_use]
     pub fn contains_path(&self, path: &str) -> bool {
         self.entries.contains_key(path)
+    }
+
+    /// Returns true when a path is pinned in memory and excluded from
+    /// W-TinyLFU eviction.
+    #[must_use]
+    pub fn is_pinned_path(&self, path: &str) -> bool {
+        self.pinned.contains(path)
+    }
+
+    /// Lists pinned paths in stable order.
+    #[must_use]
+    pub fn pinned_paths(&self) -> Vec<&str> {
+        self.pinned.iter().map(String::as_str).collect()
+    }
+
+    /// Loads a dynamic tool and pins it in memory. Pinned tools do not count
+    /// against the W-TinyLFU capacity and are not evicted by admission.
+    pub fn pin_path(&mut self, path: impl AsRef<Path>) -> io::Result<()> {
+        let path = path.as_ref().display().to_string();
+        let _inserted = self.pinned.insert(path.clone());
+        match self.get_or_load(&path) {
+            Ok(_tool) => Ok(()),
+            Err(error) => {
+                let _removed = self.pinned.remove(&path);
+                Err(error)
+            }
+        }
+    }
+
+    /// Removes a memory pin. The tool remains loaded until normal W-TinyLFU
+    /// admission later evicts it.
+    pub fn unpin_path(&mut self, path: impl AsRef<Path>) -> bool {
+        let path = path.as_ref().display().to_string();
+        self.pinned.remove(&path)
     }
 
     /// Gets a loaded tool or loads it from disk, using W-TinyLFU admission
@@ -483,7 +519,7 @@ impl DynamicToolCache {
             }
         }
 
-        while self.entries.len() > self.capacity {
+        while self.unpinned_len() > self.capacity {
             let victim = self
                 .main_victim_path()
                 .or_else(|| self.oldest_window_path())
@@ -495,17 +531,28 @@ impl DynamicToolCache {
         }
     }
 
+    fn unpinned_len(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| !self.is_pinned_path(&entry.path))
+            .count()
+    }
+
     fn window_len(&self) -> usize {
         self.entries
             .values()
-            .filter(|entry| entry.segment == CacheSegment::Window)
+            .filter(|entry| {
+                entry.segment == CacheSegment::Window && !self.is_pinned_path(&entry.path)
+            })
             .count()
     }
 
     fn main_len(&self) -> usize {
         self.entries
             .values()
-            .filter(|entry| entry.segment == CacheSegment::Main)
+            .filter(|entry| {
+                entry.segment == CacheSegment::Main && !self.is_pinned_path(&entry.path)
+            })
             .count()
     }
 
@@ -516,7 +563,9 @@ impl DynamicToolCache {
     fn oldest_window_path(&self) -> Option<String> {
         self.entries
             .values()
-            .filter(|entry| entry.segment == CacheSegment::Window)
+            .filter(|entry| {
+                entry.segment == CacheSegment::Window && !self.is_pinned_path(&entry.path)
+            })
             .min_by_key(|entry| (entry.last_used, entry.path.clone()))
             .map(|entry| entry.path.clone())
     }
@@ -525,7 +574,9 @@ impl DynamicToolCache {
         wtinylfu_victim_path(
             self.entries
                 .values()
-                .filter(|entry| entry.segment == CacheSegment::Main)
+                .filter(|entry| {
+                    entry.segment == CacheSegment::Main && !self.is_pinned_path(&entry.path)
+                })
                 .map(|entry| {
                     (
                         entry.path.as_str(),
