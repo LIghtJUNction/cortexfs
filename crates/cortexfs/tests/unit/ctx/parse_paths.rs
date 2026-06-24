@@ -303,6 +303,38 @@ fn agent_ps_reads_parent_status_and_pid_controls() {
 }
 
 #[test]
+fn status_helpers_report_ctx_and_agent_tree() {
+    let root = clean_test_dir("ctx-status-tree");
+    write_text_file(&root.join("status"), "ready\n");
+    create_agent_fixture(&root, "coder", "", "idle", "");
+    create_agent_fixture(&root, "reviewer", "agent:coder session:default run:r1", "busy", "123");
+
+    assert_eq!(ctx_state(true, true, true), "running");
+    assert_eq!(ctx_state(true, true, false), "available");
+    assert_eq!(read_ctx_status(&root), "ready");
+
+    let processes = read_status_agent_processes(&root);
+    assert!(processes.is_ok());
+    let rendered = render_agent_status_lines(&processes.unwrap_or_default());
+    assert_eq!(
+        rendered,
+        vec![
+            "coder [idle]".to_owned(),
+            "`- reviewer [busy] pid=123".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn status_tolerates_missing_agent_directory() {
+    let root = clean_test_dir("ctx-status-no-agent");
+    write_text_file(&root.join("status"), "ready\n");
+
+    let processes = read_status_agent_processes(&root);
+    assert_eq!(processes, Ok(Vec::new()));
+}
+
+#[test]
 fn agent_terminal_socket_uses_session_terminal_main_socket() {
     let root = clean_test_dir("ctx-agent-terminal-socket");
     let socket = agent_terminal_socket(&root, "coder", "test");

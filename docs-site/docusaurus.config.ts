@@ -18,11 +18,15 @@ const config: Config = {
 
   i18n: {
     defaultLocale: 'zh-Hans',
-    locales: ['zh-Hans'],
+    locales: ['zh-Hans', 'en'],
     localeConfigs: {
       'zh-Hans': {
         label: '简体中文',
         htmlLang: 'zh-CN',
+      },
+      en: {
+        label: 'English',
+        htmlLang: 'en-US',
       },
     },
   },
@@ -55,12 +59,26 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'docs',
           position: 'left',
-          label: 'Spec',
+          label: '文档',
+        },
+        {
+          to: '/docs/getting-started',
+          label: '安装',
+          position: 'left',
+        },
+        {
+          to: '/docs/using-cortexfs',
+          label: '使用',
+          position: 'left',
         },
         {
           to: '/docs/agent-sh',
           label: 'agent.sh',
           position: 'left',
+        },
+        {
+          type: 'localeDropdown',
+          position: 'right',
         },
         {
           href: 'https://github.com/LIghtJUNction/cortexfs',
@@ -73,9 +91,12 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Core',
+          title: '核心',
           items: [
-            {label: 'Design', to: '/docs/DESIGN'},
+            {label: '安装', to: '/docs/getting-started'},
+            {label: '使用 CortexFS', to: '/docs/using-cortexfs'},
+            {label: '二次开发', to: '/docs/developing-cortexfs'},
+            {label: '设计', to: '/docs/DESIGN'},
             {label: 'Root ABI', to: '/docs/spec/root-abi'},
             {label: 'Object ABI', to: '/docs/spec/object-abi'},
           ],
@@ -89,7 +110,7 @@ const config: Config = {
           ],
         },
         {
-          title: 'Project',
+          title: '项目',
           items: [
             {label: 'GitHub', href: 'https://github.com/LIghtJUNction/cortexfs'},
           ],

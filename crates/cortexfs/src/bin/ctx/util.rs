@@ -158,10 +158,6 @@ fn unescape_mountinfo(value: &str) -> String {
         .replace("\\134", "\\")
 }
 
-fn bool_text(value: bool) -> &'static str {
-    if value { "1" } else { "0" }
-}
-
 fn shell_quote(value: &str) -> String {
     if value.bytes().all(|byte| {
         byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b':')
