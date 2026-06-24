@@ -6,9 +6,9 @@ use super::{
     format_session_index_issues, format_session_layout_issues, format_shared_queue_layout_issues,
     format_tool_schema_issues, json_string, list_names, newline_terminated, parse_command,
     agent_bwrap_args, agent_new_request_json, agent_start_systemd_command, agent_terminal_socket,
-    read_agent_processes, render_agent_process_tree, resolve_abi_path, stream_socket_request,
-    AgentArgs, AgentMount, AgentStartArgs, Command, FileCommand, LsTarget, ObjectClass,
-    MAX_SOCKET_FRAME_BYTES,
+    read_agent_processes, render_agent_process_tree, require_cli_name, require_session_name,
+    resolve_abi_path, stream_socket_request, AgentArgs, AgentMount, AgentStartArgs, Command,
+    FileCommand, LsTarget, ObjectClass, MAX_SOCKET_FRAME_BYTES,
 };
 use cortexfs::{
     ensure_v1_reference_tree, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,
