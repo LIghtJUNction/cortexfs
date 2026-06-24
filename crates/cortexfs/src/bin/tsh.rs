@@ -44,13 +44,20 @@ fn main() -> ExitCode {
 
 fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let (root, command) = parse_args(args)?;
-    let mut cache = DynamicToolCache::new(tool_cache_capacity());
-    let mut context = ToolContext::default();
     match command {
-        TshCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
-        TshCommand::List => list_tools(&root).map(|()| ExitCode::SUCCESS),
+        TshCommand::Help => return print_help().map(|()| ExitCode::SUCCESS),
+        TshCommand::List => return list_tools(&root).map(|()| ExitCode::SUCCESS),
+        TshCommand::Repl | TshCommand::Tool { .. } => {}
+    }
+    let config = TshConfig::read(&root)?;
+    let mut cache =
+        DynamicToolCache::with_window_percent(config.cache_capacity, config.window_percent);
+    let mut context = ToolContext::new(config.max_loaded_tools);
+    match command {
         TshCommand::Repl => run_repl(&root, &mut cache, &mut context),
         TshCommand::Tool { name, args } => run_tool(&root, &mut cache, &name, args),
+        TshCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
+        TshCommand::List => list_tools(&root).map(|()| ExitCode::SUCCESS),
     }
 }
 
@@ -184,6 +191,103 @@ fn list_tools_with_mode(root: &Path, mode: ToolListMode) -> Result<(), TshError>
     stdout.flush().map_err(|error| write_error_to_tsh(&error))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TshConfig {
+    max_loaded_tools: usize,
+    cache_capacity: usize,
+    window_percent: usize,
+}
+
+impl Default for TshConfig {
+    fn default() -> Self {
+        Self {
+            max_loaded_tools: 64,
+            cache_capacity: 32,
+            window_percent: 1,
+        }
+    }
+}
+
+impl TshConfig {
+    fn read(root: &Path) -> Result<Self, TshError> {
+        let mut config = if let Some(content) = read_tsh_config_text(root)? {
+            parse_tsh_config(&content)
+                .map_err(|message| TshError::usage(format!("invalid tsh.d/config: {message}")))?
+        } else {
+            Self::default()
+        };
+        if let Some(capacity) = env::var("CTX_TOOL_CACHE")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            config.cache_capacity = capacity.max(1);
+        }
+        Ok(config)
+    }
+}
+
+fn read_tsh_config_text(root: &Path) -> Result<Option<String>, TshError> {
+    let tool_path = ctx_tool_path(root)?;
+    let Some(hit) = tool_path.find("tsh").map_err(tool_path_error)? else {
+        return Ok(None);
+    };
+    let path = hit.control_dir().join("config");
+    match fs::read_to_string(&path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(TshError::unavailable(format!(
+            "cannot read {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+fn parse_tsh_config(content: &str) -> Result<TshConfig, String> {
+    let mut config = TshConfig::default();
+    for (index, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(format!(
+                "line {} must be key=value",
+                index.saturating_add(1)
+            ));
+        };
+        let value = value.parse::<usize>().map_err(|_error| {
+            format!(
+                "line {} value must be a positive integer",
+                index.saturating_add(1)
+            )
+        })?;
+        match key {
+            "max_loaded_tools" if value > 0 => config.max_loaded_tools = value,
+            "cache_capacity" if value > 0 => config.cache_capacity = value,
+            "window_percent" if (1..=100).contains(&value) => config.window_percent = value,
+            "max_loaded_tools" | "cache_capacity" => {
+                return Err(format!(
+                    "line {} value must be greater than zero",
+                    index.saturating_add(1)
+                ));
+            }
+            "window_percent" => {
+                return Err(format!(
+                    "line {} window_percent must be 1..100",
+                    index.saturating_add(1)
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "line {} has unknown key {key}",
+                    index.saturating_add(1)
+                ));
+            }
+        }
+    }
+    Ok(config)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LoadedTool {
     name: String,
@@ -192,20 +296,41 @@ struct LoadedTool {
     schema: Option<String>,
     dynamic_resident: bool,
     pinned: bool,
+    last_used: u64,
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 struct ToolContext {
     tools: BTreeMap<String, LoadedTool>,
+    max_loaded_tools: usize,
+    clock: u64,
 }
 
 impl ToolContext {
-    fn insert(&mut self, tool: LoadedTool) {
+    fn new(max_loaded_tools: usize) -> Self {
+        Self {
+            tools: BTreeMap::new(),
+            max_loaded_tools: max_loaded_tools.max(1),
+            clock: 0,
+        }
+    }
+
+    fn insert(&mut self, mut tool: LoadedTool) -> Vec<LoadedTool> {
+        self.clock = self.clock.saturating_add(1);
+        tool.last_used = self.clock;
         let _old = self.tools.insert(tool.name.clone(), tool);
+        self.evict_over_limit()
     }
 
     fn get_mut(&mut self, name: &str) -> Option<&mut LoadedTool> {
         self.tools.get_mut(name)
+    }
+
+    fn touch(&mut self, name: &str) {
+        if let Some(tool) = self.tools.get_mut(name) {
+            self.clock = self.clock.saturating_add(1);
+            tool.last_used = self.clock;
+        }
     }
 
     fn remove_unpinned(&mut self, name: &str) -> Result<Option<LoadedTool>, TshError> {
@@ -223,6 +348,25 @@ impl ToolContext {
 
     fn pinned_values(&self) -> impl Iterator<Item = &LoadedTool> {
         self.tools.values().filter(|tool| tool.pinned)
+    }
+
+    fn evict_over_limit(&mut self) -> Vec<LoadedTool> {
+        let mut evicted = Vec::new();
+        while self.tools.values().filter(|tool| !tool.pinned).count() > self.max_loaded_tools {
+            let Some(name) = self
+                .tools
+                .values()
+                .filter(|tool| !tool.pinned)
+                .min_by_key(|tool| (tool.last_used, tool.name.clone()))
+                .map(|tool| tool.name.clone())
+            else {
+                break;
+            };
+            if let Some(tool) = self.tools.remove(&name) {
+                evicted.push(tool);
+            }
+        }
+        evicted
     }
 }
 
@@ -316,7 +460,7 @@ fn run_repl(
             }
             Some(name) => {
                 let args = words.iter().skip(1).map(OsString::from).collect::<Vec<_>>();
-                if let Err(error) = run_repl_tool(root, cache, name, args) {
+                if let Err(error) = run_repl_tool(root, cache, context, name, args) {
                     report_repl_error(&error)?;
                 }
             }
@@ -408,7 +552,7 @@ fn repl_load(
     let loaded_name = loaded.name.clone();
     let path = loaded.path.clone();
     let dynamic_resident = loaded.dynamic_resident;
-    context.insert(loaded);
+    let evicted = context.insert(loaded);
     let state = if dynamic_resident {
         "metadata+resident"
     } else {
@@ -417,7 +561,8 @@ fn repl_load(
     write_stdout(&format!(
         "loaded {loaded_name}\t{}\t{state}\n",
         path.display()
-    ))
+    ))?;
+    report_context_evictions(evicted)
 }
 
 fn repl_unload(
@@ -468,13 +613,14 @@ fn repl_pin(
     let loaded_name = loaded.name.clone();
     let path = loaded.path.clone();
     let dynamic_resident = loaded.dynamic_resident;
-    context.insert(loaded);
+    let evicted = context.insert(loaded);
     let state = if dynamic_resident {
         "pinned metadata+resident"
     } else {
         "pinned metadata"
     };
-    write_stdout(&format!("{state} {loaded_name}\t{}\n", path.display()))
+    write_stdout(&format!("{state} {loaded_name}\t{}\n", path.display()))?;
+    report_context_evictions(evicted)
 }
 
 fn repl_unpin(
@@ -602,6 +748,7 @@ fn print_tool_help(root: &Path, name: &str) -> Result<(), TshError> {
 fn run_repl_tool(
     root: &Path,
     cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
     name: &str,
     args: Vec<OsString>,
 ) -> Result<ExitCode, TshError> {
@@ -623,6 +770,7 @@ fn run_repl_tool(
         ))?;
         return Ok(ExitCode::from(2));
     }
+    context.touch(name);
     run_tool(root, cache, name, args)
 }
 
@@ -754,13 +902,6 @@ fn collect_tool_input(args: &[OsString]) -> Result<String, TshError> {
     Ok(input)
 }
 
-fn tool_cache_capacity() -> usize {
-    env::var("CTX_TOOL_CACHE")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(32)
-}
-
 fn resolve_tool_hit(root: &Path, name: &str) -> Result<cortexfs::ToolHit, TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
@@ -788,7 +929,15 @@ fn load_tool_context(
         schema: tool_schema(&hit),
         dynamic_resident,
         pinned,
+        last_used: 0,
     })
+}
+
+fn report_context_evictions(evicted: Vec<LoadedTool>) -> Result<(), TshError> {
+    for tool in evicted {
+        write_stdout(&format!("auto-unloaded {}\tcontext-limit\n", tool.name))?;
+    }
+    Ok(())
 }
 
 fn tool_description(hit: &cortexfs::ToolHit) -> String {
@@ -951,7 +1100,8 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        TshCommand, is_interactive_tool, parse_args, parse_repl_line, parse_tshrc_ctx_path,
+        LoadedTool, ToolContext, TshCommand, TshConfig, is_interactive_tool, parse_args,
+        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path,
     };
     use std::ffi::OsString;
     use std::path::PathBuf;
@@ -1006,10 +1156,68 @@ CTX_PATH=/ctx/home/1000/tool:/ctx/tool
     }
 
     #[test]
+    fn parses_tsh_config_as_data() {
+        assert_eq!(
+            parse_tsh_config(
+                "\
+# tsh runtime policy
+max_loaded_tools=16
+cache_capacity=8
+window_percent=25
+"
+            ),
+            Ok(TshConfig {
+                max_loaded_tools: 16,
+                cache_capacity: 8,
+                window_percent: 25,
+            })
+        );
+        assert!(parse_tsh_config("max_loaded_tools=0\n").is_err());
+        assert!(parse_tsh_config("window_percent=101\n").is_err());
+        assert!(parse_tsh_config("export cache_capacity=8\n").is_err());
+    }
+
+    #[test]
+    fn tool_context_evicts_oldest_unpinned_tool() {
+        let mut context = ToolContext::new(1);
+        assert!(context.insert(test_loaded_tool("a", false)).is_empty());
+        let evicted = context.insert(test_loaded_tool("b", false));
+        assert_eq!(
+            evicted
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a"]
+        );
+        assert!(context.tools.contains_key("b"));
+    }
+
+    #[test]
+    fn tool_context_keeps_pinned_tools_over_limit() {
+        let mut context = ToolContext::new(1);
+        assert!(context.insert(test_loaded_tool("a", true)).is_empty());
+        assert!(context.insert(test_loaded_tool("b", false)).is_empty());
+        assert!(context.tools.contains_key("a"));
+        assert!(context.tools.contains_key("b"));
+    }
+
+    #[test]
     fn classifies_repl_interactive_tools() {
         assert!(is_interactive_tool("bash"));
         assert!(is_interactive_tool("tmux"));
         assert!(is_interactive_tool("zellij"));
         assert!(!is_interactive_tool("fs.read"));
+    }
+
+    fn test_loaded_tool(name: &str, pinned: bool) -> LoadedTool {
+        LoadedTool {
+            name: name.to_owned(),
+            path: PathBuf::from(format!("/ctx/tool/{name}")),
+            description: String::new(),
+            schema: None,
+            dynamic_resident: false,
+            pinned,
+            last_used: 0,
+        }
     }
 }

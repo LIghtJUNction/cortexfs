@@ -87,7 +87,9 @@ pub use context_pack::{
     ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,
     validate_context_pack_source,
 };
-pub use core_tools::{FsReadTool, FsWriteTool, ShellExecTool, core_tool_specs, run_core_tool};
+pub use core_tools::{
+    FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
+};
 pub use model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
