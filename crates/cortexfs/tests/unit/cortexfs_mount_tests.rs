@@ -45,7 +45,7 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };
 
-    let tool = fs.xattrs_for_path("tool/fs.read");
+    let tool = fs.xattrs_for_path("tool/tsh");
     assert!(tool.is_ok());
     let tool = tool.unwrap_or_default();
     assert_eq!(xattr_value(&tool, "user.cortexfs.origin"), Some("virtual"));
@@ -78,7 +78,7 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
         Some("0")
     );
 
-    let schema = fs.xattrs_for_path("tool/fs.read.d/schema");
+    let schema = fs.xattrs_for_path("tool/tsh.d/schema");
     assert!(schema.is_ok());
     let schema = schema.unwrap_or_default();
     assert_eq!(xattr_value(&schema, "user.cortexfs.origin"), Some("disk"));

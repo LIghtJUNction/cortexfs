@@ -4,13 +4,20 @@
 //! implement [`Tool`]. The same value can then be exposed as a normal `CLI`
 //! binary with [`run_cli`] or called directly in-process through [`Registry`].
 
+use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
+use std::ffi::c_void;
 use std::fmt;
 use std::io::{self, Read, Write};
+use std::path::Path;
 use std::process::ExitCode;
+use std::slice;
 
+use libloading::Library;
 use serde_json::{Value, json};
+
+const TOOL_ABI_MAGIC_V1: u64 = 0x4354_5854_4f4f_4c31;
 
 /// Static metadata exported by a `CortexFS` tool.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -21,6 +28,109 @@ pub struct ToolSpec {
     pub description: &'static str,
     /// JSON Schema text for the tool input.
     pub input_schema: &'static str,
+}
+
+/// Borrowed byte string used by the stable dynamic tool ABI.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ToolStr {
+    /// UTF-8 byte pointer.
+    pub ptr: *const u8,
+    /// Byte length.
+    pub len: usize,
+}
+
+// SAFETY: `ToolStr` is only used for immutable ABI strings. Producers must
+// provide bytes that remain valid while the dynamic artifact is loaded.
+unsafe impl Sync for ToolStr {}
+
+impl ToolStr {
+    /// Creates an ABI string from a static Rust string.
+    #[must_use]
+    pub const fn from_static(value: &'static str) -> Self {
+        Self {
+            ptr: value.as_ptr(),
+            len: value.len(),
+        }
+    }
+
+    fn as_str(self) -> io::Result<&'static str> {
+        if self.ptr.is_null() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "tool ABI string has null pointer",
+            ));
+        }
+        // SAFETY: The dynamic tool ABI requires `ptr,len` to reference immutable
+        // UTF-8 bytes that remain valid while the library is loaded. The loader
+        // keeps the `Library` alive inside `DynamicTool`.
+        let bytes = unsafe { slice::from_raw_parts(self.ptr, self.len) };
+        std::str::from_utf8(bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+}
+
+/// Invocation passed over the dynamic tool ABI.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ToolInvocationAbi {
+    /// Run id.
+    pub run: ToolStr,
+    /// Raw input.
+    pub input: ToolStr,
+}
+
+/// Writer callback passed over the dynamic tool ABI.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ToolWriterAbi {
+    /// Opaque writer context.
+    pub ctx: *mut c_void,
+    /// Writer callback.
+    pub write: extern "C" fn(*mut c_void, *const u8, usize) -> i32,
+}
+
+/// Stable dynamic ABI descriptor exported by loadable tool artifacts.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ToolAbiV1 {
+    magic: u64,
+    version: u32,
+    name: ToolStr,
+    description: ToolStr,
+    input_schema: ToolStr,
+    call: extern "C" fn(ToolInvocationAbi, ToolWriterAbi) -> i32,
+}
+
+impl ToolAbiV1 {
+    /// Creates a tool ABI descriptor.
+    #[must_use]
+    pub const fn new(
+        name: &'static str,
+        description: &'static str,
+        input_schema: &'static str,
+        call: extern "C" fn(ToolInvocationAbi, ToolWriterAbi) -> i32,
+    ) -> Self {
+        Self {
+            magic: TOOL_ABI_MAGIC_V1,
+            version: 1,
+            name: ToolStr::from_static(name),
+            description: ToolStr::from_static(description),
+            input_schema: ToolStr::from_static(input_schema),
+            call,
+        }
+    }
+
+    fn validate(self) -> io::Result<Self> {
+        if self.magic == TOOL_ABI_MAGIC_V1 && self.version == 1 {
+            Ok(self)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unsupported CortexFS tool ABI",
+            ))
+        }
+    }
 }
 
 /// One tool invocation.
@@ -176,7 +286,7 @@ impl<W: Write> ToolEmitter<W> {
 }
 
 /// `CortexFS` tool implementation.
-pub trait Tool: Sync {
+pub trait Tool {
     /// Static tool metadata.
     fn spec(&self) -> ToolSpec;
 
@@ -247,6 +357,298 @@ pub enum RegistryError {
     Io(io::Error),
 }
 
+/// Dynamically loaded single-file tool artifact.
+#[derive(Debug)]
+pub struct DynamicTool {
+    _library: Library,
+    abi: ToolAbiV1,
+}
+
+/// W-TinyLFU cache for dynamically loaded tool artifacts.
+#[derive(Debug)]
+pub struct DynamicToolCache {
+    capacity: usize,
+    window_capacity: usize,
+    clock: u64,
+    frequencies: BTreeMap<String, u64>,
+    entries: BTreeMap<String, CachedDynamicTool>,
+}
+
+#[derive(Debug)]
+struct CachedDynamicTool {
+    path: String,
+    last_used: u64,
+    segment: CacheSegment,
+    tool: DynamicTool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CacheSegment {
+    Window,
+    Main,
+}
+
+impl DynamicToolCache {
+    /// Creates a cache with at least one slot.
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        let capacity = capacity.max(1);
+        let window_capacity = (capacity / 100).max(1).min(capacity);
+        Self {
+            capacity,
+            window_capacity,
+            clock: 0,
+            frequencies: BTreeMap::new(),
+            entries: BTreeMap::new(),
+        }
+    }
+
+    /// Number of currently loaded dynamic tools.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns true when no tools are loaded.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Returns true when a path is currently loaded.
+    #[must_use]
+    pub fn contains_path(&self, path: &str) -> bool {
+        self.entries.contains_key(path)
+    }
+
+    /// Gets a loaded tool or loads it from disk, using W-TinyLFU admission
+    /// when the cache is full.
+    pub fn get_or_load(&mut self, path: impl AsRef<Path>) -> io::Result<&DynamicTool> {
+        let path = path.as_ref().display().to_string();
+        self.record_frequency(&path);
+        if !self.entries.contains_key(&path) {
+            let tool = DynamicTool::open(&path)?;
+            self.entries.insert(
+                path.clone(),
+                CachedDynamicTool {
+                    path: path.clone(),
+                    last_used: 0,
+                    segment: CacheSegment::Window,
+                    tool,
+                },
+            );
+            self.admit_window_candidate(&path);
+        }
+        self.clock = self.clock.saturating_add(1);
+        let Some(entry) = self.entries.get_mut(&path) else {
+            return Err(io::Error::other("dynamic tool cache insert failed"));
+        };
+        entry.last_used = self.clock;
+        Ok(&entry.tool)
+    }
+
+    fn record_frequency(&mut self, path: &str) {
+        let count = self.frequencies.entry(path.to_owned()).or_insert(0);
+        *count = count.saturating_add(1);
+    }
+
+    fn admit_window_candidate(&mut self, current_path: &str) {
+        while self.window_len() > self.window_capacity {
+            let Some(candidate) = self.oldest_window_path() else {
+                return;
+            };
+            if self.main_len() < self.main_capacity() {
+                if let Some(entry) = self.entries.get_mut(&candidate) {
+                    entry.segment = CacheSegment::Main;
+                }
+                continue;
+            }
+            let Some(victim) = self.main_victim_path() else {
+                return;
+            };
+            if tiny_lfu_admits(
+                self.frequency(&candidate),
+                self.frequency(&victim),
+                self.last_used(&candidate),
+                self.last_used(&victim),
+            ) {
+                let _dropped = self.entries.remove(&victim);
+                if let Some(entry) = self.entries.get_mut(&candidate) {
+                    entry.segment = CacheSegment::Main;
+                }
+            } else if candidate != current_path {
+                let _dropped = self.entries.remove(&candidate);
+            } else {
+                return;
+            }
+        }
+
+        while self.entries.len() > self.capacity {
+            let victim = self
+                .main_victim_path()
+                .or_else(|| self.oldest_window_path())
+                .filter(|path| path != current_path);
+            let Some(victim) = victim else {
+                return;
+            };
+            let _dropped = self.entries.remove(&victim);
+        }
+    }
+
+    fn window_len(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| entry.segment == CacheSegment::Window)
+            .count()
+    }
+
+    fn main_len(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| entry.segment == CacheSegment::Main)
+            .count()
+    }
+
+    fn main_capacity(&self) -> usize {
+        self.capacity.saturating_sub(self.window_capacity).max(1)
+    }
+
+    fn oldest_window_path(&self) -> Option<String> {
+        self.entries
+            .values()
+            .filter(|entry| entry.segment == CacheSegment::Window)
+            .min_by_key(|entry| (entry.last_used, entry.path.clone()))
+            .map(|entry| entry.path.clone())
+    }
+
+    fn main_victim_path(&self) -> Option<String> {
+        wtinylfu_victim_path(
+            self.entries
+                .values()
+                .filter(|entry| entry.segment == CacheSegment::Main)
+                .map(|entry| {
+                    (
+                        entry.path.as_str(),
+                        self.frequency(&entry.path),
+                        entry.last_used,
+                    )
+                }),
+        )
+    }
+
+    fn frequency(&self, path: &str) -> u64 {
+        self.frequencies.get(path).copied().unwrap_or(0)
+    }
+
+    fn last_used(&self, path: &str) -> u64 {
+        self.entries.get(path).map_or(0, |entry| entry.last_used)
+    }
+}
+
+fn tiny_lfu_admits(
+    candidate_frequency: u64,
+    victim_frequency: u64,
+    candidate_last_used: u64,
+    victim_last_used: u64,
+) -> bool {
+    candidate_frequency > victim_frequency
+        || (candidate_frequency == victim_frequency && candidate_last_used > victim_last_used)
+}
+
+fn wtinylfu_victim_path<'a>(
+    entries: impl IntoIterator<Item = (&'a str, u64, u64)>,
+) -> Option<String> {
+    entries
+        .into_iter()
+        .min_by_key(|(path, hits, last_used)| (*hits, *last_used, (*path).to_owned()))
+        .map(|(path, _hits, _last_used)| path.to_owned())
+}
+
+impl DynamicTool {
+    /// Loads a tool artifact from disk.
+    pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
+        // SAFETY: Loading a dynamic library can run platform loader code. The
+        // caller explicitly requested loading this tool artifact from disk.
+        let library = unsafe { Library::new(path.as_ref()) }.map_err(io::Error::other)?;
+        // SAFETY: `cortexfs_tool_abi_v1` is the stable symbol required by this
+        // SDK. We copy the returned descriptor while keeping the library alive.
+        let abi = unsafe {
+            let symbol = library
+                .get::<extern "C" fn() -> *const ToolAbiV1>(b"cortexfs_tool_abi_v1")
+                .map_err(io::Error::other)?;
+            let pointer = symbol();
+            if pointer.is_null() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "tool ABI function returned null",
+                ));
+            }
+            *pointer
+        }
+        .validate()?;
+        Ok(Self {
+            _library: library,
+            abi,
+        })
+    }
+}
+
+impl Tool for DynamicTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: self.abi.name.as_str().unwrap_or("<invalid>"),
+            description: self.abi.description.as_str().unwrap_or("<invalid>"),
+            input_schema: self.abi.input_schema.as_str().unwrap_or("{}"),
+        }
+    }
+
+    fn call(
+        &self,
+        invocation: &ToolInvocation,
+        output: &mut ToolEmitter<&mut dyn Write>,
+    ) -> ToolResult<()> {
+        let mut writer = AbiWriter { output };
+        let abi_invocation = ToolInvocationAbi {
+            run: ToolStr {
+                ptr: invocation.run_id().as_ptr(),
+                len: invocation.run_id().len(),
+            },
+            input: ToolStr {
+                ptr: invocation.input().as_ptr(),
+                len: invocation.input().len(),
+            },
+        };
+        let abi_writer = ToolWriterAbi {
+            ctx: (&mut writer as *mut AbiWriter<'_, '_>).cast::<c_void>(),
+            write: abi_write,
+        };
+        match (self.abi.call)(abi_invocation, abi_writer) {
+            0 => Ok(()),
+            _ => Err(ToolError::new("EIO", "dynamic tool failed")),
+        }
+    }
+}
+
+struct AbiWriter<'a, 'b> {
+    output: &'a mut ToolEmitter<&'b mut dyn Write>,
+}
+
+extern "C" fn abi_write(ctx: *mut c_void, ptr: *const u8, len: usize) -> i32 {
+    if ctx.is_null() || ptr.is_null() {
+        return -1;
+    }
+    // SAFETY: The callee receives `ctx` from `DynamicTool::call`, where it was
+    // created from a live mutable `AbiWriter`. The byte pointer is valid for the
+    // duration of this callback by ABI contract.
+    let writer = unsafe { &mut *ctx.cast::<AbiWriter<'_, '_>>() };
+    // SAFETY: The ABI writer callback receives a byte slice valid for the call.
+    let bytes = unsafe { slice::from_raw_parts(ptr, len) };
+    match writer.output.writer.write_all(bytes) {
+        Ok(()) => 0,
+        Err(_error) => -1,
+    }
+}
+
 /// Runs a tool invocation and emits `CortexFS` JSONL frames.
 pub fn run_tool(
     tool: &dyn Tool,
@@ -314,11 +716,76 @@ macro_rules! cortexfs_tool_main {
     };
 }
 
+/// Exports a tool as a dynamic artifact and as a normal executable entry point.
+#[macro_export]
+macro_rules! cortexfs_tool_artifact {
+    ($tool:expr, name: $name:expr, description: $description:expr, schema: $schema:expr $(,)?) => {
+        #[unsafe(no_mangle)]
+        pub extern "C" fn cortexfs_tool_abi_v1() -> *const $crate::ToolAbiV1 {
+            extern "C" fn call(
+                invocation: $crate::ToolInvocationAbi,
+                writer: $crate::ToolWriterAbi,
+            ) -> i32 {
+                struct AbiWrite($crate::ToolWriterAbi);
+
+                impl std::io::Write for AbiWrite {
+                    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+                        let status = (self.0.write)(self.0.ctx, buffer.as_ptr(), buffer.len());
+                        if status == 0 {
+                            Ok(buffer.len())
+                        } else {
+                            Err(std::io::Error::other("tool ABI write failed"))
+                        }
+                    }
+
+                    fn flush(&mut self) -> std::io::Result<()> {
+                        Ok(())
+                    }
+                }
+
+                fn read_abi(value: $crate::ToolStr) -> Result<&'static str, ()> {
+                    if value.ptr.is_null() {
+                        return Err(());
+                    }
+                    // SAFETY: Tool ABI strings are required to be valid for the
+                    // duration of the call.
+                    let bytes = unsafe { std::slice::from_raw_parts(value.ptr, value.len) };
+                    std::str::from_utf8(bytes).map_err(|_error| ())
+                }
+
+                let Ok(run) = read_abi(invocation.run) else {
+                    return -1;
+                };
+                let Ok(input) = read_abi(invocation.input) else {
+                    return -1;
+                };
+                let tool = $tool;
+                let invocation = $crate::ToolInvocation::new(run, input);
+                let mut writer = AbiWrite(writer);
+                let mut output =
+                    $crate::ToolEmitter::new(run, &mut writer as &mut dyn std::io::Write);
+                match $crate::Tool::call(&tool, &invocation, &mut output) {
+                    Ok(()) => 0,
+                    Err(_error) => -1,
+                }
+            }
+
+            static ABI: $crate::ToolAbiV1 =
+                $crate::ToolAbiV1::new($name, $description, $schema, call);
+            &ABI
+        }
+
+        fn main() -> std::process::ExitCode {
+            $crate::run_cli(&$tool, std::env::args_os().skip(1))
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         Registry, RegistryError, Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult,
-        ToolSpec, collect_input, run_tool,
+        ToolSpec, collect_input, run_tool, tiny_lfu_admits, wtinylfu_victim_path,
     };
     use std::ffi::OsString;
     use std::io::{self, Write};
@@ -401,5 +868,22 @@ mod tests {
         let error = RegistryError::Io(io::Error::other("boom"));
         let text = format!("{error:?}");
         assert!(text.contains("boom"));
+    }
+
+    #[test]
+    fn wtinylfu_victim_prefers_lowest_frequency_then_oldest_use() {
+        assert_eq!(
+            wtinylfu_victim_path([("/tool/a", 4, 10), ("/tool/b", 1, 20), ("/tool/c", 1, 5),]),
+            Some("/tool/c".to_owned())
+        );
+        assert_eq!(wtinylfu_victim_path([]), None);
+    }
+
+    #[test]
+    fn tiny_lfu_admission_keeps_frequent_main_entries() {
+        assert!(tiny_lfu_admits(5, 2, 1, 10));
+        assert!(!tiny_lfu_admits(1, 3, 10, 1));
+        assert!(tiny_lfu_admits(2, 2, 20, 10));
+        assert!(!tiny_lfu_admits(2, 2, 10, 20));
     }
 }

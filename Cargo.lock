@@ -350,6 +350,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 name = "cortexfs"
 version = "0.1.0"
 dependencies = [
+ "cortexfs-tool-sdk",
  "fuser",
  "jsonschema",
  "keyring",
@@ -366,6 +367,7 @@ dependencies = [
 name = "cortexfs-tool-sdk"
 version = "0.1.0"
 dependencies = [
+ "libloading",
  "serde_json",
 ]
 
@@ -923,6 +925,16 @@ name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+
+[[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
 
 [[package]]
 name = "linux-raw-sys"

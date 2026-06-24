@@ -549,8 +549,7 @@ fn ls_lists_abi_paths_and_keeps_object_filtering() {
     assert!(matches!(
         tool,
         Ok(ref names)
-            if names.contains(&"fs.read".to_owned())
-                && !names.contains(&"fs.read.d".to_owned())
+            if names.contains(&"tsh".to_owned()) && !names.contains(&"tsh.d".to_owned())
     ));
 }
 

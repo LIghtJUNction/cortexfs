@@ -1,10 +1,11 @@
 use std::ffi::OsString;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::{env, fs};
 
 use cortexfs::{CTX_ROOT, ToolPath};
+use cortexfs_tool_sdk::{DynamicToolCache, ToolInvocation, run_tool as run_sdk_tool};
 
 #[derive(Debug, Eq, PartialEq)]
 struct TshError {
@@ -40,11 +41,12 @@ fn main() -> ExitCode {
 
 fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let (root, command) = parse_args(args)?;
+    let mut cache = DynamicToolCache::new(tool_cache_capacity());
     match command {
         TshCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
         TshCommand::List => list_tools(&root).map(|()| ExitCode::SUCCESS),
-        TshCommand::Repl => run_repl(&root),
-        TshCommand::Tool { name, args } => run_tool(&root, &name, args),
+        TshCommand::Repl => run_repl(&root, &mut cache),
+        TshCommand::Tool { name, args } => run_tool(&root, &mut cache, &name, args),
     }
 }
 
@@ -144,7 +146,7 @@ fn list_tools(root: &Path) -> Result<(), TshError> {
     stdout.flush().map_err(|error| write_error_to_tsh(&error))
 }
 
-fn run_repl(root: &Path) -> Result<ExitCode, TshError> {
+fn run_repl(root: &Path, cache: &mut DynamicToolCache) -> Result<ExitCode, TshError> {
     loop {
         write_stdout("tsh> ")?;
         let mut line = String::new();
@@ -169,7 +171,7 @@ fn run_repl(root: &Path) -> Result<ExitCode, TshError> {
             Some("which") => repl_which(root, &words)?,
             Some(name) => {
                 let args = words.iter().skip(1).map(OsString::from).collect::<Vec<_>>();
-                let _code = run_repl_tool(root, name, args)?;
+                let _code = run_repl_tool(root, cache, name, args)?;
             }
             None => {}
         }
@@ -199,14 +201,19 @@ fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
     write_stdout(&format!("{}\n", hit.path().display()))
 }
 
-fn run_repl_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
+fn run_repl_tool(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    name: &str,
+    args: Vec<OsString>,
+) -> Result<ExitCode, TshError> {
     if args.is_empty() && !is_interactive_tool(name) {
         write_stdout(&format!(
             "tsh: {name} needs input; pass arguments instead of leaving stdin open\ntry: {name} PATH or {name} '{{\"path\":\"PATH\"}}'\n"
         ))?;
         return Ok(ExitCode::from(2));
     }
-    run_tool(root, name, args)
+    run_tool(root, cache, name, args)
 }
 
 fn is_interactive_tool(name: &str) -> bool {
@@ -262,13 +269,27 @@ fn parse_repl_line(line: &str) -> Result<Vec<String>, TshError> {
     Ok(words)
 }
 
-fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
+fn run_tool(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    name: &str,
+    args: Vec<OsString>,
+) -> Result<ExitCode, TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
         return Err(TshError::unavailable(format!(
             "tool not found in CTX_PATH: {name}; try `tools` or `bash`"
         )));
     };
+    if let Ok(tool) = cache.get_or_load(hit.path()) {
+        let input = collect_tool_input(&args)?;
+        let run_id = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+        let invocation = ToolInvocation::new(run_id, input);
+        let mut stdout = io::stdout().lock();
+        run_sdk_tool(tool, &invocation, &mut stdout)
+            .map_err(|error| TshError::unavailable(format!("cannot run dynamic tool: {error}")))?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let status = ProcessCommand::new(hit.path())
         .args(args)
         .stdin(Stdio::inherit())
@@ -280,6 +301,29 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
+}
+
+fn collect_tool_input(args: &[OsString]) -> Result<String, TshError> {
+    let input = args
+        .iter()
+        .map(|value| value.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !input.is_empty() {
+        return Ok(input);
+    }
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .map_err(|error| TshError::unavailable(format!("cannot read tool input: {error}")))?;
+    Ok(input)
+}
+
+fn tool_cache_capacity() -> usize {
+    env::var("CTX_TOOL_CACHE")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(32)
 }
 
 fn ctx_tool_path(root: &Path) -> Result<ToolPath, TshError> {

@@ -117,7 +117,7 @@ fn doctor_reports_reference_tree_layout_breakage() {
     let root = clean_test_dir("ctx-doctor-reference-tree-bad");
     let ensured = ensure_v1_reference_tree(&root);
     assert!(ensured.is_ok());
-    assert!(fs::remove_file(root.join("tool").join("fs.read.d").join("schema")).is_ok());
+    assert!(fs::remove_file(root.join("tool").join("tsh.d").join("schema")).is_ok());
     assert!(
         fs::remove_dir_all(fixture_path(
             &root,
