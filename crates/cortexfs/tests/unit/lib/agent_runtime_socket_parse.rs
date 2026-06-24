@@ -206,6 +206,44 @@ fn api_key_resolution_uses_keychain_when_environment_is_empty_or_missing() {
 }
 
 #[test]
+fn api_key_resolution_checks_all_environment_candidates_before_keychain() {
+    let env_names = vec![
+        "PRIMARY_API_KEY".to_owned(),
+        "SECONDARY_API_KEY".to_owned(),
+    ];
+    let resolved = resolve_api_key_from_env_names_with(
+        &env_names,
+        "cortexfs:test",
+        "default",
+        |name| {
+            if name == "SECONDARY_API_KEY" {
+                Ok("env-secret".to_owned())
+            } else {
+                Err(std::env::VarError::NotPresent)
+            }
+        },
+        |_service, _account| Ok(Some("keychain-secret".to_owned())),
+    );
+    assert_eq!(resolved, Ok(Some("env-secret".to_owned())));
+}
+
+#[test]
+fn api_key_resolution_uses_keychain_after_environment_candidates() {
+    let env_names = vec![
+        "PRIMARY_API_KEY".to_owned(),
+        "SECONDARY_API_KEY".to_owned(),
+    ];
+    let resolved = resolve_api_key_from_env_names_with(
+        &env_names,
+        "cortexfs:test",
+        "default",
+        |_name| Err(std::env::VarError::NotPresent),
+        |_service, _account| Ok(Some("keychain-secret".to_owned())),
+    );
+    assert_eq!(resolved, Ok(Some("keychain-secret".to_owned())));
+}
+
+#[test]
 fn api_key_resolution_reports_unconfigured_without_environment_or_keychain() {
     let resolved = resolve_api_key_with(
         "LMM_API_KEY",

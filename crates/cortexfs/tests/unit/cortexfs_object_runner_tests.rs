@@ -1,4 +1,7 @@
-use super::{openai_stream_event, run, ObjectPath, OpenAiStreamEvent};
+use super::{
+    openai_stream_event, provider_key_names, run, ObjectPath, OpenAiStreamEvent,
+    RunnerProviderConfig,
+};
 use std::ffi::OsString;
 use std::path::Path;
 
@@ -48,4 +51,30 @@ fn openai_stream_event_does_not_mix_reasoning_into_answer_text() {
         r#"data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}"#,
     );
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text.is_empty()));
+}
+
+#[test]
+fn provider_key_names_accept_configured_and_host_fallbacks() {
+    assert_eq!(
+        provider_key_names(&RunnerProviderConfig {
+            base_url: "https://api.openai.com/v1".to_owned(),
+            api_key_env: Some("CORTEXFS_OPENAI_KEY".to_owned()),
+        }),
+        vec![
+            "CORTEXFS_OPENAI_KEY".to_owned(),
+            "OPENAI_COM_API_KEY".to_owned(),
+            "API_OPENAI_COM_API_KEY".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn provider_key_names_reject_invalid_configured_names() {
+    assert_eq!(
+        provider_key_names(&RunnerProviderConfig {
+            base_url: "https://localhost:11434/v1".to_owned(),
+            api_key_env: Some("bad-name".to_owned()),
+        }),
+        vec!["LOCALHOST_API_KEY".to_owned()]
+    );
 }

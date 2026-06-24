@@ -16,7 +16,7 @@ fn provider_chat_completion(
         .ok_or_else(|| format!("invalid provider model: {name}"))?;
     let config =
         provider_config(provider).ok_or_else(|| format!("missing provider: {provider}"))?;
-    let key = provider_key(&config).ok_or_else(|| format!("missing api key: {provider}"))?;
+    let key = provider_key(&config)?.ok_or_else(|| format!("missing api key: {provider}"))?;
     match call_openai_chat_streaming(&config.base_url, model, input, &key, run, stdout) {
         Ok(()) => Ok(()),
         Err(error) if error.can_fallback => {
@@ -49,29 +49,69 @@ fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
     None
 }
 
-fn provider_key(config: &RunnerProviderConfig) -> Option<String> {
-    for name in provider_key_names(config) {
-        if let Ok(value) = env::var(name)
-            && !value.trim().is_empty()
-        {
-            return Some(value);
-        }
-    }
-    None
+fn provider_key(config: &RunnerProviderConfig) -> Result<Option<String>, String> {
+    let Some(provider) = provider_name_from_base_url(&config.base_url) else {
+        return Ok(None);
+    };
+    resolve_api_key_from_env_names(
+        &provider_key_names(config),
+        &provider_keychain_service(&provider),
+        "default",
+    )
+    .map_err(|_error| format!("keychain unavailable: {provider}"))
 }
 
 fn provider_key_names(config: &RunnerProviderConfig) -> Vec<String> {
     let mut names = Vec::new();
     if let Some(name) = config.api_key_env.as_deref() {
-        names.push(name.to_owned());
+        append_provider_key_name(name, &mut names);
     }
     if let Some(host) = provider_name_from_base_url(&config.base_url) {
-        names.push(format!(
-            "{}_API_KEY",
-            host.replace('.', "_").to_ascii_uppercase()
-        ));
+        append_provider_key_name_for_host(&host, true, &mut names);
+        append_provider_key_name_for_host(&host, false, &mut names);
     }
     names
+}
+
+fn append_provider_key_name_for_host(host: &str, drop_api_prefix: bool, names: &mut Vec<String>) {
+    let labels = host
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let labels = if drop_api_prefix && labels.first() == Some(&"api") {
+        labels.get(1..).unwrap_or_default()
+    } else {
+        labels.as_slice()
+    };
+    if labels.is_empty() {
+        return;
+    }
+    append_provider_key_name(
+        &(labels
+            .iter()
+            .map(|part| part.to_ascii_uppercase())
+            .collect::<Vec<_>>()
+            .join("_")
+            + "_API_KEY"),
+        names,
+    );
+}
+
+fn append_provider_key_name(name: &str, names: &mut Vec<String>) {
+    if is_provider_key_name(name) && !names.contains(&name.to_owned()) {
+        names.push(name.to_owned());
+    }
+}
+
+fn is_provider_key_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
+}
+
+fn provider_keychain_service(provider: &str) -> String {
+    format!("cortexfs:{provider}")
 }
 
 fn provider_name_from_base_url(base_url: &str) -> Option<String> {
@@ -169,11 +209,15 @@ fn call_openai_chat_streaming(
             can_fallback: !emitted,
         });
     }
-    if emitted || done {
+    if emitted {
         Ok(())
     } else {
         Err(StreamFailure {
-            message: "provider stream produced no content".to_owned(),
+            message: if done {
+                "provider stream produced no answer text".to_owned()
+            } else {
+                "provider stream produced no content".to_owned()
+            },
             can_fallback: true,
         })
     }
