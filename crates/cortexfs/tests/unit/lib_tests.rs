@@ -45,7 +45,6 @@ use std::net::Shutdown;
 use std::os::unix::fs::{symlink, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 include!("lib/helpers.rs");
 include!("lib/reference_tree_basics.rs");

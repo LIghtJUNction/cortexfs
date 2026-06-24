@@ -189,16 +189,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(base_policy.contains("allow base_t tool:tsh execute\n"));
     assert!(base_policy.contains("allow base_t agent:coder create\n"));
     assert!(base_policy.contains("allow base_t agent:reviewer start\n"));
-    for tool in [
-        "tsh",
-        "bash",
-        "tmux",
-        "zellij",
-        "fs.read",
-        "fs.write",
-        "shell.exec",
-    ] {
-        assert!(inspect_object_layout(&root, ObjectClass::Tool, tool).is_ok());
+    assert!(inspect_object_layout(&root, ObjectClass::Tool, "tsh").is_ok());
+    for tool in ["bash", "tmux", "zellij", "fs.read", "fs.write", "shell.exec"] {
+        assert!(!root.join("tool").join(tool).exists());
+        assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }
     for tool in [
         "mcp.github.search_issues",
@@ -210,28 +204,9 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }
 
-    for (tool, required) in [
-        ("tsh", &[][..]),
-        ("bash", &[][..]),
-        ("tmux", &[][..]),
-        ("zellij", &[][..]),
-        ("fs.read", &["path"][..]),
-        ("fs.write", &["path", "content"][..]),
-        ("shell.exec", &["cmd"][..]),
-    ] {
-        let schema = fs::read_to_string(root.join("tool").join(format!("{tool}.d/schema")));
-        let schema = ok!(schema);
-        assert!(inspect_tool_schema_json(&schema).is_ok());
-        let parsed = serde_json::from_str::<serde_json::Value>(&schema);
-        let parsed = ok!(parsed);
-        for field in required {
-            assert!(parsed
-                .pointer("/required")
-                .and_then(serde_json::Value::as_array)
-                .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(field))));
-            assert!(parsed.pointer(&format!("/properties/{field}")).is_some());
-        }
-    }
+    let schema = fs::read_to_string(root.join("tool").join("tsh.d/schema"));
+    let schema = ok!(schema);
+    assert!(inspect_tool_schema_json(&schema).is_ok());
 
     let private_session_root = agent_session_root(&root, "coder");
     assert!(private_session_root.join("index").join("by-cwd").is_dir());
@@ -381,48 +356,13 @@ fn echo_model_runner_emits_one_shot_jsonl() {
 }
 
 #[test]
-fn reference_tree_standard_tools_emit_jsonl() {
+fn reference_tree_bootstrap_only_installs_tsh_tool() {
     let root = reference_tree("reference-tree-tool-exec");
 
-    let data = root.join("shared").join("project-a").join("data");
-    let read_target = data.join("readme.txt");
-    write_text_file(&read_target, "visible");
-    let read_arg = format!(r#"{{"path":"{}"}}"#, read_target.display());
-    let read = Command::new(root.join("tool").join("fs.read"))
-        .arg(read_arg)
-        .output();
-    let read = ok!(read);
-    assert!(read.status.success());
-    let read_stdout = String::from_utf8(read.stdout);
-    let read_stdout = ok!(read_stdout);
-    assert!(read_stdout.contains(r#"{"type":"start","run":"r1","tool":"fs.read"}"#));
-    assert!(read_stdout.contains(r#""text":"visible""#));
-    assert!(inspect_event_stream_jsonl(&read_stdout).is_ok());
-
-    let write_target = data.join("written.txt");
-    let write_arg = format!(
-        r#"{{"path":"{}","content":"stored"}}"#,
-        write_target.display()
-    );
-    let write = Command::new(root.join("tool").join("fs.write"))
-        .arg(write_arg)
-        .output();
-    let write = ok!(write);
-    assert!(write.status.success());
-    assert_file_text(&write_target, "stored");
-    let write_stdout = String::from_utf8(write.stdout);
-    let write_stdout = ok!(write_stdout);
-    assert!(write_stdout.contains(r#"{"type":"start","run":"r1","tool":"fs.write"}"#));
-    assert!(inspect_event_stream_jsonl(&write_stdout).is_ok());
-
-    let shell = Command::new(root.join("tool").join("shell.exec"))
-        .arg(r#"{"cmd":"printf shell-ok"}"#)
-        .output();
-    let shell = ok!(shell);
-    assert!(shell.status.success());
-    let shell_stdout = String::from_utf8(shell.stdout);
-    let shell_stdout = ok!(shell_stdout);
-    assert!(shell_stdout.contains(r#"{"type":"start","run":"r1","tool":"shell.exec"}"#));
-    assert!(shell_stdout.contains(r#""text":"shell-ok""#));
-    assert!(inspect_event_stream_jsonl(&shell_stdout).is_ok());
+    assert!(root.join("tool").join("tsh").is_file());
+    assert!(root.join("tool").join("tsh.d").is_dir());
+    for tool in ["fs.read", "fs.write", "shell.exec", "bash", "tmux", "zellij"] {
+        assert!(!root.join("tool").join(tool).exists());
+        assert!(!root.join("tool").join(format!("{tool}.d")).exists());
+    }
 }

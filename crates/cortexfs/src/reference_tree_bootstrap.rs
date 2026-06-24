@@ -108,8 +108,7 @@ fn ensure_reference_agent(
 fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
     let mut policy = format!(
         "allow {policy_subject} model:{DEFAULT_MODEL_ALIAS} use\n\
-         allow {policy_subject} tool:tsh execute\n\
-         allow {policy_subject} tool:fs.read execute\n"
+         allow {policy_subject} tool:tsh execute\n"
     );
     if name == "base" {
         for child in ["coder", "reviewer"] {
@@ -243,109 +242,6 @@ const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
         cap: "tsh",
         policy: "allow base_t tool:tsh execute\nallow coder_t tool:tsh execute\nallow reviewer_t tool:tsh execute",
     },
-    ReferenceToolSpec {
-        name: "bash",
-        description: "Interactive bash tool for agents running inside ctxterm/tsh.",
-        schema: r#"{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "bash tool input",
-  "description": "Launch bash as a CortexFS tool.",
-  "type": "object",
-  "additionalProperties": true
-}"#,
-        cap: "bash",
-        policy: "",
-    },
-    ReferenceToolSpec {
-        name: "tmux",
-        description: "Interactive tmux tool for background terminal tasks.",
-        schema: r#"{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "tmux tool input",
-  "description": "Launch tmux as a CortexFS tool.",
-  "type": "object",
-  "additionalProperties": true
-}"#,
-        cap: "tmux",
-        policy: "",
-    },
-    ReferenceToolSpec {
-        name: "zellij",
-        description: "Interactive zellij tool for background terminal tasks.",
-        schema: r#"{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "zellij tool input",
-  "description": "Launch zellij as a CortexFS tool.",
-  "type": "object",
-  "additionalProperties": true
-}"#,
-        cap: "zellij",
-        policy: "",
-    },
-    ReferenceToolSpec {
-        name: "fs.read",
-        description: "Read a UTF-8 text file from the agent-visible filesystem.",
-        schema: r#"{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fs.read input",
-  "description": "Read one UTF-8 text file visible to the tool process.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["path"],
-  "properties": {
-    "path": {
-      "type": "string",
-      "description": "Path to a UTF-8 text file visible to the tool process."
-    }
-  }
-}"#,
-        cap: "fs.read",
-        policy: "allow base_t tool:fs.read execute\nallow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute",
-    },
-    ReferenceToolSpec {
-        name: "fs.write",
-        description: "Write UTF-8 text to a file path visible to the tool process.",
-        schema: r#"{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "fs.write input",
-  "description": "Write UTF-8 text to one path visible to the tool process.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["path", "content"],
-  "properties": {
-    "path": {
-      "type": "string",
-      "description": "Path to write."
-    },
-    "content": {
-      "type": "string",
-      "description": "UTF-8 content to write."
-    }
-  }
-}"#,
-        cap: "fs.write",
-        policy: "",
-    },
-    ReferenceToolSpec {
-        name: "shell.exec",
-        description: "Run a shell command in the tool process environment and return stdout/stderr.",
-        schema: r#"{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "shell.exec input",
-  "description": "Run one shell command in the tool process environment.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["cmd"],
-  "properties": {
-    "cmd": {
-      "type": "string",
-      "description": "Command line passed to sh -c."
-    }
-  }
-}"#,
-        cap: "shell.exec",
-        policy: "",
-    },
 ];
 
 const DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS: &[&str] = &[
@@ -358,12 +254,6 @@ const DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS: &[&str] = &[
 fn reference_tool_stub_script(name: &str) -> Option<&'static str> {
     match name {
         "tsh" => Some(reference_exec_named_tool_script("tsh")),
-        "bash" => Some(reference_exec_named_tool_script("bash")),
-        "tmux" => Some(reference_exec_named_tool_script("tmux")),
-        "zellij" => Some(reference_exec_named_tool_script("zellij")),
-        "fs.read" => Some(reference_fs_read_stub_script()),
-        "fs.write" => Some(reference_fs_write_stub_script()),
-        "shell.exec" => Some(reference_shell_exec_stub_script()),
         _ => None,
     }
 }
@@ -376,111 +266,6 @@ fn reference_exec_named_tool_script(name: &'static str) -> &'static str {
 exec tsh "$@"
 "#
         }
-        "bash" => {
-            r#"#!/bin/sh
-# CortexFS reference-tree bash tool.
-exec bash "$@"
-"#
-        }
-        "tmux" => {
-            r#"#!/bin/sh
-# CortexFS reference-tree tmux tool.
-exec tmux "$@"
-"#
-        }
-        "zellij" => {
-            r#"#!/bin/sh
-# CortexFS reference-tree zellij tool.
-exec zellij "$@"
-"#
-        }
         _ => "",
     }
-}
-
-fn reference_fs_read_stub_script() -> &'static str {
-    r#"#!/bin/sh
-# CortexFS reference-tree fs.read stub.
-run="$CTX_RUN_ID"
-if [ -z "$run" ]; then
-  run="r1"
-fi
-input="$*"
-if [ -z "$input" ]; then
-  input="$(cat)"
-fi
-path="$(printf '%s' "$input" | sed -n 's/.*"path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-if [ -z "$path" ]; then
-  path="$input"
-fi
-printf '{"type":"start","run":"%s","tool":"fs.read"}\n' "$run"
-if [ ! -f "$path" ]; then
-  printf '{"type":"error","run":"%s","code":"ENOENT","message":"file not found"}\n' "$run"
-  printf '{"type":"done","run":"%s","status":"error"}\n' "$run"
-  exit 2
-fi
-content="$(cat "$path")"
-json_text="$(printf '%s' "$content" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"text","text":"%s"}]}\n' "$run" "$json_text"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
-"#
-}
-
-fn reference_fs_write_stub_script() -> &'static str {
-    r#"#!/bin/sh
-# CortexFS reference-tree fs.write stub.
-run="$CTX_RUN_ID"
-if [ -z "$run" ]; then
-  run="r1"
-fi
-input="$*"
-if [ -z "$input" ]; then
-  input="$(cat)"
-fi
-path="$(printf '%s' "$input" | sed -n 's/.*"path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-content="$(printf '%s' "$input" | sed -n 's/.*"content"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-printf '{"type":"start","run":"%s","tool":"fs.write"}\n' "$run"
-if [ -z "$path" ]; then
-  printf '{"type":"error","run":"%s","code":"EINVAL","message":"missing path"}\n' "$run"
-  printf '{"type":"done","run":"%s","status":"error"}\n' "$run"
-  exit 2
-fi
-if ! printf '%s' "$content" > "$path"; then
-  printf '{"type":"error","run":"%s","code":"EACCES","message":"write failed"}\n' "$run"
-  printf '{"type":"done","run":"%s","status":"error"}\n' "$run"
-  exit 13
-fi
-printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"text","text":"written"}]}\n' "$run"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
-"#
-}
-
-fn reference_shell_exec_stub_script() -> &'static str {
-    r#"#!/bin/sh
-# CortexFS reference-tree shell.exec stub.
-run="$CTX_RUN_ID"
-if [ -z "$run" ]; then
-  run="r1"
-fi
-input="$*"
-if [ -z "$input" ]; then
-  input="$(cat)"
-fi
-cmd="$(printf '%s' "$input" | sed -n 's/.*"cmd"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-if [ -z "$cmd" ]; then
-  cmd="$input"
-fi
-printf '{"type":"start","run":"%s","tool":"shell.exec"}\n' "$run"
-output="$(sh -c "$cmd" 2>&1)"
-status="$?"
-json_text="$(printf '%s' "$output" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"text","text":"%s"}]}\n' "$run" "$json_text"
-if [ "$status" -eq 0 ]; then
-  printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
-else
-  printf '{"type":"error","run":"%s","code":"EIO","message":"command failed"}\n' "$run"
-  printf '{"type":"done","run":"%s","status":"error"}\n' "$run"
-  exit 1
-fi
-"#
 }

@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use cortexfs_tool_sdk::{
-    Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, cortexfs_tool_main,
+    Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, cortexfs_tool_artifact,
 };
 
 #[derive(Debug)]
@@ -33,4 +33,9 @@ impl Tool for EchoTool {
     }
 }
 
-cortexfs_tool_main!(EchoTool);
+cortexfs_tool_artifact!(
+    EchoTool,
+    name: "project.echo",
+    description: "Echo text for CortexFS tool SDK examples.",
+    schema: r#"{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}"#,
+);

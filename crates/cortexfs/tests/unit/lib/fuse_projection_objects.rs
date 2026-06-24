@@ -127,13 +127,13 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
         echo_attr,
         Ok(ref attr) if attr.mode() & 0o777 == 0o555
     ));
-    let tool_metadata = projection.read_to_string("tool/fs.read");
+    let tool_metadata = projection.read_to_string("tool/tsh");
     assert!(matches!(
         tool_metadata,
         Ok(ref content)
             if content.starts_with(&format!("#!{CORTEXFS_OBJECT_RUNNER}\n"))
                 && content.contains("# cortexfs.object=tool\n")
-                && content.contains("# cortexfs.name=fs.read\n")
+                && content.contains("# cortexfs.name=tsh\n")
                 && !content.contains("#!/bin/sh")
     ));
     let agent_metadata = projection.read_to_string("agent/coder");
@@ -146,7 +146,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
                 && content.contains("# cortexfs.model=main\n")
                 && !content.contains("reference-tree agent stub")
     ));
-    let tool_attr = projection.getattr("tool/fs.read");
+    let tool_attr = projection.getattr("tool/tsh");
     assert!(matches!(
         tool_attr,
         Ok(ref attr)
