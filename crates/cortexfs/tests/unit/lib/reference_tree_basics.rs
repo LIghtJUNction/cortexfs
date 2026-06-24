@@ -156,6 +156,8 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         .map(|metadata| metadata.permissions().mode() & 0o777);
     assert!(matches!(status_mode, Ok(0o644)));
     assert!(root.join("bin").join("ctx").is_file());
+    assert!(root.join("bin").join("te").is_file());
+    assert!(root.join("bin").join("tsh").is_file());
     assert!(!root.join("model").join("debug").join("echo").exists());
     let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))
         .map(|metadata| metadata.permissions().mode() & 0o777);
@@ -165,9 +167,32 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(!root.join("memory").exists());
 
     assert!(inspect_object_layout(&root, ObjectClass::Model, "debug/echo").is_ok());
+    assert!(inspect_object_layout(&root, ObjectClass::Agent, "base").is_ok());
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "reviewer").is_ok());
-    for tool in ["fs.read", "fs.write", "shell.exec"] {
+    assert_file_text(&root.join("agent").join("base.d").join("parent"), "\n");
+    assert_file_text(
+        &root.join("agent").join("coder.d").join("parent"),
+        "agent:base\n",
+    );
+    assert_file_text(
+        &root.join("agent").join("reviewer.d").join("parent"),
+        "agent:base\n",
+    );
+    let base_policy = fs::read_to_string(root.join("agent").join("base.d").join("policy"));
+    let base_policy = ok!(base_policy);
+    assert!(base_policy.contains("allow base_t tool:tsh execute\n"));
+    assert!(base_policy.contains("allow base_t agent:coder create\n"));
+    assert!(base_policy.contains("allow base_t agent:reviewer start\n"));
+    for tool in [
+        "tsh",
+        "bash",
+        "tmux",
+        "zellij",
+        "fs.read",
+        "fs.write",
+        "shell.exec",
+    ] {
         assert!(inspect_object_layout(&root, ObjectClass::Tool, tool).is_ok());
     }
     for tool in [
@@ -181,6 +206,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     }
 
     for (tool, required) in [
+        ("tsh", &[][..]),
+        ("bash", &[][..]),
+        ("tmux", &[][..]),
+        ("zellij", &[][..]),
         ("fs.read", &["path"][..]),
         ("fs.write", &["path", "content"][..]),
         ("shell.exec", &["cmd"][..]),
@@ -202,6 +231,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let private_session_root = agent_session_root(&root, "coder");
     assert!(private_session_root.join("index").join("by-cwd").is_dir());
     assert!(!private_session_root.join("default").exists());
+    assert!(agent_session_root(&root, "base")
+        .join("index")
+        .join("by-cwd")
+        .is_dir());
 
     assert!(user_tool_dir.is_dir());
     assert!(!user_tool_dir.join("fs.read").exists());

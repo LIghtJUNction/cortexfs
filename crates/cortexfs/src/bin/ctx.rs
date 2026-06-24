@@ -35,6 +35,8 @@ fn main() -> ExitCode {
 
 include!("ctx/parse.rs");
 
+include!("ctx/agent.rs");
+
 include!("ctx/output_mount.rs");
 
 include!("ctx/objects_socket.rs");

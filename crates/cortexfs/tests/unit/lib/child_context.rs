@@ -46,6 +46,14 @@ allow reviewer_t shared:project-a read
         &parent_mounts,
     );
     assert_eq!(authorize_child_agent(request, authority), Ok(()));
+
+    let temp_request = ChildAgentRequest::new(
+        "scratch",
+        "agent:coder session:default run:r124",
+        ChildLifecycle::Temp,
+        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+    );
+    assert_eq!(authorize_child_agent(temp_request, authority), Ok(()));
 }
 
 #[test]
@@ -179,6 +187,10 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
         Err(ChildAgentDenial::InvalidParentRef)
     );
 
+    assert_eq!(
+        ChildLifecycle::parse("temp"),
+        Ok(ChildLifecycle::Temp)
+    );
     assert_eq!(
         ChildLifecycle::parse("detached"),
         Err(ChildAgentDenial::UnsupportedLifecycle)

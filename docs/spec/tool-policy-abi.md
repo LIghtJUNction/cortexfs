@@ -103,6 +103,34 @@ requested child groups are a subset of parent groups
 requested child name is valid
 ```
 
+## Agent Terminal Tools
+
+Agents should get one terminal capability: `tsh`. A runtime launches it inside
+`te`, the pseudo-terminal owner:
+
+```text
+/ctx/bin/te
+/ctx/bin/tsh
+/ctx/tool/tsh
+```
+
+`te` starts `tsh` by default and owns the PTY for the whole agent terminal
+lifecycle. `tsh` is not a host shell. It resolves the first word through
+`CTX_PATH` and executes only the matching CortexFS tool object.
+
+Interactive shells and multiplexers are ordinary tools:
+
+```text
+/ctx/tool/bash
+/ctx/tool/tmux
+/ctx/tool/zellij
+```
+
+So an agent enters an interactive shell by asking `tsh` to run the `bash` tool.
+Inside that tool, `exit` exits bash and returns to `tsh`. Background terminal
+work should go through visible `tmux` or `zellij` tools, not through a second
+agent scheduler namespace.
+
 Example request:
 
 ```json
@@ -141,17 +169,23 @@ an authorization side effect.
 stdin/stdout is the main tool interface. `schema` describes input and output.
 It does not grant permission.
 
-Execution permission is decided by all four:
+Execution visibility and permission are decided by all of:
 
 ```text
 Linux execute bit
-agent uid/gid
+agent uid/gid/groups
+agent mount table and noexec flag
 agent policy v0 allow
 tool's own policy
 ```
 
 There is no `agent/<name>.d/tool`. Tool authorization is policy v0. Without
 `allow <agent_type> tool:<name> execute`, return `EACCES`.
+
+An implementation may list only executable tools that pass this full effective
+authority check for the agent. A durable system tool under `/ctx/tool` is a
+candidate, not a grant. User-level visibility and CortexFS security context
+both constrain the final agent-visible tool set.
 
 MCP-originated tools use the same policy object class:
 

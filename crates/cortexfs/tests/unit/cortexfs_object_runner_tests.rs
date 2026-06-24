@@ -1,5 +1,5 @@
 use super::{
-    openai_stream_event, provider_key_names, run, ObjectPath, OpenAiStreamEvent,
+    is_passthrough_tool, openai_stream_event, provider_key_names, run, ObjectPath, OpenAiStreamEvent,
     RunnerProviderConfig,
 };
 use std::ffi::OsString;
@@ -27,6 +27,16 @@ fn runner_rejects_unknown_model() {
         run(vec![OsString::from("/ctx/model/openai/gpt-4o")]),
         Err("missing provider: openai".to_owned())
     );
+}
+
+#[test]
+fn runner_recognizes_interactive_tool_passthroughs() {
+    assert!(is_passthrough_tool("bash"));
+    assert!(is_passthrough_tool("tmux"));
+    assert!(is_passthrough_tool("zellij"));
+    assert!(is_passthrough_tool("tsh"));
+    assert!(!is_passthrough_tool("shell.exec"));
+    assert!(!is_passthrough_tool("fs.read"));
 }
 
 #[test]

@@ -303,6 +303,7 @@ fn agent_controls_accept_fixed_v1_values() {
     assert!(inspect_agent_control(AgentControlKind::Iso, "shared\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Iso, "uid\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Life, "owned\n").is_ok());
+    assert!(inspect_agent_control(AgentControlKind::Life, "temp\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Parent, "\n").is_ok());
     assert!(inspect_agent_control(
         AgentControlKind::Parent,

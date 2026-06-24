@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "aimock": "llmock -p 4010 -f tests/fixtures/aimock --strict --validate-on-load",
+    "aimock:smoke": "scripts/aimock-smoke.sh"
+  },
+  "devDependencies": {
+    "@copilotkit/aimock": "^1.33.0"
+  }
+}

@@ -7,8 +7,9 @@
 pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
     create_reference_root(root)?;
     ensure_reference_bin(root)?;
-    ensure_reference_agent(root, "coder")?;
-    ensure_reference_agent(root, "reviewer")?;
+    ensure_reference_agent(root, "base", None)?;
+    ensure_reference_agent(root, "coder", Some("agent:base"))?;
+    ensure_reference_agent(root, "reviewer", Some("agent:base"))?;
     remove_deprecated_reference_placeholder_tools(root)?;
     ensure_reference_global_tools(root)?;
     ensure_reference_home(root)?;
@@ -33,19 +34,30 @@ fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
         &ctx,
         "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec ctx \"$@\"\n",
     )?;
-    set_reference_executable(&ctx)
+    set_reference_executable(&ctx)?;
+    for name in ["te", "tsh"] {
+        let path = root.join("bin").join(name);
+        write_reference_text(
+            &path,
+            &format!("#!/bin/sh\n# CortexFS reference-tree {name} placeholder.\nexec {name} \"$@\"\n"),
+        )?;
+        set_reference_executable(&path)?;
+    }
+    Ok(())
 }
 
-fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeError> {
+fn ensure_reference_agent(
+    root: &Path,
+    name: &str,
+    parent: Option<&str>,
+) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(root, ObjectClass::Agent, name, "/bin/false", &[])
         .map_err(ReferenceTreeError::Object)?;
     let control = root.join("agent").join(format!("{name}.d"));
     let label = format!("user_u:agent_r:{name}_t:s0\n");
     let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
     let policy_subject = format!("{name}_t");
-    let policy = format!(
-        "allow {policy_subject} model:{DEFAULT_MODEL_ALIAS} use\nallow {policy_subject} tool:fs.read execute\n"
-    );
+    let policy = reference_agent_policy(&policy_subject, name);
     let mount = format!(
         "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/{name}\t/home/agent\trw\trbind,nosuid,nodev\n"
     );
@@ -56,7 +68,7 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
         ("groups", "1000\n".to_owned()),
         ("label", label),
         ("iso", "shared\n".to_owned()),
-        ("parent", "\n".to_owned()),
+        ("parent", parent.map_or_else(|| "\n".to_owned(), |value| format!("{value}\n"))),
         ("life", "owned\n".to_owned()),
         ("root", home_root),
         ("cwd", "/work\n".to_owned()),
@@ -79,6 +91,28 @@ fn ensure_reference_agent(root: &Path, name: &str) -> Result<(), ReferenceTreeEr
     )?;
     set_reference_executable(&root.join("agent").join(name))?;
     ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")))
+}
+
+fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
+    let mut policy = format!(
+        "allow {policy_subject} model:{DEFAULT_MODEL_ALIAS} use\n\
+         allow {policy_subject} tool:tsh execute\n\
+         allow {policy_subject} tool:fs.read execute\n"
+    );
+    if name == "base" {
+        for child in ["coder", "reviewer"] {
+            let _ignored = std::fmt::Write::write_fmt(
+                &mut policy,
+                format_args!(
+                    "allow {policy_subject} agent:{child} create\n\
+                     allow {policy_subject} agent:{child} start\n\
+                     allow {policy_subject} agent:{child} stop\n\
+                     allow {policy_subject} agent:{child} read\n"
+                ),
+            );
+        }
+    }
+    policy
 }
 
 fn reference_agent_stub_script(name: &str) -> String {
@@ -185,6 +219,58 @@ struct ReferenceToolSpec {
 
 const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
     ReferenceToolSpec {
+        name: "tsh",
+        description: "CortexFS tool shell. Resolve and run tools through CTX_PATH.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tsh input",
+  "description": "Run a CortexFS tool by name through CTX_PATH.",
+  "type": "object",
+  "additionalProperties": true
+}"#,
+        cap: "tsh",
+        policy: "allow base_t tool:tsh execute\nallow coder_t tool:tsh execute\nallow reviewer_t tool:tsh execute",
+    },
+    ReferenceToolSpec {
+        name: "bash",
+        description: "Interactive bash tool for agents running inside te/tsh.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "bash tool input",
+  "description": "Launch bash as a CortexFS tool.",
+  "type": "object",
+  "additionalProperties": true
+}"#,
+        cap: "bash",
+        policy: "",
+    },
+    ReferenceToolSpec {
+        name: "tmux",
+        description: "Interactive tmux tool for background terminal tasks.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tmux tool input",
+  "description": "Launch tmux as a CortexFS tool.",
+  "type": "object",
+  "additionalProperties": true
+}"#,
+        cap: "tmux",
+        policy: "",
+    },
+    ReferenceToolSpec {
+        name: "zellij",
+        description: "Interactive zellij tool for background terminal tasks.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "zellij tool input",
+  "description": "Launch zellij as a CortexFS tool.",
+  "type": "object",
+  "additionalProperties": true
+}"#,
+        cap: "zellij",
+        policy: "",
+    },
+    ReferenceToolSpec {
         name: "fs.read",
         description: "Read a UTF-8 text file from the agent-visible filesystem.",
         schema: r#"{
@@ -202,7 +288,7 @@ const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   }
 }"#,
         cap: "fs.read",
-        policy: "allow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute",
+        policy: "allow base_t tool:fs.read execute\nallow coder_t tool:fs.read execute\nallow reviewer_t tool:fs.read execute",
     },
     ReferenceToolSpec {
         name: "fs.write",
@@ -259,10 +345,44 @@ const DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS: &[&str] = &[
 
 fn reference_tool_stub_script(name: &str) -> Option<&'static str> {
     match name {
+        "tsh" => Some(reference_exec_named_tool_script("tsh")),
+        "bash" => Some(reference_exec_named_tool_script("bash")),
+        "tmux" => Some(reference_exec_named_tool_script("tmux")),
+        "zellij" => Some(reference_exec_named_tool_script("zellij")),
         "fs.read" => Some(reference_fs_read_stub_script()),
         "fs.write" => Some(reference_fs_write_stub_script()),
         "shell.exec" => Some(reference_shell_exec_stub_script()),
         _ => None,
+    }
+}
+
+fn reference_exec_named_tool_script(name: &'static str) -> &'static str {
+    match name {
+        "tsh" => {
+            r#"#!/bin/sh
+# CortexFS reference-tree tsh tool.
+exec tsh "$@"
+"#
+        }
+        "bash" => {
+            r#"#!/bin/sh
+# CortexFS reference-tree bash tool.
+exec bash "$@"
+"#
+        }
+        "tmux" => {
+            r#"#!/bin/sh
+# CortexFS reference-tree tmux tool.
+exec tmux "$@"
+"#
+        }
+        "zellij" => {
+            r#"#!/bin/sh
+# CortexFS reference-tree zellij tool.
+exec zellij "$@"
+"#
+        }
+        _ => "",
     }
 }
 

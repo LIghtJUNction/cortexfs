@@ -1,10 +1,7 @@
 fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
-    let agent_root = root.join("home").join("1000").join("agent").join("coder");
-    create_reference_dir(&agent_root.join("root"))?;
-    create_reference_dir(&agent_root.join("session").join("index").join("by-cwd"))?;
-    create_reference_dir(&agent_root.join("data"))?;
-    create_reference_dir(&agent_root.join("cache"))?;
-    create_reference_dir(&agent_root.join("log"))?;
+    for agent in ["base", "coder", "reviewer"] {
+        ensure_reference_home_agent(root, agent)?;
+    }
     create_reference_dir(&root.join("home").join("1000").join("tool"))?;
     create_reference_dir(&root.join("home").join("1000").join("model"))?;
 
@@ -12,6 +9,15 @@ fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
         &root.join("home").join("1000").join("model").join("coder"),
         Path::new("/ctx/model/main"),
     )
+}
+
+fn ensure_reference_home_agent(root: &Path, agent: &str) -> Result<(), ReferenceTreeError> {
+    let agent_root = root.join("home").join("1000").join("agent").join(agent);
+    create_reference_dir(&agent_root.join("root"))?;
+    create_reference_dir(&agent_root.join("session").join("index").join("by-cwd"))?;
+    create_reference_dir(&agent_root.join("data"))?;
+    create_reference_dir(&agent_root.join("cache"))?;
+    create_reference_dir(&agent_root.join("log"))
 }
 
 fn remove_deprecated_reference_home_tool_aliases(root: &Path) -> Result<(), ReferenceTreeError> {

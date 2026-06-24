@@ -4,15 +4,15 @@ Independent tasks should run in child agents. The parent agent should keep task
 decomposition, global constraints, and result indexes. The child agent owns the
 task process and returns a compact result.
 
-The default lifecycle is owned:
+The default durable lifecycle is owned:
 
 ```text
 Child agents are owned by their parent unless explicitly detached by policy.
 Owned children die when the parent dies.
 ```
 
-v1 should support `owned`. `detached` is reserved for a future explicit policy
-grant and should not be exposed unless needed.
+v1 supports `owned` and `temp`. `detached` is reserved for a future explicit
+policy grant and should not be exposed unless needed.
 
 ## Agent Control Files
 
@@ -53,6 +53,7 @@ agent:coder session:default run:r123
 
 ```text
 owned
+temp
 ```
 
 Future value:
@@ -63,6 +64,18 @@ detached
 
 Detached children require explicit policy authorization and are not required
 for v1.
+
+`owned` agents are durable child agents. Their control object and session
+history remain after cancellation so the parent can inspect failure state and
+raw history.
+
+`temp` agents are ordinary child agents while they run: they still have
+`agent/<name>`, `agent/<name>.sock`, and `agent/<name>.d/` controls, and they
+must pass the same identity, policy, and mount attenuation checks as `owned`
+agents. A runtime may remove the temp agent object and socket after exit,
+cancel, or parent death. Durable task results should be written through the
+parent child-result channel or an explicitly shared space; temp agent private
+history is not a stable retention contract.
 
 ## Child Session
 
@@ -194,7 +207,7 @@ Recommended implementation:
 each parent agent has a runtime process group or cgroup
 each owned child agent is tracked under the parent
 runtime maintains parent -> children state
-parent death synchronously cancels owned children
+parent death synchronously cancels owned children and removes or cancels temp children
 ```
 
 Example cgroup shape:

@@ -111,6 +111,158 @@ fn parses_session_file_commands() {
 }
 
 #[test]
+fn parses_agent_lifecycle_commands() {
+    let new = cmd!(
+        "agent",
+        "new",
+        "reviewer",
+        "--temp",
+        "--label",
+        "reviewer_t",
+        "--model",
+        "openai/gpt-4o",
+        "--tool",
+        "fs.read",
+        "--shared",
+        "project-a:read",
+        "--mount",
+        "/work",
+        "/work",
+        "ro",
+    );
+    assert!(matches!(
+        new,
+        Ok(Command::Agent(AgentArgs::New(ref args)))
+            if args.name == "reviewer"
+                && args.temporary
+                && args.label.as_deref() == Some("reviewer_t")
+                && args.models == ["openai/gpt-4o".to_owned()]
+                && args.tools == ["fs.read".to_owned()]
+                && args.shared.len() == 1
+                && args.mounts.len() == 1
+    ));
+
+    let start = cmd!("agent", "start", "reviewer");
+    assert!(matches!(
+        start,
+        Ok(Command::Agent(AgentArgs::Start { ref name })) if name == "reviewer"
+    ));
+
+    let stop = cmd!("agent", "stop", "reviewer");
+    assert!(matches!(
+        stop,
+        Ok(Command::Agent(AgentArgs::Stop { ref name })) if name == "reviewer"
+    ));
+
+    let status = cmd!("agent", "status", "reviewer");
+    assert!(matches!(
+        status,
+        Ok(Command::Agent(AgentArgs::Status { ref name })) if name == "reviewer"
+    ));
+
+    let ps = cmd!("agent", "ps");
+    assert!(matches!(ps, Ok(Command::Agent(AgentArgs::Ps))));
+}
+
+#[test]
+fn agent_new_request_json_matches_lifecycle_tool_shape() {
+    let command = cmd!(
+        "agent",
+        "new",
+        "reviewer",
+        "--label",
+        "reviewer_t",
+        "--model",
+        "openai/gpt-4o",
+        "--tool",
+        "fs.read",
+        "--shared",
+        "project-a:read",
+        "--mount",
+        "/work",
+        "/work",
+        "ro",
+    );
+    assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
+    let Ok(Command::Agent(AgentArgs::New(args))) = command else {
+        return;
+    };
+    assert_eq!(
+        agent_new_request_json(&args),
+        Ok(
+            "{\"name\":\"reviewer\",\"label\":\"reviewer_t\",\"model\":[\"openai/gpt-4o\"],\"tools\":[\"fs.read\"],\"shared\":{\"project-a\":[\"read\"]},\"mount\":[[\"/work\",\"/work\",\"ro\"]]}".to_owned()
+        )
+    );
+}
+
+#[test]
+fn agent_new_temp_request_json_includes_lifecycle() {
+    let command = cmd!("agent", "new", "scratch", "--temp");
+    assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
+    let Ok(Command::Agent(AgentArgs::New(args))) = command else {
+        return;
+    };
+    assert_eq!(
+        agent_new_request_json(&args),
+        Ok("{\"name\":\"scratch\",\"life\":\"temp\"}".to_owned())
+    );
+}
+
+#[test]
+fn agent_ps_reads_parent_status_and_pid_controls() {
+    let root = clean_test_dir("ctx-agent-ps");
+    create_agent_fixture(&root, "coder", "", "idle", "");
+    create_agent_fixture(&root, "reviewer", "agent:coder session:default run:r1", "busy", "123");
+    create_agent_fixture(&root, "auditor", "agent:reviewer", "ready", "");
+
+    let processes = read_agent_processes(&root);
+    assert!(processes.is_ok());
+    let mut processes = processes.unwrap_or_default();
+    processes.sort_by(|left, right| left.name.cmp(&right.name));
+    assert!(processes.iter().any(|process| {
+        process.name == "reviewer"
+            && process.parent.as_deref() == Some("coder")
+            && process.status == "busy"
+            && process.pid.as_deref() == Some("123")
+    }));
+
+    let root_process = processes
+        .iter()
+        .find(|process| process.name == "coder")
+        .cloned();
+    assert!(root_process.is_some());
+    let Some(root_process) = root_process else {
+        return;
+    };
+    let mut rendered = Vec::new();
+    render_agent_process_tree(&root_process, &processes, "", true, true, &mut rendered);
+    assert_eq!(
+        rendered,
+        vec![
+            "coder [idle]".to_owned(),
+            "`- reviewer [busy] pid=123".to_owned(),
+            "   `- auditor [ready]".to_owned(),
+        ]
+    );
+}
+
+fn create_agent_fixture(root: &Path, name: &str, parent: &str, status: &str, pid: &str) {
+    let agent = fixture_path(root, &["agent", name]);
+    write_text_file(&agent, "#!/bin/sh\nexit 0\n");
+    let metadata = fs::metadata(&agent);
+    assert!(metadata.is_ok());
+    if let Ok(metadata) = metadata {
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o755);
+        assert!(fs::set_permissions(&agent, permissions).is_ok());
+    }
+    let control = fixture_path(root, &["agent", &format!("{name}.d")]);
+    write_text_file(&control.join("parent"), &newline_terminated(parent));
+    write_text_file(&control.join("status"), &newline_terminated(status));
+    write_text_file(&control.join("pid"), &newline_terminated(pid));
+}
+
+#[test]
 fn parses_bootstrap_and_mount_commands() {
     let bootstrap = cmd!("bootstrap");
     assert!(matches!(bootstrap, Ok(Command::Bootstrap { source: None })));

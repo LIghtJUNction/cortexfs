@@ -1,0 +1,22 @@
+{
+  "fixtures": [
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "hi"
+      },
+      "response": {
+        "content": "cortexfs aimock ok"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "hello cortexfs"
+      },
+      "response": {
+        "content": "cortexfs aimock ok"
+      }
+    }
+  ]
+}
