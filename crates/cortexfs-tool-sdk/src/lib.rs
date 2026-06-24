@@ -393,8 +393,19 @@ impl DynamicToolCache {
     /// Creates a cache with at least one slot.
     #[must_use]
     pub fn new(capacity: usize) -> Self {
+        Self::with_window_percent(capacity, 1)
+    }
+
+    /// Creates a cache with a configurable W-TinyLFU window percentage.
+    #[must_use]
+    pub fn with_window_percent(capacity: usize, window_percent: usize) -> Self {
         let capacity = capacity.max(1);
-        let window_capacity = (capacity / 100).max(1).min(capacity);
+        let window_percent = window_percent.clamp(1, 100);
+        let window_capacity = capacity
+            .saturating_mul(window_percent)
+            .div_ceil(100)
+            .max(1)
+            .min(capacity);
         Self {
             capacity,
             window_capacity,

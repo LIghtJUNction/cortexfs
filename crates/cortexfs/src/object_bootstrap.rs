@@ -169,7 +169,7 @@ fn is_valid_wrapper_target(value: &str) -> bool {
 
 fn executable_wrapper_script(wrapper_target: &str) -> String {
     format!(
-        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec {} \"$@\"\n",
+        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec {} \"$0\" \"$@\"\n",
         shell_single_quote(wrapper_target)
     )
 }

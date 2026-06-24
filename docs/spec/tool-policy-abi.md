@@ -205,6 +205,34 @@ For human `tsh` sessions, the lookup path is chosen in this order:
 `.tshrc` is not shell code. It is a user-level data file for persistent tool
 path configuration.
 
+`tsh` persistent runtime configuration lives in the `tsh` tool control
+directory:
+
+```text
+/ctx/tool/tsh.d/config
+```
+
+The file is data, not shell code. It accepts blank lines, `#` comments, and
+these `key=value` settings:
+
+```text
+max_loaded_tools=64
+cache_capacity=32
+window_percent=1
+```
+
+`max_loaded_tools` limits unpinned tool metadata entries loaded into the `tsh`
+context. `cache_capacity` limits unpinned dynamic tool artifacts kept resident
+in memory by W-TinyLFU. `window_percent` configures the W-TinyLFU admission
+window. Pinned tools are excluded from both automatic context unload and dynamic
+cache eviction.
+
+The durable configuration should normally be updated through the visible tool:
+
+```text
+/ctx/tool/tsh.config
+```
+
 The search path above describes source tiers. The agent process may see a
 filtered memory projection instead of the raw durable directories. The
 projection must preserve object ABI shape and must not create durable files as

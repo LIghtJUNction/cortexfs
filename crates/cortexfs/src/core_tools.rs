@@ -1,10 +1,12 @@
 use std::fs;
 use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cortexfs_tool_sdk::{
     Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
 };
+use serde_json::{Map, Value};
 
 #[derive(Debug)]
 pub struct FsReadTool;
@@ -14,6 +16,9 @@ pub struct FsWriteTool;
 
 #[derive(Debug)]
 pub struct ShellExecTool;
+
+#[derive(Debug)]
+pub struct TshConfigTool;
 
 impl Tool for FsReadTool {
     fn spec(&self) -> ToolSpec {
@@ -111,9 +116,72 @@ impl Tool for ShellExecTool {
     }
 }
 
+impl Tool for TshConfigTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "tsh.config",
+            description: "Read or update persistent tsh runtime configuration.",
+            input_schema: TSH_CONFIG_SCHEMA,
+        }
+    }
+
+    fn call(
+        &self,
+        invocation: &ToolInvocation,
+        output: &mut ToolEmitter<&mut dyn Write>,
+    ) -> ToolResult<()> {
+        let input = invocation.input().trim();
+        let request = if input.is_empty() {
+            Value::Object(Map::new())
+        } else {
+            serde_json::from_str::<Value>(input)
+                .map_err(|_error| ToolError::invalid("invalid json input"))?
+        };
+        let Some(object) = request.as_object() else {
+            return Err(ToolError::invalid("input must be a json object"));
+        };
+        let path = object
+            .get("path")
+            .and_then(Value::as_str)
+            .map_or_else(default_tsh_config_path, PathBuf::from);
+        let mut config = read_tsh_runtime_config(&path)?;
+        let changed = object.contains_key("max_loaded_tools")
+            || object.contains_key("cache_capacity")
+            || object.contains_key("window_percent");
+        if let Some(value) = object.get("max_loaded_tools") {
+            config.max_loaded_tools = positive_usize(value, "max_loaded_tools")?;
+        }
+        if let Some(value) = object.get("cache_capacity") {
+            config.cache_capacity = positive_usize(value, "cache_capacity")?;
+        }
+        if let Some(value) = object.get("window_percent") {
+            let window_percent = positive_usize(value, "window_percent")?;
+            if !(1..=100).contains(&window_percent) {
+                return Err(ToolError::invalid("window_percent must be 1..100"));
+            }
+            config.window_percent = window_percent;
+        }
+        if changed {
+            write_tsh_runtime_config(&path, config)?;
+        }
+        output
+            .message(&format!(
+                "{}\n{}",
+                path.display(),
+                format_tsh_runtime_config(config)
+            ))
+            .map_err(|error| ToolError::new("EIO", error.to_string()))
+    }
+}
+
 #[must_use]
 pub fn core_tool_specs() -> Vec<ToolSpec> {
-    vec![FsReadTool.spec(), FsWriteTool.spec(), ShellExecTool.spec()]
+    vec![
+        FsReadTool.spec(),
+        FsWriteTool.spec(),
+        ShellExecTool.spec(),
+        TshConfigTool.spec(),
+    ]
 }
 
 pub fn run_core_tool(
@@ -125,8 +193,128 @@ pub fn run_core_tool(
         "fs.read" => run_tool(&FsReadTool, invocation, writer).map(|()| true),
         "fs.write" => run_tool(&FsWriteTool, invocation, writer).map(|()| true),
         "shell.exec" => run_tool(&ShellExecTool, invocation, writer).map(|()| true),
+        "tsh.config" => run_tool(&TshConfigTool, invocation, writer).map(|()| true),
         _ => Ok(false),
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TshRuntimeConfig {
+    max_loaded_tools: usize,
+    cache_capacity: usize,
+    window_percent: usize,
+}
+
+impl Default for TshRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            max_loaded_tools: 64,
+            cache_capacity: 32,
+            window_percent: 1,
+        }
+    }
+}
+
+fn default_tsh_config_path() -> PathBuf {
+    std::env::var_os("CTX_ROOT").map_or_else(
+        || PathBuf::from("/ctx/tool/tsh.d/config"),
+        |root| PathBuf::from(root).join("tool/tsh.d/config"),
+    )
+}
+
+fn read_tsh_runtime_config(path: &Path) -> ToolResult<TshRuntimeConfig> {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(TshRuntimeConfig::default());
+        }
+        Err(error) => return Err(ToolError::denied(format!("cannot read config: {error}"))),
+    };
+    parse_tsh_runtime_config(&content)
+}
+
+fn parse_tsh_runtime_config(content: &str) -> ToolResult<TshRuntimeConfig> {
+    let mut config = TshRuntimeConfig::default();
+    for (index, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(ToolError::invalid(format!(
+                "line {} must be key=value",
+                index.saturating_add(1)
+            )));
+        };
+        let value = value.parse::<usize>().map_err(|_error| {
+            ToolError::invalid(format!(
+                "line {} value must be a positive integer",
+                index.saturating_add(1)
+            ))
+        })?;
+        match key {
+            "max_loaded_tools" if value > 0 => config.max_loaded_tools = value,
+            "cache_capacity" if value > 0 => config.cache_capacity = value,
+            "window_percent" if (1..=100).contains(&value) => config.window_percent = value,
+            "max_loaded_tools" | "cache_capacity" => {
+                return Err(ToolError::invalid(format!(
+                    "line {} value must be greater than zero",
+                    index.saturating_add(1)
+                )));
+            }
+            "window_percent" => {
+                return Err(ToolError::invalid(format!(
+                    "line {} window_percent must be 1..100",
+                    index.saturating_add(1)
+                )));
+            }
+            _ => {
+                return Err(ToolError::invalid(format!(
+                    "line {} has unknown key {key}",
+                    index.saturating_add(1)
+                )));
+            }
+        }
+    }
+    Ok(config)
+}
+
+fn write_tsh_runtime_config(path: &Path, config: TshRuntimeConfig) -> ToolResult<()> {
+    let Some(parent) = path.parent() else {
+        return Err(ToolError::invalid(
+            "config path must have a parent directory",
+        ));
+    };
+    fs::create_dir_all(parent)
+        .map_err(|error| ToolError::denied(format!("cannot create config directory: {error}")))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| ToolError::invalid("config path must end with a valid UTF-8 file name"))?;
+    let tmp = parent.join(format!(".{file_name}.tmp-{}", std::process::id()));
+    fs::write(&tmp, format_tsh_runtime_config(config))
+        .map_err(|error| ToolError::denied(format!("cannot write config: {error}")))?;
+    fs::rename(&tmp, path)
+        .map_err(|error| ToolError::denied(format!("cannot install config: {error}")))
+}
+
+fn format_tsh_runtime_config(config: TshRuntimeConfig) -> String {
+    format!(
+        "max_loaded_tools={}\ncache_capacity={}\nwindow_percent={}\n",
+        config.max_loaded_tools, config.cache_capacity, config.window_percent
+    )
+}
+
+fn positive_usize(value: &Value, field: &str) -> ToolResult<usize> {
+    let Some(value) = value.as_u64() else {
+        return Err(ToolError::invalid(format!(
+            "{field} must be a positive integer"
+        )));
+    };
+    usize::try_from(value)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| ToolError::invalid(format!("{field} must be a positive integer")))
 }
 
 const FS_READ_SCHEMA: &str = r#"{
@@ -178,9 +366,39 @@ const SHELL_EXEC_SCHEMA: &str = r#"{
   }
 }"#;
 
+const TSH_CONFIG_SCHEMA: &str = r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tsh.config input",
+  "description": "Read or update tsh.d/config. Omit all fields to show the current config.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Optional config path. Defaults to CTX_ROOT/tool/tsh.d/config or /ctx/tool/tsh.d/config."
+    },
+    "max_loaded_tools": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum unpinned tool metadata entries kept in the tsh context."
+    },
+    "cache_capacity": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum unpinned dynamic tool artifacts kept resident by W-TinyLFU."
+    },
+    "window_percent": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Percentage of the dynamic cache used as the W-TinyLFU admission window."
+    }
+  }
+}"#;
+
 #[cfg(test)]
 mod tests {
-    use super::{FsReadTool, FsWriteTool, ShellExecTool};
+    use super::{FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool};
     use cortexfs_tool_sdk::{ToolInvocation, run_tool};
     use std::fs;
 
@@ -221,5 +439,29 @@ mod tests {
         let text = String::from_utf8(output).unwrap_or_default();
         assert!(text.contains(r#""tool":"shell.exec""#));
         assert!(text.contains("shell-ok"));
+    }
+
+    #[test]
+    fn tsh_config_tool_updates_runtime_config_file() {
+        let dir = std::env::temp_dir().join(format!("cortexfs-tsh-config-{}", std::process::id()));
+        assert!(fs::create_dir_all(&dir).is_ok());
+        let path = dir.join("config");
+        let tool = TshConfigTool;
+        let invocation = ToolInvocation::new(
+            "r1",
+            format!(
+                r#"{{"path":"{}","max_loaded_tools":12,"cache_capacity":6,"window_percent":10}}"#,
+                path.display()
+            ),
+        );
+        let mut output = Vec::new();
+        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+        let config = fs::read_to_string(&path).unwrap_or_default();
+        assert!(config.contains("max_loaded_tools=12\n"));
+        assert!(config.contains("cache_capacity=6\n"));
+        assert!(config.contains("window_percent=10\n"));
+        let text = String::from_utf8(output).unwrap_or_default();
+        assert!(text.contains(r#""tool":"tsh.config""#));
+        let _ignored = fs::remove_dir_all(dir);
     }
 }

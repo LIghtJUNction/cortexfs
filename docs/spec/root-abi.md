@@ -160,6 +160,23 @@ examples of valid entries.
     fs.read.d/
     tsh
     tsh.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
+      config
+    tsh.config
+    tsh.config.d/
+      name
+      description
+      schema
+      cap
+      policy
+      status
+      log
     bash
     bash.d/
     tmux
