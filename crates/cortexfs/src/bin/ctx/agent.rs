@@ -5,6 +5,8 @@ enum AgentArgs {
     Stop { name: String },
     Status { name: String },
     Ps,
+    Watch { name: String, session: String },
+    Attach { name: String, session: String },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -53,7 +55,97 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
             ))
         }
         AgentArgs::Ps => success(agent_ps(root)),
+        AgentArgs::Watch {
+            ref name,
+            ref session,
+        } => agent_terminal(root, name, session, false),
+        AgentArgs::Attach {
+            ref name,
+            ref session,
+        } => agent_terminal(root, name, session, true),
     }
+}
+
+fn agent_terminal(
+    root: &Path,
+    name: &str,
+    session: &str,
+    write: bool,
+) -> Result<ExitCode, CliError> {
+    require_cli_name("agent name", name)?;
+    require_session_name(session)?;
+    let socket = agent_terminal_socket(root, name, session)?;
+    stream_terminal_socket(&socket, write)
+}
+
+fn agent_terminal_socket(root: &Path, name: &str, session: &str) -> Result<PathBuf, CliError> {
+    Ok(ctx_home(root)?
+        .join("agent")
+        .join(name)
+        .join("session")
+        .join(session)
+        .join("terminal")
+        .join("main.sock"))
+}
+
+fn require_session_name(session: &str) -> Result<(), CliError> {
+    if !session.is_empty()
+        && !matches!(session, "." | "..")
+        && !session.contains('/')
+        && !session.contains('\n')
+        && !session.contains('\t')
+    {
+        Ok(())
+    } else {
+        Err(CliError::usage("invalid session name"))
+    }
+}
+
+fn stream_terminal_socket(socket: &Path, write: bool) -> Result<ExitCode, CliError> {
+    let mut stream = UnixStream::connect(socket).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot connect terminal socket {}: {error}",
+            socket.display()
+        ))
+    })?;
+    if write {
+        stream.write_all(b"attach\n")
+    } else {
+        stream.write_all(b"watch\n")
+    }
+    .map_err(|error| CliError::unavailable(format!("cannot write terminal mode: {error}")))?;
+
+    let mut reader = stream
+        .try_clone()
+        .map_err(|error| CliError::unavailable(format!("cannot clone terminal socket: {error}")))?;
+    let output = std::thread::spawn(move || {
+        let mut stdout = io::stdout().lock();
+        io::copy(&mut reader, &mut stdout).and_then(|_bytes| stdout.flush())
+    });
+    if write {
+        let input = std::thread::spawn(move || {
+            let mut stdin = io::stdin().lock();
+            let result = io::copy(&mut stdin, &mut stream);
+            drop(stdin);
+            let _ignored = stream.shutdown(Shutdown::Write);
+            result
+        });
+        match input.join() {
+            Ok(Ok(_bytes)) => {}
+            Ok(Err(error)) => {
+                return Err(CliError::unavailable(format!("terminal input failed: {error}")));
+            }
+            Err(_error) => return Err(CliError::unavailable("terminal input thread failed")),
+        }
+    }
+    match output.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            return Err(CliError::unavailable(format!("terminal output failed: {error}")));
+        }
+        Err(_error) => return Err(CliError::unavailable("terminal output thread failed")),
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

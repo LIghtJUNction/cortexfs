@@ -118,6 +118,23 @@ resolves command names through `CTX_PATH`, not `PATH`, and must not execute
 arbitrary host commands directly. A command such as `bash` works only when a
 tool named `bash` is visible through `CTX_PATH`.
 
+`ctxterm --listen SOCKET` exposes the PTY for observation and attachment.
+Session terminals use:
+
+```text
+/ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
+```
+
+The ABI socket may be a symlink to `/run/cortexfs/terminal/.../main.sock`;
+`ctxterm --listen` follows that symlink and binds the runtime socket target.
+
+The corresponding human commands are:
+
+```text
+ctx agent watch <agent> --session <session>
+ctx agent attach <agent> --session <session>
+```
+
 When `CTX_PATH` is not set, `tsh` reads `CTX_HOME/.tshrc` if it exists. The
 file is data-only and supports a single stable setting:
 

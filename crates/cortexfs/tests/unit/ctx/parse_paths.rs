@@ -162,6 +162,24 @@ fn parses_agent_lifecycle_commands() {
 
     let ps = cmd!("agent", "ps");
     assert!(matches!(ps, Ok(Command::Agent(AgentArgs::Ps))));
+
+    let watch = cmd!("agent", "watch", "coder", "--session", "test");
+    assert!(matches!(
+        watch,
+        Ok(Command::Agent(AgentArgs::Watch {
+            ref name,
+            ref session
+        })) if name == "coder" && session == "test"
+    ));
+
+    let attach = cmd!("agent", "attach", "coder");
+    assert!(matches!(
+        attach,
+        Ok(Command::Agent(AgentArgs::Attach {
+            ref name,
+            ref session
+        })) if name == "coder" && session == "default"
+    ));
 }
 
 #[test]
@@ -243,6 +261,24 @@ fn agent_ps_reads_parent_status_and_pid_controls() {
             "`- reviewer [busy] pid=123".to_owned(),
             "   `- auditor [ready]".to_owned(),
         ]
+    );
+}
+
+#[test]
+fn agent_terminal_socket_uses_session_terminal_main_socket() {
+    let root = clean_test_dir("ctx-agent-terminal-socket");
+    let socket = agent_terminal_socket(&root, "coder", "test");
+    assert_eq!(
+        socket,
+        Ok(root
+            .join("home")
+            .join("1000")
+            .join("agent")
+            .join("coder")
+            .join("session")
+            .join("test")
+            .join("terminal")
+            .join("main.sock"))
     );
 }
 

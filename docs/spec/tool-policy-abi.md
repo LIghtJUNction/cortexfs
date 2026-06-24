@@ -118,6 +118,37 @@ Agents should get one terminal capability: `tsh`. A runtime launches it inside
 lifecycle. `tsh` is not a host shell. It resolves the first word through
 `CTX_PATH` and executes only the matching CortexFS tool object.
 
+When a terminal needs to be observable, `ctxterm` listens on the session
+terminal socket:
+
+```text
+/ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
+```
+
+Because FUSE mounts generally cannot host a bound Unix socket directly, this
+visible ABI path may be a symlink to a runtime socket under `/run`, for example:
+
+```text
+/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock
+```
+
+The socket protocol is raw PTY bytes after a one-line client mode:
+
+```text
+watch\n   read PTY output only
+attach\n  read PTY output and write stdin to the PTY
+```
+
+Human clients should use:
+
+```text
+ctx agent watch <agent> --session <session>
+ctx agent attach <agent> --session <session>
+```
+
+`watch` is the safe default for observation. `attach` is an explicit writable
+join and may affect the agent's terminal state.
+
 Interactive shells and multiplexers are ordinary tools:
 
 ```text
