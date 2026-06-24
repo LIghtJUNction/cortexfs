@@ -127,11 +127,33 @@ fn run_visible_tool(root: &Path, name: &str, args: &[String]) -> Result<ExitCode
             "tool not found in CTX_PATH: {name}"
         )));
     };
+    let mut cache = DynamicToolCache::new(1);
+    if let Ok(tool) = cache.get_or_load(hit.path()) {
+        let input = collect_visible_tool_input(args)?;
+        let run_id = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+        let invocation = ToolInvocation::new(run_id, input);
+        let mut stdout = io::stdout().lock();
+        run_sdk_tool(tool, &invocation, &mut stdout)
+            .map_err(|error| CliError::unavailable(format!("cannot run dynamic tool: {error}")))?;
+        return Ok(ExitCode::SUCCESS);
+    }
     let status = ProcessCommand::new(hit.path())
         .args(args)
         .status()
         .map_err(|error| CliError::unavailable(format!("cannot run tool {name}: {error}")))?;
     Ok(exit_code_from_status(status))
+}
+
+fn collect_visible_tool_input(args: &[String]) -> Result<String, CliError> {
+    let input = args.join(" ");
+    if !input.is_empty() {
+        return Ok(input);
+    }
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .map_err(|error| CliError::unavailable(format!("cannot read tool input: {error}")))?;
+    Ok(input)
 }
 
 fn exit_code_from_status(status: std::process::ExitStatus) -> ExitCode {
