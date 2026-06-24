@@ -372,6 +372,22 @@ fn agent_start_systemd_command_unsets_ctx_path_and_sets_ctx_home() {
     ));
 }
 
+#[test]
+fn cli_names_reject_usage_placeholders() {
+    assert!(require_cli_name("agent name", "coder").is_ok());
+    assert!(matches!(
+        require_cli_name("agent name", "NAME"),
+        Err(ref error) if error.code == 2
+            && error.message == "agent name is a placeholder; replace NAME with a real value"
+    ));
+    assert!(matches!(
+        require_session_name("SESSION"),
+        Err(ref error) if error.code == 2
+            && error.message
+                == "session name is a placeholder; replace SESSION with a real value"
+    ));
+}
+
 fn contains_arg_pair(args: &[String], first: &str, second: &str) -> bool {
     args.windows(2)
         .any(|window| window.first().map(String::as_str) == Some(first)
