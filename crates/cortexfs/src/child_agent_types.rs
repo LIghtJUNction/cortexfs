@@ -1,8 +1,10 @@
 /// v1 child lifecycle value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChildLifecycle {
-    /// Parent-owned child. v1 stable supports only this lifecycle.
+    /// Parent-owned durable child. The parent owns cancellation and history.
     Owned,
+    /// Parent-owned temporary child. Runtime may remove the agent object on exit.
+    Temp,
 }
 
 impl ChildLifecycle {
@@ -10,6 +12,7 @@ impl ChildLifecycle {
     pub fn parse(value: &str) -> Result<Self, ChildAgentDenial> {
         match value.trim() {
             "owned" => Ok(Self::Owned),
+            "temp" => Ok(Self::Temp),
             _ => Err(ChildAgentDenial::UnsupportedLifecycle),
         }
     }
@@ -113,7 +116,7 @@ pub enum ChildAgentDenial {
     ParentMismatch,
     /// Parent reference syntax is invalid.
     InvalidParentRef,
-    /// Child lifecycle is not v1 `owned`.
+    /// Child lifecycle is not a supported v1 value.
     UnsupportedLifecycle,
     /// Child uid or gid differs from the parent without supervisor authority.
     IdentityExpansion,

@@ -41,6 +41,13 @@ ctx history coder
 ctx latest coder
 ctx resume coder default
 
+ctx agent new reviewer --model openai/gpt-4o --tool fs.read
+ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
+ctx agent start reviewer
+ctx agent stop reviewer
+ctx agent status reviewer
+ctx agent ps
+
 ctx file cat agent/coder.d/policy
 ctx file set agent/coder.d/cwd /work
 ctx file append agent/coder.d/path /ctx/tool
@@ -66,11 +73,24 @@ Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
-Agent lifecycle conveniences such as `ctx agent new`, `ctx agent start`, and
-`ctx agent stop` may exist, but they must not assume lifecycle tools are default
-built-ins. When `/ctx/tool/agent.create`, `/ctx/tool/agent.start`, and
-`/ctx/tool/agent.stop` exist, the commands must be thin wrappers over them.
-`ctx` must not decide policy locally.
+Agent lifecycle conveniences exist as thin wrappers:
+
+```text
+ctx agent new NAME [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]
+ctx agent start NAME
+ctx agent stop NAME
+ctx agent status NAME
+ctx agent ps
+```
+
+`ctx agent new`, `ctx agent start`, and `ctx agent stop` must call
+`/ctx/tool/agent.create`, `/ctx/tool/agent.start`, and `/ctx/tool/agent.stop`
+respectively. If those tools are absent, the commands fail with service
+unavailable. `ctx agent new --temp` passes `life=temp` to `agent.create`; `ctx`
+must not decide lifecycle policy locally. `ctx agent status`
+may read `agent/<name>.d/status` directly because it is ordinary ABI
+inspection. `ctx agent ps` may read `agent/<name>.d/parent`, `status`, and
+`pid` directly and print the current agent tree.
 
 ## Installation Boundary
 
@@ -79,15 +99,24 @@ chroots, or scripts:
 
 ```text
 /ctx/bin/ctx
+/ctx/bin/te
+/ctx/bin/tsh
 ```
 
-The first implementation may expose only `ctx`. The placement rule is:
+The first implementation may expose only `ctx`, but agent terminal runtimes
+should use `te` and `tsh` when present. The placement rule is:
 
 ```text
 human CLI              system PATH, usually one ctx binary
 agent capability       /ctx/tool
 runtime ABI helper     /ctx/bin
 ```
+
+`te` is the agent terminal emulator. It owns the pseudo-terminal and starts
+`tsh` by default. `tsh` is the tool shell that runs inside that terminal. `tsh`
+resolves command names through `CTX_PATH`, not `PATH`, and must not execute
+arbitrary host commands directly. A command such as `bash` works only when a
+tool named `bash` is visible through `CTX_PATH`.
 
 Do not let `/ctx/bin` become a second `/usr/bin`.
 

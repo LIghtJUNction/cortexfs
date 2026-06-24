@@ -47,8 +47,8 @@ tree.
 ## v1 Reference Tree
 
 This is the normative v1 shape. Concrete object names such as `debug/echo`,
-`openai/gpt-4o`, `coder`, `reviewer`, `1000`, and `project-a` are examples of
-valid entries.
+`openai/gpt-4o`, `base`, `coder`, `reviewer`, `1000`, and `project-a` are
+examples of valid entries.
 
 ```text
 /ctx/
@@ -56,6 +56,8 @@ valid entries.
 
   bin/
     ctx
+    te
+    tsh
 
   model/
     main -> /ctx/model/debug/echo
@@ -84,6 +86,29 @@ valid entries.
         log
 
   agent/
+    base
+    base.sock
+    base.d/
+      owner
+      uid
+      gid
+      groups
+      label
+      iso
+      parent
+      life
+      root
+      cwd
+      env
+      path
+      mount
+      model
+      policy
+      status
+      pid
+      log
+      meta.json
+
     coder
     coder.sock
     coder.d/
@@ -133,6 +158,14 @@ valid entries.
   tool/
     fs.read
     fs.read.d/
+    tsh
+    tsh.d/
+    bash
+    bash.d/
+    tmux
+    tmux.d/
+    zellij
+    zellij.d/
       name
       description
       schema
@@ -164,6 +197,12 @@ valid entries.
   home/
     1000/
       agent/
+        base/
+          root/
+          session/
+            index/
+              by-cwd/
+
         coder/
           root/
           session/

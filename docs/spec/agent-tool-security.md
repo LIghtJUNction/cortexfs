@@ -249,6 +249,20 @@ An agent can create another agent only through normal CortexFS objects and
 policy checks. There is no root-level `spawn/`, `factory/`, or
 `agent-template/`.
 
+`base` is the ordinary root agent for v1 lineage:
+
+```text
+/ctx/agent/base
+/ctx/agent/base.sock
+/ctx/agent/base.d/
+```
+
+`base` is not a template namespace and does not add inheritance semantics.
+It is a normal agent object with a normal label, mount table, policy, socket,
+home, and session state. New top-level agents should be created by
+`agent.create` with `parent=agent:base`. Child agents created by other agents
+must still be attenuated from their direct parent.
+
 The child appears as ordinary agent ABI:
 
 ```text
@@ -278,6 +292,7 @@ The child appears as ordinary agent ABI:
 `parent` is a small text file. v1 should keep it simple:
 
 ```text
+agent:base
 agent:coder
 ```
 
@@ -297,12 +312,64 @@ uid    = parent uid
 gid    = parent gid
 groups = subset of parent groups
 iso    = shared
-life   = owned
+life   = owned | temp
+```
+
+A temp child uses the same defaults except:
+
+```text
+life   = temp
 ```
 
 Every agent should have a distinct CortexFS label unless it is intentionally
 the same security domain. A child that reuses the parent's label is the same
 security subject for policy purposes.
+
+## Agent Tool Visibility
+
+An agent can see and execute only the intersection of:
+
+```text
+user-visible scope
+CortexFS security context
+```
+
+User-visible scope is derived from ordinary Linux and mount facts:
+
+```text
+agent uid/gid/groups
+tool file owner/group/mode bits
+agent mount table
+mount mode and noexec option
+CTX_PATH search order
+```
+
+CortexFS security context is derived from stable agent controls:
+
+```text
+agent label subject, for example coder_t
+agent/<name>.d/policy
+tool/<tool>.d/policy
+shared/session/mount policy where relevant
+```
+
+Both sides must allow access. A tool that is executable and mounted but not
+allowed by policy is invisible for execution. A tool allowed by policy but not
+visible to the agent uid/gid/groups or blocked by `noexec` is also invisible.
+Prompts, skills, MCP config files, schemas, and model output never expand this
+set.
+
+The agent terminal path is:
+
+```text
+te starts tsh
+tsh resolves tool names through CTX_PATH
+```
+
+Agents should be granted the `tsh` terminal capability as their primary shell
+tool. `tsh` is not a host command shell and must not fall back to `PATH`.
+Interactive behavior such as `bash`, `tmux`, or `zellij` is provided by
+ordinary visible tool objects with those names.
 
 Child agent attenuation is mandatory:
 

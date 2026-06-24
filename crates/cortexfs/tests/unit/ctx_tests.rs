@@ -5,7 +5,8 @@ use super::{
     format_model_driver_route_error, format_object_layout_issues, format_session_control_issues,
     format_session_index_issues, format_session_layout_issues, format_shared_queue_layout_issues,
     format_tool_schema_issues, json_string, list_names, newline_terminated, parse_command,
-    resolve_abi_path, stream_socket_request, Command, FileCommand, LsTarget, ObjectClass,
+    agent_new_request_json, read_agent_processes, render_agent_process_tree, resolve_abi_path,
+    stream_socket_request, AgentArgs, Command, FileCommand, LsTarget, ObjectClass,
     MAX_SOCKET_FRAME_BYTES,
 };
 use cortexfs::{
@@ -17,6 +18,7 @@ use cortexfs::{
     CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES, SESSION_REQUIRED_FILES,
 };
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

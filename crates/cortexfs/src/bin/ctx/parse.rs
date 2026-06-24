@@ -60,6 +60,7 @@ enum Command {
         session: String,
         input: String,
     },
+    Agent(AgentArgs),
     Ping {
         path: String,
     },
@@ -127,6 +128,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             session,
             input,
         } => send(&cli.root, &agent, &session, &input),
+        Command::Agent(args) => agent_command(&cli.root, &args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
         Command::Doctor => success(doctor(&cli.root)),
@@ -241,6 +243,7 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
                 input,
             })
         }
+        "agent" => parse_agent_command(values),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
             no_extra_args(values)?;
@@ -322,6 +325,100 @@ fn parse_send(
     let input = required_arg(&mut values, "send requires input text")?;
     no_extra_args(values)?;
     Ok((agent, session, input))
+}
+
+fn parse_agent_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let command = required_arg(&mut values, "agent requires new, start, stop, status, or ps")?;
+    match command.as_str() {
+        "new" => Ok(Command::Agent(AgentArgs::New(parse_agent_new(values)?))),
+        "start" => {
+            let name = required_arg(&mut values, "agent start requires an agent name")?;
+            no_extra_args(values)?;
+            Ok(Command::Agent(AgentArgs::Start { name }))
+        }
+        "stop" => {
+            let name = required_arg(&mut values, "agent stop requires an agent name")?;
+            no_extra_args(values)?;
+            Ok(Command::Agent(AgentArgs::Stop { name }))
+        }
+        "status" => {
+            let name = required_arg(&mut values, "agent status requires an agent name")?;
+            no_extra_args(values)?;
+            Ok(Command::Agent(AgentArgs::Status { name }))
+        }
+        "ps" => {
+            no_extra_args(values)?;
+            Ok(Command::Agent(AgentArgs::Ps))
+        }
+        _ => Err(CliError::usage(format!("unknown agent command: {command}"))),
+    }
+}
+
+fn parse_agent_new(mut values: impl Iterator<Item = String>) -> Result<AgentNewArgs, CliError> {
+    let name = required_arg(&mut values, "agent new requires an agent name")?;
+    let mut args = AgentNewArgs {
+        name,
+        temporary: false,
+        label: None,
+        models: Vec::new(),
+        tools: Vec::new(),
+        shared: Vec::new(),
+        mounts: Vec::new(),
+    };
+
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--temp" => {
+                args.temporary = true;
+            }
+            "--label" => {
+                let label = required_arg(&mut values, "agent new --label requires a label")?;
+                args.label = Some(label);
+            }
+            "--model" => {
+                args.models.push(required_arg(
+                    &mut values,
+                    "agent new --model requires a model name",
+                )?);
+            }
+            "--tool" => {
+                args.tools.push(required_arg(
+                    &mut values,
+                    "agent new --tool requires a tool name",
+                )?);
+            }
+            "--shared" => {
+                let value =
+                    required_arg(&mut values, "agent new --shared requires NAME:read|write")?;
+                args.shared.push(parse_agent_shared(&value)?);
+            }
+            "--mount" => {
+                let source =
+                    required_arg(&mut values, "agent new --mount requires a source path")?;
+                let target =
+                    required_arg(&mut values, "agent new --mount requires a target path")?;
+                let mode = required_arg(&mut values, "agent new --mount requires ro or rw")?;
+                args.mounts.push(AgentMount {
+                    source,
+                    target,
+                    mode,
+                });
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+
+    Ok(args)
+}
+
+fn parse_agent_shared(value: &str) -> Result<AgentShared, CliError> {
+    let Some((name, access)) = value.split_once(':') else {
+        return Err(CliError::usage("agent new --shared expects NAME:read|write"));
+    };
+    Ok(AgentShared {
+        name: name.to_owned(),
+        access: access.to_owned(),
+    })
 }
 
 fn parse_file_args(args: Vec<String>) -> Result<FileArgs, CliError> {

@@ -156,9 +156,9 @@ pub fn authorize_session_access(
 
 /// Decides whether a requested child agent is attenuated from its parent.
 ///
-/// v1 supports only owned children. This check keeps child creation in the
-/// ordinary agent object/control-file ABI while proving that the child cannot
-/// expand identity, groups, policy, or mount visibility.
+/// v1 supports owned and temporary children. This check keeps child creation in
+/// the ordinary agent object/control-file ABI while proving that the child
+/// cannot expand identity, groups, policy, or mount visibility.
 pub fn authorize_child_agent(
     request: ChildAgentRequest<'_>,
     authority: ChildAgentAuthority<'_>,
@@ -175,7 +175,7 @@ pub fn authorize_child_agent(
     if !parent_ref_matches(request.parent_ref, authority.parent_agent)? {
         return Err(ChildAgentDenial::ParentMismatch);
     }
-    if request.lifecycle != ChildLifecycle::Owned {
+    if !matches!(request.lifecycle, ChildLifecycle::Owned | ChildLifecycle::Temp) {
         return Err(ChildAgentDenial::UnsupportedLifecycle);
     }
     if request.controls.identity.uid() != authority.identity.uid()

@@ -137,6 +137,9 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
 }
 
 fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
+    if is_passthrough_tool(name) {
+        return run_passthrough_tool(name, args);
+    }
     let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let stdout = io::stdout();
@@ -155,6 +158,22 @@ fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
                 )
             })
             .map_err(|error| format!("cannot write output: {error}")),
+    }
+}
+
+fn is_passthrough_tool(name: &str) -> bool {
+    matches!(name, "bash" | "tmux" | "zellij" | "tsh")
+}
+
+fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), String> {
+    let status = Command::new(name)
+        .args(args)
+        .status()
+        .map_err(|error| format!("cannot run {name} tool: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{name} tool exited with {status}"))
     }
 }
 
