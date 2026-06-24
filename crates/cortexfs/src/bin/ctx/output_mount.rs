@@ -148,18 +148,92 @@ fn print_status(root: &Path) -> Result<(), CliError> {
     let exists = root.exists();
     let is_dir = root.is_dir();
     let mounted = is_mount_point(root).unwrap_or(false);
+    let status = read_ctx_status(root);
+    let present_entries = ROOT_ENTRIES
+        .iter()
+        .filter(|entry| root.join(entry).exists())
+        .count();
+    let missing_entries = ROOT_ENTRIES.len().saturating_sub(present_entries);
+    let agents = read_status_agent_processes(root)?;
 
-    print_line(&format!("root={}", root.display()))?;
-    print_line(&format!("exists={}", bool_text(exists)))?;
-    print_line(&format!("dir={}", bool_text(is_dir)))?;
-    print_line(&format!("mounted={}", bool_text(mounted)))?;
+    print_line("ctx")?;
+    print_line(&format!("    State: {}", ctx_state(exists, is_dir, mounted)))?;
+    print_line(&format!("     Root: {}", root.display()))?;
+    print_line(&format!("   Status: {status}"))?;
+    print_line(&format!(
+        "  Mounted: {}",
+        if mounted { "yes" } else { "no" }
+    ))?;
+    print_line(&format!(
+        "  Entries: {present_entries}/{} loaded",
+        ROOT_ENTRIES.len()
+    ))?;
+    print_line(&format!("   Failed: {missing_entries} entries"))?;
+    print_line(&format!("   Agents: {} loaded", agents.len()))?;
 
-    for entry in ROOT_ENTRIES {
-        let present = root.join(entry).exists();
-        print_line(&format!("{entry}={}", bool_text(present)))?;
+    if !agents.is_empty() {
+        print_line("    Tree:")?;
+        for line in render_agent_status_lines(&agents) {
+            print_line(&format!("          {line}"))?;
+        }
     }
 
     Ok(())
+}
+
+fn ctx_state(exists: bool, is_dir: bool, mounted: bool) -> &'static str {
+    if mounted {
+        "running"
+    } else if exists && is_dir {
+        "available"
+    } else if exists {
+        "invalid"
+    } else {
+        "missing"
+    }
+}
+
+fn read_ctx_status(root: &Path) -> String {
+    fs::read_to_string(root.join("status"))
+        .ok()
+        .map(|content| content.trim().to_owned())
+        .filter(|content| !content.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+fn read_status_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
+    match read_agent_processes(root) {
+        Ok(processes) => Ok(processes),
+        Err(error)
+            if error.message.starts_with(&format!(
+                "cannot read {}",
+                root.join("agent").display()
+            )) =>
+        {
+            Ok(Vec::new())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn render_agent_status_lines(processes: &[AgentProcess]) -> Vec<String> {
+    let mut processes = processes.to_vec();
+    processes.sort_by(|left, right| left.name.cmp(&right.name));
+    let names = processes
+        .iter()
+        .map(|process| process.name.clone())
+        .collect::<Vec<_>>();
+    let mut rendered = Vec::new();
+    for process in &processes {
+        if process
+            .parent
+            .as_ref()
+            .is_none_or(|parent| !names.contains(parent))
+        {
+            render_agent_process_tree(process, &processes, "", true, true, &mut rendered);
+        }
+    }
+    rendered
 }
 
 fn bootstrap_reference_tree(source: Option<&Path>) -> Result<(), CliError> {
