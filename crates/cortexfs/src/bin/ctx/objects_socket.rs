@@ -120,6 +120,27 @@ fn which_tool(root: &Path, name: &str) -> Result<(), CliError> {
     Err(CliError::unavailable(format!("tool not found: {name}")))
 }
 
+fn run_visible_tool(root: &Path, name: &str, args: &[String]) -> Result<ExitCode, CliError> {
+    require_cli_name("tool name", name)?;
+    let Some(hit) = ctx_tool_path(root)?.find(name).map_err(tool_path_error)? else {
+        return Err(CliError::unavailable(format!(
+            "tool not found in CTX_PATH: {name}"
+        )));
+    };
+    let status = ProcessCommand::new(hit.path())
+        .args(args)
+        .status()
+        .map_err(|error| CliError::unavailable(format!("cannot run tool {name}: {error}")))?;
+    Ok(exit_code_from_status(status))
+}
+
+fn exit_code_from_status(status: std::process::ExitStatus) -> ExitCode {
+    status
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .map_or_else(|| ExitCode::from(1), ExitCode::from)
+}
+
 fn path_shared(root: &Path, name: &str) -> Result<(), CliError> {
     require_cli_name("shared name", name)?;
     print_line(&root.join("shared").join(name).display().to_string())

@@ -26,6 +26,7 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] ping model/NAME|agent/NAME",
         "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN",
         "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
+        "  ctx [--root PATH] tool NAME [ARG...]",
         "  ctx [--root PATH] file PATH",
         "  ctx [--root PATH] file cat PATH",
         "  ctx [--root PATH] file set PATH VALUE",
@@ -98,6 +99,13 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
         "exec" => print_lines(&[
             "usage:",
             "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
+        ]),
+        "tool" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] tool NAME [ARG...]",
+            "",
+            "lookup:",
+            "  resolves NAME through CTX_PATH like tsh, then executes the tool directly",
         ]),
         "file" => print_lines(&[
             "usage:",
