@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::fmt::Write as FmtWrite;
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
@@ -6,6 +7,7 @@ use std::{env, fs};
 
 use cortexfs::{CTX_ROOT, ToolPath};
 use cortexfs_tool_sdk::{DynamicToolCache, ToolInvocation, run_tool as run_sdk_tool};
+use serde_json::Value;
 
 #[derive(Debug, Eq, PartialEq)]
 struct TshError {
@@ -125,7 +127,11 @@ principles:
 repl:
   help             show this help
   tools            list visible tools
+  tools -l         list visible tools with paths and descriptions
   which TOOL       print the resolved tool path
+  type TOOL        explain whether TOOL is a builtin or visible tool
+  command -v TOOL  print the command that tsh would run
+  help TOOL        show metadata for a visible tool
   bash             enter an interactive shell tool
   fs.read PATH     read a file through the fs.read tool
   exit             leave tsh
@@ -134,6 +140,16 @@ repl:
 }
 
 fn list_tools(root: &Path) -> Result<(), TshError> {
+    list_tools_with_mode(root, ToolListMode::Names)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ToolListMode {
+    Names,
+    Long,
+}
+
+fn list_tools_with_mode(root: &Path, mode: ToolListMode) -> Result<(), TshError> {
     let tool_path = ctx_tool_path(root)?;
     let hits = tool_path.list().map_err(tool_path_error)?;
     let mut stdout = io::stdout().lock();
@@ -141,7 +157,21 @@ fn list_tools(root: &Path) -> Result<(), TshError> {
         let Some(name) = hit.path().file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        writeln!(stdout, "{name}").map_err(|error| write_error_to_tsh(&error))?;
+        match mode {
+            ToolListMode::Names => {
+                writeln!(stdout, "{name}").map_err(|error| write_error_to_tsh(&error))?;
+            }
+            ToolListMode::Long => {
+                let description = tool_description(&hit);
+                if description.is_empty() {
+                    writeln!(stdout, "{name}\t{}", hit.path().display())
+                        .map_err(|error| write_error_to_tsh(&error))?;
+                } else {
+                    writeln!(stdout, "{name}\t{}\t{description}", hit.path().display())
+                        .map_err(|error| write_error_to_tsh(&error))?;
+                }
+            }
+        }
     }
     stdout.flush().map_err(|error| write_error_to_tsh(&error))
 }
@@ -160,22 +190,86 @@ fn run_repl(root: &Path, cache: &mut DynamicToolCache) -> Result<ExitCode, TshEr
         if bytes == 0 {
             return Ok(ExitCode::SUCCESS);
         }
-        let words = parse_repl_line(&line)?;
+        let words = match parse_repl_line(&line) {
+            Ok(words) => words,
+            Err(error) => {
+                report_repl_error(&error)?;
+                continue;
+            }
+        };
         if words.is_empty() {
             continue;
         }
         match words.first().map(String::as_str) {
-            Some("exit" | "quit") => return parse_exit_code(&words),
-            Some("help") => print_help()?,
-            Some("tools") => list_tools(root)?,
-            Some("which") => repl_which(root, &words)?,
+            Some("exit" | "quit") => match parse_exit_code(&words) {
+                Ok(code) => return Ok(code),
+                Err(error) => report_repl_error(&error)?,
+            },
+            Some("help") => {
+                if let Err(error) = repl_help(root, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("tools") => {
+                if let Err(error) = repl_tools(root, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("which") => {
+                if let Err(error) = repl_which(root, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("type") => {
+                if let Err(error) = repl_type(root, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
+            Some("command") => {
+                if let Err(error) = repl_command(root, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
             Some(name) => {
                 let args = words.iter().skip(1).map(OsString::from).collect::<Vec<_>>();
-                let _code = run_repl_tool(root, cache, name, args)?;
+                if let Err(error) = run_repl_tool(root, cache, name, args) {
+                    report_repl_error(&error)?;
+                }
             }
             None => {}
         }
     }
+}
+
+fn repl_help(root: &Path, words: &[String]) -> Result<(), TshError> {
+    if words.len() == 1 {
+        return print_help();
+    }
+    if words.len() != 2 {
+        return write_stdout("tsh: help accepts at most one topic\n");
+    }
+    let Some(name) = words.get(1) else {
+        return print_help();
+    };
+    if is_tsh_builtin(name) {
+        print_builtin_help(name)
+    } else {
+        print_tool_help(root, name)
+    }
+}
+
+fn repl_tools(root: &Path, words: &[String]) -> Result<(), TshError> {
+    if words.len() == 1 {
+        return list_tools_with_mode(root, ToolListMode::Names);
+    }
+    if words.len() == 2
+        && words
+            .get(1)
+            .is_some_and(|flag| flag == "-l" || flag == "--long")
+    {
+        return list_tools_with_mode(root, ToolListMode::Long);
+    }
+    write_stdout("tsh: tools accepts only -l/--long\n")
 }
 
 fn repl_which(root: &Path, words: &[String]) -> Result<(), TshError> {
@@ -191,6 +285,29 @@ fn repl_which(root: &Path, words: &[String]) -> Result<(), TshError> {
     }
 }
 
+fn repl_type(root: &Path, words: &[String]) -> Result<(), TshError> {
+    if words.len() == 1 {
+        return write_stdout("tsh: type requires a tool name\n");
+    }
+    if words.len() != 2 {
+        return write_stdout("tsh: type accepts one tool name\n");
+    }
+    let Some(name) = words.get(1) else {
+        return write_stdout("tsh: type requires a tool name\n");
+    };
+    print_command_type(root, name)
+}
+
+fn repl_command(root: &Path, words: &[String]) -> Result<(), TshError> {
+    if words.len() == 3 && words.get(1).is_some_and(|flag| flag == "-v") {
+        let Some(name) = words.get(2) else {
+            return write_stdout("tsh: command supports only `command -v TOOL`\n");
+        };
+        return print_command_v(root, name);
+    }
+    write_stdout("tsh: command supports only `command -v TOOL`\n")
+}
+
 fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
@@ -201,20 +318,71 @@ fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
     write_stdout(&format!("{}\n", hit.path().display()))
 }
 
+fn print_command_type(root: &Path, name: &str) -> Result<(), TshError> {
+    if is_tsh_builtin(name) {
+        return write_stdout(&format!("{name} is a tsh builtin\n"));
+    }
+    let tool_path = ctx_tool_path(root)?;
+    let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
+        return command_not_found(name);
+    };
+    write_stdout(&format!("{name} is {}\n", hit.path().display()))
+}
+
+fn print_command_v(root: &Path, name: &str) -> Result<(), TshError> {
+    if is_tsh_builtin(name) {
+        return write_stdout(&format!("{name}\n"));
+    }
+    print_tool_path(root, name)
+}
+
+fn print_builtin_help(name: &str) -> Result<(), TshError> {
+    let text = match name {
+        "exit" | "quit" => "exit [CODE]\n  leave tsh\n",
+        "help" => "help [TOOL]\n  show tsh help or visible tool metadata\n",
+        "tools" => "tools [-l]\n  list visible tools from CTX_PATH\n",
+        "which" => "which TOOL\n  print the resolved tool path\n",
+        "type" => "type TOOL\n  show whether TOOL is a tsh builtin or visible tool\n",
+        "command" => "command -v TOOL\n  print the command that tsh would run\n",
+        _ => "unknown builtin\n",
+    };
+    write_stdout(text)
+}
+
+fn print_tool_help(root: &Path, name: &str) -> Result<(), TshError> {
+    let tool_path = ctx_tool_path(root)?;
+    let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
+        return command_not_found(name);
+    };
+    let description = tool_description(&hit);
+    let schema = tool_schema(&hit);
+    let mut text = format!("{name}\n  path: {}\n", hit.path().display());
+    if !description.is_empty() {
+        let _ignored = writeln!(text, "  description: {description}");
+    }
+    if let Some(schema) = schema {
+        append_schema_help(&mut text, &schema);
+    }
+    write_stdout(&text)
+}
+
 fn run_repl_tool(
     root: &Path,
     cache: &mut DynamicToolCache,
     name: &str,
     args: Vec<OsString>,
 ) -> Result<ExitCode, TshError> {
-    if ctx_tool_path(root)?
-        .find(name)
-        .map_err(tool_path_error)?
-        .is_none()
+    let tool_path = ctx_tool_path(root)?;
+    if tool_path.find(name).map_err(tool_path_error)?.is_none() {
+        return command_not_found(name);
+    }
+    if args.len() == 1
+        && matches!(
+            args.first().and_then(|arg| arg.to_str()),
+            Some("-h" | "--help")
+        )
     {
-        return Err(TshError::unavailable(format!(
-            "tool not found in CTX_PATH: {name}; try `tools` or `bash`"
-        )));
+        return print_tool_help(root, name).map(|()| ExitCode::SUCCESS);
     }
     if args.is_empty() && !is_interactive_tool(name) {
         write_stdout(&format!(
@@ -223,6 +391,13 @@ fn run_repl_tool(
         return Ok(ExitCode::from(2));
     }
     run_tool(root, cache, name, args)
+}
+
+fn is_tsh_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "exit" | "quit" | "help" | "tools" | "which" | "type" | "command"
+    )
 }
 
 fn is_interactive_tool(name: &str) -> bool {
@@ -286,10 +461,16 @@ fn run_tool(
 ) -> Result<ExitCode, TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
-        return Err(TshError::unavailable(format!(
-            "tool not found in CTX_PATH: {name}; try `tools` or `bash`"
-        )));
+        return command_not_found(name);
     };
+    if args.len() == 1
+        && matches!(
+            args.first().and_then(|arg| arg.to_str()),
+            Some("-h" | "--help")
+        )
+    {
+        return print_tool_help(root, name).map(|()| ExitCode::SUCCESS);
+    }
     if let Ok(tool) = cache.get_or_load(hit.path()) {
         let input = collect_tool_input(&args)?;
         let run_id = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
@@ -333,6 +514,49 @@ fn tool_cache_capacity() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(32)
+}
+
+fn tool_description(hit: &cortexfs::ToolHit) -> String {
+    read_control_text(hit, "description").unwrap_or_default()
+}
+
+fn tool_schema(hit: &cortexfs::ToolHit) -> Option<String> {
+    read_control_text(hit, "schema")
+}
+
+fn read_control_text(hit: &cortexfs::ToolHit, file: &str) -> Option<String> {
+    fs::read_to_string(hit.control_dir().join(file))
+        .ok()
+        .map(|content| content.trim().to_owned())
+        .filter(|content| !content.is_empty())
+}
+
+fn append_schema_help(text: &mut String, schema: &str) {
+    let Ok(value) = serde_json::from_str::<Value>(schema) else {
+        return;
+    };
+    if let Some(title) = value.get("title").and_then(Value::as_str) {
+        let _ignored = writeln!(text, "  schema: {title}");
+    }
+    if let Some(description) = value.get("description").and_then(Value::as_str) {
+        let _ignored = writeln!(text, "  schema-description: {description}");
+    }
+    if let Some(required) = value.get("required").and_then(Value::as_array) {
+        let fields = required
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !fields.is_empty() {
+            let _ignored = writeln!(text, "  required: {fields}");
+        }
+    }
+}
+
+fn command_not_found<T>(name: &str) -> Result<T, TshError> {
+    Err(TshError::unavailable(format!(
+        "{name}: command not found\ntry: tools"
+    )))
 }
 
 fn ctx_tool_path(root: &Path) -> Result<ToolPath, TshError> {
@@ -435,6 +659,10 @@ fn write_stdout(message: &str) -> Result<(), TshError> {
 fn write_error(message: &str) -> io::Result<()> {
     let mut stderr = io::stderr().lock();
     writeln!(stderr, "{message}")
+}
+
+fn report_repl_error(error: &TshError) -> Result<(), TshError> {
+    write_error(&format!("tsh: {}", error.message)).map_err(|error| write_error_to_tsh(&error))
 }
 
 fn read_error_to_tsh(error: &io::Error) -> TshError {
