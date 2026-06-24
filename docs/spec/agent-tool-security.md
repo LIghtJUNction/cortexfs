@@ -362,10 +362,25 @@ set.
 The agent terminal path is:
 
 ```text
+ctx agent start launches bwrap
+bwrap starts ctxterm
 ctxterm starts tsh
 tsh resolves tool names through CTX_PATH
 humans observe through ctx agent watch
 humans join through ctx agent attach
+```
+
+By default, `ctx agent start` binds the caller's current directory to
+`/workspace` with read-write access and starts the agent terminal there. The
+agent sees the project through the sandbox path, not the host path. Additional
+host paths must be declared as sandbox mounts; paths that are not mounted are
+not visible to the agent at the Linux filesystem layer.
+
+Filesystem access is granted only when both layers allow it:
+
+```text
+sandbox mount exposes the path
+CortexFS policy/mount context authorizes the tool or ABI operation
 ```
 
 Agents should be granted the `tsh` terminal capability as their primary shell

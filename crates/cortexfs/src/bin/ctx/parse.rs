@@ -355,11 +355,7 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = rest.into_iter();
     match command.as_str() {
         "new" => Ok(Command::Agent(AgentArgs::New(parse_agent_new(values)?))),
-        "start" => {
-            let name = required_arg(&mut values, "agent start requires an agent name")?;
-            no_extra_args(values)?;
-            Ok(Command::Agent(AgentArgs::Start { name }))
-        }
+        "start" => Ok(Command::Agent(AgentArgs::Start(parse_agent_start(values)?))),
         "stop" => {
             let name = required_arg(&mut values, "agent stop requires an agent name")?;
             no_extra_args(values)?;
@@ -384,6 +380,47 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
         }
         _ => Err(CliError::usage(format!("unknown agent command: {command}"))),
     }
+}
+
+fn parse_agent_start(mut values: impl Iterator<Item = String>) -> Result<AgentStartArgs, CliError> {
+    let name = required_arg(&mut values, "agent start requires an agent name")?;
+    let mut args = AgentStartArgs {
+        name,
+        session: "default".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" => {
+                args.session = required_arg(
+                    &mut values,
+                    "agent start --session requires a session name",
+                )?;
+            }
+            "--cwd" => {
+                args.cwd = required_arg(&mut values, "agent start --cwd requires a path")?;
+            }
+            "--mount" => {
+                let source =
+                    required_arg(&mut values, "agent start --mount requires a source path")?;
+                let target =
+                    required_arg(&mut values, "agent start --mount requires a target path")?;
+                let mode = required_arg(&mut values, "agent start --mount requires ro or rw")?;
+                args.mounts.push(AgentMount {
+                    source,
+                    target,
+                    mode,
+                });
+            }
+            "--no-default-workspace" => {
+                args.default_workspace = false;
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(args)
 }
 
 fn parse_agent_terminal_args(

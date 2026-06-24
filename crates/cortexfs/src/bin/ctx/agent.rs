@@ -1,7 +1,7 @@
 #[derive(Debug, Eq, PartialEq)]
 enum AgentArgs {
     New(AgentNewArgs),
-    Start { name: String },
+    Start(AgentStartArgs),
     Stop { name: String },
     Status { name: String },
     Ps,
@@ -21,12 +21,21 @@ struct AgentNewArgs {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+struct AgentStartArgs {
+    name: String,
+    session: String,
+    cwd: String,
+    default_workspace: bool,
+    mounts: Vec<AgentMount>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct AgentShared {
     name: String,
     access: String,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct AgentMount {
     source: String,
     target: String,
@@ -40,10 +49,7 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
             "agent.create",
             &agent_new_request_json(args)?,
         ),
-        AgentArgs::Start { ref name } => {
-            require_cli_name("agent name", name)?;
-            agent_lifecycle_tool(root, "agent.start", &agent_name_request_json(name))
-        }
+        AgentArgs::Start(ref args) => agent_start(root, args),
         AgentArgs::Stop { ref name } => {
             require_cli_name("agent name", name)?;
             agent_lifecycle_tool(root, "agent.stop", &agent_name_request_json(name))
@@ -64,6 +70,269 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
             ref session,
         } => agent_terminal(root, name, session, true),
     }
+}
+
+fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
+    require_cli_name("agent name", &args.name)?;
+    require_session_name(&args.session)?;
+    require_sandbox_cwd(&args.cwd)?;
+    let mounts = agent_start_mounts(args)?;
+    for mount in &mounts {
+        require_agent_mount(mount)?;
+    }
+    let socket = agent_terminal_socket(root, &args.name, &args.session)?;
+    ensure_agent_terminal_socket(root, &args.name, &args.session, &socket)?;
+    let unit = agent_terminal_unit(&args.name, &args.session);
+    let command = agent_start_systemd_command(root, args, &mounts, &socket, &unit)?;
+    let status = ProcessCommand::new(&command.program)
+        .args(&command.args)
+        .status()
+        .map_err(|error| CliError::unavailable(format!("cannot start systemd-run: {error}")))?;
+    if !status.success() {
+        return Err(CliError::unavailable(format!(
+            "agent terminal service failed to start with {status}"
+        )));
+    }
+    print_line(&format!("agent={}", args.name))?;
+    print_line(&format!("session={}", args.session))?;
+    print_line(&format!("unit={unit}.service"))?;
+    print_line(&format!("cwd={}", args.cwd))?;
+    print_line(&format!("socket={}", socket.display()))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AgentStartCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+fn agent_start_systemd_command(
+    root: &Path,
+    args: &AgentStartArgs,
+    mounts: &[AgentMount],
+    socket: &Path,
+    unit: &str,
+) -> Result<AgentStartCommand, CliError> {
+    let mut command = AgentStartCommand {
+        program: "systemd-run".to_owned(),
+        args: vec![
+            "--user".to_owned(),
+            "--unit".to_owned(),
+            unit.to_owned(),
+            "/usr/bin/env".to_owned(),
+            "-u".to_owned(),
+            "CTX_PATH".to_owned(),
+            format!("CTX_HOME={}", ctx_home(root)?.display()),
+            "bwrap".to_owned(),
+        ],
+    };
+    command.args.extend(agent_bwrap_args(root, args, mounts, socket));
+    Ok(command)
+}
+
+fn agent_bwrap_args(
+    root: &Path,
+    args: &AgentStartArgs,
+    mounts: &[AgentMount],
+    socket: &Path,
+) -> Vec<String> {
+    let mut bwrap = vec![
+        "--die-with-parent".to_owned(),
+        "--unshare-pid".to_owned(),
+        "--proc".to_owned(),
+        "/proc".to_owned(),
+        "--dev".to_owned(),
+        "/dev".to_owned(),
+        "--tmpfs".to_owned(),
+        "/tmp".to_owned(),
+        "--dir".to_owned(),
+        "/run".to_owned(),
+        "--ro-bind".to_owned(),
+        "/usr".to_owned(),
+        "/usr".to_owned(),
+        "--ro-bind".to_owned(),
+        "/etc".to_owned(),
+        "/etc".to_owned(),
+        "--symlink".to_owned(),
+        "usr/bin".to_owned(),
+        "/bin".to_owned(),
+        "--symlink".to_owned(),
+        "usr/lib".to_owned(),
+        "/lib".to_owned(),
+        "--symlink".to_owned(),
+        "usr/lib".to_owned(),
+        "/lib64".to_owned(),
+        "--bind".to_owned(),
+        root.display().to_string(),
+        root.display().to_string(),
+    ];
+    if let Some(runtime_dir) = socket_runtime_dir(socket) {
+        bwrap.extend([
+            "--bind".to_owned(),
+            runtime_dir.display().to_string(),
+            runtime_dir.display().to_string(),
+        ]);
+    }
+    for mount in mounts {
+        bwrap.push(if mount.mode == "ro" {
+            "--ro-bind".to_owned()
+        } else {
+            "--bind".to_owned()
+        });
+        bwrap.push(mount.source.clone());
+        bwrap.push(mount.target.clone());
+    }
+    bwrap.extend([
+        "--chdir".to_owned(),
+        args.cwd.clone(),
+        "/usr/bin/ctxterm".to_owned(),
+        "--listen".to_owned(),
+        socket.display().to_string(),
+        "--no-stdio".to_owned(),
+        "--".to_owned(),
+        "/ctx/bin/tsh".to_owned(),
+    ]);
+    bwrap
+}
+
+fn agent_start_mounts(args: &AgentStartArgs) -> Result<Vec<AgentMount>, CliError> {
+    let mut mounts = Vec::new();
+    if args.default_workspace {
+        mounts.push(AgentMount {
+            source: env::current_dir()
+                .map_err(|error| {
+                    CliError::unavailable(format!("cannot read current directory: {error}"))
+                })?
+                .display()
+                .to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        });
+    }
+    mounts.extend(args.mounts.iter().cloned());
+    Ok(mounts)
+}
+
+fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
+    if !Path::new(&mount.source).is_absolute() {
+        return Err(CliError::usage("agent mount source must be absolute"));
+    }
+    if !Path::new(&mount.target).is_absolute() {
+        return Err(CliError::usage("agent mount target must be absolute"));
+    }
+    if !matches!(mount.mode.as_str(), "ro" | "rw") {
+        return Err(CliError::usage("agent mount mode must be ro or rw"));
+    }
+    if mount.target == "/" || mount.target.starts_with("/ctx/") || mount.target == "/ctx" {
+        return Err(CliError::usage("agent mount target cannot replace / or /ctx"));
+    }
+    Ok(())
+}
+
+fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
+    if Path::new(cwd).is_absolute() {
+        Ok(())
+    } else {
+        Err(CliError::usage("agent cwd must be absolute inside the sandbox"))
+    }
+}
+
+fn ensure_agent_terminal_socket(
+    root: &Path,
+    name: &str,
+    session: &str,
+    socket: &Path,
+) -> Result<(), CliError> {
+    if let Some(parent) = socket.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
+        })?;
+    }
+    let runtime_socket = agent_runtime_socket(root, name, session)?;
+    if let Some(parent) = runtime_socket.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
+        })?;
+    }
+    match fs::read_link(socket) {
+        Ok(target) if target == runtime_socket => {}
+        Ok(_target) => {
+            return Err(CliError::unavailable(format!(
+                "{} already points at another socket",
+                socket.display()
+            )));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            std::os::unix::fs::symlink(&runtime_socket, socket).map_err(|error| {
+                CliError::unavailable(format!(
+                    "cannot create terminal socket link {} -> {}: {error}",
+                    socket.display(),
+                    runtime_socket.display()
+                ))
+            })?;
+        }
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot inspect {}: {error}",
+                socket.display()
+            )));
+        }
+    }
+    match fs::remove_file(&runtime_socket) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot remove stale {}: {error}",
+                runtime_socket.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn agent_runtime_socket(root: &Path, name: &str, session: &str) -> Result<PathBuf, CliError> {
+    Ok(PathBuf::from("/run")
+        .join("cortexfs")
+        .join("terminal")
+        .join(current_uid_for_ctx(root)?)
+        .join(name)
+        .join(session)
+        .join("main.sock"))
+}
+
+fn current_uid_for_ctx(root: &Path) -> Result<String, CliError> {
+    let home = ctx_home(root)?;
+    home.file_name()
+        .and_then(|uid| uid.to_str())
+        .filter(|uid| uid.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(str::to_owned)
+        .ok_or_else(|| CliError::unavailable("cannot derive uid from CTX_HOME"))
+}
+
+fn socket_runtime_dir(socket: &Path) -> Option<PathBuf> {
+    let target = fs::read_link(socket).ok()?;
+    let target = if target.is_absolute() {
+        target
+    } else {
+        socket.parent()?.join(target)
+    };
+    target.parent().map(Path::to_path_buf)
+}
+
+fn agent_terminal_unit(name: &str, session: &str) -> String {
+    let session = session
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!("cortexfs-agent-{name}-{session}-terminal")
 }
 
 fn agent_terminal(

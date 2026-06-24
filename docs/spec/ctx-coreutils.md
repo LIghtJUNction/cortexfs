@@ -118,6 +118,22 @@ resolves command names through `CTX_PATH`, not `PATH`, and must not execute
 arbitrary host commands directly. A command such as `bash` works only when a
 tool named `bash` is visible through `CTX_PATH`.
 
+`ctx agent start <agent> --session <session>` starts the default agent
+terminal in a sandbox. Unless overridden, the caller's current working
+directory is bind-mounted at `/workspace` with read-write access, and the
+agent process starts with `/workspace` as its current directory. The host path
+is therefore not exposed as the agent's `pwd`; the agent sees the authorized
+project mount through the sandbox path.
+
+Additional mounts can be supplied explicitly:
+
+```text
+ctx agent start <agent> --session <session> \
+  --mount /host/path /workspace rw \
+  --mount /host/input /input ro \
+  --cwd /workspace
+```
+
 `ctxterm --listen SOCKET` exposes the PTY for observation and attachment.
 Session terminals use:
 
