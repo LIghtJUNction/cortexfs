@@ -369,6 +369,8 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
         Ok(ref command)
             if command.program == "systemd-run"
                 && command.args.contains(&"--user".to_owned())
+                && contains_arg_pair(&command.args, "--property", "Restart=always")
+                && contains_arg_pair(&command.args, "--property", "RestartSec=250ms")
                 && command.args.contains(&"-i".to_owned())
                 && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
                 && command.args.contains(&"CTX_ROOT=/ctx".to_owned())
@@ -381,6 +383,18 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
                 && command.args.contains(&"LANG=C.UTF-8".to_owned())
                 && command.args.contains(&"/usr/bin/bwrap".to_owned())
                 && !command.args.contains(&"CTX_PATH".to_owned())
+    ));
+}
+
+#[test]
+fn agent_attach_missing_terminal_suggests_start_command() {
+    let socket = unique_test_dir("agent-attach-missing-terminal").join("main.sock");
+    let result = stream_terminal_socket(&socket, true, "coder", "test");
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.message.contains("terminal is not running")
+                && error.message.contains("ctx agent start coder --session test")
     ));
 }
 

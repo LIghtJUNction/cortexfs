@@ -120,6 +120,10 @@ fn agent_start_systemd_command(
             "--user".to_owned(),
             "--unit".to_owned(),
             unit.to_owned(),
+            "--property".to_owned(),
+            "Restart=always".to_owned(),
+            "--property".to_owned(),
+            "RestartSec=250ms".to_owned(),
             "/usr/bin/env".to_owned(),
             "-i".to_owned(),
             "PATH=/usr/bin:/bin".to_owned(),
@@ -377,7 +381,7 @@ fn agent_terminal(
     require_cli_name("agent name", name)?;
     require_session_name(session)?;
     let socket = agent_terminal_socket(root, name, session)?;
-    stream_terminal_socket(&socket, write)
+    stream_terminal_socket(&socket, write, name, session)
 }
 
 fn agent_terminal_socket(root: &Path, name: &str, session: &str) -> Result<PathBuf, CliError> {
@@ -408,10 +412,21 @@ fn require_session_name(session: &str) -> Result<(), CliError> {
     }
 }
 
-fn stream_terminal_socket(socket: &Path, write: bool) -> Result<ExitCode, CliError> {
+fn stream_terminal_socket(
+    socket: &Path,
+    write: bool,
+    name: &str,
+    session: &str,
+) -> Result<ExitCode, CliError> {
     let mut stream = UnixStream::connect(socket).map_err(|error| {
+        let hint = format!("run: ctx agent start {name} --session {session}");
+        let reason = match error.kind() {
+            io::ErrorKind::NotFound => "terminal is not running",
+            io::ErrorKind::ConnectionRefused => "terminal socket exists but has no listener",
+            _ => "cannot connect terminal socket",
+        };
         CliError::unavailable(format!(
-            "cannot connect terminal socket {}: {error}",
+            "{reason} {}: {error}\n{hint}",
             socket.display()
         ))
     })?;
