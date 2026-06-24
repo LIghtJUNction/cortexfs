@@ -41,6 +41,72 @@ fn print_help() -> Result<(), CliError> {
     ])
 }
 
+fn print_help_topic(topic: &str) -> Result<(), CliError> {
+    match topic {
+        "status" => print_lines(&["usage:", "  ctx [--root PATH] status"]),
+        "abi" => print_lines(&["usage:", "  ctx [--root PATH] abi"]),
+        "env" => print_lines(&["usage:", "  ctx [--root PATH] env"]),
+        "root" => print_lines(&["usage:", "  ctx [--root PATH] root"]),
+        "bootstrap" => print_lines(&["usage:", "  ctx bootstrap [SOURCE]"]),
+        "mount" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] mount [--source SOURCE] [MOUNTPOINT]",
+        ]),
+        "ls" => print_lines(&["usage:", "  ctx [--root PATH] ls [PATH|model|agent|tool]"]),
+        "which" => print_lines(&["usage:", "  ctx [--root PATH] which model|agent|tool NAME"]),
+        "which-tool" => print_lines(&["usage:", "  ctx [--root PATH] which-tool NAME"]),
+        "path" => print_lines(&["usage:", "  ctx [--root PATH] path shared NAME"]),
+        "history" => print_lines(&["usage:", "  ctx [--root PATH] history AGENT [SESSION]"]),
+        "latest" => print_lines(&["usage:", "  ctx [--root PATH] latest AGENT [SESSION]"]),
+        "resume" => print_lines(&["usage:", "  ctx [--root PATH] resume AGENT [SESSION]"]),
+        "send" => print_lines(&["usage:", "  ctx [--root PATH] send AGENT SESSION INPUT"]),
+        "agent" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] agent new NAME [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
+            "  ctx [--root PATH] agent start NAME",
+            "  ctx [--root PATH] agent stop NAME",
+            "  ctx [--root PATH] agent status NAME",
+            "  ctx [--root PATH] agent ps",
+            "  ctx [--root PATH] agent watch NAME [--session SESSION]",
+            "  ctx [--root PATH] agent attach NAME [--session SESSION]",
+        ]),
+        "agent new" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] agent new NAME [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
+        ]),
+        "agent start" => print_lines(&["usage:", "  ctx [--root PATH] agent start NAME"]),
+        "agent stop" => print_lines(&["usage:", "  ctx [--root PATH] agent stop NAME"]),
+        "agent status" => print_lines(&["usage:", "  ctx [--root PATH] agent status NAME"]),
+        "agent ps" => print_lines(&["usage:", "  ctx [--root PATH] agent ps"]),
+        "agent watch" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] agent watch NAME [--session SESSION]",
+        ]),
+        "agent attach" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] agent attach NAME [--session SESSION]",
+        ]),
+        "ping" => print_lines(&["usage:", "  ctx [--root PATH] ping model/NAME|agent/NAME"]),
+        "cancel" => print_lines(&["usage:", "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN"]),
+        "exec" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
+        ]),
+        "file" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] file PATH",
+            "  ctx [--root PATH] file cat PATH",
+            "  ctx [--root PATH] file set PATH VALUE",
+            "  ctx [--root PATH] file append PATH VALUE",
+            "  ctx [--root PATH] file check PATH",
+            "  ctx [--root PATH] file classify PATH",
+        ]),
+        "doctor" => print_lines(&["usage:", "  ctx [--root PATH] doctor"]),
+        "validate-name" => print_lines(&["usage:", "  ctx validate-name NAME"]),
+        _ => Err(CliError::usage(format!("unknown help topic: {topic}"))),
+    }
+}
+
 fn print_abi() -> Result<(), CliError> {
     print_line("root=/ctx")?;
     print_line("entries=status bin model agent tool home shared")?;

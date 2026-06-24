@@ -29,6 +29,7 @@ struct Cli {
 #[derive(Debug)]
 enum Command {
     Help,
+    HelpTopic(String),
     Abi,
     Env,
     Root,
@@ -103,6 +104,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
     let cli = parse(args)?;
     match cli.command {
         Command::Help => success(print_help()),
+        Command::HelpTopic(topic) => success(print_help_topic(&topic)),
         Command::Abi => success(print_abi()),
         Command::Env => success(print_env(&cli.root)),
         Command::Root => success(print_line(&cli.root.display().to_string())),
@@ -185,6 +187,11 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     let Some(command) = values.next() else {
         return Ok(Command::Status);
     };
+    let rest: Vec<String> = values.collect();
+    if is_help_args(&rest) {
+        return Ok(Command::HelpTopic(command));
+    }
+    let mut values = rest.into_iter();
 
     match command.as_str() {
         "help" | "--help" | "-h" => Ok(Command::Help),
@@ -243,7 +250,7 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
                 input,
             })
         }
-        "agent" => parse_agent_command(values),
+        "agent" => parse_agent_command(values.collect()),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
             no_extra_args(values)?;
@@ -277,6 +284,14 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         }
         _ => Err(CliError::usage(format!("unknown command: {command}"))),
     }
+}
+
+fn is_help_args(args: &[String]) -> bool {
+    matches!(args, [value] if is_help_flag(value))
+}
+
+fn is_help_flag(value: &str) -> bool {
+    matches!(value, "help" | "--help" | "-h")
 }
 
 fn parse_ls_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
@@ -327,11 +342,17 @@ fn parse_send(
     Ok((agent, session, input))
 }
 
-fn parse_agent_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
+    let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
         "agent requires new, start, stop, status, ps, watch, or attach",
     )?;
+    let rest: Vec<String> = values.collect();
+    if is_help_args(&rest) {
+        return Ok(Command::HelpTopic(format!("agent {command}")));
+    }
+    let mut values = rest.into_iter();
     match command.as_str() {
         "new" => Ok(Command::Agent(AgentArgs::New(parse_agent_new(values)?))),
         "start" => {
