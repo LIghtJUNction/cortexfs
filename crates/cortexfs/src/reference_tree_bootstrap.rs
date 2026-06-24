@@ -35,13 +35,25 @@ fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
         "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec ctx \"$@\"\n",
     )?;
     set_reference_executable(&ctx)?;
-    for name in ["te", "tsh"] {
+    for name in ["ctxterm", "tsh"] {
         let path = root.join("bin").join(name);
         write_reference_text(
             &path,
             &format!("#!/bin/sh\n# CortexFS reference-tree {name} placeholder.\nexec {name} \"$@\"\n"),
         )?;
         set_reference_executable(&path)?;
+    }
+    remove_deprecated_reference_bin_te(root)?;
+    Ok(())
+}
+
+fn remove_deprecated_reference_bin_te(root: &Path) -> Result<(), ReferenceTreeError> {
+    let path = root.join("bin").join("te");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    if content.contains("# CortexFS reference-tree te placeholder.") {
+        fs::remove_file(path).map_err(|_error| ReferenceTreeError::CannotRemove)?;
     }
     Ok(())
 }
@@ -233,7 +245,7 @@ const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
     },
     ReferenceToolSpec {
         name: "bash",
-        description: "Interactive bash tool for agents running inside te/tsh.",
+        description: "Interactive bash tool for agents running inside ctxterm/tsh.",
         schema: r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "bash tool input",

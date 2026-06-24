@@ -156,7 +156,8 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         .map(|metadata| metadata.permissions().mode() & 0o777);
     assert!(matches!(status_mode, Ok(0o644)));
     assert!(root.join("bin").join("ctx").is_file());
-    assert!(root.join("bin").join("te").is_file());
+    assert!(root.join("bin").join("ctxterm").is_file());
+    assert!(!root.join("bin").join("te").exists());
     assert!(root.join("bin").join("tsh").is_file());
     assert!(!root.join("model").join("debug").join("echo").exists());
     let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))

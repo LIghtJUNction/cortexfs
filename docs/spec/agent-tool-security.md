@@ -362,7 +362,7 @@ set.
 The agent terminal path is:
 
 ```text
-te starts tsh
+ctxterm starts tsh
 tsh resolves tool names through CTX_PATH
 ```
 

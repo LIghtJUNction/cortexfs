@@ -106,15 +106,15 @@ requested child name is valid
 ## Agent Terminal Tools
 
 Agents should get one terminal capability: `tsh`. A runtime launches it inside
-`te`, the pseudo-terminal owner:
+`ctxterm`, the pseudo-terminal owner:
 
 ```text
-/ctx/bin/te
+/ctx/bin/ctxterm
 /ctx/bin/tsh
 /ctx/tool/tsh
 ```
 
-`te` starts `tsh` by default and owns the PTY for the whole agent terminal
+`ctxterm` starts `tsh` by default and owns the PTY for the whole agent terminal
 lifecycle. `tsh` is not a host shell. It resolves the first word through
 `CTX_PATH` and executes only the matching CortexFS tool object.
 
