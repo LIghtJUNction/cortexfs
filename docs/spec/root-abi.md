@@ -348,6 +348,22 @@ PATH      normal shell command path, may include /ctx/bin
 
 `CTX_PATH` is only for tool lookup. It is not used to find models or agents.
 
+When a human starts `tsh` and `CTX_PATH` is not set, `tsh` may read:
+
+```text
+/ctx/home/<uid>/.tshrc
+```
+
+The file is data, not shell. The stable line format is:
+
+```text
+CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
+```
+
+Blank lines and `#` comments are ignored. `tsh` must not execute `.tshrc`, must
+not process `export`, and must not use it when `CTX_PATH` is already set in the
+process environment.
+
 ## Legacy rc File
 
 `/ctx/AGENTS.rc` is not stable ABI. Strict clients must not depend on it. Agent

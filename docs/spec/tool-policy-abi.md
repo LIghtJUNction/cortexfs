@@ -161,6 +161,17 @@ Agents search for tools by `CTX_PATH`:
 /ctx/shared/project-a/tool/fs.read
 ```
 
+For human `tsh` sessions, the lookup path is chosen in this order:
+
+```text
+1. process CTX_PATH, when set
+2. CTX_HOME/.tshrc line CTX_PATH=...
+3. default /ctx/tool:/ctx/home/<uid>/tool
+```
+
+`.tshrc` is not shell code. It is a user-level data file for persistent tool
+path configuration.
+
 The search path above describes source tiers. The agent process may see a
 filtered memory projection instead of the raw durable directories. The
 projection must preserve object ABI shape and must not create durable files as

@@ -1,8 +1,8 @@
-use std::env;
 use std::ffi::OsString;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
+use std::{env, fs};
 
 use cortexfs::{CTX_ROOT, ToolPath};
 
@@ -116,6 +116,7 @@ usage:
 
 principles:
   tsh resolves TOOL through CTX_PATH
+  when CTX_PATH is unset, tsh may read CTX_HOME/.tshrc
   tsh never falls back to PATH for tool lookup
   bash, tmux, and zellij are tools, not built-ins
 ",
@@ -238,9 +239,57 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
 fn ctx_tool_path(root: &Path) -> Result<ToolPath, TshError> {
     match env::var("CTX_PATH") {
         Ok(value) => Ok(ToolPath::parse(&value)),
-        Err(env::VarError::NotPresent) => Ok(ToolPath::default(root, &ctx_home(root)?)),
+        Err(env::VarError::NotPresent) => {
+            let home = ctx_home(root)?;
+            tshrc_ctx_path(&home)?.map_or_else(
+                || Ok(ToolPath::default(root, &home)),
+                |value| Ok(ToolPath::parse(&value)),
+            )
+        }
         Err(env::VarError::NotUnicode(_value)) => Err(TshError::usage("CTX_PATH must be UTF-8")),
     }
+}
+
+fn tshrc_ctx_path(home: &Path) -> Result<Option<String>, TshError> {
+    let path = home.join(".tshrc");
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(TshError::unavailable(format!(
+                "cannot read {}: {error}",
+                path.display()
+            )));
+        }
+    };
+    parse_tshrc_ctx_path(&content)
+        .map_err(|message| TshError::usage(format!("invalid {}: {message}", path.display())))
+}
+
+fn parse_tshrc_ctx_path(content: &str) -> Result<Option<String>, String> {
+    let mut value = None;
+    for (index, line) in content.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(path) = line.strip_prefix("CTX_PATH=") else {
+            return Err(format!(
+                "line {} must be CTX_PATH=...",
+                index.saturating_add(1)
+            ));
+        };
+        if path.is_empty() {
+            return Err(format!(
+                "line {} has empty CTX_PATH",
+                index.saturating_add(1)
+            ));
+        }
+        if value.replace(path.to_owned()).is_some() {
+            return Err(format!("line {} repeats CTX_PATH", index.saturating_add(1)));
+        }
+    }
+    Ok(value)
 }
 
 fn ctx_home(root: &Path) -> Result<PathBuf, TshError> {
@@ -299,7 +348,7 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 
 #[cfg(test)]
 mod tests {
-    use super::{TshCommand, parse_args, parse_repl_line};
+    use super::{TshCommand, parse_args, parse_repl_line, parse_tshrc_ctx_path};
     use std::ffi::OsString;
     use std::path::PathBuf;
 
@@ -334,5 +383,21 @@ mod tests {
             ])
         );
         assert!(parse_repl_line("bash 'unterminated").is_err());
+    }
+
+    #[test]
+    fn parses_tshrc_ctx_path_as_data() {
+        assert_eq!(
+            parse_tshrc_ctx_path(
+                "\
+# user tools first for this account
+CTX_PATH=/ctx/home/1000/tool:/ctx/tool
+"
+            ),
+            Ok(Some("/ctx/home/1000/tool:/ctx/tool".to_owned()))
+        );
+        assert_eq!(parse_tshrc_ctx_path("# empty\n\n"), Ok(None));
+        assert!(parse_tshrc_ctx_path("export CTX_PATH=/ctx/tool\n").is_err());
+        assert!(parse_tshrc_ctx_path("CTX_PATH=\n").is_err());
     }
 }
