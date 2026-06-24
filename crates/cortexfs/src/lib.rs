@@ -48,6 +48,7 @@ mod context_pack;
 mod context_pack_build;
 mod context_pack_inspect;
 mod context_pack_source;
+mod core_tools;
 mod message_stream;
 mod model;
 mod mount_table;
@@ -86,6 +87,7 @@ pub use context_pack::{
     ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,
     validate_context_pack_source,
 };
+pub use core_tools::{FsReadTool, FsWriteTool, ShellExecTool, core_tool_specs, run_core_tool};
 pub use model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
