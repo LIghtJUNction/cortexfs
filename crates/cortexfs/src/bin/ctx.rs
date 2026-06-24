@@ -3,8 +3,9 @@ use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::net::Shutdown;
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
@@ -22,6 +23,7 @@ use cortexfs::{
     inspect_shared_queue_layout, inspect_tool_schema_json, is_executable_file, is_model_name,
     is_object_name, parse_abi_path, parse_model_driver_routes,
 };
+use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
