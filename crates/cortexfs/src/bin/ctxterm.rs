@@ -2,8 +2,9 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::net::Shutdown;
+use std::os::fd::AsFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -12,6 +13,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 const DEFAULT_ROWS: u16 = 24;
@@ -452,6 +454,8 @@ fn run_client(socket: &Path, write: bool) -> Result<ExitCode, CtxtermError> {
         io::copy(&mut reader, &mut stdout).and_then(|_bytes| stdout.flush())
     });
     if write {
+        let _raw_mode =
+            RawTerminalMode::maybe_new().map_err(|error| write_error_to_ctxterm(&error))?;
         let input = thread::spawn(move || {
             let mut stdin = io::stdin().lock();
             let result = io::copy(&mut stdin, &mut stream);
@@ -471,6 +475,36 @@ fn run_client(socket: &Path, write: bool) -> Result<ExitCode, CtxtermError> {
         Err(_error) => return Err(CtxtermError::unavailable("output thread failed")),
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Debug)]
+struct RawTerminalMode {
+    original: Termios,
+}
+
+impl RawTerminalMode {
+    fn maybe_new() -> io::Result<Option<Self>> {
+        let stdin = io::stdin();
+        if !stdin.is_terminal() {
+            return Ok(None);
+        }
+        let original = tcgetattr(stdin.as_fd()).map_err(nix_error_to_io)?;
+        let mut raw = original.clone();
+        cfmakeraw(&mut raw);
+        tcsetattr(stdin.as_fd(), SetArg::TCSANOW, &raw).map_err(nix_error_to_io)?;
+        Ok(Some(Self { original }))
+    }
+}
+
+impl Drop for RawTerminalMode {
+    fn drop(&mut self) {
+        let stdin = io::stdin();
+        let _ignored = tcsetattr(stdin.as_fd(), SetArg::TCSANOW, &self.original);
+    }
+}
+
+fn nix_error_to_io(error: nix::errno::Errno) -> io::Error {
+    io::Error::from(error)
 }
 
 fn pty_size() -> PtySize {
