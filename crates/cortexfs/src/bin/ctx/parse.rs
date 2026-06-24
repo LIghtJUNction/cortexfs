@@ -74,6 +74,10 @@ enum Command {
         path: String,
         args: Vec<String>,
     },
+    Tool {
+        name: String,
+        args: Vec<String>,
+    },
     File(FileArgs),
     ValidateName(String),
 }
@@ -135,6 +139,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
         Command::Doctor => success(doctor(&cli.root)),
         Command::Exec { path, args } => exec_object(&cli.root, &path, &args),
+        Command::Tool { name, args } => run_visible_tool(&cli.root, &name, &args),
         Command::File(args) => success(file_command(&cli.root, &args)),
         Command::ValidateName(name) => success(validate_name(&name)),
     }
@@ -270,6 +275,13 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             let path = required_arg(&mut values, "exec requires an ABI object path")?;
             Ok(Command::Exec {
                 path,
+                args: values.collect(),
+            })
+        }
+        "tool" => {
+            let name = required_arg(&mut values, "tool requires a tool name")?;
+            Ok(Command::Tool {
+                name,
                 args: values.collect(),
             })
         }

@@ -495,6 +495,29 @@ fn parses_exec_command_with_arguments() {
 }
 
 #[test]
+fn parses_tool_command_with_arguments() {
+    let command = cmd!("tool", "fs.read", "README.md");
+    assert!(matches!(
+        command,
+        Ok(Command::Tool {
+            ref name,
+            ref args
+        }) if name == "fs.read" && args == &["README.md".to_owned()]
+    ));
+}
+
+#[test]
+fn tool_command_executes_visible_tool_without_tsh() {
+    let root = clean_test_dir("ctx-tool-command-visible");
+    let tool = root.join("tool").join("project.echo");
+    write_text_file(&tool, "#!/bin/sh\nexit 7\n");
+    assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+
+    let result = run_visible_tool(&root, "project.echo", &["hello".to_owned()]);
+    assert!(matches!(result, Ok(code) if format!("{code:?}") == "ExitCode(unix_exit_status(7))"));
+}
+
+#[test]
 fn abi_path_resolution_rejects_escape() {
     let root = Path::new("/ctx");
     assert!(resolve_abi_path(root, "agent/coder.d/cwd").is_ok());
