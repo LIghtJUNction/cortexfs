@@ -207,6 +207,15 @@ fn run_repl_tool(
     name: &str,
     args: Vec<OsString>,
 ) -> Result<ExitCode, TshError> {
+    if ctx_tool_path(root)?
+        .find(name)
+        .map_err(tool_path_error)?
+        .is_none()
+    {
+        return Err(TshError::unavailable(format!(
+            "tool not found in CTX_PATH: {name}; try `tools` or `bash`"
+        )));
+    }
     if args.is_empty() && !is_interactive_tool(name) {
         write_stdout(&format!(
             "tsh: {name} needs input; pass arguments instead of leaving stdin open\ntry: {name} PATH or {name} '{{\"path\":\"PATH\"}}'\n"
