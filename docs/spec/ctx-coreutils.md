@@ -125,6 +125,11 @@ agent process starts with `/workspace` as its current directory. The host path
 is therefore not exposed as the agent's `pwd`; the agent sees the authorized
 project mount through the sandbox path.
 
+The terminal process starts from an empty environment with a small allowlist
+such as `CTX_ROOT`, `CTX_HOME`, `HOME=/workspace`, `PATH=/usr/bin:/bin`,
+`USER`, `LOGNAME`, `SHELL`, `TERM`, and `LANG`. Host session variables and
+secrets are not inherited by default.
+
 Additional mounts can be supplied explicitly:
 
 ```text

@@ -192,14 +192,29 @@ Runtime environment:
 ```sh
 CTX_ROOT=/ctx
 CTX_HOME=/ctx/home/1000
-HOME=/ctx/home/1000/agent/coder
-CTX_PATH=/ctx/tool:/ctx/home/1000/tool
+HOME=/workspace
+PATH=/usr/bin:/bin
+USER=coder
+LOGNAME=coder
+SHELL=/usr/bin/bash
+TERM=xterm-256color
+LANG=C.UTF-8
 ```
 
-`CTX_PATH` names candidate tool source tiers. The runtime-visible tool
-directory can be a filtered in-memory FUSE projection of those tiers for this
-agent. A tool being present in `/ctx/tool` means it is installed system-wide;
-it does not by itself grant any agent execution authority.
+The runtime starts from an empty environment and sets only the allowlisted
+variables above. User session variables, desktop state, provider secrets, and
+human MCP secrets must not be inherited by default. `CTX_PATH` is intentionally
+absent from the process environment unless explicitly granted; `tsh` then uses
+`CTX_HOME/.tshrc` or its default tool path.
+
+The sandbox should also mask host shell startup files that commonly repopulate
+environment variables, such as `/etc/profile`, `/etc/bash.bashrc`, and
+`/etc/profile.d`.
+
+The runtime-visible tool directory can be a filtered in-memory FUSE projection
+of candidate tool tiers for this agent. A tool being present in `/ctx/tool`
+means it is installed system-wide; it does not by itself grant any agent
+execution authority.
 
 ## Mount File
 
