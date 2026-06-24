@@ -364,6 +364,8 @@ The agent terminal path is:
 ```text
 ctxterm starts tsh
 tsh resolves tool names through CTX_PATH
+humans observe through ctx agent watch
+humans join through ctx agent attach
 ```
 
 Agents should be granted the `tsh` terminal capability as their primary shell

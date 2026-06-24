@@ -328,7 +328,10 @@ fn parse_send(
 }
 
 fn parse_agent_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
-    let command = required_arg(&mut values, "agent requires new, start, stop, status, or ps")?;
+    let command = required_arg(
+        &mut values,
+        "agent requires new, start, stop, status, ps, watch, or attach",
+    )?;
     match command.as_str() {
         "new" => Ok(Command::Agent(AgentArgs::New(parse_agent_new(values)?))),
         "start" => {
@@ -350,8 +353,36 @@ fn parse_agent_command(mut values: impl Iterator<Item = String>) -> Result<Comma
             no_extra_args(values)?;
             Ok(Command::Agent(AgentArgs::Ps))
         }
+        "watch" => {
+            let (name, session) = parse_agent_terminal_args(values, "agent watch")?;
+            Ok(Command::Agent(AgentArgs::Watch { name, session }))
+        }
+        "attach" => {
+            let (name, session) = parse_agent_terminal_args(values, "agent attach")?;
+            Ok(Command::Agent(AgentArgs::Attach { name, session }))
+        }
         _ => Err(CliError::usage(format!("unknown agent command: {command}"))),
     }
+}
+
+fn parse_agent_terminal_args(
+    mut values: impl Iterator<Item = String>,
+    command: &str,
+) -> Result<(String, String), CliError> {
+    let name = required_arg(&mut values, &format!("{command} requires an agent name"))?;
+    let mut session = "default".to_owned();
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" => {
+                session = required_arg(
+                    &mut values,
+                    &format!("{command} --session requires a session name"),
+                )?;
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok((name, session))
 }
 
 fn parse_agent_new(mut values: impl Iterator<Item = String>) -> Result<AgentNewArgs, CliError> {
