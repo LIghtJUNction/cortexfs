@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/cortexfs",
+    "crates/cortexfs-tool-sdk",
 ]
 resolver = "3"
 
