@@ -163,10 +163,27 @@ fn parses_agent_lifecycle_commands() {
                 && args.mounts.len() == 1
     ));
 
-    let start = cmd!("agent", "start", "reviewer");
+    let start = cmd!(
+        "agent",
+        "start",
+        "reviewer",
+        "--session",
+        "test",
+        "--mount",
+        "/repo",
+        "/workspace",
+        "rw",
+        "--cwd",
+        "/workspace",
+    );
     assert!(matches!(
         start,
-        Ok(Command::Agent(AgentArgs::Start { ref name })) if name == "reviewer"
+        Ok(Command::Agent(AgentArgs::Start(ref args)))
+            if args.name == "reviewer"
+                && args.session == "test"
+                && args.cwd == "/workspace"
+                && args.default_workspace
+                && args.mounts.len() == 1
     ));
 
     let stop = cmd!("agent", "stop", "reviewer");
@@ -301,6 +318,71 @@ fn agent_terminal_socket_uses_session_terminal_main_socket() {
             .join("terminal")
             .join("main.sock"))
     );
+}
+
+#[test]
+fn agent_start_builds_sandboxed_terminal_command() {
+    let root = PathBuf::from("/ctx");
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: vec![AgentMount {
+            source: "/repo".to_owned(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }],
+    };
+    let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
+    let bwrap = agent_bwrap_args(&root, &args, &args.mounts, &socket);
+    assert!(contains_arg_triplet(&bwrap, "--bind", "/ctx", "/ctx"));
+    assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
+    assert!(contains_arg_pair(&bwrap, "--chdir", "/workspace"));
+    assert!(contains_arg_pair(&bwrap, "--listen", socket.to_str().unwrap_or_default()));
+    assert_eq!(bwrap.last().map(String::as_str), Some("/ctx/bin/tsh"));
+}
+
+#[test]
+fn agent_start_systemd_command_unsets_ctx_path_and_sets_ctx_home() {
+    let root = PathBuf::from("/ctx");
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+    let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
+    let command = agent_start_systemd_command(
+        &root,
+        &args,
+        &args.mounts,
+        &socket,
+        "cortexfs-agent-coder-test-terminal",
+    );
+    assert!(matches!(
+        command,
+        Ok(ref command)
+            if command.program == "systemd-run"
+                && command.args.contains(&"--user".to_owned())
+                && command.args.contains(&"-u".to_owned())
+                && command.args.contains(&"CTX_PATH".to_owned())
+                && command.args.contains(&"CTX_HOME=/ctx/home/1000".to_owned())
+    ));
+}
+
+fn contains_arg_pair(args: &[String], first: &str, second: &str) -> bool {
+    args.windows(2)
+        .any(|window| window.first().map(String::as_str) == Some(first)
+            && window.get(1).map(String::as_str) == Some(second))
+}
+
+fn contains_arg_triplet(args: &[String], first: &str, second: &str, third: &str) -> bool {
+    args.windows(3)
+        .any(|window| window.first().map(String::as_str) == Some(first)
+            && window.get(1).map(String::as_str) == Some(second)
+            && window.get(2).map(String::as_str) == Some(third))
 }
 
 fn create_agent_fixture(root: &Path, name: &str, parent: &str, status: &str, pid: &str) {

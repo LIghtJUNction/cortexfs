@@ -115,7 +115,9 @@ Agents should get one terminal capability: `tsh`. A runtime launches it inside
 ```
 
 `ctxterm` starts `tsh` by default and owns the PTY for the whole agent terminal
-lifecycle. `tsh` is not a host shell. It resolves the first word through
+lifecycle. `ctx agent start` launches that terminal inside a sandbox; by
+default the caller's current directory is mounted at `/workspace` and the agent
+starts there. `tsh` is not a host shell. It resolves the first word through
 `CTX_PATH` and executes only the matching CortexFS tool object.
 
 When a terminal needs to be observable, `ctxterm` listens on the session
