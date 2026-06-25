@@ -246,6 +246,7 @@ fn reference_tree_bootstrap_replaces_tshrc_symlink_without_chmodding_target() {
     let root = clean_test_dir("reference-tree-tshrc-symlink");
     let victim = clean_test_dir("reference-tree-tshrc-victim");
     let victim_target = victim.join("target");
+    assert!(fs::create_dir_all(&victim).is_ok());
     assert!(fs::write(&victim_target, "keep-private\n").is_ok());
     assert!(fs::set_permissions(&victim_target, fs::Permissions::from_mode(0o600)).is_ok());
 
