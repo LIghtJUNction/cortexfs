@@ -88,7 +88,8 @@ Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 `ctx agent repl` owns line editing, interrupt handling, socket requests, and
 assistant response rendering. Interactive REPL responses are buffered before
 printing so model output does not corrupt the user's current input buffer.
-`Ctrl+C` exits the REPL.
+`Ctrl+C` exits an idle REPL. While a run is active it asks CortexFS to cancel
+that run and returns to the prompt.
 
 `ctx agent send` is the non-interactive path and may stream assistant deltas as
 they arrive.
