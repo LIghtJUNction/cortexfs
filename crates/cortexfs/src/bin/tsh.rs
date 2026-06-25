@@ -1175,7 +1175,9 @@ fn report_context_evictions(evicted: Vec<LoadedTool>) -> Result<(), TshError> {
 }
 
 fn tool_description(hit: &cortexfs::ToolHit) -> String {
-    read_control_text(hit, "description").unwrap_or_default()
+    read_control_text(hit, "description")
+        .map(|description| terminal_safe_text(&description))
+        .unwrap_or_default()
 }
 
 fn tool_schema(hit: &cortexfs::ToolHit) -> Option<String> {
@@ -1189,20 +1191,27 @@ fn read_control_text(hit: &cortexfs::ToolHit, file: &str) -> Option<String> {
         .filter(|content| !content.is_empty())
 }
 
+fn terminal_safe_text(text: &str) -> String {
+    text.chars().flat_map(char::escape_default).collect()
+}
+
 fn append_schema_help(text: &mut String, schema: &str) {
     let Ok(value) = serde_json::from_str::<Value>(schema) else {
         return;
     };
     if let Some(title) = value.get("title").and_then(Value::as_str) {
+        let title = terminal_safe_text(title);
         let _ignored = writeln!(text, "  schema: {title}");
     }
     if let Some(description) = value.get("description").and_then(Value::as_str) {
+        let description = terminal_safe_text(description);
         let _ignored = writeln!(text, "  schema-description: {description}");
     }
     if let Some(required) = value.get("required").and_then(Value::as_array) {
         let fields = required
             .iter()
             .filter_map(Value::as_str)
+            .map(terminal_safe_text)
             .collect::<Vec<_>>()
             .join(" ");
         if !fields.is_empty() {
@@ -1364,8 +1373,9 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, ToolContext, TshCommand, TshConfig, is_interactive_tool, parse_args,
-        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, run_tool, validate_tshrc_ctx_path,
+        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, is_interactive_tool,
+        parse_args, parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, run_tool,
+        terminal_safe_text, validate_tshrc_ctx_path,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -1486,6 +1496,33 @@ window_percent=25
         assert!(context.insert(test_loaded_tool("b", false)).is_empty());
         assert!(context.tools.contains_key("a"));
         assert!(context.tools.contains_key("b"));
+    }
+
+    #[test]
+    fn terminal_safe_text_escapes_control_sequences() {
+        assert_eq!(
+            terminal_safe_text("desc-prefix-\u{1b}[31mRED\u{1b}[0m\tend"),
+            "desc-prefix-\\u{1b}[31mRED\\u{1b}[0m\\tend"
+        );
+    }
+
+    #[test]
+    fn schema_help_escapes_decoded_control_sequences() {
+        let mut text = String::new();
+        append_schema_help(
+            &mut text,
+            r#"{
+                "title":"schema-title-\u001b[35mMAGENTA\u001b[0m",
+                "description":"schema-description-\u001b]52;c;AAAA\u0007",
+                "required":["safe","bad\u001b[0m"]
+            }"#,
+        );
+
+        assert!(!text.contains('\u{1b}'));
+        assert!(!text.contains('\u{7}'));
+        assert!(text.contains(r"schema-title-\u{1b}[35mMAGENTA\u{1b}[0m"));
+        assert!(text.contains(r"schema-description-\u{1b}]52;c;AAAA\u{7}"));
+        assert!(text.contains(r"required: safe bad\u{1b}[0m"));
     }
 
     #[test]
