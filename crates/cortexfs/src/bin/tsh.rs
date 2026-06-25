@@ -1120,7 +1120,9 @@ fn authorize_tsh_tool_execution(
     };
     let agent_name = env::var("CTX_AGENT").map_err(|error| match error {
         env::VarError::NotPresent => {
-            TshError::unavailable("cannot authorize tool execution: CTX_AGENT is not set")
+            TshError::unavailable(
+                "cannot authorize tool execution: CTX_AGENT is not set; use `ctx agent attach AGENT` to run tools in an agent terminal",
+            )
         }
         env::VarError::NotUnicode(_value) => TshError::usage("CTX_AGENT must be UTF-8"),
     })?;
@@ -1602,7 +1604,12 @@ window_percent=25
         assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
 
         let result = run_tool(&root, "noop", Vec::new());
-        assert!(matches!(result, Err(error) if error.message.contains("CTX_AGENT")));
+        assert!(matches!(
+            result,
+            Err(error)
+                if error.message.contains("CTX_AGENT")
+                    && error.message.contains("ctx agent attach AGENT")
+        ));
         let _ignored = fs::remove_dir_all(root);
     }
 
@@ -1621,7 +1628,12 @@ window_percent=25
         let mut context = ToolContext::new(4);
         let result = run_repl_tool(&root, &mut context, "noop", Vec::new());
 
-        assert!(matches!(result, Err(error) if error.message.contains("CTX_AGENT")));
+        assert!(matches!(
+            result,
+            Err(error)
+                if error.message.contains("CTX_AGENT")
+                    && error.message.contains("ctx agent attach AGENT")
+        ));
         let _ignored = fs::remove_dir_all(root);
     }
 

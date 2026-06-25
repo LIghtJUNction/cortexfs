@@ -202,9 +202,13 @@ Human usage:
 ```bash
 tsh tools
 tsh which fs.read
-tsh fs.read README.md
-tsh bash
+tsh help fs.read
+tsh load fs.read
 ```
+
+Standalone `tsh` can inspect visible tools and metadata. Tool execution runs
+inside an agent terminal so CortexFS can apply the agent's policy, mounts, uid,
+gid, and `CTX_PATH` together.
 
 `ctx tool` is only a direct CLI entrypoint for allowlisted safe CortexFS core
 tools such as `tsh.config`. Ordinary visible tools and authority-bearing core

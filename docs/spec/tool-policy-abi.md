@@ -136,6 +136,11 @@ structured JSON input and JSONL tool frames. `load` and `pin` affect the native
 context/cache; they must not force terminal CLI commands to emit structured
 frames.
 
+Executing a tool through `tsh` requires an agent terminal context so CortexFS
+can evaluate the agent identity, mounts, policy, and `CTX_PATH` together. A
+standalone human `tsh` process may discover tools and inspect metadata, but it
+must not fabricate an agent identity to execute tools.
+
 `ctx tool NAME [ARG...]` may directly run only allowlisted safe CortexFS core
 tool CLIs that are implemented inside `ctx`, such as `tsh.config`. It still
 requires `NAME` to be visible through `CTX_PATH`, but it must refuse ordinary
