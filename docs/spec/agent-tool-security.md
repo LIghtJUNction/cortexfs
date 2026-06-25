@@ -192,7 +192,7 @@ Runtime environment:
 ```sh
 CTX_ROOT=/ctx
 CTX_HOME=/ctx/home/1000
-HOME=/workspace
+HOME=/home/agent
 PATH=/usr/bin:/bin
 USER=coder
 LOGNAME=coder

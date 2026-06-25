@@ -15,6 +15,9 @@
 
 # Local test/runtime scratch data
 /.cortexfs/
+/.bash_history
+/.cache/
+/.config/
 /.env
 /.env.*
 !/.env.example
