@@ -230,7 +230,7 @@ fn run_agent_executable_streaming(
         .stdout
         .take()
         .ok_or(SocketRuntimeError::CannotRunAgent)?;
-    let (stdout_sender, stdout_receiver) = mpsc::channel();
+    let (stdout_sender, stdout_receiver) = mpsc::sync_channel(MAX_AGENT_STDOUT_QUEUE_FRAMES);
     let reader = thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             let line = line.map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
