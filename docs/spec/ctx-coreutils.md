@@ -37,9 +37,9 @@ ctx which agent coder
 ctx which tool fs.read
 
 ctx path shared project-a
-ctx history coder
-ctx latest coder
-ctx resume coder default
+ctx agent history coder
+ctx agent output coder
+ctx agent resume coder --session default
 
 ctx agent new reviewer --model openai/gpt-4o --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
@@ -260,15 +260,19 @@ eval "$(ctx cd project-a --shell)"
 
 ## Sessions
 
-`ctx history`, `ctx latest`, and `ctx resume` read session files and connect to
+`ctx agent history`, `ctx agent output`, and `ctx agent resume` read session files and connect to
 the relevant socket. They do not keep a private chat database.
+
+When `--session` is omitted, they use `session/index/current` first and fall
+back to `default`. `ctx latest` is intentionally not a command; the current
+session behavior belongs to `--session` omission.
 
 Examples:
 
 ```text
-ctx history coder
-ctx latest coder
-ctx resume coder default
+ctx agent history coder
+ctx agent output coder
+ctx agent resume coder --session default
 ```
 
 These commands read:

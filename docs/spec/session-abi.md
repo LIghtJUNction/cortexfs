@@ -61,10 +61,13 @@ Context runtime state stays under the session directory. Do not add
 Users can inspect history with ordinary file operations:
 
 ```bash
-ctx history coder
-ctx latest coder
+ctx agent history coder
+ctx agent output coder
 less /ctx/home/$(id -u)/agent/coder/session/default/messages.jsonl
 ```
+
+If `--session` is omitted, client commands resolve `session/index/current`
+first and fall back to `default`. There is no separate `ctx latest` command.
 
 ## Session Index
 
