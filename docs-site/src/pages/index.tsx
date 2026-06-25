@@ -17,6 +17,10 @@ type Copy = {
   primary: string;
   secondary: string;
   developer: string;
+  trusted: string;
+  commandOne: string;
+  commandTwo: string;
+  commandThree: string;
   inspectTitle: string;
   inspectText: string;
   virtualFileTitle: string;
@@ -55,6 +59,10 @@ const zh: Copy = {
   primary: '从安装开始',
   secondary: '日常使用',
   developer: '开发指南',
+  trusted: '稳定 ABI，普通文件，可审计提交',
+  commandOne: '写临时文件',
+  commandTwo: '原子 rename 成 *.req.json',
+  commandThree: '从 outbox 读取事实',
   inspectTitle: '一眼可见',
   inspectText:
     '模型是文件，agent 是可执行对象和 socket，tool 是能力端点，session 是普通历史目录。隐藏状态变成可 inspect 的事实。',
@@ -121,6 +129,10 @@ const en: Copy = {
   primary: 'Install first',
   secondary: 'Daily usage',
   developer: 'Developer guide',
+  trusted: 'Stable ABI, ordinary files, auditable submissions',
+  commandOne: 'write a temp file',
+  commandTwo: 'atomic rename to *.req.json',
+  commandThree: 'read facts from outbox',
   inspectTitle: 'Visible by default',
   inspectText:
     'Models are files, agents are executables and sockets, tools are capability endpoints, and sessions are ordinary history directories.',
@@ -201,43 +213,79 @@ function FeatureRail({copy}: {copy: Copy}): ReactElement {
   );
 }
 
-function AgentConsole(): ReactElement {
+function AgentConsole({copy}: {copy: Copy}): ReactElement {
   return (
-    <div className="cortexConsole" aria-label="CortexFS working console mockup">
-      <div className="cortexConsoleHeader">
-        <span>/ctx</span>
-        <strong>agent/coder</strong>
-      </div>
-      <div className="cortexConsoleBody">
-        <aside>
-          <span className="isActive">status</span>
-          <span>model</span>
-          <span>agent</span>
-          <span>tool</span>
-          <span>session</span>
-          <span>policy</span>
-        </aside>
-        <div className="cortexEditor">
-          <div className="cortexMeta">
-            <span>request</span>
-            <span>atomic rename</span>
-            <span>audit append</span>
-          </div>
-          <pre>{`$ ls /ctx
-model  agent  tool  session  policy  shared
-
-$ ctx send coder "inspect docs/DESIGN.md"
-write: .tmp/9f2.req.json
-rename: agent/coder/inbox/9f2.req.json
-
-$ tail -f agent/coder/outbox/latest.json
-{
-  "status": "accepted",
-  "native_tool": "tsh",
-  "ctx_path": "tool/tsh:tool/fs.read"
+    <div className="cortexStage" aria-label="CortexFS working product mockup">
+      <div className="cortexCloud cortexCloudOne" />
+      <div className="cortexCloud cortexCloudTwo" />
+      <div className="cortexMountains" />
+      <div className="cortexProductWindow">
+        <div className="cortexWindowRail">
+          <span>ctx</span>
+          <span>fs</span>
+          <span>run</span>
+        </div>
+        <div className="cortexWindowMain">
+          <div className="cortexDocument">
+            <div className="cortexDocumentTop">
+              <span>/ctx/agent/coder</span>
+              <strong>request flow</strong>
+            </div>
+            <ol>
+              <li>{copy.commandOne}</li>
+              <li>{copy.commandTwo}</li>
+              <li>{copy.commandThree}</li>
+            </ol>
+            <pre>{`{
+  "agent": "coder",
+  "tool": "tsh",
+  "status": "accepted"
 }`}</pre>
+          </div>
+          <div className="cortexPrompt">
+            <span>tsh</span>
+            <strong>cat agent/coder/outbox/latest.json</strong>
+          </div>
         </div>
       </div>
+      <div className="cortexStageCaption">
+        <span>{copy.trusted}</span>
+      </div>
+    </div>
+  );
+}
+
+function HeroBrand(): ReactElement {
+  return (
+    <div className="cortexHeroBrand" aria-label="CortexFS">
+      <span className="cortexLogoMark">/</span>
+      <span>CortexFS</span>
+    </div>
+  );
+}
+
+function RootTicker(): ReactElement {
+  const roots = ['model', 'agent', 'tool', 'session', 'policy', 'shared', 'audit'];
+
+  return (
+    <div className="cortexTicker" aria-label="CortexFS root ABI ticker">
+      <div>
+        {[...roots, ...roots].map((root, index) => (
+          <span key={`${root}-${index}`}>{root}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TrustDots(): ReactElement {
+  return (
+    <div className="cortexTrustDots" aria-hidden="true">
+      {['/ctx', 'ABI', 'tsh', 'audit'].map((label) => (
+        <div key={label}>
+          <span>{label}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -252,6 +300,7 @@ export default function Home(): ReactElement {
         <section className="cortexHero">
           <div className="container cortexHeroInner">
             <div className="cortexHeroCopy">
+              <HeroBrand />
               <p className="cortexEyebrow">{copy.eyebrow}</p>
               <h1>{copy.title}</h1>
               <p className="cortexLead">{copy.lead}</p>
@@ -259,13 +308,8 @@ export default function Home(): ReactElement {
                 <Link className="cortexButton cortexButtonPrimary" to="/docs/getting-started">
                   {copy.primary}
                 </Link>
-                <Link className="cortexButton" to="/docs/using-cortexfs">
-                  {copy.secondary}
-                </Link>
-                <Link className="cortexButton" to="/docs/developing-cortexfs">
-                  {copy.developer}
-                </Link>
               </div>
+              <TrustDots />
               <div className="cortexProofRow" aria-label="CortexFS root ABI">
                 <span>model</span>
                 <span>agent</span>
@@ -275,9 +319,10 @@ export default function Home(): ReactElement {
               </div>
             </div>
             <div className="cortexHeroVisual">
-              <AgentConsole />
+              <AgentConsole copy={copy} />
             </div>
           </div>
+          <RootTicker />
         </section>
 
         <section className="cortexBand cortexArchitecture">
