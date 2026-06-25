@@ -159,8 +159,7 @@ fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseV1Error> {
         .map_err(|_error| FuseV1Error::Io)?;
     drop(stdin);
     let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
+        terminate_child(&mut child);
         return Err(FuseV1Error::Io);
     };
     let mut limited = stdout.take(MAX_PROVIDER_MODEL_RESPONSE_BYTES + 1);
@@ -168,9 +167,9 @@ fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseV1Error> {
     limited
         .read_to_end(&mut output)
         .map_err(|_error| FuseV1Error::Io)?;
-    if output.len() as u64 > MAX_PROVIDER_MODEL_RESPONSE_BYTES {
-        let _ = child.kill();
-        let _ = child.wait();
+    let output_len = u64::try_from(output.len()).map_err(|_error| FuseV1Error::TooLarge)?;
+    if output_len > MAX_PROVIDER_MODEL_RESPONSE_BYTES {
+        terminate_child(&mut child);
         return Err(FuseV1Error::TooLarge);
     }
     let status = child.wait().map_err(|_error| FuseV1Error::Io)?;
@@ -178,6 +177,15 @@ fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseV1Error> {
         Ok(output)
     } else {
         Err(FuseV1Error::Io)
+    }
+}
+
+fn terminate_child(child: &mut Child) {
+    match child.kill() {
+        Ok(()) | Err(_) => {}
+    }
+    match child.wait() {
+        Ok(_) | Err(_) => {}
     }
 }
 
