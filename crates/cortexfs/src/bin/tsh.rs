@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::{env, fs};
 
-use cortexfs::{CTX_ROOT, ToolPath};
+use cortexfs::{
+    AgentRuntimeViewError, CTX_ROOT, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
+    ToolPath, authorize_tool_execution, derive_agent_runtime_view,
+};
 use cortexfs_tool_sdk::DynamicToolCache;
 use nix::libc;
 use nix::sys::termios::{self, ControlFlags, InputFlags, LocalFlags, OutputFlags, SetArg};
@@ -1063,10 +1066,8 @@ fn parse_repl_line(line: &str) -> Result<Vec<String>, TshError> {
 }
 
 fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
-    let tool_path = ctx_tool_path(root)?;
-    let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
-        return command_not_found(name);
-    };
+    let grant = authorize_tsh_tool_execution(root, name)?;
+    let hit = grant.hit();
     if args.len() == 1
         && matches!(
             args.first().and_then(|arg| arg.to_str()),
@@ -1087,6 +1088,52 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
+}
+
+fn authorize_tsh_tool_execution(
+    root: &Path,
+    name: &str,
+) -> Result<cortexfs::ToolExecutionGrant, TshError> {
+    let tool_path = ctx_tool_path(root)?;
+    let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
+        return command_not_found(name);
+    };
+    let agent_name = env::var("CTX_AGENT").map_err(|error| match error {
+        env::VarError::NotPresent => {
+            TshError::unavailable("cannot authorize tool execution: CTX_AGENT is not set")
+        }
+        env::VarError::NotUnicode(_value) => TshError::usage("CTX_AGENT must be UTF-8"),
+    })?;
+    let view = derive_agent_runtime_view(root, &agent_name)
+        .map_err(|error| agent_view_error_to_tsh(&error))?;
+    let policy_text = fs::read_to_string(hit.control_dir().join("policy")).map_err(|error| {
+        TshError::unavailable(format!(
+            "cannot read {}: {error}",
+            hit.control_dir().join("policy").display()
+        ))
+    })?;
+    let tool_policy = PolicyV0::parse(&policy_text)
+        .map_err(|_error| TshError::unavailable(format!("invalid policy for tool:{name}")))?;
+    authorize_tool_execution(
+        &tool_path,
+        name,
+        ToolExecutionAuthority::new(
+            view.identity(),
+            view.mount_table(),
+            view.policy_subject(),
+            view.policy(),
+            &tool_policy,
+        ),
+    )
+    .map_err(|denial| tool_execution_denial_to_tsh(name, denial))
+}
+
+fn agent_view_error_to_tsh(error: &AgentRuntimeViewError) -> TshError {
+    TshError::unavailable(format!("cannot derive agent authority: {}", error.errno()))
+}
+
+fn tool_execution_denial_to_tsh(name: &str, denial: ToolExecutionDenial) -> TshError {
+    TshError::unavailable(format!("cannot execute tool:{name}: {}", denial.errno()))
 }
 
 fn resolve_tool_hit(root: &Path, name: &str) -> Result<cortexfs::ToolHit, TshError> {
@@ -1387,7 +1434,7 @@ window_percent=25
     }
 
     #[test]
-    fn tsh_runs_tool_with_empty_argv_in_cli_mode() {
+    fn tsh_refuses_tool_execution_without_agent_authority() {
         let root =
             std::env::temp_dir().join(format!("cortexfs-tsh-empty-argv-{}", std::process::id()));
         let tool_dir = root.join("tool");
@@ -1397,7 +1444,7 @@ window_percent=25
         assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
 
         let result = run_tool(&root, "noop", Vec::new());
-        assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
+        assert!(matches!(result, Err(error) if error.message.contains("CTX_AGENT")));
         let _ignored = fs::remove_dir_all(root);
     }
 
