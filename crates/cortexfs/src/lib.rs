@@ -368,7 +368,7 @@ fn write_private_text_file(path: &Path, content: &str) -> Result<(), DurableSess
         .create(true)
         .truncate(true)
         .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     file.write_all(content.as_bytes())

@@ -198,8 +198,18 @@ fn run_agent_executable_streaming(
     let mut command = Command::new(runtime.agent_executable);
     command
         .arg(input)
+        // The socket-activated service may hold provider credentials in its
+        // own environment. Start executable agents from a clean environment
+        // and then add only the derived agent view plus runtime-owned CTX_*
+        // values so those service credentials cannot be inherited by agent
+        // code or its descendants.
         .env_clear()
-        .envs(runtime.env.iter().map(|(key, value)| (key.as_str(), value.as_str())))
+        .envs(
+            runtime
+                .env
+                .iter()
+                .map(|env| (env.0.as_str(), env.1.as_str())),
+        )
         .env("CTX_AGENT", runtime.agent_name)
         .env("CTX_ROOT", runtime.ctx_root)
         .env("CTX_SOURCE", runtime.source_root)
@@ -238,37 +248,12 @@ fn run_agent_executable_streaming(
 }
 
 fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
-    let uid = identity.uid();
-    let gid = identity.gid();
-    let groups = identity.groups().to_vec();
-    // Only privileged service processes can safely change supplementary groups.
-    // Non-root test/development invocations retain their existing uid/gid, while
-    // the packaged root socket service drops to the derived agent identity before
-    // exec so prompts and tools cannot run with service privileges.
-    // SAFETY: `pre_exec` runs after fork and before exec in the child. The
-    // closure only calls async-signal-safe libc credential setters and returns
-    // OS errors directly without touching shared runtime state.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::geteuid() != 0 {
-                return Ok(());
-            }
-            let raw_groups = groups
-                .iter()
-                .copied()
-                .map(libc::gid_t::from)
-                .collect::<Vec<_>>();
-            if libc::setgroups(raw_groups.len(), raw_groups.as_ptr()) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::setgid(libc::gid_t::from(gid)) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::setuid(libc::uid_t::from(uid)) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
+    // Non-root test/development invocations retain their existing uid/gid. The
+    // packaged socket service has already dropped supplementary groups to the
+    // derived agent identity; setting child uid/gid here keeps the helper safe
+    // for privileged callers without reintroducing unsafe pre-exec code.
+    if nix::unistd::geteuid().is_root() {
+        command.gid(identity.gid()).uid(identity.uid());
     }
 }
 

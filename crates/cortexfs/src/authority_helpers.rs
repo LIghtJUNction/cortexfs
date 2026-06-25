@@ -5,7 +5,7 @@ fn append_jsonl_event(path: &Path, event: &str) -> std::io::Result<()> {
 fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
     let mut file = fs::OpenOptions::new()
         .append(true)
-        .custom_flags(nix::libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)?;
     file.write_all(line.as_bytes())?;
     file.write_all(b"\n")?;
