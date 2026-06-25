@@ -431,6 +431,44 @@ fn reference_tree_bootstrap_installs_tsh_tools() {
 }
 
 #[test]
+fn root_bootstrap_chowns_reference_home_symlinks_without_following_targets() {
+    if fs::metadata("/proc/self").map_or(1, |metadata| metadata.uid()) != 0 {
+        return;
+    }
+
+    let root = clean_test_dir("reference-tree-home-symlink-ownership");
+    let target_dir = clean_test_dir("reference-tree-home-symlink-target");
+    let target = target_dir.join("root-owned-target");
+    assert!(fs::create_dir_all(&target_dir).is_ok());
+    assert!(fs::write(&target, "keep root owner\n").is_ok());
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    let link = root
+        .join("home")
+        .join("1000")
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("pwn");
+    assert!(symlink(&target, &link).is_ok());
+
+    let target_before = ok!(fs::symlink_metadata(&target));
+    assert_eq!(target_before.uid(), 0);
+    assert_eq!(target_before.gid(), 0);
+
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    let link_metadata = ok!(fs::symlink_metadata(&link));
+    assert!(link_metadata.file_type().is_symlink());
+    assert_eq!(link_metadata.uid(), 1000);
+    assert_eq!(link_metadata.gid(), 1000);
+
+    let target_after = ok!(fs::symlink_metadata(&target));
+    assert_eq!(target_after.uid(), 0);
+    assert_eq!(target_after.gid(), 0);
+}
+
+#[test]
 fn root_bootstrap_assigns_reference_home_to_agent_identity() {
     if fs::metadata("/proc/self").map_or(1, |metadata| metadata.uid()) != 0 {
         return;
