@@ -369,6 +369,17 @@ fn status_tolerates_missing_agent_directory() {
     assert_eq!(processes, Ok(Vec::new()));
 }
 
+fn current_uid_for_test() -> String {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|uid| uid.trim().to_owned())
+        .filter(|uid| !uid.is_empty())
+        .unwrap_or_else(|| "1000".to_owned())
+}
+
 #[test]
 fn agent_terminal_socket_uses_session_terminal_main_socket() {
     let root = clean_test_dir("ctx-agent-terminal-socket");
@@ -377,7 +388,7 @@ fn agent_terminal_socket_uses_session_terminal_main_socket() {
         socket,
         Ok(root
             .join("home")
-            .join("1000")
+            .join(current_uid_for_test())
             .join("agent")
             .join("coder")
             .join("session")
@@ -389,7 +400,13 @@ fn agent_terminal_socket_uses_session_terminal_main_socket() {
 
 #[test]
 fn agent_start_builds_sandboxed_terminal_command() {
-    let root = PathBuf::from("/ctx");
+    let root = clean_test_dir("ctx-agent-start-bwrap-view");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let view = derive_agent_runtime_view(&root, "coder");
+    assert!(view.is_ok(), "reference coder view: {view:?}");
+    let Ok(view) = view else {
+        return;
+    };
     let args = AgentStartArgs {
         name: "coder".to_owned(),
         session: "test".to_owned(),
@@ -403,20 +420,21 @@ fn agent_start_builds_sandboxed_terminal_command() {
     };
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
     let home = PathBuf::from("/ctx/home/1000");
-    let bwrap = agent_bwrap_args(&root, &args, &args.mounts, &socket, &home);
-    assert!(contains_arg_triplet(&bwrap, "--bind", "/ctx", "/ctx"));
+    let bwrap = agent_bwrap_args(&root, &args, &view, &socket, &home);
+    assert!(contains_arg_triplet(&bwrap, "--ro-bind", "/ctx", "/ctx"));
     assert!(contains_arg_triplet(
         &bwrap,
         "--bind",
         "/ctx/home/1000/agent/coder",
         "/home/agent"
     ));
-    assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
+    assert!(!contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
+    assert!(bwrap.contains(&"--unshare-net".to_owned()));
     assert!(contains_arg_pair(&bwrap, "--dir", "/home"));
     assert!(contains_ro_bind_stub(&bwrap, "/etc/profile"));
     assert!(contains_ro_bind_stub(&bwrap, "/etc/bash.bashrc"));
     assert!(contains_arg_pair(&bwrap, "--tmpfs", "/etc/profile.d"));
-    assert!(contains_arg_pair(&bwrap, "--chdir", "/workspace"));
+    assert!(contains_arg_pair(&bwrap, "--chdir", "/work"));
     assert!(contains_arg_pair(&bwrap, "--listen", socket.to_str().unwrap_or_default()));
     assert_eq!(bwrap.last().map(String::as_str), Some("/ctx/bin/tsh"));
 }
@@ -450,11 +468,17 @@ fn agent_start_default_workspace_remounts_git_read_only() {
         ]
     );
 
-    let root = PathBuf::from("/ctx");
+    let root = clean_test_dir("ctx-agent-start-git-bwrap-view");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let view = derive_agent_runtime_view(&root, "coder");
+    assert!(view.is_ok(), "reference coder view: {view:?}");
+    let Ok(view) = view else {
+        return;
+    };
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
     let home = PathBuf::from("/ctx/home/1000");
-    let bwrap = agent_bwrap_args(&root, &args, &mounts, &socket, &home);
-    assert!(contains_arg_triplet(
+    let bwrap = agent_bwrap_args(&root, &args, &view, &socket, &home);
+    assert!(!contains_arg_triplet(
         &bwrap,
         "--ro-bind",
         source.join(".git").to_str().unwrap_or_default(),
@@ -480,7 +504,13 @@ fn agent_start_no_default_workspace_does_not_guess_git_mount() {
 
 #[test]
 fn agent_start_systemd_command_uses_sanitized_environment() {
-    let root = PathBuf::from("/ctx");
+    let root = clean_test_dir("ctx-agent-start-systemd-view");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let view = derive_agent_runtime_view(&root, "coder");
+    assert!(view.is_ok(), "reference coder view: {view:?}");
+    let Ok(view) = view else {
+        return;
+    };
     let args = AgentStartArgs {
         name: "coder".to_owned(),
         session: "test".to_owned(),
@@ -492,21 +522,19 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
     let command = agent_start_systemd_command(
         &root,
         &args,
-        &args.mounts,
+        &view,
         &socket,
         "cortexfs-agent-coder-test-terminal",
     );
-    assert!(matches!(
-        command,
-        Ok(ref command)
-            if command.program == "systemd-run"
+    assert!(
+        command.program == "systemd-run"
                 && command.args.contains(&"--user".to_owned())
                 && contains_arg_pair(&command.args, "--property", "Restart=always")
                 && contains_arg_pair(&command.args, "--property", "RestartSec=250ms")
                 && command.args.contains(&"-i".to_owned())
                 && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
-                && command.args.contains(&"CTX_ROOT=/ctx".to_owned())
-                && command.args.contains(&"CTX_HOME=/ctx/home/1000".to_owned())
+                && command.args.contains(&format!("CTX_ROOT={}", root.display()))
+                && command.args.contains(&format!("CTX_HOME={}", root.join("home").join("1000").display()))
                 && command.args.contains(&"HOME=/home/agent".to_owned())
                 && command.args.contains(&"USER=coder".to_owned())
                 && command.args.contains(&"LOGNAME=coder".to_owned())
@@ -514,8 +542,8 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
                 && command.args.contains(&"TERM=xterm-256color".to_owned())
                 && command.args.contains(&"LANG=C.UTF-8".to_owned())
                 && command.args.contains(&"/usr/bin/bwrap".to_owned())
-                && !command.args.contains(&"CTX_PATH".to_owned())
-    ));
+                && command.args.contains(&"CTX_PATH=/ctx/tool:/ctx/home/1000/tool".to_owned())
+    );
 }
 
 #[test]
