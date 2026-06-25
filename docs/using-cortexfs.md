@@ -114,8 +114,12 @@ CTX_PATH=/ctx/tool:/ctx/home/1000/tool
 
 ```bash
 tsh --list
-tsh fs.read '{"path":"README.md"}'
+tsh which fs.read
+tsh help fs.read
 ```
+
+直接执行 tool 时，推荐从 agent terminal 里使用 `tsh`，这样 CortexFS 可以同时应用
+agent policy、挂载、uid/gid 和 `CTX_PATH`。
 
 ## 使用 agent.sh
 
