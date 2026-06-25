@@ -24,6 +24,8 @@ use nix::sys::socket::{getsockopt, sockopt};
 use serde::Deserialize;
 use serde_json::Value;
 
+const MAX_AGENT_STDOUT_QUEUE_FRAMES: usize = 16;
+
 macro_rules! impl_issue_report {
     ($report:ty, $issue:ty) => {
         impl $report {
