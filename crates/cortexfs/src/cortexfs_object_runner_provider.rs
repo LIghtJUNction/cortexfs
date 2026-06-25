@@ -135,7 +135,7 @@ fn call_openai_chat(
     let url = chat_completions_url(base_url);
     let body = json!({
         "model": model,
-        "messages": [{"role": "user", "content": input}],
+        "messages": provider_messages(input),
         "stream": false
     })
     .to_string();
@@ -159,7 +159,7 @@ fn call_openai_chat_streaming(
     let url = chat_completions_url(base_url);
     let body = json!({
         "model": model,
-        "messages": [{"role": "user", "content": input}],
+        "messages": provider_messages(input),
         "stream": true
     })
     .to_string();
@@ -221,6 +221,38 @@ fn call_openai_chat_streaming(
             can_fallback: true,
         })
     }
+}
+
+fn provider_messages(input: &str) -> Value {
+    let agent = env::var("CTX_AGENT")
+        .ok()
+        .filter(|value| cortexfs::is_object_name(value));
+    provider_messages_for_agent(input, agent.as_deref())
+}
+
+fn provider_messages_for_agent(input: &str, agent: Option<&str>) -> Value {
+    agent.map_or_else(
+        || json!([{"role": "user", "content": input}]),
+        |agent| json!([
+            {"role": "system", "content": agent_system_prompt(agent)},
+            {"role": "user", "content": input}
+        ]),
+    )
+}
+
+fn agent_system_prompt(agent: &str) -> String {
+    format!(
+        "\
+You are CortexFS agent `{agent}`.
+Your only native callable tool is `tsh`, the CortexFS tool shell.
+Do not claim direct access to provider, host, or assistant-platform tools.
+If asked what tools you can call, answer that you can call `tsh` only.
+Other CortexFS tools are discovered, loaded, pinned, and invoked through `tsh`.
+Use `tsh tools` to discover tools, `tsh load TOOL` to load a tool description into context, \
+`tsh pin TOOL` to keep it resident, and `tsh TOOL ARG...` to invoke it.
+Interactive shells and multiplexers such as bash, tmux, and zellij are ordinary CortexFS tools \
+that must be invoked through `tsh` when visible."
+    )
 }
 
 fn run_curl_json(url: &str, api_key: &str, body: &str) -> Result<Vec<u8>, String> {

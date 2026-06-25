@@ -59,6 +59,7 @@ still decide what a specific agent may execute.
 ```bash
 agent.sh coder
 agent.sh coder "fix tests"
+agent.sh --chat coder
 agent.sh --session default coder
 agent.sh --resume coder
 agent.sh --history coder
@@ -71,7 +72,11 @@ agent.sh --raw coder "prompt"
 ```
 
 With no prompt, `agent.sh AGENT` reads lines from stdin or an interactive TTY
-and sends each non-empty line to `/ctx/agent/<agent>.sock`.
+from an interactive TTY attaches to the agent terminal through
+`ctx agent attach AGENT`, so the user sees `ctxterm -> tsh`. With a prompt, it
+delegates to `ctx agent send AGENT`.
+
+Use `agent.sh --chat AGENT` for the agent socket chat REPL.
 
 ## Socket Protocol
 
