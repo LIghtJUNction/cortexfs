@@ -392,7 +392,7 @@ fn root_bootstrap_assigns_reference_home_to_agent_identity() {
         return;
     }
 
-    let root = temp_root("reference-tree-home-ownership");
+    let root = clean_test_dir("reference-tree-home-ownership");
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
     for path in [
@@ -401,7 +401,7 @@ fn root_bootstrap_assigns_reference_home_to_agent_identity() {
         root.join("home").join("1000").join("agent").join("coder").join("session"),
         root.join("home").join("1000").join("agent").join("coder").join("session").join("index"),
     ] {
-        let metadata = fs::symlink_metadata(path).expect("reference home metadata");
+        let metadata = ok!(fs::symlink_metadata(path));
         assert_eq!(metadata.uid(), 1000);
         assert_eq!(metadata.gid(), 1000);
     }

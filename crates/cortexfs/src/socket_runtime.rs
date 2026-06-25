@@ -238,38 +238,7 @@ fn run_agent_executable_streaming(
 }
 
 fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
-    let uid = identity.uid();
-    let gid = identity.gid();
-    let groups = identity.groups().to_vec();
-    // Only privileged service processes can safely change supplementary groups.
-    // Non-root test/development invocations retain their existing uid/gid, while
-    // the packaged root socket service drops to the derived agent identity before
-    // exec so prompts and tools cannot run with service privileges.
-    // SAFETY: `pre_exec` runs after fork and before exec in the child. The
-    // closure only calls async-signal-safe libc credential setters and returns
-    // OS errors directly without touching shared runtime state.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::geteuid() != 0 {
-                return Ok(());
-            }
-            let raw_groups = groups
-                .iter()
-                .copied()
-                .map(libc::gid_t::from)
-                .collect::<Vec<_>>();
-            if libc::setgroups(raw_groups.len(), raw_groups.as_ptr()) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::setgid(libc::gid_t::from(gid)) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::setuid(libc::uid_t::from(uid)) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    command.uid(identity.uid()).gid(identity.gid());
 }
 
 fn event_type(line: &str) -> Option<String> {
