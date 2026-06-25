@@ -8,7 +8,7 @@ use std::process::{Command, ExitCode, Stdio};
 use cortexfs::{
     DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata, current_time_unix,
     is_model_name, resolve_api_key_from_env_names, run_core_tool, run_core_tool_cli,
-    run_echo_model, skill_metadata_budget_from_env,
+    run_echo_model, run_proxy_model, skill_metadata_budget_from_env,
 };
 use cortexfs_tool_sdk::ToolInvocation;
 use serde_json::Value;
@@ -50,6 +50,14 @@ fn run_model(name: &str, args: &[OsString]) -> Result<(), String> {
             stdout.lock(),
         )
         .map_err(|error| format!("echo model failed: {error}"));
+    }
+    if name == "debug/proxy" {
+        let stdout = io::stdout();
+        return run_proxy_model(
+            args.iter().map(|value| value.to_string_lossy()),
+            stdout.lock(),
+        )
+        .map_err(|error| format!("proxy model failed: {error}"));
     }
     let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
     run_provider_model(&name, &input)

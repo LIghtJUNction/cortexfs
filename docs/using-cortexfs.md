@@ -39,6 +39,16 @@ ctx ls tool
 echo "summarize this file" | /ctx/model/main
 ```
 
+需要调试 agent prompt，但暂时不想配置任何模型供应商时，可以用 proxy 调试模型：
+
+```bash
+/ctx/model/debug/proxy "请解释这个 agent 当前看到的工具"
+```
+
+默认情况下它会输出一段可复制给任意 AI 对话框的代理请求。若宿主工具提供 CLI，可以设置
+`CORTEXFS_PROXY_COMMAND`，让 `debug/proxy` 把请求 JSON 写到该命令 stdin，并把 stdout
+作为模型回复。这不是新的 provider 配置，只是本地调试桥。
+
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
 供应商密钥不写进 model 文件或 `.d/` 控制目录；provider adapter 会按环境变量、系统
 keychain、未配置的顺序解析。

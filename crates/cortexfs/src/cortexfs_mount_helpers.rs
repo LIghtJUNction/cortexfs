@@ -253,6 +253,8 @@ impl CortexFuse {
         if path == "model/debug"
             || path == "model/debug/echo"
             || path.starts_with("model/debug/echo.d/")
+            || path == "model/debug/proxy"
+            || path.starts_with("model/debug/proxy.d/")
         {
             return true;
         }

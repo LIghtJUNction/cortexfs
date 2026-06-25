@@ -236,8 +236,10 @@ impl FuseV1Projection {
             "model/debug" => vec![
                 FuseV1DirEntry::new(DEBUG_ECHO_NAME.to_owned(), FuseV1FileType::Regular),
                 FuseV1DirEntry::new(format!("{DEBUG_ECHO_NAME}.d"), FuseV1FileType::Directory),
+                FuseV1DirEntry::new(DEBUG_PROXY_NAME.to_owned(), FuseV1FileType::Regular),
+                FuseV1DirEntry::new(format!("{DEBUG_PROXY_NAME}.d"), FuseV1FileType::Directory),
             ],
-            "model/debug/echo.d" => model_control_dir_entries(),
+            "model/debug/echo.d" | "model/debug/proxy.d" => model_control_dir_entries(),
             _ => {
                 if let Some(model) =
                     projected_provider_model_control_dir(
@@ -295,8 +297,14 @@ impl FuseV1Projection {
         if abi_path == "model/debug/echo" {
             return Ok(Some(debug_echo_model_metadata()));
         }
+        if abi_path == "model/debug/proxy" {
+            return Ok(Some(debug_proxy_model_metadata()));
+        }
         if let Some(file) = abi_path.strip_prefix("model/debug/echo.d/") {
-            return Ok(debug_echo_control_content(file).map(str::to_owned));
+            return Ok(debug_model_control_content(DEBUG_ECHO_MODEL, file));
+        }
+        if let Some(file) = abi_path.strip_prefix("model/debug/proxy.d/") {
+            return Ok(debug_model_control_content(DEBUG_PROXY_MODEL, file));
         }
         let Some(model) = projected_provider_model_for_exec(
             &self.provider_config_dir,
@@ -381,14 +389,23 @@ impl FuseV1Projection {
                 .map_err(|_error| FuseV1Error::Io)?,
                 0o777,
             ))),
-            "model/debug" | "model/debug/echo.d" => Ok(Some((FuseV1FileType::Directory, 0, 0o755))),
+            "model/debug" | "model/debug/echo.d" | "model/debug/proxy.d" => {
+                Ok(Some((FuseV1FileType::Directory, 0, 0o755)))
+            }
             "model/debug/echo" => virtual_regular_entry(&debug_echo_model_metadata(), 0o555),
+            "model/debug/proxy" => virtual_regular_entry(&debug_proxy_model_metadata(), 0o555),
             path => {
                 if let Some(file) = path.strip_prefix("model/debug/echo.d/") {
-                    let Some(content) = debug_echo_control_content(file) else {
+                    let Some(content) = debug_model_control_content(DEBUG_ECHO_MODEL, file) else {
                         return Ok(None);
                     };
-                    return virtual_regular_entry(content, 0o644);
+                    return virtual_regular_entry(&content, 0o644);
+                }
+                if let Some(file) = path.strip_prefix("model/debug/proxy.d/") {
+                    let Some(content) = debug_model_control_content(DEBUG_PROXY_MODEL, file) else {
+                        return Ok(None);
+                    };
+                    return virtual_regular_entry(&content, 0o644);
                 }
                 if projected_provider_models_for_provider_path(
                     &self.provider_config_dir,

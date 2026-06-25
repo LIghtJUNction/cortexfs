@@ -39,6 +39,18 @@ Start with the echo model while debugging:
 echo "summarize this file" | /ctx/model/main
 ```
 
+Use the proxy debug model when you want to inspect agent prompts without
+configuring a provider:
+
+```bash
+/ctx/model/debug/proxy "explain what this agent can see"
+```
+
+By default it emits a portable proxy request that can be copied into any AI chat
+surface. If the host tool exposes a CLI, set `CORTEXFS_PROXY_COMMAND`; then
+`debug/proxy` writes the request JSON to that command's stdin and uses stdout as
+the model response. This is a local debug bridge, not provider configuration.
+
 Change the `/ctx/model/main` alias when you want a different default model.
 Do not add provider-specific root entries.
 Provider secrets are not written into model files or `.d/` control
