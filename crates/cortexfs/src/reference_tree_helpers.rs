@@ -189,7 +189,9 @@ fn write_reference_text(path: &Path, content: &str) -> Result<(), ReferenceTreeE
     if let Some(parent) = path.parent() {
         create_reference_dir(parent)?;
     }
-    atomic_replace_text(path, content).map_err(|_error| ReferenceTreeError::CannotCreate)
+    atomic_replace_text(path, content).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+        .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 fn set_reference_executable(path: &Path) -> Result<(), ReferenceTreeError> {
