@@ -1,3 +1,7 @@
+const MAX_PROVIDER_MODEL_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_PROVIDER_MODEL_CACHE_BYTES: u64 = 1024 * 1024;
+const MAX_PROVIDER_MODEL_COUNT: usize = 256;
+
 pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Result<(), FuseV1Error> {
     fs::create_dir_all(cache_dir).map_err(|_error| FuseV1Error::Io)?;
     for config in read_provider_configs(config_dir)? {
@@ -25,7 +29,14 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
 }
 
 fn provider_cached_models(cache_dir: &Path, provider: &str) -> Vec<String> {
-    let Ok(content) = fs::read_to_string(provider_model_cache_path(cache_dir, provider)) else {
+    let path = provider_model_cache_path(cache_dir, provider);
+    let Ok(metadata) = fs::metadata(&path) else {
+        return Vec::new();
+    };
+    if metadata.len() > MAX_PROVIDER_MODEL_CACHE_BYTES {
+        return Vec::new();
+    }
+    let Ok(content) = fs::read_to_string(path) else {
         return Vec::new();
     };
     let Ok(cache) = serde_json::from_str::<ProviderModelCache>(&content) else {
@@ -39,6 +50,9 @@ fn provider_model_names(values: impl IntoIterator<Item = String>) -> Vec<String>
     let mut seen = HashSet::new();
     for model in values {
         append_provider_model_name(&model, &mut models, &mut seen);
+        if models.len() >= MAX_PROVIDER_MODEL_COUNT {
+            break;
+        }
     }
     models
 }
@@ -144,9 +158,24 @@ fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseV1Error> {
         .write_all(config.as_bytes())
         .map_err(|_error| FuseV1Error::Io)?;
     drop(stdin);
-    let output = child.wait_with_output().map_err(|_error| FuseV1Error::Io)?;
-    if output.status.success() {
-        Ok(output.stdout)
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(FuseV1Error::Io);
+    };
+    let mut limited = stdout.take(MAX_PROVIDER_MODEL_RESPONSE_BYTES + 1);
+    let mut output = Vec::new();
+    limited
+        .read_to_end(&mut output)
+        .map_err(|_error| FuseV1Error::Io)?;
+    if output.len() as u64 > MAX_PROVIDER_MODEL_RESPONSE_BYTES {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(FuseV1Error::TooLarge);
+    }
+    let status = child.wait().map_err(|_error| FuseV1Error::Io)?;
+    if status.success() {
+        Ok(output)
     } else {
         Err(FuseV1Error::Io)
     }
