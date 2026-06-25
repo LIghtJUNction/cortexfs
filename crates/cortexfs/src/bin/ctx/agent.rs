@@ -508,10 +508,9 @@ fn agent_repl(
             let prompt = format!("{name} {session} > ");
             let line = match editor.readline(&prompt) {
                 Ok(line) => line,
-                Err(
-                    rustyline::error::ReadlineError::Interrupted
-                    | rustyline::error::ReadlineError::Eof,
-                ) => return Ok(ExitCode::SUCCESS),
+                Err(error) if agent_repl_should_exit_on_readline_error(&error) => {
+                    return Ok(ExitCode::SUCCESS);
+                }
                 Err(error) => {
                     return Err(CliError::unavailable(format!(
                         "cannot read interactive input: {error}"
@@ -569,6 +568,15 @@ fn agent_repl(
 
 fn agent_repl_editor_config() -> rustyline::Config {
     rustyline::Config::builder().enable_signals(true).build()
+}
+
+fn agent_repl_should_exit_on_readline_error(error: &rustyline::error::ReadlineError) -> bool {
+    matches!(
+        error,
+        rustyline::error::ReadlineError::Interrupted
+            | rustyline::error::ReadlineError::Signal(rustyline::error::Signal::Interrupt)
+            | rustyline::error::ReadlineError::Eof
+    )
 }
 
 struct AgentInterruptGuard {
