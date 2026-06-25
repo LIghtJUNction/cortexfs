@@ -33,14 +33,14 @@ fn runner_rejects_unknown_model() {
 }
 
 #[test]
-fn model_alias_resolves_only_ctx_model_objects() {
+fn model_alias_resolves_only_ctx_model_objects() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::temp_dir().join(format!(
         "cortexfs-runner-model-alias-ok-{}",
         std::process::id()
     ));
     let _ignored = fs::remove_dir_all(&root);
-    fs::create_dir_all(root.join("model")).expect("create model dir");
-    symlink("/ctx/model/debug/echo", root.join("model/main")).expect("create model alias");
+    fs::create_dir_all(root.join("model"))?;
+    symlink("/ctx/model/debug/echo", root.join("model/main"))?;
 
     assert_eq!(
         resolve_model_alias(&root, "main"),
@@ -52,17 +52,18 @@ fn model_alias_resolves_only_ctx_model_objects() {
     );
 
     let _ignored = fs::remove_dir_all(root);
+    Ok(())
 }
 
 #[test]
-fn model_alias_rejects_cross_class_symlink_target() {
+fn model_alias_rejects_cross_class_symlink_target() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::temp_dir().join(format!(
         "cortexfs-runner-model-alias-bad-{}",
         std::process::id()
     ));
     let _ignored = fs::remove_dir_all(&root);
-    fs::create_dir_all(root.join("model")).expect("create model dir");
-    symlink("../tool/shell.exec", root.join("model/main")).expect("create model alias");
+    fs::create_dir_all(root.join("model"))?;
+    symlink("../tool/shell.exec", root.join("model/main"))?;
 
     assert_eq!(
         resolve_model_alias(&root, "main"),
@@ -70,6 +71,7 @@ fn model_alias_rejects_cross_class_symlink_target() {
     );
 
     let _ignored = fs::remove_dir_all(root);
+    Ok(())
 }
 
 #[test]
