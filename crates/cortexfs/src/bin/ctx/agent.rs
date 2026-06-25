@@ -755,7 +755,7 @@ fn is_control_or_socket_name(name: &str) -> bool {
 
 fn agent_cwd(root: &Path, name: &str) -> Result<String, CliError> {
     let path = root.join("agent").join(format!("{name}.d")).join("cwd");
-    Ok(read_optional_trimmed(&path)?.unwrap_or_else(|| "/work".to_owned()))
+    Ok(read_optional_trimmed(&path)?.unwrap_or_else(|| "/workspace".to_owned()))
 }
 
 fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<String, CliError> {

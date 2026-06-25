@@ -902,6 +902,29 @@ fn top_level_send_uses_agent_send_request_shape() {
 }
 
 #[test]
+fn top_level_send_defaults_cwd_to_workspace() {
+    let root = clean_test_dir("ctx-top-level-send-default-cwd");
+    assert!(fs::create_dir_all(root.join("agent")).is_ok());
+    let server = spawn_agent_socket_request_capture(&root, "coder");
+
+    let result = run(vec![
+        std::ffi::OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+        std::ffi::OsString::from("send"),
+        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("hello"),
+    ]);
+
+    assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    let Ok(request) = request else {
+        return;
+    };
+    assert!(request.contains("\"cwd\":\"/workspace\""));
+}
+
+#[test]
 fn top_level_resume_uses_agent_resume_request_shape() {
     let root = clean_test_dir("ctx-top-level-resume-agent-shape");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());

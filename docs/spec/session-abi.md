@@ -6,7 +6,7 @@ Socket requests must include `session`. If the client omits it, runtime uses
 Request:
 
 ```jsonl
-{"op":"send","id":"client-msg-id","session":"default","scope":"private","cwd":"/work","input":"hello"}
+{"op":"send","id":"client-msg-id","session":"default","scope":"private","cwd":"/workspace","input":"hello"}
 ```
 
 `cwd` must be a path inside the agent chroot. If omitted, runtime uses
