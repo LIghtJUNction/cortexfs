@@ -39,19 +39,41 @@ ctx ls tool
 echo "summarize this file" | /ctx/model/main
 ```
 
-需要调试 agent prompt，但暂时不想配置任何模型供应商时，可以用 proxy 调试模型：
-
-```bash
-/ctx/model/debug/proxy "请解释这个 agent 当前看到的工具"
-```
-
-默认情况下它会输出一段可复制给任意 AI 对话框的代理请求。若宿主工具提供 CLI，可以设置
-`CORTEXFS_PROXY_COMMAND`，让 `debug/proxy` 把请求 JSON 写到该命令 stdin，并把 stdout
-作为模型回复。这不是新的 provider 配置，只是本地调试桥。
-
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
 供应商密钥不写进 model 文件或 `.d/` 控制目录；provider adapter 会按环境变量、系统
 keychain、未配置的顺序解析。
+
+模型代理不做成 agent。先添加正常 provider，然后在 provider 配置里声明可复用 transport，
+再用 model route 选择 HTTP 或 Unix socket 代理：
+
+```json
+{
+  "base_url": "https://api.openai.com/v1",
+  "api_key_env": "OPENAI_API_KEY",
+  "transports": {
+    "office-http": {
+      "kind": "http",
+      "url": "http://127.0.0.1:8080/v1"
+    },
+    "local-socket": {
+      "kind": "unix",
+      "path": "/run/user/1000/cortexfs/proxy/openai.sock"
+    }
+  },
+  "route": [
+    {
+      "model": "gpt-4o",
+      "transport": "office-http"
+    },
+    {
+      "model": "embedding-*",
+      "transport": "local-socket"
+    }
+  ]
+}
+```
+
+多个模型需要代理时共享同一个 transport；未命中 route 的模型继续直连 `base_url`。
 
 ## 管理 agent
 

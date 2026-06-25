@@ -145,16 +145,9 @@ are local debug metadata and do not imply a provider default.
 
 ```bash
 /ctx/model/debug/echo "hello"
-/ctx/model/debug/proxy "please answer through the active host AI chat"
 echo "hello" | /ctx/model/openai/gpt-4o
 echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-4o
 ```
-
-`debug/proxy` is a software-independent proxy harness. By default it emits a
-portable JSON request that can be pasted into any AI chat surface. If
-`CORTEXFS_PROXY_COMMAND` is set, the object runner sends that JSON request to
-the executable on stdin and treats stdout as the model response. This is a
-debug bridge, not a provider namespace and not a cloud API configuration.
 
 Semantics:
 
@@ -168,6 +161,49 @@ file content is inspectable metadata, not provider code or secrets
 
 Even if the underlying provider has native state,
 `/ctx/model/<provider>/<model>` behaves as a stateless single call.
+
+## Provider Transport Routes
+
+Proxying is provider transport configuration, not an agent and not a second
+model namespace. The provider must already exist, the model id stays under that
+provider, and the runner selects a transport before sending the provider-native
+request.
+
+Example provider config:
+
+```json
+{
+  "base_url": "https://api.openai.com/v1",
+  "api_key_env": "OPENAI_API_KEY",
+  "transports": {
+    "office-http": {
+      "kind": "http",
+      "url": "http://127.0.0.1:8080/v1"
+    },
+    "local-socket": {
+      "kind": "unix",
+      "path": "/run/user/1000/cortexfs/proxy/openai.sock",
+      "url": "http://localhost/v1"
+    }
+  },
+  "route": [
+    {
+      "model": "gpt-4o",
+      "transport": "office-http"
+    },
+    {
+      "model": "embedding-*",
+      "transport": "local-socket"
+    }
+  ]
+}
+```
+
+`route[].model` supports exact model ids and trailing `*` prefixes. If no route
+matches and `default_transport` is absent, the runner uses `base_url` directly.
+This lets many models share one HTTP or Unix-socket proxy without creating
+fake provider names or debug agents. Secrets still resolve through the provider
+environment/keychain path; transport entries only decide where bytes are sent.
 
 ## Model Socket
 

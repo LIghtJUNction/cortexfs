@@ -39,23 +39,45 @@ Start with the echo model while debugging:
 echo "summarize this file" | /ctx/model/main
 ```
 
-Use the proxy debug model when you want to inspect agent prompts without
-configuring a provider:
-
-```bash
-/ctx/model/debug/proxy "explain what this agent can see"
-```
-
-By default it emits a portable proxy request that can be copied into any AI chat
-surface. If the host tool exposes a CLI, set `CORTEXFS_PROXY_COMMAND`; then
-`debug/proxy` writes the request JSON to that command's stdin and uses stdout as
-the model response. This is a local debug bridge, not provider configuration.
-
 Change the `/ctx/model/main` alias when you want a different default model.
 Do not add provider-specific root entries.
 Provider secrets are not written into model files or `.d/` control
 directories; provider adapters resolve API keys in environment, system
 keychain, then unconfigured order.
+
+Model proxying is provider transport configuration, not an agent. Add the
+normal provider first, then declare reusable transports and route models to an
+HTTP or Unix-socket proxy:
+
+```json
+{
+  "base_url": "https://api.openai.com/v1",
+  "api_key_env": "OPENAI_API_KEY",
+  "transports": {
+    "office-http": {
+      "kind": "http",
+      "url": "http://127.0.0.1:8080/v1"
+    },
+    "local-socket": {
+      "kind": "unix",
+      "path": "/run/user/1000/cortexfs/proxy/openai.sock"
+    }
+  },
+  "route": [
+    {
+      "model": "gpt-4o",
+      "transport": "office-http"
+    },
+    {
+      "model": "embedding-*",
+      "transport": "local-socket"
+    }
+  ]
+}
+```
+
+Many models can share one transport. Models that do not match a route continue
+to use the provider `base_url` directly.
 
 ## Manage Agents
 
