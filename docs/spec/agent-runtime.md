@@ -88,8 +88,8 @@ interactive REPL, `Ctrl+C` exits the REPL.
 
 The socket-activated executable agent runtime observes the durable session state
 for the active run. When the matching `done/cancelled` event appears, it stops
-the executable agent process group and does not record later assistant output
-for that run.
+the executable agent process group with `SIGTERM`, escalates to `SIGKILL` after
+a short grace period, and does not record later assistant output for that run.
 
 ## Persistent Terminal Flow
 
