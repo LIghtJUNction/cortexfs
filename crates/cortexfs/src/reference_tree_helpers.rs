@@ -156,24 +156,7 @@ fn ensure_reference_home_ownership(path: &Path) -> Result<(), ReferenceTreeError
     if !nix::unistd::Uid::effective().is_root() {
         return Ok(());
     }
-    chown_reference_home_entry(path)?;
-    chown_reference_home_descendants(path)
-}
-
-fn chown_reference_home_descendants(path: &Path) -> Result<(), ReferenceTreeError> {
-    let entries = fs::read_dir(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    for entry in entries {
-        let entry = entry.map_err(|_error| ReferenceTreeError::CannotCreate)?;
-        let path = entry.path();
-        chown_reference_home_entry(&path)?;
-        let file_type = entry
-            .file_type()
-            .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-        if file_type.is_dir() && !file_type.is_symlink() {
-            chown_reference_home_descendants(&path)?;
-        }
-    }
-    Ok(())
+    chown_reference_home_entry(path)
 }
 
 fn chown_reference_home_entry(path: &Path) -> Result<(), ReferenceTreeError> {
