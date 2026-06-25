@@ -150,8 +150,8 @@ repl:
   load TOOL        load tool metadata into this tsh context
   unload TOOL      remove unpinned tool metadata from this tsh context
   loads            list loaded tool context entries
-  pin TOOL         load TOOL and keep it from context/cache eviction
-  unpin TOOL       allow a pinned tool to be unloaded/evicted again
+  pin TOOL         load TOOL metadata and keep it from context eviction
+  unpin TOOL       allow a pinned tool to be unloaded from context again
   pins             list pinned tool context entries
   bash             enter an interactive shell tool
   fs.read PATH     read a file through the fs.read tool
@@ -758,7 +758,7 @@ fn repl_command(root: &Path, words: &[String]) -> Result<(), TshError> {
 
 fn repl_load(
     root: &Path,
-    cache: &mut DynamicToolCache,
+    cache: &DynamicToolCache,
     context: &mut ToolContext,
     words: &[String],
 ) -> Result<(), TshError> {
@@ -819,7 +819,7 @@ fn repl_loads(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
 
 fn repl_pin(
     root: &Path,
-    cache: &mut DynamicToolCache,
+    cache: &DynamicToolCache,
     context: &mut ToolContext,
     words: &[String],
 ) -> Result<(), TshError> {
@@ -940,8 +940,8 @@ fn print_builtin_help(name: &str) -> Result<(), TshError> {
         "load" => "load TOOL\n  load tool metadata into this tsh context\n",
         "unload" => "unload TOOL\n  remove unpinned tool metadata from this tsh context\n",
         "loads" => "loads\n  list loaded tool context entries\n",
-        "pin" => "pin TOOL\n  load TOOL and keep it from context/cache eviction\n",
-        "unpin" => "unpin TOOL\n  allow a pinned tool to be unloaded/evicted again\n",
+        "pin" => "pin TOOL\n  load TOOL metadata and keep it from context eviction\n",
+        "unpin" => "unpin TOOL\n  allow a pinned tool to be unloaded from context again\n",
         "pins" => "pins\n  list pinned tool context entries\n",
         _ => "unknown builtin\n",
     };
@@ -1164,16 +1164,12 @@ fn resolve_tool_hit(root: &Path, name: &str) -> Result<cortexfs::ToolHit, TshErr
 
 fn load_tool_context(
     root: &Path,
-    cache: &mut DynamicToolCache,
+    cache: &DynamicToolCache,
     name: &str,
     pinned: bool,
 ) -> Result<LoadedTool, TshError> {
     let hit = resolve_tool_hit(root, name)?;
-    let dynamic_resident = if pinned {
-        cache.pin_path(hit.path()).is_ok()
-    } else {
-        cache.get_or_load(hit.path()).is_ok()
-    };
+    let dynamic_resident = cache.contains_path(&hit.path().display().to_string());
     Ok(LoadedTool {
         name: name.to_owned(),
         path: hit.path().to_path_buf(),
@@ -1275,7 +1271,7 @@ fn tshrc_ctx_path(root: &Path, home: &Path) -> Result<Option<String>, TshError> 
     };
     let value = parse_tshrc_ctx_path(&content)
         .map_err(|message| TshError::usage(format!("invalid {}: {message}", path.display())))?;
-    if let Some(value) = &value {
+    if let Some(ref value) = value {
         validate_tshrc_ctx_path(value, root, home)
             .map_err(|message| TshError::usage(format!("invalid {}: {message}", path.display())))?;
     }
@@ -1333,8 +1329,7 @@ fn is_allowed_tshrc_tool_dir(path: &Path, root: &Path, home: &Path) -> bool {
         || path == home.join("tool")
         || home
             .file_name()
-            .map(|uid| path == Path::new("/ctx/home").join(uid).join("tool"))
-            .unwrap_or(false)
+            .is_some_and(|uid| path == Path::new("/ctx/home").join(uid).join("tool"))
 }
 
 fn ctx_home(root: &Path) -> Result<PathBuf, TshError> {
@@ -1394,9 +1389,11 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, ToolContext, TshCommand, TshConfig, is_interactive_tool, parse_args,
-        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, run_tool, validate_tshrc_ctx_path,
+        LoadedTool, ToolContext, TshCommand, TshConfig, is_interactive_tool, load_tool_context,
+        parse_args, parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, run_tool,
+        validate_tshrc_ctx_path,
     };
+    use cortexfs_tool_sdk::DynamicToolCache;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -1516,6 +1513,35 @@ window_percent=25
         assert!(context.insert(test_loaded_tool("b", false)).is_empty());
         assert!(context.tools.contains_key("a"));
         assert!(context.tools.contains_key("b"));
+    }
+
+    #[test]
+    fn load_tool_context_reads_metadata_without_dynamic_load() {
+        let root =
+            std::env::temp_dir().join(format!("cortexfs-tsh-load-context-{}", std::process::id()));
+        let tool_dir = root.join("tool");
+        let control_dir = root.join("tool").join("meta.d");
+        assert!(fs::create_dir_all(&control_dir).is_ok());
+        let tool = tool_dir.join("meta");
+        assert!(fs::write(&tool, "#!/bin/sh\nexit 0\n").is_ok());
+        assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+        assert!(fs::write(control_dir.join("description"), "metadata only\n").is_ok());
+
+        let cache = DynamicToolCache::new(4);
+        let loaded = load_tool_context(&root, &cache, "meta", true);
+        assert!(loaded.is_ok(), "load metadata: {loaded:?}");
+        let Ok(loaded) = loaded else {
+            return;
+        };
+
+        assert_eq!(loaded.name, "meta");
+        assert_eq!(loaded.description, "metadata only");
+        assert!(loaded.pinned);
+        assert!(!loaded.dynamic_resident);
+        assert!(!cache.contains_path(&tool.display().to_string()));
+        assert!(!cache.is_pinned_path(&tool.display().to_string()));
+
+        let _ignored = fs::remove_dir_all(root);
     }
 
     #[test]

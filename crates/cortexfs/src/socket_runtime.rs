@@ -199,7 +199,12 @@ fn run_agent_executable_streaming(
     command
         .arg(input)
         .env_clear()
-        .envs(runtime.env.iter().map(|(key, value)| (key.as_str(), value.as_str())))
+        .envs(
+            runtime
+                .env
+                .iter()
+                .map(|env| (env.0.as_str(), env.1.as_str())),
+        )
         .env("CTX_AGENT", runtime.agent_name)
         .env("CTX_ROOT", runtime.ctx_root)
         .env("CTX_SOURCE", runtime.source_root)
