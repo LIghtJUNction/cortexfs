@@ -38,18 +38,19 @@ host `PATH`.
 
 ## Default Human Entry
 
-`agent.sh` is a compatibility frontend over `ctx agent` commands:
+`agent.sh` is a compatibility frontend over the Rust-owned `ctx agent-sh`
+entrypoint:
 
 ```text
-agent.sh AGENT           -> ctx agent repl AGENT
-agent.sh AGENT INPUT...  -> ctx agent send AGENT INPUT...
-agent.sh --watch AGENT   -> ctx agent watch AGENT
-agent.sh --attach AGENT  -> ctx agent attach AGENT, starting the terminal if needed
+agent.sh AGENT           -> ctx agent-sh AGENT           -> ctx agent repl AGENT
+agent.sh AGENT INPUT...  -> ctx agent-sh AGENT INPUT...  -> ctx agent send AGENT INPUT...
+agent.sh --watch AGENT   -> ctx agent-sh --watch AGENT   -> ctx agent watch AGENT
+agent.sh --attach AGENT  -> ctx agent-sh --attach AGENT  -> ctx agent attach AGENT, starting the terminal if needed
 ```
 
-`agent.sh` must remain a small command router. It must not implement socket
+`agent.sh` must remain a tiny executable resolver. Argument routing, socket
 protocols, terminal emulation, model streaming, policy checks, tool discovery,
-or provider behavior. Those belong in CortexFS, primarily under `ctx`.
+and provider behavior belong in CortexFS, primarily under `ctx`.
 
 ## Socket Chat Flow
 
@@ -281,7 +282,7 @@ command prints explicit placeholder text.
 The runtime design is healthy when all of these are true:
 
 ```text
-agent.sh contains no protocol implementation beyond ctx command routing
+agent.sh contains no protocol implementation beyond resolving ctx and execing ctx agent-sh
 ctx agent repl is the default human chat UI
 ctx agent watch is the read-only human path into ctxterm -> tsh
 ctx agent attach is the writable human path into ctxterm -> tsh

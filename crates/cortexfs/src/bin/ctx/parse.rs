@@ -58,6 +58,9 @@ enum Command {
         input: String,
     },
     Agent(AgentArgs),
+    AgentSh {
+        args: Vec<String>,
+    },
     Ping {
         path: String,
     },
@@ -136,6 +139,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             input,
         } => send(&cli.root, &agent, &session, &input),
         Command::Agent(args) => agent_command(&cli.root, &args),
+        Command::AgentSh { args } => agent_sh_command(&cli.root, args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
         Command::Doctor => success(doctor(&cli.root)),
@@ -260,6 +264,9 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             })
         }
         "agent" => parse_agent_command(values.collect()),
+        "agent-sh" => Ok(Command::AgentSh {
+            args: values.collect(),
+        }),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
             no_extra_args(values)?;
