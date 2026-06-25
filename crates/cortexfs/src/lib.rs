@@ -6,10 +6,8 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::ffi::CString;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{
     DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt, symlink,
 };
@@ -319,11 +317,29 @@ fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
         }
         return set_private_dir_permissions(path);
     }
-    fs::DirBuilder::new()
-        .mode(0o700)
-        .create(path)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-    set_private_dir_permissions(path)
+    let mut missing = Vec::new();
+    let mut cursor = Some(path);
+    while let Some(current) = cursor {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(DurableSessionLayoutError::CannotCreate);
+            }
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+                cursor = current.parent();
+            }
+            Err(_) => return Err(DurableSessionLayoutError::CannotCreate),
+        }
+    }
+    for dir in missing.iter().rev() {
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(dir)
+            .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+        set_private_dir_permissions(dir)?;
+    }
+    Ok(())
 }
 
 fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
@@ -370,7 +386,7 @@ fn write_private_text_file(path: &Path, content: &str) -> Result<(), DurableSess
         .create(true)
         .truncate(true)
         .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     file.write_all(content.as_bytes())

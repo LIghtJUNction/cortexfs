@@ -423,7 +423,7 @@ fn write_text_file_if_absent(path: &Path, content: &str) -> std::io::Result<()> 
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(path)?;
     file.write_all(content.as_bytes())?;
     file.flush()

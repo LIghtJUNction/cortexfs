@@ -153,7 +153,7 @@ fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError> {
 }
 
 fn ensure_reference_home_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
-    if unsafe { libc::geteuid() } != 0 {
+    if !nix::unistd::Uid::effective().is_root() {
         return Ok(());
     }
     chown_reference_home_entry(path)?;
@@ -177,20 +177,12 @@ fn chown_reference_home_descendants(path: &Path) -> Result<(), ReferenceTreeErro
 }
 
 fn chown_reference_home_entry(path: &Path) -> Result<(), ReferenceTreeError> {
-    let path = CString::new(path.as_os_str().as_bytes())
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    let result = unsafe {
-        libc::lchown(
-            path.as_ptr(),
-            REFERENCE_HOME_UID,
-            REFERENCE_HOME_GID,
-        )
-    };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(ReferenceTreeError::CannotCreate)
-    }
+    nix::unistd::chown(
+        path,
+        Some(nix::unistd::Uid::from_raw(REFERENCE_HOME_UID)),
+        Some(nix::unistd::Gid::from_raw(REFERENCE_HOME_GID)),
+    )
+    .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 fn write_reference_text(path: &Path, content: &str) -> Result<(), ReferenceTreeError> {
