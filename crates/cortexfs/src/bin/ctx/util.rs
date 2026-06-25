@@ -135,10 +135,14 @@ fn tool_path_error(error: cortexfs::ToolPathError) -> CliError {
 
 fn is_mount_point(root: &Path) -> io::Result<bool> {
     let mountinfo = fs::read_to_string("/proc/self/mountinfo")?;
-    let root = root.display().to_string();
+    let root = absolute_existing_path(root)?.display().to_string();
     Ok(mountinfo
         .lines()
         .any(|line| mount_point(line).is_some_and(|point| point == root)))
+}
+
+fn absolute_existing_path(path: &Path) -> io::Result<PathBuf> {
+    fs::canonicalize(path)
 }
 
 fn mount_point(line: &str) -> Option<String> {
