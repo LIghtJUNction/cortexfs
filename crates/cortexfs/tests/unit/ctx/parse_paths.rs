@@ -693,6 +693,7 @@ fn abi_path_resolution_rejects_escape() {
     assert!(resolve_abi_path(root, "agent/coder.d/cwd").is_ok());
     assert!(resolve_abi_path(root, "../etc/passwd").is_err());
     assert!(resolve_abi_path(root, "/etc/passwd").is_err());
+    assert!(resolve_abi_path(root, "/ctx/../etc/passwd").is_err());
     assert_eq!(
         resolve_abi_path(root, "/ctx/agent/coder.d/cwd").map(|path| path.display().to_string()),
         Ok("/ctx/agent/coder.d/cwd".to_owned())
@@ -714,6 +715,9 @@ fn ls_lists_abi_paths_and_keeps_object_filtering() {
     let absolute_home = absolute_home.display().to_string();
     let home_absolute = list_names(&root, &LsTarget::Path(absolute_home));
     assert_eq!(home_absolute, Ok(vec!["1000".to_owned()]));
+
+    let absolute_escape = root.join("../outside").display().to_string();
+    assert!(list_names(&root, &LsTarget::Path(absolute_escape)).is_err());
 
     let tool = list_names(&root, &LsTarget::Path("tool".to_owned()));
     assert!(matches!(
