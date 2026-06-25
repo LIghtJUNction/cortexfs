@@ -282,7 +282,8 @@ fn agent_repl(
     }
 
     if io::stdin().is_terminal() {
-        let mut editor = rustyline::DefaultEditor::new().map_err(|error| {
+        let mut editor =
+            rustyline::DefaultEditor::with_config(agent_repl_editor_config()).map_err(|error| {
             CliError::unavailable(format!("cannot initialize line editor: {error}"))
         })?;
         loop {
@@ -312,7 +313,13 @@ fn agent_repl(
                 }
                 continue;
             }
-            let _code = agent_send_buffered(root, name, Some(&session), &line, raw)?;
+            if !raw {
+                print_terminal_text("\n")?;
+            }
+            let code = agent_send_buffered(root, name, Some(&session), &line, raw)?;
+            if code != ExitCode::SUCCESS {
+                return Ok(code);
+            }
         }
     }
 
@@ -332,6 +339,10 @@ fn agent_repl(
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn agent_repl_editor_config() -> rustyline::Config {
+    rustyline::Config::builder().enable_signals(true).build()
 }
 
 fn agent_repl_command(
