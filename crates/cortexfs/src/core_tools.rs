@@ -1,13 +1,12 @@
+use cortexfs_tool_sdk::{
+    Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
+};
+use serde_json::{Map, Value};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-
-use cortexfs_tool_sdk::{
-    Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
-};
-use serde_json::{Map, Value};
 
 #[derive(Debug)]
 pub struct FsReadTool;
@@ -141,10 +140,7 @@ impl Tool for TshConfigTool {
         let Some(object) = request.as_object() else {
             return Err(ToolError::invalid("input must be a json object"));
         };
-        let path = object
-            .get("path")
-            .and_then(Value::as_str)
-            .map_or_else(default_tsh_config_path, PathBuf::from);
+        let path = requested_tsh_config_path(object)?;
         let mut config = read_tsh_runtime_config(&path)?;
         let changed = object.contains_key("max_loaded_tools")
             || object.contains_key("cache_capacity")
@@ -237,6 +233,24 @@ fn default_tsh_config_path() -> PathBuf {
     )
 }
 
+fn requested_tsh_config_path(object: &Map<String, Value>) -> ToolResult<PathBuf> {
+    let default_path = default_tsh_config_path();
+    let Some(value) = object.get("path") else {
+        return Ok(default_path);
+    };
+    let Some(path) = value.as_str() else {
+        return Err(ToolError::invalid("path must be a string"));
+    };
+    let requested_path = PathBuf::from(path);
+    if requested_path == default_path {
+        Ok(default_path)
+    } else {
+        Err(ToolError::denied(
+            "tsh.config path is restricted to CTX_ROOT/tool/tsh.d/config",
+        ))
+    }
+}
+
 fn read_tsh_runtime_config(path: &Path) -> ToolResult<TshRuntimeConfig> {
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
@@ -306,11 +320,42 @@ fn write_tsh_runtime_config(path: &Path, config: TshRuntimeConfig) -> ToolResult
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| ToolError::invalid("config path must end with a valid UTF-8 file name"))?;
-    let tmp = parent.join(format!(".{file_name}.tmp-{}", std::process::id()));
-    fs::write(&tmp, format_tsh_runtime_config(config))
-        .map_err(|error| ToolError::denied(format!("cannot write config: {error}")))?;
-    fs::rename(&tmp, path)
-        .map_err(|error| ToolError::denied(format!("cannot install config: {error}")))
+    let content = format_tsh_runtime_config(config);
+    for attempt in 0..16 {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let tmp = parent.join(format!(
+            ".{file_name}.tmp-{}-{nonce}-{attempt}",
+            std::process::id()
+        ));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(content.as_bytes()) {
+                    let _ignored = fs::remove_file(&tmp);
+                    return Err(ToolError::denied(format!("cannot write config: {error}")));
+                }
+                if let Err(error) = file.sync_all() {
+                    let _ignored = fs::remove_file(&tmp);
+                    return Err(ToolError::denied(format!("cannot sync config: {error}")));
+                }
+                drop(file);
+                return fs::rename(&tmp, path)
+                    .map_err(|error| ToolError::denied(format!("cannot install config: {error}")));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(ToolError::denied(format!(
+                    "cannot create config temp file: {error}"
+                )));
+            }
+        }
+    }
+    Err(ToolError::denied("cannot create unique config temp file"))
 }
 
 fn format_tsh_runtime_config(config: TshRuntimeConfig) -> String {
@@ -393,10 +438,7 @@ fn run_tsh_config_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<E
     let object = request.as_object().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "input must be a json object")
     })?;
-    let path = object
-        .get("path")
-        .and_then(Value::as_str)
-        .map_or_else(default_tsh_config_path, PathBuf::from);
+    let path = requested_tsh_config_path(object).map_err(|error| tool_error_to_io(&error))?;
     let mut config = read_tsh_runtime_config(&path).map_err(|error| tool_error_to_io(&error))?;
     let changed = object.contains_key("max_loaded_tools")
         || object.contains_key("cache_capacity")
@@ -497,7 +539,7 @@ const TSH_CONFIG_SCHEMA: &str = r#"{
   "properties": {
     "path": {
       "type": "string",
-      "description": "Optional config path. Defaults to CTX_ROOT/tool/tsh.d/config or /ctx/tool/tsh.d/config."
+      "description": "Optional config path. If supplied, it must equal CTX_ROOT/tool/tsh.d/config or /ctx/tool/tsh.d/config."
     },
     "max_loaded_tools": {
       "type": "integer",
@@ -565,27 +607,34 @@ mod tests {
     }
 
     #[test]
-    fn tsh_config_tool_updates_runtime_config_file() {
+    fn tsh_config_writer_updates_runtime_config_file() {
         let dir = std::env::temp_dir().join(format!("cortexfs-tsh-config-{}", std::process::id()));
-        assert!(fs::create_dir_all(&dir).is_ok());
-        let path = dir.join("config");
-        let tool = TshConfigTool;
-        let invocation = ToolInvocation::new(
-            "r1",
-            format!(
-                r#"{{"path":"{}","max_loaded_tools":12,"cache_capacity":6,"window_percent":10}}"#,
-                path.display()
-            ),
-        );
-        let mut output = Vec::new();
-        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+        let path = dir.join("tool/tsh.d/config");
+        let config = super::TshRuntimeConfig {
+            max_loaded_tools: 12,
+            cache_capacity: 6,
+            window_percent: 10,
+        };
+        assert!(super::write_tsh_runtime_config(&path, config).is_ok());
         let config = fs::read_to_string(&path).unwrap_or_default();
         assert!(config.contains("max_loaded_tools=12\n"));
         assert!(config.contains("cache_capacity=6\n"));
         assert!(config.contains("window_percent=10\n"));
-        let text = String::from_utf8(output).unwrap_or_default();
-        assert!(text.contains(r#""tool":"tsh.config""#));
         let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tsh_config_tool_rejects_non_default_path() {
+        let tool = TshConfigTool;
+        let invocation = ToolInvocation::new(
+            "r1",
+            r#"{"path":"/tmp/cortexfs-outside-config","max_loaded_tools":12}"#,
+        );
+        let mut output = Vec::new();
+        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+        let text = String::from_utf8(output).unwrap_or_default();
+        assert!(text.contains(r#""code":"EACCES""#));
+        assert!(text.contains(r#""status":"error""#));
     }
 
     #[test]
