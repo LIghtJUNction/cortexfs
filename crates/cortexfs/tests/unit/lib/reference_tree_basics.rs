@@ -188,6 +188,8 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "reviewer").is_ok());
     assert_file_text(&root.join("agent").join("base.d").join("parent"), "\n");
+    assert_file_text(&root.join("agent").join("base.d").join("cwd"), "/workspace\n");
+    assert_file_text(&root.join("agent").join("coder.d").join("cwd"), "/workspace\n");
     assert_file_text(
         &root.join("agent").join("coder.d").join("parent"),
         "agent:base\n",

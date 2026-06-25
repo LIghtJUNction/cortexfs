@@ -147,7 +147,7 @@ sockets. The protocol is JSONL.
 Requests:
 
 ```jsonl
-{"op":"send","id":"msg-1","session":"default","cwd":"/work","input":"hello"}
+{"op":"send","id":"msg-1","session":"default","cwd":"/workspace","input":"hello"}
 {"op":"resume","session":"default","after":"event-id"}
 {"op":"cancel","id":"run-id"}
 {"op":"ping"}

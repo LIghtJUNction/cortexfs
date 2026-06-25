@@ -206,7 +206,7 @@ Recommended config:
 
 ```text
 /ctx/agent/coder.d/root = /ctx/home/1000/agent/coder/root
-/ctx/agent/coder.d/cwd  = /work
+/ctx/agent/coder.d/cwd  = /workspace
 ```
 
 Runtime environment:

@@ -83,7 +83,7 @@ fn ensure_reference_agent(
         ("parent", parent.map_or_else(|| "\n".to_owned(), |value| format!("{value}\n"))),
         ("life", "owned\n".to_owned()),
         ("root", home_root),
-        ("cwd", "/work\n".to_owned()),
+        ("cwd", "/workspace\n".to_owned()),
         ("env", "CTX_ROOT=/ctx\n".to_owned()),
         ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
