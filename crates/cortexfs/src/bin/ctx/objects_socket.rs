@@ -226,6 +226,31 @@ fn stream_agent_socket_request(
     render_agent_events(stream)
 }
 
+fn stream_agent_socket_request_buffered(
+    socket: &Path,
+    request: &str,
+    raw: bool,
+) -> Result<ExitCode, CliError> {
+    if raw {
+        return stream_socket_request(socket, request);
+    }
+    if request.len() > MAX_SOCKET_FRAME_BYTES {
+        return Err(CliError::usage(format!(
+            "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
+        )));
+    }
+
+    let mut stream = UnixStream::connect(socket).map_err(|error| {
+        CliError::unavailable(format!("cannot connect {}: {error}", socket.display()))
+    })?;
+    stream
+        .write_all(request.as_bytes())
+        .and_then(|()| stream.shutdown(Shutdown::Write))
+        .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
+
+    render_agent_events_buffered(stream)
+}
+
 fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
     let reader = io::BufReader::new(stream);
     let mut saw_delta = false;
@@ -276,6 +301,70 @@ fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
             }
             _ => {}
         }
+    }
+    Ok(exit)
+}
+
+fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError> {
+    let reader = io::BufReader::new(stream);
+    let mut saw_delta = false;
+    let mut output = String::new();
+    let mut diagnostics = Vec::new();
+    let mut exit = ExitCode::SUCCESS;
+    for line in reader.lines() {
+        let line = line.map_err(|error| {
+            CliError::unavailable(format!("cannot read socket response: {error}"))
+        })?;
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            output.push_str(&line);
+            output.push('\n');
+            continue;
+        };
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("delta" | "reasoning_delta") => {
+                if let Some(text) = json_text_field(&value) {
+                    output.push_str(text);
+                    saw_delta = true;
+                }
+            }
+            Some("message" | "reasoning_message") if !saw_delta => {
+                if let Some(text) = json_text_field(&value) {
+                    output.push_str(text);
+                    output.push('\n');
+                }
+            }
+            Some("tool_call") => {
+                let name = value
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("tool_call");
+                diagnostics.push(format!("[tool] {name}"));
+            }
+            Some("error") => {
+                let code = value
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("EIO");
+                let message = value
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("runtime error");
+                diagnostics.push(format!("error: {code}: {message}"));
+                exit = ExitCode::from(1);
+            }
+            Some("pong") => output.push_str("pong\n"),
+            Some("done") if saw_delta => {
+                output.push('\n');
+                saw_delta = false;
+            }
+            _ => {}
+        }
+    }
+    if !output.is_empty() {
+        print_terminal_text(&output)?;
+    }
+    for diagnostic in diagnostics {
+        write_terminal_error(&diagnostic)?;
     }
     Ok(exit)
 }

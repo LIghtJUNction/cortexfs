@@ -216,6 +216,24 @@ fn agent_send(
     stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
 }
 
+fn agent_send_buffered(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+    input: &str,
+    raw: bool,
+) -> Result<ExitCode, CliError> {
+    let session = agent_session_name(root, name, session)?;
+    let request = format!(
+        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
+        json_string(&request_id()?),
+        json_string(&session),
+        json_string(&agent_cwd(root, name)?),
+        json_string(input)
+    );
+    stream_agent_socket_request_buffered(&agent_socket_path(root, name)?, &request, raw)
+}
+
 fn agent_resume(
     root: &Path,
     name: &str,
@@ -267,8 +285,10 @@ fn agent_repl(
             let prompt = format!("{name} {session} > ");
             let line = match editor.readline(&prompt) {
                 Ok(line) => line,
-                Err(rustyline::error::ReadlineError::Interrupted) => continue,
-                Err(rustyline::error::ReadlineError::Eof) => return Ok(ExitCode::SUCCESS),
+                Err(
+                    rustyline::error::ReadlineError::Interrupted
+                    | rustyline::error::ReadlineError::Eof,
+                ) => return Ok(ExitCode::SUCCESS),
                 Err(error) => {
                     return Err(CliError::unavailable(format!(
                         "cannot read interactive input: {error}"
@@ -288,7 +308,7 @@ fn agent_repl(
                 }
                 continue;
             }
-            let _code = agent_send(root, name, Some(&session), &line, raw)?;
+            let _code = agent_send_buffered(root, name, Some(&session), &line, raw)?;
         }
     }
 
