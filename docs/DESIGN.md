@@ -50,6 +50,7 @@ spec/model-abi.md
 spec/session-abi.md
 spec/16-context.md
 spec/agent-tool-security.md
+spec/agent-runtime.md
 spec/tool-policy-abi.md
 spec/17-child-agents.md
 spec/ctx-coreutils.md
