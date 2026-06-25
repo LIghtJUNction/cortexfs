@@ -678,6 +678,11 @@ fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
 }
 
 #[test]
+fn agent_repl_editor_enables_terminal_signals() {
+    assert!(agent_repl_editor_config().enable_signals());
+}
+
+#[test]
 fn buffered_agent_renderer_keeps_assistant_output_atomic() {
     let input = concat!(
         "{\"type\":\"delta\",\"text\":\"\\u4f60\"}\n",
