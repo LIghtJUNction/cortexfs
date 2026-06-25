@@ -299,7 +299,7 @@ fn terminate_agent_process_group(child: &mut Child) {
         signal_agent_process_group(pid, nix::sys::signal::Signal::SIGTERM);
         for _attempt in 0..5 {
             if child.try_wait().ok().flatten().is_some() {
-                return;
+                break;
             }
             thread::sleep(Duration::from_millis(50));
         }
