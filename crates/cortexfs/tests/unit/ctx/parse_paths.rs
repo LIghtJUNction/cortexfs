@@ -924,6 +924,30 @@ fn tool_command_requires_core_tool_to_be_visible() {
 }
 
 #[test]
+fn tool_command_refuses_authority_bearing_core_tool_cli() {
+    let root = clean_test_dir("ctx-tool-command-core-authority");
+    let tool = root.join("tool").join("fs.write");
+    write_text_file(&tool, "#!/bin/sh\nexit 7\n");
+    assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+    let blocked_path = root.join("blocked-output");
+
+    let result = run_visible_tool_with_writer(
+        &root,
+        "fs.write",
+        &[blocked_path.display().to_string(), "blocked".to_owned()],
+        &mut Vec::new(),
+    );
+
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.code == 69
+                && error.message.contains("direct CTX_PATH execution bypasses CortexFS tool authorization")
+    ));
+    assert!(!blocked_path.exists());
+}
+
+#[test]
 fn tool_command_refuses_direct_ctx_path_execution() {
     let root = clean_test_dir("ctx-tool-command-visible");
     let tool = root.join("tool").join("project.echo");
