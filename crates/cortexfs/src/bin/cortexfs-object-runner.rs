@@ -5,7 +5,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
-use cortexfs::{resolve_api_key_from_env_names, run_core_tool, run_echo_model};
+use cortexfs::{resolve_api_key_from_env_names, run_core_tool, run_core_tool_cli, run_echo_model};
 use cortexfs_tool_sdk::ToolInvocation;
 use serde_json::Value;
 
@@ -141,6 +141,9 @@ fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
     if is_passthrough_tool(name) {
         return run_passthrough_tool(name, args);
     }
+    if env::var("CTX_TOOL_MODE").as_deref() == Ok("cli") {
+        return run_cli_tool(name, args);
+    }
     let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let stdout = io::stdout();
@@ -159,6 +162,31 @@ fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
             })
             .map_err(|error| format!("cannot write output: {error}")),
         Err(error) => Err(format!("cannot write output: {error}")),
+    }
+}
+
+fn run_cli_tool(name: &str, args: &[OsString]) -> Result<(), String> {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    match run_core_tool_cli(name, args, &mut stdout) {
+        Ok(Some(code)) if code == ExitCode::SUCCESS => Ok(()),
+        Ok(Some(code)) => Err(format!("{name} tool exited with {code:?}")),
+        Ok(None) => Err("tool is not implemented by cortexfs-object-runner".to_owned()),
+        Err(error) => Err(format!("cannot run tool: {error}")),
+    }
+}
+
+#[cfg(test)]
+fn run_cli_tool_to_writer(
+    name: &str,
+    args: &[OsString],
+    writer: &mut dyn Write,
+) -> Result<(), String> {
+    match run_core_tool_cli(name, args, writer) {
+        Ok(Some(code)) if code == ExitCode::SUCCESS => Ok(()),
+        Ok(Some(code)) => Err(format!("{name} tool exited with {code:?}")),
+        Ok(None) => Err("tool is not implemented by cortexfs-object-runner".to_owned()),
+        Err(error) => Err(format!("cannot run tool: {error}")),
     }
 }
 

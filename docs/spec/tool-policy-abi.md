@@ -120,6 +120,20 @@ default the caller's current directory is mounted at `/workspace` and the agent
 starts there. `tsh` is not a host shell. It resolves the first word through
 `CTX_PATH` and executes only the matching CortexFS tool object.
 
+Tool execution has two caller-facing modes:
+
+```text
+terminal CLI     tsh TOOL ARG...
+agent native     in-process/runtime tool call with structured input/output
+```
+
+The terminal CLI mode should behave like a normal command line program: argv is
+preserved, stdin/stdout/stderr are inherited, and output is plain command
+output. The native agent mode may load the same tool into memory and call it
+through the SDK ABI, using structured JSON input and JSONL tool frames. `load`
+and `pin` affect the native context/cache; they must not force terminal CLI
+commands to emit structured frames.
+
 When a terminal needs to be observable, `ctxterm` listens on the session
 terminal socket:
 

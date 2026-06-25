@@ -1,8 +1,9 @@
 use super::{
     is_passthrough_tool, openai_stream_event, provider_key_names, run, ObjectPath, OpenAiStreamEvent,
-    RunnerProviderConfig,
+    RunnerProviderConfig, run_cli_tool_to_writer,
 };
 use std::ffi::OsString;
+use std::fs;
 use std::path::Path;
 
 #[test]
@@ -37,6 +38,17 @@ fn runner_recognizes_interactive_tool_passthroughs() {
     assert!(is_passthrough_tool("tsh"));
     assert!(!is_passthrough_tool("shell.exec"));
     assert!(!is_passthrough_tool("fs.read"));
+}
+
+#[test]
+fn cli_tool_mode_outputs_plain_text() {
+    let path = std::env::temp_dir().join(format!("cortexfs-runner-cli-{}", std::process::id()));
+    assert!(fs::write(&path, "plain").is_ok());
+    let mut output = Vec::new();
+    let result = run_cli_tool_to_writer("fs.read", &[OsString::from(&path)], &mut output);
+    assert!(result.is_ok());
+    assert_eq!(String::from_utf8(output).unwrap_or_default(), "plain");
+    let _ignored = fs::remove_file(path);
 }
 
 #[test]

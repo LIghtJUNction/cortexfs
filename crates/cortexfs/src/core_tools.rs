@@ -1,7 +1,8 @@
+use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitCode};
 
 use cortexfs_tool_sdk::{
     Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
@@ -198,6 +199,20 @@ pub fn run_core_tool(
     }
 }
 
+pub fn run_core_tool_cli(
+    name: &str,
+    args: &[OsString],
+    writer: &mut dyn Write,
+) -> Result<Option<ExitCode>, io::Error> {
+    match name {
+        "fs.read" => run_fs_read_cli(args, writer).map(Some),
+        "fs.write" => run_fs_write_cli(args, writer).map(Some),
+        "shell.exec" => run_shell_exec_cli(args, writer).map(Some),
+        "tsh.config" => run_tsh_config_cli(args, writer).map(Some),
+        _ => Ok(None),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct TshRuntimeConfig {
     max_loaded_tools: usize,
@@ -317,6 +332,113 @@ fn positive_usize(value: &Value, field: &str) -> ToolResult<usize> {
         .ok_or_else(|| ToolError::invalid(format!("{field} must be a positive integer")))
 }
 
+fn run_fs_read_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
+    let Some(path) = args.first() else {
+        writeln!(io::stderr(), "fs.read: missing path")?;
+        return Ok(ExitCode::from(2));
+    };
+    let content = fs::read_to_string(PathBuf::from(path))?;
+    writer.write_all(content.as_bytes())?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
+    let Some(path) = args.first() else {
+        writeln!(io::stderr(), "fs.write: missing path")?;
+        return Ok(ExitCode::from(2));
+    };
+    let content = if args.len() > 1 {
+        args.iter()
+            .skip(1)
+            .map(|value| value.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ")
+    } else {
+        let mut content = String::new();
+        io::stdin().read_to_string(&mut content)?;
+        content
+    };
+    fs::write(PathBuf::from(path), content)?;
+    writeln!(writer, "written")?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
+    let command = args
+        .iter()
+        .map(|value| value.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if command.is_empty() {
+        writeln!(io::stderr(), "shell.exec: missing command")?;
+        return Ok(ExitCode::from(2));
+    }
+    let output = Command::new("sh").arg("-c").arg(command).output()?;
+    writer.write_all(&output.stdout)?;
+    io::stderr().write_all(&output.stderr)?;
+    Ok(exit_code_from_status(output.status))
+}
+
+fn run_tsh_config_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
+    let input = args
+        .iter()
+        .map(|value| value.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let request = if input.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_json::from_str::<Value>(&input).map_err(io::Error::other)?
+    };
+    let object = request.as_object().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "input must be a json object")
+    })?;
+    let path = object
+        .get("path")
+        .and_then(Value::as_str)
+        .map_or_else(default_tsh_config_path, PathBuf::from);
+    let mut config = read_tsh_runtime_config(&path).map_err(|error| tool_error_to_io(&error))?;
+    let changed = object.contains_key("max_loaded_tools")
+        || object.contains_key("cache_capacity")
+        || object.contains_key("window_percent");
+    if let Some(value) = object.get("max_loaded_tools") {
+        config.max_loaded_tools =
+            positive_usize(value, "max_loaded_tools").map_err(|error| tool_error_to_io(&error))?;
+    }
+    if let Some(value) = object.get("cache_capacity") {
+        config.cache_capacity =
+            positive_usize(value, "cache_capacity").map_err(|error| tool_error_to_io(&error))?;
+    }
+    if let Some(value) = object.get("window_percent") {
+        let window_percent =
+            positive_usize(value, "window_percent").map_err(|error| tool_error_to_io(&error))?;
+        if !(1..=100).contains(&window_percent) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "window_percent must be 1..100",
+            ));
+        }
+        config.window_percent = window_percent;
+    }
+    if changed {
+        write_tsh_runtime_config(&path, config).map_err(|error| tool_error_to_io(&error))?;
+    }
+    writeln!(writer, "{}", path.display())?;
+    writer.write_all(format_tsh_runtime_config(config).as_bytes())?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn exit_code_from_status(status: std::process::ExitStatus) -> ExitCode {
+    status
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .map_or_else(|| ExitCode::from(1), ExitCode::from)
+}
+
+fn tool_error_to_io(error: &ToolError) -> io::Error {
+    io::Error::other(format!("{}: {}", error.code(), error.message()))
+}
+
 const FS_READ_SCHEMA: &str = r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "fs.read input",
@@ -398,8 +520,9 @@ const TSH_CONFIG_SCHEMA: &str = r#"{
 
 #[cfg(test)]
 mod tests {
-    use super::{FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool};
+    use super::{FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, run_core_tool_cli};
     use cortexfs_tool_sdk::{ToolInvocation, run_tool};
+    use std::ffi::OsString;
     use std::fs;
 
     #[test]
@@ -463,5 +586,17 @@ mod tests {
         let text = String::from_utf8(output).unwrap_or_default();
         assert!(text.contains(r#""tool":"tsh.config""#));
         let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fs_read_cli_outputs_plain_text() {
+        let path =
+            std::env::temp_dir().join(format!("cortexfs-fs-read-cli-{}", std::process::id()));
+        assert!(fs::write(&path, "plain").is_ok());
+        let mut output = Vec::new();
+        let result = run_core_tool_cli("fs.read", &[OsString::from(&path)], &mut output);
+        assert!(matches!(result, Ok(Some(code)) if code == std::process::ExitCode::SUCCESS));
+        assert_eq!(String::from_utf8(output).unwrap_or_default(), "plain");
+        let _ignored = fs::remove_file(path);
     }
 }
