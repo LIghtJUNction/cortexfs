@@ -72,7 +72,8 @@ ctx ls agent
 ctx ls tool
 ctx which model debug/echo
 ctx which tool fs.read
-ctx file classify tool/fs.read
+ctx file type tool/fs.read
+ctx file tool/fs.read
 ```
 
 `model/debug/echo` is the smallest debug model. It echoes input and is useful
@@ -82,7 +83,9 @@ for confirming that local installation and ABI paths work.
 
 `ctx agent start` uses `systemd-run --user` to start `ctxterm -> tsh` inside a
 bwrap sandbox. By default, it mounts the caller's current directory read-write
-at `/workspace`:
+at `/workspace`. If the current directory contains `.git`, it is additionally
+over-mounted read-only at `/workspace/.git`. The agent starts with `pwd` set to
+`/workspace`, while `HOME` is the sandbox's own `/home/agent`:
 
 ```bash
 ctx agent start coder --session default

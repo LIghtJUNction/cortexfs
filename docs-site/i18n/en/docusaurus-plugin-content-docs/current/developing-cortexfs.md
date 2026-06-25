@@ -41,6 +41,62 @@ The root ABI only contains:
 Do not add top-level directories such as `provider`, `workflow`, `job`, `hook`,
 `mcp`, `skill`, or `audit`.
 
+## Development Mental Model
+
+CortexFS extension work starts with file operations, not framework integration.
+But these files are not always disk files.
+
+A path under `/ctx` may be backed by disk, or it may be a memory projection
+derived from the current agent, session, authority, and context. Traditional
+agent architectures often expose extra debug APIs, dump JSON, or repeatedly
+write runtime state to files just so developers can inspect context. Disk files
+add I/O and synchronization cost; tmpfs is fast but ephemeral. FUSE lets those
+states appear as files: if nobody opens, stats, or reads a path, it does not
+need to be materialized; when inspection is needed, ordinary Unix tools work.
+
+That is the core shape of CortexFS: hidden runtime state becomes a
+what-you-see-is-what-you-get file view, while remaining deeply customizable. An
+agent does not need a new framework; it only needs the high-level objects:
+files, sockets, executable tools, and sessions.
+
+```text
+write agent/<name>.d/*     configure identity, model, authority, mounts, tool path
+connect agent/<name>.sock  send JSONL conversation requests
+execute tool/<name>        run a policy-bound capability
+read session/*             inspect history, events, latest output, context packs
+read context/*             inspect working sets, file refs, child results
+read xattr/stat            inspect file type, origin, token estimate, security facts
+```
+
+A minimal agent runtime can be a single executable: read a request from stdin or
+a socket, pick `agent/<name>.d/model`, and emit stable event frames. Richer
+runtimes can add tool loops, context packing, child-agent orchestration, and
+provider adaptation, but they still land on the same objects, sockets, and file
+semantics.
+
+For images, PDFs, audio, archives, and other non-text inputs, do not stuff bytes
+into the prompt and do not invent a separate upload API. Put the file somewhere
+visible to the agent, then reference the path in the conversation:
+
+```bash
+ctx agent start coder --session default --mount "$PWD" /workspace rw
+ctx send coder "Analyze /workspace/assets/screenshot.png and compare it with /workspace/docs/DESIGN.md"
+```
+
+For material shared across agents or sessions, use shared space:
+
+```bash
+mkdir -p "$(ctx path shared project-a)/input"
+cp screenshot.png "$(ctx path shared project-a)/input/"
+ctx agent new reviewer --shared project-a:read
+ctx send reviewer "Inspect /ctx/shared/project-a/input/screenshot.png"
+```
+
+The runtime only needs to record those paths in `context/refs.jsonl` or the
+context pack. Reading image bytes, estimating tokens, rendering thumbnails, or
+calling a vision model should happen lazily through the relevant tool or
+provider adapter.
+
 ## Extend Tools
 
 A tool is an executable capability endpoint. Users see:
@@ -64,6 +120,10 @@ commit semantics:
 4. Append facts to audit.
 ```
 
+This keeps tool development Unix-shaped. CLI mode uses argv/stdin/stdout; agent
+native mode can use the tool SDK for structured JSON and in-process invocation.
+Both modes share the same `.d/schema`, `.d/policy`, and visibility rules.
+
 ## Extend Agents
 
 An agent is a policy-bound orchestrator. Stable paths are:
@@ -77,6 +137,26 @@ An agent is a policy-bound orchestrator. Stable paths are:
 
 Agents may organize tool loops, context, child tasks, and handoff, but those
 orchestration concepts should not become new root ABI.
+
+### Agent Tree
+
+The base agent is the inheritable root identity. Child agents are not about
+duplicating a process; they narrow the visible world:
+
+```text
+base
+├── coder
+│   └── reviewer
+└── operator
+```
+
+A parent can create a child, but the child's model, tools, mounts, shared space,
+uid/gid/groups, and policy must be a subset of the parent's authority. Child
+handoff, result, refs, and lifecycle records live under the parent session's
+`context/child/<id>/`. Owned children are cancelled with the parent task;
+detached children require explicit policy.
+
+### Terminal: ctxterm And tsh
 
 The current `ctx agent start` terminal path is:
 
@@ -101,8 +181,61 @@ terminal socket:
 ```
 
 `tsh` only looks up tools through `CTX_PATH`; it does not fall back to the host
-`PATH`. If `CTX_PATH` is unset, it may read `CTX_HOME/.tshrc`, but that file
-only supports data-form `CTX_PATH=...`.
+`PATH`. Standalone human sessions read `CTX_HOME/.tshrc` before inherited
+process `CTX_PATH`, and that file only supports data-form `CTX_PATH=...`.
+Inside an agent terminal, the runtime-provided `CTX_PATH` remains
+authoritative.
+
+The split is deliberate:
+
+```text
+ctxterm  owns PTY lifetime, watch/attach, and multi-observer terminal access
+tsh      discovers tools, loads/pins them, and invokes capabilities via CTX_PATH
+bash     is only a normal tool, available when visible and allowed
+tmux     is also a normal tool, useful for long-running panes or background work
+```
+
+The default native tool visible to an agent is `tsh`. Additional tools do not
+appear just because a prompt mentions them; they enter the working set through
+`tsh tools`, `tsh load TOOL`, `tsh pin TOOL`, and `tsh TOOL ARG...`.
+
+### Context Window Management
+
+CortexFS treats context as a working set, not the source of truth:
+
+```text
+messages.jsonl     durable conversation facts
+events.jsonl       durable runtime facts
+latest.md          recent-output view, rebuildable
+context/pack.md    current working set, rebuildable
+context/refs.jsonl selected files, child results, search results
+```
+
+Prompt construction merges agent instruction, AGENTS.md rules, skill metadata,
+tool injection, message history, and the runtime contract. Skill metadata starts
+with `name`, `description`, and `SKILL.md path`. It may use at most 2% of the
+context window; when the window size is unknown, the hard cap is 8,000
+characters. Over-budget descriptions are shortened first, then some skills are
+omitted with a warning. Full `SKILL.md` content is read only after a skill is
+selected.
+
+### Authority Control
+
+Prompts and schemas are not the authority system. Effective authority is always
+the intersection of several layers:
+
+```text
+mount/chroot visibility
+Linux uid/gid/groups and mode bits
+CortexFS label + policy v0
+CTX_PATH tool visibility
+tool executable metadata
+noexec mount placement
+```
+
+For example, reading a file does not imply executing its related tool; seeing a
+tool file does not imply policy allows invoking it; a prompt that says "you may
+use shell" cannot bypass `tsh` or policy.
 
 ## Extend Providers Or Local Models
 
@@ -130,6 +263,13 @@ Provider API key resolution order is fixed:
 
 Do not write secrets into `/ctx/model/*`, `.d/default`, or any other ABI file.
 
+OAuth access tokens follow the same principle: environment variables first,
+then the system keychain. Provider configuration may declare Authorization
+Code + PKCE metadata. By default, the access token is stored under
+`service=cortexfs:<provider> account=oauth:access`, and the refresh token under
+`account=oauth:refresh`. PKCE verifier, state, access token, and refresh token
+must not be written into `/ctx/model/*`, `.d/default`, or any other ABI file.
+
 When you need to test an OpenAI-compatible provider path without calling a
 cloud API, use this repository's aimock fixture:
 
@@ -141,6 +281,37 @@ npm run aimock:smoke
 
 See [AIMock Testing](aimock-testing.md) for details. This is a local test
 fixture, not a new `/ctx/provider` root namespace.
+
+The multi-API compatibility boundary is:
+
+```text
+/ctx/model/main                    stable default model alias
+/ctx/model/<provider>/<model>      model objects projected by provider adapters
+model/<name>.d/driver              driver/route metadata
+provider registry/cache/keychain   runtime state, not root ABI
+```
+
+When switching providers, users update a model alias or route. Agents can keep
+saying "use model:main". Provider compatibility does not leak into the agent,
+tool, session, or authority model.
+
+## Performance Design
+
+CortexFS is efficient because the boundary is small:
+
+```text
+object discovery   directory reads and short control files
+model/tool exec    file exec or Unix sockets
+conversation       JSONL frame streams
+context packing    durable history plus rebuildable working sets
+tool context       explicit load/pin; unpinned entries reclaimed by W-TinyLFU
+authority checks   static mount/policy/mode-bit intersection
+```
+
+The root ABI has only a few object classes, so providers, databases, workflows,
+MCP servers, and temporary jobs do not each become new directories. Agent
+runtimes can keep fast in-memory projections of visible tools, while durable
+state remains plain files and stable events.
 
 ## Local Verification
 

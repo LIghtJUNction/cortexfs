@@ -186,12 +186,16 @@ ctx agent watch <agent> --session <session>
 ctx agent attach <agent> --session <session>
 ```
 
-When `CTX_PATH` is not set, `tsh` reads `CTX_HOME/.tshrc` if it exists. The
-file is data-only and supports a single stable setting:
+For standalone human sessions, `tsh` reads `CTX_HOME/.tshrc` before inherited
+process `CTX_PATH` when the file exists. The file is data-only and supports a
+single stable setting:
 
 ```text
 CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
 ```
+
+Inside an agent terminal, `tsh` keeps the runtime-provided process `CTX_PATH`
+authoritative.
 
 Do not let `/ctx/bin` become a second `/usr/bin`.
 
