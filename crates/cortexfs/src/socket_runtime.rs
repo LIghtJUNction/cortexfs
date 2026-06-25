@@ -296,12 +296,20 @@ fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixId
 
 fn terminate_agent_process_group(child: &mut Child) {
     if let Ok(pid) = i32::try_from(child.id()) {
-        let _ignored = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(-pid),
-            nix::sys::signal::Signal::SIGKILL,
-        );
+        signal_agent_process_group(pid, nix::sys::signal::Signal::SIGTERM);
+        for _attempt in 0..5 {
+            if child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        signal_agent_process_group(pid, nix::sys::signal::Signal::SIGKILL);
     }
     let _ignored = child.kill();
+}
+
+fn signal_agent_process_group(pid: i32, signal: nix::sys::signal::Signal) {
+    let _ignored = nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), signal);
 }
 
 fn event_type(line: &str) -> Option<String> {

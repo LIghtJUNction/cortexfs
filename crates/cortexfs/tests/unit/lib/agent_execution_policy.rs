@@ -165,6 +165,7 @@ fn agent_executable_socket_runtime_stops_child_after_cancel() {
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
+trap 'printf term > "$CTX_SOURCE/agent-terminated"; exit 0' TERM
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 sh -c 'while [ ! -f "$CTX_SOURCE/release-agent" ]; do sleep 0.05; done; printf leaked > "$CTX_SOURCE/grandchild-leaked"' &
 touch "$CTX_SOURCE/agent-ready"
@@ -230,6 +231,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     let outcome = ok!(outcome);
     assert!(!outcome.jsonl().contains("too-late"));
     assert_file_text(&session_root.join("default").join("state"), "cancelled\n");
+    assert_file_text(&root.join("agent-terminated"), "term");
     assert!(fs::write(root.join("release-agent"), "").is_ok());
     thread::sleep(Duration::from_millis(200));
     assert!(!root.join("grandchild-leaked").exists());
