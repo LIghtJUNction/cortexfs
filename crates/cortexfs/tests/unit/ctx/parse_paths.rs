@@ -399,6 +399,35 @@ fn rejects_agent_sh_cancel_with_multiple_run_ids() {
 }
 
 #[test]
+fn agent_sh_with_input_uses_agent_send_request_shape() {
+    let root = clean_test_dir("ctx-agent-sh-send-agent-shape");
+    assert!(fs::create_dir_all(root.join("agent")).is_ok());
+    let server = spawn_agent_socket_request_capture(&root, "coder");
+
+    let result = agent_sh_command(
+        &root,
+        vec![
+            "coder".to_owned(),
+            "hello".to_owned(),
+            "from".to_owned(),
+            "wrapper".to_owned(),
+        ],
+    );
+
+    assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    let Ok(request) = request else {
+        return;
+    };
+    assert!(request.contains("\"op\":\"send\""));
+    assert!(request.contains("\"session\":\"default\""));
+    assert!(request.contains("\"scope\":\"private\""));
+    assert!(request.contains("\"cwd\":\"/workspace\""));
+    assert!(request.contains("\"input\":\"hello from wrapper\""));
+}
+
+#[test]
 fn parses_agent_lifecycle_commands() {
     let new = cmd!(
         "agent",
