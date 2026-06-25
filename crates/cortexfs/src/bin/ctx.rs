@@ -23,7 +23,6 @@ use cortexfs::{
     inspect_shared_queue_layout, inspect_tool_schema_json, is_executable_file, is_model_name,
     is_object_name, parse_abi_path, parse_model_driver_routes,
 };
-use cortexfs_tool_sdk::{DynamicToolCache, ToolInvocation, run_tool as run_sdk_tool};
 use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 
 fn main() -> ExitCode {
