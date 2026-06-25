@@ -30,6 +30,63 @@ fn socket_session_recorder_appends_send_to_durable_history() {
 }
 
 #[test]
+fn durable_session_layout_uses_private_modes_for_session_state() {
+    let root = clean_test_dir("durable-session-private-modes");
+
+    let result = ensure_durable_session_layout(
+        &root,
+        "default",
+        "/work/project",
+        Some("debug/echo"),
+        SocketSessionScope::Private,
+    );
+    assert!(result.is_ok());
+
+    let session = root.join("default");
+    assert_eq!(
+        fs::metadata(&session)
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+            .ok(),
+        Some(0o700)
+    );
+    assert_eq!(
+        fs::metadata(session.join("context"))
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+            .ok(),
+        Some(0o700)
+    );
+    for file in ["messages.jsonl", "events.jsonl", "meta.json", "cwd"] {
+        assert_eq!(
+            fs::metadata(session.join(file))
+                .map(|metadata| metadata.permissions().mode() & 0o777)
+                .ok(),
+            Some(0o600),
+            "{file}"
+        );
+    }
+}
+
+#[test]
+fn durable_session_layout_rejects_session_symlink() {
+    let root = clean_test_dir("durable-session-symlink");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let target = clean_test_dir("durable-session-symlink-target");
+    assert!(fs::create_dir_all(&target).is_ok());
+    assert!(symlink(&target, root.join("default")).is_ok());
+
+    let result = ensure_durable_session_layout(
+        &root,
+        "default",
+        "/work/project",
+        Some("debug/echo"),
+        SocketSessionScope::Private,
+    );
+
+    assert_eq!(result, Err(DurableSessionLayoutError::CannotCreate));
+    assert!(!target.join("messages.jsonl").exists());
+}
+
+#[test]
 fn socket_session_recorder_cancels_without_deleting_history() {
     let root = clean_test_dir("socket-session-cancel");
     let session = root.join("default");
