@@ -1110,16 +1110,25 @@ fn authorize_tsh_tool_execution(
     })?;
     let view = derive_agent_runtime_view(root, &agent_name)
         .map_err(|error| agent_view_error_to_tsh(&error))?;
-    let policy_text = fs::read_to_string(hit.control_dir().join("policy")).map_err(|error| {
-        TshError::unavailable(format!(
-            "cannot read {}: {error}",
-            hit.control_dir().join("policy").display()
-        ))
-    })?;
+    let Some(view_hit) = view.tool_path().find(name).map_err(tool_path_error)? else {
+        return command_not_found(name);
+    };
+    if view_hit.path() != hit.path() {
+        return Err(TshError::unavailable(format!(
+            "cannot execute tool:{name}: EACCES"
+        )));
+    }
+    let policy_text =
+        fs::read_to_string(view_hit.control_dir().join("policy")).map_err(|error| {
+            TshError::unavailable(format!(
+                "cannot read {}: {error}",
+                view_hit.control_dir().join("policy").display()
+            ))
+        })?;
     let tool_policy = PolicyV0::parse(&policy_text)
         .map_err(|_error| TshError::unavailable(format!("invalid policy for tool:{name}")))?;
     authorize_tool_execution(
-        &tool_path,
+        view.tool_path(),
         name,
         ToolExecutionAuthority::new(
             view.identity(),
