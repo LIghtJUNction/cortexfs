@@ -242,6 +242,36 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
 }
 
 #[test]
+fn reference_tree_bootstrap_does_not_chown_descendants_through_symlink() {
+    if !nix::unistd::Uid::effective().is_root() {
+        return;
+    }
+
+    let root = clean_test_dir("reference-tree-chown-symlink-race");
+    let victim = clean_test_dir("reference-tree-chown-victim");
+    assert!(fs::create_dir_all(&victim).is_ok());
+    let victim_target = victim.join("target");
+    assert!(fs::write(&victim_target, "keep-root-owned\n").is_ok());
+    assert!(nix::unistd::chown(
+        &victim_target,
+        Some(nix::unistd::Uid::from_raw(0)),
+        Some(nix::unistd::Gid::from_raw(0)),
+    )
+    .is_ok());
+
+    let attacker_link = ctx_home(&root).join("attacker-link");
+    assert!(fs::create_dir_all(ctx_home(&root)).is_ok());
+    assert!(symlink(&victim, &attacker_link).is_ok());
+
+    let bootstrapped = ensure_v1_reference_tree(&root);
+    assert!(bootstrapped.is_ok());
+
+    let metadata = ok!(fs::symlink_metadata(&victim_target));
+    assert_eq!(metadata.uid(), 0);
+    assert_eq!(metadata.gid(), 0);
+}
+
+#[test]
 fn reference_tree_model_exec_is_readonly_metadata() {
     let root = reference_tree("reference-tree-model-metadata");
     let projection =
