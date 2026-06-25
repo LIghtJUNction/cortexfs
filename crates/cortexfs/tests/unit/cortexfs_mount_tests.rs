@@ -61,6 +61,7 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
         xattr_value(&tool, "user.cortexfs.backing_exists"),
         Some("true")
     );
+    assert_eq!(xattr_value(&tool, "user.cortexfs.backing_path"), None);
     let bytes = xattr_value(&tool, "user.cortexfs.bytes")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or_default();
@@ -84,6 +85,7 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
     assert_eq!(xattr_value(&schema, "user.cortexfs.origin"), Some("disk"));
     assert_eq!(xattr_value(&schema, "user.cortexfs.storage"), Some("disk"));
     assert_eq!(xattr_value(&schema, "user.cortexfs.virtual"), Some("false"));
+    assert_eq!(xattr_value(&schema, "user.cortexfs.backing_path"), None);
 
     let helper = fs.xattrs_for_path("model/helper");
     assert!(helper.is_ok());
