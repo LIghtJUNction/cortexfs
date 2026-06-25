@@ -178,7 +178,7 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     let socket = agent_runtime_socket(root, &args.name, &args.session)?;
     ensure_agent_terminal_socket(&visible_socket, &socket)?;
     let unit = agent_terminal_unit(&args.name, &args.session);
-    let command = agent_start_systemd_command(root, args, &view, &socket, &unit);
+    let command = agent_start_systemd_command(root, args, &cli_mounts, &view, &socket, &unit);
     let status = ProcessCommand::new(&command.program)
         .args(&command.args)
         .status()
@@ -477,6 +477,7 @@ struct AgentStartCommand {
 fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
+    cli_mounts: &[AgentMount],
     view: &AgentRuntimeView,
     socket: &Path,
     unit: &str,
@@ -495,35 +496,68 @@ fn agent_start_systemd_command(
             "/usr/bin/env".to_owned(),
             "-i".to_owned(),
             "PATH=/usr/bin:/bin".to_owned(),
-            format!("CTX_ROOT={}", view.ctx_root().display()),
-            format!("CTX_HOME={}", view.ctx_home().display()),
-            format!("CTX_AGENT={}", view.agent_name()),
-            format!("CTX_AGENT_SUBJECT={}", view.policy_subject()),
-            format!("HOME={AGENT_SANDBOX_HOME}"),
-            format!("USER={}", view.agent_name()),
-            format!("LOGNAME={}", view.agent_name()),
-            "SHELL=/usr/bin/bash".to_owned(),
-            "TERM=xterm-256color".to_owned(),
-            "LANG=C.UTF-8".to_owned(),
             "/usr/bin/bwrap".to_owned(),
         ],
     };
-    command.args.extend(view.env().iter().map(|env_pair| format!("{}={}", env_pair.0, env_pair.1)));
     command
         .args
-        .extend(agent_bwrap_args(root, args, view, socket, home));
+        .extend(agent_bwrap_args(root, args, cli_mounts, view, socket, home));
     command
+}
+
+fn agent_sandbox_env(view: &AgentRuntimeView) -> Vec<(String, String)> {
+    let mut env = vec![
+        ("CTX_ROOT".to_owned(), view.ctx_root().display().to_string()),
+        ("CTX_HOME".to_owned(), view.ctx_home().display().to_string()),
+        ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
+        (
+            "CTX_AGENT_SUBJECT".to_owned(),
+            view.policy_subject().to_owned(),
+        ),
+        ("HOME".to_owned(), AGENT_SANDBOX_HOME.to_owned()),
+        ("USER".to_owned(), view.agent_name().to_owned()),
+        ("LOGNAME".to_owned(), view.agent_name().to_owned()),
+        ("SHELL".to_owned(), "/usr/bin/bash".to_owned()),
+        ("TERM".to_owned(), "xterm-256color".to_owned()),
+        ("LANG".to_owned(), "C.UTF-8".to_owned()),
+    ];
+    for env_pair in view.env() {
+        let key = &env_pair.0;
+        let value = &env_pair.1;
+        if matches!(
+            key.as_str(),
+            "CTX_ROOT"
+                | "CTX_HOME"
+                | "CTX_AGENT"
+                | "CTX_AGENT_SUBJECT"
+                | "HOME"
+                | "USER"
+                | "LOGNAME"
+                | "SHELL"
+                | "TERM"
+                | "LANG"
+        ) {
+            continue;
+        }
+        env.push((key.clone(), value.clone()));
+    }
+    env
 }
 
 fn agent_bwrap_args(
     _root: &Path,
-    _args: &AgentStartArgs,
+    args: &AgentStartArgs,
+    cli_mounts: &[AgentMount],
     view: &AgentRuntimeView,
     socket: &Path,
     _home: &Path,
 ) -> Vec<String> {
     let agent_home = view.home();
-    let mut bwrap = vec![
+    let mut bwrap = vec!["--clearenv".to_owned()];
+    for (key, value) in agent_sandbox_env(view) {
+        bwrap.extend(["--setenv".to_owned(), key, value]);
+    }
+    bwrap.extend([
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
         "--unshare-net".to_owned(),
@@ -554,7 +588,7 @@ fn agent_bwrap_args(
         "--symlink".to_owned(),
         "usr/lib".to_owned(),
         "/lib64".to_owned(),
-    ];
+    ]);
     if let Some(runtime_dir) = socket_runtime_dir(socket) {
         bwrap.extend([
             "--bind".to_owned(),
@@ -575,6 +609,14 @@ fn agent_bwrap_args(
         };
         bwrap.push(target);
     }
+    for mount in cli_mounts {
+        bwrap.push(match mount.mode.as_str() {
+            "ro" => "--ro-bind".to_owned(),
+            _ => "--bind".to_owned(),
+        });
+        bwrap.push(mount.source.clone());
+        bwrap.push(mount.target.clone());
+    }
     if let Some(startup_stub) = shell_startup_stub_path(socket) {
         bwrap.extend([
             "--ro-bind".to_owned(),
@@ -587,7 +629,7 @@ fn agent_bwrap_args(
     }
     bwrap.extend([
         "--chdir".to_owned(),
-        view.cwd().display().to_string(),
+        args.cwd.clone(),
         "/usr/bin/ctxterm".to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
