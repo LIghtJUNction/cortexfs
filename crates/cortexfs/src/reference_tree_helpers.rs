@@ -210,25 +210,33 @@ fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
                 Ok(target) if target.file_type().is_socket() => {
                     return set_reference_socket_permissions(path);
                 }
-                Ok(_target) => return Err(ReferenceTreeError::CannotSocket),
+                Ok(_target) => {
+                    return Err(ReferenceTreeError::CannotSocket(
+                        std::io::ErrorKind::AlreadyExists,
+                    ));
+                }
                 Err(_error) => {
-                    fs::remove_file(path).map_err(|_error| ReferenceTreeError::CannotSocket)?;
+                    fs::remove_file(path).map_err(|error| {
+                        ReferenceTreeError::CannotSocket(error.kind())
+                    })?;
                 }
             }
         } else {
-            return Err(ReferenceTreeError::CannotSocket);
+            return Err(ReferenceTreeError::CannotSocket(
+                std::io::ErrorKind::AlreadyExists,
+            ));
         }
     }
     if let Some(parent) = path.parent() {
         create_reference_dir(parent)?;
     }
-    UnixListener::bind(path).map_err(|_error| ReferenceTreeError::CannotSocket)?;
+    UnixListener::bind(path).map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;
     set_reference_socket_permissions(path)
 }
 
 fn set_reference_socket_permissions(path: &Path) -> Result<(), ReferenceTreeError> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o777))
-        .map_err(|_error| ReferenceTreeError::CannotSocket)
+        .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))
 }
 
 fn ensure_reference_model_alias(path: &Path, target: &Path) -> Result<(), ReferenceTreeError> {

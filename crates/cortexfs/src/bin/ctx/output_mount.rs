@@ -347,9 +347,9 @@ fn bootstrap_reference_tree(source: Option<&Path>) -> Result<(), CliError> {
     };
     ensure_v1_reference_tree(&source).map_err(|error| {
         CliError::unavailable(format!(
-            "cannot bootstrap {}: {}",
+            "cannot bootstrap {}: {} ({error:?})",
             source.display(),
-            error.errno()
+            error.errno(),
         ))
     })?;
     print_line(&format!("source={}", source.display()))
@@ -368,9 +368,9 @@ fn mount_reference_tree(
 
     ensure_v1_reference_tree(&source).map_err(|error| {
         CliError::unavailable(format!(
-            "cannot bootstrap {}: {}",
+            "cannot bootstrap {}: {} ({error:?})",
             source.display(),
-            error.errno()
+            error.errno(),
         ))
     })?;
     fs::create_dir_all(mountpoint).map_err(|error| {
