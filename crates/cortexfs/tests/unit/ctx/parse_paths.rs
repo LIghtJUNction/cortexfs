@@ -748,6 +748,63 @@ fn interruptible_raw_socket_copy_returns_on_interrupt_flag() {
 }
 
 #[test]
+fn interruptible_buffered_agent_request_sends_cancel_for_active_run() {
+    let root = clean_test_dir("ctx-agent-repl-interrupt-cancel");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let socket = root.join("agent.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket);
+    assert!(listener.is_ok());
+    let Ok(listener) = listener else {
+        return;
+    };
+
+    let server = std::thread::spawn(move || {
+        let first = listener.accept();
+        assert!(first.is_ok());
+        let Ok((mut first_stream, _addr)) = first else {
+            return String::new();
+        };
+        let mut first_request = String::new();
+        assert!(std::io::Read::read_to_string(&mut first_stream, &mut first_request).is_ok());
+
+        let second = listener.accept();
+        assert!(second.is_ok());
+        let Ok((mut second_stream, _addr)) = second else {
+            return first_request;
+        };
+        let mut second_request = String::new();
+        assert!(std::io::Read::read_to_string(&mut second_stream, &mut second_request).is_ok());
+        assert!(std::io::Write::write_all(&mut second_stream, b"{\"type\":\"done\"}\n").is_ok());
+
+        format!("{first_request}{second_request}")
+    });
+
+    let guard = AgentInterruptGuard::new();
+    assert!(guard.is_ok());
+    let Ok(guard) = guard else {
+        return;
+    };
+    guard.interrupted_flag().store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let result = stream_agent_socket_request_buffered_interruptible(
+        &socket,
+        "{\"op\":\"send\",\"id\":\"run-1\"}\n",
+        false,
+        Some((&guard, "{\"op\":\"cancel\",\"id\":\"run-1\"}\n", "run-1")),
+    );
+
+    assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
+    let requests = server.join();
+    assert!(requests.is_ok());
+    let Ok(requests) = requests else {
+        return;
+    };
+    assert!(requests.contains("\"op\":\"send\""));
+    assert!(requests.contains("\"op\":\"cancel\""));
+    assert!(requests.contains("\"id\":\"run-1\""));
+}
+
+#[test]
 fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
     assert!(ensure_v1_reference_tree(&root).is_ok());

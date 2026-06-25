@@ -22,7 +22,8 @@ They must not collapse into one interface.
 `ctx agent repl` is a human chat UI. It owns line editing, `Ctrl+C`, socket
 requests, assistant response rendering, and prompt re-display. Interactive REPL
 responses are buffered before printing so assistant output cannot corrupt the
-user's input buffer. `Ctrl+C` exits the REPL.
+user's input buffer. `Ctrl+C` exits an idle REPL; while a run is active it first
+requests cancellation for that run and returns to the prompt.
 
 `ctx agent send` is a non-interactive human command. It may stream assistant
 deltas as they arrive.
