@@ -91,6 +91,9 @@ ctx send AGENT SESSION INPUT
 
 Omitting the session reads `session/index/current` first and falls back to
 `default`. The positional `SESSION` form remains accepted for compatibility.
+`ctx send` and `ctx resume` render assistant events the same way as
+`ctx agent send` and `ctx agent resume`; raw socket JSONL is reserved for lower
+level socket commands and explicit raw agent modes.
 
 Agent lifecycle conveniences exist as thin wrappers:
 

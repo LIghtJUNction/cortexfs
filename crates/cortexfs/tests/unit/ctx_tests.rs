@@ -5,7 +5,7 @@ use super::{
     format_model_driver_route_error, format_object_layout_issues, format_session_control_issues,
     format_session_index_issues, format_session_layout_issues, format_shared_queue_layout_issues,
     format_tool_schema_issues, json_string, list_names, newline_terminated, parse_command,
-    absolute_existing_path, agent_bwrap_args, agent_new_request_json, agent_repl_editor_config,
+    absolute_existing_path, agent_bwrap_args, agent_new_request_json, agent_repl_editor_config, run,
     agent_repl_should_exit_on_readline_error, agent_sh_args_request_help, agent_sh_command,
     agent_start_mounts_with_default_source, agent_start_systemd_command, agent_terminal_socket,
     build_agent_system_prompt, parse_agent_sh_args_with_session,

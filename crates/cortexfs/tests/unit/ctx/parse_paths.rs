@@ -861,6 +861,54 @@ fn agent_repl_exits_on_interrupt_signal_errors() {
 }
 
 #[test]
+fn top_level_send_uses_agent_send_request_shape() {
+    let root = clean_test_dir("ctx-top-level-send-agent-shape");
+    let agent_dir = root.join("agent").join("coder.d");
+    assert!(fs::create_dir_all(&agent_dir).is_ok());
+    assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
+    let socket = root.join("agent").join("coder.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket);
+    assert!(listener.is_ok());
+    let Ok(listener) = listener else {
+        return;
+    };
+
+    let server = std::thread::spawn(move || {
+        let accepted = listener.accept();
+        assert!(accepted.is_ok());
+        let Ok((mut stream, _addr)) = accepted else {
+            return String::new();
+        };
+        let mut request = String::new();
+        assert!(std::io::Read::read_to_string(&mut stream, &mut request).is_ok());
+        assert!(
+            std::io::Write::write_all(&mut stream, b"{\"type\":\"done\"}\n").is_ok()
+        );
+        request
+    });
+
+    let result = run(vec![
+        std::ffi::OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+        std::ffi::OsString::from("send"),
+        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("hello"),
+    ]);
+
+    assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    let Ok(request) = request else {
+        return;
+    };
+    assert!(request.contains("\"op\":\"send\""));
+    assert!(request.contains("\"session\":\"default\""));
+    assert!(request.contains("\"scope\":\"private\""));
+    assert!(request.contains("\"cwd\":\"/workspace\""));
+    assert!(request.contains("\"input\":\"hello\""));
+}
+
+#[test]
 fn buffered_agent_renderer_keeps_assistant_output_atomic() {
     let input = concat!(
         "{\"type\":\"delta\",\"text\":\"\\u4f60\"}\n",

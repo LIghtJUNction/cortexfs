@@ -132,12 +132,14 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::History { agent, session } => {
             success(history(&cli.root, &agent, session.as_deref()))
         }
-        Command::Resume { agent, session } => resume(&cli.root, &agent, session.as_deref()),
+        Command::Resume { agent, session } => {
+            agent_resume(&cli.root, &agent, session.as_deref(), false)
+        }
         Command::Send {
             agent,
             session,
             input,
-        } => send(&cli.root, &agent, session.as_deref(), &input),
+        } => agent_send(&cli.root, &agent, session.as_deref(), &input, false),
         Command::Agent(args) => agent_command(&cli.root, &args),
         Command::AgentSh { args } => agent_sh_command(&cli.root, args),
         Command::Ping { path } => ping(&cli.root, &path),
