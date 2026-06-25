@@ -564,9 +564,10 @@ fn json_text_field(value: &serde_json::Value) -> Option<&str> {
 
 fn print_terminal_text(text: &str) -> Result<(), CliError> {
     let text = terminal_safe_text(text);
-    io::stdout()
-        .lock()
+    let mut stdout = io::stdout().lock();
+    stdout
         .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
         .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))
 }
 

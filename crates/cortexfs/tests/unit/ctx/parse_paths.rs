@@ -848,6 +848,19 @@ fn agent_repl_editor_enables_terminal_signals() {
 }
 
 #[test]
+fn agent_repl_exits_on_interrupt_signal_errors() {
+    assert!(agent_repl_should_exit_on_readline_error(
+        &rustyline::error::ReadlineError::Interrupted
+    ));
+    assert!(agent_repl_should_exit_on_readline_error(
+        &rustyline::error::ReadlineError::Signal(rustyline::error::Signal::Interrupt)
+    ));
+    assert!(agent_repl_should_exit_on_readline_error(
+        &rustyline::error::ReadlineError::Eof
+    ));
+}
+
+#[test]
 fn buffered_agent_renderer_keeps_assistant_output_atomic() {
     let input = concat!(
         "{\"type\":\"delta\",\"text\":\"\\u4f60\"}\n",
