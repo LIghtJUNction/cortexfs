@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::{env, fs};
 
 use cortexfs::{CTX_ROOT, ToolPath};
-use cortexfs_tool_sdk::{DynamicToolCache, ToolInvocation, run_tool as run_sdk_tool};
+use cortexfs_tool_sdk::DynamicToolCache;
 use serde_json::Value;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -55,7 +55,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let mut context = ToolContext::new(config.max_loaded_tools);
     match command {
         TshCommand::Repl => run_repl(&root, &mut cache, &mut context),
-        TshCommand::Tool { name, args } => run_tool(&root, &mut cache, &name, args),
+        TshCommand::Tool { name, args } => run_tool(&root, &name, args),
         TshCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
         TshCommand::List => list_tools(&root).map(|()| ExitCode::SUCCESS),
     }
@@ -460,7 +460,7 @@ fn run_repl(
             }
             Some(name) => {
                 let args = words.iter().skip(1).map(OsString::from).collect::<Vec<_>>();
-                if let Err(error) = run_repl_tool(root, cache, context, name, args) {
+                if let Err(error) = run_repl_tool(root, context, name, args) {
                     report_repl_error(&error)?;
                 }
             }
@@ -747,7 +747,6 @@ fn print_tool_help(root: &Path, name: &str) -> Result<(), TshError> {
 
 fn run_repl_tool(
     root: &Path,
-    cache: &mut DynamicToolCache,
     context: &mut ToolContext,
     name: &str,
     args: Vec<OsString>,
@@ -771,7 +770,7 @@ fn run_repl_tool(
         return Ok(ExitCode::from(2));
     }
     context.touch(name);
-    run_tool(root, cache, name, args)
+    run_tool(root, name, args)
 }
 
 fn is_tsh_builtin(name: &str) -> bool {
@@ -846,12 +845,7 @@ fn parse_repl_line(line: &str) -> Result<Vec<String>, TshError> {
     Ok(words)
 }
 
-fn run_tool(
-    root: &Path,
-    cache: &mut DynamicToolCache,
-    name: &str,
-    args: Vec<OsString>,
-) -> Result<ExitCode, TshError> {
+fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
         return command_not_found(name);
@@ -864,17 +858,9 @@ fn run_tool(
     {
         return print_tool_help(root, name).map(|()| ExitCode::SUCCESS);
     }
-    if let Ok(tool) = cache.get_or_load(hit.path()) {
-        let input = collect_tool_input(&args)?;
-        let run_id = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
-        let invocation = ToolInvocation::new(run_id, input);
-        let mut stdout = io::stdout().lock();
-        run_sdk_tool(tool, &invocation, &mut stdout)
-            .map_err(|error| TshError::unavailable(format!("cannot run dynamic tool: {error}")))?;
-        return Ok(ExitCode::SUCCESS);
-    }
     let status = ProcessCommand::new(hit.path())
         .args(args)
+        .env("CTX_TOOL_MODE", "cli")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -884,22 +870,6 @@ fn run_tool(
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
-}
-
-fn collect_tool_input(args: &[OsString]) -> Result<String, TshError> {
-    let input = args
-        .iter()
-        .map(|value| value.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if !input.is_empty() {
-        return Ok(input);
-    }
-    let mut input = String::new();
-    io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|error| TshError::unavailable(format!("cannot read tool input: {error}")))?;
-    Ok(input)
 }
 
 fn resolve_tool_hit(root: &Path, name: &str) -> Result<cortexfs::ToolHit, TshError> {
@@ -1101,9 +1071,11 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 mod tests {
     use super::{
         LoadedTool, ToolContext, TshCommand, TshConfig, is_interactive_tool, parse_args,
-        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path,
+        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, run_tool,
     };
     use std::ffi::OsString;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     #[test]
@@ -1199,6 +1171,21 @@ window_percent=25
         assert!(context.insert(test_loaded_tool("b", false)).is_empty());
         assert!(context.tools.contains_key("a"));
         assert!(context.tools.contains_key("b"));
+    }
+
+    #[test]
+    fn tsh_runs_tool_with_empty_argv_in_cli_mode() {
+        let root =
+            std::env::temp_dir().join(format!("cortexfs-tsh-empty-argv-{}", std::process::id()));
+        let tool_dir = root.join("tool");
+        assert!(fs::create_dir_all(&tool_dir).is_ok());
+        let tool = tool_dir.join("noop");
+        assert!(fs::write(&tool, "#!/bin/sh\n[ \"$CTX_TOOL_MODE\" = cli ]\n").is_ok());
+        assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+
+        let result = run_tool(&root, "noop", Vec::new());
+        assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
+        let _ignored = fs::remove_dir_all(root);
     }
 
     #[test]
