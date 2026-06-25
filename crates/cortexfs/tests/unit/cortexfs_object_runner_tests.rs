@@ -1,10 +1,11 @@
 use super::{
     agent_system_prompt, is_passthrough_tool, openai_stream_event, provider_key_names,
-    provider_messages_for_agent, run, run_cli_tool_to_writer, AgentPromptContext, ObjectPath,
-    OpenAiStreamEvent, RunnerProviderConfig,
+    provider_messages_for_agent, resolve_model_alias, resolved_model_path, run,
+    run_cli_tool_to_writer, AgentPromptContext, ObjectPath, OpenAiStreamEvent, RunnerProviderConfig,
 };
 use std::ffi::OsString;
 use std::fs;
+use std::os::unix::fs::symlink;
 use std::path::Path;
 
 #[test]
@@ -28,6 +29,56 @@ fn runner_rejects_unknown_model() {
     assert_eq!(
         run(vec![OsString::from("/ctx/model/openai/gpt-4o")]),
         Err("missing provider: openai".to_owned())
+    );
+}
+
+#[test]
+fn model_alias_resolves_only_ctx_model_objects() {
+    let root = std::env::temp_dir().join(format!(
+        "cortexfs-runner-model-alias-ok-{}",
+        std::process::id()
+    ));
+    let _ignored = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("model")).expect("create model dir");
+    symlink("/ctx/model/debug/echo", root.join("model/main")).expect("create model alias");
+
+    assert_eq!(
+        resolve_model_alias(&root, "main"),
+        Ok("debug/echo".to_owned())
+    );
+    assert_eq!(
+        resolved_model_path(&root, "main"),
+        Ok(root.join("model/debug/echo"))
+    );
+
+    let _ignored = fs::remove_dir_all(root);
+}
+
+#[test]
+fn model_alias_rejects_cross_class_symlink_target() {
+    let root = std::env::temp_dir().join(format!(
+        "cortexfs-runner-model-alias-bad-{}",
+        std::process::id()
+    ));
+    let _ignored = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("model")).expect("create model dir");
+    symlink("../tool/shell.exec", root.join("model/main")).expect("create model alias");
+
+    assert_eq!(
+        resolve_model_alias(&root, "main"),
+        Err("invalid model alias target: main".to_owned())
+    );
+
+    let _ignored = fs::remove_dir_all(root);
+}
+
+#[test]
+fn model_path_rejects_traversal_reference() {
+    let root = std::env::temp_dir().join("cortexfs-runner-model-path");
+
+    assert_eq!(
+        resolved_model_path(&root, "../tool/shell.exec"),
+        Err("invalid model reference: ../tool/shell.exec".to_owned())
     );
 }
 
