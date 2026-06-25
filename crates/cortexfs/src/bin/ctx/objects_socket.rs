@@ -168,29 +168,6 @@ fn latest(root: &Path, agent: &str, session: Option<&str>) -> Result<(), CliErro
     cat_path(&session_dir.join("latest.md"))
 }
 
-fn resume(root: &Path, agent: &str, session: Option<&str>) -> Result<ExitCode, CliError> {
-    let session = agent_session_name(root, agent, session)?;
-    let request = format!(
-        "{{\"op\":\"resume\",\"session\":{}}}\n",
-        json_string(&session)
-    );
-    stream_socket_request(&agent_socket_path(root, agent)?, &request)
-}
-
-fn send(root: &Path, agent: &str, session: Option<&str>, input: &str) -> Result<ExitCode, CliError> {
-    require_cli_name("agent name", agent)?;
-    let session = agent_session_name(root, agent, session)?;
-    require_cli_name("session name", &session)?;
-
-    let request = format!(
-        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"input\":{}}}\n",
-        json_string(&request_id()?),
-        json_string(&session),
-        json_string(input)
-    );
-    stream_socket_request(&agent_socket_path(root, agent)?, &request)
-}
-
 fn ping(root: &Path, path: &str) -> Result<ExitCode, CliError> {
     stream_socket_request(&object_socket_path(root, path)?, "{\"op\":\"ping\"}\n")
 }
