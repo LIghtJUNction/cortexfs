@@ -1,6 +1,7 @@
 use super::{
-    is_passthrough_tool, openai_stream_event, provider_key_names, run, ObjectPath, OpenAiStreamEvent,
-    RunnerProviderConfig, run_cli_tool_to_writer,
+    agent_system_prompt, is_passthrough_tool, openai_stream_event, provider_key_names,
+    provider_messages_for_agent, run, run_cli_tool_to_writer, ObjectPath, OpenAiStreamEvent,
+    RunnerProviderConfig,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -73,6 +74,26 @@ fn openai_stream_event_does_not_mix_reasoning_into_answer_text() {
         r#"data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}"#,
     );
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text.is_empty()));
+}
+
+#[test]
+fn agent_provider_messages_expose_only_tsh_as_native_tool() {
+    let messages = provider_messages_for_agent("what tools?", Some("coder"));
+    let system = messages
+        .pointer("/0/content")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    assert!(system.contains("only native callable tool is `tsh`"));
+    assert!(system.contains("Do not claim direct access"));
+    assert!(system.contains("tsh load TOOL"));
+    assert_eq!(
+        messages.pointer("/1/content").and_then(serde_json::Value::as_str),
+        Some("what tools?")
+    );
+
+    let prompt = agent_system_prompt("coder");
+    assert!(prompt.contains("CortexFS agent `coder`"));
+    assert!(!prompt.contains("image_gen"));
 }
 
 #[test]

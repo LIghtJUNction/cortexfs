@@ -112,6 +112,7 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     let mut child = Command::new(model_path)
         .arg(input)
         .env("CTX_RUN_ID", &run)
+        .env("CTX_AGENT", name)
         .stdout(Stdio::piped())
         .spawn()
         .map_err(|error| format!("cannot run agent model: {error}"))?;

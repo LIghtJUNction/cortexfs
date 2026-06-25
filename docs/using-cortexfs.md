@@ -123,13 +123,16 @@ tsh fs.read '{"path":"README.md"}'
 ```bash
 install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh
 agent.sh --help
+agent.sh coder
 agent.sh coder "summarize this repository"
+agent.sh --chat coder
 agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
 ```
 
-`agent.sh` 是薄客户端。它读写 `/ctx/agent/<agent>.sock` 和 session 文件，不保存私有
-聊天数据库。
+`agent.sh coder` 会连接 agent terminal，因此正常会看到 `ctxterm -> tsh` 的会话。
+带 prompt 参数时才发送一条 agent socket 消息。需要聊天式 socket REPL 时使用
+`agent.sh --chat coder`。`agent.sh` 不保存私有聊天数据库。
 
 ## 使用共享空间
 
