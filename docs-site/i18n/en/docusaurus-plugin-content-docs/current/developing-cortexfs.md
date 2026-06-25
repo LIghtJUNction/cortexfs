@@ -181,8 +181,10 @@ terminal socket:
 ```
 
 `tsh` only looks up tools through `CTX_PATH`; it does not fall back to the host
-`PATH`. If `CTX_PATH` is unset, it may read `CTX_HOME/.tshrc`, but that file
-only supports data-form `CTX_PATH=...`.
+`PATH`. Standalone human sessions read `CTX_HOME/.tshrc` before inherited
+process `CTX_PATH`, and that file only supports data-form `CTX_PATH=...`.
+Inside an agent terminal, the runtime-provided `CTX_PATH` remains
+authoritative.
 
 The split is deliberate:
 
@@ -260,6 +262,13 @@ Provider API key resolution order is fixed:
 ```
 
 Do not write secrets into `/ctx/model/*`, `.d/default`, or any other ABI file.
+
+OAuth access tokens follow the same principle: environment variables first,
+then the system keychain. Provider configuration may declare Authorization
+Code + PKCE metadata. By default, the access token is stored under
+`service=cortexfs:<provider> account=oauth:access`, and the refresh token under
+`account=oauth:refresh`. PKCE verifier, state, access token, and refresh token
+must not be written into `/ctx/model/*`, `.d/default`, or any other ABI file.
 
 When you need to test an OpenAI-compatible provider path without calling a
 cloud API, use this repository's aimock fixture:
