@@ -47,6 +47,7 @@ mod abi_constants;
 mod abi_path;
 mod abi_path_parse;
 mod agent_control;
+mod agent_prompt;
 mod context_jsonl;
 mod context_pack;
 mod context_pack_build;
@@ -86,6 +87,7 @@ pub use abi_path::{
 pub use agent_control::{
     AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
 };
+pub use agent_prompt::{AgentPromptContext, agent_runtime_contract, render_agent_system_prompt};
 pub use context_pack::{
     ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,
     ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,

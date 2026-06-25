@@ -7,7 +7,7 @@ use super::{
     format_tool_schema_issues, json_string, list_names, newline_terminated, parse_command,
     absolute_existing_path, agent_bwrap_args, agent_new_request_json, agent_start_mounts_with_default_source,
     agent_start_systemd_command, agent_terminal_socket, collect_agent_events_buffered, ctx_state,
-    env_exports, is_mount_point, read_agent_processes, read_ctx_status,
+    build_agent_system_prompt, env_exports, is_mount_point, read_agent_processes, read_ctx_status,
     read_status_agent_processes, render_agent_process_tree, render_agent_status_lines,
     require_cli_name, require_session_name, resolve_abi_path, run_visible_tool, shell_quote_arg,
     stream_socket_request, stream_terminal_socket, AgentArgs, AgentMount,

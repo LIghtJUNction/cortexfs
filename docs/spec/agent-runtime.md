@@ -249,6 +249,18 @@ Other CortexFS tools are discovered, loaded, pinned, and invoked through tsh.
 Prompt text and skill metadata do not grant permissions.
 ```
 
+Humans can inspect the currently renderable system prompt with:
+
+```text
+ctx agent prompt <agent>
+```
+
+This command renders `system.md`, `prompt.template.md`, and the immutable
+runtime contract through the same prompt renderer used by model execution.
+Runtime-only blocks such as discovered rules, skill metadata, tool injection,
+and historical message context remain bounded dynamic inputs; when they are not
+available to the CLI, the command prints explicit placeholder text.
+
 ## Design Tests
 
 The runtime design is healthy when all of these are true:

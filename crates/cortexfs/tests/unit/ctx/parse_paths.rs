@@ -86,6 +86,12 @@ fn parses_session_file_commands() {
         })) if name == "coder" && session == "default"
     ));
 
+    let prompt = cmd!("agent", "prompt", "coder");
+    assert!(matches!(
+        prompt,
+        Ok(Command::Agent(AgentArgs::Prompt { ref name })) if name == "coder"
+    ));
+
     let resume = cmd!("resume", "coder", "default");
     assert!(matches!(
         resume,
@@ -690,6 +696,33 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
                 && rendered.diagnostics
                     == vec!["[tool] tsh".to_owned(), "error: EIO: boom".to_owned()]
                 && rendered.exit_code == 1
+    ));
+}
+
+#[test]
+fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
+    let root = clean_test_dir("ctx-agent-prompt-render");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let control = root.join("agent").join("coder.d");
+    assert!(fs::write(control.join("system.md"), "Be precise.\n").is_ok());
+    assert!(
+        fs::write(
+            control.join("prompt.template.md"),
+            "agent={{agent}}\ntime={{current_time_unix}}\ninst={{agent_instructions}}\n{{runtime_contract}}\n",
+        )
+        .is_ok()
+    );
+
+    let prompt = build_agent_system_prompt(&root, "coder", "123");
+
+    assert!(matches!(
+        prompt,
+        Ok(ref prompt)
+            if prompt.contains("agent=coder")
+                && prompt.contains("time=123")
+                && prompt.contains("inst=Be precise.")
+                && prompt.contains("Your only native callable tool is `tsh`")
+                && !prompt.contains("{{agent}}")
     ));
 }
 

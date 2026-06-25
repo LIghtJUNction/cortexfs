@@ -1,8 +1,9 @@
 use super::{
-    agent_system_prompt, is_passthrough_tool, openai_stream_event, provider_key_names,
-    provider_messages_for_agent, resolve_model_alias, resolved_model_path, run,
-    run_cli_tool_to_writer, AgentPromptContext, ObjectPath, OpenAiStreamEvent, RunnerProviderConfig,
+    is_passthrough_tool, openai_stream_event, provider_key_names, provider_messages_for_agent,
+    resolve_model_alias, resolved_model_path, run, run_cli_tool_to_writer, ObjectPath,
+    OpenAiStreamEvent, RunnerProviderConfig,
 };
+use cortexfs::{AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, render_agent_system_prompt};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::symlink;
@@ -155,7 +156,7 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
         Some("what tools?")
     );
 
-    let prompt = agent_system_prompt("coder", "", &test_prompt_context());
+    let prompt = render_agent_system_prompt("coder", "", &test_prompt_context());
     assert!(prompt.contains("CortexFS agent `coder`"));
     assert!(!prompt.contains("image_gen"));
 }
@@ -165,7 +166,7 @@ fn agent_prompt_template_controls_rendered_system_message() {
     let mut context = test_prompt_context();
     context.template = "agent={{agent}}\ninstructions={{agent_instructions}}\ncontract={{runtime_contract}}\n".to_owned();
 
-    let prompt = agent_system_prompt("coder", "custom identity", &context);
+    let prompt = render_agent_system_prompt("coder", "custom identity", &context);
 
     assert!(prompt.starts_with("agent=coder\ninstructions=custom identity\n"));
     assert!(prompt.contains("contract=You are CortexFS agent `coder`."));
@@ -174,7 +175,7 @@ fn agent_prompt_template_controls_rendered_system_message() {
 
 fn test_prompt_context() -> AgentPromptContext {
     AgentPromptContext {
-        template: super::default_agent_prompt_template(),
+        template: DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned(),
         rules: "Project rule".to_owned(),
         skills: "- name: rust\n  description: Rust help\n  path: /skills/rust/SKILL.md\n"
             .to_owned(),
