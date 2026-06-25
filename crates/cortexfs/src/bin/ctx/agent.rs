@@ -346,14 +346,15 @@ fn agent_sh_attach_or_start(
     name: &str,
     session: Option<&str>,
 ) -> Result<ExitCode, CliError> {
-    match agent_terminal(root, name, session, true) {
+    let session = agent_sh_attach_session(root, name, session)?;
+    match agent_terminal(root, name, Some(&session), true) {
         Ok(code) => Ok(code),
         Err(error) if error.message.contains("terminal is not running") => {
             write_error("agent.sh terminal is not running; starting agent terminal")
                 .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
             let start = AgentStartArgs {
                 name: name.to_owned(),
-                session: session.unwrap_or("default").to_owned(),
+                session: session.clone(),
                 cwd: "/workspace".to_owned(),
                 default_workspace: true,
                 mounts: Vec::new(),
@@ -362,10 +363,20 @@ fn agent_sh_attach_or_start(
             if code != ExitCode::SUCCESS {
                 return Ok(code);
             }
-            agent_terminal(root, name, session, true)
+            agent_terminal(root, name, Some(&session), true)
         }
         Err(error) => Err(error),
     }
+}
+
+fn agent_sh_attach_session(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+) -> Result<String, CliError> {
+    let session = agent_session_name(root, name, session)?;
+    require_session_name(&session)?;
+    Ok(session)
 }
 
 fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
