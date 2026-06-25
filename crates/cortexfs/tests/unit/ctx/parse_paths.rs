@@ -170,6 +170,18 @@ fn parses_subcommand_help_before_required_args() {
         Err(ref error) if error.code == 2 && error.message == "unknown command: latest"
     ));
 
+    let send = cmd!("send", "--help");
+    assert!(matches!(
+        send,
+        Ok(Command::HelpTopic(ref topic)) if topic == "send"
+    ));
+
+    let resume = cmd!("resume", "--help");
+    assert!(matches!(
+        resume,
+        Ok(Command::HelpTopic(ref topic)) if topic == "resume"
+    ));
+
     let agent = cmd!("agent", "--help");
     assert!(matches!(
         agent,
