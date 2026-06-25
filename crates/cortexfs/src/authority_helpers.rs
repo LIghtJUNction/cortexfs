@@ -3,7 +3,10 @@ fn append_jsonl_event(path: &Path, event: &str) -> std::io::Result<()> {
 }
 
 fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
-    let mut file = fs::OpenOptions::new().append(true).open(path)?;
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(path)?;
     file.write_all(line.as_bytes())?;
     file.write_all(b"\n")?;
     file.flush()
@@ -15,7 +18,7 @@ pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result
     temp.write_all(content.as_bytes())?;
     temp.flush()?;
     temp.as_file()
-        .set_permissions(fs::Permissions::from_mode(0o644))?;
+        .set_permissions(fs::Permissions::from_mode(0o600))?;
     temp.persist(path)
         .map(|_file| ())
         .map_err(std::io::Error::from)
