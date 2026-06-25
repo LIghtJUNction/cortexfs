@@ -644,43 +644,50 @@ mod tests {
     }
 
     #[test]
-    fn remove_stale_socket_refuses_symlink_without_touching_target() {
-        let dir = tempfile::tempdir().expect("create tempdir");
+    fn remove_stale_socket_refuses_symlink_without_touching_target()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
         let target = dir.path().join("target.txt");
         let link = dir.path().join("session.sock");
-        fs::write(&target, "keep me").expect("write target");
-        symlink(&target, &link).expect("create symlink");
+        fs::write(&target, "keep me")?;
+        symlink(&target, &link)?;
 
-        let error = remove_stale_socket(&link).expect_err("symlinks are refused");
+        let Err(error) = remove_stale_socket(&link) else {
+            return Err("symlinks are refused".into());
+        };
 
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
-        assert_eq!(fs::read_to_string(&target).expect("read target"), "keep me");
+        assert_eq!(fs::read_to_string(&target)?, "keep me");
         assert!(link.is_symlink());
+        Ok(())
     }
 
     #[test]
-    fn remove_stale_socket_only_removes_socket_inodes() {
-        let dir = tempfile::tempdir().expect("create tempdir");
+    fn remove_stale_socket_only_removes_socket_inodes() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
         let socket = dir.path().join("session.sock");
-        let listener = UnixListener::bind(&socket).expect("bind stale socket");
+        let listener = UnixListener::bind(&socket)?;
         drop(listener);
 
-        remove_stale_socket(&socket).expect("remove stale socket");
+        remove_stale_socket(&socket)?;
 
         assert!(!socket.exists());
+        Ok(())
     }
 
     #[test]
-    fn start_listener_refuses_symlink_listen_path() {
-        let dir = tempfile::tempdir().expect("create tempdir");
+    fn start_listener_refuses_symlink_listen_path() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = tempfile::tempdir()?;
         let target = dir.path().join("target.txt");
         let link = dir.path().join("session.sock");
-        fs::write(&target, "keep me").expect("write target");
-        symlink(&target, &link).expect("create symlink");
+        fs::write(&target, "keep me")?;
+        symlink(&target, &link)?;
         let writer: PtyWriter = Arc::new(Mutex::new(Box::new(Vec::<u8>::new())));
         let clients: Clients = Arc::new(Mutex::new(Vec::new()));
 
-        let error = start_listener(&link, writer, clients).expect_err("symlinks are refused");
+        let Err(error) = start_listener(&link, writer, clients) else {
+            return Err("symlinks are refused".into());
+        };
 
         assert_eq!(error.code, 69);
         assert!(
@@ -688,7 +695,8 @@ mod tests {
                 .message
                 .contains("refusing to replace non-socket path")
         );
-        assert_eq!(fs::read_to_string(&target).expect("read target"), "keep me");
+        assert_eq!(fs::read_to_string(&target)?, "keep me");
         assert!(link.is_symlink());
+        Ok(())
     }
 }

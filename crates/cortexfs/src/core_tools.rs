@@ -347,7 +347,7 @@ fn write_tsh_runtime_config(path: &Path, config: TshRuntimeConfig) -> ToolResult
                 return fs::rename(&tmp, path)
                     .map_err(|error| ToolError::denied(format!("cannot install config: {error}")));
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => {
                 return Err(ToolError::denied(format!(
                     "cannot create config temp file: {error}"

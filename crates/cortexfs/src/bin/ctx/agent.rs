@@ -618,7 +618,7 @@ fn agent_start_mounts_with_default_source(
         let git_dir = default_source.join(".git");
         if let Ok(metadata) = fs::symlink_metadata(&git_dir) {
             let file_type = metadata.file_type();
-            if file_type.is_dir() || file_type.is_file() {
+            if file_type.is_dir() || metadata.is_file() {
                 mounts.push(AgentMount {
                     source: git_dir.display().to_string(),
                     target: "/workspace/.git".to_owned(),

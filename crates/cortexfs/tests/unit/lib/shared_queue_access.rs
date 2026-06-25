@@ -68,7 +68,7 @@ fn shared_access_authority_rejects_symlink_paths() {
 }
 
 #[test]
-fn session_access_authority_rejects_symlink_paths() {
+fn session_access_authority_rejects_symlink_paths() -> Result<(), Box<dyn std::error::Error>> {
     let root = clean_test_dir("session-authority-symlink-deny");
     let home = root.join("home-1000");
     let outside = root.join("outside-host");
@@ -80,10 +80,13 @@ fn session_access_authority_rejects_symlink_paths() {
         .join("messages.jsonl");
     let target = outside.join("messages.jsonl");
     write_fixture_file(&target, 0o644);
-    assert!(fs::create_dir_all(link.parent().unwrap()).is_ok());
+    let Some(parent) = link.parent() else {
+        return Err("link path has a parent".into());
+    };
+    assert!(fs::create_dir_all(parent).is_ok());
     assert!(symlink(&target, &link).is_ok());
 
-    let metadata = ok!(fs::metadata(&target));
+    let metadata = fs::metadata(&target)?;
     let identity = AgentUnixIdentity::new(1000, metadata.gid(), []);
     let mounts = mount_table_for_source_target(
         "/ctx/home/1000",
@@ -98,6 +101,7 @@ fn session_access_authority_rejects_symlink_paths() {
         authorize_session_access(&link, SessionAccess::Read, authority),
         Err(SessionAccessDenial::CannotInspectPath)
     );
+    Ok(())
 }
 
 #[test]

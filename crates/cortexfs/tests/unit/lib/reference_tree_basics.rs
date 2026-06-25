@@ -384,11 +384,7 @@ fn reference_tree_bootstrap_installs_tsh_tools() {
 
 #[test]
 fn root_bootstrap_assigns_reference_home_to_agent_identity() {
-    if fs::metadata("/proc/self")
-        .map(|metadata| metadata.uid())
-        .unwrap_or(1)
-        != 0
-    {
+    if fs::metadata("/proc/self").map_or(1, |metadata| metadata.uid()) != 0 {
         return;
     }
 
