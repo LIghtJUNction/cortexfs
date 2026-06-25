@@ -189,48 +189,56 @@ file content is inspectable metadata, not provider code or secrets
 Even if the underlying provider has native state,
 `/ctx/model/<provider>/<model>` behaves as a stateless single call.
 
-## Provider Transport Routes
+## Global Model Route
 
-Proxying is provider transport configuration, not an agent and not a second
-model namespace. The provider must already exist, the model id stays under that
-provider, and the runner selects a transport before sending the provider-native
-request.
+Model proxying is not an agent and is not stored in provider JSON. The single
+global egress route table is:
 
-Example provider config:
-
-```json
-{
-  "base_url": "https://api.openai.com/v1",
-  "api_key_env": "OPENAI_API_KEY",
-  "transports": {
-    "office-http": {
-      "kind": "http",
-      "url": "http://127.0.0.1:8080/v1"
-    },
-    "local-socket": {
-      "kind": "unix",
-      "path": "/run/user/1000/cortexfs/proxy/openai.sock",
-      "url": "http://localhost/v1"
-    }
-  },
-  "route": [
-    {
-      "model": "gpt-4o",
-      "transport": "office-http"
-    },
-    {
-      "model": "embedding-*",
-      "transport": "local-socket"
-    }
-  ]
-}
+```text
+/ctx/model/route
 ```
 
-`route[].model` supports exact model ids and trailing `*` prefixes. If no route
-matches and `default_transport` is absent, the runner uses `base_url` directly.
-This lets many models share one HTTP or Unix-socket proxy without creating
-fake provider names or debug agents. Secrets still resolve through the provider
-environment/keychain path; transport entries only decide where bytes are sent.
+The file is ordinary CortexFS state. It is read only when a model request is
+made; if the file is absent, the projected default is `fallback: direct`.
+
+Rules are evaluated top to bottom. A rule selects a group; a group selects both
+transport and an optional credential slot. Secrets are never written into the
+route file. `key(NAME)` selects `service=cortexfs:<provider> account=NAME` from
+the system keychain, with environment variables checked first.
+
+```text
+group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)
+group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock), key(local)
+
+dip(198.51.100.45) -> direct
+# dip(203.0.113.43) -> JP
+domain(bestproxy.com) -> proxy
+pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct
+dip(geoip:private) -> direct
+dip(geoip:cn) -> direct
+domain(geosite:cn) -> direct
+model(embedding-*) -> local-socket
+fallback: proxy
+```
+
+Built-in group names:
+
+```text
+direct       use the provider base_url and default credential slot
+must_direct  same transport as direct, intended for policy readability
+```
+
+Custom groups use:
+
+```text
+group(NAME) -> direct[, key(SLOT)]
+group(NAME) -> http(BASE_URL)[, key(SLOT)]
+group(NAME) -> unix(SOCKET_PATH[, BASE_URL])[, key(SLOT)]
+```
+
+Matchers currently include `domain(...)`, `dip(...)`, `pname(...)`,
+`provider(...)`, and `model(...)`. `model(...)` and `provider(...)` accept
+exact names and trailing `*` prefixes.
 
 ## Model Socket
 

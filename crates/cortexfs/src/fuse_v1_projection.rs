@@ -231,6 +231,10 @@ impl FuseV1Projection {
                     HELPER_MODEL_ALIAS.to_owned(),
                     FuseV1FileType::Symlink,
                 ));
+                entries.push(FuseV1DirEntry::new(
+                    MODEL_ROUTE_FILE.to_owned(),
+                    FuseV1FileType::Regular,
+                ));
                 entries
             }
             "model/debug" => vec![
@@ -292,6 +296,16 @@ impl FuseV1Projection {
     }
 
     fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+        if abi_path == format!("model/{MODEL_ROUTE_FILE}") {
+            let path = self.resolve(abi_path)?;
+            return match fs::read_to_string(path) {
+                Ok(content) => Ok(Some(content)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    Ok(Some(DEFAULT_MODEL_ROUTE.to_owned()))
+                }
+                Err(_error) => Err(FuseV1Error::Io),
+            };
+        }
         if abi_path == "model/debug/echo" {
             return Ok(Some(debug_echo_model_metadata()));
         }
@@ -354,6 +368,12 @@ impl FuseV1Projection {
             return Err(FuseV1Error::TooLarge);
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
+        if normalized == format!("model/{MODEL_ROUTE_FILE}") {
+            let path = self.resolve(&normalized)?;
+            let content =
+                std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+            return atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io);
+        }
         if !is_fuse_v1_writable_control_path(&normalized) {
             return Err(FuseV1Error::NotControlFile);
         }
@@ -371,6 +391,10 @@ impl FuseV1Projection {
         abi_path: &str,
     ) -> Result<Option<(FuseV1FileType, u64, u32)>, FuseV1Error> {
         match abi_path {
+            path if path == format!("model/{MODEL_ROUTE_FILE}") => {
+                let content = self.virtual_model_content(path)?.unwrap_or_default();
+                virtual_regular_entry(&content, 0o644)
+            }
             path if model_alias_name(path).is_some() => Ok(Some((
                 FuseV1FileType::Symlink,
                 u64::try_from(

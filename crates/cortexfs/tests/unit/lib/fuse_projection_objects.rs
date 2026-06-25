@@ -69,7 +69,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
         .iter()
         .map(super::FuseV1DirEntry::name)
         .collect::<Vec<_>>();
-    assert_eq!(model_names, ["debug", "helper", "main"]);
+    assert_eq!(model_names, ["debug", "helper", "main", "route"]);
     let main_node = projection.lookup(&model_node, "main");
     assert!(matches!(
         main_node,
@@ -293,7 +293,23 @@ fn fuse_v1_projection_projects_configured_provider_models() {
         .into_iter()
         .map(|entry| entry.name().to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(model_names, ["api.lmm.best", "debug", "helper", "main"]);
+    assert_eq!(
+        model_names,
+        ["api.lmm.best", "debug", "helper", "main", "route"]
+    );
+    let route = projection.read_to_string("model/route");
+    assert!(matches!(route, Ok(ref content) if content.contains("fallback: direct")));
+    assert_eq!(
+        projection.write_control_file(
+            "model/route",
+            "group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)\nmodel(gpt-*) -> proxy\nfallback: direct\n"
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        projection.read_to_string("model/route"),
+        Ok("group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)\nmodel(gpt-*) -> proxy\nfallback: direct\n".to_owned())
+    );
 
     let provider_entries = projection.readdir("model/api.lmm.best");
     assert!(provider_entries.is_ok());
@@ -392,7 +408,7 @@ fn fuse_v1_projection_skips_disabled_provider_models() {
         .into_iter()
         .map(|entry| entry.name().to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(model_names, ["debug", "helper", "main"]);
+    assert_eq!(model_names, ["debug", "helper", "main", "route"]);
     assert_eq!(
         projection.getattr("model/api.lmm.best"),
         Err(FuseV1Error::NotFound)

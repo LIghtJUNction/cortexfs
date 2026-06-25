@@ -1,8 +1,8 @@
 use super::{
     is_passthrough_tool, openai_stream_event, provider_key_names, provider_messages_for_agent,
-    provider_transport, resolve_model_alias, resolved_model_path, run, run_cli_tool_to_writer,
-    ObjectPath, OpenAiStreamEvent, ResolvedTransport, RunnerModelRoute, RunnerProviderConfig,
-    RunnerTransportConfig,
+    provider_route, provider_transport, resolve_model_alias, resolved_model_path, run,
+    run_cli_tool_to_writer, ObjectPath, OpenAiStreamEvent, ProviderRoute, ResolvedTransport,
+    RunnerProviderConfig,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -12,7 +12,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
-use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(unix)]
@@ -214,10 +213,10 @@ fn test_prompt_context() -> AgentPromptContext {
 #[test]
 fn provider_key_names_accept_configured_and_host_fallbacks() {
     assert_eq!(
-        provider_key_names(&test_provider_config(
-            "https://api.openai.com/v1",
-            Some("CORTEXFS_OPENAI_KEY")
-        )),
+        provider_key_names(
+            &test_provider_config("https://api.openai.com/v1", Some("CORTEXFS_OPENAI_KEY")),
+            None
+        ),
         vec![
             "CORTEXFS_OPENAI_KEY".to_owned(),
             "OPENAI_COM_API_KEY".to_owned(),
@@ -229,11 +228,32 @@ fn provider_key_names_accept_configured_and_host_fallbacks() {
 #[test]
 fn provider_key_names_reject_invalid_configured_names() {
     assert_eq!(
-        provider_key_names(&test_provider_config(
-            "https://localhost:11434/v1",
-            Some("bad-name")
-        )),
+        provider_key_names(
+            &test_provider_config("https://localhost:11434/v1", Some("bad-name")),
+            None
+        ),
         vec!["LOCALHOST_API_KEY".to_owned()]
+    );
+}
+
+#[test]
+fn provider_key_names_support_route_key_slots() {
+    assert_eq!(
+        provider_key_names(
+            &test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
+            Some("office-key")
+        ),
+        vec![
+            "OPENAI_API_KEY_OFFICE_KEY".to_owned(),
+            "OPENAI_OFFICE_KEY_API_KEY".to_owned(),
+            "OPENAI_API_KEY".to_owned(),
+            "OPENAI_COM_API_KEY_OFFICE_KEY".to_owned(),
+            "OPENAI_COM_OFFICE_KEY_API_KEY".to_owned(),
+            "OPENAI_COM_API_KEY".to_owned(),
+            "API_OPENAI_COM_API_KEY_OFFICE_KEY".to_owned(),
+            "API_OPENAI_COM_OFFICE_KEY_API_KEY".to_owned(),
+            "API_OPENAI_COM_API_KEY".to_owned(),
+        ]
     );
 }
 
@@ -242,7 +262,7 @@ fn provider_transport_defaults_to_direct_base_url() {
     assert_eq!(
         provider_transport(
             &test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
-            "gpt-4o"
+            None
         ),
         Ok(ResolvedTransport::Direct {
             base_url: "https://api.openai.com/v1".to_owned()
@@ -252,22 +272,13 @@ fn provider_transport_defaults_to_direct_base_url() {
 
 #[test]
 fn provider_transport_uses_exact_http_route() {
-    let mut config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
-    config.transports.insert(
-        "office".to_owned(),
-        RunnerTransportConfig {
-            kind: "http".to_owned(),
-            url: Some("http://127.0.0.1:8080/v1".to_owned()),
-            path: None,
-        },
-    );
-    config.route.push(RunnerModelRoute {
-        model: "gpt-4o".to_owned(),
-        transport: "office".to_owned(),
-    });
+    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
 
     assert_eq!(
-        provider_transport(&config, "gpt-4o"),
+        provider_transport(
+            &config,
+            Some("group(office) -> http(http://127.0.0.1:8080/v1)\ndomain(openai.com) -> office\n")
+        ),
         Ok(ResolvedTransport::Http {
             base_url: "http://127.0.0.1:8080/v1".to_owned()
         })
@@ -276,25 +287,36 @@ fn provider_transport_uses_exact_http_route() {
 
 #[test]
 fn provider_transport_uses_wildcard_unix_route() {
-    let mut config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
-    config.transports.insert(
-        "local-socket".to_owned(),
-        RunnerTransportConfig {
-            kind: "unix".to_owned(),
-            url: None,
-            path: Some("/run/user/1000/cortexfs/proxy/openai.sock".to_owned()),
-        },
-    );
-    config.route.push(RunnerModelRoute {
-        model: "gpt-*".to_owned(),
-        transport: "local-socket".to_owned(),
-    });
+    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
 
     assert_eq!(
-        provider_transport(&config, "gpt-4o"),
+        provider_transport(
+            &config,
+            Some("group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock)\ndomain(openai.com) -> local-socket\n")
+        ),
         Ok(ResolvedTransport::Unix {
             base_url: "http://localhost/v1".to_owned(),
             socket_path: "/run/user/1000/cortexfs/proxy/openai.sock".to_owned()
+        })
+    );
+}
+
+#[test]
+fn provider_route_selects_key_slot_by_model() {
+    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+
+    assert_eq!(
+        provider_route(
+            &config,
+            "api.openai.com",
+            "gpt-4o",
+            Some("group(paid) -> direct, key(office)\nmodel(gpt-*) -> paid\nfallback: direct\n")
+        ),
+        Ok(ProviderRoute {
+            transport: ResolvedTransport::Direct {
+                base_url: "https://api.openai.com/v1".to_owned()
+            },
+            key_slot: Some("office".to_owned())
         })
     );
 }
@@ -304,9 +326,6 @@ fn test_provider_config(base_url: &str, api_key_env: Option<&str>) -> RunnerProv
         base_url: base_url.to_owned(),
         api_key_env: api_key_env.map(str::to_owned),
         oauth: None,
-        transports: BTreeMap::new(),
-        route: Vec::new(),
-        default_transport: None,
     }
 }
 
