@@ -594,6 +594,27 @@ fn agent_attach_missing_terminal_suggests_start_command() {
 }
 
 #[test]
+fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
+    let socket = unique_test_dir("agent-attach-missing-terminal-unsafe-session").join("main.sock");
+    let result = stream_terminal_socket(&socket, true, "coder", "safe; touch CORTEXFS_HINT_PWNED #");
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.message.contains("terminal is not running")
+                && error.message.contains(
+                    "ctx agent start coder --session 'safe; touch CORTEXFS_HINT_PWNED #'"
+                )
+    ));
+}
+
+#[test]
+fn shell_quote_arg_escapes_single_quotes() {
+    assert_eq!(shell_quote_arg("default"), "default");
+    assert_eq!(shell_quote_arg("has space"), "'has space'");
+    assert_eq!(shell_quote_arg("can't"), "'can'\\''t'");
+}
+
+#[test]
 fn cli_names_reject_usage_placeholders() {
     assert!(require_cli_name("agent name", "coder").is_ok());
     assert!(matches!(

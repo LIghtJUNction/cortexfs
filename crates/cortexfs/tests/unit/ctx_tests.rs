@@ -9,7 +9,7 @@ use super::{
     agent_start_systemd_command, agent_terminal_socket, ctx_state, read_agent_processes,
     read_ctx_status, read_status_agent_processes, render_agent_process_tree,
     render_agent_status_lines, require_cli_name, require_session_name, resolve_abi_path,
-    run_visible_tool, stream_socket_request, stream_terminal_socket, AgentArgs, AgentMount,
+    run_visible_tool, shell_quote_arg, stream_socket_request, stream_terminal_socket, AgentArgs, AgentMount,
     AgentStartArgs, Command, FileCommand, LsTarget, ObjectClass,
     MAX_SOCKET_FRAME_BYTES, terminal_safe_text,
 };
