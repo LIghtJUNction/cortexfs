@@ -1,12 +1,12 @@
 # agent.sh
 
-`agent.sh` is a tiny Linux shell frontend for the CortexFS v1 agent ABI. It is
-not the CortexFS runtime, a provider SDK, a scheduler, or a private chat
-database.
+`agent.sh` is a tiny Linux compatibility frontend for `ctx agent` commands. It
+is not the CortexFS runtime, a socket protocol implementation, a provider SDK,
+a scheduler, or a private chat database.
 
-It only depends on ordinary shell tools plus Linux `nc` with Unix socket
-support. It does not use `jq`, Python, Node, npm, Cargo, cloud SDKs, provider
-clients, or package managers.
+It depends on Bash and one `ctx` binary. It does not use `nc`, `jq`, Python,
+Node, npm, Cargo, cloud SDKs, provider clients, package managers, or direct
+provider APIs. All agent protocol behavior stays inside `ctx`.
 
 ## Install
 
@@ -22,9 +22,12 @@ Check the installed frontend:
 agent.sh --help
 ```
 
-## ABI Paths
+## Boundary
 
-`agent.sh` only uses stable v1 paths:
+`agent.sh` is a command router, not an ABI reader. It resolves `ctx`, validates
+the agent name, maps legacy flags to `ctx agent` subcommands, and then execs
+`ctx`. The stable paths below are the CortexFS state that `ctx` reads and
+writes:
 
 ```text
 /ctx/agent/<agent>.sock
@@ -72,15 +75,27 @@ agent.sh --status coder
 agent.sh --raw coder "prompt"
 ```
 
-With no prompt, `agent.sh AGENT` opens the agent socket chat REPL through
+With no prompt, `agent.sh AGENT` opens the agent chat REPL through
 `ctx agent repl AGENT`. With a prompt, it delegates to `ctx agent send AGENT`.
 
 Use `agent.sh --attach AGENT` only when you want to join the agent terminal and
 see `ctxterm -> tsh`.
 
-## Socket Protocol
+## Chat And Terminal
 
-Socket requests are newline-delimited JSON:
+`ctx agent repl` owns line editing, interrupt handling, socket requests, and
+assistant response rendering. Interactive REPL responses are buffered before
+printing so model output does not corrupt the user's current input buffer.
+`Ctrl+C` exits the REPL.
+
+`ctx agent send` is the non-interactive path and may stream assistant deltas as
+they arrive.
+
+`ctx agent attach` is a different workflow: it joins the persistent agent PTY.
+That PTY runs `ctxterm -> tsh`; `tsh` is the agent-facing tool shell, not the
+human chat UI.
+
+The socket request shape used by `ctx` is newline-delimited JSON:
 
 ```json
 {"op":"send","id":"agent-sh-...","session":"default","scope":"private","cwd":"/work","input":"fix tests"}
@@ -88,8 +103,8 @@ Socket requests are newline-delimited JSON:
 {"op":"cancel","id":"run-1"}
 ```
 
-Responses are rendered as assistant text by default. Set
-`CORTEX_RAW_EVENTS=1` or pass `--raw` to print raw JSONL events.
+Responses are rendered by `ctx agent` as assistant text by default. Pass `--raw`
+to print raw JSONL events.
 
 ## Sessions
 
