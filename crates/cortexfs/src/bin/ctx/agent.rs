@@ -1018,16 +1018,49 @@ fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if !Path::new(&mount.source).is_absolute() {
         return Err(CliError::usage("agent mount source must be absolute"));
     }
-    if !Path::new(&mount.target).is_absolute() {
+    let Some(target) = normalized_absolute_mount_target(&mount.target) else {
         return Err(CliError::usage("agent mount target must be absolute"));
-    }
+    };
     if !matches!(mount.mode.as_str(), "ro" | "rw") {
         return Err(CliError::usage("agent mount mode must be ro or rw"));
     }
-    if mount.target == "/" || mount.target.starts_with("/ctx/") || mount.target == "/ctx" {
-        return Err(CliError::usage("agent mount target cannot replace / or /ctx"));
+    if is_protected_agent_mount_target(&target) {
+        return Err(CliError::usage(
+            "agent mount target cannot replace sandbox system paths",
+        ));
     }
     Ok(())
+}
+
+fn normalized_absolute_mount_target(target: &str) -> Option<String> {
+    let path = Path::new(target);
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut normalized = PathBuf::from("/");
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir => {}
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::Prefix(_) => return None,
+        }
+    }
+    Some(normalized.display().to_string())
+}
+
+fn is_protected_agent_mount_target(target: &str) -> bool {
+    const PROTECTED_TARGETS: &[&str] = &[
+        "/", "/bin", "/ctx", "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run",
+        "/usr",
+    ];
+
+    PROTECTED_TARGETS
+        .iter()
+        .any(|protected| target == *protected || target.starts_with(&format!("{protected}/")))
 }
 
 fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
