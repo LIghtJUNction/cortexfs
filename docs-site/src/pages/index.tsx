@@ -20,6 +20,8 @@ type Copy = {
   developer: string;
   inspectTitle: string;
   inspectText: string;
+  virtualFileTitle: string;
+  virtualFileText: string;
   terminalTitle: string;
   terminalText: string;
   contextTitle: string;
@@ -55,6 +57,9 @@ const zh: Copy = {
   inspectTitle: '一眼可见',
   inspectText:
     '模型是文件，agent 是可执行对象和 socket，tool 是能力端点，session 是普通历史目录。隐藏状态变成可 inspect 的事实。',
+  virtualFileTitle: '此文件，非彼文件',
+  virtualFileText:
+    '你看到的文件很可能不在硬盘上，而是 CortexFS 按需投影出的内存视图。不开、不读，就不生成；需要调试时直接 cat。',
   terminalTitle: 'tsh 跑在 ctxterm 上',
   terminalText:
     'ctxterm 拥有 PTY 生命周期，tsh 是 agent 唯一默认 shell。它只按 CTX_PATH 找 CortexFS tool，不回退到 host PATH。',
@@ -75,7 +80,7 @@ const zh: Copy = {
     '稳定 ABI 小，发现靠目录遍历，执行走文件或 Unix socket。tool 元数据可 load/pin，未 pin 的上下文由 W-TinyLFU 回收。',
   developerTitle: '开发 agent 不需要新框架',
   developerText:
-    '写控制文件、执行 tool、追加事件、原子提交请求，就是 CortexFS 的开发模型。agent runtime 可以简单到一个脚本，也可以复杂到完整调度器。',
+    '描述身份、启动会话、调用 tool、观察上下文，就是 CortexFS 的开发模型。agent runtime 可以简单到一个脚本，也可以复杂到完整调度器。',
   developerSteps: [
     {
       title: '定义身份',
@@ -83,14 +88,14 @@ const zh: Copy = {
       code: 'ctx set agent/coder.d/system.md "You are a careful Rust agent."',
     },
     {
-      title: '提交任务',
-      text: '对话走 agent socket；异步 tool 走同目录临时文件，然后原子 rename 成 *.req.json。',
-      code: 'printf ... > .new.req.tmp && mv .new.req.tmp task.req.json',
+      title: '发送任务',
+      text: '高层入口是 agent 会话。文本、路径、图片说明都进入同一条对话流；文件本体放在可见 workspace 或 shared space。',
+      code: 'ctx send coder "review /workspace/docs/DESIGN.md"',
     },
     {
-      title: '记录事实',
-      text: '输出写 event JSONL，结果写 session/latest.md 或 outbox。context 是缓存，history 才是事实。',
-      code: 'tail -f /ctx/home/1000/agent/coder/session/default/events.jsonl',
+      title: '观察运行',
+      text: '用普通文件查看 prompt、history、latest output 和 context pack。需要旁观终端时 attach 到 ctxterm。',
+      code: 'ctx agent prompt coder && ctx agent output coder',
     },
   ],
   architectureTitle: '高层抽象',
@@ -115,6 +120,9 @@ const en: Copy = {
   inspectTitle: 'Visible by default',
   inspectText:
     'Models are files, agents are executables and sockets, tools are capability endpoints, and sessions are ordinary history directories.',
+  virtualFileTitle: 'A file, but not that kind of file',
+  virtualFileText:
+    'The file you see may not live on disk. CortexFS can project it from memory on demand: if nobody opens it, nothing has to be materialized.',
   terminalTitle: 'tsh runs on ctxterm',
   terminalText:
     'ctxterm owns the PTY lifecycle. tsh is the only default agent shell, resolving tools through CTX_PATH and never through host PATH.',
@@ -135,7 +143,7 @@ const en: Copy = {
     'The ABI is small, discovery is directory traversal, execution is file or Unix socket I/O, and loaded tool metadata is bounded by W-TinyLFU.',
   developerTitle: 'Develop agents without a new framework',
   developerText:
-    'Write control files, execute tools, append events, and atomically submit requests. An agent runtime can be a script or a full scheduler.',
+    'Describe identity, start sessions, invoke tools, and inspect context. An agent runtime can be a script or a full scheduler.',
   developerSteps: [
     {
       title: 'Define identity',
@@ -143,14 +151,14 @@ const en: Copy = {
       code: 'ctx set agent/coder.d/system.md "You are a careful Rust agent."',
     },
     {
-      title: 'Submit work',
-      text: 'Chat uses the agent socket. Async tools write a temp file and atomically rename it to *.req.json.',
-      code: 'printf ... > .new.req.tmp && mv .new.req.tmp task.req.json',
+      title: 'Send work',
+      text: 'The high-level entry is an agent session. Text, paths, and image instructions share one conversation stream; file bytes live in visible workspace or shared space.',
+      code: 'ctx send coder "review /workspace/docs/DESIGN.md"',
     },
     {
-      title: 'Record facts',
-      text: 'Output is event JSONL, latest.md, or outbox. Context is cache; history is fact.',
-      code: 'tail -f /ctx/home/1000/agent/coder/session/default/events.jsonl',
+      title: 'Observe runtime',
+      text: 'Use ordinary files to inspect prompt, history, latest output, and context packs. Attach to ctxterm when you need the terminal.',
+      code: 'ctx agent prompt coder && ctx agent output coder',
     },
   ],
   architectureTitle: 'High-level abstraction',
@@ -165,6 +173,7 @@ const en: Copy = {
 function FeatureRail({copy}: {copy: Copy}): ReactElement {
   const features = [
     [copy.inspectTitle, copy.inspectText, 'model/main'],
+    [copy.virtualFileTitle, copy.virtualFileText, 'origin=virtual'],
     [copy.terminalTitle, copy.terminalText, 'ctxterm -> tsh'],
     [copy.contextTitle, copy.contextText, 'context/pack.md'],
     [copy.apiTitle, copy.apiText, 'model/<provider>/<id>'],

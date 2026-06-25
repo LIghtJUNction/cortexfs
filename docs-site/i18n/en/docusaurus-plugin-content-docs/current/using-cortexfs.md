@@ -64,6 +64,46 @@ If `/ctx/tool/agent.create`, `agent.start`, or `agent.stop` is missing, the
 matching lifecycle command fails with service unavailable. `ctx agent status`
 and `ctx agent ps` only read ordinary `agent/<name>.d/*` control files.
 
+## Submit Images And Other Files
+
+For images, PDFs, audio, archives, or other binary material, submit a path
+reference instead of putting bytes into the prompt. CortexFS keeps the file
+itself in workspace or shared space visible to the agent; the conversation only
+describes the task and the path.
+
+When you start an agent from the current directory, that directory is mounted as
+`/workspace` by default:
+
+```bash
+ctx agent start coder --session default
+ctx send coder "Analyze /workspace/assets/screenshot.png and summarize UI issues"
+```
+
+Use explicit mounts when you need tighter visibility:
+
+```bash
+ctx agent start coder --session image-review \
+  --no-default-workspace \
+  --mount "$PWD/assets" /input ro \
+  --mount "$PWD/docs" /docs ro \
+  --cwd /docs
+
+ctx send coder --session image-review "Inspect /input/screenshot.png and use /docs/DESIGN.md"
+```
+
+Use shared space when multiple agents or sessions need the same material:
+
+```bash
+mkdir -p "$(ctx path shared project-a)/input"
+cp screenshot.png "$(ctx path shared project-a)/input/"
+ctx agent new reviewer --shared project-a:read
+ctx send reviewer "Inspect /ctx/shared/project-a/input/screenshot.png"
+```
+
+This keeps large files out of message history. Context records paths,
+summaries, and refs; reading image bytes, extracting text, rendering thumbnails,
+or calling a vision model happens lazily through a visible tool.
+
 ## Watch And Attach Terminals
 
 `ctx agent start` mounts the caller's current directory at `/workspace` inside
@@ -116,7 +156,8 @@ Useful checks:
 
 ```bash
 tsh --list
-tsh fs.read '{"path":"README.md"}'
+tsh which fs.read
+tsh help fs.read
 ```
 
 ## Use agent.sh
@@ -126,15 +167,20 @@ The repository still includes `agent.sh` as a shell frontend:
 ```bash
 install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh
 agent.sh --help
+agent.sh coder
 agent.sh coder "summarize this repository"
+agent.sh --chat coder
+agent.sh --attach coder
+agent.sh --watch coder
 agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
-agent.sh --latest coder
 ```
 
-`agent.sh` is a thin client. It reads and writes
-`/ctx/agent/<agent>.sock` and session files; it does not keep a private chat
-database.
+`agent.sh coder` opens the chat REPL through `ctx agent-sh coder`. With prompt
+arguments, `ctx agent-sh` forwards one message to `ctx agent send`. Use
+`agent.sh --watch coder` to observe the agent terminal, and `agent.sh --attach
+coder` only when you want to enter `ctxterm -> tsh`. `agent.sh` does not keep a
+private chat database.
 
 ## Use Shared Space
 
@@ -152,9 +198,12 @@ mounts, policy, Linux uid/gid, and mode bits.
 ## Inspect History
 
 ```bash
-ctx history coder
-ctx latest coder
+ctx agent history coder
+ctx agent output coder
 ```
+
+Without `--session`, these commands use `session/index/current` first and fall
+back to `default`.
 
 The underlying history lives at:
 

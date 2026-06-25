@@ -41,20 +41,51 @@ aimock-testing.md
 
 ## 开发心智模型
 
-CortexFS 的二次开发不从“接入一个框架”开始，而是从“操作一棵文件系统”开始：
+CortexFS 的二次开发不从“接入一个框架”开始，而是从“操作一棵文件系统”开始。但这里的
+“文件”不是传统意义上必须落在硬盘上的文件。
+
+你在 `/ctx` 里看到的文件，可能来自硬盘，也可能是 CortexFS 按当前 agent、session、
+权限和上下文即时投影出的内存视图。比如传统 agent 架构想调试上下文，往往要新增 API
+接口、导出调试 JSON，或者把内部状态反复写到文件；写到硬盘会产生额外 I/O 和同步问题，
+写到 tmpfs 又容易丢失。FUSE 让这些状态以文件形态出现：不 `cat`、不 `stat`、不打开，
+就不需要物化；一旦需要观察，就用普通 Unix 工具读取。
+
+这就是 CortexFS 的核心设计：把隐藏的 agent runtime 状态变成所见即所得的文件视图，同时
+保留深度定制能力。agent 不需要接入一套新框架；它只要理解文件、socket、可执行 tool 和
+session 这几个高层对象。
 
 ```text
 写 agent/<name>.d/*     配置身份、模型、权限、挂载、工具路径
 连 agent/<name>.sock    发送 JSONL 对话请求
 执行 tool/<name>        运行一个受权限约束的能力
 读 session/*            查看历史、事件、latest output 和 context pack
-写 *.req.json           用原子 rename 提交异步请求
-追加 events.jsonl       把运行事实持久化
+读 context/*            查看当前工作集、引用文件、child result
+读 xattr/stat           判断文件类型、来源、token 估算和安全属性
 ```
 
 一个最小 agent runtime 可以只是一个可执行文件：从 stdin 或 socket request 读输入，选择
 `agent/<name>.d/model`，写出稳定事件帧。复杂 runtime 可以做 tool loop、上下文构建、
 child agent 调度和 provider 适配，但它们仍然落在同一套对象、socket 和文件语义里。
+
+图片、PDF、音频、压缩包等非文本输入不要塞进 prompt，也不要发明新的上传 API。推荐方式是
+让文件先出现在 agent 可见的文件系统里，再在对话中引用路径：
+
+```bash
+ctx agent start coder --session default --mount "$PWD" /workspace rw
+ctx send coder "请分析 /workspace/assets/screenshot.png，并对照 /workspace/docs/DESIGN.md 给建议"
+```
+
+需要跨 agent 或跨会话共享的材料，放在 shared space：
+
+```bash
+mkdir -p "$(ctx path shared project-a)/input"
+cp screenshot.png "$(ctx path shared project-a)/input/"
+ctx agent new reviewer --shared project-a:read
+ctx send reviewer "请查看 /ctx/shared/project-a/input/screenshot.png"
+```
+
+runtime 只需要把这些路径记录进 `context/refs.jsonl` 或 context pack；真正读取图片字节、
+抽取 token、生成缩略图或调用视觉模型，应由对应 tool 或 provider adapter 在需要时完成。
 
 ## 扩展 tool
 
