@@ -395,7 +395,18 @@ fn parse_agent_session(
     command: &str,
 ) -> Result<(String, Option<String>), CliError> {
     let agent = required_arg(&mut values, &format!("{command} requires an agent name"))?;
-    let session = values.next();
+    let mut session = None;
+    if let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" => {
+                session = Some(required_arg(
+                    &mut values,
+                    &format!("{command} --session requires a session name"),
+                )?);
+            }
+            _ => session = Some(value),
+        }
+    }
     no_extra_args(values)?;
     Ok((agent, session))
 }
