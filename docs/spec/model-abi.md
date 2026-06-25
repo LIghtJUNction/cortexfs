@@ -140,14 +140,21 @@ context_length
 ```
 
 Provider adapters may populate those fields from
-`ModelListingClient::list_models()` / `ModelList`. The built-in `debug/echo`
-model is local debug metadata and does not imply a provider default.
+`ModelListingClient::list_models()` / `ModelList`. Built-in `debug/*` models
+are local debug metadata and do not imply a provider default.
 
 ```bash
 /ctx/model/debug/echo "hello"
+/ctx/model/debug/proxy "please answer through the active host AI chat"
 echo "hello" | /ctx/model/openai/gpt-4o
 echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-4o
 ```
+
+`debug/proxy` is a software-independent proxy harness. By default it emits a
+portable JSON request that can be pasted into any AI chat surface. If
+`CORTEXFS_PROXY_COMMAND` is set, the object runner sends that JSON request to
+the executable on stdin and treats stdout as the model response. This is a
+debug bridge, not a provider namespace and not a cloud API configuration.
 
 Semantics:
 

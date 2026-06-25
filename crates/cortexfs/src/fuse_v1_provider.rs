@@ -1,10 +1,26 @@
 fn debug_echo_model_metadata() -> String {
+    debug_model_metadata(
+        "debug/echo",
+        "Built-in debug echo model",
+        "chat,stream",
+    )
+}
+
+fn debug_proxy_model_metadata() -> String {
+    debug_model_metadata(
+        "debug/proxy",
+        "Built-in debug proxy model",
+        "chat,stream",
+    )
+}
+
+fn debug_model_metadata(id: &str, description: &str, cap: &str) -> String {
     [
         format!("#!{CORTEXFS_OBJECT_RUNNER}"),
         "# cortexfs.object=model".to_owned(),
-        "# cortexfs.id=debug/echo".to_owned(),
-        "# cortexfs.name=debug/echo".to_owned(),
-        "# cortexfs.description=Built-in debug echo model".to_owned(),
+        format!("# cortexfs.id={id}"),
+        format!("# cortexfs.name={id}"),
+        format!("# cortexfs.description={description}"),
         "# cortexfs.type=debug".to_owned(),
         "# cortexfs.created_at=".to_owned(),
         "# cortexfs.owned_by=cortexfs".to_owned(),
@@ -16,20 +32,20 @@ fn debug_echo_model_metadata() -> String {
         "# cortexfs.driver.agent=debug".to_owned(),
         "# cortexfs.session=none".to_owned(),
         "# cortexfs.status=idle".to_owned(),
-        "# cortexfs.cap=chat,stream".to_owned(),
+        format!("# cortexfs.cap={cap}"),
     ]
     .join("\n")
         + "\n"
 }
 
-fn debug_echo_control_content(file: &str) -> Option<&'static str> {
+fn debug_model_control_content(model: &str, file: &str) -> Option<String> {
     match file {
-        "id" => Some("debug/echo\n"),
-        "driver" => Some("default=debug\nexec=debug\nagent=debug\n"),
-        "cap" => Some("chat\nstream\n"),
-        "default" | "log" => Some("\n"),
-        "session" => Some("none\n"),
-        "status" => Some("idle\n"),
+        "id" => Some(format!("{model}\n")),
+        "driver" => Some("default=debug\nexec=debug\nagent=debug\n".to_owned()),
+        "cap" => Some("chat\nstream\n".to_owned()),
+        "default" | "log" => Some("\n".to_owned()),
+        "session" => Some("none\n".to_owned()),
+        "status" => Some("idle\n".to_owned()),
         _ => None,
     }
 }

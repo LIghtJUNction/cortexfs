@@ -77,6 +77,8 @@ fn abi_paths_classify_by_stable_shape() {
         ("model/debug/echo", "ctx.model.exec"),
         ("model/debug/echo.sock", "ctx.model.socket"),
         ("model/debug/echo.d/id", "ctx.model.control"),
+        ("model/debug/proxy", "ctx.model.exec"),
+        ("model/debug/proxy.d/id", "ctx.model.control"),
         ("agent/coder", "ctx.agent.exec"),
         ("agent/coder.sock", "ctx.agent.socket"),
         ("agent/coder.d/policy", "ctx.agent.control"),

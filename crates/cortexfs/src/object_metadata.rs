@@ -126,6 +126,8 @@ fn exec_metadata(fields: &[(&str, String)]) -> String {
 fn model_metadata_description(name: &str, driver: &str) -> &'static str {
     if name == "debug/echo" && driver == "debug" {
         "Built-in debug echo model"
+    } else if name == "debug/proxy" && driver == "debug" {
+        "Built-in debug proxy model"
     } else {
         ""
     }
@@ -136,7 +138,7 @@ fn model_metadata_type(driver: &str) -> &str {
 }
 
 fn model_metadata_owner(name: &str, driver: &str) -> &'static str {
-    if name == "debug/echo" && driver == "debug" {
+    if matches!(name, "debug/echo" | "debug/proxy") && driver == "debug" {
         "cortexfs"
     } else {
         ""
@@ -172,6 +174,104 @@ where
     stdout.write_all(b"\n")?;
     stdout.write_all(format!(r#"{{"type":"done","run":"{run}","status":"ok"}}"#).as_bytes())?;
     stdout.write_all(b"\n")
+}
+
+/// Runs the built-in debug proxy model and writes canonical JSONL.
+///
+/// The default mode is software-independent: it emits a portable proxy request
+/// that can be pasted into any AI chat surface. If `CORTEXFS_PROXY_COMMAND` is
+/// set, that executable receives the proxy request JSON on stdin and its stdout
+/// becomes the model response.
+pub fn run_proxy_model<I, S, W>(args: I, mut stdout: W) -> std::io::Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+    W: Write,
+{
+    let input = collect_debug_model_input(args)?;
+    let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    stdout.write_all(
+        format!(r#"{{"type":"start","run":"{run}","model":"debug/proxy"}}"#).as_bytes(),
+    )?;
+    stdout.write_all(b"\n")?;
+
+    let response = if let Some(response) = env::var_os("CORTEXFS_PROXY_RESPONSE") {
+        response.to_string_lossy().into_owned()
+    } else if let Some(command) = env::var_os("CORTEXFS_PROXY_COMMAND") {
+        run_proxy_command(&command, &run, &input)?
+    } else {
+        manual_proxy_response(&run, &input)
+    };
+    let text = serde_json::to_string(&response).unwrap_or_else(|_error| "\"\"".to_owned());
+    stdout.write_all(format!(r#"{{"type":"delta","run":"{run}","text":{text}}}"#).as_bytes())?;
+    stdout.write_all(b"\n")?;
+    stdout.write_all(format!(r#"{{"type":"done","run":"{run}","status":"ok"}}"#).as_bytes())?;
+    stdout.write_all(b"\n")
+}
+
+fn collect_debug_model_input<I, S>(args: I) -> std::io::Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut input = args
+        .into_iter()
+        .map(|value| value.as_ref().to_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if input.is_empty() {
+        std::io::stdin().read_to_string(&mut input)?;
+    }
+    Ok(input)
+}
+
+fn run_proxy_command(command: &std::ffi::OsStr, run: &str, input: &str) -> std::io::Result<String> {
+    let request = proxy_request_json(run, input);
+    let mut child = Command::new(command)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(request.as_bytes())?;
+    }
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Ok(format!(
+            "proxy command exited with status {}\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ))
+    }
+}
+
+fn manual_proxy_response(run: &str, input: &str) -> String {
+    format!(
+        "\
+CortexFS debug proxy request
+
+This model is not connected to a provider. Copy the JSON block below into any AI chat window, \
+then paste the assistant answer back to your CortexFS client or test harness.
+
+```json
+{}
+```
+",
+        proxy_request_json(run, input)
+    )
+}
+
+fn proxy_request_json(run: &str, input: &str) -> String {
+    serde_json::json!({
+        "cortexfs_proxy_version": 1,
+        "run": run,
+        "model": "debug/proxy",
+        "instruction": "Answer the CortexFS agent request. Return only the assistant response text unless the user asks for structured output.",
+        "input": input,
+    })
+    .to_string()
 }
 
 fn read_object_control_for_metadata(control_dir: &Path, file: &str) -> Result<String, FuseV1Error> {

@@ -58,6 +58,19 @@ fn runner_rejects_unknown_model() {
 }
 
 #[test]
+fn proxy_model_emits_portable_manual_request() -> Result<(), Box<dyn std::error::Error>> {
+    let mut output = Vec::new();
+    cortexfs::run_proxy_model(["debug this agent"], &mut output)?;
+    let output = String::from_utf8(output)?;
+
+    assert!(output.contains(r#""model":"debug/proxy""#));
+    assert!(output.contains("CortexFS debug proxy request"));
+    assert!(output.contains("cortexfs_proxy_version"));
+    assert!(output.contains("debug this agent"));
+    Ok(())
+}
+
+#[test]
 fn model_alias_resolves_only_ctx_model_objects() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::temp_dir().join(format!(
         "cortexfs-runner-model-alias-ok-{}",

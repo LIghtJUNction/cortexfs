@@ -454,7 +454,7 @@ fn collect_agent_events_buffered_with(
     let mut output = String::new();
     let mut diagnostics = Vec::new();
     let mut exit_code = 0;
-    let mut response_bytes = 0;
+    let mut response_bytes: usize = 0;
     let mut events = 0;
     let mut line = String::new();
     loop {

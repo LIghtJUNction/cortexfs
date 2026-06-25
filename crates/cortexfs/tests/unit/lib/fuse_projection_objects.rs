@@ -114,6 +114,13 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
                 && node.attr().file_type() == FuseV1FileType::Directory
     ));
     let Ok(debug_node) = debug_node else { return };
+    let debug_entries = projection.readdir("model/debug");
+    let debug_entries = ok!(debug_entries);
+    let debug_names = debug_entries
+        .iter()
+        .map(super::FuseV1DirEntry::name)
+        .collect::<Vec<_>>();
+    assert_eq!(debug_names, ["echo", "echo.d", "proxy", "proxy.d"]);
     let echo_node = projection.lookup(&debug_node, "echo");
     assert!(matches!(
         echo_node,
@@ -146,6 +153,18 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
         echo_attr,
         Ok(ref attr) if attr.mode() & 0o777 == 0o555
     ));
+    let proxy_metadata = projection.read_to_string("model/debug/proxy");
+    assert!(matches!(
+        proxy_metadata,
+        Ok(ref content)
+            if content.starts_with(&format!("#!{CORTEXFS_OBJECT_RUNNER}\n"))
+                && content.contains("# cortexfs.name=debug/proxy\n")
+                && content.contains("# cortexfs.description=Built-in debug proxy model\n")
+    ));
+    assert_eq!(
+        projection.read_to_string("model/debug/proxy.d/id"),
+        Ok("debug/proxy\n".to_owned())
+    );
     let tool_metadata = projection.read_to_string("tool/tsh");
     assert!(matches!(
         tool_metadata,

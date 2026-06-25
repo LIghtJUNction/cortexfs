@@ -12,10 +12,12 @@ use super::{
     AgentInterruptGuard, collect_agent_events_buffered,
     collect_agent_events_buffered_interruptible, copy_socket_response_interruptible, ctx_state,
     env_exports, is_mount_point, read_agent_processes, read_ctx_status, read_status_agent_processes,
-    render_agent_process_tree, render_agent_status_lines, require_cli_name, require_session_name,
+    render_agent_process_tree, render_agent_status_lines, require_agent_mount, require_cli_name,
+    require_session_name,
     resolve_abi_path, run_visible_tool, run_visible_tool_with_writer, shell_quote_arg, stream_agent_socket_request_buffered_interruptible, stream_socket_request,
     stream_terminal_socket, terminal_connect_cli_error, AgentArgs, AgentMount,
     AgentShArgs, AgentShMode, AgentStartArgs, Command, FileCommand, LsTarget, ObjectClass,
+    MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS, MAX_BUFFERED_AGENT_RENDERED_BYTES,
     MAX_SOCKET_FRAME_BYTES, terminal_safe_text,
 };
 use cortexfs::{

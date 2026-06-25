@@ -1040,8 +1040,7 @@ fn normalized_absolute_mount_target(target: &str) -> Option<String> {
     let mut normalized = PathBuf::from("/");
     for component in path.components() {
         match component {
-            std::path::Component::RootDir => {}
-            std::path::Component::CurDir => {}
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
                 normalized.pop();
             }
