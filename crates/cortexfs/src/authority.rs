@@ -22,8 +22,11 @@ pub fn authorize_tool_execution(
         .map_err(tool_path_denial)?
         .ok_or(ToolExecutionDenial::ToolNotFound)?;
 
-    let metadata =
-        fs::metadata(hit.path()).map_err(|_error| ToolExecutionDenial::CannotInspectTool)?;
+    let metadata = symlink_safe_metadata(hit.path())
+        .map_err(|_error| ToolExecutionDenial::CannotInspectTool)?;
+    if !metadata.is_file() {
+        return Err(ToolExecutionDenial::CannotInspectTool);
+    }
     if !linux_identity_can_execute(&metadata, authority.identity) {
         return Err(ToolExecutionDenial::LinuxPermission);
     }
@@ -79,7 +82,8 @@ pub fn authorize_shared_access(
         return Err(SharedAccessDenial::ReadOnlyMount);
     }
 
-    let metadata = fs::metadata(path).map_err(|_error| SharedAccessDenial::CannotInspectPath)?;
+    let metadata = symlink_safe_metadata(path)
+        .map_err(|_error| SharedAccessDenial::CannotInspectPath)?;
     let linux_allowed = match access {
         SharedAccess::Read => linux_identity_can_read(&metadata, authority.identity),
         SharedAccess::Write => linux_identity_can_write(&metadata, authority.identity),
@@ -120,7 +124,8 @@ pub fn authorize_session_access(
         return Err(SessionAccessDenial::ReadOnlyMount);
     }
 
-    let metadata = fs::metadata(path).map_err(|_error| SessionAccessDenial::CannotInspectPath)?;
+    let metadata = symlink_safe_metadata(path)
+        .map_err(|_error| SessionAccessDenial::CannotInspectPath)?;
     let linux_allowed = match access {
         SessionAccess::Read | SessionAccess::Resume => {
             linux_identity_can_read(&metadata, authority.identity)

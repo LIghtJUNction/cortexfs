@@ -38,6 +38,17 @@ fn tool_path_denial(error: ToolPathError) -> ToolExecutionDenial {
     }
 }
 
+fn symlink_safe_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "symlink authority target refused",
+        ));
+    }
+    Ok(metadata)
+}
+
 fn linux_identity_can_execute(metadata: &fs::Metadata, identity: &AgentUnixIdentity) -> bool {
     let mode = metadata.permissions().mode();
     if identity.uid() == 0 {
