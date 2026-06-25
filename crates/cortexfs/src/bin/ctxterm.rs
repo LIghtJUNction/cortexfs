@@ -5,6 +5,7 @@ use std::fs::OpenOptions;
 use std::io::{self, IsTerminal, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::AsFd;
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -279,7 +280,7 @@ fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
         Err(_error) => return Err(CtxtermError::unavailable("pty output thread failed")),
     }
     if let Some(socket) = socket_path.as_deref() {
-        let _ignored = fs::remove_file(listen_bind_path(socket));
+        let _ignored = remove_stale_socket(socket);
     }
     Ok(exit_code(&status))
 }
@@ -289,27 +290,19 @@ fn start_listener(
     pty_writer: PtyWriter,
     clients: Clients,
 ) -> Result<(), CtxtermError> {
-    let bind_path = listen_bind_path(socket);
-    if let Some(parent) = bind_path.parent() {
+    if let Some(parent) = socket.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             CtxtermError::unavailable(format!("cannot create {}: {error}", parent.display()))
         })?;
     }
-    match fs::remove_file(&bind_path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(CtxtermError::unavailable(format!(
-                "cannot replace {}: {error}",
-                bind_path.display()
-            )));
-        }
-    }
-    let listener = UnixListener::bind(&bind_path).map_err(|error| {
-        CtxtermError::unavailable(format!("cannot listen on {}: {error}", bind_path.display()))
+    remove_stale_socket(socket).map_err(|error| {
+        CtxtermError::unavailable(format!("cannot replace {}: {error}", socket.display()))
     })?;
-    fs::set_permissions(&bind_path, fs::Permissions::from_mode(0o600)).map_err(|error| {
-        CtxtermError::unavailable(format!("cannot chmod {}: {error}", bind_path.display()))
+    let listener = UnixListener::bind(socket).map_err(|error| {
+        CtxtermError::unavailable(format!("cannot listen on {}: {error}", socket.display()))
+    })?;
+    fs::set_permissions(socket, fs::Permissions::from_mode(0o600)).map_err(|error| {
+        CtxtermError::unavailable(format!("cannot chmod {}: {error}", socket.display()))
     })?;
     thread::spawn(move || {
         for stream in listener.incoming().flatten() {
@@ -319,14 +312,15 @@ fn start_listener(
     Ok(())
 }
 
-fn listen_bind_path(socket: &Path) -> PathBuf {
-    match fs::read_link(socket) {
-        Ok(target) if target.is_absolute() => target,
-        Ok(target) => match socket.parent() {
-            Some(parent) => parent.join(target),
-            None => target,
-        },
-        Err(_error) => socket.to_path_buf(),
+fn remove_stale_socket(socket: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(socket) {
+        Ok(metadata) if metadata.file_type().is_socket() => fs::remove_file(socket),
+        Ok(_metadata) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to replace non-socket path",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -566,9 +560,16 @@ fn write_error_to_ctxterm(error: &io::Error) -> CtxtermError {
 
 #[cfg(test)]
 mod tests {
-    use super::{CtxtermCommand, parse_args};
+    use super::{
+        Clients, CtxtermCommand, PtyWriter, parse_args, remove_stale_socket, start_listener,
+    };
     use std::ffi::OsString;
+    use std::fs;
+    use std::io;
+    use std::os::unix::fs::symlink;
+    use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn ctxterm_defaults_to_tsh() {
@@ -640,5 +641,54 @@ mod tests {
                 write: true,
             })
         );
+    }
+
+    #[test]
+    fn remove_stale_socket_refuses_symlink_without_touching_target() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let target = dir.path().join("target.txt");
+        let link = dir.path().join("session.sock");
+        fs::write(&target, "keep me").expect("write target");
+        symlink(&target, &link).expect("create symlink");
+
+        let error = remove_stale_socket(&link).expect_err("symlinks are refused");
+
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read_to_string(&target).expect("read target"), "keep me");
+        assert!(link.is_symlink());
+    }
+
+    #[test]
+    fn remove_stale_socket_only_removes_socket_inodes() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let socket = dir.path().join("session.sock");
+        let listener = UnixListener::bind(&socket).expect("bind stale socket");
+        drop(listener);
+
+        remove_stale_socket(&socket).expect("remove stale socket");
+
+        assert!(!socket.exists());
+    }
+
+    #[test]
+    fn start_listener_refuses_symlink_listen_path() {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let target = dir.path().join("target.txt");
+        let link = dir.path().join("session.sock");
+        fs::write(&target, "keep me").expect("write target");
+        symlink(&target, &link).expect("create symlink");
+        let writer: PtyWriter = Arc::new(Mutex::new(Box::new(Vec::<u8>::new())));
+        let clients: Clients = Arc::new(Mutex::new(Vec::new()));
+
+        let error = start_listener(&link, writer, clients).expect_err("symlinks are refused");
+
+        assert_eq!(error.code, 69);
+        assert!(
+            error
+                .message
+                .contains("refusing to replace non-socket path")
+        );
+        assert_eq!(fs::read_to_string(&target).expect("read target"), "keep me");
+        assert!(link.is_symlink());
     }
 }
