@@ -381,3 +381,28 @@ fn reference_tree_bootstrap_installs_tsh_tools() {
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }
 }
+
+#[test]
+fn root_bootstrap_assigns_reference_home_to_agent_identity() {
+    if fs::metadata("/proc/self")
+        .map(|metadata| metadata.uid())
+        .unwrap_or(1)
+        != 0
+    {
+        return;
+    }
+
+    let root = temp_root("reference-tree-home-ownership");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    for path in [
+        root.join("home").join("1000"),
+        root.join("home").join("1000").join("agent").join("coder"),
+        root.join("home").join("1000").join("agent").join("coder").join("session"),
+        root.join("home").join("1000").join("agent").join("coder").join("session").join("index"),
+    ] {
+        let metadata = fs::symlink_metadata(path).expect("reference home metadata");
+        assert_eq!(metadata.uid(), 1000);
+        assert_eq!(metadata.gid(), 1000);
+    }
+}
