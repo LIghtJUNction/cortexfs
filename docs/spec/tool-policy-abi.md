@@ -129,10 +129,12 @@ agent native     in-process/runtime tool call with structured input/output
 
 The terminal CLI mode should behave like a normal command line program: argv is
 preserved, stdin/stdout/stderr are inherited, and output is plain command
-output. The native agent mode may load the same tool into memory and call it
-through the SDK ABI, using structured JSON input and JSONL tool frames. `load`
-and `pin` affect the native context/cache; they must not force terminal CLI
-commands to emit structured frames.
+output. A tool may decide that empty argv is invalid, but `tsh` must not reject
+empty argv for ordinary visible tools before the tool runs. The native agent
+mode may load the same tool into memory and call it through the SDK ABI, using
+structured JSON input and JSONL tool frames. `load` and `pin` affect the native
+context/cache; they must not force terminal CLI commands to emit structured
+frames.
 
 `ctx tool NAME [ARG...]` may directly run only allowlisted safe CortexFS core
 tool CLIs that are implemented inside `ctx`, such as `tsh.config`. It still
