@@ -144,6 +144,8 @@ empty, the runtime looks up `service=cortexfs:<provider> account=oauth:access`.
 Refresh tokens, when used by a future provider adapter or CLI wrapper, use
 `account=oauth:refresh` by default. PKCE uses `S256`; the verifier and callback
 state are short-lived local flow state and must not be written into `/ctx/model`.
+`ctx provider oauth login PROVIDER` is the host-side helper that performs this
+PKCE login flow and writes tokens to the system keychain.
 
 ## One-Shot Exec
 

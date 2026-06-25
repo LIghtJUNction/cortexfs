@@ -17,8 +17,8 @@ use super::{
     resolve_abi_path, run_visible_tool, run_visible_tool_with_writer, shell_quote_arg, stream_agent_socket_request_buffered_interruptible, stream_socket_request,
     stream_terminal_socket, terminal_connect_cli_error, AgentArgs, AgentMount,
     AgentShArgs, AgentShMode, AgentStartArgs, Command, FileCommand, LsTarget, ObjectClass,
-    MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS, MAX_BUFFERED_AGENT_RENDERED_BYTES,
-    MAX_SOCKET_FRAME_BYTES, terminal_safe_text,
+    ProviderArgs, MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS,
+    MAX_BUFFERED_AGENT_RENDERED_BYTES, MAX_SOCKET_FRAME_BYTES, terminal_safe_text,
 };
 use cortexfs::{
     derive_agent_runtime_view, ensure_v1_reference_tree, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,

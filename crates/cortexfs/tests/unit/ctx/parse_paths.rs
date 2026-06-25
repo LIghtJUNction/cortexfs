@@ -1394,6 +1394,48 @@ fn parses_tool_command_with_arguments() {
 }
 
 #[test]
+fn parses_provider_oauth_commands() {
+    let login = cmd!("provider", "oauth", "login", "api.openai.com", "--timeout", "30");
+    assert!(matches!(
+        login,
+        Ok(Command::Provider(ProviderArgs::Login {
+            ref provider,
+            timeout
+        })) if provider == "api.openai.com" && timeout == 30
+    ));
+
+    let status = cmd!("provider", "oauth", "status", "api.openai.com");
+    assert!(matches!(
+        status,
+        Ok(Command::Provider(ProviderArgs::Status { ref provider }))
+            if provider == "api.openai.com"
+    ));
+
+    let refresh = cmd!("provider", "oauth", "refresh", "api.openai.com");
+    assert!(matches!(
+        refresh,
+        Ok(Command::Provider(ProviderArgs::Refresh { ref provider }))
+            if provider == "api.openai.com"
+    ));
+}
+
+#[test]
+fn parses_provider_oauth_help_commands() {
+    assert!(matches!(
+        cmd!("provider", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider"
+    ));
+    assert!(matches!(
+        cmd!("provider", "oauth", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider oauth"
+    ));
+    assert!(matches!(
+        cmd!("provider", "oauth", "login", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider oauth login"
+    ));
+}
+
+#[test]
 fn tool_command_runs_core_tool_cli_at_selected_root() {
     let root = clean_test_dir("ctx-tool-command-core");
     assert!(ensure_v1_reference_tree(&root).is_ok());

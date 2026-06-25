@@ -149,6 +149,21 @@ pub fn oauth_authorization_code_form(
     ]))
 }
 
+/// Builds the form body for refreshing an OAuth access token.
+pub fn oauth_refresh_token_form(
+    config: &OAuthProviderConfig,
+    refresh_token: &str,
+) -> Result<String, OAuthError> {
+    if !is_valid_oauth_config(config) || refresh_token.trim().is_empty() {
+        return Err(OAuthError::InvalidConfig);
+    }
+    Ok(form_urlencoded(&[
+        ("grant_type", "refresh_token"),
+        ("client_id", &config.client_id),
+        ("refresh_token", refresh_token),
+    ]))
+}
+
 /// Parses a token endpoint JSON response and validates bearer semantics.
 pub fn parse_oauth_token_response(body: &[u8]) -> Result<OAuthTokenResponse, OAuthError> {
     let response = serde_json::from_slice::<OAuthTokenResponse>(body)
