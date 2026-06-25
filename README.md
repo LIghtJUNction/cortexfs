@@ -160,6 +160,8 @@ omitted:
 
 ```bash
 ctx send coder "summarize the current failure"
+ctx history coder
+ctx resume coder
 ctx agent history coder
 ctx agent output coder
 ctx agent resume coder
