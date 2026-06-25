@@ -87,7 +87,11 @@ pub use abi_path::{
 pub use agent_control::{
     AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
 };
-pub use agent_prompt::{AgentPromptContext, agent_runtime_contract, render_agent_system_prompt};
+pub use agent_prompt::{
+    AgentPromptContext, MAX_SKILL_METADATA_CHARS, SkillMetadata, agent_runtime_contract,
+    collect_agent_rules, collect_agent_rules_from_paths, collect_skill_metadata, current_time_unix,
+    format_skill_metadata_with_budget, render_agent_system_prompt, skill_metadata_budget_from_env,
+};
 pub use context_pack::{
     ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,
     ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,

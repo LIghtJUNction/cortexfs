@@ -399,7 +399,7 @@ fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliE
 }
 
 fn agent_prompt(root: &Path, name: &str) -> Result<(), CliError> {
-    let prompt = build_agent_system_prompt(root, name, &current_time_unix_string())?;
+    let prompt = build_agent_system_prompt(root, name, &current_time_unix().to_string())?;
     print_terminal_text(&prompt)
 }
 
@@ -418,8 +418,8 @@ fn build_agent_system_prompt(
         &agent_system,
         &AgentPromptContext {
             template,
-            rules: "(no AGENTS.md rules injected)".to_owned(),
-            skills: "(no skill metadata injected)".to_owned(),
+            rules: collect_agent_rules(),
+            skills: collect_skill_metadata(skill_metadata_budget_from_env()),
             tool_injection: "(no repo structure, search result, or file content injected)"
                 .to_owned(),
             history_messages: "(no historical messages injected)".to_owned(),
@@ -443,13 +443,6 @@ fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), 
         print_line(&format!("{child}\t{status}\t{agent}"))?;
     }
     Ok(())
-}
-
-fn current_time_unix_string() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs())
-        .to_string()
 }
 
 fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
