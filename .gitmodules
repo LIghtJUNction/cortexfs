@@ -2,8 +2,3 @@
 	path = agent.sh
 	url = https://github.com/LIghtJUNction/agent.sh.git
 	branch = main
-
-[submodule "aur/cortexfs-git"]
-	path = aur/cortexfs-git
-	url = ssh://aur@aur.archlinux.org/cortexfs-git.git
-	branch = master

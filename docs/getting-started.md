@@ -67,7 +67,8 @@ ctx ls agent
 ctx ls tool
 ctx which model debug/echo
 ctx which tool fs.read
-ctx file classify tool/fs.read
+ctx file type tool/fs.read
+ctx file tool/fs.read
 ```
 
 `model/debug/echo` 是最小调试模型，只回显输入，适合确认本机安装和 ABI 路径都正常。

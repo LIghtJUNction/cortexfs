@@ -32,21 +32,9 @@ fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, Cli
 
 fn file_command(root: &Path, args: &FileArgs) -> Result<(), CliError> {
     match args.command {
-        FileCommand::Cat => file_cat(root, &args.path),
-        FileCommand::Set => {
-            let Some(value) = args.value.as_deref() else {
-                return Err(CliError::usage("file set requires a value"));
-            };
-            file_set(root, &args.path, value)
-        }
-        FileCommand::Append => {
-            let Some(value) = args.value.as_deref() else {
-                return Err(CliError::usage("file append requires a value"));
-            };
-            file_append(root, &args.path, value)
-        }
+        FileCommand::Info => file_info(root, &args.path),
+        FileCommand::Type => file_type(root, &args.path),
         FileCommand::Check => file_check(root, &args.path),
-        FileCommand::Classify => file_classify(root, &args.path),
     }
 }
 
@@ -68,7 +56,7 @@ fn cat_path(path: &Path) -> Result<(), CliError> {
 fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     let path = resolve_abi_path(root, path)?;
     let Some(parent) = path.parent() else {
-        return Err(CliError::usage("file set requires a parent directory"));
+        return Err(CliError::usage("set requires a parent directory"));
     };
     let temp = parent.join(temp_file_name());
     let content = newline_terminated(value);
@@ -107,22 +95,97 @@ fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     })
 }
 
-fn file_classify(root: &Path, path: &str) -> Result<(), CliError> {
+fn file_type(root: &Path, path: &str) -> Result<(), CliError> {
+    print_line(&file_type_name(root, path)?)
+}
+
+fn file_info(root: &Path, path: &str) -> Result<(), CliError> {
+    let resolved = resolve_abi_path(root, path)?;
+    let metadata = fs::symlink_metadata(&resolved).map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", resolved.display()))
+    })?;
+    let bytes = metadata.len();
+    print_line(&format!("path={}", classify_input_path(root, path)?))?;
+    print_line(&format!("resolved={}", resolved.display()))?;
+    print_line(&format!("type={}", file_type_name(root, path)?))?;
+    print_line(&format!("fs_type={}", fs_type_name(&metadata)))?;
+    print_line(&format!("bytes={bytes}"))?;
+    print_line(&format!(
+        "token_estimate={}",
+        cortexfs_token_estimate(&resolved, bytes)
+    ))?;
+    print_cortexfs_xattrs(&resolved)
+}
+
+fn file_type_name(root: &Path, path: &str) -> Result<String, CliError> {
     let resolved = resolve_abi_path(root, path)?;
     let shape = classify_abi_path(&classify_input_path(root, path)?);
     if shape != "ctx.unknown" {
-        return print_line(shape);
+        return Ok(shape.to_owned());
     }
 
     if fs::symlink_metadata(&resolved).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return print_line("ctx.symlink");
+        return Ok("ctx.symlink".to_owned());
     }
 
     if resolved.exists() {
-        return print_line("ctx.ordinary");
+        return Ok("ctx.ordinary".to_owned());
     }
 
     Err(CliError::unavailable(format!(
         "unknown CortexFS path: {path}"
     )))
+}
+
+fn fs_type_name(metadata: &fs::Metadata) -> &'static str {
+    let file_type = metadata.file_type();
+    if file_type.is_dir() {
+        "directory"
+    } else if file_type.is_symlink() {
+        "symlink"
+    } else if metadata.mode() & nix::libc::S_IFMT == nix::libc::S_IFREG {
+        "regular"
+    } else if file_type.is_socket() {
+        "socket"
+    } else if file_type.is_fifo() {
+        "fifo"
+    } else if file_type.is_char_device() {
+        "char"
+    } else if file_type.is_block_device() {
+        "block"
+    } else {
+        "special"
+    }
+}
+
+fn cortexfs_token_estimate(path: &Path, bytes: u64) -> String {
+    read_xattr_string(path, "user.cortexfs.token_estimate").unwrap_or_else(|| {
+        if bytes == 0 {
+            "0".to_owned()
+        } else {
+            bytes.div_ceil(4).to_string()
+        }
+    })
+}
+
+fn print_cortexfs_xattrs(path: &Path) -> Result<(), CliError> {
+    let Ok(names) = xattr::list(path) else {
+        return Ok(());
+    };
+    let mut names = names
+        .filter_map(|name| name.into_string().ok())
+        .filter(|name| name.starts_with("user.cortexfs."))
+        .collect::<Vec<_>>();
+    names.sort_unstable();
+    for name in names {
+        if let Some(value) = read_xattr_string(path, &name) {
+            print_line(&format!("xattr.{name}={value}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn read_xattr_string(path: &Path, name: &str) -> Option<String> {
+    let value = xattr::get(path, name).ok()??;
+    String::from_utf8(value).ok()
 }

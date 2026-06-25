@@ -74,17 +74,26 @@ enum Command {
         name: String,
         args: Vec<String>,
     },
+    Cat {
+        path: String,
+    },
+    Set {
+        path: String,
+        value: String,
+    },
+    Append {
+        path: String,
+        value: String,
+    },
     File(FileArgs),
     ValidateName(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FileCommand {
-    Cat,
-    Set,
-    Append,
+    Info,
+    Type,
     Check,
-    Classify,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -97,7 +106,6 @@ enum LsTarget {
 struct FileArgs {
     command: FileCommand,
     path: String,
-    value: Option<String>,
 }
 
 fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
@@ -133,6 +141,9 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Doctor => success(doctor(&cli.root)),
         Command::Exec { path, args } => exec_object(&cli.root, &path, &args),
         Command::Tool { name, args } => run_visible_tool(&cli.root, &name, &args),
+        Command::Cat { path } => success(file_cat(&cli.root, &path)),
+        Command::Set { path, value } => success(file_set(&cli.root, &path, &value)),
+        Command::Append { path, value } => success(file_append(&cli.root, &path, &value)),
         Command::File(args) => success(file_command(&cli.root, &args)),
         Command::ValidateName(name) => success(validate_name(&name)),
     }
@@ -273,6 +284,23 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
                 name,
                 args: values.collect(),
             })
+        }
+        "cat" => {
+            let path = required_arg(&mut values, "cat requires a path")?;
+            no_extra_args(values)?;
+            Ok(Command::Cat { path })
+        }
+        "set" => {
+            let path = required_arg(&mut values, "set requires a path")?;
+            let value = required_arg(&mut values, "set requires a value")?;
+            no_extra_args(values)?;
+            Ok(Command::Set { path, value })
+        }
+        "append" => {
+            let path = required_arg(&mut values, "append requires a path")?;
+            let value = required_arg(&mut values, "append requires a value")?;
+            no_extra_args(values)?;
+            Ok(Command::Append { path, value })
         }
         "file" => {
             let args = parse_file_args(values.collect())?;
@@ -706,33 +734,16 @@ fn parse_file_args(args: Vec<String>) -> Result<FileArgs, CliError> {
     let first = required_arg(&mut values, "file requires a path or subcommand")?;
 
     let parsed = match first.as_str() {
-        "cat" => parse_file_path_command(values, FileCommand::Cat, "file cat requires a path")?,
-        "set" => parse_file_value_command(
-            values,
-            FileCommand::Set,
-            "file set requires a path",
-            "file set requires a value",
-        )?,
-        "append" => parse_file_value_command(
-            values,
-            FileCommand::Append,
-            "file append requires a path",
-            "file append requires a value",
-        )?,
+        "info" => parse_file_path_command(values, FileCommand::Info, "file info requires a path")?,
+        "type" => parse_file_path_command(values, FileCommand::Type, "file type requires a path")?,
         "check" => {
             parse_file_path_command(values, FileCommand::Check, "file check requires a path")?
         }
-        "classify" => parse_file_path_command(
-            values,
-            FileCommand::Classify,
-            "file classify requires a path",
-        )?,
         _ => {
             no_extra_args(values)?;
             FileArgs {
-                command: FileCommand::Classify,
+                command: FileCommand::Info,
                 path: first,
-                value: None,
             }
         }
     };
@@ -750,23 +761,6 @@ fn parse_file_path_command(
     Ok(FileArgs {
         command,
         path,
-        value: None,
-    })
-}
-
-fn parse_file_value_command(
-    mut values: impl Iterator<Item = String>,
-    command: FileCommand,
-    path_usage: &str,
-    value_usage: &str,
-) -> Result<FileArgs, CliError> {
-    let path = required_arg(&mut values, path_usage)?;
-    let value = required_arg(&mut values, value_usage)?;
-    no_extra_args(values)?;
-    Ok(FileArgs {
-        command,
-        path,
-        value: Some(value),
     })
 }
 
