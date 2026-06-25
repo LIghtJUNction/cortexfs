@@ -177,10 +177,12 @@ fn chown_reference_home_descendants(path: &Path) -> Result<(), ReferenceTreeErro
 }
 
 fn chown_reference_home_entry(path: &Path) -> Result<(), ReferenceTreeError> {
-    nix::unistd::chown(
+    nix::unistd::fchownat(
+        nix::fcntl::AT_FDCWD,
         path,
         Some(nix::unistd::Uid::from_raw(REFERENCE_HOME_UID)),
         Some(nix::unistd::Gid::from_raw(REFERENCE_HOME_GID)),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
     )
     .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
