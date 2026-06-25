@@ -157,6 +157,81 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 }
 
 #[test]
+fn agent_executable_socket_runtime_stops_child_after_cancel() {
+    let root = reference_tree("agent-executable-socket-runtime-cancel");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
+touch "$CTX_SOURCE/agent-ready"
+while [ ! -f "$CTX_SOURCE/release-agent" ]; do
+  sleep 0.05
+done
+printf '{"type":"delta","run":"%s","text":"too-late"}\n' "$CTX_RUN_ID"
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+"#,
+    );
+    set_file_mode(&agent_executable, 0o755);
+
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+    assert!(client
+        .write_all(
+            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let cancel_root = session_root.clone();
+    let ready_file = root.join("agent-ready");
+    let cancel_thread = thread::spawn(move || {
+        for _attempt in 0..50 {
+            if ready_file.exists() {
+                let cancel = handle_socket_request_frame(
+                    &cancel_root,
+                    "/work",
+                    Some("debug/echo"),
+                    r#"{"op":"cancel","id":"msg-1"}"#,
+                );
+                return cancel.is_ok();
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
+    });
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+        },
+    );
+
+    let joined = cancel_thread.join();
+    assert!(joined.is_ok());
+    let Ok(cancelled) = joined else {
+        return;
+    };
+    assert!(cancelled);
+    let outcome = ok!(outcome);
+    assert!(!outcome.jsonl().contains("too-late"));
+    assert_file_text(&session_root.join("default").join("state"), "cancelled\n");
+}
+
+#[test]
 fn agent_executable_socket_runtime_preserves_jsonl_error_output() {
     let root = reference_tree("agent-executable-socket-runtime-error-output");
     let session_root = agent_session_root(&root, "coder");

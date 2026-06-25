@@ -86,6 +86,10 @@ If a human sends `SIGINT` while a run is active, `ctx agent repl` sends a
 `cancel` request for the active run id and returns to the prompt. In an idle
 interactive REPL, `Ctrl+C` exits the REPL.
 
+The socket-activated executable agent runtime observes the durable session state
+for the active run. When the matching `done/cancelled` event appears, it stops
+the child executable and does not record later assistant output for that run.
+
 ## Persistent Terminal Flow
 
 The terminal flow is:
