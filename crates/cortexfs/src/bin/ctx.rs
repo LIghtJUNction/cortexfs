@@ -29,7 +29,7 @@ use cortexfs::{
     inspect_object_layout, inspect_session_control, inspect_session_index, inspect_session_layout,
     inspect_shared_queue_layout, inspect_tool_schema_json, is_executable_file, is_model_name,
     is_object_name, parse_abi_path, parse_model_driver_routes, render_agent_system_prompt,
-    skill_metadata_budget_from_env,
+    run_core_tool_cli_with_root, skill_metadata_budget_from_env,
 };
 use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 

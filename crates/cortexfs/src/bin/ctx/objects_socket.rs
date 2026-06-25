@@ -120,13 +120,28 @@ fn which_tool(root: &Path, name: &str) -> Result<(), CliError> {
     Err(CliError::unavailable(format!("tool not found: {name}")))
 }
 
-fn run_visible_tool(root: &Path, name: &str, _args: &[String]) -> Result<ExitCode, CliError> {
+fn run_visible_tool(root: &Path, name: &str, args: &[String]) -> Result<ExitCode, CliError> {
+    run_visible_tool_with_writer(root, name, args, &mut io::stdout())
+}
+
+fn run_visible_tool_with_writer(
+    root: &Path,
+    name: &str,
+    args: &[String],
+    writer: &mut dyn Write,
+) -> Result<ExitCode, CliError> {
     require_cli_name("tool name", name)?;
     let Some(_hit) = ctx_tool_path(root)?.find(name).map_err(tool_path_error)? else {
         return Err(CliError::unavailable(format!(
             "tool not found in CTX_PATH: {name}"
         )));
     };
+    let cli_args = args.iter().map(OsString::from).collect::<Vec<_>>();
+    if let Some(code) = run_core_tool_cli_with_root(root, name, &cli_args, writer)
+        .map_err(|error| CliError::unavailable(format!("tool {name} failed: {error}")))?
+    {
+        return Ok(code);
+    }
 
     Err(CliError::unavailable(format!(
         "ctx tool {name} is disabled because direct CTX_PATH execution bypasses CortexFS tool authorization"
