@@ -904,6 +904,26 @@ fn tool_command_runs_core_tool_cli_at_selected_root() {
 }
 
 #[test]
+fn tool_command_requires_core_tool_to_be_visible() {
+    let root = clean_test_dir("ctx-tool-command-core-hidden");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(fs::remove_file(root.join("tool").join("tsh.config")).is_ok());
+
+    let result = run_visible_tool_with_writer(
+        &root,
+        "tsh.config",
+        &[r#"{"max_loaded_tools":9}"#.to_owned()],
+        &mut Vec::new(),
+    );
+
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.code == 69 && error.message.contains("tool not found in CTX_PATH: tsh.config")
+    ));
+}
+
+#[test]
 fn tool_command_refuses_direct_ctx_path_execution() {
     let root = clean_test_dir("ctx-tool-command-visible");
     let tool = root.join("tool").join("project.echo");
