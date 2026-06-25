@@ -139,6 +139,47 @@ fn parses_subcommand_help_before_required_args() {
     ));
 }
 
+
+#[test]
+fn parses_literal_help_as_positional_argument() {
+    let which_tool = cmd!("which-tool", "help");
+    assert!(matches!(
+        which_tool,
+        Ok(Command::Which(ObjectClass::Tool, ref name)) if name == "help"
+    ));
+
+    let validate_name = cmd!("validate-name", "help");
+    assert!(matches!(
+        validate_name,
+        Ok(Command::ValidateName(ref name)) if name == "help"
+    ));
+
+    let mount = cmd!("mount", "help");
+    assert!(matches!(
+        mount,
+        Ok(Command::Mount { source: None, mountpoint: Some(ref mountpoint) })
+            if mountpoint == &PathBuf::from("help")
+    ));
+
+    let agent_stop = cmd!("agent", "stop", "help");
+    assert!(matches!(
+        agent_stop,
+        Ok(Command::Agent(AgentArgs::Stop { ref name })) if name == "help"
+    ));
+
+    let agent_status = cmd!("agent", "status", "help");
+    assert!(matches!(
+        agent_status,
+        Ok(Command::Agent(AgentArgs::Status { ref name })) if name == "help"
+    ));
+
+    let agent_new = cmd!("agent", "new", "help");
+    assert!(matches!(
+        agent_new,
+        Ok(Command::Agent(AgentArgs::New(ref args))) if args.name == "help"
+    ));
+}
+
 #[test]
 fn parses_agent_session_client_commands() {
     let send = cmd!("agent", "send", "coder", "--session", "test", "hello", "world");
