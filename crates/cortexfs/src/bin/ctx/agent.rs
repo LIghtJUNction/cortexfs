@@ -5,6 +5,47 @@ enum AgentArgs {
     Stop { name: String },
     Status { name: String },
     Ps,
+    Send {
+        name: String,
+        session: Option<String>,
+        input: String,
+        raw: bool,
+    },
+    Repl {
+        name: String,
+        session: Option<String>,
+        raw: bool,
+    },
+    Resume {
+        name: String,
+        session: Option<String>,
+        raw: bool,
+    },
+    History {
+        name: String,
+        session: Option<String>,
+    },
+    Output {
+        name: String,
+        session: Option<String>,
+    },
+    Pack {
+        name: String,
+        session: Option<String>,
+    },
+    Tools {
+        name: String,
+    },
+    Children {
+        name: String,
+        session: Option<String>,
+    },
+    Cancel {
+        name: String,
+        session: Option<String>,
+        run: Option<String>,
+        raw: bool,
+    },
     Watch { name: String, session: String },
     Attach { name: String, session: String },
 }
@@ -63,6 +104,45 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
             ))
         }
         AgentArgs::Ps => success(agent_ps(root)),
+        AgentArgs::Send {
+            ref name,
+            ref session,
+            ref input,
+            raw,
+        } => agent_send(root, name, session.as_deref(), input, raw),
+        AgentArgs::Repl {
+            ref name,
+            ref session,
+            raw,
+        } => agent_repl(root, name, session.as_deref(), raw),
+        AgentArgs::Resume {
+            ref name,
+            ref session,
+            raw,
+        } => agent_resume(root, name, session.as_deref(), raw),
+        AgentArgs::History {
+            ref name,
+            ref session,
+        } => success(history(root, name, session.as_deref())),
+        AgentArgs::Output {
+            ref name,
+            ref session,
+        } => success(latest(root, name, session.as_deref())),
+        AgentArgs::Pack {
+            ref name,
+            ref session,
+        } => success(agent_pack(root, name, session.as_deref())),
+        AgentArgs::Tools { ref name } => success(agent_tools(root, name)),
+        AgentArgs::Children {
+            ref name,
+            ref session,
+        } => success(agent_children(root, name, session.as_deref())),
+        AgentArgs::Cancel {
+            ref name,
+            ref session,
+            ref run,
+            raw,
+        } => agent_cancel(root, name, session.as_deref(), run.as_deref(), raw),
         AgentArgs::Watch {
             ref name,
             ref session,
@@ -101,6 +181,276 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     print_line(&format!("cwd={}", args.cwd))?;
     print_line(&format!("socket={}", socket.display()))?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn agent_send(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+    input: &str,
+    raw: bool,
+) -> Result<ExitCode, CliError> {
+    let session = agent_session_name(root, name, session)?;
+    let request = format!(
+        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
+        json_string(&request_id()?),
+        json_string(&session),
+        json_string(&agent_cwd(root, name)?),
+        json_string(input)
+    );
+    stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
+}
+
+fn agent_resume(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+    raw: bool,
+) -> Result<ExitCode, CliError> {
+    let session = agent_session_name(root, name, session)?;
+    let request = format!(
+        "{{\"op\":\"resume\",\"session\":{}}}\n",
+        json_string(&session)
+    );
+    stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
+}
+
+fn agent_cancel(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+    run: Option<&str>,
+    raw: bool,
+) -> Result<ExitCode, CliError> {
+    let session = agent_session_name(root, name, session)?;
+    let run = match run {
+        Some(run) => run.to_owned(),
+        None => latest_run_id(root, name, &session)?,
+    };
+    require_cli_name("run id", &run)?;
+    let request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(&run));
+    stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
+}
+
+fn agent_repl(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+    raw: bool,
+) -> Result<ExitCode, CliError> {
+    let session = agent_session_name(root, name, session)?;
+    if io::stdin().is_terminal() {
+        write_error(&format!("ctx agent repl  agent={name}  session={session}"))
+            .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+    }
+
+    if io::stdin().is_terminal() {
+        let mut editor = rustyline::DefaultEditor::new().map_err(|error| {
+            CliError::unavailable(format!("cannot initialize line editor: {error}"))
+        })?;
+        loop {
+            let prompt = format!("{name} {session} > ");
+            let line = match editor.readline(&prompt) {
+                Ok(line) => line,
+                Err(rustyline::error::ReadlineError::Interrupted) => continue,
+                Err(rustyline::error::ReadlineError::Eof) => return Ok(ExitCode::SUCCESS),
+                Err(error) => {
+                    return Err(CliError::unavailable(format!(
+                        "cannot read interactive input: {error}"
+                    )));
+                }
+            };
+            if line.is_empty() {
+                continue;
+            }
+            let _ignored = editor.add_history_entry(line.as_str());
+            if matches!(line.as_str(), "/exit" | "/quit") {
+                return Ok(ExitCode::SUCCESS);
+            }
+            if let Some(code) = agent_repl_command(root, name, &session, &line, raw)? {
+                if code != ExitCode::SUCCESS {
+                    return Ok(code);
+                }
+                continue;
+            }
+            let _code = agent_send(root, name, Some(&session), &line, raw)?;
+        }
+    }
+
+    let mut input = String::new();
+    io::stdin()
+        .read_to_string(&mut input)
+        .map_err(|error| CliError::unavailable(format!("cannot read stdin: {error}")))?;
+    for line in input.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        if matches!(line, "/exit" | "/quit") {
+            break;
+        }
+        if agent_repl_command(root, name, &session, line, raw)?.is_none() {
+            let _code = agent_send(root, name, Some(&session), line, raw)?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn agent_repl_command(
+    root: &Path,
+    name: &str,
+    session: &str,
+    line: &str,
+    raw: bool,
+) -> Result<Option<ExitCode>, CliError> {
+    let code = match line {
+        "/resume" => agent_resume(root, name, Some(session), raw)?,
+        "/history" => {
+            history(root, name, Some(session))?;
+            ExitCode::SUCCESS
+        }
+        "/output" => {
+            latest(root, name, Some(session))?;
+            ExitCode::SUCCESS
+        }
+        "/pack" => {
+            agent_pack(root, name, Some(session))?;
+            ExitCode::SUCCESS
+        }
+        "/tools" => {
+            agent_tools(root, name)?;
+            ExitCode::SUCCESS
+        }
+        "/children" => {
+            agent_children(root, name, Some(session))?;
+            ExitCode::SUCCESS
+        }
+        "/cancel" => agent_cancel(root, name, Some(session), None, raw)?,
+        "/status" => {
+            agent_status(root, name)?;
+            ExitCode::SUCCESS
+        }
+        command if command.starts_with('/') => {
+            write_error(&format!("ctx: unknown repl command: {command}"))
+                .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+            ExitCode::SUCCESS
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(code))
+}
+
+fn agent_status(root: &Path, name: &str) -> Result<(), CliError> {
+    require_cli_name("agent name", name)?;
+    cat_path(&root.join("agent").join(format!("{name}.d")).join("status"))
+}
+
+fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
+    let session_dir = agent_session_dir(root, name, session)?;
+    let context = session_dir.join("context");
+    for file in ["pack.md", "pack.json", "summary.md"] {
+        let path = context.join(file);
+        if path.is_file() {
+            return cat_path(&path);
+        }
+    }
+    Err(CliError::unavailable(format!(
+        "missing context pack: {}",
+        context.join("pack.md").display()
+    )))
+}
+
+fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
+    let child_root = agent_session_dir(root, name, session)?.join("context").join("child");
+    if !child_root.is_dir() {
+        return Ok(());
+    }
+    for child in read_dir_names(&child_root)? {
+        let dir = child_root.join(&child);
+        if !dir.is_dir() {
+            continue;
+        }
+        let status = read_optional_trimmed(&dir.join("status"))?.unwrap_or_else(|| "unknown".to_owned());
+        let agent = read_optional_trimmed(&dir.join("agent"))?.unwrap_or_else(|| "agent?".to_owned());
+        print_line(&format!("{child}\t{status}\t{agent}"))?;
+    }
+    Ok(())
+}
+
+fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
+    require_cli_name("agent name", name)?;
+    let mut paths = Vec::new();
+    paths.extend(ctx_tool_path(root)?.dirs().iter().map(PathBuf::from));
+    let agent_path = root.join("agent").join(format!("{name}.d")).join("path");
+    if let Ok(content) = fs::read_to_string(agent_path) {
+        paths.extend(content.lines().map(PathBuf::from));
+    }
+    paths.sort();
+    paths.dedup();
+    for path in paths {
+        if !path.is_dir() {
+            continue;
+        }
+        for tool in read_dir_names(&path)? {
+            let tool_path = path.join(&tool);
+            if !is_executable_file(&tool_path) || is_control_or_socket_name(&tool) {
+                continue;
+            }
+            let status = read_optional_trimmed(&tool_path.with_file_name(format!("{tool}.d")).join("status"))?
+                .unwrap_or_else(|| "unknown".to_owned());
+            print_line(&format!("{tool}\t{}\t{status}", tool_path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn is_control_or_socket_name(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("sock") || ext.eq_ignore_ascii_case("d"))
+}
+
+fn agent_cwd(root: &Path, name: &str) -> Result<String, CliError> {
+    let path = root.join("agent").join(format!("{name}.d")).join("cwd");
+    Ok(read_optional_trimmed(&path)?.unwrap_or_else(|| "/work".to_owned()))
+}
+
+fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<String, CliError> {
+    let session_dir = agent_session_dir(root, name, Some(session))?;
+    if let Some(run) = read_optional_trimmed(&session_dir.join("current_run"))? {
+        return Ok(run);
+    }
+    let events = session_dir.join("events.jsonl");
+    let content = fs::read_to_string(&events)
+        .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", events.display())))?;
+    let mut latest = None;
+    for line in content.lines() {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            latest = value
+                .get("run")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .or(latest);
+        }
+    }
+    latest.ok_or_else(|| CliError::unavailable("missing run id; pass RUN explicitly"))
+}
+
+fn read_optional_trimmed(path: &Path) -> Result<Option<String>, CliError> {
+    match fs::read_to_string(path) {
+        Ok(value) => {
+            let value = value.trim();
+            if value.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(value.to_owned()))
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot read {}: {error}",
+            path.display()
+        ))),
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]

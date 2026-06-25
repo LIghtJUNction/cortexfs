@@ -132,16 +132,17 @@ ctx ls agent
 ctx ls tool
 ctx which tool fs.read
 ctx path shared project-a
-ctx history coder
-ctx latest coder
-ctx resume coder default
+ctx agent history coder
+ctx agent output coder
+ctx agent resume coder --session default
 ctx file classify tool/fs.read
 ctx file check agent/coder.d/mount
 ctx validate-name coder
 ctx doctor
 ```
 
-`ctx history`、`ctx latest`、`ctx resume` 读取 session 文件并连接 agent socket。
+`ctx agent history`、`ctx agent output`、`ctx agent resume` 读取 session 文件并连接 agent socket。
+这些命令不传 `--session` 时会使用 `session/index/current`，不存在时退回 `default`。
 后续可以把 `ctx chat`、`ctx sessions` 做成 agent socket 薄客户端，但不能维护 provider registry 或私有多轮状态。
 
 ## 环境变量

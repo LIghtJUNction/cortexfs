@@ -62,7 +62,6 @@ agent.sh coder "fix tests"
 agent.sh --session default coder
 agent.sh --resume coder
 agent.sh --history coder
-agent.sh --latest coder
 agent.sh --pack coder
 agent.sh --tools coder
 agent.sh --children coder
@@ -101,6 +100,10 @@ $CTX_HOME/agent/<agent>/session/<session>/context/
 
 If no session is selected, `index/current` is used when present, otherwise the
 session name is `default`.
+
+Use `ctx agent output <agent>` to print the latest assistant output for the
+selected session. Omitting `--session` follows the same `index/current`, then
+`default` rule.
 
 ## Tools And Children
 

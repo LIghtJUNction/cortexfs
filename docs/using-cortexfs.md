@@ -126,7 +126,6 @@ agent.sh --help
 agent.sh coder "summarize this repository"
 agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
-agent.sh --latest coder
 ```
 
 `agent.sh` 是薄客户端。它读写 `/ctx/agent/<agent>.sock` 和 session 文件，不保存私有
@@ -147,9 +146,13 @@ bits 决定。
 ## 查看历史
 
 ```bash
-ctx history coder
-ctx latest coder
+ctx agent history coder
+ctx agent output coder
 ```
+
+不传 `--session` 时，`ctx agent history` 和 `ctx agent output` 会先使用
+`session/index/current`，不存在时退回 `default`。因此查看当前/latest session 不需要
+单独的 `latest` 子命令。
 
 底层历史在：
 

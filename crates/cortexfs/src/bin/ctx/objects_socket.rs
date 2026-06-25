@@ -231,6 +231,101 @@ fn stream_socket_request(socket: &Path, request: &str) -> Result<ExitCode, CliEr
     Ok(ExitCode::SUCCESS)
 }
 
+fn stream_agent_socket_request(
+    socket: &Path,
+    request: &str,
+    raw: bool,
+) -> Result<ExitCode, CliError> {
+    if raw {
+        return stream_socket_request(socket, request);
+    }
+    if request.len() > MAX_SOCKET_FRAME_BYTES {
+        return Err(CliError::usage(format!(
+            "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
+        )));
+    }
+
+    let mut stream = UnixStream::connect(socket).map_err(|error| {
+        CliError::unavailable(format!("cannot connect {}: {error}", socket.display()))
+    })?;
+    stream
+        .write_all(request.as_bytes())
+        .and_then(|()| stream.shutdown(Shutdown::Write))
+        .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
+
+    render_agent_events(stream)
+}
+
+fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
+    let reader = io::BufReader::new(stream);
+    let mut saw_delta = false;
+    let mut exit = ExitCode::SUCCESS;
+    for line in reader.lines() {
+        let line = line.map_err(|error| {
+            CliError::unavailable(format!("cannot read socket response: {error}"))
+        })?;
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            print_line(&line)?;
+            continue;
+        };
+        match value.get("type").and_then(serde_json::Value::as_str) {
+            Some("delta" | "reasoning_delta") => {
+                if let Some(text) = json_text_field(&value) {
+                    print_raw(text)?;
+                    saw_delta = true;
+                }
+            }
+            Some("message" | "reasoning_message") if !saw_delta => {
+                if let Some(text) = json_text_field(&value) {
+                    print_line(text)?;
+                }
+            }
+            Some("tool_call") => {
+                let name = value
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("tool_call");
+                write_error(&format!("[tool] {name}"))
+                    .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+            }
+            Some("error") => {
+                let code = value
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("EIO");
+                let message = value
+                    .get("message")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("runtime error");
+                write_error(&format!("error: {code}: {message}"))
+                    .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+                exit = ExitCode::from(1);
+            }
+            Some("pong") => print_line("pong")?,
+            Some("done") if saw_delta => {
+                print_raw("\n")?;
+                saw_delta = false;
+            }
+            _ => {}
+        }
+    }
+    Ok(exit)
+}
+
+fn json_text_field(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("text")
+        .or_else(|| value.get("content"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn print_raw(text: &str) -> Result<(), CliError> {
+    io::stdout()
+        .lock()
+        .write_all(text.as_bytes())
+        .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))
+}
+
 fn request_id() -> Result<String, CliError> {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)

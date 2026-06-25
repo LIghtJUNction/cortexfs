@@ -48,10 +48,6 @@ enum Command {
         agent: String,
         session: Option<String>,
     },
-    Latest {
-        agent: String,
-        session: Option<String>,
-    },
     Resume {
         agent: String,
         session: Option<String>,
@@ -125,9 +121,6 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::History { agent, session } => {
             success(history(&cli.root, &agent, session.as_deref()))
         }
-        Command::Latest { agent, session } => {
-            success(latest(&cli.root, &agent, session.as_deref()))
-        }
         Command::Resume { agent, session } => resume(&cli.root, &agent, session.as_deref()),
         Command::Send {
             agent,
@@ -193,7 +186,7 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         return Ok(Command::Status);
     };
     let rest: Vec<String> = values.collect();
-    if is_help_args(&rest) {
+    if is_help_args(&rest) && is_top_level_help_topic(command.as_str()) {
         return Ok(Command::HelpTopic(command));
     }
     let mut values = rest.into_iter();
@@ -238,10 +231,6 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         "history" => {
             let (agent, session) = parse_agent_session(values, "history")?;
             Ok(Command::History { agent, session })
-        }
-        "latest" => {
-            let (agent, session) = parse_agent_session(values, "latest")?;
-            Ok(Command::Latest { agent, session })
         }
         "resume" => {
             let (agent, session) = parse_agent_session(values, "resume")?;
@@ -302,6 +291,33 @@ fn is_help_args(args: &[String]) -> bool {
     matches!(args, [value] if is_help_flag(value))
 }
 
+fn is_top_level_help_topic(command: &str) -> bool {
+    matches!(
+        command,
+        "status"
+            | "abi"
+            | "env"
+            | "root"
+            | "bootstrap"
+            | "mount"
+            | "ls"
+            | "which"
+            | "which-tool"
+            | "path"
+            | "history"
+            | "resume"
+            | "send"
+            | "agent"
+            | "ping"
+            | "cancel"
+            | "doctor"
+            | "exec"
+            | "tool"
+            | "file"
+            | "validate-name"
+    )
+}
+
 fn is_help_flag(value: &str) -> bool {
     matches!(value, "help" | "--help" | "-h")
 }
@@ -358,7 +374,7 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
-        "agent requires new, start, stop, status, ps, watch, or attach",
+        "agent requires new, start, stop, status, ps, send, repl, resume, history, output, pack, tools, children, cancel, watch, or attach",
     )?;
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) {
@@ -382,6 +398,53 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
             no_extra_args(values)?;
             Ok(Command::Agent(AgentArgs::Ps))
         }
+        "send" => {
+            let parsed = parse_agent_send_args(values)?;
+            Ok(Command::Agent(AgentArgs::Send {
+                name: parsed.name,
+                session: parsed.session,
+                input: parsed.input,
+                raw: parsed.raw,
+            }))
+        }
+        "repl" => {
+            let (name, session, raw) = parse_agent_session_raw_args(values, "agent repl")?;
+            Ok(Command::Agent(AgentArgs::Repl { name, session, raw }))
+        }
+        "resume" => {
+            let (name, session, raw) = parse_agent_session_raw_args(values, "agent resume")?;
+            Ok(Command::Agent(AgentArgs::Resume { name, session, raw }))
+        }
+        "history" => {
+            let (name, session) = parse_agent_session_option_args(values, "agent history")?;
+            Ok(Command::Agent(AgentArgs::History { name, session }))
+        }
+        "output" => {
+            let (name, session) = parse_agent_session_option_args(values, "agent output")?;
+            Ok(Command::Agent(AgentArgs::Output { name, session }))
+        }
+        "pack" => {
+            let (name, session) = parse_agent_session_option_args(values, "agent pack")?;
+            Ok(Command::Agent(AgentArgs::Pack { name, session }))
+        }
+        "tools" => {
+            let name = required_arg(&mut values, "agent tools requires an agent name")?;
+            no_extra_args(values)?;
+            Ok(Command::Agent(AgentArgs::Tools { name }))
+        }
+        "children" => {
+            let (name, session) = parse_agent_session_option_args(values, "agent children")?;
+            Ok(Command::Agent(AgentArgs::Children { name, session }))
+        }
+        "cancel" => {
+            let parsed = parse_agent_cancel_args(values)?;
+            Ok(Command::Agent(AgentArgs::Cancel {
+                name: parsed.name,
+                session: parsed.session,
+                run: parsed.run,
+                raw: parsed.raw,
+            }))
+        }
         "watch" => {
             let (name, session) = parse_agent_terminal_args(values, "agent watch")?;
             Ok(Command::Agent(AgentArgs::Watch { name, session }))
@@ -392,6 +455,122 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
         }
         _ => Err(CliError::usage(format!("unknown agent command: {command}"))),
     }
+}
+
+fn parse_agent_session_option_args(
+    mut values: impl Iterator<Item = String>,
+    command: &str,
+) -> Result<(String, Option<String>), CliError> {
+    let name = required_arg(&mut values, &format!("{command} requires an agent name"))?;
+    let mut session = None;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" => {
+                session = Some(required_arg(
+                    &mut values,
+                    &format!("{command} --session requires a session name"),
+                )?);
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok((name, session))
+}
+
+fn parse_agent_session_raw_args(
+    mut values: impl Iterator<Item = String>,
+    command: &str,
+) -> Result<(String, Option<String>, bool), CliError> {
+    let name = required_arg(&mut values, &format!("{command} requires an agent name"))?;
+    let mut session = None;
+    let mut raw = false;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" => {
+                session = Some(required_arg(
+                    &mut values,
+                    &format!("{command} --session requires a session name"),
+                )?);
+            }
+            "--raw" => raw = true,
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok((name, session, raw))
+}
+
+struct ParsedAgentSend {
+    name: String,
+    session: Option<String>,
+    raw: bool,
+    input: String,
+}
+
+struct ParsedAgentCancel {
+    name: String,
+    session: Option<String>,
+    raw: bool,
+    run: Option<String>,
+}
+
+fn parse_agent_send_args(mut values: impl Iterator<Item = String>) -> Result<ParsedAgentSend, CliError> {
+    let name = required_arg(&mut values, "agent send requires an agent name")?;
+    let mut session = None;
+    let mut raw = false;
+    let mut input = Vec::new();
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" if input.is_empty() => {
+                session = Some(required_arg(
+                    &mut values,
+                    "agent send --session requires a session name",
+                )?);
+            }
+            "--raw" if input.is_empty() => raw = true,
+            _ => {
+                input.push(value);
+                input.extend(values);
+                break;
+            }
+        }
+    }
+    if input.is_empty() {
+        return Err(CliError::usage("agent send requires input text"));
+    }
+    Ok(ParsedAgentSend {
+        name,
+        session,
+        raw,
+        input: input.join(" "),
+    })
+}
+
+fn parse_agent_cancel_args(
+    mut values: impl Iterator<Item = String>,
+) -> Result<ParsedAgentCancel, CliError> {
+    let name = required_arg(&mut values, "agent cancel requires an agent name")?;
+    let mut session = None;
+    let mut raw = false;
+    let mut run = None;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" | "-s" if run.is_none() => {
+                session = Some(required_arg(
+                    &mut values,
+                    "agent cancel --session requires a session name",
+                )?);
+            }
+            "--raw" if run.is_none() => raw = true,
+            _ if run.is_none() => run = Some(value),
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(ParsedAgentCancel {
+        name,
+        session,
+        raw,
+        run,
+    })
 }
 
 fn parse_agent_start(mut values: impl Iterator<Item = String>) -> Result<AgentStartArgs, CliError> {

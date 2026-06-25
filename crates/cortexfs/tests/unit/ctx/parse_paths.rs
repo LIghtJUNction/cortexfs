@@ -69,13 +69,13 @@ fn parses_session_file_commands() {
         }) if agent == "coder"
     ));
 
-    let latest = cmd!("latest", "coder", "default");
+    let output = cmd!("agent", "output", "coder", "--session", "default");
     assert!(matches!(
-        latest,
-        Ok(Command::Latest {
-            ref agent,
+        output,
+        Ok(Command::Agent(AgentArgs::Output {
+            ref name,
             session: Some(ref session)
-        }) if agent == "coder" && session == "default"
+        })) if name == "coder" && session == "default"
     ));
 
     let resume = cmd!("resume", "coder", "default");
@@ -115,7 +115,7 @@ fn parses_subcommand_help_before_required_args() {
     let latest = cmd!("latest", "--help");
     assert!(matches!(
         latest,
-        Ok(Command::HelpTopic(ref topic)) if topic == "latest"
+        Err(ref error) if error.code == 2 && error.message == "unknown command: latest"
     ));
 
     let agent = cmd!("agent", "--help");
@@ -128,6 +128,41 @@ fn parses_subcommand_help_before_required_args() {
     assert!(matches!(
         agent_watch,
         Ok(Command::HelpTopic(ref topic)) if topic == "agent watch"
+    ));
+}
+
+#[test]
+fn parses_agent_session_client_commands() {
+    let send = cmd!("agent", "send", "coder", "--session", "test", "hello", "world");
+    assert!(matches!(
+        send,
+        Ok(Command::Agent(AgentArgs::Send {
+            ref name,
+            session: Some(ref session),
+            ref input,
+            raw: false,
+        })) if name == "coder" && session == "test" && input == "hello world"
+    ));
+
+    let repl = cmd!("agent", "repl", "coder", "--raw");
+    assert!(matches!(
+        repl,
+        Ok(Command::Agent(AgentArgs::Repl {
+            ref name,
+            session: None,
+            raw: true,
+        })) if name == "coder"
+    ));
+
+    let cancel = cmd!("agent", "cancel", "coder", "--session", "test", "run-1");
+    assert!(matches!(
+        cancel,
+        Ok(Command::Agent(AgentArgs::Cancel {
+            ref name,
+            session: Some(ref session),
+            run: Some(ref run),
+            raw: false,
+        })) if name == "coder" && session == "test" && run == "run-1"
     ));
 }
 
