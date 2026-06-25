@@ -77,6 +77,11 @@ Assistant text is derived from stable event frames and recorded back to the
 durable session. Raw messages and events remain ordinary files; context packs
 are rebuildable views.
 
+Before invoking an executable agent for a durable `send`, the socket runtime
+sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
+`messages.jsonl` history. This is prompt context only; it does not grant
+additional session authority.
+
 If a human sends `SIGINT` while a run is active, a client should prefer
 `cancel`. In an idle interactive REPL, `Ctrl+C` exits the REPL.
 
