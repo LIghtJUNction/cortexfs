@@ -42,11 +42,12 @@ impl FuseV1Projection {
         }
         let path = self.resolve(&normalized)?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        let mode = projected_metadata_mode(&normalized, &metadata);
         Ok(FuseV1Attr::with_owner(
             normalized,
             fuse_file_type(metadata.file_type()),
             metadata.len(),
-            metadata.permissions().mode(),
+            mode,
             metadata.uid(),
             metadata.gid(),
         ))
@@ -464,4 +465,12 @@ fn virtual_regular_entry(
         u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
         mode,
     )))
+}
+
+fn projected_metadata_mode(abi_path: &str, metadata: &fs::Metadata) -> u32 {
+    let mode = metadata.permissions().mode();
+    if abi_path.is_empty() && metadata.is_dir() {
+        return (mode & !0o7777) | 0o755;
+    }
+    mode
 }
