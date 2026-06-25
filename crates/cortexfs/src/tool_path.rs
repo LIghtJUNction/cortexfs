@@ -139,6 +139,6 @@ fn sibling_control_dir(path: &Path) -> PathBuf {
 /// Returns whether the path is an executable regular file.
 #[must_use]
 pub fn is_executable_file(path: &Path) -> bool {
-    fs::metadata(path)
+    fs::symlink_metadata(path)
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
