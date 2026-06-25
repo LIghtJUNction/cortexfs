@@ -14,7 +14,7 @@ use super::{
     MAX_SOCKET_FRAME_BYTES,
 };
 use cortexfs::{
-    ensure_v1_reference_tree, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,
+    derive_agent_runtime_view, ensure_v1_reference_tree, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,
     ContextJsonlIssue, ContextJsonlKind, ContextPackIssue, ContextPackSourceError, EventStreamIssue,
     MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError, ObjectLayoutIssue,
     SessionControlIssue, SessionControlKind, SessionIndexIssue, SessionIndexKind,
