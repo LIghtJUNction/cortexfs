@@ -379,6 +379,62 @@ fn agent_start_builds_sandboxed_terminal_command() {
 }
 
 #[test]
+fn agent_start_default_workspace_remounts_git_read_only() {
+    let source = clean_test_dir("ctx-agent-start-git-ro");
+    assert!(fs::create_dir_all(source.join(".git")).is_ok());
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+    assert_eq!(
+        mounts,
+        vec![
+            AgentMount {
+                source: source.display().to_string(),
+                target: "/workspace".to_owned(),
+                mode: "rw".to_owned(),
+            },
+            AgentMount {
+                source: source.join(".git").display().to_string(),
+                target: "/workspace/.git".to_owned(),
+                mode: "ro".to_owned(),
+            },
+        ]
+    );
+
+    let root = PathBuf::from("/ctx");
+    let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
+    let bwrap = agent_bwrap_args(&root, &args, &mounts, &socket);
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        source.join(".git").to_str().unwrap_or_default(),
+        "/workspace/.git"
+    ));
+}
+
+#[test]
+fn agent_start_no_default_workspace_does_not_guess_git_mount() {
+    let source = clean_test_dir("ctx-agent-start-no-default-git");
+    assert!(fs::create_dir_all(source.join(".git")).is_ok());
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: false,
+        mounts: Vec::new(),
+    };
+
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+    assert!(mounts.is_empty());
+}
+
+#[test]
 fn agent_start_systemd_command_uses_sanitized_environment() {
     let root = PathBuf::from("/ctx");
     let args = AgentStartArgs {

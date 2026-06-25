@@ -64,7 +64,8 @@ ctx agent stop reviewer
 ## 观察和接入 agent 终端
 
 `ctx agent start` 默认把调用者当前目录挂载到 sandbox 内的 `/workspace`，并从
-`/workspace` 启动 `ctxterm -> tsh`：
+`/workspace` 启动 `ctxterm -> tsh`。如果调用者当前目录包含 `.git`，`.git` 会被
+额外覆盖挂载到 `/workspace/.git` 只读：
 
 ```bash
 ctx agent start coder --session default
