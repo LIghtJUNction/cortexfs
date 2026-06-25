@@ -75,7 +75,8 @@ ctx file classify tool/fs.read
 ## 启动一个 agent 终端
 
 `ctx agent start` 会通过 `systemd-run --user` 启动 `ctxterm -> tsh`，并放进 bwrap
-sandbox。默认会把当前目录以读写方式挂到 agent 看到的 `/workspace`：
+sandbox。默认会把当前目录以读写方式挂到 agent 看到的 `/workspace`；如果当前目录
+包含 `.git`，会额外把它覆盖挂载为 `/workspace/.git` 只读：
 
 ```bash
 ctx agent start coder --session default

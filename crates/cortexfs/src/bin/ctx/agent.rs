@@ -220,21 +220,33 @@ fn agent_bwrap_args(
 }
 
 fn agent_start_mounts(args: &AgentStartArgs) -> Result<Vec<AgentMount>, CliError> {
+    let default_source = env::current_dir()
+        .map_err(|error| CliError::unavailable(format!("cannot read current directory: {error}")))?;
+    Ok(agent_start_mounts_with_default_source(args, &default_source))
+}
+
+fn agent_start_mounts_with_default_source(
+    args: &AgentStartArgs,
+    default_source: &Path,
+) -> Vec<AgentMount> {
     let mut mounts = Vec::new();
     if args.default_workspace {
         mounts.push(AgentMount {
-            source: env::current_dir()
-                .map_err(|error| {
-                    CliError::unavailable(format!("cannot read current directory: {error}"))
-                })?
-                .display()
-                .to_string(),
+            source: default_source.display().to_string(),
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         });
+        let git_dir = default_source.join(".git");
+        if git_dir.exists() {
+            mounts.push(AgentMount {
+                source: git_dir.display().to_string(),
+                target: "/workspace/.git".to_owned(),
+                mode: "ro".to_owned(),
+            });
+        }
     }
     mounts.extend(args.mounts.iter().cloned());
-    Ok(mounts)
+    mounts
 }
 
 fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {

@@ -120,10 +120,11 @@ tool named `bash` is visible through `CTX_PATH`.
 
 `ctx agent start <agent> --session <session>` starts the default agent
 terminal in a sandbox. Unless overridden, the caller's current working
-directory is bind-mounted at `/workspace` with read-write access, and the
-agent process starts with `/workspace` as its current directory. The host path
-is therefore not exposed as the agent's `pwd`; the agent sees the authorized
-project mount through the sandbox path.
+directory is bind-mounted at `/workspace` with read-write access. If that
+directory contains `.git`, `.git` is over-mounted at `/workspace/.git` with
+read-only access. The agent process starts with `/workspace` as its current
+directory. The host path is therefore not exposed as the agent's `pwd`; the
+agent sees the authorized project mount through the sandbox path.
 
 The terminal process starts from an empty environment with a small allowlist
 such as `CTX_ROOT`, `CTX_HOME`, `HOME=/workspace`, `PATH=/usr/bin:/bin`,
