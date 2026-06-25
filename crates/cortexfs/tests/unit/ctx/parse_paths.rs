@@ -77,6 +77,15 @@ fn parses_session_file_commands() {
         }) if agent == "coder"
     ));
 
+    let history_flagged = cmd!("history", "coder", "--session", "focus");
+    assert!(matches!(
+        history_flagged,
+        Ok(Command::History {
+            ref agent,
+            session: Some(ref session)
+        }) if agent == "coder" && session == "focus"
+    ));
+
     let output = cmd!("agent", "output", "coder", "--session", "default");
     assert!(matches!(
         output,
@@ -99,6 +108,15 @@ fn parses_session_file_commands() {
             ref agent,
             session: Some(ref session)
         }) if agent == "coder" && session == "default"
+    ));
+
+    let resume_flagged = cmd!("resume", "coder", "-s", "focus");
+    assert!(matches!(
+        resume_flagged,
+        Ok(Command::Resume {
+            ref agent,
+            session: Some(ref session)
+        }) if agent == "coder" && session == "focus"
     ));
 
     let send = cmd!("send", "coder", "default", "hello");
