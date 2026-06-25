@@ -8,35 +8,43 @@ fn parses_spec_which_command() {
 }
 
 #[test]
-fn parses_file_set_command() {
-    let command = cmd!("file", "set", "agent/coder.d/cwd", "/work");
+fn parses_top_level_file_content_commands() {
+    let cat = cmd!("cat", "agent/coder.d/cwd");
     assert!(matches!(
-        command,
-        Ok(Command::File(ref args))
-            if args.command == FileCommand::Set
-                && args.path == "agent/coder.d/cwd"
-                && args.value.as_deref() == Some("/work")
+        cat,
+        Ok(Command::Cat { ref path }) if path == "agent/coder.d/cwd"
+    ));
+
+    let set = cmd!("set", "agent/coder.d/cwd", "/work");
+    assert!(matches!(
+        set,
+        Ok(Command::Set { ref path, ref value }) if path == "agent/coder.d/cwd" && value == "/work"
+    ));
+
+    let append = cmd!("append", "agent/coder.d/path", "/ctx/tool");
+    assert!(matches!(
+        append,
+        Ok(Command::Append { ref path, ref value })
+            if path == "agent/coder.d/path" && value == "/ctx/tool"
     ));
 }
 
 #[test]
-fn parses_file_classify_command() {
-    let explicit = cmd!("file", "classify", "tool/fs.read");
+fn parses_file_metadata_command() {
+    let explicit = cmd!("file", "type", "tool/fs.read");
     assert!(matches!(
         explicit,
         Ok(Command::File(ref args))
-            if args.command == FileCommand::Classify
+            if args.command == FileCommand::Type
                 && args.path == "tool/fs.read"
-                && args.value.is_none()
     ));
 
     let shorthand = cmd!("file", "tool/fs.read");
     assert!(matches!(
         shorthand,
         Ok(Command::File(ref args))
-            if args.command == FileCommand::Classify
+            if args.command == FileCommand::Info
                 && args.path == "tool/fs.read"
-                && args.value.is_none()
     ));
 }
 

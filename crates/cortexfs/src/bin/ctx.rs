@@ -6,6 +6,7 @@ use std::fs::OpenOptions;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::AsFd;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};

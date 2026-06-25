@@ -147,8 +147,8 @@ agent 的用户可编辑系统提示词在：
 例如：
 
 ```bash
-ctx file cat agent/coder.d/system.md
-ctx file set agent/coder.d/system.md "You are a careful Rust coding agent."
+ctx cat agent/coder.d/system.md
+ctx set agent/coder.d/system.md "You are a careful Rust coding agent."
 ```
 
 `system.md` 只定义 persona 和工作风格，不授予权限。agent 默认 native tool 仍只有

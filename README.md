@@ -135,7 +135,8 @@ ctx path shared project-a
 ctx agent history coder
 ctx agent output coder
 ctx agent resume coder --session default
-ctx file classify tool/fs.read
+ctx file type tool/fs.read
+ctx file tool/fs.read
 ctx file check agent/coder.d/mount
 ctx validate-name coder
 ctx doctor

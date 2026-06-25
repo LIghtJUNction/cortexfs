@@ -48,11 +48,12 @@ ctx agent stop reviewer
 ctx agent status reviewer
 ctx agent ps
 
-ctx file cat agent/coder.d/policy
-ctx file set agent/coder.d/cwd /work
-ctx file append agent/coder.d/path /ctx/tool
+ctx cat agent/coder.d/policy
+ctx set agent/coder.d/cwd /work
+ctx append agent/coder.d/path /ctx/tool
+ctx file agent/coder.d/mount
+ctx file type tool/fs.read
 ctx file check agent/coder.d/mount
-ctx file classify tool/fs.read
 
 ctx validate-name coder
 ctx doctor
@@ -181,8 +182,8 @@ Examples:
 
 ```text
 ctx ls agent
-ctx file cat model/openai/gpt-4o.d/cap
-ctx file classify tool/fs.read
+ctx cat model/openai/gpt-4o.d/cap
+ctx file type tool/fs.read
 ctx exec agent/coder "fix tests"
 ```
 
@@ -210,14 +211,16 @@ ctx which agent coder
 ctx which tool fs.read
 ```
 
-`ctx file cat` reads ABI files. It should not interpret much.
+`ctx cat` reads ABI files. It should not interpret much.
 
-`ctx file set` updates by same-directory atomic replacement. `ctx file append`
+`ctx set` updates by same-directory atomic replacement. `ctx append`
 is only for appendable ABI files such as newline lists. `ctx file check`
 validates path shape and file syntax where the ABI defines it.
 
-`ctx file` classifies CortexFS paths using path shape, `stat`, `readlink`, and
-existing control files. It does not query a registry.
+`ctx file` inspects CortexFS paths using path shape, `stat`, `readlink`, and
+read-only `user.cortexfs.*` extended attributes. It prints stable type strings,
+projected byte size, token estimates, and available CortexFS xattrs. It does
+not query a registry.
 
 Stable type strings:
 

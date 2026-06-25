@@ -4,7 +4,7 @@ fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
     let parsed = parse_abi_path(&abi_path);
     let shape = parsed.stable_type();
     if shape == "ctx.unknown" {
-        return file_classify(root, path);
+        return file_type(root, path);
     }
 
     if file_check_policy_or_mount(parsed, &resolved)? {

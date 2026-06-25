@@ -190,7 +190,7 @@ pub enum AbiPathKind<'a> {
 }
 
 impl AbiPathKind<'_> {
-    /// Returns the stable `ctx file classify` string for this parsed path.
+    /// Returns the stable `ctx file type` string for this parsed path.
     #[must_use]
     pub fn stable_type(self) -> &'static str {
         match self {
