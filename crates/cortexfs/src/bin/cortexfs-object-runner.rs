@@ -102,6 +102,13 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
         model
     };
     let model_path = ctx_root.join("model").join(&model);
+    let system_prompt = fs::read_to_string(
+        source
+            .join("agent")
+            .join(format!("{name}.d"))
+            .join("system.md"),
+    )
+    .unwrap_or_default();
     if !model_path.exists() {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
@@ -113,6 +120,7 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
         .arg(input)
         .env("CTX_RUN_ID", &run)
         .env("CTX_AGENT", name)
+        .env("CTX_AGENT_SYSTEM", system_prompt)
         .stdout(Stdio::piped())
         .spawn()
         .map_err(|error| format!("cannot run agent model: {error}"))?;

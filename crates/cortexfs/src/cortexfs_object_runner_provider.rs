@@ -227,22 +227,38 @@ fn provider_messages(input: &str) -> Value {
     let agent = env::var("CTX_AGENT")
         .ok()
         .filter(|value| cortexfs::is_object_name(value));
-    provider_messages_for_agent(input, agent.as_deref())
+    let agent_system = env::var("CTX_AGENT_SYSTEM").unwrap_or_default();
+    provider_messages_for_agent(input, agent.as_deref(), &agent_system)
 }
 
-fn provider_messages_for_agent(input: &str, agent: Option<&str>) -> Value {
+fn provider_messages_for_agent(input: &str, agent: Option<&str>, agent_system: &str) -> Value {
     agent.map_or_else(
         || json!([{"role": "user", "content": input}]),
         |agent| json!([
-            {"role": "system", "content": agent_system_prompt(agent)},
+            {"role": "system", "content": agent_system_prompt(agent, agent_system)},
             {"role": "user", "content": input}
         ]),
     )
 }
 
-fn agent_system_prompt(agent: &str) -> String {
+fn agent_system_prompt(agent: &str, agent_system: &str) -> String {
+    let custom = agent_system.trim();
+    let custom_section = if custom.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\
+Agent instructions from agent/{agent}.d/system.md:
+---
+{custom}
+---
+
+"
+        )
+    };
     format!(
         "\
+{custom_section}CortexFS immutable runtime contract:
 You are CortexFS agent `{agent}`.
 Your only native callable tool is `tsh`, the CortexFS tool shell.
 Do not claim direct access to provider, host, or assistant-platform tools.

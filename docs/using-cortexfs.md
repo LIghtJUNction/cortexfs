@@ -134,6 +134,25 @@ agent.sh --resume coder
 带 prompt 参数时才发送一条 agent socket 消息。需要聊天式 socket REPL 时使用
 `agent.sh --chat coder`。`agent.sh` 不保存私有聊天数据库。
 
+## 自定义 agent
+
+agent 的用户可编辑系统提示词在：
+
+```text
+/ctx/agent/<agent>.d/system.md
+```
+
+例如：
+
+```bash
+ctx file cat agent/coder.d/system.md
+ctx file set agent/coder.d/system.md "You are a careful Rust coding agent."
+```
+
+`system.md` 只定义 persona 和工作风格，不授予权限。agent 默认 native tool 仍只有
+`tsh`；其他工具必须通过 `tsh` 发现、加载、pin 和调用。实际权限仍由
+`agent/<agent>.d/policy`、`path`、`mount`、Linux uid/gid 和 mode bits 决定。
+
 ## 使用共享空间
 
 共享空间是普通文件目录，适合放项目材料、任务输入和 agent 之间要交换的结果：

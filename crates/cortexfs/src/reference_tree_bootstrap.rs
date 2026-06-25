@@ -88,6 +88,7 @@ fn ensure_reference_agent(
         ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
         ("model", format!("{DEFAULT_MODEL_ALIAS}\n")),
+        ("system.md", reference_agent_system_prompt(name)),
         ("policy", policy),
         ("status", "idle\n".to_owned()),
         ("pid", "\n".to_owned()),
@@ -126,6 +127,10 @@ fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
     policy
 }
 
+fn reference_agent_system_prompt(name: &str) -> String {
+    format!("You are CortexFS agent `{name}`.\n")
+}
+
 fn reference_agent_stub_script(name: &str) -> String {
     format!(
         r#"#!/bin/sh
@@ -146,7 +151,7 @@ if [ ! -x "$ctx_root/model/$model" ]; then
   printf '{{"type":"done","run":"%s","status":"error"}}\n' "$run"
   exit 1
 fi
-CTX_RUN_ID="$run" exec "$ctx_root/model/$model" "$input"
+CTX_AGENT="{name}" CTX_AGENT_SYSTEM="$(cat "$source_root/agent/{name}.d/system.md" 2>/dev/null || true)" CTX_RUN_ID="$run" exec "$ctx_root/model/$model" "$input"
 "#
     )
 }

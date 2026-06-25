@@ -75,6 +75,7 @@ agent/<name>.d/env     durable
 agent/<name>.d/path    durable
 agent/<name>.d/mount   durable
 agent/<name>.d/model   durable
+agent/<name>.d/system.md durable
 agent/<name>.d/policy  durable
 agent/<name>.d/log     dynamic or durable, implementation choice
 tool/<name>            dynamic executable entry

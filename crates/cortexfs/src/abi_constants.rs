@@ -72,6 +72,7 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "path",
     "mount",
     "model",
+    "system.md",
     "policy",
     "status",
     "pid",
