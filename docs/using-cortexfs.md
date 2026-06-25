@@ -65,7 +65,8 @@ ctx agent stop reviewer
 
 `ctx agent start` 默认把调用者当前目录挂载到 sandbox 内的 `/workspace`，并从
 `/workspace` 启动 `ctxterm -> tsh`。如果调用者当前目录包含 `.git`，`.git` 会被
-额外覆盖挂载到 `/workspace/.git` 只读：
+额外覆盖挂载到 `/workspace/.git` 只读。agent 的 `HOME` 是沙箱自己的
+`/home/agent`，不会把 shell 配置和缓存写进项目目录：
 
 ```bash
 ctx agent start coder --session default

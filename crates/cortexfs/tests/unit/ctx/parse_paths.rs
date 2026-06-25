@@ -367,9 +367,17 @@ fn agent_start_builds_sandboxed_terminal_command() {
         }],
     };
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
-    let bwrap = agent_bwrap_args(&root, &args, &args.mounts, &socket);
+    let home = PathBuf::from("/ctx/home/1000");
+    let bwrap = agent_bwrap_args(&root, &args, &args.mounts, &socket, &home);
     assert!(contains_arg_triplet(&bwrap, "--bind", "/ctx", "/ctx"));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--bind",
+        "/ctx/home/1000/agent/coder",
+        "/home/agent"
+    ));
     assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
+    assert!(contains_arg_pair(&bwrap, "--dir", "/home"));
     assert!(contains_ro_bind_stub(&bwrap, "/etc/profile"));
     assert!(contains_ro_bind_stub(&bwrap, "/etc/bash.bashrc"));
     assert!(contains_arg_pair(&bwrap, "--tmpfs", "/etc/profile.d"));
@@ -409,7 +417,8 @@ fn agent_start_default_workspace_remounts_git_read_only() {
 
     let root = PathBuf::from("/ctx");
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
-    let bwrap = agent_bwrap_args(&root, &args, &mounts, &socket);
+    let home = PathBuf::from("/ctx/home/1000");
+    let bwrap = agent_bwrap_args(&root, &args, &mounts, &socket, &home);
     assert!(contains_arg_triplet(
         &bwrap,
         "--ro-bind",
@@ -463,7 +472,7 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
                 && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
                 && command.args.contains(&"CTX_ROOT=/ctx".to_owned())
                 && command.args.contains(&"CTX_HOME=/ctx/home/1000".to_owned())
-                && command.args.contains(&"HOME=/workspace".to_owned())
+                && command.args.contains(&"HOME=/home/agent".to_owned())
                 && command.args.contains(&"USER=coder".to_owned())
                 && command.args.contains(&"LOGNAME=coder".to_owned())
                 && command.args.contains(&"SHELL=/usr/bin/bash".to_owned())

@@ -124,10 +124,13 @@ directory is bind-mounted at `/workspace` with read-write access. If that
 directory contains `.git`, `.git` is over-mounted at `/workspace/.git` with
 read-only access. The agent process starts with `/workspace` as its current
 directory. The host path is therefore not exposed as the agent's `pwd`; the
-agent sees the authorized project mount through the sandbox path.
+agent sees the authorized project mount through the sandbox path. The sandbox
+home is `/home/agent`, backed by `/ctx/home/<uid>/agent/<agent>`, so shell
+state such as `.config`, `.cache`, and `.bash_history` does not land in the
+project workspace.
 
 The terminal process starts from an empty environment with a small allowlist
-such as `CTX_ROOT`, `CTX_HOME`, `HOME=/workspace`, `PATH=/usr/bin:/bin`,
+such as `CTX_ROOT`, `CTX_HOME`, `HOME=/home/agent`, `PATH=/usr/bin:/bin`,
 `USER`, `LOGNAME`, `SHELL`, `TERM`, and `LANG`. Host session variables and
 secrets are not inherited by default.
 

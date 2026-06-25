@@ -42,6 +42,8 @@ struct AgentMount {
     mode: String,
 }
 
+const AGENT_SANDBOX_HOME: &str = "/home/agent";
+
 fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
     match *args {
         AgentArgs::New(ref args) => agent_lifecycle_tool(
@@ -114,6 +116,7 @@ fn agent_start_systemd_command(
     socket: &Path,
     unit: &str,
 ) -> Result<AgentStartCommand, CliError> {
+    let home = ctx_home(root)?;
     let mut command = AgentStartCommand {
         program: "systemd-run".to_owned(),
         args: vec![
@@ -128,8 +131,8 @@ fn agent_start_systemd_command(
             "-i".to_owned(),
             "PATH=/usr/bin:/bin".to_owned(),
             format!("CTX_ROOT={}", root.display()),
-            format!("CTX_HOME={}", ctx_home(root)?.display()),
-            format!("HOME={}", args.cwd),
+            format!("CTX_HOME={}", home.display()),
+            format!("HOME={AGENT_SANDBOX_HOME}"),
             format!("USER={}", args.name),
             format!("LOGNAME={}", args.name),
             "SHELL=/usr/bin/bash".to_owned(),
@@ -138,7 +141,9 @@ fn agent_start_systemd_command(
             "/usr/bin/bwrap".to_owned(),
         ],
     };
-    command.args.extend(agent_bwrap_args(root, args, mounts, socket));
+    command
+        .args
+        .extend(agent_bwrap_args(root, args, mounts, socket, &home));
     Ok(command)
 }
 
@@ -147,7 +152,9 @@ fn agent_bwrap_args(
     args: &AgentStartArgs,
     mounts: &[AgentMount],
     socket: &Path,
+    home: &Path,
 ) -> Vec<String> {
+    let agent_home = home.join("agent").join(&args.name);
     let mut bwrap = vec![
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
@@ -159,6 +166,8 @@ fn agent_bwrap_args(
         "/tmp".to_owned(),
         "--dir".to_owned(),
         "/run".to_owned(),
+        "--dir".to_owned(),
+        "/home".to_owned(),
         "--ro-bind".to_owned(),
         "/usr".to_owned(),
         "/usr".to_owned(),
@@ -179,6 +188,9 @@ fn agent_bwrap_args(
         "--bind".to_owned(),
         root.display().to_string(),
         root.display().to_string(),
+        "--bind".to_owned(),
+        agent_home.display().to_string(),
+        AGENT_SANDBOX_HOME.to_owned(),
     ];
     if let Some(runtime_dir) = socket_runtime_dir(socket) {
         bwrap.extend([
