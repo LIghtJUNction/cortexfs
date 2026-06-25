@@ -9,6 +9,7 @@ use cortexfs::{
     serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
+use nix::unistd::{Gid, Uid, getuid, setgid, setgroups, setuid};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 
@@ -39,6 +40,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let session_root = view.home().join("session");
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
+    drop_to_agent_identity(view.identity())?;
     let agent_executable = config.source.join("agent").join(&config.agent);
     serve_agent_executable_socket_listener_once(
         &listener,
@@ -55,6 +57,30 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     )
     .map(|_response| ())
     .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
+}
+
+fn drop_to_agent_identity(identity: &cortexfs::AgentUnixIdentity) -> Result<(), String> {
+    if getuid().as_raw() != 0 {
+        if getuid().as_raw() == identity.uid() {
+            return Ok(());
+        }
+        return Err(format!(
+            "agent runtime must run as root or uid {}; current uid is {}",
+            identity.uid(),
+            getuid().as_raw()
+        ));
+    }
+
+    let groups = identity
+        .groups()
+        .iter()
+        .copied()
+        .map(Gid::from_raw)
+        .collect::<Vec<_>>();
+    setgroups(&groups).map_err(|error| format!("drop supplementary groups: {error}"))?;
+    setgid(Gid::from_raw(identity.gid())).map_err(|error| format!("drop gid: {error}"))?;
+    setuid(Uid::from_raw(identity.uid())).map_err(|error| format!("drop uid: {error}"))?;
+    Ok(())
 }
 
 fn write_error(line: &str) -> io::Result<()> {
