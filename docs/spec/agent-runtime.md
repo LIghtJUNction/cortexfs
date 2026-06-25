@@ -43,6 +43,7 @@ host `PATH`.
 ```text
 agent.sh AGENT           -> ctx agent repl AGENT
 agent.sh AGENT INPUT...  -> ctx agent send AGENT INPUT...
+agent.sh --watch AGENT   -> ctx agent watch AGENT
 agent.sh --attach AGENT  -> ctx agent attach AGENT, starting the terminal if needed
 ```
 
@@ -282,7 +283,8 @@ The runtime design is healthy when all of these are true:
 ```text
 agent.sh contains no protocol implementation beyond ctx command routing
 ctx agent repl is the default human chat UI
-ctx agent attach is the only human path into ctxterm -> tsh
+ctx agent watch is the read-only human path into ctxterm -> tsh
+ctx agent attach is the writable human path into ctxterm -> tsh
 tsh never falls back to host PATH
 default terminal cwd is /workspace
 default terminal HOME is /home/agent
