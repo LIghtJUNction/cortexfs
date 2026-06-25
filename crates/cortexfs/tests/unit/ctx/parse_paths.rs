@@ -399,6 +399,42 @@ fn rejects_agent_sh_cancel_with_multiple_run_ids() {
 }
 
 #[test]
+fn agent_sh_attach_omitted_session_uses_current_session() {
+    let root = clean_test_dir("ctx-agent-sh-attach-current-session");
+    let current = root
+        .join("home")
+        .join("1000")
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("index");
+    assert!(fs::create_dir_all(&current).is_ok());
+    assert!(fs::write(current.join("current"), "focus\n").is_ok());
+
+    let session = agent_sh_attach_session(&root, "coder", None);
+
+    assert!(matches!(session, Ok(ref session) if session == "focus"));
+}
+
+#[test]
+fn agent_sh_attach_explicit_session_overrides_current_session() {
+    let root = clean_test_dir("ctx-agent-sh-attach-explicit-session");
+    let current = root
+        .join("home")
+        .join("1000")
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("index");
+    assert!(fs::create_dir_all(&current).is_ok());
+    assert!(fs::write(current.join("current"), "focus\n").is_ok());
+
+    let session = agent_sh_attach_session(&root, "coder", Some("debug"));
+
+    assert!(matches!(session, Ok(ref session) if session == "debug"));
+}
+
+#[test]
 fn agent_sh_with_input_uses_agent_send_request_shape() {
     let root = clean_test_dir("ctx-agent-sh-send-agent-shape");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
