@@ -351,15 +351,23 @@ enum ClientMode {
 fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode> {
     let mut mode = Vec::new();
     let mut byte = [0; 1];
+    let mut complete = false;
     while mode.len() <= CLIENT_MODE_LIMIT {
         let read = stream.read(&mut byte)?;
         if read == 0 {
             break;
         }
         if byte[0] == b'\n' {
+            complete = true;
             break;
         }
         mode.push(byte[0]);
+    }
+    if !complete {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ctxterm client mode must end with newline",
+        ));
     }
     match mode.as_slice() {
         b"watch" => Ok(ClientMode::Watch),
@@ -561,13 +569,15 @@ fn write_error_to_ctxterm(error: &io::Error) -> CtxtermError {
 #[cfg(test)]
 mod tests {
     use super::{
-        Clients, CtxtermCommand, PtyWriter, parse_args, remove_stale_socket, start_listener,
+        ClientMode, Clients, CtxtermCommand, PtyWriter, parse_args, read_client_mode,
+        remove_stale_socket, start_listener,
     };
     use std::ffi::OsString;
     use std::fs;
-    use std::io;
+    use std::io::{self, Read, Write};
+    use std::net::Shutdown;
     use std::os::unix::fs::symlink;
-    use std::os::unix::net::UnixListener;
+    use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
@@ -641,6 +651,36 @@ mod tests {
                 write: true,
             })
         );
+    }
+
+    #[test]
+    fn client_mode_requires_newline() -> Result<(), Box<dyn std::error::Error>> {
+        let (mut client, mut server) = UnixStream::pair()?;
+        client.write_all(b"watch")?;
+        client.shutdown(Shutdown::Write)?;
+
+        let Err(error) = read_client_mode(&mut server) else {
+            return Err("unterminated mode must fail".into());
+        };
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("must end with newline"));
+        Ok(())
+    }
+
+    #[test]
+    fn client_mode_keeps_attach_payload_after_newline() -> Result<(), Box<dyn std::error::Error>> {
+        let (mut client, mut server) = UnixStream::pair()?;
+        client.write_all(b"attach\npayload")?;
+        client.shutdown(Shutdown::Write)?;
+
+        let mode = read_client_mode(&mut server)?;
+        let mut payload = String::new();
+        server.read_to_string(&mut payload)?;
+
+        assert_eq!(mode, ClientMode::Attach);
+        assert_eq!(payload, "payload");
+        Ok(())
     }
 
     #[test]
