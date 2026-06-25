@@ -71,10 +71,10 @@ agent.sh --status coder
 agent.sh --raw coder "prompt"
 ```
 
-With no prompt, `agent.sh AGENT` reads lines from stdin or an interactive TTY
-from an interactive TTY attaches to the agent terminal through
-`ctx agent attach AGENT`, so the user sees `ctxterm -> tsh`. With a prompt, it
-delegates to `ctx agent send AGENT`.
+With no prompt from an interactive TTY, `agent.sh AGENT` attaches to the agent
+terminal through `ctx agent attach AGENT`, starting it first with
+`ctx agent start AGENT` if needed, so the user sees `ctxterm -> tsh`. With a
+prompt, it delegates to `ctx agent send AGENT`.
 
 Use `agent.sh --chat AGENT` for the agent socket chat REPL.
 

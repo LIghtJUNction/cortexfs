@@ -150,8 +150,12 @@ Session terminals use:
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-The ABI socket may be a symlink to `/run/cortexfs/terminal/.../main.sock`;
-`ctxterm --listen` follows that symlink and binds the runtime socket target.
+The ABI socket may be a symlink to a runtime socket. User-started terminals
+prefer `/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock` so
+ordinary users do not need write access to `/ctx` or `/run/cortexfs`. Existing
+installations may still expose `/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock`.
+`ctx agent attach` tries the ABI path, the user runtime path, then the legacy
+runtime path.
 
 The corresponding human commands are:
 

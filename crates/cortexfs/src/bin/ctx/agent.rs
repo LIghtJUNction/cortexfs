@@ -46,8 +46,14 @@ enum AgentArgs {
         run: Option<String>,
         raw: bool,
     },
-    Watch { name: String, session: String },
-    Attach { name: String, session: String },
+    Watch {
+        name: String,
+        session: Option<String>,
+    },
+    Attach {
+        name: String,
+        session: Option<String>,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -146,11 +152,11 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
         AgentArgs::Watch {
             ref name,
             ref session,
-        } => agent_terminal(root, name, session, false),
+        } => agent_terminal(root, name, session.as_deref(), false),
         AgentArgs::Attach {
             ref name,
             ref session,
-        } => agent_terminal(root, name, session, true),
+        } => agent_terminal(root, name, session.as_deref(), true),
     }
 }
 
@@ -162,8 +168,9 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     for mount in &mounts {
         require_agent_mount(mount)?;
     }
-    let socket = agent_terminal_socket(root, &args.name, &args.session)?;
-    ensure_agent_terminal_socket(root, &args.name, &args.session, &socket)?;
+    let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
+    let socket = agent_runtime_socket(root, &args.name, &args.session)?;
+    ensure_agent_terminal_socket(&visible_socket, &socket)?;
     let unit = agent_terminal_unit(&args.name, &args.session);
     let command = agent_start_systemd_command(root, args, &mounts, &socket, &unit)?;
     let status = ProcessCommand::new(&command.program)
@@ -175,11 +182,13 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
             "agent terminal service failed to start with {status}"
         )));
     }
+    wait_for_agent_terminal_socket(&socket)?;
     print_line(&format!("agent={}", args.name))?;
     print_line(&format!("session={}", args.session))?;
     print_line(&format!("unit={unit}.service"))?;
     print_line(&format!("cwd={}", args.cwd))?;
-    print_line(&format!("socket={}", socket.display()))?;
+    print_line(&format!("socket={}", visible_socket.display()))?;
+    print_line(&format!("runtime_socket={}", socket.display()))?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -636,17 +645,9 @@ fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
 }
 
 fn ensure_agent_terminal_socket(
-    root: &Path,
-    name: &str,
-    session: &str,
-    socket: &Path,
+    visible_socket: &Path,
+    runtime_socket: &Path,
 ) -> Result<(), CliError> {
-    if let Some(parent) = socket.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
-        })?;
-    }
-    let runtime_socket = agent_runtime_socket(root, name, session)?;
     if let Some(parent) = runtime_socket.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
@@ -658,31 +659,8 @@ fn ensure_agent_terminal_socket(
             ))
         })?;
     }
-    match fs::read_link(socket) {
-        Ok(target) if target == runtime_socket => {}
-        Ok(_target) => {
-            return Err(CliError::unavailable(format!(
-                "{} already points at another socket",
-                socket.display()
-            )));
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            std::os::unix::fs::symlink(&runtime_socket, socket).map_err(|error| {
-                CliError::unavailable(format!(
-                    "cannot create terminal socket link {} -> {}: {error}",
-                    socket.display(),
-                    runtime_socket.display()
-                ))
-            })?;
-        }
-        Err(error) => {
-            return Err(CliError::unavailable(format!(
-                "cannot inspect {}: {error}",
-                socket.display()
-            )));
-        }
-    }
-    match fs::remove_file(&runtime_socket) {
+    ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)?;
+    match fs::remove_file(runtime_socket) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
@@ -695,7 +673,35 @@ fn ensure_agent_terminal_socket(
     Ok(())
 }
 
+fn wait_for_agent_terminal_socket(socket: &Path) -> Result<(), CliError> {
+    for _ in 0..50 {
+        if socket.exists() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err(CliError::unavailable(format!(
+        "agent terminal service started, but socket did not appear: {}",
+        socket.display()
+    )))
+}
+
 fn agent_runtime_socket(root: &Path, name: &str, session: &str) -> Result<PathBuf, CliError> {
+    let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from("/run")
+            .join("user")
+            .join(current_uid_for_ctx(root)?),
+    };
+    Ok(runtime_root
+        .join("cortexfs")
+        .join("terminal")
+        .join(name)
+        .join(session)
+        .join("main.sock"))
+}
+
+fn agent_legacy_runtime_socket(root: &Path, name: &str, session: &str) -> Result<PathBuf, CliError> {
     Ok(PathBuf::from("/run")
         .join("cortexfs")
         .join("terminal")
@@ -703,6 +709,46 @@ fn agent_runtime_socket(root: &Path, name: &str, session: &str) -> Result<PathBu
         .join(name)
         .join(session)
         .join("main.sock"))
+}
+
+fn ensure_best_effort_visible_terminal_socket(
+    visible_socket: &Path,
+    runtime_socket: &Path,
+) -> Result<(), CliError> {
+    if let Some(parent) = visible_socket.parent()
+        && let Err(error) = fs::create_dir_all(parent)
+    {
+        if error.kind() == io::ErrorKind::PermissionDenied {
+            return Ok(());
+        }
+        return Err(CliError::unavailable(format!(
+            "cannot create {}: {error}",
+            parent.display()
+        )));
+    }
+    match fs::read_link(visible_socket) {
+        Ok(target) if target == runtime_socket => Ok(()),
+        Ok(_target) => Err(CliError::unavailable(format!(
+            "{} already points at another socket",
+            visible_socket.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            match std::os::unix::fs::symlink(runtime_socket, visible_socket) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(()),
+                Err(error) => Err(CliError::unavailable(format!(
+                    "cannot create terminal socket link {} -> {}: {error}",
+                    visible_socket.display(),
+                    runtime_socket.display()
+                ))),
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(()),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot inspect {}: {error}",
+            visible_socket.display()
+        ))),
+    }
 }
 
 fn current_uid_for_ctx(root: &Path) -> Result<String, CliError> {
@@ -749,13 +795,14 @@ fn agent_terminal_unit(name: &str, session: &str) -> String {
 fn agent_terminal(
     root: &Path,
     name: &str,
-    session: &str,
+    session: Option<&str>,
     write: bool,
 ) -> Result<ExitCode, CliError> {
     require_cli_name("agent name", name)?;
-    require_session_name(session)?;
-    let socket = agent_terminal_socket(root, name, session)?;
-    stream_terminal_socket(&socket, write, name, session)
+    let session = agent_session_name(root, name, session)?;
+    require_session_name(&session)?;
+    let socket = agent_terminal_connect_socket(root, name, &session)?;
+    stream_terminal_socket(&socket, write, name, &session)
 }
 
 fn agent_terminal_socket(root: &Path, name: &str, session: &str) -> Result<PathBuf, CliError> {
@@ -766,6 +813,23 @@ fn agent_terminal_socket(root: &Path, name: &str, session: &str) -> Result<PathB
         .join(session)
         .join("terminal")
         .join("main.sock"))
+}
+
+fn agent_terminal_connect_socket(
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<PathBuf, CliError> {
+    for socket in [
+        agent_terminal_socket(root, name, session)?,
+        agent_runtime_socket(root, name, session)?,
+        agent_legacy_runtime_socket(root, name, session)?,
+    ] {
+        if socket.exists() {
+            return Ok(socket);
+        }
+    }
+    agent_terminal_socket(root, name, session)
 }
 
 fn require_session_name(session: &str) -> Result<(), CliError> {

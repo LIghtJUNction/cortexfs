@@ -142,7 +142,14 @@ terminal socket:
 ```
 
 Because FUSE mounts generally cannot host a bound Unix socket directly, this
-visible ABI path may be a symlink to a runtime socket under `/run`, for example:
+visible ABI path may be a symlink to a runtime socket under the user's runtime
+directory:
+
+```text
+/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock
+```
+
+Older installations may use:
 
 ```text
 /run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock
