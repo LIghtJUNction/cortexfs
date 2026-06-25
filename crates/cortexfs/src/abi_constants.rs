@@ -73,12 +73,44 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "mount",
     "model",
     "system.md",
+    "prompt.template.md",
     "policy",
     "status",
     "pid",
     "log",
     "meta.json",
 ];
+
+/// Default system prompt template for agent model calls.
+pub const DEFAULT_AGENT_PROMPT_TEMPLATE: &str = r"# CortexFS Agent System Prompt
+
+Time: {{current_time_unix}}
+Agent: {{agent}}
+
+## AGENT Instructions
+
+{{agent_instructions}}
+
+## Rules
+
+{{rules}}
+
+## Skills
+
+{{skills}}
+
+## Tool Injection
+
+{{tool_injection}}
+
+## History Messages
+
+{{history_messages}}
+
+## Runtime Contract
+
+{{runtime_contract}}
+";
 
 /// Required tool control files.
 pub const TOOL_CONTROL_FILES: &[&str] = &[

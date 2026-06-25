@@ -89,6 +89,10 @@ fn ensure_reference_agent(
         ("mount", mount),
         ("model", format!("{DEFAULT_MODEL_ALIAS}\n")),
         ("system.md", reference_agent_system_prompt(name)),
+        (
+            "prompt.template.md",
+            DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned(),
+        ),
         ("policy", policy),
         ("status", "idle\n".to_owned()),
         ("pid", "\n".to_owned()),

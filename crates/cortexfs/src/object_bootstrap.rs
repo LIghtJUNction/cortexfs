@@ -150,6 +150,7 @@ fn default_agent_control_value(object_name: &str, file: &str) -> String {
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
         "status" => "idle".to_owned(),
         "system.md" => format!("You are CortexFS agent `{object_name}`."),
+        "prompt.template.md" => DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned(),
         "meta.json" => "{}".to_owned(),
         _ => String::new(),
     }
