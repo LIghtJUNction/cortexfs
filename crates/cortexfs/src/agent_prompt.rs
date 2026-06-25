@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,6 +9,10 @@ use serde_json::Value;
 
 pub const MAX_SKILL_METADATA_CHARS: usize = 8_000;
 pub const MAX_HISTORY_MESSAGES_CHARS: usize = 8_000;
+const MAX_AGENT_RULES_CHARS: usize = 64_000;
+const MAX_AGENT_RULE_FILE_BYTES: u64 = 64 * 1024;
+const MAX_SKILL_FILE_BYTES: u64 = 16 * 1024;
+const MAX_SKILL_FILES: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentPromptContext {
@@ -125,14 +130,16 @@ pub fn collect_agent_rules_from_paths(paths: impl IntoIterator<Item = PathBuf>) 
             continue;
         }
         seen.push(key);
-        let Ok(content) = fs::read_to_string(&path) else {
+        let Some(content) = read_bounded_regular_utf8(&path, MAX_AGENT_RULE_FILE_BYTES) else {
             continue;
         };
-        output.push_str("### ");
-        output.push_str(&path.display().to_string());
-        output.push_str("\n\n");
-        output.push_str(content.trim());
-        output.push_str("\n\n");
+        let section = format!("### {}\n\n{}\n\n", path.display(), content.trim());
+        if output.len() + section.len() > MAX_AGENT_RULES_CHARS {
+            let remaining = MAX_AGENT_RULES_CHARS.saturating_sub(output.len());
+            push_str_byte_limit(&mut output, &section, remaining);
+            break;
+        }
+        output.push_str(&section);
     }
     if output.trim().is_empty() {
         "(no AGENTS.md rules discovered)".to_owned()
@@ -227,24 +234,35 @@ fn discover_skill_metadata() -> Vec<SkillMetadata> {
 }
 
 fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 8 {
+    if depth > 8 || paths.len() >= MAX_SKILL_FILES || !is_regular_directory(root) {
         return;
     }
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
+        if paths.len() >= MAX_SKILL_FILES {
+            break;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
         let path = entry.path();
         if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
-            paths.push(path);
-        } else if path.is_dir() {
+            if !file_type.is_dir() {
+                paths.push(path);
+            }
+        } else if file_type.is_dir() {
             collect_skill_files(&path, paths, depth + 1);
         }
     }
 }
 
 fn read_skill_metadata(path: &Path) -> Option<SkillMetadata> {
-    let content = fs::read_to_string(path).ok()?;
+    let content = read_bounded_regular_utf8(path, MAX_SKILL_FILE_BYTES)?;
     let (name, description) = parse_skill_frontmatter(&content);
     let name = name.unwrap_or_else(|| {
         path.parent()
@@ -278,6 +296,45 @@ fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
         }
     }
     (name, description)
+}
+
+fn push_str_byte_limit(output: &mut String, value: &str, max_bytes: usize) {
+    if value.len() <= max_bytes {
+        output.push_str(value);
+        return;
+    }
+    let mut end = 0;
+    for (index, character) in value.char_indices() {
+        let next = index + character.len_utf8();
+        if next > max_bytes {
+            break;
+        }
+        end = next;
+    }
+    if let Some(prefix) = value.get(..end) {
+        output.push_str(prefix);
+    }
+}
+
+fn is_regular_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        let file_type = metadata.file_type();
+        file_type.is_dir() && !file_type.is_symlink()
+    })
+}
+
+fn read_bounded_regular_utf8(path: &Path, max_bytes: u64) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > max_bytes {
+        return None;
+    }
+    let mut content = String::new();
+    fs::File::open(path)
+        .ok()?
+        .take(max_bytes)
+        .read_to_string(&mut content)
+        .ok()?;
+    Some(content)
 }
 
 fn format_skill_metadata(skills: &[SkillMetadata], shorten: bool) -> String {
