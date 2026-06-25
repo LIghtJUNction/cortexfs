@@ -43,15 +43,29 @@ Do not add top-level directories such as `provider`, `workflow`, `job`, `hook`,
 
 ## Development Mental Model
 
-CortexFS extension work starts with file operations, not framework integration:
+CortexFS extension work starts with file operations, not framework integration.
+But these files are not always disk files.
+
+A path under `/ctx` may be backed by disk, or it may be a memory projection
+derived from the current agent, session, authority, and context. Traditional
+agent architectures often expose extra debug APIs, dump JSON, or repeatedly
+write runtime state to files just so developers can inspect context. Disk files
+add I/O and synchronization cost; tmpfs is fast but ephemeral. FUSE lets those
+states appear as files: if nobody opens, stats, or reads a path, it does not
+need to be materialized; when inspection is needed, ordinary Unix tools work.
+
+That is the core shape of CortexFS: hidden runtime state becomes a
+what-you-see-is-what-you-get file view, while remaining deeply customizable. An
+agent does not need a new framework; it only needs the high-level objects:
+files, sockets, executable tools, and sessions.
 
 ```text
 write agent/<name>.d/*     configure identity, model, authority, mounts, tool path
 connect agent/<name>.sock  send JSONL conversation requests
 execute tool/<name>        run a policy-bound capability
 read session/*             inspect history, events, latest output, context packs
-write *.req.json           commit async requests with atomic rename
-append events.jsonl        persist runtime facts
+read context/*             inspect working sets, file refs, child results
+read xattr/stat            inspect file type, origin, token estimate, security facts
 ```
 
 A minimal agent runtime can be a single executable: read a request from stdin or
@@ -59,6 +73,29 @@ a socket, pick `agent/<name>.d/model`, and emit stable event frames. Richer
 runtimes can add tool loops, context packing, child-agent orchestration, and
 provider adaptation, but they still land on the same objects, sockets, and file
 semantics.
+
+For images, PDFs, audio, archives, and other non-text inputs, do not stuff bytes
+into the prompt and do not invent a separate upload API. Put the file somewhere
+visible to the agent, then reference the path in the conversation:
+
+```bash
+ctx agent start coder --session default --mount "$PWD" /workspace rw
+ctx send coder "Analyze /workspace/assets/screenshot.png and compare it with /workspace/docs/DESIGN.md"
+```
+
+For material shared across agents or sessions, use shared space:
+
+```bash
+mkdir -p "$(ctx path shared project-a)/input"
+cp screenshot.png "$(ctx path shared project-a)/input/"
+ctx agent new reviewer --shared project-a:read
+ctx send reviewer "Inspect /ctx/shared/project-a/input/screenshot.png"
+```
+
+The runtime only needs to record those paths in `context/refs.jsonl` or the
+context pack. Reading image bytes, estimating tokens, rendering thumbnails, or
+calling a vision model should happen lazily through the relevant tool or
+provider adapter.
 
 ## Extend Tools
 
