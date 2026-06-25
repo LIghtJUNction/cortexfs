@@ -198,6 +198,11 @@ fn run_agent_executable_streaming(
     let mut command = Command::new(runtime.agent_executable);
     command
         .arg(input)
+        // The socket-activated service may hold provider credentials in its
+        // own environment. Start executable agents from a clean environment
+        // and then add only the derived agent view plus runtime-owned CTX_*
+        // values so those service credentials cannot be inherited by agent
+        // code or its descendants.
         .env_clear()
         .envs(
             runtime
@@ -243,7 +248,13 @@ fn run_agent_executable_streaming(
 }
 
 fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
-    command.uid(identity.uid()).gid(identity.gid());
+    // Non-root test/development invocations retain their existing uid/gid. The
+    // packaged socket service has already dropped supplementary groups to the
+    // derived agent identity; setting child uid/gid here keeps the helper safe
+    // for privileged callers without reintroducing unsafe pre-exec code.
+    if nix::unistd::geteuid().is_root() {
+        command.gid(identity.gid()).uid(identity.uid());
+    }
 }
 
 fn event_type(line: &str) -> Option<String> {
