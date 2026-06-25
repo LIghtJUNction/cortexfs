@@ -74,6 +74,17 @@ Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
+`ctx send` follows the same current-session default as `ctx agent send`:
+
+```text
+ctx send AGENT INPUT
+ctx send AGENT --session SESSION INPUT
+ctx send AGENT SESSION INPUT
+```
+
+Omitting the session reads `session/index/current` first and falls back to
+`default`. The positional `SESSION` form remains accepted for compatibility.
+
 Agent lifecycle conveniences exist as thin wrappers:
 
 ```text
