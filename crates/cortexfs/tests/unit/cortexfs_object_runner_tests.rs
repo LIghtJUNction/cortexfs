@@ -160,6 +160,18 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     assert!(!prompt.contains("image_gen"));
 }
 
+#[test]
+fn agent_prompt_template_controls_rendered_system_message() {
+    let mut context = test_prompt_context();
+    context.template = "agent={{agent}}\ninstructions={{agent_instructions}}\ncontract={{runtime_contract}}\n".to_owned();
+
+    let prompt = agent_system_prompt("coder", "custom identity", &context);
+
+    assert!(prompt.starts_with("agent=coder\ninstructions=custom identity\n"));
+    assert!(prompt.contains("contract=You are CortexFS agent `coder`."));
+    assert!(!prompt.contains("## Rules"));
+}
+
 fn test_prompt_context() -> AgentPromptContext {
     AgentPromptContext {
         template: super::default_agent_prompt_template(),

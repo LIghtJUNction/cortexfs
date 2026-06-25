@@ -305,6 +305,10 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     assert!(
         matches!(prompt_template, Ok(ref content) if content.contains("{{agent_instructions}}"))
     );
+    let agent_script = fs::read_to_string(root.join("agent").join("coder"));
+    assert!(
+        matches!(agent_script, Ok(ref content) if content.contains("CTX_AGENT_PROMPT_TEMPLATE"))
+    );
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(
         matches!(agent_policy, Ok(ref content) if content.contains("model:main use"))
