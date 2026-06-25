@@ -56,6 +56,7 @@ agent policy decides whether execution is allowed
     mount
     model
     system.md
+    prompt.template.md
     policy
     status
     pid
@@ -75,6 +76,7 @@ iso     isolation profile: shared, uid, or userns
 parent  parent agent, session, or run that created this agent
 life    lifecycle ownership, default owned
 system.md user-editable agent instructions/persona. This is prompt text, not authority.
+prompt.template.md user-editable system prompt template. This is prompt text, not authority.
 ```
 
 Multiple agents may share one Linux uid. The uid expresses the user boundary.
@@ -82,10 +84,24 @@ The label expresses the agent security boundary.
 
 `meta.json` may exist for longer descriptions such as purpose, creation time,
 or issue number. Policy decisions must not depend on `meta.json`.
-`system.md` is the user-editable system prompt for the agent. It is read by the
-agent runtime and combined with the immutable CortexFS runtime contract. It must
-not grant tool, model, network, filesystem, or session authority; those remain
-controlled by `policy`, `path`, `mount`, uid/gid, and Linux mode bits.
+`system.md` is the user-editable identity and instruction text for the agent.
+`prompt.template.md` is rendered as the first system message sent to the model.
+The template supports simple `{{name}}` variables including `agent`,
+`current_time_unix`, `agent_instructions`, `rules`, `skills`, `tool_injection`,
+`history_messages`, and `runtime_contract`.
+
+The rendered prompt combines `system.md`, discovered `AGENTS.md` rules, bounded
+skill metadata, optional tool-injected context, optional historical message
+context, and the immutable CortexFS runtime contract. Prompt text must not grant
+tool, model, network, filesystem, or session authority; those remain controlled
+by `policy`, `path`, `mount`, uid/gid, and Linux mode bits.
+
+Skill metadata contains only `name`, `description`, and `SKILL.md` path. Full
+`SKILL.md` files are read only after a skill is selected. The skill metadata
+section may use at most 2% of the model context window; when the window is
+unknown, the hard cap is 8,000 characters. If the list is too large,
+descriptions are shortened first; if it still exceeds the cap, some skills are
+omitted and a warning is included.
 
 Agent startup:
 

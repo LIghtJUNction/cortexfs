@@ -33,7 +33,7 @@ Start from this loop:
 /ctx/model/debug/echo.d/log
 /ctx/agent/coder
 /ctx/agent/coder.sock
-/ctx/agent/coder.d/{owner,uid,gid,groups,label,iso,parent,life,root,cwd,env,path,mount,model,system.md,policy,status,pid,log,meta.json}
+/ctx/agent/coder.d/{owner,uid,gid,groups,label,iso,parent,life,root,cwd,env,path,mount,model,system.md,prompt.template.md,policy,status,pid,log,meta.json}
 /ctx/tool/fs.read
 /ctx/tool/fs.write
 /ctx/tool/shell.exec

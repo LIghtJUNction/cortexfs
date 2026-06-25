@@ -297,6 +297,14 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
         &root.join("agent").join("coder.d").join("system.md"),
         "You are CortexFS agent `coder`.\n",
     );
+    let prompt_template = fs::read_to_string(
+        root.join("agent")
+            .join("coder.d")
+            .join("prompt.template.md"),
+    );
+    assert!(
+        matches!(prompt_template, Ok(ref content) if content.contains("{{agent_instructions}}"))
+    );
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(
         matches!(agent_policy, Ok(ref content) if content.contains("model:main use"))

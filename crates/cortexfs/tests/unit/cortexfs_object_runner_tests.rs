@@ -1,7 +1,7 @@
 use super::{
     agent_system_prompt, is_passthrough_tool, openai_stream_event, provider_key_names,
-    provider_messages_for_agent, run, run_cli_tool_to_writer, ObjectPath, OpenAiStreamEvent,
-    RunnerProviderConfig,
+    provider_messages_for_agent, run, run_cli_tool_to_writer, AgentPromptContext, ObjectPath,
+    OpenAiStreamEvent, RunnerProviderConfig,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -82,14 +82,19 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
         "what tools?",
         Some("coder"),
         "Always answer tersely.",
+        &test_prompt_context(),
     );
     let system = messages
         .pointer("/0/content")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     assert!(system.contains("only native callable tool is `tsh`"));
-    assert!(system.contains("Agent instructions from agent/coder.d/system.md"));
+    assert!(system.contains("## AGENT Instructions"));
     assert!(system.contains("Always answer tersely."));
+    assert!(system.contains("Project rule"));
+    assert!(system.contains("name: rust"));
+    assert!(system.contains("tool output"));
+    assert!(system.contains("previous message"));
     assert!(system.contains("Do not claim direct access"));
     assert!(system.contains("tsh load TOOL"));
     assert_eq!(
@@ -97,9 +102,21 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
         Some("what tools?")
     );
 
-    let prompt = agent_system_prompt("coder", "");
+    let prompt = agent_system_prompt("coder", "", &test_prompt_context());
     assert!(prompt.contains("CortexFS agent `coder`"));
     assert!(!prompt.contains("image_gen"));
+}
+
+fn test_prompt_context() -> AgentPromptContext {
+    AgentPromptContext {
+        template: super::default_agent_prompt_template(),
+        rules: "Project rule".to_owned(),
+        skills: "- name: rust\n  description: Rust help\n  path: /skills/rust/SKILL.md\n"
+            .to_owned(),
+        tool_injection: "tool output".to_owned(),
+        history_messages: "previous message".to_owned(),
+        current_time_unix: "123".to_owned(),
+    }
 }
 
 #[test]

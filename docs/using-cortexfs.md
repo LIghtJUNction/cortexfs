@@ -142,6 +142,7 @@ agent 的用户可编辑系统提示词在：
 
 ```text
 /ctx/agent/<agent>.d/system.md
+/ctx/agent/<agent>.d/prompt.template.md
 ```
 
 例如：
@@ -149,11 +150,22 @@ agent 的用户可编辑系统提示词在：
 ```bash
 ctx cat agent/coder.d/system.md
 ctx set agent/coder.d/system.md "You are a careful Rust coding agent."
+ctx cat agent/coder.d/prompt.template.md
 ```
 
-`system.md` 只定义 persona 和工作风格，不授予权限。agent 默认 native tool 仍只有
-`tsh`；其他工具必须通过 `tsh` 发现、加载、pin 和调用。实际权限仍由
-`agent/<agent>.d/policy`、`path`、`mount`、Linux uid/gid 和 mode bits 决定。
+`system.md` 只定义 persona 和工作风格；`prompt.template.md` 决定它和规则、skill
+元数据、工具注入内容、历史消息上下文、runtime contract 如何组成模型看到的第一条
+system message。模板变量包括 `{{agent}}`、`{{current_time_unix}}`、
+`{{agent_instructions}}`、`{{rules}}`、`{{skills}}`、`{{tool_injection}}`、
+`{{history_messages}}`、`{{runtime_contract}}`。
+
+Skill 列表只注入 `name`、`description`、`SKILL.md` 路径；完整 `SKILL.md` 只在选中
+skill 后读取。Skill 元数据最多占上下文窗口 2%；上下文大小未知时硬上限为 8,000
+字符。超限时先缩短 description，仍超限则省略部分 skill 并在 prompt 中给出警告。
+
+这些 prompt 文件不授予权限。agent 默认 native tool 仍只有 `tsh`；其他工具必须通过
+`tsh` 发现、加载、pin 和调用。实际权限仍由 `agent/<agent>.d/policy`、`path`、
+`mount`、Linux uid/gid 和 mode bits 决定。
 
 ## 使用共享空间
 
