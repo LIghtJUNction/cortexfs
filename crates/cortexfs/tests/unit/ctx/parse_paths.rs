@@ -817,6 +817,48 @@ fn agent_start_default_workspace_does_not_remount_symlinked_git() {
 }
 
 #[test]
+fn agent_mount_validation_rejects_protected_sandbox_targets() {
+    for target in [
+        "/",
+        "/usr",
+        "/usr/local",
+        "/etc",
+        "/bin",
+        "/lib",
+        "/lib64",
+        "/run",
+        "/home",
+        "/dev",
+        "/proc",
+        "/ctx",
+        "/ctx/bin",
+        "/usr/../ctx",
+        "/workspace/../usr/bin",
+    ] {
+        let mount = AgentMount {
+            source: "/tmp/source".to_owned(),
+            target: target.to_owned(),
+            mode: "rw".to_owned(),
+        };
+        assert!(
+            require_agent_mount(&mount).is_err(),
+            "target should be rejected: {target}"
+        );
+    }
+}
+
+#[test]
+fn agent_mount_validation_allows_workspace_subtrees() {
+    let mount = AgentMount {
+        source: "/tmp/source".to_owned(),
+        target: "/workspace/project".to_owned(),
+        mode: "rw".to_owned(),
+    };
+
+    assert!(require_agent_mount(&mount).is_ok());
+}
+
+#[test]
 fn agent_start_no_default_workspace_does_not_guess_git_mount() {
     let source = clean_test_dir("ctx-agent-start-no-default-git");
     assert!(fs::create_dir_all(source.join(".git")).is_ok());
