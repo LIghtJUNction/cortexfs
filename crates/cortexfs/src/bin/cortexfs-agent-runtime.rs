@@ -48,6 +48,8 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         AgentExecutableSocketRuntime {
             ctx_root: Path::new(cortexfs::CTX_ROOT),
             source_root: &config.source,
+            identity: view.identity(),
+            env: view.env(),
             session_root: &session_root,
             default_cwd: &default_cwd,
             model: Some(view.model()),

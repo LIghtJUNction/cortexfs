@@ -2,6 +2,7 @@
 fn agent_executable_socket_runtime_returns_visible_message() {
     let root = reference_tree("agent-executable-socket-runtime");
     let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
@@ -34,6 +35,8 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
         AgentExecutableSocketRuntime {
             ctx_root: &root,
             source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
@@ -64,6 +67,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 fn agent_executable_socket_runtime_passes_source_root() {
     let root = reference_tree("agent-executable-socket-runtime-source-root");
     let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
@@ -91,6 +95,8 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
         AgentExecutableSocketRuntime {
             ctx_root: &root,
             source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
@@ -109,6 +115,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 fn agent_executable_socket_runtime_preserves_jsonl_error_output() {
     let root = reference_tree("agent-executable-socket-runtime-error-output");
     let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
@@ -138,6 +145,8 @@ exit 1
         AgentExecutableSocketRuntime {
             ctx_root: &root,
             source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
