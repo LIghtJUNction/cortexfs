@@ -229,23 +229,54 @@ fn run_agent_executable_streaming(
         .stdout
         .take()
         .ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let (stdout_sender, stdout_receiver) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let line = line.map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+            if stdout_sender.send(line).is_err() {
+                break;
+            }
+        }
+        Ok::<(), SocketRuntimeError>(())
+    });
     let mut frames = Vec::new();
-    for line in BufReader::new(stdout).lines() {
-        let line = line.map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        if !inspect_event_stream_jsonl(&line).is_ok() {
-            return Err(SocketRuntimeError::InvalidAgentOutput);
-        }
-        if event_type(&line).as_deref() != Some("start") {
-            write_socket_frame(stream, &line)?;
-            frames.push(line);
+    let session_dir = runtime.session_root.join(session);
+    let mut cancelled = false;
+    loop {
+        match stdout_receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(line) => {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if !inspect_event_stream_jsonl(&line).is_ok() {
+                    let _ignored = child.kill();
+                    let _ignored = child.wait();
+                    return Err(SocketRuntimeError::InvalidAgentOutput);
+                }
+                if event_type(&line).as_deref() != Some("start") {
+                    write_socket_frame(stream, &line)?;
+                    frames.push(line);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if agent_run_cancelled(&session_dir, run_id) {
+                    cancelled = true;
+                    let _ignored = child.kill();
+                    break;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
     let status = child
         .wait()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    reader
+        .join()
+        .map_err(|_error| SocketRuntimeError::CannotReadFrame)??;
+    if cancelled {
+        return Ok(frames);
+    }
     if !status.success() && frames.is_empty() {
         return Err(SocketRuntimeError::CannotRunAgent);
     }
@@ -266,6 +297,25 @@ fn event_type(line: &str) -> Option<String> {
     serde_json::from_str::<Value>(line)
         .ok()
         .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_owned))
+}
+
+fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
+    let Ok(state) = fs::read_to_string(session_dir.join("state")) else {
+        return false;
+    };
+    if state.trim() != "cancelled" {
+        return false;
+    }
+    let Ok(events) = fs::read_to_string(session_dir.join("events.jsonl")) else {
+        return false;
+    };
+    events.lines().any(|line| {
+        serde_json::from_str::<Value>(line).is_ok_and(|value| {
+            value.get("type").and_then(Value::as_str) == Some("done")
+                && value.get("run").and_then(Value::as_str) == Some(run_id)
+                && value.get("status").and_then(Value::as_str) == Some("cancelled")
+        })
+    })
 }
 
 fn assistant_text_from_event_frames(frames: &[String]) -> Option<String> {
