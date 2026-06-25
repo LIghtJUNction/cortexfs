@@ -244,6 +244,23 @@ fn api_key_resolution_uses_keychain_after_environment_candidates() {
 }
 
 #[test]
+fn api_key_resolution_uses_keychain_without_environment_candidates() {
+    let env_names = Vec::new();
+    let resolved = resolve_api_key_from_env_names_with(
+        &env_names,
+        "cortexfs:api.foo-bar.com",
+        "default",
+        |_name| Err(std::env::VarError::NotPresent),
+        |service, account| {
+            assert_eq!(service, "cortexfs:api.foo-bar.com");
+            assert_eq!(account, "default");
+            Ok(Some("keychain-secret".to_owned()))
+        },
+    );
+    assert_eq!(resolved, Ok(Some("keychain-secret".to_owned())));
+}
+
+#[test]
 fn api_key_resolution_reports_unconfigured_without_environment_or_keychain() {
     let resolved = resolve_api_key_with(
         "LMM_API_KEY",

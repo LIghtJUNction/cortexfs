@@ -226,8 +226,7 @@ where
     E: Fn(&str) -> Result<String, env::VarError>,
     K: FnOnce(&str, &str) -> Result<Option<String>, ApiKeyResolutionError>,
 {
-    if env_names.is_empty()
-        || env_names.iter().any(|name| !is_valid_env_key(name))
+    if env_names.iter().any(|name| !is_valid_env_key(name))
         || !is_valid_secret_lookup_part(service)
         || !is_valid_secret_lookup_part(account)
     {
