@@ -241,13 +241,13 @@ fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
         match value.get("type").and_then(serde_json::Value::as_str) {
             Some("delta" | "reasoning_delta") => {
                 if let Some(text) = json_text_field(&value) {
-                    print_raw(text)?;
+                    print_terminal_text(text)?;
                     saw_delta = true;
                 }
             }
             Some("message" | "reasoning_message") if !saw_delta => {
                 if let Some(text) = json_text_field(&value) {
-                    print_line(text)?;
+                    print_terminal_line(text)?;
                 }
             }
             Some("tool_call") => {
@@ -255,8 +255,7 @@ fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("tool_call");
-                write_error(&format!("[tool] {name}"))
-                    .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+                write_terminal_error(&format!("[tool] {name}"))?;
             }
             Some("error") => {
                 let code = value
@@ -267,13 +266,12 @@ fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
                     .get("message")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("runtime error");
-                write_error(&format!("error: {code}: {message}"))
-                    .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+                write_terminal_error(&format!("error: {code}: {message}"))?;
                 exit = ExitCode::from(1);
             }
             Some("pong") => print_line("pong")?,
             Some("done") if saw_delta => {
-                print_raw("\n")?;
+                print_terminal_text("\n")?;
                 saw_delta = false;
             }
             _ => {}
@@ -289,11 +287,38 @@ fn json_text_field(value: &serde_json::Value) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
 }
 
-fn print_raw(text: &str) -> Result<(), CliError> {
+fn print_terminal_text(text: &str) -> Result<(), CliError> {
+    let text = terminal_safe_text(text);
     io::stdout()
         .lock()
         .write_all(text.as_bytes())
         .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))
+}
+
+fn print_terminal_line(line: &str) -> Result<(), CliError> {
+    let line = terminal_safe_text(line);
+    print_line(&line)
+}
+
+fn write_terminal_error(line: &str) -> Result<(), CliError> {
+    let line = terminal_safe_text(line);
+    write_error(&line).map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
+}
+
+fn terminal_safe_text(text: &str) -> String {
+    let mut safe = String::with_capacity(text.len());
+    for character in text.chars() {
+        if is_terminal_safe_character(character) {
+            safe.push(character);
+        } else {
+            safe.extend(character.escape_default());
+        }
+    }
+    safe
+}
+
+fn is_terminal_safe_character(character: char) -> bool {
+    !character.is_control() || matches!(character, '\n' | '\r' | '\t')
 }
 
 fn request_id() -> Result<String, CliError> {
