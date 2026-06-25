@@ -6,14 +6,13 @@ fn read_file_to_string(path: &Path) -> Result<String, CliError> {
 fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
-        return candidate
-            .strip_prefix(root)
-            .map(|relative| relative.display().to_string())
-            .map_err(|error| {
-                CliError::usage(format!(
-                    "absolute file path must be under CTX_ROOT: {error}"
-                ))
-            });
+        let relative = candidate.strip_prefix(root).map_err(|error| {
+            CliError::usage(format!(
+                "absolute file path must be under CTX_ROOT: {error}"
+            ))
+        })?;
+        validate_relative_abi_path(relative)?;
+        return Ok(relative.display().to_string());
     }
     Ok(path.to_owned())
 }
@@ -21,14 +20,13 @@ fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
 fn resolve_abi_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
-        return candidate
-            .strip_prefix(root)
-            .map(|relative| root.join(relative))
-            .map_err(|error| {
-                CliError::usage(format!(
-                    "absolute file path must be under CTX_ROOT: {error}"
-                ))
-            });
+        let relative = candidate.strip_prefix(root).map_err(|error| {
+            CliError::usage(format!(
+                "absolute file path must be under CTX_ROOT: {error}"
+            ))
+        })?;
+        validate_relative_abi_path(relative)?;
+        return Ok(root.join(relative));
     }
 
     if path
@@ -39,6 +37,17 @@ fn resolve_abi_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
     }
 
     Ok(root.join(path))
+}
+
+fn validate_relative_abi_path(path: &Path) -> Result<(), CliError> {
+    if path
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(CliError::usage("file path must be a relative ABI path"));
+    }
+
+    Ok(())
 }
 
 fn newline_terminated(value: &str) -> String {
