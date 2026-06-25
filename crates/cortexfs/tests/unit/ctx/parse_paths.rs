@@ -469,7 +469,12 @@ fn agent_start_builds_sandboxed_terminal_command() {
     };
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
     let home = PathBuf::from("/ctx/home/1000");
-    let bwrap = agent_bwrap_args(&root, &args, &view, &socket, &home);
+    let cli_mounts = vec![AgentMount {
+        source: "/repo".to_owned(),
+        target: "/workspace".to_owned(),
+        mode: "rw".to_owned(),
+    }];
+    let bwrap = agent_bwrap_args(&root, &args, &cli_mounts, &view, &socket, &home);
     assert!(contains_arg_triplet(&bwrap, "--ro-bind", "/ctx", "/ctx"));
     assert!(contains_arg_triplet(
         &bwrap,
@@ -477,13 +482,13 @@ fn agent_start_builds_sandboxed_terminal_command() {
         "/ctx/home/1000/agent/coder",
         "/home/agent"
     ));
-    assert!(!contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
+    assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
     assert!(bwrap.contains(&"--unshare-net".to_owned()));
     assert!(contains_arg_pair(&bwrap, "--dir", "/home"));
     assert!(contains_ro_bind_stub(&bwrap, "/etc/profile"));
     assert!(contains_ro_bind_stub(&bwrap, "/etc/bash.bashrc"));
     assert!(contains_arg_pair(&bwrap, "--tmpfs", "/etc/profile.d"));
-    assert!(contains_arg_pair(&bwrap, "--chdir", "/work"));
+    assert!(contains_arg_pair(&bwrap, "--chdir", "/workspace"));
     assert!(contains_arg_pair(&bwrap, "--listen", socket.to_str().unwrap_or_default()));
     assert_eq!(bwrap.last().map(String::as_str), Some("/ctx/bin/tsh"));
 }
@@ -526,7 +531,8 @@ fn agent_start_default_workspace_remounts_git_read_only() {
     };
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
     let home = PathBuf::from("/ctx/home/1000");
-    let bwrap = agent_bwrap_args(&root, &args, &view, &socket, &home);
+    let cli_mounts = Vec::new();
+    let bwrap = agent_bwrap_args(&root, &args, &cli_mounts, &view, &socket, &home);
     assert!(!contains_arg_triplet(
         &bwrap,
         "--ro-bind",
@@ -595,9 +601,11 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
         mounts: Vec::new(),
     };
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
+    let cli_mounts = agent_start_mounts_with_default_source(&args, Path::new("/repo"));
     let command = agent_start_systemd_command(
         &root,
         &args,
+        &cli_mounts,
         &view,
         &socket,
         "cortexfs-agent-coder-test-terminal",
@@ -609,16 +617,31 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
                 && contains_arg_pair(&command.args, "--property", "RestartSec=250ms")
                 && command.args.contains(&"-i".to_owned())
                 && command.args.contains(&"PATH=/usr/bin:/bin".to_owned())
-                && command.args.contains(&format!("CTX_ROOT={}", root.display()))
-                && command.args.contains(&format!("CTX_HOME={}", root.join("home").join("1000").display()))
-                && command.args.contains(&"HOME=/home/agent".to_owned())
-                && command.args.contains(&"USER=coder".to_owned())
-                && command.args.contains(&"LOGNAME=coder".to_owned())
-                && command.args.contains(&"SHELL=/usr/bin/bash".to_owned())
-                && command.args.contains(&"TERM=xterm-256color".to_owned())
-                && command.args.contains(&"LANG=C.UTF-8".to_owned())
                 && command.args.contains(&"/usr/bin/bwrap".to_owned())
-                && command.args.contains(&"CTX_PATH=/ctx/tool:/ctx/home/1000/tool".to_owned())
+                && contains_arg_pair(&command.args, "--clearenv", "--setenv")
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_ROOT", &root.display().to_string())
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_HOME", &root.join("home").join("1000").display().to_string())
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT", "coder")
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_SUBJECT", "coder_t")
+                && contains_arg_triplet(&command.args, "--setenv", "HOME", "/home/agent")
+                && contains_arg_triplet(&command.args, "--setenv", "USER", "coder")
+                && contains_arg_triplet(&command.args, "--setenv", "LOGNAME", "coder")
+                && contains_arg_triplet(&command.args, "--setenv", "SHELL", "/usr/bin/bash")
+                && contains_arg_triplet(&command.args, "--setenv", "TERM", "xterm-256color")
+                && contains_arg_triplet(&command.args, "--setenv", "LANG", "C.UTF-8")
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_PATH", "/ctx/tool:/ctx/home/1000/tool")
+    );
+    let bwrap_index = command.args.iter().position(|arg| arg == "/usr/bin/bwrap");
+    assert!(bwrap_index.is_some(), "missing bwrap in command: {command:?}");
+    let Some(bwrap_index) = bwrap_index else {
+        return;
+    };
+    let bwrap_tail = command.args.get(bwrap_index + 1..).unwrap_or_default();
+    assert!(
+        !bwrap_tail
+            .iter()
+            .any(|arg| arg.starts_with("CTX_") && arg.contains('=')),
+        "bwrap arguments must not contain raw KEY=value env entries: {command:?}"
     );
 }
 
