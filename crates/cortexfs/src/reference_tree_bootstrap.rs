@@ -150,7 +150,24 @@ model="$(tr -d '\n' < "$source_root/agent/{name}.d/model" 2>/dev/null || true)"
 if [ -z "$model" ]; then
   model="main"
 fi
-if [ ! -x "$ctx_root/model/$model" ]; then
+case "$model" in
+  */*/*|/*|../*|*/../*|*/..|*//*) model="" ;;
+  */*) ;;
+  main|helper)
+    target="$(readlink "$ctx_root/model/$model" 2>/dev/null || true)"
+    case "$target" in
+      /ctx/model/*/*) model="${{target#/ctx/model/}}" ;;
+      *) model="" ;;
+    esac
+    ;;
+  *) model="" ;;
+esac
+case "$model" in
+  */*/*|/*|../*|*/../*|*/..|*//*) model="" ;;
+  ?*/*?) ;;
+  *) model="" ;;
+esac
+if [ -z "$model" ] || [ ! -x "$ctx_root/model/$model" ]; then
   printf '{{"type":"error","run":"%s","code":"ENOENT","message":"missing model"}}\n' "$run"
   printf '{{"type":"done","run":"%s","status":"error"}}\n' "$run"
   exit 1
