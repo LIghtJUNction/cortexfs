@@ -10,6 +10,10 @@ use serde_json::Value;
 
 pub const MAX_SKILL_METADATA_CHARS: usize = 8_000;
 pub const MAX_HISTORY_MESSAGES_CHARS: usize = 8_000;
+const MAX_AGENT_RULES_CHARS: usize = 64_000;
+const MAX_AGENT_RULE_FILE_BYTES: u64 = 64 * 1024;
+const MAX_SKILL_FILE_BYTES: u64 = 16 * 1024;
+const MAX_SKILL_FILES: usize = 256;
 const MAX_HISTORY_MESSAGES_READ_BYTES: u64 = 64 * 1024;
 const MAX_HISTORY_MESSAGE_LINE_BYTES: usize = 16 * 1024;
 
@@ -129,14 +133,16 @@ pub fn collect_agent_rules_from_paths(paths: impl IntoIterator<Item = PathBuf>) 
             continue;
         }
         seen.push(key);
-        let Ok(content) = fs::read_to_string(&path) else {
+        let Some(content) = read_bounded_regular_utf8(&path, MAX_AGENT_RULE_FILE_BYTES) else {
             continue;
         };
-        output.push_str("### ");
-        output.push_str(&path.display().to_string());
-        output.push_str("\n\n");
-        output.push_str(content.trim());
-        output.push_str("\n\n");
+        let section = format!("### {}\n\n{}\n\n", path.display(), content.trim());
+        if output.len() + section.len() > MAX_AGENT_RULES_CHARS {
+            let remaining = MAX_AGENT_RULES_CHARS.saturating_sub(output.len());
+            push_str_byte_limit(&mut output, &section, remaining);
+            break;
+        }
+        output.push_str(&section);
     }
     if output.trim().is_empty() {
         "(no AGENTS.md rules discovered)".to_owned()
@@ -231,24 +237,35 @@ fn discover_skill_metadata() -> Vec<SkillMetadata> {
 }
 
 fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 8 {
+    if depth > 8 || paths.len() >= MAX_SKILL_FILES || !is_regular_directory(root) {
         return;
     }
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
+        if paths.len() >= MAX_SKILL_FILES {
+            break;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
         let path = entry.path();
         if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
-            paths.push(path);
-        } else if path.is_dir() {
+            if !file_type.is_dir() {
+                paths.push(path);
+            }
+        } else if file_type.is_dir() {
             collect_skill_files(&path, paths, depth + 1);
         }
     }
 }
 
 fn read_skill_metadata(path: &Path) -> Option<SkillMetadata> {
-    let content = fs::read_to_string(path).ok()?;
+    let content = read_bounded_regular_utf8(path, MAX_SKILL_FILE_BYTES)?;
     let (name, description) = parse_skill_frontmatter(&content);
     let name = name.unwrap_or_else(|| {
         path.parent()
@@ -282,6 +299,45 @@ fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
         }
     }
     (name, description)
+}
+
+fn push_str_byte_limit(output: &mut String, value: &str, max_bytes: usize) {
+    if value.len() <= max_bytes {
+        output.push_str(value);
+        return;
+    }
+    let mut end = 0;
+    for (index, character) in value.char_indices() {
+        let next = index + character.len_utf8();
+        if next > max_bytes {
+            break;
+        }
+        end = next;
+    }
+    if let Some(prefix) = value.get(..end) {
+        output.push_str(prefix);
+    }
+}
+
+fn is_regular_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| {
+        let file_type = metadata.file_type();
+        file_type.is_dir() && !file_type.is_symlink()
+    })
+}
+
+fn read_bounded_regular_utf8(path: &Path, max_bytes: u64) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > max_bytes {
+        return None;
+    }
+    let mut content = String::new();
+    File::open(path)
+        .ok()?
+        .take(max_bytes)
+        .read_to_string(&mut content)
+        .ok()?;
+    Some(content)
 }
 
 fn format_skill_metadata(skills: &[SkillMetadata], shorten: bool) -> String {
@@ -339,7 +395,9 @@ fn read_history_messages_tail(path: &Path) -> std::io::Result<String> {
     let start = len.saturating_sub(read_len);
     file.seek(SeekFrom::Start(start))?;
 
-    let mut bytes = vec![0; read_len as usize];
+    let read_len_usize = usize::try_from(read_len)
+        .map_err(|_error| std::io::Error::other("history tail too large"))?;
+    let mut bytes = vec![0; read_len_usize];
     file.read_exact(&mut bytes)?;
     if start > 0
         && let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n')
@@ -352,9 +410,8 @@ fn read_history_messages_tail(path: &Path) -> std::io::Result<String> {
 #[must_use]
 pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String {
     let mut rendered = VecDeque::new();
-    let mut full_len = 0;
-    let warning_len = history_budget_warning(max_chars).len();
     let mut selected_len = 0;
+    let mut truncated = false;
 
     for line in messages.lines() {
         if line.len() > MAX_HISTORY_MESSAGE_LINE_BYTES {
@@ -363,12 +420,14 @@ pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String
         let Some(line) = render_history_message_line(line) else {
             continue;
         };
-        full_len += line.len() + usize::from(full_len > 0);
         selected_len += line.len() + usize::from(!rendered.is_empty());
         rendered.push_back(line);
 
-        while !rendered.is_empty() && warning_len + selected_len > max_chars {
-            let removed = rendered.pop_front().expect("rendered is not empty");
+        while !rendered.is_empty() && selected_len > max_chars {
+            let Some(removed) = rendered.pop_front() else {
+                break;
+            };
+            truncated = true;
             selected_len = selected_len.saturating_sub(removed.len());
             if !rendered.is_empty() {
                 selected_len = selected_len.saturating_sub(1);
@@ -376,9 +435,12 @@ pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String
         }
     }
     if rendered.is_empty() {
+        if truncated {
+            return history_budget_warning(max_chars).trim_end().to_owned();
+        }
         return "(no historical messages injected)".to_owned();
     }
-    if full_len <= max_chars {
+    if !truncated {
         return rendered.into_iter().collect::<Vec<_>>().join("\n");
     }
     fit_history_lines(rendered.into_iter().collect(), max_chars)
@@ -422,10 +484,6 @@ fn history_budget_warning(max_chars: usize) -> String {
 }
 
 fn fit_history_lines(lines: Vec<String>, max_chars: usize) -> String {
-    let full = lines.join("\n");
-    if full.len() <= max_chars {
-        return full;
-    }
     let warning = history_budget_warning(max_chars);
     let mut selected = Vec::new();
     let mut used = warning.len();

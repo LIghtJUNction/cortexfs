@@ -817,6 +817,48 @@ fn agent_start_default_workspace_does_not_remount_symlinked_git() {
 }
 
 #[test]
+fn agent_mount_validation_rejects_protected_sandbox_targets() {
+    for target in [
+        "/",
+        "/usr",
+        "/usr/local",
+        "/etc",
+        "/bin",
+        "/lib",
+        "/lib64",
+        "/run",
+        "/home",
+        "/dev",
+        "/proc",
+        "/ctx",
+        "/ctx/bin",
+        "/usr/../ctx",
+        "/workspace/../usr/bin",
+    ] {
+        let mount = AgentMount {
+            source: "/tmp/source".to_owned(),
+            target: target.to_owned(),
+            mode: "rw".to_owned(),
+        };
+        assert!(
+            require_agent_mount(&mount).is_err(),
+            "target should be rejected: {target}"
+        );
+    }
+}
+
+#[test]
+fn agent_mount_validation_allows_workspace_subtrees() {
+    let mount = AgentMount {
+        source: "/tmp/source".to_owned(),
+        target: "/workspace/project".to_owned(),
+        mode: "rw".to_owned(),
+    };
+
+    assert!(require_agent_mount(&mount).is_ok());
+}
+
+#[test]
 fn agent_start_no_default_workspace_does_not_guess_git_mount() {
     let source = clean_test_dir("ctx-agent-start-no-default-git");
     assert!(fs::create_dir_all(source.join(".git")).is_ok());
@@ -1088,6 +1130,37 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
 }
 
 #[test]
+fn buffered_agent_renderer_rejects_too_much_output() {
+    let input = format!(
+        "{{\"type\":\"delta\",\"text\":\"{}\"}}\n",
+        "x".repeat(MAX_BUFFERED_AGENT_RENDERED_BYTES + 1)
+    );
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("agent output exceeds")));
+}
+
+#[test]
+fn buffered_agent_renderer_rejects_too_many_events() {
+    let input = "{\"type\":\"ignored\"}\n".repeat(MAX_BUFFERED_AGENT_EVENTS + 1);
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("buffered events")));
+}
+
+#[test]
+fn buffered_agent_renderer_rejects_too_many_diagnostics() {
+    let input = "{\"type\":\"tool_call\",\"name\":\"tsh\"}\n"
+        .repeat(MAX_BUFFERED_AGENT_DIAGNOSTICS + 1);
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("buffered diagnostics")));
+}
+
+#[test]
 fn interruptible_agent_renderer_returns_on_interrupt_flag() {
     let pair = std::os::unix::net::UnixStream::pair();
     assert!(pair.is_ok());
@@ -1317,6 +1390,66 @@ fn parses_tool_command_with_arguments() {
             ref name,
             ref args
         }) if name == "fs.read" && args == &["README.md".to_owned()]
+    ));
+}
+
+#[test]
+fn parses_provider_oauth_commands() {
+    let login = cmd!("provider", "oauth", "login", "api.openai.com", "--timeout", "30");
+    assert!(matches!(
+        login,
+        Ok(Command::Provider(ProviderArgs::Login {
+            ref provider,
+            timeout
+        })) if provider == "api.openai.com" && timeout == 30
+    ));
+
+    let status = cmd!("provider", "oauth", "status", "api.openai.com");
+    assert!(matches!(
+        status,
+        Ok(Command::Provider(ProviderArgs::Status { ref provider }))
+            if provider == "api.openai.com"
+    ));
+
+    let refresh = cmd!("provider", "oauth", "refresh", "api.openai.com");
+    assert!(matches!(
+        refresh,
+        Ok(Command::Provider(ProviderArgs::Refresh { ref provider }))
+            if provider == "api.openai.com"
+    ));
+}
+
+#[test]
+fn parses_provider_oauth_help_commands() {
+    assert!(matches!(
+        cmd!("provider", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider"
+    ));
+    assert!(matches!(
+        cmd!("provider", "oauth", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider oauth"
+    ));
+    assert!(matches!(
+        cmd!("provider", "oauth", "login", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "provider oauth login"
+    ));
+}
+
+#[test]
+fn parses_provider_preset_commands() {
+    assert!(matches!(
+        cmd!("provider", "preset", "list"),
+        Ok(Command::Provider(ProviderArgs::PresetList))
+    ));
+    assert!(matches!(
+        cmd!("provider", "preset", "show", "google"),
+        Ok(Command::Provider(ProviderArgs::PresetShow { ref preset }))
+            if preset == "google"
+    ));
+    assert!(matches!(
+        cmd!("provider", "preset", "install", "anthropic"),
+        Ok(Command::Provider(ProviderArgs::PresetInstall { ref preset }))
+            if preset == "anthropic"
     ));
 }
 

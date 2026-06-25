@@ -13,12 +13,20 @@ fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
 }
 
 pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result<()> {
+    atomic_replace_text_with_mode(path, content, 0o600)
+}
+
+pub(crate) fn atomic_replace_text_with_mode(
+    path: &Path,
+    content: &str,
+    mode: u32,
+) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
     temp.write_all(content.as_bytes())?;
     temp.flush()?;
     temp.as_file()
-        .set_permissions(fs::Permissions::from_mode(0o600))?;
+        .set_permissions(fs::Permissions::from_mode(mode))?;
     temp.persist(path)
         .map(|_file| ())
         .map_err(std::io::Error::from)

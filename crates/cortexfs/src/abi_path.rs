@@ -134,6 +134,8 @@ pub enum AbiPathKind<'a> {
     Unknown,
     /// `model/<provider>`.
     ModelDir { provider: &'a str },
+    /// Global model route file, `model/route`.
+    ModelRoute,
     /// `model/<provider>/<model>`, `agent/<name>`, or `tool/<name>`.
     ObjectExec {
         class: ObjectClass,
@@ -196,6 +198,7 @@ impl AbiPathKind<'_> {
         match self {
             Self::Unknown => "ctx.unknown",
             Self::ModelDir { .. } => "ctx.model.dir",
+            Self::ModelRoute => "ctx.model.route",
             Self::ObjectExec { class, .. } => class.exec_type(),
             Self::ObjectSocket { class, .. } => class.socket_type(),
             Self::ObjectControl { class, .. } => class.control_type(),

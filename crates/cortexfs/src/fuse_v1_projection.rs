@@ -42,11 +42,12 @@ impl FuseV1Projection {
         }
         let path = self.resolve(&normalized)?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        let mode = projected_metadata_mode(&normalized, &metadata);
         Ok(FuseV1Attr::with_owner(
             normalized,
             fuse_file_type(metadata.file_type()),
             metadata.len(),
-            metadata.permissions().mode(),
+            mode,
             metadata.uid(),
             metadata.gid(),
         ))
@@ -230,6 +231,10 @@ impl FuseV1Projection {
                     HELPER_MODEL_ALIAS.to_owned(),
                     FuseV1FileType::Symlink,
                 ));
+                entries.push(FuseV1DirEntry::new(
+                    MODEL_ROUTE_FILE.to_owned(),
+                    FuseV1FileType::Regular,
+                ));
                 entries
             }
             "model/debug" => vec![
@@ -291,11 +296,21 @@ impl FuseV1Projection {
     }
 
     fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+        if abi_path == format!("model/{MODEL_ROUTE_FILE}") {
+            let path = self.resolve(abi_path)?;
+            return match fs::read_to_string(path) {
+                Ok(content) => Ok(Some(content)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    Ok(Some(DEFAULT_MODEL_ROUTE.to_owned()))
+                }
+                Err(_error) => Err(FuseV1Error::Io),
+            };
+        }
         if abi_path == "model/debug/echo" {
             return Ok(Some(debug_echo_model_metadata()));
         }
         if let Some(file) = abi_path.strip_prefix("model/debug/echo.d/") {
-            return Ok(debug_echo_control_content(file).map(str::to_owned));
+            return Ok(debug_model_control_content(DEBUG_ECHO_MODEL, file));
         }
         let Some(model) = projected_provider_model_for_exec(
             &self.provider_config_dir,
@@ -353,6 +368,12 @@ impl FuseV1Projection {
             return Err(FuseV1Error::TooLarge);
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
+        if normalized == format!("model/{MODEL_ROUTE_FILE}") {
+            let path = self.resolve(&normalized)?;
+            let content =
+                std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+            return atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io);
+        }
         if !is_fuse_v1_writable_control_path(&normalized) {
             return Err(FuseV1Error::NotControlFile);
         }
@@ -370,6 +391,10 @@ impl FuseV1Projection {
         abi_path: &str,
     ) -> Result<Option<(FuseV1FileType, u64, u32)>, FuseV1Error> {
         match abi_path {
+            path if path == format!("model/{MODEL_ROUTE_FILE}") => {
+                let content = self.virtual_model_content(path)?.unwrap_or_default();
+                virtual_regular_entry(&content, 0o644)
+            }
             path if model_alias_name(path).is_some() => Ok(Some((
                 FuseV1FileType::Symlink,
                 u64::try_from(
@@ -380,14 +405,16 @@ impl FuseV1Projection {
                 .map_err(|_error| FuseV1Error::Io)?,
                 0o777,
             ))),
-            "model/debug" | "model/debug/echo.d" => Ok(Some((FuseV1FileType::Directory, 0, 0o755))),
+            "model/debug" | "model/debug/echo.d" => {
+                Ok(Some((FuseV1FileType::Directory, 0, 0o755)))
+            }
             "model/debug/echo" => virtual_regular_entry(&debug_echo_model_metadata(), 0o555),
             path => {
                 if let Some(file) = path.strip_prefix("model/debug/echo.d/") {
-                    let Some(content) = debug_echo_control_content(file) else {
+                    let Some(content) = debug_model_control_content(DEBUG_ECHO_MODEL, file) else {
                         return Ok(None);
                     };
-                    return virtual_regular_entry(content, 0o644);
+                    return virtual_regular_entry(&content, 0o644);
                 }
                 if projected_provider_models_for_provider_path(
                     &self.provider_config_dir,
@@ -464,4 +491,12 @@ fn virtual_regular_entry(
         u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
         mode,
     )))
+}
+
+fn projected_metadata_mode(abi_path: &str, metadata: &fs::Metadata) -> u32 {
+    let mode = metadata.permissions().mode();
+    if abi_path.is_empty() && metadata.is_dir() {
+        return (mode & !0o7777) | 0o755;
+    }
+    mode
 }

@@ -1,13 +1,38 @@
 use super::{
-    is_passthrough_tool, openai_stream_event, provider_key_names, provider_messages_for_agent,
-    resolve_model_alias, resolved_model_path, run, run_cli_tool_to_writer, ObjectPath,
-    OpenAiStreamEvent, RunnerProviderConfig,
+    is_passthrough_tool, openai_stream_event, parse_anthropic_message_content, provider_key_names,
+    provider_messages_for_agent, provider_route, provider_transport, resolve_model_alias,
+    resolved_model_path, run, run_cli_tool_to_writer, ObjectPath, OpenAiStreamEvent,
+    ProviderRoute, ResolvedTransport, RunnerProviderConfig,
 };
-use cortexfs::{AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, render_agent_system_prompt};
+use cortexfs::{
+    AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
+    render_agent_system_prompt,
+};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::symlink;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+#[cfg(unix)]
+fn env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[cfg(unix)]
+fn unique_temp_dir(name: &str) -> std::io::Result<PathBuf> {
+    let path = std::env::temp_dir().join(format!(
+        "cortexfs-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&path)?;
+    Ok(path)
+}
 
 #[test]
 fn object_path_parses_class_and_name() {
@@ -188,10 +213,10 @@ fn test_prompt_context() -> AgentPromptContext {
 #[test]
 fn provider_key_names_accept_configured_and_host_fallbacks() {
     assert_eq!(
-        provider_key_names(&RunnerProviderConfig {
-            base_url: "https://api.openai.com/v1".to_owned(),
-            api_key_env: Some("CORTEXFS_OPENAI_KEY".to_owned()),
-        }),
+        provider_key_names(
+            &test_provider_config("https://api.openai.com/v1", Some("CORTEXFS_OPENAI_KEY")),
+            None
+        ),
         vec![
             "CORTEXFS_OPENAI_KEY".to_owned(),
             "OPENAI_COM_API_KEY".to_owned(),
@@ -203,10 +228,182 @@ fn provider_key_names_accept_configured_and_host_fallbacks() {
 #[test]
 fn provider_key_names_reject_invalid_configured_names() {
     assert_eq!(
-        provider_key_names(&RunnerProviderConfig {
-            base_url: "https://localhost:11434/v1".to_owned(),
-            api_key_env: Some("bad-name".to_owned()),
-        }),
+        provider_key_names(
+            &test_provider_config("https://localhost:11434/v1", Some("bad-name")),
+            None
+        ),
         vec!["LOCALHOST_API_KEY".to_owned()]
     );
+}
+
+#[test]
+fn provider_key_names_support_route_key_slots() {
+    assert_eq!(
+        provider_key_names(
+            &test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
+            Some("office-key")
+        ),
+        vec![
+            "OPENAI_API_KEY_OFFICE_KEY".to_owned(),
+            "OPENAI_OFFICE_KEY_API_KEY".to_owned(),
+            "OPENAI_API_KEY".to_owned(),
+            "OPENAI_COM_API_KEY_OFFICE_KEY".to_owned(),
+            "OPENAI_COM_OFFICE_KEY_API_KEY".to_owned(),
+            "OPENAI_COM_API_KEY".to_owned(),
+            "API_OPENAI_COM_API_KEY_OFFICE_KEY".to_owned(),
+            "API_OPENAI_COM_OFFICE_KEY_API_KEY".to_owned(),
+            "API_OPENAI_COM_API_KEY".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn provider_transport_defaults_to_direct_base_url() {
+    assert_eq!(
+        provider_transport(
+            &test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
+            None
+        ),
+        Ok(ResolvedTransport::Direct {
+            base_url: "https://api.openai.com/v1".to_owned()
+        })
+    );
+}
+
+#[test]
+fn provider_transport_uses_exact_http_route() {
+    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+
+    assert_eq!(
+        provider_transport(
+            &config,
+            Some("group(office) -> http(http://127.0.0.1:8080/v1)\ndomain(openai.com) -> office\n")
+        ),
+        Ok(ResolvedTransport::Http {
+            base_url: "http://127.0.0.1:8080/v1".to_owned()
+        })
+    );
+}
+
+#[test]
+fn provider_transport_uses_wildcard_unix_route() {
+    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+
+    assert_eq!(
+        provider_transport(
+            &config,
+            Some("group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock)\ndomain(openai.com) -> local-socket\n")
+        ),
+        Ok(ResolvedTransport::Unix {
+            base_url: "http://localhost/v1".to_owned(),
+            socket_path: "/run/user/1000/cortexfs/proxy/openai.sock".to_owned()
+        })
+    );
+}
+
+#[test]
+fn provider_route_selects_key_slot_by_model() {
+    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+
+    assert_eq!(
+        provider_route(
+            &config,
+            "api.openai.com",
+            "gpt-4o",
+            Some("group(paid) -> direct, key(office)\nmodel(gpt-*) -> paid\nfallback: direct\n")
+        ),
+        Ok(ProviderRoute {
+            transport: ResolvedTransport::Direct {
+                base_url: "https://api.openai.com/v1".to_owned()
+            },
+            key_slot: Some("office".to_owned())
+        })
+    );
+}
+
+#[test]
+fn anthropic_message_content_parses_text_parts() {
+    assert_eq!(
+        parse_anthropic_message_content(
+            br#"{"content":[{"type":"text","text":"hello "},{"type":"text","text":"claude"}]}"#
+        ),
+        Ok("hello claude".to_owned())
+    );
+}
+
+fn test_provider_config(base_url: &str, api_key_env: Option<&str>) -> RunnerProviderConfig {
+    RunnerProviderConfig {
+        base_url: base_url.to_owned(),
+        api_key_env: api_key_env.map(str::to_owned),
+        oauth: None,
+        formats: Vec::new(),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn prompt_discovery_skips_symlinked_agents_files_and_skill_trees()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::symlink;
+
+    let _guard = env_lock()
+        .lock()
+        .map_err(|_error| std::io::Error::other("env lock poisoned"))?;
+    let original_cwd = std::env::current_dir()?;
+    let root = unique_temp_dir("prompt-symlinks")?;
+    let workspace = root.join("workspace");
+    let outside = root.join("outside");
+    fs::create_dir_all(&workspace)?;
+    fs::create_dir_all(outside.join("skills").join("leak"))?;
+    fs::write(outside.join("secret.txt"), "SHOULD_NOT_LEAK_RULE")?;
+    fs::write(
+        outside.join("skills").join("leak").join("SKILL.md"),
+        "---\nname: leak\ndescription: SHOULD_NOT_LEAK_SKILL\n---\nbody",
+    )?;
+    symlink(outside.join("secret.txt"), workspace.join("AGENTS.md"))?;
+    fs::create_dir_all(workspace.join(".agents"))?;
+    symlink(outside.join("skills"), workspace.join(".agents").join("skills"))?;
+
+    std::env::set_current_dir(&workspace)?;
+    let rules = collect_agent_rules();
+    let skills = collect_skill_metadata(8_000);
+
+    std::env::set_current_dir(original_cwd)?;
+    let _ignored = fs::remove_dir_all(root);
+
+    assert!(!rules.contains("SHOULD_NOT_LEAK_RULE"));
+    assert!(!skills.contains("SHOULD_NOT_LEAK_SKILL"));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn prompt_discovery_enforces_file_size_limits() -> Result<(), Box<dyn std::error::Error>> {
+    let _guard = env_lock()
+        .lock()
+        .map_err(|_error| std::io::Error::other("env lock poisoned"))?;
+    let original_cwd = std::env::current_dir()?;
+    let root = unique_temp_dir("prompt-limits")?;
+    let workspace = root.join("workspace");
+    fs::create_dir_all(workspace.join(".agents").join("skills").join("large"))?;
+    fs::write(workspace.join("AGENTS.md"), "A".repeat(70 * 1024))?;
+    fs::write(
+        workspace
+            .join(".agents")
+            .join("skills")
+            .join("large")
+            .join("SKILL.md"),
+        format!("---\nname: large\ndescription: {}\n---\n", "B".repeat(20 * 1024)),
+    )?;
+
+    std::env::set_current_dir(&workspace)?;
+    let rules = collect_agent_rules();
+    let skills = collect_skill_metadata(8_000);
+
+    std::env::set_current_dir(original_cwd)?;
+    let _ignored = fs::remove_dir_all(root);
+
+    assert!(!rules.contains(&"A".repeat(1024)));
+    assert!(!skills.contains("large"));
+    Ok(())
 }

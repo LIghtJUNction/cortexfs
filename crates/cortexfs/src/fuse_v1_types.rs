@@ -88,6 +88,7 @@ struct ProviderConfig {
     #[serde(default)]
     formats: Vec<String>,
     api_key_env: Option<String>,
+    oauth: Option<OAuthProviderConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

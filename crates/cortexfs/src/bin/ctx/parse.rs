@@ -61,6 +61,7 @@ enum Command {
     AgentSh {
         args: Vec<String>,
     },
+    Provider(ProviderArgs),
     Ping {
         path: String,
     },
@@ -142,6 +143,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         } => agent_send(&cli.root, &agent, session.as_deref(), &input, false),
         Command::Agent(args) => agent_command(&cli.root, &args),
         Command::AgentSh { args } => agent_sh_command(&cli.root, args),
+        Command::Provider(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
         Command::Doctor => success(doctor(&cli.root)),
@@ -269,6 +271,7 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         "agent-sh" => Ok(Command::AgentSh {
             args: values.collect(),
         }),
+        "provider" => parse_provider_command(values.collect()),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
             no_extra_args(values)?;
@@ -350,6 +353,7 @@ fn is_top_level_help_topic(command: &str) -> bool {
             | "send"
             | "agent"
             | "agent-sh"
+            | "provider"
             | "ping"
             | "cancel"
             | "doctor"
@@ -358,6 +362,98 @@ fn is_top_level_help_topic(command: &str) -> bool {
             | "file"
             | "validate-name"
     )
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ProviderArgs {
+    Login { provider: String, timeout: u64 },
+    Status { provider: String },
+    Refresh { provider: String },
+    PresetList,
+    PresetShow { preset: String },
+    PresetInstall { preset: String },
+}
+
+fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
+    let mut values = args.into_iter();
+    let command = required_arg(&mut values, "provider requires oauth or preset")?;
+    let rest = values.collect::<Vec<_>>();
+    if is_help_args(&rest) {
+        return Ok(Command::HelpTopic(format!("provider {command}")));
+    }
+    if command == "oauth"
+        && matches!(rest.as_slice(), [subcommand, help] if is_help_flag(help) && matches!(subcommand.as_str(), "login" | "status" | "refresh"))
+    {
+        let Some(subcommand) = rest.first() else {
+            return Err(CliError::usage("provider oauth requires login, status, or refresh"));
+        };
+        return Ok(Command::HelpTopic(format!("provider oauth {subcommand}")));
+    }
+    if command == "help" && rest.is_empty() {
+        return Ok(Command::HelpTopic("provider".to_owned()));
+    }
+    match command.as_str() {
+        "oauth" => parse_provider_oauth_command(rest.into_iter()),
+        "preset" => parse_provider_preset_command(rest.into_iter()),
+        _ => Err(CliError::usage("provider expects oauth or preset")),
+    }
+}
+
+fn parse_provider_oauth_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let command = required_arg(&mut values, "provider oauth requires login, status, or refresh")?;
+    match command.as_str() {
+        "login" => {
+            let provider = required_arg(&mut values, "provider oauth login requires a provider")?;
+            let mut timeout = 120;
+            while let Some(value) = values.next() {
+                match value.as_str() {
+                    "--timeout" => {
+                        let raw = required_arg(
+                            &mut values,
+                            "provider oauth login --timeout requires seconds",
+                        )?;
+                        timeout = raw
+                            .parse::<u64>()
+                            .map_err(|_error| CliError::usage("invalid oauth timeout"))?;
+                    }
+                    _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+                }
+            }
+            Ok(Command::Provider(ProviderArgs::Login { provider, timeout }))
+        }
+        "status" => {
+            let provider = required_arg(&mut values, "provider oauth status requires a provider")?;
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::Status { provider }))
+        }
+        "refresh" => {
+            let provider = required_arg(&mut values, "provider oauth refresh requires a provider")?;
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::Refresh { provider }))
+        }
+        _ => Err(CliError::usage("provider oauth expects login, status, or refresh")),
+    }
+}
+
+fn parse_provider_preset_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let command = required_arg(&mut values, "provider preset requires list, show, or install")?;
+    match command.as_str() {
+        "list" => {
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::PresetList))
+        }
+        "show" => {
+            let preset = required_arg(&mut values, "provider preset show requires a preset")?;
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::PresetShow { preset }))
+        }
+        "install" => {
+            let preset = required_arg(&mut values, "provider preset install requires a preset")?;
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::PresetInstall { preset }))
+        }
+        _ => Err(CliError::usage("provider preset expects list, show, or install")),
+    }
 }
 
 fn is_help_flag(value: &str) -> bool {

@@ -24,6 +24,8 @@ use nix::sys::socket::{getsockopt, sockopt};
 use serde::Deserialize;
 use serde_json::Value;
 
+const MAX_AGENT_STDOUT_QUEUE_FRAMES: usize = 16;
+
 macro_rules! impl_issue_report {
     ($report:ty, $issue:ty) => {
         impl $report {
@@ -59,6 +61,7 @@ mod core_tools;
 mod message_stream;
 mod model;
 mod mount_table;
+mod oauth;
 mod policy;
 mod session_index;
 mod session_layout;
@@ -78,8 +81,8 @@ pub use abi_constants::{
 };
 use abi_constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
-    DEFAULT_MODEL_ALIAS_TARGET, HELPER_MODEL_ALIAS, SYSTEM_PROVIDER_CONFIG_DIR,
-    SYSTEM_PROVIDER_MODEL_CACHE_DIR,
+    DEFAULT_MODEL_ALIAS_TARGET, DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, MODEL_ROUTE_FILE,
+    SYSTEM_PROVIDER_CONFIG_DIR, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi_path::is_object_name_for_class;
 pub use abi_path::{
@@ -111,6 +114,11 @@ pub use model::{
     ModelRegistryError, inspect_model_capabilities, parse_model_driver_routes,
 };
 pub use mount_table::{MountEntry, MountError, MountMode, MountOption, MountTable};
+pub use oauth::{
+    OAuthError, OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, oauth_authorization_code_form,
+    oauth_authorization_url, oauth_refresh_token_form, parse_oauth_token_response,
+    resolve_oauth_access_token, resolve_oauth_access_token_with,
+};
 pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
 pub use session_index::{
     SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,

@@ -1,4 +1,6 @@
-use crate::{AbiPathKind, ObjectClass, SessionIndexKind, is_model_name, is_object_name};
+use crate::{
+    AbiPathKind, MODEL_ROUTE_FILE, ObjectClass, SessionIndexKind, is_model_name, is_object_name,
+};
 
 /// Classifies a relative `CortexFS` ABI path by path shape.
 #[must_use]
@@ -78,6 +80,9 @@ fn parse_model_object_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
     };
     if !is_object_name(provider) {
         return AbiPathKind::Unknown;
+    }
+    if *provider == MODEL_ROUTE_FILE && rest.is_empty() {
+        return AbiPathKind::ModelRoute;
     }
     let Some((name, rest)) = rest.split_first() else {
         return AbiPathKind::ModelDir { provider };

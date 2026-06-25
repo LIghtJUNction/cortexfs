@@ -43,6 +43,47 @@ echo "summarize this file" | /ctx/model/main
 供应商密钥不写进 model 文件或 `.d/` 控制目录；provider adapter 会按环境变量、系统
 keychain、未配置的顺序解析。
 
+常见 provider 可以先安装文件化 preset：
+
+```bash
+ctx provider preset list
+ctx provider preset show google
+ctx provider preset install openai
+ctx provider preset install anthropic
+ctx provider preset install google
+```
+
+规范名称是 `openai`、`anthropic`、`google`。`codex` 是 `openai` preset 的别名；
+`gemini` 是 `google` preset 的别名。
+
+模型代理不做成 agent，也不写进 provider JSON。全局唯一路由表是：
+
+```text
+/ctx/model/route
+```
+
+这个文件同时决定 transport 和 key slot。多个 provider、多个模型、同一个 provider 的
+多个 key，都通过这一张表分配：
+
+```text
+group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)
+group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock), key(local)
+
+dip(198.51.100.45) -> direct
+# dip(203.0.113.43) -> JP
+domain(bestproxy.com) -> proxy
+pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct
+dip(geoip:private) -> direct
+dip(geoip:cn) -> direct
+domain(geosite:cn) -> direct
+model(embedding-*) -> local-socket
+fallback: proxy
+```
+
+`key(office)` 表示同一个 provider 的另一个凭据槽：先查匹配的环境变量，再查系统
+keychain 的 `service=cortexfs:<provider> account=office`。不写 `key(...)` 就用
+`account=default`。
+
 ## 管理 agent
 
 `ctx agent` 是当前 ABI 的薄客户端。创建、启动和停止 agent 仍然走普通 tool 或文件
@@ -60,6 +101,43 @@ ctx agent stop reviewer
 如果 `/ctx/tool/agent.create`、`agent.start` 或 `agent.stop` 不存在，对应生命周期命令会
 以 service unavailable 失败。`ctx agent status` 和 `ctx agent ps` 只读取普通
 `agent/<name>.d/*` 控制文件。
+
+## 提交图片和其他文件
+
+给 agent 图片、PDF、音频、压缩包或其他二进制材料时，推荐提交“路径引用”，不要把文件内容
+塞进 prompt。CortexFS 的思路是：文件本体留在 agent 可见的 workspace 或 shared space，
+对话里只描述任务和路径。
+
+当前目录启动 agent 时会默认挂载为 `/workspace`：
+
+```bash
+ctx agent start coder --session default
+ctx send coder "请分析 /workspace/assets/screenshot.png，总结界面问题"
+```
+
+需要显式控制可见目录时：
+
+```bash
+ctx agent start coder --session image-review \
+  --no-default-workspace \
+  --mount "$PWD/assets" /input ro \
+  --mount "$PWD/docs" /docs ro \
+  --cwd /docs
+
+ctx send coder --session image-review "请查看 /input/screenshot.png，并参考 /docs/DESIGN.md"
+```
+
+需要让多个 agent 或多次会话共享同一批材料时，放到 shared space：
+
+```bash
+mkdir -p "$(ctx path shared project-a)/input"
+cp screenshot.png "$(ctx path shared project-a)/input/"
+ctx agent new reviewer --shared project-a:read
+ctx send reviewer "请检查 /ctx/shared/project-a/input/screenshot.png"
+```
+
+这样做的好处是：大文件不进入消息历史；上下文里只记录路径、摘要和引用；真正读取图片、
+抽取文本、生成缩略图或调用视觉模型，由可见 tool 在需要时完成。
 
 ## 观察和接入 agent 终端
 

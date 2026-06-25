@@ -167,7 +167,7 @@ fn agent_executable_socket_runtime_stops_child_after_cancel() {
         r#"#!/bin/sh
 trap 'printf term > "$CTX_SOURCE/agent-terminated"; exit 0' TERM
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
-sh -c 'while [ ! -f "$CTX_SOURCE/release-agent" ]; do sleep 0.05; done; printf leaked > "$CTX_SOURCE/grandchild-leaked"' &
+sh -c 'trap "" TERM; while [ ! -f "$CTX_SOURCE/release-agent" ]; do sleep 0.05; done; printf leaked > "$CTX_SOURCE/grandchild-leaked"' &
 touch "$CTX_SOURCE/agent-ready"
 while [ ! -f "$CTX_SOURCE/release-agent" ]; do
   sleep 0.05

@@ -74,6 +74,7 @@ fn abi_paths_classify_by_stable_shape() {
         assert_abi_class(&format!("model/{model}"), "ctx.model.exec");
     }
     for (path, expected) in [
+        ("model/route", "ctx.model.route"),
         ("model/debug/echo", "ctx.model.exec"),
         ("model/debug/echo.sock", "ctx.model.socket"),
         ("model/debug/echo.d/id", "ctx.model.control"),
@@ -239,6 +240,31 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(!root.join("shared").join("project-a").exists());
 
     assert_eq!(ensure_v1_reference_tree(&root), Ok(bootstrapped));
+}
+
+#[test]
+fn reference_tree_bootstrap_replaces_tshrc_symlink_without_chmodding_target() {
+    let root = clean_test_dir("reference-tree-tshrc-symlink");
+    let victim = clean_test_dir("reference-tree-tshrc-victim");
+    let victim_target = victim.join("target");
+    assert!(fs::create_dir_all(&victim).is_ok());
+    assert!(fs::write(&victim_target, "keep-private\n").is_ok());
+    assert!(fs::set_permissions(&victim_target, fs::Permissions::from_mode(0o600)).is_ok());
+
+    let tshrc = ctx_home(&root).join(".tshrc");
+    assert!(fs::create_dir_all(ctx_home(&root)).is_ok());
+    assert!(symlink(&victim_target, &tshrc).is_ok());
+
+    let bootstrapped = ensure_v1_reference_tree(&root);
+    assert!(bootstrapped.is_ok());
+
+    let target_mode = fs::metadata(&victim_target)
+        .map(|metadata| metadata.permissions().mode() & 0o777);
+    assert!(matches!(target_mode, Ok(0o600)));
+    let tshrc_metadata = ok!(fs::symlink_metadata(&tshrc));
+    assert!(tshrc_metadata.is_file());
+    assert_eq!(tshrc_metadata.permissions().mode() & 0o777, 0o644);
+    assert_file_text(&tshrc, "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n");
 }
 
 #[test]

@@ -154,17 +154,23 @@ Provider presets are host-side JSON file templates. They install under
 
 ```text
 ctx provider preset list
-ctx provider preset show openai|anthropic|google
-ctx provider preset install openai|anthropic|google
+ctx provider preset show openai|codex|anthropic|google
+ctx provider preset install openai|codex|anthropic|google
 ```
 
 Canonical provider names:
 
 ```text
-openai     OpenAI-compatible `/v1/chat/completions`; `codex` is an alias
+openai     OpenAI API with `/v1/responses` for agent calls and
+           `/v1/chat/completions` fallback; `codex` is an alias
 anthropic  Claude Messages API
 google     Gemini through Google's OpenAI-compatible endpoint; `gemini` is an alias
 ```
+
+The `codex` alias installs the OpenAI preset and projects Codex-recommended
+OpenAI models under the canonical provider path, for example
+`/ctx/model/openai/gpt-5.5`. It does not create `/ctx/model/codex` or a second
+provider namespace.
 
 The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
 preset uses `anthropic.messages`, so the runner sends `POST /v1/messages` with
