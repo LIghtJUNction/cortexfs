@@ -7,7 +7,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
-    DEFAULT_AGENT_PROMPT_TEMPLATE, resolve_api_key_from_env_names, run_core_tool,
+    DEFAULT_AGENT_PROMPT_TEMPLATE, is_model_name, resolve_api_key_from_env_names, run_core_tool,
     run_core_tool_cli, run_echo_model,
 };
 use cortexfs_tool_sdk::ToolInvocation;
@@ -57,21 +57,45 @@ fn run_model(name: &str, args: &[OsString]) -> Result<(), String> {
 }
 
 fn resolve_model_name(name: &str) -> Result<String, String> {
-    if name.contains('/') {
+    if is_model_name(name) {
         return Ok(name.to_owned());
+    }
+    if !is_model_alias(name) {
+        return Err(format!("invalid model reference: {name}"));
     }
     let ctx_root =
         env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    resolve_model_alias(&ctx_root, name)
+}
+
+fn resolve_model_alias(ctx_root: &Path, name: &str) -> Result<String, String> {
     let target = fs::read_link(ctx_root.join("model").join(name))
         .map_err(|_error| format!("missing model alias: {name}"))?;
     let Some(target) = target.to_str() else {
         return Err(format!("invalid model alias: {name}"));
     };
-    target
-        .strip_prefix("/ctx/model/")
-        .filter(|model| model.contains('/'))
-        .map(str::to_owned)
-        .ok_or_else(|| format!("invalid model alias target: {name}"))
+    let Some(model) = target.strip_prefix("/ctx/model/") else {
+        return Err(format!("invalid model alias target: {name}"));
+    };
+    if !is_model_name(model) {
+        return Err(format!("invalid model alias target: {name}"));
+    }
+    Ok(model.to_owned())
+}
+
+fn is_model_alias(name: &str) -> bool {
+    matches!(name, "main" | "helper")
+}
+
+fn resolved_model_path(ctx_root: &Path, model: &str) -> Result<PathBuf, String> {
+    let name = if is_model_name(model) {
+        model.to_owned()
+    } else if is_model_alias(model) {
+        resolve_model_alias(ctx_root, model)?
+    } else {
+        return Err(format!("invalid model reference: {model}"));
+    };
+    Ok(ctx_root.join("model").join(name))
 }
 
 fn run_provider_model(name: &str, input: &str) -> Result<(), String> {
@@ -106,7 +130,7 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     } else {
         model
     };
-    let model_path = ctx_root.join("model").join(&model);
+    let model_path = resolved_model_path(&ctx_root, &model)?;
     let system_prompt = fs::read_to_string(
         source
             .join("agent")
