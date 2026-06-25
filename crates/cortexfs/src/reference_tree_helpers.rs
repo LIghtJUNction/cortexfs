@@ -1,3 +1,6 @@
+const REFERENCE_HOME_UID: u32 = 1000;
+const REFERENCE_HOME_GID: u32 = 1000;
+
 fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
     for agent in ["base", "coder", "reviewer"] {
         ensure_reference_home_agent(root, agent)?;
@@ -12,7 +15,8 @@ fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
     ensure_reference_model_alias(
         &root.join("home").join("1000").join("model").join("coder"),
         Path::new("/ctx/model/main"),
-    )
+    )?;
+    ensure_reference_home_ownership(&root.join("home").join("1000"))
 }
 
 fn ensure_reference_home_agent(root: &Path, agent: &str) -> Result<(), ReferenceTreeError> {
@@ -146,6 +150,47 @@ fn migrate_reference_session_meta_model(meta_path: &Path) -> Result<(), Referenc
 
 fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError> {
     fs::create_dir_all(path).map_err(|_error| ReferenceTreeError::CannotCreate)
+}
+
+fn ensure_reference_home_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
+    if unsafe { libc::geteuid() } != 0 {
+        return Ok(());
+    }
+    chown_reference_home_entry(path)?;
+    chown_reference_home_descendants(path)
+}
+
+fn chown_reference_home_descendants(path: &Path) -> Result<(), ReferenceTreeError> {
+    let entries = fs::read_dir(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    for entry in entries {
+        let entry = entry.map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        let path = entry.path();
+        chown_reference_home_entry(&path)?;
+        let file_type = entry
+            .file_type()
+            .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        if file_type.is_dir() && !file_type.is_symlink() {
+            chown_reference_home_descendants(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn chown_reference_home_entry(path: &Path) -> Result<(), ReferenceTreeError> {
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    let result = unsafe {
+        libc::lchown(
+            path.as_ptr(),
+            REFERENCE_HOME_UID,
+            REFERENCE_HOME_GID,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(ReferenceTreeError::CannotCreate)
+    }
 }
 
 fn write_reference_text(path: &Path, content: &str) -> Result<(), ReferenceTreeError> {
