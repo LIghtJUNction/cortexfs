@@ -1008,3 +1008,24 @@ fn detects_agent_control_paths_with_fixed_value_syntax() {
         assert_path_kind!(path, agent_control_path_kind, expected);
     }
 }
+
+#[test]
+fn ctx_env_quotes_path_export_root_bin() {
+    let exports = env_exports(
+        Path::new("/tmp/ctx;echo CORTEXFS_CTX_ENV_EVAL_PWNED >/tmp/pwn #"),
+        None,
+        None,
+    );
+
+    assert_eq!(
+        exports[3],
+        "export PATH='/tmp/ctx;echo CORTEXFS_CTX_ENV_EVAL_PWNED >/tmp/pwn #/bin':$PATH"
+    );
+}
+
+#[test]
+fn ctx_env_preserves_path_expansion_for_safe_root() {
+    let exports = env_exports(Path::new("/ctx"), None, None);
+
+    assert_eq!(exports[3], "export PATH=/ctx/bin:$PATH");
+}
