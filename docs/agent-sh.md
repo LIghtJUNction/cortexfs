@@ -60,6 +60,7 @@ still decide what a specific agent may execute.
 agent.sh coder
 agent.sh coder "fix tests"
 agent.sh --chat coder
+agent.sh --attach coder
 agent.sh --session default coder
 agent.sh --resume coder
 agent.sh --history coder
@@ -71,12 +72,11 @@ agent.sh --status coder
 agent.sh --raw coder "prompt"
 ```
 
-With no prompt from an interactive TTY, `agent.sh AGENT` attaches to the agent
-terminal through `ctx agent attach AGENT`, starting it first with
-`ctx agent start AGENT` if needed, so the user sees `ctxterm -> tsh`. With a
-prompt, it delegates to `ctx agent send AGENT`.
+With no prompt, `agent.sh AGENT` opens the agent socket chat REPL through
+`ctx agent repl AGENT`. With a prompt, it delegates to `ctx agent send AGENT`.
 
-Use `agent.sh --chat AGENT` for the agent socket chat REPL.
+Use `agent.sh --attach AGENT` only when you want to join the agent terminal and
+see `ctxterm -> tsh`.
 
 ## Socket Protocol
 

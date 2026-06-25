@@ -127,13 +127,14 @@ agent.sh --help
 agent.sh coder
 agent.sh coder "summarize this repository"
 agent.sh --chat coder
+agent.sh --attach coder
 agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
 ```
 
-`agent.sh coder` 会连接 agent terminal；如果 terminal 尚未运行，会先执行
-`ctx agent start coder`，因此正常会看到 `ctxterm -> tsh` 的会话。带 prompt 参数时
-才发送一条 agent socket 消息。需要聊天式 socket REPL 时使用 `agent.sh --chat coder`。
+`agent.sh coder` 会进入 agent socket 聊天 REPL；带 prompt 参数时发送一条 agent
+socket 消息。只有需要进入 agent terminal、看到 `ctxterm -> tsh` 时，才使用
+`agent.sh --attach coder`。
 `agent.sh` 不保存私有聊天数据库。
 
 ## 自定义 agent
