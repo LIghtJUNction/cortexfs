@@ -132,8 +132,8 @@ agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
 ```
 
-`agent.sh coder` 会进入 agent socket 聊天 REPL；带 prompt 参数时发送一条 agent
-socket 消息。只有需要进入 agent terminal、看到 `ctxterm -> tsh` 时，才使用
+`agent.sh coder` 会进入 agent 聊天 REPL；带 prompt 参数时通过 `ctx agent send`
+发送一条消息。只有需要进入 agent terminal、看到 `ctxterm -> tsh` 时，才使用
 `agent.sh --attach coder`。
 `agent.sh` 不保存私有聊天数据库。
 
