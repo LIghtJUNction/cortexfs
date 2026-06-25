@@ -307,10 +307,28 @@ fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
 
 fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError> {
     let reader = io::BufReader::new(stream);
+    let rendered = collect_agent_events_buffered(reader)?;
+    if !rendered.output.is_empty() {
+        print_terminal_text(&rendered.output)?;
+    }
+    for diagnostic in rendered.diagnostics {
+        write_terminal_error(&diagnostic)?;
+    }
+    Ok(ExitCode::from(rendered.exit_code))
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct BufferedAgentEvents {
+    output: String,
+    diagnostics: Vec<String>,
+    exit_code: u8,
+}
+
+fn collect_agent_events_buffered(reader: impl BufRead) -> Result<BufferedAgentEvents, CliError> {
     let mut saw_delta = false;
     let mut output = String::new();
     let mut diagnostics = Vec::new();
-    let mut exit = ExitCode::SUCCESS;
+    let mut exit_code = 0;
     for line in reader.lines() {
         let line = line.map_err(|error| {
             CliError::unavailable(format!("cannot read socket response: {error}"))
@@ -350,7 +368,7 @@ fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("runtime error");
                 diagnostics.push(format!("error: {code}: {message}"));
-                exit = ExitCode::from(1);
+                exit_code = 1;
             }
             Some("pong") => output.push_str("pong\n"),
             Some("done") if saw_delta => {
@@ -360,13 +378,11 @@ fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError
             _ => {}
         }
     }
-    if !output.is_empty() {
-        print_terminal_text(&output)?;
-    }
-    for diagnostic in diagnostics {
-        write_terminal_error(&diagnostic)?;
-    }
-    Ok(exit)
+    Ok(BufferedAgentEvents {
+        output,
+        diagnostics,
+        exit_code,
+    })
 }
 
 fn json_text_field(value: &serde_json::Value) -> Option<&str> {

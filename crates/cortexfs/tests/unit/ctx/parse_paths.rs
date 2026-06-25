@@ -531,9 +531,9 @@ fn agent_start_default_workspace_remounts_git_read_only() {
     };
     let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
     let home = PathBuf::from("/ctx/home/1000");
-    let cli_mounts = Vec::new();
+    let cli_mounts = mounts;
     let bwrap = agent_bwrap_args(&root, &args, &cli_mounts, &view, &socket, &home);
-    assert!(!contains_arg_triplet(
+    assert!(contains_arg_triplet(
         &bwrap,
         "--ro-bind",
         source.join(".git").to_str().unwrap_or_default(),
@@ -668,6 +668,28 @@ fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
                 && error.message.contains(
                     "ctx agent start coder --session 'safe; touch CORTEXFS_HINT_PWNED #'"
                 )
+    ));
+}
+
+#[test]
+fn buffered_agent_renderer_keeps_assistant_output_atomic() {
+    let input = concat!(
+        "{\"type\":\"delta\",\"text\":\"\\u4f60\"}\n",
+        "{\"type\":\"tool_call\",\"name\":\"tsh\"}\n",
+        "{\"type\":\"delta\",\"text\":\"\\u597d\"}\n",
+        "{\"type\":\"done\"}\n",
+        "{\"type\":\"error\",\"code\":\"EIO\",\"message\":\"boom\"}\n",
+    );
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(
+        rendered,
+        Ok(ref rendered)
+            if rendered.output == "\u{4f60}\u{597d}\n"
+                && rendered.diagnostics
+                    == vec!["[tool] tsh".to_owned(), "error: EIO: boom".to_owned()]
+                && rendered.exit_code == 1
     ));
 }
 
