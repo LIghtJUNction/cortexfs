@@ -27,6 +27,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 include!("ctx/helpers.rs");
+include!("ctx/output_mount.rs");
 include!("ctx/parse_paths.rs");
 include!("ctx/format_check.rs");
 include!("ctx/file_doctor.rs");
