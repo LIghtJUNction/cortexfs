@@ -138,6 +138,12 @@ fn parses_subcommand_help_before_required_args() {
         Ok(Command::HelpTopic(ref topic)) if topic == "agent"
     ));
 
+    let agent_sh = cmd!("agent-sh", "--help");
+    assert!(matches!(
+        agent_sh,
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent-sh"
+    ));
+
     let agent_watch = cmd!("agent", "watch", "--help");
     assert!(matches!(
         agent_watch,
