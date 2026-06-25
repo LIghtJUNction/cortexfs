@@ -32,6 +32,7 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
         "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         "  ctx [--root PATH] agent attach NAME [--session SESSION]",
+        "  ctx [--root PATH] agent-sh [agent.sh options...]",
         "  ctx [--root PATH] ping model/NAME|agent/NAME",
         "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN",
         "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
@@ -176,6 +177,14 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
         "agent attach" => print_lines(&[
             "usage:",
             "  ctx [--root PATH] agent attach NAME [--session SESSION]",
+        ]),
+        "agent-sh" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] agent-sh [agent.sh options...]",
+            "",
+            "compatibility:",
+            "  agent.sh resolves ctx and execs this Rust-owned entrypoint",
+            "  this command preserves agent.sh argument semantics",
         ]),
         "ping" => print_lines(&["usage:", "  ctx [--root PATH] ping model/NAME|agent/NAME"]),
         "cancel" => print_lines(&["usage:", "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN"]),

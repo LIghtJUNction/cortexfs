@@ -347,6 +347,7 @@ fn is_top_level_help_topic(command: &str) -> bool {
             | "resume"
             | "send"
             | "agent"
+            | "agent-sh"
             | "ping"
             | "cancel"
             | "doctor"
