@@ -47,7 +47,7 @@
     <g transform="translate(86 86)">
       <rect class="node" width="270" height="40" rx="6"/><text class="mono" x="18" y="27">status</text>
       <rect class="node" y="48" width="270" height="40" rx="6"/><text class="mono" x="18" y="75">bin/</text>
-      <rect class="hot" y="96" width="270" height="40" rx="6"/><text class="mono" x="18" y="123">model/debug/echo</text>
+      <rect class="hot" y="96" width="270" height="40" rx="6"/><text class="mono" x="18" y="123">model/qwen</text>
       <rect class="hot" y="144" width="270" height="40" rx="6"/><text class="mono" x="18" y="171">agent/coder.sock</text>
       <rect class="hot" y="192" width="270" height="40" rx="6"/><text class="mono" x="18" y="219">tool/fs.read</text>
       <rect class="node" y="240" width="270" height="40" rx="6"/><text class="mono" x="18" y="267">home/ shared/</text>

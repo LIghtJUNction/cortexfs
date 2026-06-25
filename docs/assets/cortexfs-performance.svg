@@ -12,25 +12,25 @@
   <rect class="panel" x="56" y="126" width="1088" height="342" rx="8"/>
   <line class="axis" x1="258" y1="420" x2="1098" y2="420"/>
   <text class="mono" x="82" y="192">ctx status</text>
-  <rect class="bar" x="258" y="170" width="90" height="28" rx="5"/>
-  <text class="mono" x="368" y="191">1.20 ms</text>
-  <text class="small" x="912" y="190">min 1 ms / max 2 ms / n=30</text>
+  <rect class="bar" x="258" y="170" width="273" height="28" rx="5"/>
+  <text class="mono" x="551" y="191">4.83 ms</text>
+  <text class="small" x="912" y="190">min 2 ms / max 12 ms / n=30</text>
   <text class="mono" x="82" y="246">ctx ls</text>
-  <rect class="bar" x="258" y="224" width="123" height="28" rx="5"/>
-  <text class="mono" x="401" y="245">1.63 ms</text>
-  <text class="small" x="912" y="244">min 1 ms / max 4 ms / n=30</text>
+  <rect class="bar" x="258" y="224" width="231" height="28" rx="5"/>
+  <text class="mono" x="509" y="245">4.10 ms</text>
+  <text class="small" x="912" y="244">min 2 ms / max 12 ms / n=30</text>
   <text class="mono" x="82" y="300">ctx ls tool</text>
-  <rect class="bar" x="258" y="278" width="151" height="28" rx="5"/>
-  <text class="mono" x="429" y="299">2.00 ms</text>
-  <text class="small" x="912" y="298">min 1 ms / max 5 ms / n=30</text>
+  <rect class="bar" x="258" y="278" width="237" height="28" rx="5"/>
+  <text class="mono" x="515" y="299">4.20 ms</text>
+  <text class="small" x="912" y="298">min 2 ms / max 12 ms / n=30</text>
   <text class="mono" x="82" y="354">cat /ctx/status</text>
-  <rect class="bar" x="258" y="332" width="118" height="28" rx="5"/>
-  <text class="mono" x="396" y="353">1.57 ms</text>
-  <text class="small" x="912" y="352">min 1 ms / max 2 ms / n=30</text>
+  <rect class="bar" x="258" y="332" width="148" height="28" rx="5"/>
+  <text class="mono" x="426" y="353">2.63 ms</text>
+  <text class="small" x="912" y="352">min 1 ms / max 5 ms / n=30</text>
   <text class="mono" x="82" y="408">ctx doctor</text>
   <rect class="bar" x="258" y="386" width="720" height="28" rx="5"/>
-  <text class="mono" x="998" y="407">9.50 ms</text>
-  <text class="small" x="912" y="406">min 3 ms / max 15 ms / n=30</text>
+  <text class="mono" x="998" y="407">12.73 ms</text>
+  <text class="small" x="912" y="406">min 7 ms / max 27 ms / n=30</text>
   <rect x="56" y="490" width="1088" height="34" rx="6" fill="#0b1220" stroke="#26354f"/>
-  <text class="small" x="78" y="512">Updated: 2026-06-22 23:08 UTC · Host: Linux 7.0.12-1-cachyos-bore-lto x86_64 GNU/Linux · Package: cortexfs-git 0.1.0.r96.g46ec0e8-1 · Lower is better.</text>
+  <text class="small" x="78" y="512">Updated: 2026-06-25 05:30 UTC · Host: Linux 7.0.12-1-cachyos-bore-lto x86_64 GNU/Linux · Package: cortexfs-git 0.1.0.r145.gae69b47-1 · Lower is better.</text>
 </svg>
