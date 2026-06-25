@@ -920,6 +920,30 @@ fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
 }
 
 #[test]
+fn terminal_connect_error_classifies_socket_failures() {
+    let socket = Path::new("/tmp/cortexfs-terminal.sock");
+    let missing = terminal_connect_cli_error(
+        socket,
+        "coder",
+        "test",
+        &std::io::Error::from(std::io::ErrorKind::NotFound),
+    );
+    assert!(missing.message.contains("terminal is not running"));
+    assert!(missing.message.contains("ctx agent start coder --session test"));
+
+    let refused = terminal_connect_cli_error(
+        socket,
+        "coder",
+        "test",
+        &std::io::Error::from(std::io::ErrorKind::ConnectionRefused),
+    );
+    assert!(refused
+        .message
+        .contains("terminal socket exists but has no listener"));
+    assert!(!refused.message.contains("terminal is not running"));
+}
+
+#[test]
 fn agent_repl_editor_enables_terminal_signals() {
     assert!(agent_repl_editor_config().enable_signals());
 }
