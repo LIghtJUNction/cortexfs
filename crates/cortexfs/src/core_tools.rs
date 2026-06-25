@@ -1,3 +1,4 @@
+use crate::CTX_ROOT;
 use cortexfs_tool_sdk::{
     Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
 };
@@ -140,7 +141,7 @@ impl Tool for TshConfigTool {
         let Some(object) = request.as_object() else {
             return Err(ToolError::invalid("input must be a json object"));
         };
-        let path = requested_tsh_config_path(object)?;
+        let path = requested_tsh_config_path(&ctx_root_from_env(), object)?;
         let mut config = read_tsh_runtime_config(&path)?;
         let changed = object.contains_key("max_loaded_tools")
             || object.contains_key("cache_capacity")
@@ -200,11 +201,20 @@ pub fn run_core_tool_cli(
     args: &[OsString],
     writer: &mut dyn Write,
 ) -> Result<Option<ExitCode>, io::Error> {
+    run_core_tool_cli_with_root(&ctx_root_from_env(), name, args, writer)
+}
+
+pub fn run_core_tool_cli_with_root(
+    root: &Path,
+    name: &str,
+    args: &[OsString],
+    writer: &mut dyn Write,
+) -> Result<Option<ExitCode>, io::Error> {
     match name {
         "fs.read" => run_fs_read_cli(args, writer).map(Some),
         "fs.write" => run_fs_write_cli(args, writer).map(Some),
         "shell.exec" => run_shell_exec_cli(args, writer).map(Some),
-        "tsh.config" => run_tsh_config_cli(args, writer).map(Some),
+        "tsh.config" => run_tsh_config_cli(root, args, writer).map(Some),
         _ => Ok(None),
     }
 }
@@ -226,15 +236,16 @@ impl Default for TshRuntimeConfig {
     }
 }
 
-fn default_tsh_config_path() -> PathBuf {
-    std::env::var_os("CTX_ROOT").map_or_else(
-        || PathBuf::from("/ctx/tool/tsh.d/config"),
-        |root| PathBuf::from(root).join("tool/tsh.d/config"),
-    )
+fn ctx_root_from_env() -> PathBuf {
+    std::env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(CTX_ROOT), PathBuf::from)
 }
 
-fn requested_tsh_config_path(object: &Map<String, Value>) -> ToolResult<PathBuf> {
-    let default_path = default_tsh_config_path();
+fn default_tsh_config_path(root: &Path) -> PathBuf {
+    root.join("tool/tsh.d/config")
+}
+
+fn requested_tsh_config_path(root: &Path, object: &Map<String, Value>) -> ToolResult<PathBuf> {
+    let default_path = default_tsh_config_path(root);
     let Some(value) = object.get("path") else {
         return Ok(default_path);
     };
@@ -424,7 +435,11 @@ fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<E
     Ok(exit_code_from_status(output.status))
 }
 
-fn run_tsh_config_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
+fn run_tsh_config_cli(
+    root: &Path,
+    args: &[OsString],
+    writer: &mut dyn Write,
+) -> io::Result<ExitCode> {
     let input = args
         .iter()
         .map(|value| value.to_string_lossy())
@@ -438,7 +453,7 @@ fn run_tsh_config_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<E
     let object = request.as_object().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "input must be a json object")
     })?;
-    let path = requested_tsh_config_path(object).map_err(|error| tool_error_to_io(&error))?;
+    let path = requested_tsh_config_path(root, object).map_err(|error| tool_error_to_io(&error))?;
     let mut config = read_tsh_runtime_config(&path).map_err(|error| tool_error_to_io(&error))?;
     let changed = object.contains_key("max_loaded_tools")
         || object.contains_key("cache_capacity")

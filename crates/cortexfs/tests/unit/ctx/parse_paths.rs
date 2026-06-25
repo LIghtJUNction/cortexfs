@@ -882,6 +882,28 @@ fn parses_tool_command_with_arguments() {
 }
 
 #[test]
+fn tool_command_runs_core_tool_cli_at_selected_root() {
+    let root = clean_test_dir("ctx-tool-command-core");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    let mut output = Vec::new();
+    let result = run_visible_tool_with_writer(
+        &root,
+        "tsh.config",
+        &[r#"{"max_loaded_tools":9,"cache_capacity":4,"window_percent":2}"#.to_owned()],
+        &mut output,
+    );
+
+    assert_eq!(result, Ok(std::process::ExitCode::SUCCESS));
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains("tool/tsh.d/config"));
+    let config = fs::read_to_string(root.join("tool/tsh.d/config")).unwrap_or_default();
+    assert!(config.contains("max_loaded_tools=9\n"));
+    assert!(config.contains("cache_capacity=4\n"));
+    assert!(config.contains("window_percent=2\n"));
+}
+
+#[test]
 fn tool_command_refuses_direct_ctx_path_execution() {
     let root = clean_test_dir("ctx-tool-command-visible");
     let tool = root.join("tool").join("project.echo");

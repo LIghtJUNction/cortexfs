@@ -103,7 +103,7 @@ pub use context_pack::{
 };
 pub use core_tools::{
     FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
-    run_core_tool_cli,
+    run_core_tool_cli, run_core_tool_cli_with_root,
 };
 pub use model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
