@@ -223,12 +223,8 @@ fn print_env(root: &Path) -> Result<(), CliError> {
 
 fn env_exports(root: &Path, home_env: Option<&str>, path_env: Option<&str>) -> [String; 4] {
     let root = root.display().to_string();
-    let home = home_env
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("{root}/home/$(id -u)"));
-    let path = path_env
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("{root}/tool:{home}/tool"));
+    let home = home_env.map_or_else(|| format!("{root}/home/$(id -u)"), str::to_owned);
+    let path = path_env.map_or_else(|| format!("{root}/tool:{home}/tool"), str::to_owned);
     let root_bin = format!("{root}/bin");
     [
         format!("export CTX_ROOT={}", shell_quote(&root)),

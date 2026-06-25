@@ -191,6 +191,7 @@ fn required_arg(
     values.next().ok_or_else(|| CliError::usage(message))
 }
 
+#[expect(clippy::too_many_lines, reason = "flat CLI dispatch keeps subcommand parsing explicit")]
 fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let Some(command) = values.next() else {
