@@ -1,4 +1,23 @@
 #[test]
+fn fuse_v1_projection_root_is_traversable_when_backing_root_is_private() {
+    let root = reference_tree("fuse-v1-private-backing-root");
+    assert!(fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).is_ok());
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    let attr = projection.getattr("");
+    assert!(matches!(
+        attr,
+        Ok(ref attr)
+            if attr.file_type() == FuseV1FileType::Directory
+                && attr.mode() & 0o777 == 0o755
+    ));
+
+    let status_attr = projection.getattr("status");
+    assert!(matches!(status_attr, Ok(ref attr) if attr.mode() & 0o777 == 0o644));
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "single projection smoke test keeps related FUSE ABI assertions together"
