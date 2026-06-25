@@ -407,8 +407,10 @@ fn cortexfs_mount_bin() -> PathBuf {
     PathBuf::from("cortexfs-mount")
 }
 
+const TRUSTED_SETSID_BIN: &str = "/usr/bin/setsid";
+
 fn spawn_mount_process(mount_bin: &Path, source: &Path, mountpoint: &Path) -> Result<(), CliError> {
-    let mut detached = ProcessCommand::new("setsid");
+    let mut detached = ProcessCommand::new(TRUSTED_SETSID_BIN);
     detached
         .arg("-f")
         .arg(mount_bin)
