@@ -523,10 +523,11 @@ impl DynamicToolCache {
                 if let Some(entry) = self.entries.get_mut(&candidate) {
                     entry.segment = CacheSegment::Main;
                 }
-            } else if candidate != current_path {
-                let _dropped = self.entries.remove(&candidate);
             } else {
-                return;
+                let _dropped = self.entries.remove(&candidate);
+                if candidate == current_path {
+                    return;
+                }
             }
         }
 
