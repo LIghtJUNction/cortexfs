@@ -701,6 +701,32 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
                 && rendered.diagnostics
                     == vec!["[tool] tsh".to_owned(), "error: EIO: boom".to_owned()]
                 && rendered.exit_code == 1
+                && !rendered.interrupted
+    ));
+}
+
+#[test]
+fn interruptible_agent_renderer_returns_on_interrupt_flag() {
+    let pair = std::os::unix::net::UnixStream::pair();
+    assert!(pair.is_ok());
+    let Ok((reader, _writer)) = pair else {
+        return;
+    };
+    assert!(reader
+        .set_read_timeout(Some(std::time::Duration::from_millis(1)))
+        .is_ok());
+    let interrupted = std::sync::atomic::AtomicBool::new(true);
+
+    let rendered =
+        collect_agent_events_buffered_interruptible(std::io::BufReader::new(reader), &interrupted);
+
+    assert!(matches!(
+        rendered,
+        Ok(ref rendered)
+            if rendered.output.is_empty()
+                && rendered.diagnostics.is_empty()
+                && rendered.exit_code == 0
+                && rendered.interrupted
     ));
 }
 

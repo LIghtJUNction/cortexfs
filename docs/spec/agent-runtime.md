@@ -82,8 +82,9 @@ sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
 `messages.jsonl` history. This is prompt context only; it does not grant
 additional session authority.
 
-If a human sends `SIGINT` while a run is active, a client should prefer
-`cancel`. In an idle interactive REPL, `Ctrl+C` exits the REPL.
+If a human sends `SIGINT` while a run is active, `ctx agent repl` sends a
+`cancel` request for the active run id and returns to the prompt. In an idle
+interactive REPL, `Ctrl+C` exits the REPL.
 
 ## Persistent Terminal Flow
 

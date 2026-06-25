@@ -220,22 +220,36 @@ fn agent_send(
     stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
 }
 
-fn agent_send_buffered(
+#[derive(Clone, Copy)]
+struct AgentBufferedSend<'a> {
+    session: Option<&'a str>,
+    input: &'a str,
+    raw: bool,
+    run_id: &'a str,
+    interrupt: Option<&'a AgentInterruptGuard>,
+}
+
+fn agent_send_buffered_with_run_id(
     root: &Path,
     name: &str,
-    session: Option<&str>,
-    input: &str,
-    raw: bool,
+    send: AgentBufferedSend<'_>,
 ) -> Result<ExitCode, CliError> {
-    let session = agent_session_name(root, name, session)?;
+    let session = agent_session_name(root, name, send.session)?;
     let request = format!(
         "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
-        json_string(&request_id()?),
+        json_string(send.run_id),
         json_string(&session),
         json_string(&agent_cwd(root, name)?),
-        json_string(input)
+        json_string(send.input)
     );
-    stream_agent_socket_request_buffered(&agent_socket_path(root, name)?, &request, raw)
+    let cancel_request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(send.run_id));
+    stream_agent_socket_request_buffered_interruptible(
+        &agent_socket_path(root, name)?,
+        &request,
+        send.raw,
+        send.interrupt
+            .map(|guard| (guard, cancel_request.as_str(), send.run_id)),
+    )
 }
 
 fn agent_resume(
@@ -316,7 +330,15 @@ fn agent_repl(
             if !raw {
                 print_terminal_text("\n")?;
             }
-            let code = agent_send_buffered(root, name, Some(&session), &line, raw)?;
+            let run_id = request_id()?;
+            let interrupt = AgentInterruptGuard::new()?;
+            let code = agent_send_buffered_with_run_id(root, name, AgentBufferedSend {
+                session: Some(&session),
+                input: &line,
+                raw,
+                run_id: &run_id,
+                interrupt: Some(&interrupt),
+            })?;
             if code != ExitCode::SUCCESS {
                 return Ok(code);
             }
@@ -343,6 +365,36 @@ fn agent_repl(
 
 fn agent_repl_editor_config() -> rustyline::Config {
     rustyline::Config::builder().enable_signals(true).build()
+}
+
+struct AgentInterruptGuard {
+    interrupted: Arc<AtomicBool>,
+    signal_id: signal_hook::SigId,
+}
+
+impl AgentInterruptGuard {
+    fn new() -> Result<Self, CliError> {
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let signal_id =
+            signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted))
+                .map_err(|error| {
+                    CliError::unavailable(format!("cannot register SIGINT handler: {error}"))
+                })?;
+        Ok(Self {
+            interrupted,
+            signal_id,
+        })
+    }
+
+    fn interrupted_flag(&self) -> &AtomicBool {
+        &self.interrupted
+    }
+}
+
+impl Drop for AgentInterruptGuard {
+    fn drop(&mut self) {
+        signal_hook::low_level::unregister(self.signal_id);
+    }
 }
 
 fn agent_repl_command(
@@ -796,7 +848,7 @@ fn wait_for_agent_terminal_socket(socket: &Path) -> Result<(), CliError> {
         if socket.exists() {
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
     }
     Err(CliError::unavailable(format!(
         "agent terminal service started, but socket did not appear: {}",

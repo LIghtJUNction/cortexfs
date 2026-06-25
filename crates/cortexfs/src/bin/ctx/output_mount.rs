@@ -395,7 +395,7 @@ fn mount_reference_tree(
             print_line(&format!("source={}", source.display()))?;
             return Ok(());
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
     }
 
     Err(CliError::unavailable(format!(

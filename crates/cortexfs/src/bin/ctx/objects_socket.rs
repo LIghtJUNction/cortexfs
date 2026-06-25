@@ -226,10 +226,11 @@ fn stream_agent_socket_request(
     render_agent_events(stream)
 }
 
-fn stream_agent_socket_request_buffered(
+fn stream_agent_socket_request_buffered_interruptible(
     socket: &Path,
     request: &str,
     raw: bool,
+    interrupt: Option<(&AgentInterruptGuard, &str, &str)>,
 ) -> Result<ExitCode, CliError> {
     if raw {
         return stream_socket_request(socket, request);
@@ -247,6 +248,23 @@ fn stream_agent_socket_request_buffered(
         .write_all(request.as_bytes())
         .and_then(|()| stream.shutdown(Shutdown::Write))
         .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
+
+    if let Some((guard, cancel_request, run_id)) = interrupt {
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .map_err(|error| {
+                CliError::unavailable(format!("cannot configure interruptible socket: {error}"))
+            })?;
+        let interrupted = render_agent_events_buffered_interruptible(stream, guard.interrupted_flag())?;
+        if interrupted {
+            write_terminal_error(&format!("ctx: interrupt requested; cancelling run {run_id}"))?;
+            let cancel_code = stream_agent_socket_request(socket, cancel_request, false)?;
+            if cancel_code != ExitCode::SUCCESS {
+                return Ok(cancel_code);
+            }
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
 
     render_agent_events_buffered(stream)
 }
@@ -317,24 +335,80 @@ fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError
     Ok(ExitCode::from(rendered.exit_code))
 }
 
+fn render_agent_events_buffered_interruptible(
+    stream: UnixStream,
+    interrupt: &AtomicBool,
+) -> Result<bool, CliError> {
+    let mut reader = io::BufReader::new(stream);
+    let rendered = collect_agent_events_buffered_interruptible(&mut reader, interrupt)?;
+    if !rendered.output.is_empty() {
+        print_terminal_text(&rendered.output)?;
+    }
+    for diagnostic in rendered.diagnostics {
+        write_terminal_error(&diagnostic)?;
+    }
+    Ok(rendered.interrupted)
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct BufferedAgentEvents {
     output: String,
     diagnostics: Vec<String>,
     exit_code: u8,
+    interrupted: bool,
 }
 
 fn collect_agent_events_buffered(reader: impl BufRead) -> Result<BufferedAgentEvents, CliError> {
+    collect_agent_events_buffered_with(reader, None)
+}
+
+fn collect_agent_events_buffered_interruptible(
+    reader: impl BufRead,
+    interrupt: &AtomicBool,
+) -> Result<BufferedAgentEvents, CliError> {
+    collect_agent_events_buffered_with(reader, Some(interrupt))
+}
+
+fn collect_agent_events_buffered_with(
+    mut reader: impl BufRead,
+    interrupt: Option<&AtomicBool>,
+) -> Result<BufferedAgentEvents, CliError> {
     let mut saw_delta = false;
     let mut output = String::new();
     let mut diagnostics = Vec::new();
     let mut exit_code = 0;
-    for line in reader.lines() {
-        let line = line.map_err(|error| {
-            CliError::unavailable(format!("cannot read socket response: {error}"))
-        })?;
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-            output.push_str(&line);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_bytes) => {}
+            Err(error)
+                if interrupt.is_some()
+                    && matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+            {
+                if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+                    return Ok(BufferedAgentEvents {
+                        output,
+                        diagnostics,
+                        exit_code,
+                        interrupted: true,
+                    });
+                }
+                continue;
+            }
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot read socket response: {error}"
+                )));
+            }
+        }
+        let line = line.trim_end_matches(['\r', '\n']);
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            output.push_str(line);
             output.push('\n');
             continue;
         };
@@ -382,6 +456,7 @@ fn collect_agent_events_buffered(reader: impl BufRead) -> Result<BufferedAgentEv
         output,
         diagnostics,
         exit_code,
+        interrupted: false,
     })
 }
 
