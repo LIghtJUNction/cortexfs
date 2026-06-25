@@ -220,7 +220,8 @@ fn run_agent_executable_streaming(
         .env("CTX_RUN_ID", run_id)
         .env("CTX_SESSION", session)
         .env("CTX_AGENT_HISTORY_MESSAGES", history_messages)
-        .stdout(Stdio::piped());
+        .stdout(Stdio::piped())
+        .process_group(0);
     apply_agent_identity_to_command(&mut command, runtime.identity);
     let mut child = command
         .spawn()
@@ -249,7 +250,7 @@ fn run_agent_executable_streaming(
                     continue;
                 }
                 if !inspect_event_stream_jsonl(&line).is_ok() {
-                    let _ignored = child.kill();
+                    terminate_agent_process_group(&mut child);
                     let _ignored = child.wait();
                     return Err(SocketRuntimeError::InvalidAgentOutput);
                 }
@@ -261,7 +262,7 @@ fn run_agent_executable_streaming(
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if agent_run_cancelled(&session_dir, run_id) {
                     cancelled = true;
-                    let _ignored = child.kill();
+                    terminate_agent_process_group(&mut child);
                     break;
                 }
             }
@@ -291,6 +292,16 @@ fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixId
     if nix::unistd::geteuid().is_root() {
         command.gid(identity.gid()).uid(identity.uid());
     }
+}
+
+fn terminate_agent_process_group(child: &mut Child) {
+    if let Ok(pid) = i32::try_from(child.id()) {
+        let _ignored = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(-pid),
+            nix::sys::signal::Signal::SIGKILL,
+        );
+    }
+    let _ignored = child.kill();
 }
 
 fn event_type(line: &str) -> Option<String> {
