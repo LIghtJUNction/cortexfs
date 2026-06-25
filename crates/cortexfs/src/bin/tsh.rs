@@ -7,7 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::{env, fs};
 
-use cortexfs::{CTX_ROOT, ToolPath};
+use cortexfs::{
+    CTX_ROOT, PolicyV0, ToolExecutionAuthority, ToolPath, authorize_tool_execution,
+    derive_agent_runtime_view,
+};
 use cortexfs_tool_sdk::DynamicToolCache;
 use nix::libc;
 use nix::sys::termios::{self, ControlFlags, InputFlags, LocalFlags, OutputFlags, SetArg};
@@ -1075,6 +1078,24 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
     {
         return print_tool_help(root, name).map(|()| ExitCode::SUCCESS);
     }
+    if let Ok(agent_name) = env::var("CTX_AGENT") {
+        let view = derive_agent_runtime_view(root, &agent_name).map_err(|error| {
+            TshError::unavailable(format!(
+                "cannot derive runtime authority for {agent_name}: {error:?}"
+            ))
+        })?;
+        let tool_policy = read_tool_policy(hit.control_dir())?;
+        let authority = ToolExecutionAuthority::new(
+            view.identity(),
+            view.mount_table(),
+            view.policy_subject(),
+            view.policy(),
+            &tool_policy,
+        );
+        authorize_tool_execution(view.tool_path(), name, authority).map_err(|denial| {
+            TshError::unavailable(format!("tool execution denied: {denial:?}"))
+        })?;
+    }
     let status = ProcessCommand::new(hit.path())
         .args(args)
         .env("CTX_TOOL_MODE", "cli")
@@ -1168,6 +1189,18 @@ fn command_not_found<T>(name: &str) -> Result<T, TshError> {
     Err(TshError::unavailable(format!(
         "{name}: command not found\ntry: tools"
     )))
+}
+
+fn read_tool_policy(control_dir: &Path) -> Result<PolicyV0, TshError> {
+    let path = control_dir.join("policy");
+    let content = fs::read_to_string(&path).map_err(|error| {
+        TshError::unavailable(format!(
+            "cannot read tool policy {}: {error}",
+            path.display()
+        ))
+    })?;
+    PolicyV0::parse(&content)
+        .map_err(|_error| TshError::unavailable(format!("invalid tool policy {}", path.display())))
 }
 
 fn ctx_tool_path(root: &Path) -> Result<ToolPath, TshError> {
