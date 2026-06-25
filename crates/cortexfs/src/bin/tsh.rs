@@ -1175,7 +1175,7 @@ fn ctx_tool_path(root: &Path) -> Result<ToolPath, TshError> {
         Ok(value) => Ok(ToolPath::parse(&value)),
         Err(env::VarError::NotPresent) => {
             let home = ctx_home(root)?;
-            tshrc_ctx_path(&home)?.map_or_else(
+            tshrc_ctx_path(root, &home)?.map_or_else(
                 || Ok(ToolPath::default(root, &home)),
                 |value| Ok(ToolPath::parse(&value)),
             )
@@ -1184,7 +1184,7 @@ fn ctx_tool_path(root: &Path) -> Result<ToolPath, TshError> {
     }
 }
 
-fn tshrc_ctx_path(home: &Path) -> Result<Option<String>, TshError> {
+fn tshrc_ctx_path(root: &Path, home: &Path) -> Result<Option<String>, TshError> {
     let path = home.join(".tshrc");
     let content = match fs::read_to_string(&path) {
         Ok(content) => content,
@@ -1196,8 +1196,13 @@ fn tshrc_ctx_path(home: &Path) -> Result<Option<String>, TshError> {
             )));
         }
     };
-    parse_tshrc_ctx_path(&content)
-        .map_err(|message| TshError::usage(format!("invalid {}: {message}", path.display())))
+    let value = parse_tshrc_ctx_path(&content)
+        .map_err(|message| TshError::usage(format!("invalid {}: {message}", path.display())))?;
+    if let Some(value) = &value {
+        validate_tshrc_ctx_path(value, root, home)
+            .map_err(|message| TshError::usage(format!("invalid {}: {message}", path.display())))?;
+    }
+    Ok(value)
 }
 
 fn parse_tshrc_ctx_path(content: &str) -> Result<Option<String>, String> {
@@ -1224,6 +1229,35 @@ fn parse_tshrc_ctx_path(content: &str) -> Result<Option<String>, String> {
         }
     }
     Ok(value)
+}
+
+fn validate_tshrc_ctx_path(value: &str, root: &Path, home: &Path) -> Result<(), String> {
+    for component in value.split(':') {
+        if component.is_empty() {
+            return Err("CTX_PATH contains an empty component".to_owned());
+        }
+        let path = Path::new(component);
+        if !path.is_absolute() {
+            return Err(format!("CTX_PATH component is not absolute: {component}"));
+        }
+        if is_allowed_tshrc_tool_dir(path, root, home) {
+            continue;
+        }
+        return Err(format!(
+            "CTX_PATH component must be /ctx/tool, /ctx/home/<uid>/tool, or the matching --root/CTX_HOME tool directory: {component}"
+        ));
+    }
+    Ok(())
+}
+
+fn is_allowed_tshrc_tool_dir(path: &Path, root: &Path, home: &Path) -> bool {
+    path == Path::new("/ctx/tool")
+        || path == root.join("tool")
+        || path == home.join("tool")
+        || home
+            .file_name()
+            .map(|uid| path == Path::new("/ctx/home").join(uid).join("tool"))
+            .unwrap_or(false)
 }
 
 fn ctx_home(root: &Path) -> Result<PathBuf, TshError> {
@@ -1284,11 +1318,12 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 mod tests {
     use super::{
         LoadedTool, ToolContext, TshCommand, TshConfig, is_interactive_tool, parse_args,
-        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, run_tool,
+        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, run_tool, validate_tshrc_ctx_path,
     };
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use std::path::PathBuf;
 
     #[test]
@@ -1338,6 +1373,26 @@ CTX_PATH=/ctx/home/1000/tool:/ctx/tool
         assert_eq!(parse_tshrc_ctx_path("# empty\n\n"), Ok(None));
         assert!(parse_tshrc_ctx_path("export CTX_PATH=/ctx/tool\n").is_err());
         assert!(parse_tshrc_ctx_path("CTX_PATH=\n").is_err());
+    }
+
+    #[test]
+    fn rejects_tshrc_ctx_path_outside_ctx_namespace() {
+        let root = Path::new("/tmp/cortexfs-root");
+        let home = root.join("home").join("1000");
+
+        assert!(validate_tshrc_ctx_path("/ctx/tool:/ctx/home/1000/tool", root, &home).is_ok());
+        assert!(
+            validate_tshrc_ctx_path(
+                "/tmp/cortexfs-root/tool:/tmp/cortexfs-root/home/1000/tool",
+                root,
+                &home,
+            )
+            .is_ok()
+        );
+        assert!(validate_tshrc_ctx_path(".", root, &home).is_err());
+        assert!(validate_tshrc_ctx_path("/usr/bin", root, &home).is_err());
+        assert!(validate_tshrc_ctx_path("/tmp/attacker", root, &home).is_err());
+        assert!(validate_tshrc_ctx_path("/ctx/tool::/ctx/home/1000/tool", root, &home).is_err());
     }
 
     #[test]
