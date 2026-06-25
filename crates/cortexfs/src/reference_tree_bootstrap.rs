@@ -172,7 +172,11 @@ if [ -z "$model" ] || [ ! -x "$ctx_root/model/$model" ]; then
   printf '{{"type":"done","run":"%s","status":"error"}}\n' "$run"
   exit 1
 fi
-CTX_AGENT="{name}" CTX_AGENT_SYSTEM="$(cat "$source_root/agent/{name}.d/system.md" 2>/dev/null || true)" CTX_RUN_ID="$run" exec "$ctx_root/model/$model" "$input"
+CTX_AGENT="{name}" \
+CTX_AGENT_SYSTEM="$(cat "$source_root/agent/{name}.d/system.md" 2>/dev/null || true)" \
+CTX_AGENT_PROMPT_TEMPLATE="$(cat "$source_root/agent/{name}.d/prompt.template.md" 2>/dev/null || true)" \
+CTX_RUN_ID="$run" \
+exec "$ctx_root/model/$model" "$input"
 "#
     )
 }
