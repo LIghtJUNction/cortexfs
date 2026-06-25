@@ -983,7 +983,7 @@ fn run_repl_tool(
     {
         return print_tool_help(root, name).map(|()| ExitCode::SUCCESS);
     }
-    if args.is_empty() && !is_interactive_tool(name) {
+    if args.is_empty() && requires_explicit_repl_input(name) {
         write_stdout(&format!(
             "tsh: {name} needs input; pass arguments instead of leaving stdin open\ntry: {name} PATH or {name} '{{\"path\":\"PATH\"}}'\n"
         ))?;
@@ -1012,8 +1012,8 @@ fn is_tsh_builtin(name: &str) -> bool {
     )
 }
 
-fn is_interactive_tool(name: &str) -> bool {
-    matches!(name, "bash" | "tmux" | "zellij" | "tsh")
+fn requires_explicit_repl_input(name: &str) -> bool {
+    matches!(name, "fs.read" | "fs.write" | "shell.exec")
 }
 
 fn parse_exit_code(words: &[String]) -> Result<ExitCode, TshError> {
@@ -1398,9 +1398,10 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, is_interactive_tool,
-        load_tool_context, parse_args, parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path,
-        run_tool, terminal_safe_text, validate_tshrc_ctx_path,
+        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, load_tool_context,
+        parse_args, parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path,
+        requires_explicit_repl_input, run_repl_tool, run_tool, terminal_safe_text,
+        validate_tshrc_ctx_path,
     };
     use cortexfs_tool_sdk::DynamicToolCache;
     use std::ffi::OsString;
@@ -1596,11 +1597,31 @@ window_percent=25
     }
 
     #[test]
-    fn classifies_repl_interactive_tools() {
-        assert!(is_interactive_tool("bash"));
-        assert!(is_interactive_tool("tmux"));
-        assert!(is_interactive_tool("zellij"));
-        assert!(!is_interactive_tool("fs.read"));
+    fn repl_allows_empty_argv_for_normal_cli_tools() {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-repl-empty-normal-{}",
+            std::process::id()
+        ));
+        let tool_dir = root.join("tool");
+        assert!(fs::create_dir_all(&tool_dir).is_ok());
+        let tool = tool_dir.join("noop");
+        assert!(fs::write(&tool, "#!/bin/sh\nexit 0\n").is_ok());
+        assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+
+        let mut context = ToolContext::new(4);
+        let result = run_repl_tool(&root, &mut context, "noop", Vec::new());
+
+        assert!(matches!(result, Err(error) if error.message.contains("CTX_AGENT")));
+        let _ignored = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn repl_keeps_explicit_input_guard_for_structured_core_tools() {
+        assert!(requires_explicit_repl_input("fs.read"));
+        assert!(requires_explicit_repl_input("fs.write"));
+        assert!(requires_explicit_repl_input("shell.exec"));
+        assert!(!requires_explicit_repl_input("ls"));
+        assert!(!requires_explicit_repl_input("project.test"));
     }
 
     fn test_loaded_tool(name: &str, pinned: bool) -> LoadedTool {
