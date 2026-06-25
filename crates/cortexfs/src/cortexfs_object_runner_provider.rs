@@ -1,8 +1,50 @@
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::fmt::Write as FmtWrite;
+
 use serde_json::json;
 
+#[derive(Clone, Debug, Deserialize)]
 struct RunnerProviderConfig {
     base_url: String,
     api_key_env: Option<String>,
+    #[serde(default)]
+    transports: BTreeMap<String, RunnerTransportConfig>,
+    #[serde(default)]
+    route: Vec<RunnerModelRoute>,
+    default_transport: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RunnerTransportConfig {
+    kind: String,
+    url: Option<String>,
+    path: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct RunnerModelRoute {
+    model: String,
+    transport: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ResolvedTransport {
+    Direct {
+        base_url: String,
+    },
+    Http {
+        base_url: String,
+    },
+    Unix {
+        base_url: String,
+        socket_path: String,
+    },
+}
+
+struct CurlJsonTarget {
+    url: String,
+    unix_socket: Option<String>,
 }
 
 fn provider_chat_completion(
@@ -17,10 +59,11 @@ fn provider_chat_completion(
     let config =
         provider_config(provider).ok_or_else(|| format!("missing provider: {provider}"))?;
     let key = provider_key(&config)?.ok_or_else(|| format!("missing api key: {provider}"))?;
-    match call_openai_chat_streaming(&config.base_url, model, input, &key, run, stdout) {
+    let transport = provider_transport(&config, model)?;
+    match call_openai_chat_streaming(&transport, model, input, &key, run, stdout) {
         Ok(()) => Ok(()),
         Err(error) if error.can_fallback => {
-            let content = call_openai_chat(&config.base_url, model, input, &key)?;
+            let content = call_openai_chat(&transport, model, input, &key)?;
             write_model_delta(stdout, run, &content)
                 .and_then(|()| stdout.flush())
                 .map_err(|error| format!("cannot write output: {error}"))
@@ -38,15 +81,72 @@ fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
         if provider_name_from_base_url(&base_url).as_deref() != Some(provider) {
             continue;
         }
-        return Some(RunnerProviderConfig {
-            base_url,
-            api_key_env: value
-                .get("api_key_env")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-        });
+        let mut config = serde_json::from_value::<RunnerProviderConfig>(value).ok()?;
+        config.base_url = base_url;
+        return Some(config);
     }
     None
+}
+
+fn provider_transport(
+    config: &RunnerProviderConfig,
+    model: &str,
+) -> Result<ResolvedTransport, String> {
+    let selected = config
+        .route
+        .iter()
+        .find(|route| model_route_matches(&route.model, model))
+        .map(|route| route.transport.as_str())
+        .or(config.default_transport.as_deref());
+    let Some(name) = selected else {
+        return Ok(ResolvedTransport::Direct {
+            base_url: config.base_url.clone(),
+        });
+    };
+    let transport = config
+        .transports
+        .get(name)
+        .ok_or_else(|| format!("missing provider transport: {name}"))?;
+    match transport.kind.as_str() {
+        "direct" => Ok(ResolvedTransport::Direct {
+            base_url: transport
+                .url
+                .clone()
+                .unwrap_or_else(|| config.base_url.clone()),
+        }),
+        "http" => {
+            let base_url = transport
+                .url
+                .clone()
+                .ok_or_else(|| format!("provider transport {name} missing url"))?;
+            Ok(ResolvedTransport::Http { base_url })
+        }
+        "unix" => {
+            let socket_path = transport
+                .path
+                .clone()
+                .ok_or_else(|| format!("provider transport {name} missing path"))?;
+            let base_url = transport
+                .url
+                .clone()
+                .unwrap_or_else(|| "http://localhost/v1".to_owned());
+            Ok(ResolvedTransport::Unix {
+                base_url,
+                socket_path,
+            })
+        }
+        kind => Err(format!("unsupported provider transport kind: {kind}")),
+    }
+}
+
+fn model_route_matches(pattern: &str, model: &str) -> bool {
+    if matches!(pattern, "*" | "") {
+        return true;
+    }
+    pattern == model
+        || pattern
+            .strip_suffix('*')
+            .is_some_and(|prefix| model.starts_with(prefix))
 }
 
 fn provider_key(config: &RunnerProviderConfig) -> Result<Option<String>, String> {
@@ -127,19 +227,19 @@ fn provider_name_from_base_url(base_url: &str) -> Option<String> {
 }
 
 fn call_openai_chat(
-    base_url: &str,
+    transport: &ResolvedTransport,
     model: &str,
     input: &str,
     api_key: &str,
 ) -> Result<String, String> {
-    let url = chat_completions_url(base_url);
+    let target = chat_completions_target(transport);
     let body = json!({
         "model": model,
         "messages": provider_messages(input),
         "stream": false
     })
     .to_string();
-    let output = run_curl_json(&url, api_key, &body)?;
+    let output = run_curl_json(&target, api_key, &body)?;
     parse_openai_chat_content(&output)
 }
 
@@ -149,21 +249,21 @@ struct StreamFailure {
 }
 
 fn call_openai_chat_streaming(
-    base_url: &str,
+    transport: &ResolvedTransport,
     model: &str,
     input: &str,
     api_key: &str,
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
-    let url = chat_completions_url(base_url);
+    let target = chat_completions_target(transport);
     let body = json!({
         "model": model,
         "messages": provider_messages(input),
         "stream": true
     })
     .to_string();
-    let mut child = start_curl_json(&url, api_key, &body).map_err(|message| StreamFailure {
+    let mut child = start_curl_json(&target, api_key, &body).map_err(|message| StreamFailure {
         message,
         can_fallback: true,
     })?;
@@ -263,8 +363,8 @@ fn provider_messages_for_agent(
     )
 }
 
-fn run_curl_json(url: &str, api_key: &str, body: &str) -> Result<Vec<u8>, String> {
-    let output = start_curl_json(url, api_key, body)?
+fn run_curl_json(target: &CurlJsonTarget, api_key: &str, body: &str) -> Result<Vec<u8>, String> {
+    let output = start_curl_json(target, api_key, body)?
         .wait_with_output()
         .map_err(|error| format!("cannot run curl: {error}"))?;
     if output.status.success() {
@@ -274,7 +374,11 @@ fn run_curl_json(url: &str, api_key: &str, body: &str) -> Result<Vec<u8>, String
     }
 }
 
-fn start_curl_json(url: &str, api_key: &str, body: &str) -> Result<std::process::Child, String> {
+fn start_curl_json(
+    target: &CurlJsonTarget,
+    api_key: &str,
+    body: &str,
+) -> Result<std::process::Child, String> {
     let mut child = Command::new("curl")
         .arg("--config")
         .arg("-")
@@ -287,9 +391,16 @@ fn start_curl_json(url: &str, api_key: &str, body: &str) -> Result<std::process:
         cleanup_curl_child(&mut child);
         return Err("cannot write curl config".to_owned());
     };
-    let config = format!(
-        "fail\nsilent\nshow-error\nno-buffer\nmax-time = 60\nrequest = POST\nurl = {}\nheader = {}\nheader = {}\ndata = {}\n",
-        curl_config_quote(url),
+    let mut config = format!(
+        "fail\nsilent\nshow-error\nno-buffer\nmax-time = 60\nrequest = POST\nurl = {}\n",
+        curl_config_quote(&target.url),
+    );
+    if let Some(socket_path) = target.unix_socket.as_deref() {
+        let _ignored = writeln!(config, "unix-socket = {}", curl_config_quote(socket_path));
+    }
+    let _ignored = write!(
+        config,
+        "header = {}\nheader = {}\ndata = {}\n",
         curl_config_quote(&format!("Authorization: Bearer {api_key}")),
         curl_config_quote("Content-Type: application/json"),
         curl_config_quote(body),
@@ -349,6 +460,22 @@ fn chat_completions_url(base_url: &str) -> String {
         format!("{base}/chat/completions")
     } else {
         format!("{base}/v1/chat/completions")
+    }
+}
+
+fn chat_completions_target(transport: &ResolvedTransport) -> CurlJsonTarget {
+    let (base_url, unix_socket) = match *transport {
+        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
+            (base_url, None)
+        }
+        ResolvedTransport::Unix {
+            ref base_url,
+            ref socket_path,
+        } => (base_url, Some(socket_path.clone())),
+    };
+    CurlJsonTarget {
+        url: chat_completions_url(base_url),
+        unix_socket,
     }
 }
 

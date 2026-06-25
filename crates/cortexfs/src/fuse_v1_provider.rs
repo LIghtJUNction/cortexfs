@@ -6,14 +6,6 @@ fn debug_echo_model_metadata() -> String {
     )
 }
 
-fn debug_proxy_model_metadata() -> String {
-    debug_model_metadata(
-        "debug/proxy",
-        "Built-in debug proxy model",
-        "chat,stream",
-    )
-}
-
 fn debug_model_metadata(id: &str, description: &str, cap: &str) -> String {
     [
         format!("#!{CORTEXFS_OBJECT_RUNNER}"),

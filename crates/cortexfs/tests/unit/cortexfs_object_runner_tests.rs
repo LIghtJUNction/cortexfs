@@ -1,7 +1,8 @@
 use super::{
     is_passthrough_tool, openai_stream_event, provider_key_names, provider_messages_for_agent,
-    resolve_model_alias, resolved_model_path, run, run_cli_tool_to_writer, ObjectPath,
-    OpenAiStreamEvent, RunnerProviderConfig,
+    provider_transport, resolve_model_alias, resolved_model_path, run, run_cli_tool_to_writer,
+    ObjectPath, OpenAiStreamEvent, ResolvedTransport, RunnerModelRoute, RunnerProviderConfig,
+    RunnerTransportConfig,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -11,6 +12,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(unix)]
@@ -55,19 +57,6 @@ fn runner_rejects_unknown_model() {
         run(vec![OsString::from("/ctx/model/openai/gpt-4o")]),
         Err("missing provider: openai".to_owned())
     );
-}
-
-#[test]
-fn proxy_model_emits_portable_manual_request() -> Result<(), Box<dyn std::error::Error>> {
-    let mut output = Vec::new();
-    cortexfs::run_proxy_model(["debug this agent"], &mut output)?;
-    let output = String::from_utf8(output)?;
-
-    assert!(output.contains(r#""model":"debug/proxy""#));
-    assert!(output.contains("CortexFS debug proxy request"));
-    assert!(output.contains("cortexfs_proxy_version"));
-    assert!(output.contains("debug this agent"));
-    Ok(())
 }
 
 #[test]
@@ -225,10 +214,10 @@ fn test_prompt_context() -> AgentPromptContext {
 #[test]
 fn provider_key_names_accept_configured_and_host_fallbacks() {
     assert_eq!(
-        provider_key_names(&RunnerProviderConfig {
-            base_url: "https://api.openai.com/v1".to_owned(),
-            api_key_env: Some("CORTEXFS_OPENAI_KEY".to_owned()),
-        }),
+        provider_key_names(&test_provider_config(
+            "https://api.openai.com/v1",
+            Some("CORTEXFS_OPENAI_KEY")
+        )),
         vec![
             "CORTEXFS_OPENAI_KEY".to_owned(),
             "OPENAI_COM_API_KEY".to_owned(),
@@ -240,12 +229,84 @@ fn provider_key_names_accept_configured_and_host_fallbacks() {
 #[test]
 fn provider_key_names_reject_invalid_configured_names() {
     assert_eq!(
-        provider_key_names(&RunnerProviderConfig {
-            base_url: "https://localhost:11434/v1".to_owned(),
-            api_key_env: Some("bad-name".to_owned()),
-        }),
+        provider_key_names(&test_provider_config(
+            "https://localhost:11434/v1",
+            Some("bad-name")
+        )),
         vec!["LOCALHOST_API_KEY".to_owned()]
     );
+}
+
+#[test]
+fn provider_transport_defaults_to_direct_base_url() {
+    assert_eq!(
+        provider_transport(
+            &test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
+            "gpt-4o"
+        ),
+        Ok(ResolvedTransport::Direct {
+            base_url: "https://api.openai.com/v1".to_owned()
+        })
+    );
+}
+
+#[test]
+fn provider_transport_uses_exact_http_route() {
+    let mut config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+    config.transports.insert(
+        "office".to_owned(),
+        RunnerTransportConfig {
+            kind: "http".to_owned(),
+            url: Some("http://127.0.0.1:8080/v1".to_owned()),
+            path: None,
+        },
+    );
+    config.route.push(RunnerModelRoute {
+        model: "gpt-4o".to_owned(),
+        transport: "office".to_owned(),
+    });
+
+    assert_eq!(
+        provider_transport(&config, "gpt-4o"),
+        Ok(ResolvedTransport::Http {
+            base_url: "http://127.0.0.1:8080/v1".to_owned()
+        })
+    );
+}
+
+#[test]
+fn provider_transport_uses_wildcard_unix_route() {
+    let mut config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+    config.transports.insert(
+        "local-socket".to_owned(),
+        RunnerTransportConfig {
+            kind: "unix".to_owned(),
+            url: None,
+            path: Some("/run/user/1000/cortexfs/proxy/openai.sock".to_owned()),
+        },
+    );
+    config.route.push(RunnerModelRoute {
+        model: "gpt-*".to_owned(),
+        transport: "local-socket".to_owned(),
+    });
+
+    assert_eq!(
+        provider_transport(&config, "gpt-4o"),
+        Ok(ResolvedTransport::Unix {
+            base_url: "http://localhost/v1".to_owned(),
+            socket_path: "/run/user/1000/cortexfs/proxy/openai.sock".to_owned()
+        })
+    );
+}
+
+fn test_provider_config(base_url: &str, api_key_env: Option<&str>) -> RunnerProviderConfig {
+    RunnerProviderConfig {
+        base_url: base_url.to_owned(),
+        api_key_env: api_key_env.map(str::to_owned),
+        transports: BTreeMap::new(),
+        route: Vec::new(),
+        default_transport: None,
+    }
 }
 
 #[cfg(unix)]
