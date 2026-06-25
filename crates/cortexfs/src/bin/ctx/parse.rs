@@ -200,6 +200,9 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     if is_help_args(&rest) && is_top_level_help_topic(command.as_str()) {
         return Ok(Command::HelpTopic(command));
     }
+    if command == "agent" && matches!(rest.as_slice(), [value] if value == "help") {
+        return Ok(Command::HelpTopic(command));
+    }
     let mut values = rest.into_iter();
 
     match command.as_str() {
@@ -347,7 +350,7 @@ fn is_top_level_help_topic(command: &str) -> bool {
 }
 
 fn is_help_flag(value: &str) -> bool {
-    matches!(value, "help" | "--help" | "-h")
+    matches!(value, "--help" | "-h")
 }
 
 fn parse_ls_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
@@ -407,6 +410,9 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) {
         return Ok(Command::HelpTopic(format!("agent {command}")));
+    }
+    if command == "help" && rest.is_empty() {
+        return Ok(Command::HelpTopic("agent".to_owned()));
     }
     let mut values = rest.into_iter();
     match command.as_str() {
