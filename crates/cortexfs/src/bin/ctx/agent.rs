@@ -347,9 +347,10 @@ fn agent_sh_attach_or_start(
     session: Option<&str>,
 ) -> Result<ExitCode, CliError> {
     let session = agent_sh_attach_session(root, name, session)?;
-    match agent_terminal(root, name, Some(&session), true) {
-        Ok(code) => Ok(code),
-        Err(error) if error.message.contains("terminal is not running") => {
+    let socket = agent_terminal_connect_socket(root, name, &session)?;
+    match open_terminal_socket(&socket) {
+        Ok(stream) => stream_terminal_stream(stream, true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
             write_error("agent.sh terminal is not running; starting agent terminal")
                 .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
             let start = AgentStartArgs {
@@ -365,7 +366,7 @@ fn agent_sh_attach_or_start(
             }
             agent_terminal(root, name, Some(&session), true)
         }
-        Err(error) => Err(error),
+        Err(error) => Err(terminal_connect_cli_error(&socket, name, &session, &error)),
     }
 }
 
@@ -1255,22 +1256,35 @@ fn stream_terminal_socket(
     name: &str,
     session: &str,
 ) -> Result<ExitCode, CliError> {
-    let mut stream = UnixStream::connect(socket).map_err(|error| {
-        let hint = format!(
-            "run: ctx agent start {} --session {}",
-            shell_quote_arg(name),
-            shell_quote_arg(session)
-        );
-        let reason = match error.kind() {
-            io::ErrorKind::NotFound => "terminal is not running",
-            io::ErrorKind::ConnectionRefused => "terminal socket exists but has no listener",
-            _ => "cannot connect terminal socket",
-        };
-        CliError::unavailable(format!(
-            "{reason} {}: {error}\n{hint}",
-            socket.display()
-        ))
-    })?;
+    let stream = open_terminal_socket(socket)
+        .map_err(|error| terminal_connect_cli_error(socket, name, session, &error))?;
+    stream_terminal_stream(stream, write)
+}
+
+fn open_terminal_socket(socket: &Path) -> Result<UnixStream, io::Error> {
+    UnixStream::connect(socket)
+}
+
+fn terminal_connect_cli_error(
+    socket: &Path,
+    name: &str,
+    session: &str,
+    error: &io::Error,
+) -> CliError {
+    let hint = format!(
+        "run: ctx agent start {} --session {}",
+        shell_quote_arg(name),
+        shell_quote_arg(session)
+    );
+    let reason = match error.kind() {
+        io::ErrorKind::NotFound => "terminal is not running",
+        io::ErrorKind::ConnectionRefused => "terminal socket exists but has no listener",
+        _ => "cannot connect terminal socket",
+    };
+    CliError::unavailable(format!("{reason} {}: {error}\n{hint}", socket.display()))
+}
+
+fn stream_terminal_stream(mut stream: UnixStream, write: bool) -> Result<ExitCode, CliError> {
     if write {
         stream.write_all(b"attach\n")
     } else {
