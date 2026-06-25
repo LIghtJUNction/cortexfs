@@ -190,10 +190,7 @@ struct AgentShArgs {
 }
 
 fn agent_sh_command(root: &Path, args: Vec<String>) -> Result<ExitCode, CliError> {
-    if args
-        .iter()
-        .any(|value| matches!(value.as_str(), "--help" | "-h" | "help"))
-    {
+    if agent_sh_args_request_help(&args) {
         print_terminal_text(&format!("{}\n", agent_sh_usage()))?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -237,6 +234,22 @@ fn agent_sh_command(root: &Path, args: Vec<String>) -> Result<ExitCode, CliError
             success(agent_status(root, &args.name))
         }
     }
+}
+
+fn agent_sh_args_request_help(args: &[String]) -> bool {
+    let mut values = args.iter();
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--help" | "-h" | "help" => return true,
+            "--session" => {
+                let _ignored = values.next();
+            }
+            "--" => return false,
+            value if value.starts_with('-') => {}
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn parse_agent_sh_args(args: Vec<String>) -> Result<AgentShArgs, CliError> {

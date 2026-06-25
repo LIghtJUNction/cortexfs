@@ -292,6 +292,38 @@ fn parses_agent_sh_compat_router_modes() {
 }
 
 #[test]
+fn agent_sh_help_is_only_recognized_before_agent_name() {
+    assert!(agent_sh_args_request_help(&["--help".to_owned()]));
+    assert!(agent_sh_args_request_help(&[
+        "--session".to_owned(),
+        "focus".to_owned(),
+        "help".to_owned()
+    ]));
+    assert!(!agent_sh_args_request_help(&[
+        "coder".to_owned(),
+        "help".to_owned()
+    ]));
+    assert!(!agent_sh_args_request_help(&[
+        "--".to_owned(),
+        "help".to_owned()
+    ]));
+
+    let parsed = parse_agent_sh_args_with_session(
+        vec!["coder".to_owned(), "help".to_owned()],
+        None,
+    );
+    assert!(matches!(
+        parsed,
+        Ok(AgentShArgs {
+            mode: AgentShMode::Auto,
+            ref name,
+            ref input,
+            ..
+        }) if name == "coder" && input == &vec!["help".to_owned()]
+    ));
+}
+
+#[test]
 fn rejects_agent_sh_cancel_with_multiple_run_ids() {
     let result = agent_sh_command(
         Path::new("/tmp/cortexfs-agent-sh-test"),
