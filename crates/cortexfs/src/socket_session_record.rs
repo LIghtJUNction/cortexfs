@@ -207,7 +207,8 @@ pub fn record_child_handoff_to_parent_context(
     require_parent_session_context(parent_session_dir)?;
 
     let child_dir = parent_session_dir.join("context/child").join(child_name);
-    fs::create_dir_all(child_dir.join("artifact"))
+    create_private_context_dir(&child_dir).map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    create_private_context_dir(&child_dir.join("artifact"))
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     for (file, value) in [
         ("agent", child_agent),
@@ -410,14 +411,36 @@ fn touch_session(dir: &Path) -> SocketRecordResult<()> {
 }
 
 fn write_text_file_if_absent(path: &Path, content: &str) -> std::io::Result<()> {
-    if path.exists() {
-        return if path.is_file() {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        return if !metadata.file_type().is_symlink() && metadata.is_file() {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
             Ok(())
         } else {
             Err(std::io::Error::other("path is not a regular file"))
         };
     }
-    fs::write(path, content)
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(path)?;
+    file.write_all(content.as_bytes())?;
+    file.flush()
+}
+
+fn create_private_context_dir(path: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(std::io::Error::other("path is not a directory"))
+        }
+        Ok(_) => fs::set_permissions(path, fs::Permissions::from_mode(0o700)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::DirBuilder::new().mode(0o700).create(path)?;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn ensure_trailing_newline(content: &str) -> String {
