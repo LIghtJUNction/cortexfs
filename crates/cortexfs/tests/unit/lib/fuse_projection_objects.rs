@@ -310,6 +310,40 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 }
 
 #[test]
+fn fuse_v1_projection_ignores_oversized_provider_model_cache() {
+    let root = reference_tree("fuse-v1-oversized-provider-model-cache");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    write_text_file(
+        &providers.join("api.lmm.best.json"),
+        r#"{
+  "base_url": "https://api.lmm.best:9000/",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    let oversized_padding = "x".repeat(1024 * 1024);
+    write_text_file(
+        &cache.join("api.lmm.best.models.json"),
+        &format!(r#"{{"models":["gpt-cache"],"padding":"{oversized_padding}"}}"#),
+    );
+    let projection = FuseV1Projection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    let provider_entries = projection.readdir("model/api.lmm.best");
+    assert!(provider_entries.is_ok());
+    let provider_names = provider_entries
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.name().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(provider_names, ["gpt-5.4-mini", "gpt-5.4-mini.d"]);
+}
+
+#[test]
 fn fuse_v1_projection_skips_disabled_provider_models() {
     let root = reference_tree("fuse-v1-disabled-provider-model");
     let providers = root.join("providers.d");
