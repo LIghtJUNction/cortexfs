@@ -61,6 +61,7 @@ mod core_tools;
 mod message_stream;
 mod model;
 mod mount_table;
+mod oauth;
 mod policy;
 mod session_index;
 mod session_layout;
@@ -113,6 +114,11 @@ pub use model::{
     ModelRegistryError, inspect_model_capabilities, parse_model_driver_routes,
 };
 pub use mount_table::{MountEntry, MountError, MountMode, MountOption, MountTable};
+pub use oauth::{
+    OAuthError, OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, oauth_authorization_code_form,
+    oauth_authorization_url, parse_oauth_token_response, resolve_oauth_access_token,
+    resolve_oauth_access_token_with,
+};
 pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
 pub use session_index::{
     SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,

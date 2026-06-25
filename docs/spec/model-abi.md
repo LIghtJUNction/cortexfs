@@ -120,6 +120,31 @@ For example, a provider adapter may first read `LMM_API_KEY`, then look up a
 system keychain item such as `service=cortexfs:lmm account=default`. If both
 are absent, the model is not configured and must return a stable error.
 
+OAuth providers use the same rule: access tokens are bearer credentials and
+remain provider-runtime state, not model ABI state. A provider config may
+declare OAuth Authorization Code + PKCE metadata:
+
+```json
+{
+  "base_url": "https://api.example.com/v1",
+  "oauth": {
+    "client_id": "cortexfs-local",
+    "auth_url": "https://auth.example.com/oauth/authorize",
+    "token_url": "https://auth.example.com/oauth/token",
+    "redirect_uri": "http://127.0.0.1:8765/callback",
+    "scopes": ["model.read", "offline_access"],
+    "access_token_env": "EXAMPLE_OAUTH_ACCESS_TOKEN",
+    "refresh_token_env": "EXAMPLE_OAUTH_REFRESH_TOKEN"
+  }
+}
+```
+
+`access_token_env` is checked before the system keychain. If it is absent or
+empty, the runtime looks up `service=cortexfs:<provider> account=oauth:access`.
+Refresh tokens, when used by a future provider adapter or CLI wrapper, use
+`account=oauth:refresh` by default. PKCE uses `S256`; the verifier and callback
+state are short-lived local flow state and must not be written into `/ctx/model`.
+
 ## One-Shot Exec
 
 `/ctx/model/<provider>/<model>` is a read-only executable object. Reading it returns

@@ -8,6 +8,7 @@ use serde_json::json;
 struct RunnerProviderConfig {
     base_url: String,
     api_key_env: Option<String>,
+    oauth: Option<cortexfs::OAuthProviderConfig>,
     #[serde(default)]
     transports: BTreeMap<String, RunnerTransportConfig>,
     #[serde(default)]
@@ -58,7 +59,8 @@ fn provider_chat_completion(
         .ok_or_else(|| format!("invalid provider model: {name}"))?;
     let config =
         provider_config(provider).ok_or_else(|| format!("missing provider: {provider}"))?;
-    let key = provider_key(&config)?.ok_or_else(|| format!("missing api key: {provider}"))?;
+    let key = provider_bearer_token(&config)?
+        .ok_or_else(|| format!("missing provider credential: {provider}"))?;
     let transport = provider_transport(&config, model)?;
     match call_openai_chat_streaming(&transport, model, input, &key, run, stdout) {
         Ok(()) => Ok(()),
@@ -149,16 +151,24 @@ fn model_route_matches(pattern: &str, model: &str) -> bool {
             .is_some_and(|prefix| model.starts_with(prefix))
 }
 
-fn provider_key(config: &RunnerProviderConfig) -> Result<Option<String>, String> {
+fn provider_bearer_token(config: &RunnerProviderConfig) -> Result<Option<String>, String> {
     let Some(provider) = provider_name_from_base_url(&config.base_url) else {
         return Ok(None);
     };
-    resolve_api_key_from_env_names(
+    let api_key = resolve_api_key_from_env_names(
         &provider_key_names(config),
         &provider_keychain_service(&provider),
         "default",
     )
-    .map_err(|_error| format!("keychain unavailable: {provider}"))
+    .map_err(|_error| format!("keychain unavailable: {provider}"))?;
+    if api_key.is_some() {
+        return Ok(api_key);
+    }
+    let Some(oauth) = config.oauth.as_ref() else {
+        return Ok(None);
+    };
+    cortexfs::resolve_oauth_access_token(&provider, oauth)
+        .map_err(|_error| format!("oauth credential unavailable: {provider}"))
 }
 
 fn provider_key_names(config: &RunnerProviderConfig) -> Vec<String> {

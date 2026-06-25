@@ -303,6 +303,7 @@ fn test_provider_config(base_url: &str, api_key_env: Option<&str>) -> RunnerProv
     RunnerProviderConfig {
         base_url: base_url.to_owned(),
         api_key_env: api_key_env.map(str::to_owned),
+        oauth: None,
         transports: BTreeMap::new(),
         route: Vec::new(),
         default_transport: None,

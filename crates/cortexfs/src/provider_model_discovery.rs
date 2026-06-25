@@ -11,7 +11,7 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         let Some(provider) = provider_name_from_base_url(&config.config.base_url) else {
             continue;
         };
-        let Some(api_key) = provider_api_key(&config.config, &provider) else {
+        let Some(api_key) = provider_bearer_token(&config.config, &provider) else {
             continue;
         };
         let Ok(models) = fetch_provider_models(&config.config.base_url, &api_key) else {
@@ -61,14 +61,19 @@ fn provider_model_cache_path(cache_dir: &Path, provider: &str) -> PathBuf {
     cache_dir.join(format!("{provider}.models.json"))
 }
 
-fn provider_api_key(config: &ProviderConfig, provider: &str) -> Option<String> {
-    resolve_api_key_from_env_names(
+fn provider_bearer_token(config: &ProviderConfig, provider: &str) -> Option<String> {
+    let api_key = resolve_api_key_from_env_names(
         &provider_api_key_env_names(config),
         &provider_keychain_service(provider),
         "default",
     )
     .ok()
-    .flatten()
+    .flatten();
+    if api_key.is_some() {
+        return api_key;
+    }
+    let oauth = config.oauth.as_ref()?;
+    resolve_oauth_access_token(provider, oauth).ok().flatten()
 }
 
 fn provider_api_key_env_names(config: &ProviderConfig) -> Vec<String> {
