@@ -54,7 +54,7 @@ enum Command {
     },
     Send {
         agent: String,
-        session: String,
+        session: Option<String>,
         input: String,
     },
     Agent(AgentArgs),
@@ -137,7 +137,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             agent,
             session,
             input,
-        } => send(&cli.root, &agent, &session, &input),
+        } => send(&cli.root, &agent, session.as_deref(), &input),
         Command::Agent(args) => agent_command(&cli.root, &args),
         Command::AgentSh { args } => agent_sh_command(&cli.root, args),
         Command::Ping { path } => ping(&cli.root, &path),
@@ -402,12 +402,25 @@ fn parse_agent_session(
 
 fn parse_send(
     mut values: impl Iterator<Item = String>,
-) -> Result<(String, String, String), CliError> {
+) -> Result<(String, Option<String>, String), CliError> {
     let agent = required_arg(&mut values, "send requires an agent name")?;
-    let session = required_arg(&mut values, "send requires a session name")?;
-    let input = required_arg(&mut values, "send requires input text")?;
-    no_extra_args(values)?;
-    Ok((agent, session, input))
+    let mut rest: Vec<String> = values.collect();
+    if rest.is_empty() {
+        return Err(CliError::usage("send requires input text"));
+    }
+    if matches!(rest.first().map(String::as_str), Some("--session" | "-s")) {
+        if rest.len() < 3 {
+            return Err(CliError::usage("send --session requires a session and input text"));
+        }
+        let session = rest.remove(1);
+        rest.remove(0);
+        return Ok((agent, Some(session), rest.join(" ")));
+    }
+    if rest.len() == 1 {
+        return Ok((agent, None, rest.remove(0)));
+    }
+    let session = rest.remove(0);
+    Ok((agent, Some(session), rest.join(" ")))
 }
 
 fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {

@@ -159,6 +159,7 @@ Session commands default to the latest/current session when `--session` is
 omitted:
 
 ```bash
+ctx send coder "summarize the current failure"
 ctx agent history coder
 ctx agent output coder
 ctx agent resume coder

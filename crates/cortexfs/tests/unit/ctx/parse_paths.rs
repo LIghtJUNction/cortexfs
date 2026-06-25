@@ -106,9 +106,29 @@ fn parses_session_file_commands() {
         send,
         Ok(Command::Send {
             ref agent,
-            ref session,
+            session: Some(ref session),
             ref input
         }) if agent == "coder" && session == "default" && input == "hello"
+    ));
+
+    let send_current = cmd!("send", "coder", "hello");
+    assert!(matches!(
+        send_current,
+        Ok(Command::Send {
+            ref agent,
+            session: None,
+            ref input
+        }) if agent == "coder" && input == "hello"
+    ));
+
+    let send_flagged = cmd!("send", "coder", "--session", "focus", "hello", "world");
+    assert!(matches!(
+        send_flagged,
+        Ok(Command::Send {
+            ref agent,
+            session: Some(ref session),
+            ref input
+        }) if agent == "coder" && session == "focus" && input == "hello world"
     ));
 
     let ping = cmd!("ping", "agent/coder");

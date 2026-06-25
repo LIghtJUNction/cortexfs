@@ -177,14 +177,15 @@ fn resume(root: &Path, agent: &str, session: Option<&str>) -> Result<ExitCode, C
     stream_socket_request(&agent_socket_path(root, agent)?, &request)
 }
 
-fn send(root: &Path, agent: &str, session: &str, input: &str) -> Result<ExitCode, CliError> {
+fn send(root: &Path, agent: &str, session: Option<&str>, input: &str) -> Result<ExitCode, CliError> {
     require_cli_name("agent name", agent)?;
-    require_cli_name("session name", session)?;
+    let session = agent_session_name(root, agent, session)?;
+    require_cli_name("session name", &session)?;
 
     let request = format!(
         "{{\"op\":\"send\",\"id\":{},\"session\":{},\"input\":{}}}\n",
         json_string(&request_id()?),
-        json_string(session),
+        json_string(&session),
         json_string(input)
     );
     stream_socket_request(&agent_socket_path(root, agent)?, &request)
