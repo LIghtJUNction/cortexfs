@@ -11,7 +11,7 @@ use super::{
     render_agent_status_lines, require_cli_name, require_session_name, resolve_abi_path,
     run_visible_tool, stream_socket_request, stream_terminal_socket, AgentArgs, AgentMount,
     AgentStartArgs, Command, FileCommand, LsTarget, ObjectClass,
-    MAX_SOCKET_FRAME_BYTES,
+    MAX_SOCKET_FRAME_BYTES, terminal_safe_text,
 };
 use cortexfs::{
     derive_agent_runtime_view, ensure_v1_reference_tree, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,
@@ -30,3 +30,19 @@ include!("ctx/helpers.rs");
 include!("ctx/parse_paths.rs");
 include!("ctx/format_check.rs");
 include!("ctx/file_doctor.rs");
+
+#[test]
+fn terminal_safe_text_escapes_control_sequences() {
+    let malicious = "prefix\u{1b}]52;c;payload\u{7}suffix";
+
+    let rendered = terminal_safe_text(malicious);
+
+    assert_eq!(rendered, "prefix\\u{1b}]52;c;payload\\u{7}suffix");
+    assert!(!rendered.as_bytes().contains(&0x1b));
+    assert!(!rendered.as_bytes().contains(&0x07));
+}
+
+#[test]
+fn terminal_safe_text_preserves_common_formatting() {
+    assert_eq!(terminal_safe_text("a\nb\tc\rd"), "a\nb\tc\rd");
+}
