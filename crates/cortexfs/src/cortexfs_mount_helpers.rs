@@ -218,7 +218,7 @@ impl CortexFuse {
         };
         let byte_len = attr.size();
         let token_estimate = estimate_tokens_from_bytes(byte_len);
-        let mut attrs = vec![
+        let attrs = vec![
             CortexXattr::new("user.cortexfs.abi_path", path),
             CortexXattr::new("user.cortexfs.kind", classify_abi_path(path)),
             CortexXattr::new("user.cortexfs.origin", origin),
@@ -240,12 +240,6 @@ impl CortexFuse {
                 if backing_exists { "true" } else { "false" },
             ),
         ];
-        if backing_exists {
-            attrs.push(CortexXattr::new(
-                "user.cortexfs.backing_path",
-                backing_path.display().to_string(),
-            ));
-        }
         Ok(attrs)
     }
 
