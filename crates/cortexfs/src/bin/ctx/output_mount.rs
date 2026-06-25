@@ -354,7 +354,13 @@ fn mount_reference_tree(
             mountpoint.display()
         ))
     })?;
-    if is_mount_point(mountpoint).unwrap_or(false) {
+    let mountpoint = absolute_existing_path(mountpoint).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot resolve mountpoint {}: {error}",
+            mountpoint.display()
+        ))
+    })?;
+    if is_mount_point(&mountpoint).unwrap_or(false) {
         return Err(CliError::unavailable(format!(
             "already mounted: {}",
             mountpoint.display()
@@ -362,10 +368,10 @@ fn mount_reference_tree(
     }
 
     let mount_bin = cortexfs_mount_bin();
-    spawn_mount_process(&mount_bin, &source, mountpoint)?;
+    spawn_mount_process(&mount_bin, &source, &mountpoint)?;
 
     for _attempt in 0..20 {
-        if is_mount_point(mountpoint).unwrap_or(false) {
+        if is_mount_point(&mountpoint).unwrap_or(false) {
             print_line(&format!("mounted={}", mountpoint.display()))?;
             print_line(&format!("source={}", source.display()))?;
             return Ok(());
