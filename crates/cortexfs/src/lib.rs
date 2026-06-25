@@ -8,7 +8,9 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
+use std::os::unix::fs::{
+    DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt, symlink,
+};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -236,6 +238,7 @@ pub fn ensure_durable_session_layout(
 
     let session_dir = session_root.join(session_name);
     let context = session_dir.join("context");
+    create_dir(session_root)?;
     create_dir(&session_dir)?;
     create_dir(&context)?;
     for dir in CONTEXT_REQUIRED_DIRS {
@@ -243,7 +246,9 @@ pub fn ensure_durable_session_layout(
     }
     create_dir(&context.join("swap").join("chunk"))?;
     create_dir(&context.join("dedup").join("blob"))?;
-    create_dir(&session_root.join("index").join("by-cwd"))?;
+    let index = session_root.join("index");
+    create_dir(&index)?;
+    create_dir(&index.join("by-cwd"))?;
 
     let now = unix_timestamp_text();
     write_text_file_if_missing(&session_dir.join("messages.jsonl"), "")?;
@@ -304,7 +309,17 @@ fn durable_session_meta_json(model: Option<&str>, scope: SocketSessionScope) -> 
 }
 
 fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    fs::create_dir_all(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(DurableSessionLayoutError::CannotCreate);
+        }
+        return set_private_dir_permissions(path);
+    }
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(path)
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    set_private_dir_permissions(path)
 }
 
 fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
@@ -318,7 +333,7 @@ fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableS
     if let Some(parent) = path.parent() {
         create_dir(parent)?;
     }
-    fs::write(path, content).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    write_private_text_file(path, content)?;
     set_text_file_permissions(path)
 }
 
@@ -326,12 +341,37 @@ fn write_text_file(path: &Path, content: &str) -> Result<(), DurableSessionLayou
     if let Some(parent) = path.parent() {
         create_dir(parent)?;
     }
-    fs::write(path, content).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    write_private_text_file(path, content)?;
     set_text_file_permissions(path)
 }
 
 fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(DurableSessionLayoutError::CannotCreate);
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)
+}
+
+fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)
+}
+
+fn write_private_text_file(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    file.write_all(content.as_bytes())
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    file.flush()
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
