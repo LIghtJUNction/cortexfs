@@ -854,6 +854,17 @@ fn require_session_name(session: &str) -> Result<(), CliError> {
     }
 }
 
+fn shell_quote_arg(value: &str) -> String {
+    if value
+        .bytes()
+        .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b'=' | b','))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 fn stream_terminal_socket(
     socket: &Path,
     write: bool,
@@ -861,7 +872,11 @@ fn stream_terminal_socket(
     session: &str,
 ) -> Result<ExitCode, CliError> {
     let mut stream = UnixStream::connect(socket).map_err(|error| {
-        let hint = format!("run: ctx agent start {name} --session {session}");
+        let hint = format!(
+            "run: ctx agent start {} --session {}",
+            shell_quote_arg(name),
+            shell_quote_arg(session)
+        );
         let reason = match error.kind() {
             io::ErrorKind::NotFound => "terminal is not running",
             io::ErrorKind::ConnectionRefused => "terminal socket exists but has no listener",
