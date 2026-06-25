@@ -256,10 +256,12 @@ ctx agent prompt <agent>
 ```
 
 This command renders `system.md`, `prompt.template.md`, and the immutable
-runtime contract through the same prompt renderer used by model execution.
-Runtime-only blocks such as discovered rules, skill metadata, tool injection,
-and historical message context remain bounded dynamic inputs; when they are not
-available to the CLI, the command prints explicit placeholder text.
+runtime contract through the same prompt renderer used by model execution. It
+also collects currently discoverable `AGENTS.md` rules and bounded skill
+metadata through the same library functions used by the object runner.
+Runtime-only blocks such as tool injection and historical message context
+remain bounded dynamic inputs; when they are not available to the CLI, the
+command prints explicit placeholder text.
 
 ## Design Tests
 

@@ -18,13 +18,14 @@ use cortexfs::{
     MAX_SOCKET_FRAME_BYTES, MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError,
     MountMode, MountTable, ObjectClass, ObjectLayoutIssue, PolicyV0, ROOT_ENTRIES,
     SessionControlIssue, SessionIndexIssue, SessionIndexKind, SessionLayoutIssue,
-    SharedQueueLayoutIssue, ToolPath, ToolSchemaIssue, classify_abi_path,
-    derive_agent_runtime_view, ensure_v1_reference_tree, inspect_agent_control,
-    inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl,
-    inspect_message_stream_jsonl, inspect_model_capabilities, inspect_object_layout,
-    inspect_session_control, inspect_session_index, inspect_session_layout,
+    SharedQueueLayoutIssue, ToolPath, ToolSchemaIssue, classify_abi_path, collect_agent_rules,
+    collect_skill_metadata, current_time_unix, derive_agent_runtime_view, ensure_v1_reference_tree,
+    inspect_agent_control, inspect_context_jsonl, inspect_context_pack_json,
+    inspect_event_stream_jsonl, inspect_message_stream_jsonl, inspect_model_capabilities,
+    inspect_object_layout, inspect_session_control, inspect_session_index, inspect_session_layout,
     inspect_shared_queue_layout, inspect_tool_schema_json, is_executable_file, is_model_name,
     is_object_name, parse_abi_path, parse_model_driver_routes, render_agent_system_prompt,
+    skill_metadata_budget_from_env,
 };
 use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 

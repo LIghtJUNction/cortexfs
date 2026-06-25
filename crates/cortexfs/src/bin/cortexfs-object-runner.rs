@@ -4,18 +4,17 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
-    DEFAULT_AGENT_PROMPT_TEMPLATE, is_model_name, resolve_api_key_from_env_names, run_core_tool,
-    run_core_tool_cli, run_echo_model,
+    DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata, current_time_unix,
+    is_model_name, resolve_api_key_from_env_names, run_core_tool, run_core_tool_cli,
+    run_echo_model, skill_metadata_budget_from_env,
 };
 use cortexfs_tool_sdk::ToolInvocation;
 use serde_json::Value;
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 const DEFAULT_CTX_ROOT: &str = "/ctx";
-const MAX_SKILL_METADATA_CHARS: usize = 8_000;
 
 include!("../cortexfs_object_runner_provider.rs");
 
@@ -146,7 +145,7 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     )
     .unwrap_or_else(|_error| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());
     let rules = collect_agent_rules();
-    let skills = collect_skill_metadata(skill_metadata_budget());
+    let skills = collect_skill_metadata(skill_metadata_budget_from_env());
     let current_time_unix = current_time_unix().to_string();
     if !model_path.exists() {
         let stdout = io::stdout();
@@ -215,213 +214,6 @@ fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
             .map_err(|error| format!("cannot write output: {error}")),
         Err(error) => Err(format!("cannot write output: {error}")),
     }
-}
-
-fn collect_agent_rules() -> String {
-    let mut paths = Vec::new();
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        paths.push(home.join(".codex").join("AGENTS.md"));
-        paths.push(home.join(".agents").join("AGENTS.md"));
-        paths.push(home.join("AGENTS.md"));
-    }
-    paths.push(PathBuf::from("/etc/cortexfs/AGENTS.md"));
-    if let Ok(cwd) = env::current_dir() {
-        let mut ancestors = cwd.ancestors().map(Path::to_path_buf).collect::<Vec<_>>();
-        ancestors.reverse();
-        paths.extend(ancestors.into_iter().map(|path| path.join("AGENTS.md")));
-    }
-
-    let mut output = String::new();
-    let mut seen = Vec::new();
-    for path in paths {
-        let key = path.to_string_lossy().into_owned();
-        if seen.contains(&key) {
-            continue;
-        }
-        seen.push(key);
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        output.push_str("### ");
-        output.push_str(&path.display().to_string());
-        output.push_str("\n\n");
-        output.push_str(content.trim());
-        output.push_str("\n\n");
-    }
-    if output.trim().is_empty() {
-        "(no AGENTS.md rules discovered)".to_owned()
-    } else {
-        output
-    }
-}
-
-#[derive(Clone)]
-struct SkillMetadata {
-    name: String,
-    description: String,
-    path: PathBuf,
-}
-
-fn collect_skill_metadata(max_chars: usize) -> String {
-    let mut skills = discover_skill_metadata();
-    skills.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then_with(|| left.path.cmp(&right.path))
-    });
-    let full = format_skill_metadata(&skills, false);
-    if full.len() <= max_chars {
-        return full;
-    }
-    let shortened = format_skill_metadata(&skills, true);
-    if shortened.len() <= max_chars {
-        return format!(
-            "WARNING: skill descriptions were shortened to fit the {max_chars} character budget.\n\n{shortened}"
-        );
-    }
-
-    let warning = format!(
-        "WARNING: skill metadata exceeded the {max_chars} character budget; some skills were omitted.\n\n"
-    );
-    let mut output = warning;
-    for skill in &skills {
-        let line = format_skill_metadata_item(skill, true);
-        if output.len() + line.len() > max_chars {
-            break;
-        }
-        output.push_str(&line);
-    }
-    if output.trim().is_empty() {
-        "(no skills discovered)".to_owned()
-    } else {
-        output
-    }
-}
-
-fn skill_metadata_budget() -> usize {
-    env::var("CTX_CONTEXT_WINDOW_CHARS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .map_or(MAX_SKILL_METADATA_CHARS, |window| {
-            window.saturating_mul(2).saturating_div(100)
-        })
-}
-
-fn discover_skill_metadata() -> Vec<SkillMetadata> {
-    let mut roots = Vec::new();
-    if let Ok(cwd) = env::current_dir() {
-        roots.push(cwd.join(".agents").join("skills"));
-        roots.push(cwd.join(".codex").join("skills"));
-    }
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        roots.push(home.join(".agents").join("skills"));
-        roots.push(home.join(".codex").join("skills"));
-        roots.push(home.join(".codex").join("plugins").join("cache"));
-    }
-
-    let mut paths = Vec::new();
-    for root in roots {
-        collect_skill_files(&root, &mut paths, 0);
-    }
-    paths.sort();
-    paths.dedup();
-    paths
-        .into_iter()
-        .filter_map(|path| read_skill_metadata(&path))
-        .collect()
-}
-
-fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 8 {
-        return;
-    }
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
-            paths.push(path);
-        } else if path.is_dir() {
-            collect_skill_files(&path, paths, depth + 1);
-        }
-    }
-}
-
-fn read_skill_metadata(path: &Path) -> Option<SkillMetadata> {
-    let content = fs::read_to_string(path).ok()?;
-    let (name, description) = parse_skill_frontmatter(&content);
-    let name = name.unwrap_or_else(|| {
-        path.parent()
-            .and_then(Path::file_name)
-            .and_then(|name| name.to_str())
-            .unwrap_or("skill")
-            .to_owned()
-    });
-    Some(SkillMetadata {
-        name,
-        description: description.unwrap_or_default(),
-        path: path.to_path_buf(),
-    })
-}
-
-fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
-    let mut lines = content.lines();
-    if lines.next() != Some("---") {
-        return (None, None);
-    }
-    let mut name = None;
-    let mut description = None;
-    for line in lines {
-        if line.trim() == "---" {
-            break;
-        }
-        if let Some(value) = line.strip_prefix("name:") {
-            name = Some(value.trim().trim_matches('"').to_owned());
-        } else if let Some(value) = line.strip_prefix("description:") {
-            description = Some(value.trim().trim_matches('"').to_owned());
-        }
-    }
-    (name, description)
-}
-
-fn format_skill_metadata(skills: &[SkillMetadata], shorten: bool) -> String {
-    if skills.is_empty() {
-        return "(no skills discovered)".to_owned();
-    }
-    let mut output = String::new();
-    for skill in skills {
-        output.push_str(&format_skill_metadata_item(skill, shorten));
-    }
-    output
-}
-
-fn format_skill_metadata_item(skill: &SkillMetadata, shorten: bool) -> String {
-    let description = if shorten {
-        shorten_description(&skill.description, 160)
-    } else {
-        skill.description.clone()
-    };
-    format!(
-        "- name: {}\n  description: {}\n  path: {}\n",
-        skill.name,
-        description,
-        skill.path.display()
-    )
-}
-
-fn shorten_description(description: &str, max_chars: usize) -> String {
-    let normalized = description.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.chars().count() <= max_chars {
-        return normalized;
-    }
-    normalized.chars().take(max_chars).collect::<String>()
-}
-
-fn current_time_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs())
 }
 
 fn run_cli_tool(name: &str, args: &[OsString]) -> Result<(), String> {

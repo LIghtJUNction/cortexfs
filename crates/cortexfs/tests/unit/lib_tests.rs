@@ -1,14 +1,15 @@
 use super::{
     authorize_child_agent, authorize_session_access, authorize_shared_access,
     authorize_tool_execution, claim_next_shared_queue_job, classify_abi_path,
-    derive_agent_runtime_view, ensure_durable_session_layout, ensure_v1_reference_tree,
-    finish_shared_queue_job, handle_socket_request_frame, inspect_agent_control,
-    inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl,
-    inspect_message_stream_jsonl, inspect_model_capabilities, inspect_object_layout,
-    inspect_session_control, inspect_session_index, inspect_session_layout,
-    inspect_shared_queue_layout, inspect_tool_schema_json, install_executable_object_wrapper,
-    is_object_name, is_root_entry, model_exec_metadata, owned_child_cancellation_events,
-    parse_model_driver_routes, parse_socket_request_frame, peer_credentials, rebuild_context_pack,
+    collect_agent_rules_from_paths, derive_agent_runtime_view, ensure_durable_session_layout,
+    ensure_v1_reference_tree, finish_shared_queue_job, format_skill_metadata_with_budget,
+    handle_socket_request_frame, inspect_agent_control, inspect_context_jsonl,
+    inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
+    inspect_model_capabilities, inspect_object_layout, inspect_session_control,
+    inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
+    inspect_tool_schema_json, install_executable_object_wrapper, is_object_name, is_root_entry,
+    model_exec_metadata, owned_child_cancellation_events, parse_model_driver_routes,
+    parse_socket_request_frame, peer_credentials, rebuild_context_pack,
     record_assistant_response_to_session, record_child_handoff_to_parent_context,
     record_child_result_to_parent_context, record_indexed_socket_send_to_session,
     record_owned_child_cancellation, record_socket_request_to_session,
@@ -30,7 +31,7 @@ use super::{
     PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0, ReferenceTreeError, SessionAccess,
     SessionAccessAuthority, SessionAccessDenial, SessionControlIssue, SessionControlKind,
     SessionIndexIssue, SessionIndexKind, SessionIndexUpdateError, SessionLayoutIssue,
-    SharedAccess, SharedAccessAuthority, SharedAccessDenial, SharedQueueLayoutIssue,
+    SharedAccess, SharedAccessAuthority, SharedAccessDenial, SharedQueueLayoutIssue, SkillMetadata,
     SharedQueueOutcome, SharedQueueRecoverError, SocketPeerPolicy, SocketRequest, SocketRequestError,
     SocketRuntimeError,
     SocketSessionRecordError, SocketSessionScope, ToolExecutionAuthority, ToolExecutionDenial,
@@ -48,6 +49,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 include!("lib/helpers.rs");
 include!("lib/reference_tree_basics.rs");
+include!("lib/agent_prompt.rs");
 include!("lib/fuse_projection_objects.rs");
 include!("lib/object_agent_layout.rs");
 include!("lib/agent_runtime_socket_parse.rs");
