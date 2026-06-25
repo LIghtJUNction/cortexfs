@@ -60,6 +60,46 @@ fn agent_prompt_history_messages_are_bounded_and_recent() {
     assert!(bounded.contains("new question"));
 }
 
+
+#[test]
+fn agent_prompt_history_session_reads_only_bounded_recent_tail() {
+    let root = clean_test_dir("agent-prompt-history-bounded-tail");
+    let session = root.join("session").join("default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    let old = serde_json::json!({
+        "role": "user",
+        "content": "old message".repeat(70_000)
+    })
+    .to_string();
+    let recent = serde_json::json!({
+        "role": "assistant",
+        "content": "recent answer"
+    })
+    .to_string();
+    write_text_file(
+        &session.join("messages.jsonl"),
+        &format!("{old}\n{recent}\n"),
+    );
+
+    let history = collect_history_messages_from_session(&session, 10_000);
+
+    assert!(!history.contains("old message"));
+    assert_eq!(history, "- assistant: recent answer");
+}
+
+#[test]
+fn agent_prompt_history_skips_oversized_lines_before_rendering() {
+    let messages = format!(
+        "{}\n{}\n",
+        serde_json::json!({"role": "user", "content": "x".repeat(20_000)}),
+        serde_json::json!({"role": "assistant", "content": "small"})
+    );
+
+    let history = format_history_messages_jsonl(&messages, 10_000);
+
+    assert_eq!(history, "- assistant: small");
+}
+
 #[test]
 fn agent_prompt_history_messages_read_session_file() {
     let root = clean_test_dir("agent-prompt-history-session");

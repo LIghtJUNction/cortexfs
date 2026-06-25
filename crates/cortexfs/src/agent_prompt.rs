@@ -1,6 +1,7 @@
+use std::collections::VecDeque;
 use std::env;
-use std::fs;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,6 +14,8 @@ const MAX_AGENT_RULES_CHARS: usize = 64_000;
 const MAX_AGENT_RULE_FILE_BYTES: u64 = 64 * 1024;
 const MAX_SKILL_FILE_BYTES: u64 = 16 * 1024;
 const MAX_SKILL_FILES: usize = 256;
+const MAX_HISTORY_MESSAGES_READ_BYTES: u64 = 64 * 1024;
+const MAX_HISTORY_MESSAGE_LINE_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentPromptContext {
@@ -329,7 +332,7 @@ fn read_bounded_regular_utf8(path: &Path, max_bytes: u64) -> Option<String> {
         return None;
     }
     let mut content = String::new();
-    fs::File::open(path)
+    File::open(path)
         .ok()?
         .take(max_bytes)
         .read_to_string(&mut content)
@@ -379,32 +382,78 @@ pub fn current_time_unix() -> u64 {
 
 #[must_use]
 pub fn collect_history_messages_from_session(session_dir: &Path, max_chars: usize) -> String {
-    let Ok(messages) = fs::read_to_string(session_dir.join("messages.jsonl")) else {
+    let Ok(messages) = read_history_messages_tail(&session_dir.join("messages.jsonl")) else {
         return "(no historical messages injected)".to_owned();
     };
     format_history_messages_jsonl(&messages, max_chars)
 }
 
+fn read_history_messages_tail(path: &Path) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let len = file.metadata()?.len();
+    let read_len = len.min(MAX_HISTORY_MESSAGES_READ_BYTES);
+    let start = len.saturating_sub(read_len);
+    file.seek(SeekFrom::Start(start))?;
+
+    let read_len_usize = usize::try_from(read_len)
+        .map_err(|_error| std::io::Error::other("history tail too large"))?;
+    let mut bytes = vec![0; read_len_usize];
+    file.read_exact(&mut bytes)?;
+    if start > 0
+        && let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n')
+    {
+        bytes.drain(..=first_newline);
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 #[must_use]
 pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String {
-    let mut rendered = Vec::new();
+    let mut rendered = VecDeque::new();
+    let mut selected_len = 0;
+    let mut truncated = false;
+
     for line in messages.lines() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else {
-            continue;
-        };
-        let Some(role) = value.get("role").and_then(Value::as_str) else {
-            continue;
-        };
-        let text = message_content_text(value.get("content"));
-        if text.trim().is_empty() {
+        if line.len() > MAX_HISTORY_MESSAGE_LINE_BYTES {
             continue;
         }
-        rendered.push(format!("- {role}: {}", text.trim()));
+        let Some(line) = render_history_message_line(line) else {
+            continue;
+        };
+        selected_len += line.len() + usize::from(!rendered.is_empty());
+        rendered.push_back(line);
+
+        while !rendered.is_empty() && selected_len > max_chars {
+            let Some(removed) = rendered.pop_front() else {
+                break;
+            };
+            truncated = true;
+            selected_len = selected_len.saturating_sub(removed.len());
+            if !rendered.is_empty() {
+                selected_len = selected_len.saturating_sub(1);
+            }
+        }
     }
     if rendered.is_empty() {
+        if truncated {
+            return history_budget_warning(max_chars).trim_end().to_owned();
+        }
         return "(no historical messages injected)".to_owned();
     }
-    fit_history_lines(rendered, max_chars)
+    if !truncated {
+        return rendered.into_iter().collect::<Vec<_>>().join("\n");
+    }
+    fit_history_lines(rendered.into_iter().collect(), max_chars)
+}
+
+fn render_history_message_line(line: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(line).ok()?;
+    let role = value.get("role").and_then(Value::as_str)?;
+    let text = message_content_text(value.get("content"));
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(format!("- {role}: {}", text.trim()))
 }
 
 fn message_content_text(content: Option<&Value>) -> String {
@@ -428,14 +477,14 @@ fn message_content_text(content: Option<&Value>) -> String {
     content.to_string()
 }
 
-fn fit_history_lines(lines: Vec<String>, max_chars: usize) -> String {
-    let full = lines.join("\n");
-    if full.len() <= max_chars {
-        return full;
-    }
-    let warning = format!(
+fn history_budget_warning(max_chars: usize) -> String {
+    format!(
         "WARNING: historical messages exceeded the {max_chars} character budget; oldest messages were omitted.\n\n"
-    );
+    )
+}
+
+fn fit_history_lines(lines: Vec<String>, max_chars: usize) -> String {
+    let warning = history_budget_warning(max_chars);
     let mut selected = Vec::new();
     let mut used = warning.len();
     for line in lines.into_iter().rev() {
