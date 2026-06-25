@@ -609,12 +609,15 @@ fn agent_start_mounts_with_default_source(
             mode: "rw".to_owned(),
         });
         let git_dir = default_source.join(".git");
-        if git_dir.exists() {
-            mounts.push(AgentMount {
-                source: git_dir.display().to_string(),
-                target: "/workspace/.git".to_owned(),
-                mode: "ro".to_owned(),
-            });
+        if let Ok(metadata) = fs::symlink_metadata(&git_dir) {
+            let file_type = metadata.file_type();
+            if file_type.is_dir() || file_type.is_file() {
+                mounts.push(AgentMount {
+                    source: git_dir.display().to_string(),
+                    target: "/workspace/.git".to_owned(),
+                    mode: "ro".to_owned(),
+                });
+            }
         }
     }
     mounts.extend(args.mounts.iter().cloned());

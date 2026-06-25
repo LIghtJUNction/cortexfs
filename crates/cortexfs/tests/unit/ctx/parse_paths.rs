@@ -470,6 +470,31 @@ fn agent_start_default_workspace_remounts_git_read_only() {
     ));
 }
 
+
+#[test]
+fn agent_start_default_workspace_does_not_remount_symlinked_git() {
+    let source = clean_test_dir("ctx-agent-start-git-symlink");
+    let target = clean_test_dir("ctx-agent-start-git-symlink-target");
+    assert!(std::os::unix::fs::symlink(&target, source.join(".git")).is_ok());
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+    assert_eq!(
+        mounts,
+        vec![AgentMount {
+            source: source.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }]
+    );
+}
+
 #[test]
 fn agent_start_no_default_workspace_does_not_guess_git_mount() {
     let source = clean_test_dir("ctx-agent-start-no-default-git");
