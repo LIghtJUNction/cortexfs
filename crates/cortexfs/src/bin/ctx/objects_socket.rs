@@ -422,6 +422,11 @@ fn render_agent_events_buffered_interruptible(
     Ok(rendered.interrupted)
 }
 
+const MAX_BUFFERED_AGENT_RESPONSE_BYTES: usize = MAX_SOCKET_FRAME_BYTES * 4;
+const MAX_BUFFERED_AGENT_RENDERED_BYTES: usize = MAX_SOCKET_FRAME_BYTES;
+const MAX_BUFFERED_AGENT_EVENTS: usize = 8192;
+const MAX_BUFFERED_AGENT_DIAGNOSTICS: usize = 1024;
+
 #[derive(Debug, Eq, PartialEq)]
 struct BufferedAgentEvents {
     output: String,
@@ -449,12 +454,23 @@ fn collect_agent_events_buffered_with(
     let mut output = String::new();
     let mut diagnostics = Vec::new();
     let mut exit_code = 0;
+    let mut response_bytes = 0;
+    let mut events = 0;
     let mut line = String::new();
     loop {
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => break,
-            Ok(_bytes) => {}
+            Ok(bytes) => {
+                response_bytes = response_bytes.checked_add(bytes).ok_or_else(|| {
+                    CliError::unavailable("agent response exceeds buffered response limit")
+                })?;
+                if response_bytes > MAX_BUFFERED_AGENT_RESPONSE_BYTES {
+                    return Err(CliError::unavailable(format!(
+                        "agent response exceeds {MAX_BUFFERED_AGENT_RESPONSE_BYTES} buffered bytes"
+                    )));
+                }
+            }
             Err(error)
                 if interrupt.is_some()
                     && matches!(
@@ -478,23 +494,29 @@ fn collect_agent_events_buffered_with(
                 )));
             }
         }
+        events += 1;
+        if events > MAX_BUFFERED_AGENT_EVENTS {
+            return Err(CliError::unavailable(format!(
+                "agent response exceeds {MAX_BUFFERED_AGENT_EVENTS} buffered events"
+            )));
+        }
         let line = line.trim_end_matches(['\r', '\n']);
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-            output.push_str(line);
-            output.push('\n');
+            push_buffered_output(&mut output, line)?;
+            push_buffered_output(&mut output, "\n")?;
             continue;
         };
         match value.get("type").and_then(serde_json::Value::as_str) {
             Some("delta" | "reasoning_delta") => {
                 if let Some(text) = json_text_field(&value) {
-                    output.push_str(text);
+                    push_buffered_output(&mut output, text)?;
                     saw_delta = true;
                 }
             }
             Some("message" | "reasoning_message") if !saw_delta => {
                 if let Some(text) = json_text_field(&value) {
-                    output.push_str(text);
-                    output.push('\n');
+                    push_buffered_output(&mut output, text)?;
+                    push_buffered_output(&mut output, "\n")?;
                 }
             }
             Some("tool_call") => {
@@ -502,7 +524,7 @@ fn collect_agent_events_buffered_with(
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("tool_call");
-                diagnostics.push(format!("[tool] {name}"));
+                push_buffered_diagnostic(&mut diagnostics, format!("[tool] {name}"))?;
             }
             Some("error") => {
                 let code = value
@@ -513,12 +535,15 @@ fn collect_agent_events_buffered_with(
                     .get("message")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("runtime error");
-                diagnostics.push(format!("error: {code}: {message}"));
+                push_buffered_diagnostic(
+                    &mut diagnostics,
+                    format!("error: {code}: {message}"),
+                )?;
                 exit_code = 1;
             }
-            Some("pong") => output.push_str("pong\n"),
+            Some("pong") => push_buffered_output(&mut output, "pong\n")?,
             Some("done") if saw_delta => {
-                output.push('\n');
+                push_buffered_output(&mut output, "\n")?;
                 saw_delta = false;
             }
             _ => {}
@@ -530,6 +555,32 @@ fn collect_agent_events_buffered_with(
         exit_code,
         interrupted: false,
     })
+}
+
+fn push_buffered_output(output: &mut String, text: &str) -> Result<(), CliError> {
+    let bytes = output.len().checked_add(text.len()).ok_or_else(|| {
+        CliError::unavailable("agent output exceeds buffered output limit")
+    })?;
+    if bytes > MAX_BUFFERED_AGENT_RENDERED_BYTES {
+        return Err(CliError::unavailable(format!(
+            "agent output exceeds {MAX_BUFFERED_AGENT_RENDERED_BYTES} buffered bytes"
+        )));
+    }
+    output.push_str(text);
+    Ok(())
+}
+
+fn push_buffered_diagnostic(
+    diagnostics: &mut Vec<String>,
+    diagnostic: String,
+) -> Result<(), CliError> {
+    if diagnostics.len() >= MAX_BUFFERED_AGENT_DIAGNOSTICS {
+        return Err(CliError::unavailable(format!(
+            "agent response exceeds {MAX_BUFFERED_AGENT_DIAGNOSTICS} buffered diagnostics"
+        )));
+    }
+    diagnostics.push(diagnostic);
+    Ok(())
 }
 
 fn json_text_field(value: &serde_json::Value) -> Option<&str> {

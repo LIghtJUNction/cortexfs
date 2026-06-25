@@ -1130,6 +1130,37 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
 }
 
 #[test]
+fn buffered_agent_renderer_rejects_too_much_output() {
+    let input = format!(
+        "{{\"type\":\"delta\",\"text\":\"{}\"}}\n",
+        "x".repeat(MAX_BUFFERED_AGENT_RENDERED_BYTES + 1)
+    );
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("agent output exceeds")));
+}
+
+#[test]
+fn buffered_agent_renderer_rejects_too_many_events() {
+    let input = "{\"type\":\"ignored\"}\n".repeat(MAX_BUFFERED_AGENT_EVENTS + 1);
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("buffered events")));
+}
+
+#[test]
+fn buffered_agent_renderer_rejects_too_many_diagnostics() {
+    let input = "{\"type\":\"tool_call\",\"name\":\"tsh\"}\n"
+        .repeat(MAX_BUFFERED_AGENT_DIAGNOSTICS + 1);
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("buffered diagnostics")));
+}
+
+#[test]
 fn interruptible_agent_renderer_returns_on_interrupt_flag() {
     let pair = std::os::unix::net::UnixStream::pair();
     assert!(pair.is_ok());
