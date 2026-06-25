@@ -844,11 +844,6 @@ fn agent_terminal_connect_socket(
 }
 
 fn require_session_name(session: &str) -> Result<(), CliError> {
-    if is_usage_placeholder(session) {
-        return Err(CliError::usage(format!(
-            "session name is a placeholder; replace {session} with a real value"
-        )));
-    }
     if !session.is_empty()
         && !matches!(session, "." | "..")
         && !session.contains('/')

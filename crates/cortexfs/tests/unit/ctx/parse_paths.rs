@@ -656,19 +656,11 @@ fn shell_quote_arg_escapes_single_quotes() {
 }
 
 #[test]
-fn cli_names_reject_usage_placeholders() {
-    assert!(require_cli_name("agent name", "coder").is_ok());
-    assert!(matches!(
-        require_cli_name("agent name", "NAME"),
-        Err(ref error) if error.code == 2
-            && error.message == "agent name is a placeholder; replace NAME with a real value"
-    ));
-    assert!(matches!(
-        require_session_name("SESSION"),
-        Err(ref error) if error.code == 2
-            && error.message
-                == "session name is a placeholder; replace SESSION with a real value"
-    ));
+fn cli_names_accept_abi_valid_uppercase_names() {
+    for name in ["NAME", "SESSION", "AGENT", "SOURCE", "TARGET", "PATH", "INPUT", "RUN"] {
+        assert!(require_cli_name("agent name", name).is_ok(), "{name}");
+        assert!(require_session_name(name).is_ok(), "{name}");
+    }
 }
 
 fn contains_arg_pair(args: &[String], first: &str, second: &str) -> bool {
