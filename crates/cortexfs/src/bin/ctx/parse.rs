@@ -617,16 +617,16 @@ fn parse_agent_start(mut values: impl Iterator<Item = String>) -> Result<AgentSt
 fn parse_agent_terminal_args(
     mut values: impl Iterator<Item = String>,
     command: &str,
-) -> Result<(String, String), CliError> {
+) -> Result<(String, Option<String>), CliError> {
     let name = required_arg(&mut values, &format!("{command} requires an agent name"))?;
-    let mut session = "default".to_owned();
+    let mut session = None;
     while let Some(value) = values.next() {
         match value.as_str() {
             "--session" | "-s" => {
-                session = required_arg(
+                session = Some(required_arg(
                     &mut values,
                     &format!("{command} --session requires a session name"),
-                )?;
+                )?);
             }
             _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
         }

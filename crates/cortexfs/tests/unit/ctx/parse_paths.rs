@@ -241,7 +241,7 @@ fn parses_agent_lifecycle_commands() {
         watch,
         Ok(Command::Agent(AgentArgs::Watch {
             ref name,
-            ref session
+            session: Some(ref session)
         })) if name == "coder" && session == "test"
     ));
 
@@ -250,8 +250,8 @@ fn parses_agent_lifecycle_commands() {
         attach,
         Ok(Command::Agent(AgentArgs::Attach {
             ref name,
-            ref session
-        })) if name == "coder" && session == "default"
+            session: None
+        })) if name == "coder"
     ));
 }
 

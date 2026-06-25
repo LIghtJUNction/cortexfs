@@ -80,8 +80,9 @@ ctx agent attach coder --session default
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-FUSE 路径可以是指向 `/run/cortexfs/terminal/.../main.sock` 的 symlink。`watch` 只读；
-`attach` 会把你的 stdin 接入终端。
+FUSE 路径可以是指向 `/run/user/<uid>/cortexfs/terminal/.../main.sock` 的 symlink；旧安装
+也可能指向 `/run/cortexfs/terminal/.../main.sock`。`watch` 只读；`attach` 会把你的
+stdin 接入终端。
 
 需要精确控制 sandbox 时：
 
@@ -130,9 +131,10 @@ agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
 ```
 
-`agent.sh coder` 会连接 agent terminal，因此正常会看到 `ctxterm -> tsh` 的会话。
-带 prompt 参数时才发送一条 agent socket 消息。需要聊天式 socket REPL 时使用
-`agent.sh --chat coder`。`agent.sh` 不保存私有聊天数据库。
+`agent.sh coder` 会连接 agent terminal；如果 terminal 尚未运行，会先执行
+`ctx agent start coder`，因此正常会看到 `ctxterm -> tsh` 的会话。带 prompt 参数时
+才发送一条 agent socket 消息。需要聊天式 socket REPL 时使用 `agent.sh --chat coder`。
+`agent.sh` 不保存私有聊天数据库。
 
 ## 自定义 agent
 
