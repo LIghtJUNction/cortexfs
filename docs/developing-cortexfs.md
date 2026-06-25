@@ -234,7 +234,11 @@ smollm2:135m
 3. 未配置，返回稳定错误
 ```
 
-不要把 secret 写入 `/ctx/model/*`、`.d/default` 或其他 ABI 文件。
+OAuth access token 也按同样原则处理：环境变量优先，其次系统 keychain。provider 配置可以
+声明 Authorization Code + PKCE 元数据；access token 默认保存在
+`service=cortexfs:<provider> account=oauth:access`，refresh token 默认保存在
+`account=oauth:refresh`。PKCE verifier、state、access token、refresh token 都不要写入
+`/ctx/model/*`、`.d/default` 或其他 ABI 文件。
 
 需要测试 OpenAI-compatible provider 路径而不调用云 API 时，使用本仓库的 aimock fixture：
 
