@@ -29,6 +29,18 @@ fn executable_objects_are_model_agent_tool() {
 }
 
 #[test]
+fn reference_tree_socket_errors_report_specific_errno() {
+    assert_eq!(
+        ReferenceTreeError::CannotSocket(std::io::ErrorKind::PermissionDenied).errno(),
+        "EACCES"
+    );
+    assert_eq!(
+        ReferenceTreeError::CannotSocket(std::io::ErrorKind::AlreadyExists).errno(),
+        "EEXIST"
+    );
+}
+
+#[test]
 fn object_names_are_small_ascii_path_components() {
     assert!(is_object_name("echo"));
     assert!(is_object_name("fs.read"));

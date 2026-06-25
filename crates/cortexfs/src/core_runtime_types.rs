@@ -179,7 +179,7 @@ pub enum ReferenceTreeError {
     /// A documented symlink could not be created or conflicts with an existing path.
     CannotLink,
     /// A documented socket path could not be created or conflicts with an existing path.
-    CannotSocket,
+    CannotSocket(std::io::ErrorKind),
     /// A deprecated reference-tree placeholder could not be removed.
     CannotRemove,
     /// A deprecated reference-tree alias could not be removed.
@@ -254,8 +254,15 @@ impl DurableSessionLayoutError {
 impl ReferenceTreeError {
     /// Returns a stable errno name for this reference-tree bootstrap failure.
     #[must_use]
-    pub const fn errno(self) -> &'static str {
+    pub fn errno(self) -> &'static str {
         match self {
+            Self::CannotSocket(std::io::ErrorKind::PermissionDenied) => "EACCES",
+            Self::CannotSocket(std::io::ErrorKind::NotFound)
+            | Self::Session(DurableSessionLayoutError::TempSessionNotDurable)
+            | Self::Child(ChildContextRecordError::MissingParentSession) => "ENOENT",
+            Self::CannotSocket(
+                std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::AddrInUse,
+            ) => "EEXIST",
             Self::CannotCreate
             | Self::Object(
                 ObjectBootstrapError::CannotCreate
@@ -265,7 +272,7 @@ impl ReferenceTreeError {
             | Self::Session(DurableSessionLayoutError::CannotCreate)
             | Self::Child(ChildContextRecordError::CannotRecord)
             | Self::CannotLink
-            | Self::CannotSocket
+            | Self::CannotSocket(_)
             | Self::CannotRemove
             | Self::CannotUnlink => "EIO",
             Self::Object(
@@ -287,8 +294,6 @@ impl ReferenceTreeError {
                 | ChildContextRecordError::InvalidText
                 | ChildContextRecordError::InvalidRefs,
             ) => "EINVAL",
-            Self::Session(DurableSessionLayoutError::TempSessionNotDurable)
-            | Self::Child(ChildContextRecordError::MissingParentSession) => "ENOENT",
         }
     }
 }

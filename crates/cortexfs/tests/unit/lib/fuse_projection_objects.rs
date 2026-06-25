@@ -350,10 +350,10 @@ fn reference_tree_bootstrap_rejects_conflicting_symlink_and_socket_paths() {
 
     assert!(fs::remove_dir_all(&root).is_ok());
     write_text_file(&root.join("agent").join("coder.sock"), "not socket\n");
-    assert_eq!(
+    assert!(matches!(
         ensure_v1_reference_tree(&root),
-        Err(ReferenceTreeError::CannotSocket)
-    );
+        Err(ReferenceTreeError::CannotSocket(_))
+    ));
 }
 
 #[test]
