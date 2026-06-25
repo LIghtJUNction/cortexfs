@@ -125,8 +125,11 @@ fn os_string(value: OsString) -> Result<String, TshError> {
 }
 
 fn print_help() -> Result<(), TshError> {
-    write_stdout(
-        "\
+    write_stdout(help_text())
+}
+
+fn help_text() -> &'static str {
+    "\
 tsh - CortexFS tool shell
 
 usage:
@@ -153,11 +156,10 @@ repl:
   pin TOOL         load TOOL metadata and keep it from context eviction
   unpin TOOL       allow a pinned tool to be unloaded from context again
   pins             list pinned tool context entries
+  TOOL [ARG...]    run a visible tool with CLI-style argv and stdio
   bash             enter an interactive shell tool
-  fs.read PATH     read a file through the fs.read tool
   exit             leave tsh
-",
-    )
+"
 }
 
 fn list_tools(root: &Path) -> Result<(), TshError> {
@@ -1398,8 +1400,8 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, load_tool_context,
-        parse_args, parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path,
+        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, help_text,
+        load_tool_context, parse_args, parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path,
         requires_explicit_repl_input, run_repl_tool, run_tool, terminal_safe_text,
         validate_tshrc_ctx_path,
     };
@@ -1429,6 +1431,14 @@ mod tests {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn help_describes_generic_visible_tool_invocation() {
+        let help = help_text();
+
+        assert!(help.contains("TOOL [ARG...]    run a visible tool with CLI-style argv and stdio"));
+        assert!(!help.contains("fs.read PATH"));
     }
 
     #[test]
