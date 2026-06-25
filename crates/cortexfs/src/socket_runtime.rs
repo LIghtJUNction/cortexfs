@@ -195,6 +195,10 @@ fn run_agent_executable_streaming(
     session: &str,
     input: &str,
 ) -> Result<Vec<String>, SocketRuntimeError> {
+    let history_messages = collect_history_messages_from_session(
+        &runtime.session_root.join(session),
+        MAX_HISTORY_MESSAGES_CHARS,
+    );
     let mut command = Command::new(runtime.agent_executable);
     command
         .arg(input)
@@ -215,6 +219,7 @@ fn run_agent_executable_streaming(
         .env("CTX_SOURCE", runtime.source_root)
         .env("CTX_RUN_ID", run_id)
         .env("CTX_SESSION", session)
+        .env("CTX_AGENT_HISTORY_MESSAGES", history_messages)
         .stdout(Stdio::piped());
     apply_agent_identity_to_command(&mut command, runtime.identity);
     let mut child = command

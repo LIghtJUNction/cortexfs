@@ -40,3 +40,37 @@ fn agent_prompt_skill_metadata_shortens_then_omits_over_budget() {
     assert!(omitted.contains("name: alpha"));
     assert!(!omitted.contains("name: beta"));
 }
+
+#[test]
+fn agent_prompt_history_messages_are_bounded_and_recent() {
+    let messages = concat!(
+        "{\"role\":\"user\",\"content\":\"old question old question old question old question old question old question old question old question old question old question\"}\n",
+        "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"old answer\"}]}\n",
+        "{\"role\":\"user\",\"content\":\"new question\"}\n",
+    );
+
+    let full = format_history_messages_jsonl(messages, 10_000);
+    assert!(full.contains("- user: old question old question"));
+    assert!(full.contains("- assistant: old answer"));
+    assert!(full.contains("- user: new question"));
+
+    let bounded = format_history_messages_jsonl(messages, 120);
+    assert!(bounded.contains("WARNING: historical messages exceeded"));
+    assert!(!bounded.contains("old question"));
+    assert!(bounded.contains("new question"));
+}
+
+#[test]
+fn agent_prompt_history_messages_read_session_file() {
+    let root = clean_test_dir("agent-prompt-history-session");
+    let session = root.join("session").join("default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    write_text_file(
+        &session.join("messages.jsonl"),
+        "{\"role\":\"user\",\"content\":\"hello\"}\n",
+    );
+
+    let history = collect_history_messages_from_session(&session, 10_000);
+
+    assert_eq!(history, "- user: hello");
+}
