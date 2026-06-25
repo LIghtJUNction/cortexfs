@@ -1,7 +1,6 @@
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
-import HeroImage from '../../../docs/assets/cortexfs-hero.svg';
 import type {ReactElement} from 'react';
 
 type Feature = {
@@ -39,6 +38,8 @@ type Copy = {
   developerSteps: Feature[];
   architectureTitle: string;
   architectureText: string;
+  manifestTitle: string;
+  manifestText: string;
   model: string;
   agent: string;
   tool: string;
@@ -101,6 +102,9 @@ const zh: Copy = {
   architectureTitle: '高层抽象',
   architectureText:
     'CortexFS 是一层薄 ABI：它让模型、agent、tool、session 以同一种 Unix 形状组合，而不是把每个供应商或框架的内部状态变成新根目录。',
+  manifestTitle: '不要把 runtime 藏在数据库里',
+  manifestText:
+    'CortexFS 的判断很简单：可见状态应该是普通文件，可执行能力应该有明确边界，每次提交都应该留下可审计事实。',
   model: '纯推理入口',
   agent: '策略约束的编排者',
   tool: '可执行能力',
@@ -164,6 +168,9 @@ const en: Copy = {
   architectureTitle: 'High-level abstraction',
   architectureText:
     'CortexFS is a thin ABI that gives models, agents, tools, and sessions one Unix shape instead of turning every vendor or framework detail into a new root directory.',
+  manifestTitle: 'Do not hide the runtime in a database',
+  manifestText:
+    'CortexFS takes a simple position: visible state should be ordinary files, executable capability should have clear boundaries, and every submission should leave auditable facts.',
   model: 'pure inference',
   agent: 'policy-bound orchestration',
   tool: 'executable capability',
@@ -194,6 +201,47 @@ function FeatureRail({copy}: {copy: Copy}): ReactElement {
   );
 }
 
+function AgentConsole(): ReactElement {
+  return (
+    <div className="cortexConsole" aria-label="CortexFS working console mockup">
+      <div className="cortexConsoleHeader">
+        <span>/ctx</span>
+        <strong>agent/coder</strong>
+      </div>
+      <div className="cortexConsoleBody">
+        <aside>
+          <span className="isActive">status</span>
+          <span>model</span>
+          <span>agent</span>
+          <span>tool</span>
+          <span>session</span>
+          <span>policy</span>
+        </aside>
+        <div className="cortexEditor">
+          <div className="cortexMeta">
+            <span>request</span>
+            <span>atomic rename</span>
+            <span>audit append</span>
+          </div>
+          <pre>{`$ ls /ctx
+model  agent  tool  session  policy  shared
+
+$ ctx send coder "inspect docs/DESIGN.md"
+write: .tmp/9f2.req.json
+rename: agent/coder/inbox/9f2.req.json
+
+$ tail -f agent/coder/outbox/latest.json
+{
+  "status": "accepted",
+  "native_tool": "tsh",
+  "ctx_path": "tool/tsh:tool/fs.read"
+}`}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home(): ReactElement {
   const {i18n} = useDocusaurusContext();
   const copy = i18n.currentLocale === 'en' ? en : zh;
@@ -218,19 +266,16 @@ export default function Home(): ReactElement {
                   {copy.developer}
                 </Link>
               </div>
-            </div>
-            <div className="cortexHeroVisual" aria-label="CortexFS ABI blueprint">
-              <HeroImage className="cortexHeroImage" aria-hidden="true" />
-              <div className="cortexBlueprint">
-                <pre>{`/ctx
-  status
-  bin/ctxterm
-  model/main
-  agent/coder.sock
-  tool/tsh
-  home/1000/agent/coder/session
-  shared/project-a`}</pre>
+              <div className="cortexProofRow" aria-label="CortexFS root ABI">
+                <span>model</span>
+                <span>agent</span>
+                <span>tool</span>
+                <span>session</span>
+                <span>policy</span>
               </div>
+            </div>
+            <div className="cortexHeroVisual">
+              <AgentConsole />
             </div>
           </div>
         </section>
@@ -291,6 +336,14 @@ tsh.config`}</pre>
                 <span>W-TinyLFU</span>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section className="cortexManifest">
+          <div className="container">
+            <p>{copy.manifestTitle}</p>
+            <h2>{copy.manifestText}</h2>
+            <Link to="/docs/DESIGN">{copy.architectureTitle}</Link>
           </div>
         </section>
 
