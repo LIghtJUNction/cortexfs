@@ -206,6 +206,15 @@ tsh fs.read README.md
 tsh bash
 ```
 
+`ctx tool` is only a direct CLI entrypoint for CortexFS core tools such as
+`tsh.config`. Ordinary visible tools still run through `tsh` or an authorized
+agent/runtime path, so `ctx tool` cannot bypass CortexFS tool authorization.
+
+```bash
+ctx tool tsh.config
+ctx tool tsh.config '{"max_loaded_tools":32}'
+```
+
 Inside `tsh`, `load` and `pin` load tool metadata into the agent context without
 executing the tool binary or dynamic library:
 

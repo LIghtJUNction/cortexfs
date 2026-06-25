@@ -134,6 +134,11 @@ through the SDK ABI, using structured JSON input and JSONL tool frames. `load`
 and `pin` affect the native context/cache; they must not force terminal CLI
 commands to emit structured frames.
 
+`ctx tool NAME [ARG...]` may directly run only CortexFS core tool CLIs that are
+implemented inside `ctx`, such as `tsh.config`. It still requires `NAME` to be
+visible through `CTX_PATH`, but it must refuse ordinary visible tools because
+direct execution from `CTX_PATH` would skip the agent/tool authorization stack.
+
 When a terminal needs to be observable, `ctxterm` listens on the session
 terminal socket:
 
