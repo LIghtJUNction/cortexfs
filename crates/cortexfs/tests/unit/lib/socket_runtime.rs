@@ -53,6 +53,28 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     assert!(meta.contains("\"model\":\"main\""));
     assert!(meta.contains("\"scope\":\"private\""));
     assert!(inspect_context_pack_json(&pack).is_ok());
+    assert_eq!(
+        fs::metadata(&session_root).map(|meta| meta.permissions().mode() & 0o777),
+        Ok(0o700)
+    );
+    assert_eq!(
+        fs::metadata(&session).map(|meta| meta.permissions().mode() & 0o777),
+        Ok(0o700)
+    );
+    assert_eq!(
+        fs::metadata(session.join("context")).map(|meta| meta.permissions().mode() & 0o777),
+        Ok(0o700)
+    );
+    assert_eq!(
+        fs::metadata(session.join("messages.jsonl"))
+            .map(|meta| meta.permissions().mode() & 0o777),
+        Ok(0o600)
+    );
+    assert_eq!(
+        fs::metadata(session.join("context").join("summary.md"))
+            .map(|meta| meta.permissions().mode() & 0o777),
+        Ok(0o600)
+    );
 
     let updated = ensure_durable_session_layout(
         &session_root,
