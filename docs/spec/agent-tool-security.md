@@ -55,6 +55,7 @@ agent policy decides whether execution is allowed
     path
     mount
     model
+    system.md
     policy
     status
     pid
@@ -73,6 +74,7 @@ label   CortexFS agent label, for example user_u:agent_r:coder_t:s0
 iso     isolation profile: shared, uid, or userns
 parent  parent agent, session, or run that created this agent
 life    lifecycle ownership, default owned
+system.md user-editable agent instructions/persona. This is prompt text, not authority.
 ```
 
 Multiple agents may share one Linux uid. The uid expresses the user boundary.
@@ -80,6 +82,10 @@ The label expresses the agent security boundary.
 
 `meta.json` may exist for longer descriptions such as purpose, creation time,
 or issue number. Policy decisions must not depend on `meta.json`.
+`system.md` is the user-editable system prompt for the agent. It is read by the
+agent runtime and combined with the immutable CortexFS runtime contract. It must
+not grant tool, model, network, filesystem, or session authority; those remain
+controlled by `policy`, `path`, `mount`, uid/gid, and Linux mode bits.
 
 Agent startup:
 

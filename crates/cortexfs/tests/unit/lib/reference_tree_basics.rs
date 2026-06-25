@@ -293,6 +293,10 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
     assert_file_text(&root.join("agent").join("coder.d").join("model"), "main\n");
+    assert_file_text(
+        &root.join("agent").join("coder.d").join("system.md"),
+        "You are CortexFS agent `coder`.\n",
+    );
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(
         matches!(agent_policy, Ok(ref content) if content.contains("model:main use"))
