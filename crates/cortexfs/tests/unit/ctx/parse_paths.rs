@@ -222,6 +222,95 @@ fn parses_agent_session_client_commands() {
 }
 
 #[test]
+fn parses_agent_sh_compat_command() {
+    let command = cmd!("agent-sh", "--session", "focus", "coder", "hello", "world");
+    assert!(matches!(
+        command,
+        Ok(Command::AgentSh { ref args })
+            if args == &vec![
+                "--session".to_owned(),
+                "focus".to_owned(),
+                "coder".to_owned(),
+                "hello".to_owned(),
+                "world".to_owned()
+            ]
+    ));
+}
+
+#[test]
+fn parses_agent_sh_compat_router_modes() {
+    let send = parse_agent_sh_args_with_session(
+        vec!["coder".to_owned(), "hello".to_owned(), "world".to_owned()],
+        None,
+    );
+    assert!(matches!(
+        send,
+        Ok(AgentShArgs {
+            session: None,
+            raw: false,
+            mode: AgentShMode::Auto,
+            ref name,
+            ref input,
+        }) if name == "coder" && input == &vec!["hello".to_owned(), "world".to_owned()]
+    ));
+
+    let repl = parse_agent_sh_args_with_session(
+        vec![
+            "--session".to_owned(),
+            "focus".to_owned(),
+            "--raw".to_owned(),
+            "--chat".to_owned(),
+            "coder".to_owned(),
+        ],
+        None,
+    );
+    assert!(matches!(
+        repl,
+        Ok(AgentShArgs {
+            session: Some(ref session),
+            raw: true,
+            mode: AgentShMode::Repl,
+            ref name,
+            ref input,
+        }) if session == "focus" && name == "coder" && input.is_empty()
+    ));
+
+    let inherited = parse_agent_sh_args_with_session(
+        vec!["--watch".to_owned(), "coder".to_owned()],
+        Some("env-session".to_owned()),
+    );
+    assert!(matches!(
+        inherited,
+        Ok(AgentShArgs {
+            session: Some(ref session),
+            raw: false,
+            mode: AgentShMode::Watch,
+            ref name,
+            ref input,
+        }) if session == "env-session" && name == "coder" && input.is_empty()
+    ));
+}
+
+#[test]
+fn rejects_agent_sh_cancel_with_multiple_run_ids() {
+    let result = agent_sh_command(
+        Path::new("/tmp/cortexfs-agent-sh-test"),
+        vec![
+            "--cancel".to_owned(),
+            "coder".to_owned(),
+            "run-1".to_owned(),
+            "run-2".to_owned(),
+        ],
+    );
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.code == 2
+                && error.message == "agent.sh --cancel accepts at most one run id"
+    ));
+}
+
+#[test]
 fn parses_agent_lifecycle_commands() {
     let new = cmd!(
         "agent",

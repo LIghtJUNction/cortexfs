@@ -164,6 +164,197 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum AgentShMode {
+    Auto,
+    Repl,
+    Attach,
+    Watch,
+    Resume,
+    History,
+    Output,
+    Pack,
+    Tools,
+    Children,
+    Cancel,
+    Status,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AgentShArgs {
+    session: Option<String>,
+    raw: bool,
+    mode: AgentShMode,
+    name: String,
+    input: Vec<String>,
+}
+
+fn agent_sh_command(root: &Path, args: Vec<String>) -> Result<ExitCode, CliError> {
+    if args
+        .iter()
+        .any(|value| matches!(value.as_str(), "--help" | "-h" | "help"))
+    {
+        print_terminal_text(&format!("{}\n", agent_sh_usage()))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    let args = parse_agent_sh_args(args)?;
+    require_cli_name("agent name", &args.name)?;
+    match args.mode {
+        AgentShMode::Auto | AgentShMode::Repl if !args.input.is_empty() => agent_send(
+            root,
+            &args.name,
+            args.session.as_deref(),
+            &args.input.join(" "),
+            args.raw,
+        ),
+        AgentShMode::Auto | AgentShMode::Repl => {
+            agent_repl(root, &args.name, args.session.as_deref(), args.raw)
+        }
+        AgentShMode::Attach => agent_sh_attach_or_start(root, &args.name, args.session.as_deref()),
+        AgentShMode::Watch => agent_terminal(root, &args.name, args.session.as_deref(), false),
+        AgentShMode::Resume => agent_resume(root, &args.name, args.session.as_deref(), args.raw),
+        AgentShMode::History => success(history(root, &args.name, args.session.as_deref())),
+        AgentShMode::Output => success(latest(root, &args.name, args.session.as_deref())),
+        AgentShMode::Pack => success(agent_pack(root, &args.name, args.session.as_deref())),
+        AgentShMode::Tools => {
+            if args.session.is_some() {
+                return Err(CliError::usage("agent.sh --tools does not accept --session"));
+            }
+            success(agent_tools(root, &args.name))
+        }
+        AgentShMode::Children => success(agent_children(root, &args.name, args.session.as_deref())),
+        AgentShMode::Cancel => {
+            if args.input.len() > 1 {
+                return Err(CliError::usage("agent.sh --cancel accepts at most one run id"));
+            }
+            let run = args.input.first().map(String::as_str);
+            agent_cancel(root, &args.name, args.session.as_deref(), run, args.raw)
+        }
+        AgentShMode::Status => {
+            if args.session.is_some() {
+                return Err(CliError::usage("agent.sh --status does not accept --session"));
+            }
+            success(agent_status(root, &args.name))
+        }
+    }
+}
+
+fn parse_agent_sh_args(args: Vec<String>) -> Result<AgentShArgs, CliError> {
+    let default_session = env::var("CORTEX_SESSION")
+        .ok()
+        .filter(|value| !value.is_empty());
+    parse_agent_sh_args_with_session(args, default_session)
+}
+
+fn parse_agent_sh_args_with_session(
+    args: Vec<String>,
+    default_session: Option<String>,
+) -> Result<AgentShArgs, CliError> {
+    let mut session = default_session;
+    let mut mode = AgentShMode::Auto;
+    let mut raw = false;
+    let mut values = args.into_iter();
+    let mut rest = Vec::new();
+
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--session" => {
+                session = Some(required_arg(&mut values, "agent.sh --session requires a value")?);
+            }
+            "--raw" => raw = true,
+            "--resume" => mode = AgentShMode::Resume,
+            "--chat" | "--repl" => mode = AgentShMode::Repl,
+            "--attach" => mode = AgentShMode::Attach,
+            "--watch" => mode = AgentShMode::Watch,
+            "--history" => mode = AgentShMode::History,
+            "--output" => mode = AgentShMode::Output,
+            "--pack" => mode = AgentShMode::Pack,
+            "--tools" => mode = AgentShMode::Tools,
+            "--children" => mode = AgentShMode::Children,
+            "--cancel" => mode = AgentShMode::Cancel,
+            "--status" => mode = AgentShMode::Status,
+            "--help" | "-h" | "help" => {
+                return Err(CliError::usage(agent_sh_usage()));
+            }
+            "--" => {
+                rest.extend(values);
+                break;
+            }
+            _ if value.starts_with('-') => {
+                return Err(CliError::usage(format!("unknown agent.sh option: {value}")));
+            }
+            _ => {
+                rest.push(value);
+                rest.extend(values);
+                break;
+            }
+        }
+    }
+
+    if rest.is_empty() {
+        return Err(CliError::usage(agent_sh_usage()));
+    }
+    let name = rest.remove(0);
+    Ok(AgentShArgs {
+        session,
+        raw,
+        mode,
+        name,
+        input: rest,
+    })
+}
+
+fn agent_sh_usage() -> String {
+    [
+        "usage:",
+        "  agent.sh [--session SESSION] AGENT",
+        "  agent.sh [--session SESSION] AGENT INPUT...",
+        "  agent.sh --chat AGENT",
+        "  agent.sh --attach AGENT",
+        "  agent.sh --watch AGENT",
+        "  agent.sh --resume AGENT",
+        "  agent.sh --history AGENT",
+        "  agent.sh --output AGENT",
+        "  agent.sh --pack AGENT",
+        "  agent.sh --tools AGENT",
+        "  agent.sh --children AGENT",
+        "  agent.sh --cancel AGENT [RUN]",
+        "  agent.sh --status AGENT",
+        "  agent.sh --raw AGENT \"prompt\"",
+        "",
+        "agent.sh is a compatibility wrapper over ctx agent-sh.",
+        "With no INPUT, it opens the agent chat REPL. Use --attach for tsh.",
+    ]
+    .join("\n")
+}
+
+fn agent_sh_attach_or_start(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+) -> Result<ExitCode, CliError> {
+    match agent_terminal(root, name, session, true) {
+        Ok(code) => Ok(code),
+        Err(error) if error.message.contains("terminal is not running") => {
+            write_error("agent.sh terminal is not running; starting agent terminal")
+                .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+            let start = AgentStartArgs {
+                name: name.to_owned(),
+                session: session.unwrap_or("default").to_owned(),
+                cwd: "/workspace".to_owned(),
+                default_workspace: true,
+                mounts: Vec::new(),
+            };
+            let code = agent_start(root, &start)?;
+            if code != ExitCode::SUCCESS {
+                return Ok(code);
+            }
+            agent_terminal(root, name, session, true)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
     require_cli_name("agent name", &args.name)?;
     require_session_name(&args.session)?;
