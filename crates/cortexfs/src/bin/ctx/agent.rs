@@ -482,6 +482,7 @@ fn agent_start_systemd_command(
             "PATH=/usr/bin:/bin".to_owned(),
             format!("CTX_ROOT={}", root.display()),
             format!("CTX_HOME={}", home.display()),
+            format!("CTX_AGENT={}", args.name),
             format!("HOME={AGENT_SANDBOX_HOME}"),
             format!("USER={}", args.name),
             format!("LOGNAME={}", args.name),
