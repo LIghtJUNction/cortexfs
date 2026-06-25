@@ -211,16 +211,31 @@ fn print_abi() -> Result<(), CliError> {
 }
 
 fn print_env(root: &Path) -> Result<(), CliError> {
-    let home = env::var("CTX_HOME").unwrap_or_else(|_| format!("{}/home/$(id -u)", root.display()));
-    let path =
-        env::var("CTX_PATH").unwrap_or_else(|_| format!("{}/tool:{home}/tool", root.display()));
-    print_line(&format!(
-        "export CTX_ROOT={}",
-        shell_quote(&root.display().to_string())
-    ))?;
-    print_line(&format!("export CTX_HOME={}", shell_quote(&home)))?;
-    print_line(&format!("export CTX_PATH={}", shell_quote(&path)))?;
-    print_line(&format!("export PATH={}/bin:$PATH", root.display()))
+    for line in env_exports(
+        root,
+        env::var("CTX_HOME").ok().as_deref(),
+        env::var("CTX_PATH").ok().as_deref(),
+    ) {
+        print_line(&line)?;
+    }
+    Ok(())
+}
+
+fn env_exports(root: &Path, home_env: Option<&str>, path_env: Option<&str>) -> [String; 4] {
+    let root = root.display().to_string();
+    let home = home_env
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{root}/home/$(id -u)"));
+    let path = path_env
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{root}/tool:{home}/tool"));
+    let root_bin = format!("{root}/bin");
+    [
+        format!("export CTX_ROOT={}", shell_quote(&root)),
+        format!("export CTX_HOME={}", shell_quote(&home)),
+        format!("export CTX_PATH={}", shell_quote(&path)),
+        format!("export PATH={}:$PATH", shell_quote(&root_bin)),
+    ]
 }
 
 fn print_status(root: &Path) -> Result<(), CliError> {
