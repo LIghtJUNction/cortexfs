@@ -236,6 +236,7 @@ pub fn ensure_durable_session_layout(
 
     let session_dir = session_root.join(session_name);
     let context = session_dir.join("context");
+    create_dir(session_root)?;
     create_dir(&session_dir)?;
     create_dir(&context)?;
     for dir in CONTEXT_REQUIRED_DIRS {
@@ -304,7 +305,8 @@ fn durable_session_meta_json(model: Option<&str>, scope: SocketSessionScope) -> 
 }
 
 fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    fs::create_dir_all(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)
+    fs::create_dir_all(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    set_dir_permissions(path)
 }
 
 fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
@@ -331,7 +333,12 @@ fn write_text_file(path: &Path, content: &str) -> Result<(), DurableSessionLayou
 }
 
 fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)
+}
+
+fn set_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
