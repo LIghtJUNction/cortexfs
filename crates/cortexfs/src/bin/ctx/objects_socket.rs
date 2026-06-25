@@ -332,23 +332,11 @@ fn agent_socket_path(root: &Path, agent: &str) -> Result<PathBuf, CliError> {
 }
 
 fn require_cli_name(label: &str, value: &str) -> Result<(), CliError> {
-    if is_usage_placeholder(value) {
-        return Err(CliError::usage(format!(
-            "{label} is a placeholder; replace {value} with a real value"
-        )));
-    }
     if is_object_name(value) {
         Ok(())
     } else {
         Err(CliError::usage(format!("invalid {label}: {value}")))
     }
-}
-
-fn is_usage_placeholder(value: &str) -> bool {
-    matches!(
-        value,
-        "NAME" | "SESSION" | "AGENT" | "SOURCE" | "TARGET" | "PATH" | "INPUT" | "RUN"
-    )
 }
 
 fn object_socket_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
