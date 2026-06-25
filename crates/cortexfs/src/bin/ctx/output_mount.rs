@@ -26,6 +26,7 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent history NAME [--session SESSION]",
         "  ctx [--root PATH] agent output NAME [--session SESSION]",
         "  ctx [--root PATH] agent pack NAME [--session SESSION]",
+        "  ctx [--root PATH] agent prompt NAME",
         "  ctx [--root PATH] agent tools NAME",
         "  ctx [--root PATH] agent children NAME [--session SESSION]",
         "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
@@ -83,6 +84,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx [--root PATH] agent history NAME [--session SESSION]",
             "  ctx [--root PATH] agent output NAME [--session SESSION]",
             "  ctx [--root PATH] agent pack NAME [--session SESSION]",
+            "  ctx [--root PATH] agent prompt NAME",
             "  ctx [--root PATH] agent tools NAME",
             "  ctx [--root PATH] agent children NAME [--session SESSION]",
             "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
@@ -145,6 +147,12 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
+        ]),
+        "agent prompt" => print_lines(&[
+            "usage:",
+            "  ctx [--root PATH] agent prompt NAME",
+            "",
+            "prints the rendered runtime system prompt for the agent",
         ]),
         "agent tools" => print_lines(&["usage:", "  ctx [--root PATH] agent tools NAME"]),
         "agent children" => print_lines(&[

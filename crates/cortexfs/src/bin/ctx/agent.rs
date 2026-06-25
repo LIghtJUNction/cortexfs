@@ -33,6 +33,9 @@ enum AgentArgs {
         name: String,
         session: Option<String>,
     },
+    Prompt {
+        name: String,
+    },
     Tools {
         name: String,
     },
@@ -138,6 +141,7 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
             ref name,
             ref session,
         } => success(agent_pack(root, name, session.as_deref())),
+        AgentArgs::Prompt { ref name } => success(agent_prompt(root, name)),
         AgentArgs::Tools { ref name } => success(agent_tools(root, name)),
         AgentArgs::Children {
             ref name,
@@ -394,6 +398,36 @@ fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliE
     )))
 }
 
+fn agent_prompt(root: &Path, name: &str) -> Result<(), CliError> {
+    let prompt = build_agent_system_prompt(root, name, &current_time_unix_string())?;
+    print_terminal_text(&prompt)
+}
+
+fn build_agent_system_prompt(
+    root: &Path,
+    name: &str,
+    current_time_unix: &str,
+) -> Result<String, CliError> {
+    require_cli_name("agent name", name)?;
+    let control = root.join("agent").join(format!("{name}.d"));
+    let agent_system = read_optional_trimmed(&control.join("system.md"))?.unwrap_or_default();
+    let template = read_optional_trimmed(&control.join("prompt.template.md"))?
+        .unwrap_or_else(|| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());
+    Ok(render_agent_system_prompt(
+        name,
+        &agent_system,
+        &AgentPromptContext {
+            template,
+            rules: "(no AGENTS.md rules injected)".to_owned(),
+            skills: "(no skill metadata injected)".to_owned(),
+            tool_injection: "(no repo structure, search result, or file content injected)"
+                .to_owned(),
+            history_messages: "(no historical messages injected)".to_owned(),
+            current_time_unix: current_time_unix.to_owned(),
+        },
+    ))
+}
+
 fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
     let child_root = agent_session_dir(root, name, session)?.join("context").join("child");
     if !child_root.is_dir() {
@@ -409,6 +443,13 @@ fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), 
         print_line(&format!("{child}\t{status}\t{agent}"))?;
     }
     Ok(())
+}
+
+fn current_time_unix_string() -> String {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs())
+        .to_string()
 }
 
 fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {

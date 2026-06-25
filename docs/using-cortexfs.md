@@ -152,6 +152,7 @@ agent 的用户可编辑系统提示词在：
 ctx cat agent/coder.d/system.md
 ctx set agent/coder.d/system.md "You are a careful Rust coding agent."
 ctx cat agent/coder.d/prompt.template.md
+ctx agent prompt coder
 ```
 
 `system.md` 只定义 persona 和工作风格；`prompt.template.md` 决定它和规则、skill
@@ -159,6 +160,10 @@ ctx cat agent/coder.d/prompt.template.md
 system message。模板变量包括 `{{agent}}`、`{{current_time_unix}}`、
 `{{agent_instructions}}`、`{{rules}}`、`{{skills}}`、`{{tool_injection}}`、
 `{{history_messages}}`、`{{runtime_contract}}`。
+
+`ctx agent prompt <agent>` 会打印 CortexFS 当前可渲染出的 runtime system prompt。
+它用于检查模板、agent instruction 和 runtime contract 是否按预期组合；真实模型调用时，
+规则、skill 元数据、工具注入和历史上下文仍由运行时按上下文窗口动态补齐。
 
 Skill 列表只注入 `name`、`description`、`SKILL.md` 路径；完整 `SKILL.md` 只在选中
 skill 后读取。Skill 元数据最多占上下文窗口 2%；上下文大小未知时硬上限为 8,000
