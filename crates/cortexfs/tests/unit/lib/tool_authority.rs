@@ -18,6 +18,31 @@ fn tool_listing_ignores_non_executable_and_control_entries() {
 }
 
 #[test]
+fn tool_lookup_rejects_executable_symlink() {
+    let root = clean_test_dir("tool-symlink-deny");
+    let tools = root.join("tool");
+    let outside = root.join("outside");
+    assert!(fs::create_dir_all(&tools).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_fixture_file(&outside.join("escape"), 0o755);
+    assert!(symlink(outside.join("escape"), tools.join("fs.read")).is_ok());
+
+    let tool_path = ToolPath::new([tools.clone()]);
+    assert_eq!(tool_path.find("fs.read"), Ok(None));
+    assert!(ok!(tool_path.list()).is_empty());
+
+    let identity = ok!(unix_identity_for(&outside.join("escape")));
+    let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
+    let policy = allow_tool_policy("coder_t", "fs.read");
+    let denied = authorize_tool_execution(
+        &tool_path,
+        "fs.read",
+        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy),
+    );
+    assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));
+}
+
+#[test]
 fn tool_execution_authority_requires_all_layers() {
     let root = clean_test_dir("tool-authority-ok");
     let tools = root.join("tool");
