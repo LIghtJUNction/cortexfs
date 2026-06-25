@@ -34,7 +34,7 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
         "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         "  ctx [--root PATH] agent attach NAME [--session SESSION]",
-        "  ctx [--root PATH] agent-sh [agent.sh options...]",
+        "  ctx [--root PATH] agent-sh [--session SESSION] AGENT [INPUT...]",
         "  ctx [--root PATH] ping model/NAME|agent/NAME",
         "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN",
         "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
