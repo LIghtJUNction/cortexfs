@@ -180,7 +180,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx [--root PATH] tool NAME [ARG...]",
             "",
             "lookup:",
-            "  resolves NAME through CTX_PATH like tsh, then executes the tool directly",
+            "  validates NAME through CTX_PATH but refuses direct execution without CortexFS authorization",
         ]),
         "cat" => print_lines(&["usage:", "  ctx [--root PATH] cat PATH"]),
         "set" => print_lines(&["usage:", "  ctx [--root PATH] set PATH VALUE"]),
