@@ -422,6 +422,10 @@ pub struct AgentExecutableSocketRuntime<'a> {
     pub ctx_root: &'a Path,
     /// Backing source root used for object control files.
     pub source_root: &'a Path,
+    /// Runtime Linux uid/gid/groups applied before executing the agent.
+    pub identity: &'a AgentUnixIdentity,
+    /// Runtime environment derived from `agent/<name>.d/env` plus reserved `CTX_*` values.
+    pub env: &'a [(String, String)],
     /// Durable session root for the selected agent.
     pub session_root: &'a Path,
     /// Default chroot cwd when a request does not provide one.
