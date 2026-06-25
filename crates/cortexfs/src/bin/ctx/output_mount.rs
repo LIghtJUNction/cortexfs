@@ -35,6 +35,9 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         "  ctx [--root PATH] agent attach NAME [--session SESSION]",
         "  ctx [--root PATH] agent-sh [--session SESSION] AGENT [INPUT...]",
+        "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
+        "  ctx provider oauth status PROVIDER",
+        "  ctx provider oauth refresh PROVIDER",
         "  ctx [--root PATH] ping model/NAME|agent/NAME",
         "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN",
         "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
@@ -51,7 +54,7 @@ fn print_help() -> Result<(), CliError> {
         "",
         "principles:",
         "  ctx is a thin Unix client over /ctx",
-        "  ctx does not manage providers, API formats, or private sessions",
+        "  provider config and OAuth credentials stay outside the /ctx root ABI",
     ])
 }
 
@@ -238,6 +241,32 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
+        "provider" => print_lines(&[
+            "usage:",
+            "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
+            "  ctx provider oauth status PROVIDER",
+            "  ctx provider oauth refresh PROVIDER",
+            "",
+            "notes:",
+            "  reads /etc/cortexfs/providers.d/*.json",
+            "  stores OAuth tokens in the system keychain, not /ctx/model",
+        ]),
+        "provider oauth" => print_lines(&[
+            "usage:",
+            "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
+            "  ctx provider oauth status PROVIDER",
+            "  ctx provider oauth refresh PROVIDER",
+        ]),
+        "provider oauth login" => print_lines(&[
+            "usage:",
+            "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
+        ]),
+        "provider oauth status" => {
+            print_lines(&["usage:", "  ctx provider oauth status PROVIDER"])
+        },
+        "provider oauth refresh" => {
+            print_lines(&["usage:", "  ctx provider oauth refresh PROVIDER"])
+        },
         "ping" => print_lines(&["usage:", "  ctx [--root PATH] ping model/NAME|agent/NAME"]),
         "cancel" => print_lines(&["usage:", "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN"]),
         "exec" => print_lines(&[

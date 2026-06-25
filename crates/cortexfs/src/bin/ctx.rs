@@ -32,6 +32,7 @@ use cortexfs::{
     run_core_tool_cli_with_root, skill_metadata_budget_from_env,
 };
 use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
+use serde::Deserialize;
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -52,6 +53,8 @@ include!("ctx/output_mount.rs");
 include!("ctx/objects_socket.rs");
 
 include!("ctx/doctor.rs");
+
+include!("ctx/provider.rs");
 
 include!("ctx/file_basic.rs");
 

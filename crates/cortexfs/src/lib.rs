@@ -116,8 +116,8 @@ pub use model::{
 pub use mount_table::{MountEntry, MountError, MountMode, MountOption, MountTable};
 pub use oauth::{
     OAuthError, OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, oauth_authorization_code_form,
-    oauth_authorization_url, parse_oauth_token_response, resolve_oauth_access_token,
-    resolve_oauth_access_token_with,
+    oauth_authorization_url, oauth_refresh_token_form, parse_oauth_token_response,
+    resolve_oauth_access_token, resolve_oauth_access_token_with,
 };
 pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
 pub use session_index::{

@@ -328,12 +328,33 @@ These commands read:
 /ctx/home/<uid>/agent/<agent>/session/<session>/messages.jsonl
 ```
 
+## Provider OAuth
+
+`ctx provider oauth` is a host-side credential helper. It does not add a
+`/ctx/provider` namespace and does not expose tokens through model files.
+
+```text
+ctx provider oauth login PROVIDER [--timeout SECONDS]
+ctx provider oauth status PROVIDER
+ctx provider oauth refresh PROVIDER
+```
+
+`login` reads `/etc/cortexfs/providers.d/*.json`, uses the provider `oauth`
+block, creates a PKCE `S256` authorization request, waits on the configured
+localhost `redirect_uri`, exchanges the authorization code for tokens, and
+stores tokens in the system keychain:
+
+```text
+service=cortexfs:<provider> account=oauth:access
+service=cortexfs:<provider> account=oauth:refresh
+```
+
 ## Non-Goals
 
 `ctx` must not:
 
 ```text
-manage provider keys
+expose provider keys through /ctx
 store private chat history
 implement tool calling
 parse OpenAI/Anthropic/Gemini request formats
