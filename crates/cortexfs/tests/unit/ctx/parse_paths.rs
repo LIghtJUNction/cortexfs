@@ -1436,6 +1436,24 @@ fn parses_provider_oauth_help_commands() {
 }
 
 #[test]
+fn parses_provider_preset_commands() {
+    assert!(matches!(
+        cmd!("provider", "preset", "list"),
+        Ok(Command::Provider(ProviderArgs::PresetList))
+    ));
+    assert!(matches!(
+        cmd!("provider", "preset", "show", "google"),
+        Ok(Command::Provider(ProviderArgs::PresetShow { ref preset }))
+            if preset == "google"
+    ));
+    assert!(matches!(
+        cmd!("provider", "preset", "install", "anthropic"),
+        Ok(Command::Provider(ProviderArgs::PresetInstall { ref preset }))
+            if preset == "anthropic"
+    ));
+}
+
+#[test]
 fn tool_command_runs_core_tool_cli_at_selected_root() {
     let root = clean_test_dir("ctx-tool-command-core");
     assert!(ensure_v1_reference_tree(&root).is_ok());

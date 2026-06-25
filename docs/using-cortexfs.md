@@ -43,6 +43,19 @@ echo "summarize this file" | /ctx/model/main
 供应商密钥不写进 model 文件或 `.d/` 控制目录；provider adapter 会按环境变量、系统
 keychain、未配置的顺序解析。
 
+常见 provider 可以先安装文件化 preset：
+
+```bash
+ctx provider preset list
+ctx provider preset show google
+ctx provider preset install openai
+ctx provider preset install anthropic
+ctx provider preset install google
+```
+
+规范名称是 `openai`、`anthropic`、`google`。`codex` 是 `openai` preset 的别名；
+`gemini` 是 `google` preset 的别名。
+
 模型代理不做成 agent，也不写进 provider JSON。全局唯一路由表是：
 
 ```text

@@ -23,7 +23,98 @@ fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
         ProviderArgs::Refresh { ref provider } => {
             provider_oauth_refresh(provider).map(|()| ExitCode::SUCCESS)
         }
+        ProviderArgs::PresetList => provider_preset_list().map(|()| ExitCode::SUCCESS),
+        ProviderArgs::PresetShow { ref preset } => {
+            provider_preset_show(preset).map(|()| ExitCode::SUCCESS)
+        }
+        ProviderArgs::PresetInstall { ref preset } => {
+            provider_preset_install(preset).map(|()| ExitCode::SUCCESS)
+        }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProviderPreset {
+    name: &'static str,
+    aliases: &'static [&'static str],
+    file: &'static str,
+    config: &'static str,
+}
+
+const PROVIDER_PRESETS: &[ProviderPreset] = &[
+    ProviderPreset {
+        name: "openai",
+        aliases: &["codex", "ccodex"],
+        file: "api.openai.com.json",
+        config: r#"{
+  "base_url": "https://api.openai.com/v1",
+  "api_key_env": "OPENAI_API_KEY",
+  "enabled": true,
+  "formats": ["openai.chat", "openai.responses"]
+}
+"#,
+    },
+    ProviderPreset {
+        name: "anthropic",
+        aliases: &["claude"],
+        file: "api.anthropic.com.json",
+        config: r#"{
+  "base_url": "https://api.anthropic.com/v1",
+  "api_key_env": "ANTHROPIC_API_KEY",
+  "enabled": true,
+  "formats": ["anthropic.messages"]
+}
+"#,
+    },
+    ProviderPreset {
+        name: "google",
+        aliases: &["gemini"],
+        file: "generativelanguage.googleapis.com.json",
+        config: r#"{
+  "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+  "api_key_env": "GOOGLE_API_KEY",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    },
+];
+
+fn provider_preset_list() -> Result<(), CliError> {
+    for preset in PROVIDER_PRESETS {
+        print_line(preset.name)?;
+    }
+    Ok(())
+}
+
+fn provider_preset_show(preset: &str) -> Result<(), CliError> {
+    let preset = provider_preset(preset)?;
+    print_line(preset.config.trim_end())
+}
+
+fn provider_preset_install(preset: &str) -> Result<(), CliError> {
+    let preset = provider_preset(preset)?;
+    fs::create_dir_all(PROVIDER_CONFIG_DIR)
+        .map_err(|error| CliError::unavailable(format!("cannot create provider config dir: {error}")))?;
+    let path = PathBuf::from(PROVIDER_CONFIG_DIR).join(preset.file);
+    atomic_write_provider_config(&path, preset.config)?;
+    print_line(&format!("installed {}", path.display()))
+}
+
+fn provider_preset(name: &str) -> Result<ProviderPreset, CliError> {
+    PROVIDER_PRESETS
+        .iter()
+        .copied()
+        .find(|preset| preset.name == name || preset.aliases.contains(&name))
+        .ok_or_else(|| CliError::usage(format!("unknown provider preset: {name}")))
+}
+
+fn atomic_write_provider_config(path: &Path, content: &str) -> Result<(), CliError> {
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, content)
+        .map_err(|error| CliError::unavailable(format!("cannot write provider config: {error}")))?;
+    fs::rename(&temp, path)
+        .map_err(|error| CliError::unavailable(format!("cannot install provider config: {error}")))
 }
 
 fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliError> {

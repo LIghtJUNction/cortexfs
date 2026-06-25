@@ -38,6 +38,9 @@ fn print_help() -> Result<(), CliError> {
         "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
         "  ctx provider oauth status PROVIDER",
         "  ctx provider oauth refresh PROVIDER",
+        "  ctx provider preset list",
+        "  ctx provider preset show openai|anthropic|google",
+        "  ctx provider preset install openai|anthropic|google",
         "  ctx [--root PATH] ping model/NAME|agent/NAME",
         "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN",
         "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
@@ -246,10 +249,14 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
+            "  ctx provider preset list",
+            "  ctx provider preset show openai|anthropic|google",
+            "  ctx provider preset install openai|anthropic|google",
             "",
             "notes:",
             "  reads /etc/cortexfs/providers.d/*.json",
             "  stores OAuth tokens in the system keychain, not /ctx/model",
+            "  provider presets install ordinary JSON files under /etc/cortexfs/providers.d",
         ]),
         "provider oauth" => print_lines(&[
             "usage:",
@@ -267,6 +274,17 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
         "provider oauth refresh" => {
             print_lines(&["usage:", "  ctx provider oauth refresh PROVIDER"])
         },
+        "provider preset" => print_lines(&[
+            "usage:",
+            "  ctx provider preset list",
+            "  ctx provider preset show openai|anthropic|google",
+            "  ctx provider preset install openai|anthropic|google",
+            "",
+            "aliases:",
+            "  codex -> openai",
+            "  gemini -> google",
+            "  claude -> anthropic",
+        ]),
         "ping" => print_lines(&["usage:", "  ctx [--root PATH] ping model/NAME|agent/NAME"]),
         "cancel" => print_lines(&["usage:", "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN"]),
         "exec" => print_lines(&[
