@@ -1,8 +1,8 @@
 use super::{
-    is_passthrough_tool, openai_stream_event, provider_key_names, provider_messages_for_agent,
-    provider_route, provider_transport, resolve_model_alias, resolved_model_path, run,
-    run_cli_tool_to_writer, ObjectPath, OpenAiStreamEvent, ProviderRoute, ResolvedTransport,
-    RunnerProviderConfig,
+    is_passthrough_tool, openai_stream_event, parse_anthropic_message_content, provider_key_names,
+    provider_messages_for_agent, provider_route, provider_transport, resolve_model_alias,
+    resolved_model_path, run, run_cli_tool_to_writer, ObjectPath, OpenAiStreamEvent,
+    ProviderRoute, ResolvedTransport, RunnerProviderConfig,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -321,11 +321,22 @@ fn provider_route_selects_key_slot_by_model() {
     );
 }
 
+#[test]
+fn anthropic_message_content_parses_text_parts() {
+    assert_eq!(
+        parse_anthropic_message_content(
+            br#"{"content":[{"type":"text","text":"hello "},{"type":"text","text":"claude"}]}"#
+        ),
+        Ok("hello claude".to_owned())
+    );
+}
+
 fn test_provider_config(base_url: &str, api_key_env: Option<&str>) -> RunnerProviderConfig {
     RunnerProviderConfig {
         base_url: base_url.to_owned(),
         api_key_env: api_key_env.map(str::to_owned),
         oauth: None,
+        formats: Vec::new(),
     }
 }
 

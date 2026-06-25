@@ -369,11 +369,14 @@ enum ProviderArgs {
     Login { provider: String, timeout: u64 },
     Status { provider: String },
     Refresh { provider: String },
+    PresetList,
+    PresetShow { preset: String },
+    PresetInstall { preset: String },
 }
 
 fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
-    let command = required_arg(&mut values, "provider requires oauth")?;
+    let command = required_arg(&mut values, "provider requires oauth or preset")?;
     let rest = values.collect::<Vec<_>>();
     if is_help_args(&rest) {
         return Ok(Command::HelpTopic(format!("provider {command}")));
@@ -391,7 +394,8 @@ fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
     }
     match command.as_str() {
         "oauth" => parse_provider_oauth_command(rest.into_iter()),
-        _ => Err(CliError::usage("provider expects oauth")),
+        "preset" => parse_provider_preset_command(rest.into_iter()),
+        _ => Err(CliError::usage("provider expects oauth or preset")),
     }
 }
 
@@ -428,6 +432,27 @@ fn parse_provider_oauth_command(mut values: impl Iterator<Item = String>) -> Res
             Ok(Command::Provider(ProviderArgs::Refresh { provider }))
         }
         _ => Err(CliError::usage("provider oauth expects login, status, or refresh")),
+    }
+}
+
+fn parse_provider_preset_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let command = required_arg(&mut values, "provider preset requires list, show, or install")?;
+    match command.as_str() {
+        "list" => {
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::PresetList))
+        }
+        "show" => {
+            let preset = required_arg(&mut values, "provider preset show requires a preset")?;
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::PresetShow { preset }))
+        }
+        "install" => {
+            let preset = required_arg(&mut values, "provider preset install requires a preset")?;
+            no_extra_args(values)?;
+            Ok(Command::Provider(ProviderArgs::PresetInstall { preset }))
+        }
+        _ => Err(CliError::usage("provider preset expects list, show, or install")),
     }
 }
 

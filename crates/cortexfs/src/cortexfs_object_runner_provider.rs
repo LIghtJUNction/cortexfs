@@ -10,6 +10,8 @@ struct RunnerProviderConfig {
     base_url: String,
     api_key_env: Option<String>,
     oauth: Option<cortexfs::OAuthProviderConfig>,
+    #[serde(default)]
+    formats: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -31,6 +33,38 @@ struct CurlJsonTarget {
     unix_socket: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProviderRuntimeDriver {
+    OpenAiChat,
+    AnthropicMessages,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ProviderCredential {
+    Bearer(String),
+    AnthropicApiKey(String),
+}
+
+impl ProviderCredential {
+    fn secret(&self) -> &str {
+        match self {
+            &Self::Bearer(ref secret) | &Self::AnthropicApiKey(ref secret) => secret,
+        }
+    }
+}
+
+fn provider_runtime_driver(config: &RunnerProviderConfig) -> ProviderRuntimeDriver {
+    if config
+        .formats
+        .iter()
+        .any(|format| format.trim() == "anthropic.messages")
+    {
+        ProviderRuntimeDriver::AnthropicMessages
+    } else {
+        ProviderRuntimeDriver::OpenAiChat
+    }
+}
+
 fn provider_chat_completion(
     name: &str,
     input: &str,
@@ -46,17 +80,29 @@ fn provider_chat_completion(
         env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
     let route = fs::read_to_string(ctx_root.join("model").join("route")).ok();
     let route = provider_route(&config, provider, model, route.as_deref())?;
-    let key = provider_bearer_token(&config, route.key_slot.as_deref())?
+    let driver = provider_runtime_driver(&config);
+    let credential = provider_credential(&config, route.key_slot.as_deref(), driver)?
         .ok_or_else(|| format!("missing provider credential: {provider}"))?;
-    match call_openai_chat_streaming(&route.transport, model, input, &key, run, stdout) {
-        Ok(()) => Ok(()),
-        Err(error) if error.can_fallback => {
-            let content = call_openai_chat(&route.transport, model, input, &key)?;
+    match driver {
+        ProviderRuntimeDriver::OpenAiChat => {
+            let key = credential.secret();
+            match call_openai_chat_streaming(&route.transport, model, input, key, run, stdout) {
+                Ok(()) => Ok(()),
+                Err(error) if error.can_fallback => {
+                    let content = call_openai_chat(&route.transport, model, input, key)?;
+                    write_model_delta(stdout, run, &content)
+                        .and_then(|()| stdout.flush())
+                        .map_err(|error| format!("cannot write output: {error}"))
+                }
+                Err(error) => Err(error.message),
+            }
+        }
+        ProviderRuntimeDriver::AnthropicMessages => {
+            let content = call_anthropic_messages(&route.transport, model, input, &credential)?;
             write_model_delta(stdout, run, &content)
                 .and_then(|()| stdout.flush())
                 .map_err(|error| format!("cannot write output: {error}"))
         }
-        Err(error) => Err(error.message),
     }
 }
 
@@ -448,10 +494,11 @@ fn is_url(value: &str) -> bool {
     value.starts_with("http://") || value.starts_with("https://")
 }
 
-fn provider_bearer_token(
+fn provider_credential(
     config: &RunnerProviderConfig,
     key_slot: Option<&str>,
-) -> Result<Option<String>, String> {
+    driver: ProviderRuntimeDriver,
+) -> Result<Option<ProviderCredential>, String> {
     let Some(provider) = provider_name_from_base_url(&config.base_url) else {
         return Ok(None);
     };
@@ -462,14 +509,18 @@ fn provider_bearer_token(
         account,
     )
     .map_err(|_error| format!("keychain unavailable: {provider}"))?;
-    if api_key.is_some() {
-        return Ok(api_key);
+    if let Some(api_key) = api_key {
+        return Ok(Some(match driver {
+            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
+            ProviderRuntimeDriver::OpenAiChat => ProviderCredential::Bearer(api_key),
+        }));
     }
     let Some(oauth) = config.oauth.as_ref() else {
         return Ok(None);
     };
     if key_slot.is_none() {
         return cortexfs::resolve_oauth_access_token(&provider, oauth)
+            .map(|token| token.map(ProviderCredential::Bearer))
             .map_err(|_error| format!("oauth credential unavailable: {provider}"));
     }
     Ok(None)
@@ -586,6 +637,24 @@ fn call_openai_chat(
     .to_string();
     let output = run_curl_json(&target, api_key, &body)?;
     parse_openai_chat_content(&output)
+}
+
+fn call_anthropic_messages(
+    transport: &ResolvedTransport,
+    model: &str,
+    input: &str,
+    credential: &ProviderCredential,
+) -> Result<String, String> {
+    let target = anthropic_messages_target(transport);
+    let body = json!({
+        "model": model,
+        "max_tokens": 4096,
+        "messages": [{"role": "user", "content": input}]
+    })
+    .to_string();
+    let headers = anthropic_headers(credential);
+    let output = run_curl_json_with_headers(&target, &headers, &body)?;
+    parse_anthropic_message_content(&output)
 }
 
 struct StreamFailure {
@@ -709,7 +778,16 @@ fn provider_messages_for_agent(
 }
 
 fn run_curl_json(target: &CurlJsonTarget, api_key: &str, body: &str) -> Result<Vec<u8>, String> {
-    let output = start_curl_json(target, api_key, body)?
+    let headers = [format!("Authorization: Bearer {api_key}")];
+    run_curl_json_with_headers(target, &headers, body)
+}
+
+fn run_curl_json_with_headers(
+    target: &CurlJsonTarget,
+    headers: &[String],
+    body: &str,
+) -> Result<Vec<u8>, String> {
+    let output = start_curl_json_with_headers(target, headers, body)?
         .wait_with_output()
         .map_err(|error| format!("cannot run curl: {error}"))?;
     if output.status.success() {
@@ -722,6 +800,15 @@ fn run_curl_json(target: &CurlJsonTarget, api_key: &str, body: &str) -> Result<V
 fn start_curl_json(
     target: &CurlJsonTarget,
     api_key: &str,
+    body: &str,
+) -> Result<std::process::Child, String> {
+    let headers = [format!("Authorization: Bearer {api_key}")];
+    start_curl_json_with_headers(target, &headers, body)
+}
+
+fn start_curl_json_with_headers(
+    target: &CurlJsonTarget,
+    headers: &[String],
     body: &str,
 ) -> Result<std::process::Child, String> {
     let mut child = Command::new("curl")
@@ -743,10 +830,12 @@ fn start_curl_json(
     if let Some(socket_path) = target.unix_socket.as_deref() {
         let _ignored = writeln!(config, "unix-socket = {}", curl_config_quote(socket_path));
     }
+    for header in headers {
+        let _ignored = writeln!(config, "header = {}", curl_config_quote(header));
+    }
     let _ignored = write!(
         config,
-        "header = {}\nheader = {}\ndata = {}\n",
-        curl_config_quote(&format!("Authorization: Bearer {api_key}")),
+        "header = {}\ndata = {}\n",
         curl_config_quote("Content-Type: application/json"),
         curl_config_quote(body),
     );
@@ -772,6 +861,28 @@ fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
         .or_else(|| value.get("output_text").and_then(Value::as_str))
         .map(str::to_owned)
         .ok_or_else(|| "provider response missing content".to_owned())
+}
+
+fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
+    let value = serde_json::from_slice::<Value>(output)
+        .map_err(|error| format!("invalid provider json: {error}"))?;
+    let parts = value
+        .get("content")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "provider response missing content".to_owned())?;
+    let mut output = String::new();
+    for part in parts {
+        if part.get("type").and_then(Value::as_str) == Some("text")
+            && let Some(text) = part.get("text").and_then(Value::as_str)
+        {
+            output.push_str(text);
+        }
+    }
+    if output.is_empty() {
+        Err("provider response missing text content".to_owned())
+    } else {
+        Ok(output)
+    }
 }
 
 enum OpenAiStreamEvent {
@@ -822,6 +933,39 @@ fn chat_completions_target(transport: &ResolvedTransport) -> CurlJsonTarget {
         url: chat_completions_url(base_url),
         unix_socket,
     }
+}
+
+fn anthropic_messages_target(transport: &ResolvedTransport) -> CurlJsonTarget {
+    let (base_url, unix_socket) = match *transport {
+        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
+            (base_url, None)
+        }
+        ResolvedTransport::Unix {
+            ref base_url,
+            ref socket_path,
+        } => (base_url, Some(socket_path.clone())),
+    };
+    CurlJsonTarget {
+        url: anthropic_messages_url(base_url),
+        unix_socket,
+    }
+}
+
+fn anthropic_messages_url(base_url: &str) -> String {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.rsplit('/').next() == Some("v1") {
+        format!("{base}/messages")
+    } else {
+        format!("{base}/v1/messages")
+    }
+}
+
+fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> {
+    let auth = match *credential {
+        ProviderCredential::Bearer(ref token) => format!("Authorization: Bearer {token}"),
+        ProviderCredential::AnthropicApiKey(ref key) => format!("x-api-key: {key}"),
+    };
+    vec![auth, "anthropic-version: 2023-06-01".to_owned()]
 }
 
 fn curl_config_quote(value: &str) -> String {

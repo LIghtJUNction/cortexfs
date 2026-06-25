@@ -147,6 +147,29 @@ state are short-lived local flow state and must not be written into `/ctx/model`
 `ctx provider oauth login PROVIDER` is the host-side helper that performs this
 PKCE login flow and writes tokens to the system keychain.
 
+## Provider Presets
+
+Provider presets are host-side JSON file templates. They install under
+`/etc/cortexfs/providers.d/` and do not create a `/ctx/provider` namespace:
+
+```text
+ctx provider preset list
+ctx provider preset show openai|anthropic|google
+ctx provider preset install openai|anthropic|google
+```
+
+Canonical provider names:
+
+```text
+openai     OpenAI-compatible `/v1/chat/completions`; `codex` is an alias
+anthropic  Claude Messages API
+google     Gemini through Google's OpenAI-compatible endpoint; `gemini` is an alias
+```
+
+The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
+preset uses `anthropic.messages`, so the runner sends `POST /v1/messages` with
+the required Anthropic version header.
+
 ## One-Shot Exec
 
 `/ctx/model/<provider>/<model>` is a read-only executable object. Reading it returns
