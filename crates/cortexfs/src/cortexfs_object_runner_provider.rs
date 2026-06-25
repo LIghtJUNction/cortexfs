@@ -167,31 +167,44 @@ fn call_openai_chat_streaming(
         message,
         can_fallback: true,
     })?;
-    let child_stdout = child.stdout.take().ok_or_else(|| StreamFailure {
-        message: "cannot read provider stream".to_owned(),
-        can_fallback: true,
-    })?;
+    let Some(child_stdout) = child.stdout.take() else {
+        cleanup_curl_child(&mut child);
+        return Err(StreamFailure {
+            message: "cannot read provider stream".to_owned(),
+            can_fallback: true,
+        });
+    };
     let mut emitted = false;
     let mut done = false;
     for line in BufReader::new(child_stdout).lines() {
-        let line = line.map_err(|error| StreamFailure {
-            message: format!("cannot read provider stream: {error}"),
-            can_fallback: !emitted,
-        })?;
+        let line = match line {
+            Ok(line) => line,
+            Err(error) => {
+                cleanup_curl_child(&mut child);
+                return Err(StreamFailure {
+                    message: format!("cannot read provider stream: {error}"),
+                    can_fallback: !emitted,
+                });
+            }
+        };
         match openai_stream_event(&line) {
             Ok(OpenAiStreamEvent::Delta(text)) if !text.is_empty() => {
-                write_model_delta(stdout, run, &text)
+                if let Err(error) = write_model_delta(stdout, run, &text)
                     .and_then(|()| stdout.flush())
-                    .map_err(|error| StreamFailure {
+                {
+                    cleanup_curl_child(&mut child);
+                    return Err(StreamFailure {
                         message: format!("cannot write output: {error}"),
                         can_fallback: false,
-                })?;
+                    });
+                }
                 emitted = true;
             }
             Ok(OpenAiStreamEvent::Delta(_empty)) => {}
             Ok(OpenAiStreamEvent::Done) => done = true,
             Ok(OpenAiStreamEvent::Ignore) => {}
             Err(message) => {
+                cleanup_curl_child(&mut child);
                 return Err(StreamFailure {
                     message,
                     can_fallback: !emitted,
@@ -346,6 +359,7 @@ fn start_curl_json(url: &str, api_key: &str, body: &str) -> Result<std::process:
         .spawn()
         .map_err(|error| format!("cannot start curl: {error}"))?;
     let Some(mut stdin) = child.stdin.take() else {
+        cleanup_curl_child(&mut child);
         return Err("cannot write curl config".to_owned());
     };
     let config = format!(
@@ -355,11 +369,17 @@ fn start_curl_json(url: &str, api_key: &str, body: &str) -> Result<std::process:
         curl_config_quote("Content-Type: application/json"),
         curl_config_quote(body),
     );
-    stdin
-        .write_all(config.as_bytes())
-        .map_err(|error| format!("cannot write curl config: {error}"))?;
+    if let Err(error) = stdin.write_all(config.as_bytes()) {
+        cleanup_curl_child(&mut child);
+        return Err(format!("cannot write curl config: {error}"));
+    }
     drop(stdin);
     Ok(child)
+}
+
+fn cleanup_curl_child(child: &mut std::process::Child) {
+    let _ignored = child.kill();
+    let _ignored = child.wait();
 }
 
 fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
