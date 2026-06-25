@@ -731,6 +731,23 @@ fn interruptible_agent_renderer_returns_on_interrupt_flag() {
 }
 
 #[test]
+fn interruptible_raw_socket_copy_returns_on_interrupt_flag() {
+    let pair = std::os::unix::net::UnixStream::pair();
+    assert!(pair.is_ok());
+    let Ok((reader, _writer)) = pair else {
+        return;
+    };
+    assert!(reader
+        .set_read_timeout(Some(std::time::Duration::from_millis(1)))
+        .is_ok());
+    let interrupted = std::sync::atomic::AtomicBool::new(true);
+
+    let copied = copy_socket_response_interruptible(reader, &interrupted);
+
+    assert!(matches!(copied, Ok(true)));
+}
+
+#[test]
 fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
     assert!(ensure_v1_reference_tree(&root).is_ok());
