@@ -43,37 +43,33 @@ echo "summarize this file" | /ctx/model/main
 供应商密钥不写进 model 文件或 `.d/` 控制目录；provider adapter 会按环境变量、系统
 keychain、未配置的顺序解析。
 
-模型代理不做成 agent。先添加正常 provider，然后在 provider 配置里声明可复用 transport，
-再用 model route 选择 HTTP 或 Unix socket 代理：
+模型代理不做成 agent，也不写进 provider JSON。全局唯一路由表是：
 
-```json
-{
-  "base_url": "https://api.openai.com/v1",
-  "api_key_env": "OPENAI_API_KEY",
-  "transports": {
-    "office-http": {
-      "kind": "http",
-      "url": "http://127.0.0.1:8080/v1"
-    },
-    "local-socket": {
-      "kind": "unix",
-      "path": "/run/user/1000/cortexfs/proxy/openai.sock"
-    }
-  },
-  "route": [
-    {
-      "model": "gpt-4o",
-      "transport": "office-http"
-    },
-    {
-      "model": "embedding-*",
-      "transport": "local-socket"
-    }
-  ]
-}
+```text
+/ctx/model/route
 ```
 
-多个模型需要代理时共享同一个 transport；未命中 route 的模型继续直连 `base_url`。
+这个文件同时决定 transport 和 key slot。多个 provider、多个模型、同一个 provider 的
+多个 key，都通过这一张表分配：
+
+```text
+group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)
+group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock), key(local)
+
+dip(198.51.100.45) -> direct
+# dip(203.0.113.43) -> JP
+domain(bestproxy.com) -> proxy
+pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct
+dip(geoip:private) -> direct
+dip(geoip:cn) -> direct
+domain(geosite:cn) -> direct
+model(embedding-*) -> local-socket
+fallback: proxy
+```
+
+`key(office)` 表示同一个 provider 的另一个凭据槽：先查匹配的环境变量，再查系统
+keychain 的 `service=cortexfs:<provider> account=office`。不写 `key(...)` 就用
+`account=default`。
 
 ## 管理 agent
 

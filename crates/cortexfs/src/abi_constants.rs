@@ -21,6 +21,17 @@ pub const MAX_OBJECT_NAME_LEN: usize = 64;
 /// Required model control files.
 pub const MODEL_CONTROL_FILES: &[&str] =
     &["id", "driver", "cap", "default", "session", "status", "log"];
+pub(crate) const MODEL_ROUTE_FILE: &str = "route";
+pub(crate) const DEFAULT_MODEL_ROUTE: &str = "\
+# Global CortexFS model egress route.
+# Rules are evaluated top to bottom. A group selects both transport and key slot.
+# group(proxy) -> http(http://127.0.0.1:8080/v1), key(default)
+# group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock), key(local)
+# domain(bestproxy.com) -> proxy
+# model(embedding-*) -> local-socket
+# dip(geoip:private) -> direct
+fallback: direct
+";
 
 pub(super) const DEBUG_ECHO_MODEL: &str = "debug/echo";
 pub(super) const DEBUG_ECHO_PROVIDER: &str = "debug";

@@ -74,6 +74,7 @@ fn abi_paths_classify_by_stable_shape() {
         assert_abi_class(&format!("model/{model}"), "ctx.model.exec");
     }
     for (path, expected) in [
+        ("model/route", "ctx.model.route"),
         ("model/debug/echo", "ctx.model.exec"),
         ("model/debug/echo.sock", "ctx.model.socket"),
         ("model/debug/echo.d/id", "ctx.model.control"),
