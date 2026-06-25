@@ -211,18 +211,20 @@ ctx which agent coder
 ctx which tool fs.read
 ```
 
-`ctx tool NAME [ARG...]` is a narrow compatibility entrypoint for CortexFS core
-tool CLIs that are implemented inside the local `ctx` binary, for example:
+`ctx tool NAME [ARG...]` is a narrow compatibility entrypoint for allowlisted
+safe CortexFS core tool CLIs that are implemented inside the local `ctx`
+binary, for example:
 
 ```text
 ctx tool tsh.config
 ctx tool tsh.config '{"max_loaded_tools":32}'
 ```
 
-Before running a core tool CLI, `ctx tool` still resolves `NAME` through
-`CTX_PATH` so the visible ABI object exists. It must refuse ordinary visible
-tools that would otherwise execute directly from `CTX_PATH` and bypass
-CortexFS tool authorization. Non-core tools are run through `tsh`, an agent
+Before running an allowlisted core tool CLI, `ctx tool` still resolves `NAME`
+through `CTX_PATH` so the visible ABI object exists. It must refuse ordinary
+visible tools and authority-bearing core tools such as `fs.write` and
+`shell.exec`; executing those directly from `CTX_PATH` would bypass CortexFS
+tool authorization. Non-allowlisted tools are run through `tsh`, an agent
 runtime, or another authorized execution path.
 
 `ctx cat` reads ABI files. It should not interpret much.

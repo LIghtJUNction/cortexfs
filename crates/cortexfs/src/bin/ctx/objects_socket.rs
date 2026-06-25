@@ -124,6 +124,10 @@ fn run_visible_tool(root: &Path, name: &str, args: &[String]) -> Result<ExitCode
     run_visible_tool_with_writer(root, name, args, &mut io::stdout())
 }
 
+fn is_safe_direct_core_tool_cli(name: &str) -> bool {
+    matches!(name, "tsh.config")
+}
+
 fn run_visible_tool_with_writer(
     root: &Path,
     name: &str,
@@ -137,8 +141,9 @@ fn run_visible_tool_with_writer(
         )));
     };
     let cli_args = args.iter().map(OsString::from).collect::<Vec<_>>();
-    if let Some(code) = run_core_tool_cli_with_root(root, name, &cli_args, writer)
-        .map_err(|error| CliError::unavailable(format!("tool {name} failed: {error}")))?
+    if is_safe_direct_core_tool_cli(name)
+        && let Some(code) = run_core_tool_cli_with_root(root, name, &cli_args, writer)
+            .map_err(|error| CliError::unavailable(format!("tool {name} failed: {error}")))?
     {
         return Ok(code);
     }

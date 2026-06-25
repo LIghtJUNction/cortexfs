@@ -189,7 +189,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "",
             "lookup:",
             "  validates NAME through CTX_PATH",
-            "  runs CortexFS core tool CLIs such as tsh.config",
+            "  runs allowlisted safe CortexFS core CLIs such as tsh.config",
             "  refuses ordinary visible tools that would bypass CortexFS authorization",
             "",
             "examples:",

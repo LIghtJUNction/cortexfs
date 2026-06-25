@@ -206,9 +206,11 @@ tsh fs.read README.md
 tsh bash
 ```
 
-`ctx tool` is only a direct CLI entrypoint for CortexFS core tools such as
-`tsh.config`. Ordinary visible tools still run through `tsh` or an authorized
-agent/runtime path, so `ctx tool` cannot bypass CortexFS tool authorization.
+`ctx tool` is only a direct CLI entrypoint for allowlisted safe CortexFS core
+tools such as `tsh.config`. Ordinary visible tools and authority-bearing core
+tools such as `fs.write` and `shell.exec` still run through `tsh` or an
+authorized agent/runtime path, so `ctx tool` cannot bypass CortexFS tool
+authorization.
 
 ```bash
 ctx tool tsh.config
