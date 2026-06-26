@@ -79,11 +79,11 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
     ));
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/debug/echo"))
+        Ok(PathBuf::from("/ctx/model/openai/gpt-5.5"))
     );
     assert_eq!(
         projection.readlink("model/helper"),
-        Ok(PathBuf::from("/ctx/model/debug/echo"))
+        Ok(PathBuf::from("/ctx/model/openai/codex-auto-review"))
     );
     assert!(projection
         .set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4"))
@@ -103,7 +103,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
     assert!(projection.remove_model_alias("model/main").is_ok());
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/debug/echo"))
+        Ok(PathBuf::from("/ctx/model/openai/gpt-5.5"))
     );
     let debug_node = projection.lookup(&model_node, "debug");
     assert!(matches!(
@@ -346,6 +346,21 @@ fn fuse_v1_projection_projects_configured_provider_models() {
     assert_eq!(
         projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/default"),
         Ok("base_url=https://api.lmm.best:9000/\n".to_owned())
+    );
+    assert_eq!(
+        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/effort"),
+        Ok("auto\n".to_owned())
+    );
+    assert!(matches!(
+        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/fallback"),
+        Ok(ref content) if content.contains("api.lmm.best/gpt-5.5\n")
+    ));
+    assert!(projection
+        .write_control_file("model/api.lmm.best/gpt-5.4-mini.d/effort", "high\n")
+        .is_ok());
+    assert_eq!(
+        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/effort"),
+        Ok("high\n".to_owned())
     );
     let attr = projection.getattr("model/api.lmm.best/gpt-5.4-mini");
     assert!(matches!(attr, Ok(ref attr) if attr.mode() & 0o777 == 0o555));

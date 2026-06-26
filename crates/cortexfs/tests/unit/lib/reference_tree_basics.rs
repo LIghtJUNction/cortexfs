@@ -188,9 +188,19 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "base").is_ok());
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "reviewer").is_ok());
+    assert!(inspect_object_layout(&root, ObjectClass::Agent, "executor").is_ok());
     assert_file_text(&root.join("agent").join("base.d").join("parent"), "\n");
     assert_file_text(&root.join("agent").join("base.d").join("cwd"), "/workspace\n");
     assert_file_text(&root.join("agent").join("coder.d").join("cwd"), "/workspace\n");
+    assert_file_text(&root.join("agent").join("coder.d").join("model"), "main\n");
+    assert_file_text(
+        &root.join("agent").join("reviewer.d").join("model"),
+        "helper\n",
+    );
+    assert_file_text(
+        &root.join("agent").join("executor.d").join("model"),
+        "openai/gpt-5.3-codex-spark\n",
+    );
     assert_file_text(
         &root.join("agent").join("coder.d").join("parent"),
         "agent:base\n",
@@ -199,11 +209,16 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         &root.join("agent").join("reviewer.d").join("parent"),
         "agent:base\n",
     );
+    assert_file_text(
+        &root.join("agent").join("executor.d").join("parent"),
+        "agent:base\n",
+    );
     let base_policy = fs::read_to_string(root.join("agent").join("base.d").join("policy"));
     let base_policy = ok!(base_policy);
     assert!(base_policy.contains("allow base_t tool:tsh execute\n"));
     assert!(base_policy.contains("allow base_t agent:coder create\n"));
     assert!(base_policy.contains("allow base_t agent:reviewer start\n"));
+    assert!(base_policy.contains("allow base_t agent:executor start\n"));
     assert!(inspect_object_layout(&root, ObjectClass::Tool, "tsh").is_ok());
     for tool in ["bash", "tmux", "zellij", "fs.read", "fs.write", "shell.exec"] {
         assert!(!root.join("tool").join(tool).exists());
@@ -227,6 +242,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(private_session_root.join("index").join("by-cwd").is_dir());
     assert!(!private_session_root.join("default").exists());
     assert!(agent_session_root(&root, "base")
+        .join("index")
+        .join("by-cwd")
+        .is_dir());
+    assert!(agent_session_root(&root, "executor")
         .join("index")
         .join("by-cwd")
         .is_dir());

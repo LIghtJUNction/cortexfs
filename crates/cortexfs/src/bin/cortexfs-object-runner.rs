@@ -9,7 +9,8 @@ use cortexfs::{
     DEFAULT_AGENT_PROMPT_TEMPLATE, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
     authorize_tool_execution, collect_agent_rules, collect_skill_metadata, current_time_unix,
     derive_agent_runtime_view, inspect_event_stream_jsonl, is_model_name, is_object_name,
-    run_core_tool, run_core_tool_cli, run_echo_model, skill_metadata_budget_from_env,
+    parse_model_fallback, run_core_tool, run_core_tool_cli, run_echo_model,
+    skill_metadata_budget_from_env,
 };
 use cortexfs_tool_sdk::ToolInvocation;
 use serde_json::Value;
@@ -17,6 +18,7 @@ use serde_json::Value;
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 const DEFAULT_CTX_ROOT: &str = "/ctx";
 const MAX_AGENT_TOOL_ITERATIONS: usize = 8;
+const MAX_MODEL_FALLBACK_CANDIDATES: usize = 16;
 const MAX_TOOL_RESULT_CHARS: usize = 16 * 1024;
 
 include!("../cortexfs_object_runner_provider.rs");
@@ -89,30 +91,114 @@ fn is_model_alias(name: &str) -> bool {
     matches!(name, "main" | "helper")
 }
 
+#[cfg(test)]
 fn resolved_model_path(ctx_root: &Path, model: &str) -> Result<PathBuf, String> {
-    let name = if is_model_name(model) {
+    let name = resolved_model_name(ctx_root, model)?;
+    Ok(ctx_root.join("model").join(name))
+}
+
+fn resolved_model_name(ctx_root: &Path, model: &str) -> Result<String, String> {
+    Ok(if is_model_name(model) {
         model.to_owned()
     } else if is_model_alias(model) {
         resolve_model_alias(ctx_root, model)?
     } else {
         return Err(format!("invalid model reference: {model}"));
-    };
-    Ok(ctx_root.join("model").join(name))
+    })
 }
 
 fn run_provider_model(name: &str, input: &str) -> Result<(), String> {
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    let ctx_root =
+        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let candidates = model_candidates(&ctx_root, name)?;
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
-    write_model_start(&mut stdout, &run, name)
-        .map_err(|error| format!("cannot write output: {error}"))?;
-    if let Err(error) = provider_chat_completion(name, input, &run, &mut stdout) {
-        write_tool_error(&mut stdout, &run, "EIO", &error)
+    let mut last_error = None;
+    for candidate in candidates {
+        write_model_start(&mut stdout, &run, &candidate.name)
             .map_err(|error| format!("cannot write output: {error}"))?;
-        return Err(error);
+        let result = if candidate.name == "debug/echo" {
+            write_model_delta(&mut stdout, &run, input)
+                .map_err(|error| format!("cannot write output: {error}"))
+                .map_err(ProviderCompletionError::no_fallback)
+        } else {
+            provider_chat_completion(&candidate.name, input, &run, &mut stdout)
+        };
+        match result {
+            Ok(()) => {
+                return write_tool_done(&mut stdout, &run, "ok")
+                    .map_err(|error| format!("cannot write output: {error}"));
+            }
+            Err(error) => {
+                let can_fallback = error.can_fallback;
+                last_error = Some(error.message);
+                if !can_fallback {
+                    break;
+                }
+            }
+        }
     }
-    write_tool_done(&mut stdout, &run, "ok")
-        .map_err(|error| format!("cannot write output: {error}"))
+    let error = last_error.unwrap_or_else(|| format!("missing model: {name}"));
+    write_tool_error(&mut stdout, &run, "EIO", &error)
+        .map_err(|error| format!("cannot write output: {error}"))?;
+    Err(error)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ModelCandidate {
+    name: String,
+    path: PathBuf,
+}
+
+fn model_candidates(ctx_root: &Path, model: &str) -> Result<Vec<ModelCandidate>, String> {
+    let primary = resolved_model_name(ctx_root, model)?;
+    let mut names = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    push_model_candidate_name(&primary, &mut names, &mut seen);
+    for fallback in model_fallback_chain(ctx_root, &primary) {
+        push_model_candidate_name(&fallback, &mut names, &mut seen);
+        if names.len() >= MAX_MODEL_FALLBACK_CANDIDATES {
+            break;
+        }
+    }
+    Ok(names
+        .into_iter()
+        .map(|name| ModelCandidate {
+            path: ctx_root.join("model").join(&name),
+            name,
+        })
+        .collect())
+}
+
+fn push_model_candidate_name(
+    name: &str,
+    names: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    if is_model_name(name) && seen.insert(name.to_owned()) {
+        names.push(name.to_owned());
+    }
+}
+
+fn model_fallback_chain(ctx_root: &Path, model: &str) -> Vec<String> {
+    let Some((provider, name)) = model.split_once('/') else {
+        return Vec::new();
+    };
+    let path = ctx_root
+        .join("model")
+        .join(provider)
+        .join(format!("{name}.d"))
+        .join("fallback");
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let (fallback, report) = parse_model_fallback(&content);
+    if report.is_ok() {
+        fallback.models().to_vec()
+    } else {
+        Vec::new()
+    }
 }
 
 fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
@@ -202,7 +288,14 @@ impl AgentModelRunConfig {
         } else {
             model
         };
-        let model_path = resolved_model_path(&ctx_root, &model)?;
+        let candidates = model_candidates(&ctx_root, &model)?;
+        let selected = candidates
+            .iter()
+            .find(|candidate| candidate.path.exists())
+            .or_else(|| candidates.first())
+            .ok_or_else(|| format!("invalid model reference: {model}"))?;
+        let model_path = selected.path.clone();
+        let model = selected.name.clone();
         let system_prompt = fs::read_to_string(
             source
                 .join("agent")
