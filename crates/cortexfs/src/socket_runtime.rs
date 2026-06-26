@@ -175,12 +175,14 @@ fn handle_agent_executable_socket_request_frame_streaming(
     write_socket_runtime_response(stream, &recorder_response)?;
 
     let agent_frames = run_agent_executable_streaming(stream, runtime, id, session, input)?;
-    if scope != SocketSessionScope::Temp
-        && let Some(text) = assistant_text_from_event_frames(&agent_frames)
-    {
+    if scope != SocketSessionScope::Temp {
         let session_dir = runtime.session_root.join(session);
-        record_assistant_response_to_session(&session_dir, id, &text)
+        record_tool_results_from_event_frames(&session_dir, id, &agent_frames)
             .map_err(SocketRuntimeError::Record)?;
+        if let Some(text) = assistant_text_from_event_frames(&agent_frames) {
+            record_assistant_response_to_session(&session_dir, id, &text)
+                .map_err(SocketRuntimeError::Record)?;
+        }
     }
 
     let mut frames = recorder_response.frames().to_vec();
@@ -361,6 +363,79 @@ fn assistant_text_from_event_frames(frames: &[String]) -> Option<String> {
         }
     }
     (!output.is_empty()).then_some(output)
+}
+
+fn record_tool_results_from_event_frames(
+    session_dir: &Path,
+    run_id: &str,
+    frames: &[String],
+) -> Result<(), SocketSessionRecordError> {
+    let mut calls = Vec::new();
+    for frame in frames {
+        let Ok(value) = serde_json::from_str::<Value>(frame) else {
+            continue;
+        };
+        if value.get("type").and_then(Value::as_str) != Some("tool_call") {
+            continue;
+        }
+        let Some(id) = value.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(name) = value.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        calls.push((id.to_owned(), name.to_owned()));
+    }
+
+    for frame in frames {
+        let Ok(value) = serde_json::from_str::<Value>(frame) else {
+            continue;
+        };
+        if value.get("type").and_then(Value::as_str) != Some("message")
+            || value.get("role").and_then(Value::as_str) != Some("tool")
+        {
+            continue;
+        }
+        let event_tool_name = value.get("name").and_then(Value::as_str);
+        let Some(parts) = value.get("content").and_then(Value::as_array) else {
+            continue;
+        };
+        for part in parts {
+            if part.get("type").and_then(Value::as_str) != Some("tool_result") {
+                continue;
+            }
+            let Some(tool_call_id) = part.get("tool_call_id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(tool_name) = event_tool_name
+                .or_else(|| tool_name_for_call(&calls, tool_call_id).map(String::as_str))
+            else {
+                continue;
+            };
+            let content = tool_result_content_text(part.get("content"));
+            record_tool_execution_result_to_session(
+                session_dir,
+                run_id,
+                tool_call_id,
+                tool_name,
+                &content,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn tool_name_for_call<'a>(calls: &'a [(String, String)], tool_call_id: &str) -> Option<&'a String> {
+    calls
+        .iter()
+        .find_map(|call| (call.0 == tool_call_id).then_some(&call.1))
+}
+
+fn tool_result_content_text(content: Option<&Value>) -> String {
+    if let Some(value) = content.and_then(Value::as_str) {
+        return value.to_owned();
+    }
+    content.map_or_else(String::new, Value::to_string)
 }
 
 fn message_event_text(value: &Value) -> Option<String> {

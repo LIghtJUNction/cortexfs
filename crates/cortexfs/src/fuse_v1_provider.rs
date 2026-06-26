@@ -35,7 +35,8 @@ fn debug_model_control_content(model: &str, file: &str) -> Option<String> {
         "id" => Some(format!("{model}\n")),
         "driver" => Some("default=debug\nexec=debug\nagent=debug\n".to_owned()),
         "cap" => Some("chat\nstream\n".to_owned()),
-        "default" | "log" => Some("\n".to_owned()),
+        "effort" => Some("auto\n".to_owned()),
+        "default" | "fallback" | "log" => Some("\n".to_owned()),
         "session" => Some("none\n".to_owned()),
         "status" => Some("idle\n".to_owned()),
         _ => None,
@@ -70,6 +71,11 @@ fn projected_provider_models(
                     base_url: normalize_provider_base_url(&config.base_url),
                     driver: driver.clone(),
                     cap: cap.clone(),
+                    effort: "auto".to_owned(),
+                    fallback: default_provider_model_fallback(
+                        &provider,
+                        config.default_model.as_deref(),
+                    ),
                 });
             }
         }
@@ -310,12 +316,37 @@ fn provider_model_control_content(model: &ProjectedProviderModel, file: &str) ->
         "id" => Some(format!("{}/{}\n", model.provider, model.model)),
         "driver" => Some(model.driver.clone()),
         "cap" => Some(model.cap.clone()),
+        "effort" => Some(format!("{}\n", model.effort)),
+        "fallback" => Some(model.fallback.clone()),
         "default" => Some(format!("base_url={}\n", model.base_url)),
         "session" => Some("none\n".to_owned()),
         "status" => Some("configured\n".to_owned()),
         "log" => Some("\n".to_owned()),
         _ => None,
     }
+}
+
+fn default_provider_model_fallback(provider: &str, default_model: Option<&str>) -> String {
+    let requested = [
+        "gpt-5.5",
+        "codex-auto-review",
+        "gpt-5.3-codex-spark",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+    ];
+    let mut fallback = String::new();
+    for model in requested {
+        if default_model == Some(model) {
+            continue;
+        }
+        if is_object_name(model) {
+            fallback.push_str(provider);
+            fallback.push('/');
+            fallback.push_str(model);
+            fallback.push('\n');
+        }
+    }
+    fallback
 }
 
 fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {

@@ -25,6 +25,8 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
     inspect_object_socket(root, class, name, &control_dir, &mut issues);
     inspect_model_capability_control(class, name, &control_dir, &mut issues);
     inspect_model_driver_control(class, name, &control_dir, &mut issues);
+    inspect_model_effort_control(class, name, &control_dir, &mut issues);
+    inspect_model_fallback_control(class, name, &control_dir, &mut issues);
     inspect_tool_schema_control(class, name, &control_dir, &mut issues);
     inspect_agent_control_files(class, name, &control_dir, &mut issues);
     ObjectLayoutReport::new(issues)
@@ -145,6 +147,55 @@ fn model_driver_route_error_value(error: &ModelDriverRouteError) -> String {
         ModelDriverRouteError::InvalidDriverName { line, ref value } => {
             format!("line {line} invalid driver {value}")
         }
+    }
+}
+
+fn inspect_model_effort_control(
+    class: ObjectClass,
+    name: &str,
+    control_dir: &Path,
+    issues: &mut Vec<ObjectLayoutIssue>,
+) {
+    if class != ObjectClass::Model {
+        return;
+    }
+
+    let Ok(content) = fs::read_to_string(control_dir.join("effort")) else {
+        return;
+    };
+    if ModelEffort::parse(&content).is_none() {
+        issues.push(ObjectLayoutIssue::InvalidControlValue {
+            path: format!("model/{name}.d/effort"),
+            value: content.trim().to_owned(),
+        });
+    }
+}
+
+fn inspect_model_fallback_control(
+    class: ObjectClass,
+    name: &str,
+    control_dir: &Path,
+    issues: &mut Vec<ObjectLayoutIssue>,
+) {
+    if class != ObjectClass::Model {
+        return;
+    }
+
+    let Ok(content) = fs::read_to_string(control_dir.join("fallback")) else {
+        return;
+    };
+    for issue in parse_model_fallback(&content).1.issues() {
+        issues.push(ObjectLayoutIssue::InvalidControlValue {
+            path: format!("model/{name}.d/fallback"),
+            value: model_fallback_issue_value(issue).to_owned(),
+        });
+    }
+}
+
+fn model_fallback_issue_value(issue: &ModelFallbackIssue) -> &str {
+    match issue {
+        &ModelFallbackIssue::InvalidLine { ref value, .. }
+        | &ModelFallbackIssue::DuplicateModel { ref value, .. } => value.as_str(),
     }
 }
 

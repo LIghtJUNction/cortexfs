@@ -417,6 +417,7 @@ fn agent_repl(
     raw: bool,
 ) -> Result<ExitCode, CliError> {
     let session = agent_session_name(root, name, session)?;
+    let mut debug = AgentDebugState::default();
     if io::stdin().is_terminal() {
         print_agent_repl_banner(root, name, &session)?;
     }
@@ -447,7 +448,7 @@ fn agent_repl(
             if matches!(line.as_str(), "/exit" | "/quit") {
                 return Ok(ExitCode::SUCCESS);
             }
-            if let Some(code) = agent_repl_command(root, name, &session, &line, raw)? {
+            if let Some(code) = agent_repl_command(root, name, &session, &line, raw, &mut debug)? {
                 if code != ExitCode::SUCCESS {
                     return Ok(code);
                 }
@@ -455,6 +456,9 @@ fn agent_repl(
             }
             if !raw {
                 print_terminal_text("\n")?;
+            }
+            if debug.enabled {
+                debug.report_tools(root, name)?;
             }
             let run_id = request_id()?;
             let interrupt = AgentInterruptGuard::new()?;
@@ -482,7 +486,10 @@ fn agent_repl(
         if matches!(line, "/exit" | "/quit") {
             break;
         }
-        if agent_repl_command(root, name, &session, line, raw)?.is_none() {
+        if agent_repl_command(root, name, &session, line, raw, &mut debug)?.is_none() {
+            if debug.enabled {
+                debug.report_tools(root, name)?;
+            }
             let _code = agent_send(root, name, Some(&session), line, raw)?;
         }
     }
@@ -510,7 +517,7 @@ fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(),
             styled(
                 color,
                 ANSI_DIM,
-                "/resume /history /output /pack /tools /children /cancel /status /exit"
+                "/resume /history /output /pack /tools /children /cancel /debug /status /exit"
             )
         ),
     ];
@@ -610,6 +617,7 @@ fn agent_repl_command(
     session: &str,
     line: &str,
     raw: bool,
+    debug: &mut AgentDebugState,
 ) -> Result<Option<ExitCode>, CliError> {
     let code = match line {
         "/resume" => agent_resume(root, name, Some(session), raw)?,
@@ -634,6 +642,16 @@ fn agent_repl_command(
             ExitCode::SUCCESS
         }
         "/cancel" => agent_cancel(root, name, Some(session), None, raw)?,
+        "/debug" => {
+            debug.enabled = !debug.enabled;
+            write_error(if debug.enabled {
+                "debug on"
+            } else {
+                "debug off"
+            })
+            .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+            ExitCode::SUCCESS
+        }
         "/status" => {
             agent_status(root, name)?;
             ExitCode::SUCCESS
@@ -646,6 +664,45 @@ fn agent_repl_command(
         _ => return Ok(None),
     };
     Ok(Some(code))
+}
+
+#[derive(Default)]
+struct AgentDebugState {
+    enabled: bool,
+    previous_tools: Option<Vec<String>>,
+}
+
+impl AgentDebugState {
+    fn report_tools(&mut self, root: &Path, name: &str) -> Result<(), CliError> {
+        let tools = agent_visible_tool_names(root, name)?;
+        let line = format_debug_tool_line(self.previous_tools.as_deref(), &tools);
+        self.previous_tools = Some(tools);
+        write_error(&line)
+            .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
+    }
+}
+
+fn format_debug_tool_line(previous: Option<&[String]>, current: &[String]) -> String {
+    let current_text = current.join(" ");
+    let Some(previous) = previous else {
+        return format!("[debug tools] = {current_text}");
+    };
+    let added = current
+        .iter()
+        .filter(|tool| !previous.contains(tool))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let removed = previous
+        .iter()
+        .filter(|tool| !current.contains(tool))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if added.is_empty() && removed.is_empty() {
+        return format!("[debug tools] = {current_text}");
+    }
+    format!("[debug tools] +{added} -{removed} = {current_text}")
 }
 
 fn agent_status(root: &Path, name: &str) -> Result<(), CliError> {
@@ -716,6 +773,27 @@ fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), 
 }
 
 fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
+    for entry in agent_visible_tool_entries(root, name)? {
+        print_line(&format!("{}\t{}\t{}", entry.name, entry.path.display(), entry.status))?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AgentVisibleTool {
+    name: String,
+    path: PathBuf,
+    status: String,
+}
+
+fn agent_visible_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
+    Ok(agent_visible_tool_entries(root, name)?
+        .into_iter()
+        .map(|entry| entry.name)
+        .collect())
+}
+
+fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibleTool>, CliError> {
     require_cli_name("agent name", name)?;
     let mut paths = Vec::new();
     paths.extend(ctx_tool_path(root)?.dirs().iter().map(PathBuf::from));
@@ -725,6 +803,7 @@ fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
     }
     paths.sort();
     paths.dedup();
+    let mut tools = Vec::new();
     for path in paths {
         if !path.is_dir() {
             continue;
@@ -736,10 +815,20 @@ fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
             }
             let status = read_optional_trimmed(&tool_path.with_file_name(format!("{tool}.d")).join("status"))?
                 .unwrap_or_else(|| "unknown".to_owned());
-            print_line(&format!("{tool}\t{}\t{status}", tool_path.display()))?;
+            tools.push(AgentVisibleTool {
+                name: tool,
+                path: tool_path,
+                status,
+            });
         }
     }
-    Ok(())
+    tools.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    tools.dedup_by(|left, right| left.name == right.name && left.path == right.path);
+    Ok(tools)
 }
 
 fn is_control_or_socket_name(name: &str) -> bool {

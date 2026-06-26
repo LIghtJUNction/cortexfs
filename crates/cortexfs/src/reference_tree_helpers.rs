@@ -2,7 +2,7 @@ const REFERENCE_HOME_UID: u32 = 1000;
 const REFERENCE_HOME_GID: u32 = 1000;
 
 fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
-    for agent in ["base", "coder", "reviewer"] {
+    for agent in ["base", "coder", "reviewer", "executor"] {
         ensure_reference_home_agent(root, agent)?;
     }
     create_reference_dir(&root.join("home").join("1000").join("tool"))?;

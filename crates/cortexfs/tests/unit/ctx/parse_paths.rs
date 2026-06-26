@@ -1013,6 +1013,41 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
 }
 
 #[test]
+fn buffered_agent_renderer_reports_token_delta_and_total() {
+    let input = concat!(
+        "{\"type\":\"usage\",\"input_tokens\":10,\"output_tokens\":2}\n",
+        "{\"type\":\"usage\",\"input_tokens\":4,\"output_tokens\":3}\n",
+    );
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(
+        rendered,
+        Ok(ref rendered)
+            if rendered.diagnostics
+                == vec![
+                    "[tokens] input +10/10 output +2/2".to_owned(),
+                    "[tokens] input +4/14 output +3/5".to_owned(),
+                ]
+    ));
+}
+
+#[test]
+fn debug_tool_line_reports_current_names_and_changes() {
+    assert_eq!(
+        format_debug_tool_line(None, &["fs.read".to_owned(), "tsh".to_owned()]),
+        "[debug tools] = fs.read tsh"
+    );
+    assert_eq!(
+        format_debug_tool_line(
+            Some(&["fs.read".to_owned(), "tsh".to_owned()]),
+            &["fs.read".to_owned(), "fs.write".to_owned()]
+        ),
+        "[debug tools] +fs.write -tsh = fs.read fs.write"
+    );
+}
+
+#[test]
 fn buffered_agent_renderer_rejects_too_much_output() {
     let input = format!(
         "{{\"type\":\"delta\",\"text\":\"{}\"}}\n",

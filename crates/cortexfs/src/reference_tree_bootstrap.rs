@@ -10,6 +10,7 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
     ensure_reference_agent(root, "base", None)?;
     ensure_reference_agent(root, "coder", Some("agent:base"))?;
     ensure_reference_agent(root, "reviewer", Some("agent:base"))?;
+    ensure_reference_agent(root, "executor", Some("agent:base"))?;
     remove_deprecated_reference_placeholder_tools(root)?;
     ensure_reference_global_tools(root)?;
     ensure_reference_docs(root)?;
@@ -100,7 +101,7 @@ fn ensure_reference_agent(
         ("env", "CTX_ROOT=/ctx\n".to_owned()),
         ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
-        ("model", format!("{DEFAULT_MODEL_ALIAS}\n")),
+        ("model", format!("{}\n", reference_agent_model(name))),
         ("system.md", reference_agent_system_prompt(name)),
         (
             "prompt.template.md",
@@ -124,12 +125,13 @@ fn ensure_reference_agent(
 }
 
 fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
+    let model = reference_agent_model(name);
     let mut policy = format!(
-        "allow {policy_subject} model:{DEFAULT_MODEL_ALIAS} use\n\
+        "allow {policy_subject} model:{model} use\n\
          allow {policy_subject} tool:tsh execute\n"
     );
     if name == "base" {
-        for child in ["coder", "reviewer"] {
+        for child in ["coder", "reviewer", "executor"] {
             let _ignored = std::fmt::Write::write_fmt(
                 &mut policy,
                 format_args!(
@@ -142,6 +144,14 @@ fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
         }
     }
     policy
+}
+
+fn reference_agent_model(name: &str) -> &'static str {
+    match name {
+        "reviewer" => HELPER_MODEL_ALIAS,
+        "executor" => "openai/gpt-5.3-codex-spark",
+        _ => DEFAULT_MODEL_ALIAS,
+    }
 }
 
 fn reference_agent_system_prompt(name: &str) -> String {
@@ -291,7 +301,7 @@ const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   "additionalProperties": true
 }"#,
         cap: "tsh",
-        policy: "allow base_t tool:tsh execute\nallow coder_t tool:tsh execute\nallow reviewer_t tool:tsh execute",
+        policy: "allow base_t tool:tsh execute\nallow coder_t tool:tsh execute\nallow reviewer_t tool:tsh execute\nallow executor_t tool:tsh execute",
     },
     ReferenceToolSpec {
         name: "tsh.config",
@@ -305,7 +315,7 @@ const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
   "additionalProperties": true
 }"#,
         cap: "tsh.config",
-        policy: "allow base_t tool:tsh.config execute\nallow coder_t tool:tsh.config execute\nallow reviewer_t tool:tsh.config execute",
+        policy: "allow base_t tool:tsh.config execute\nallow coder_t tool:tsh.config execute\nallow reviewer_t tool:tsh.config execute\nallow executor_t tool:tsh.config execute",
     },
 ];
 
