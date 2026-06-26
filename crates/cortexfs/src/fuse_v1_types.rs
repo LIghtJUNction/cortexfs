@@ -104,6 +104,8 @@ struct ProjectedProviderModel {
     base_url: String,
     driver: String,
     cap: String,
+    effort: String,
+    fallback: String,
 }
 
 impl FuseV1Attr {

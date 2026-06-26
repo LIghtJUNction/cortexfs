@@ -39,7 +39,8 @@ pub(super) const DEBUG_ECHO_PROVIDER: &str = "debug";
 pub(super) const DEBUG_ECHO_NAME: &str = "echo";
 pub(crate) const DEFAULT_MODEL_ALIAS: &str = "main";
 pub(crate) const HELPER_MODEL_ALIAS: &str = "helper";
-pub(super) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/debug/echo";
+pub(super) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.5";
+pub(super) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto-review";
 pub(super) const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
 pub(super) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";
 

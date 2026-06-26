@@ -4,7 +4,7 @@ use super::{
     format_event_stream_issues, format_message_stream_issues, format_model_capability_issues,
     format_model_driver_route_error, format_object_layout_issues, format_session_control_issues,
     format_session_index_issues, format_session_layout_issues, format_shared_queue_layout_issues,
-    format_tool_schema_issues, json_string, list_names, newline_terminated, parse_command,
+    format_tool_schema_issues, format_debug_tool_line, json_string, list_names, newline_terminated, parse_command,
     absolute_existing_path, agent_bwrap_args, agent_new_request_json, agent_repl_model_summary,
     agent_repl_prompt, agent_repl_editor_config, current_session_name, run,
     agent_repl_should_exit_on_readline_error,

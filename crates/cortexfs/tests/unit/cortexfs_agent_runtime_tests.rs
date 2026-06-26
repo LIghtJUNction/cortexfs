@@ -29,3 +29,15 @@ fn runtime_config_accepts_positional_agent() {
         })
     );
 }
+
+#[test]
+fn runtime_credential_name_rejects_path_separators() {
+    assert_eq!(
+        super::safe_runtime_credential_name("../agent", "default"),
+        Err("runtime credential path components must not contain '/'".to_owned())
+    );
+    assert_eq!(
+        super::safe_runtime_credential_name("agent", "../default"),
+        Err("runtime credential path components must not contain '/'".to_owned())
+    );
+}
