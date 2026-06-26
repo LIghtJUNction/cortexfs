@@ -2,12 +2,20 @@
 
 ![CortexFS turns AI runtimes into Unix-shaped files](docs/assets/cortexfs-hero.svg)
 
-CortexFS is a Linux FUSE ABI for AI agents. It exposes models, agents, tools,
-sessions, policies, and runtime state as a small Unix-shaped filesystem under
-`/ctx`.
+CortexFS makes AI runtimes feel like Unix.
 
-The project goal is not to mirror an AI platform database into directories. The
-v1 ABI stays deliberately small:
+It mounts a small, scriptable FUSE filesystem at `/ctx`. Models are files you
+can talk to. Agents are files you can inspect, resume, and attach to. Tools are
+files that an agent can load into context, keep resident in memory, or call like
+CLI commands.
+
+CortexFS is built for the moment when you want to look inside an agent runtime
+while it is running: which model it is using, which files it can see, which tools
+are loaded, what its terminal is doing, and what state will survive the session.
+Agents wake through systemd socket activation, so idle agents do not need a
+polling loop just to be reachable.
+
+The v1 shape is intentionally small:
 
 ```text
 /ctx/status
@@ -19,36 +27,45 @@ v1 ABI stays deliberately small:
 /ctx/shared
 ```
 
-The detailed specification lives in [docs/DESIGN.md](docs/DESIGN.md).
+For the normative ABI, start with [docs/DESIGN.md](docs/DESIGN.md).
 
-## Quick Start
+## What It Feels Like
 
-Install the AUR package and start the system mount:
+Start an agent, open its chat REPL, and ask it to review a file in the mounted
+workspace:
 
-```bash
-paru -S cortexfs-git
-sudo systemctl enable --now cortexfs.service
-ctx doctor
+```text
+ctx
+/ctx/agent/coder
+live repl
+
+$ ctx agent repl coder
+coder/default ❯ review /workspace/docs/DESIGN.md
+
+tool
+tsh -> fs.read {"path":"/workspace/docs/DESIGN.md"}
+
+usage
+input 912 / output 184
 ```
 
-Useful first checks:
+That is the intended surface: direct conversation with an agent file, direct
+model calls behind it, and tools that can be discovered, loaded, pinned, and
+invoked through the same filesystem view.
+
+<video src="docs/assets/cortexfs-demo.webm" poster="docs/assets/cortexfs-demo-poster.jpg" controls muted loop playsinline></video>
+
+[Open the demo video](docs/assets/cortexfs-demo.webm).
+
+At any time, attach to the agent terminal:
 
 ```bash
-ctx status
-ctx ls
-ctx ls model
-ctx ls agent
-ctx ls tool
-ctx file type tool/fs.read
-ctx which tool tsh
+ctx agent watch coder
+ctx agent attach coder
 ```
 
-For a local development tree without installing:
-
-```bash
-cargo run -p cortexfs --bin ctx -- bootstrap
-cargo run -p cortexfs --bin ctx -- doctor
-```
+`watch` is read-only. `attach` joins the persistent `ctxterm -> tsh` terminal and
+lets you see the tool shell exactly as the agent sees it.
 
 ## Mental Model
 
@@ -60,31 +77,44 @@ agent  policy-bound orchestrator process
 tool   executable capability endpoint
 ```
 
-Each object follows the same shape:
-
-```text
-name        exec or metadata endpoint
-name.sock   stateful JSONL stream endpoint, only when supported
-name.d/     small control files
-```
-
-Examples:
-
-```text
-/ctx/model/openai/gpt-4o
-/ctx/model/openai/gpt-4o.d/driver
-/ctx/agent/coder
-/ctx/agent/coder.sock
-/ctx/agent/coder.d/policy
-/ctx/tool/tsh
-/ctx/tool/tsh.d/schema
-```
+The root stays small, the model tree stays provider-neutral, and agent context is
+ordinary visible state instead of hidden SDK state. CortexFS is a way to peer
+through the filesystem boundary and see what is happening inside agent software.
 
 ![CortexFS v1 ABI map](docs/assets/cortexfs-abi-map.svg)
 
-## Root Layout
+## Quick Start
 
-The root ABI is intentionally boring:
+Install the AUR package and start the system mount:
+
+```bash
+paru -S cortexfs-git
+sudo systemctl enable --now cortexfs.service
+ctx doctor
+```
+
+Then take a quick look around:
+
+```bash
+ctx status
+ctx ls
+ctx ls model
+ctx ls agent
+ctx ls tool
+ctx file type tool/fs.read
+ctx which tool tsh
+```
+
+For a local checkout without installing the package:
+
+```bash
+cargo run -p cortexfs --bin ctx -- bootstrap
+cargo run -p cortexfs --bin ctx -- doctor
+```
+
+## A First Walk Through `/ctx`
+
+The root ABI is deliberately short:
 
 ```text
 /ctx/
@@ -97,37 +127,66 @@ The root ABI is intentionally boring:
   shared/
 ```
 
-CortexFS does not add root namespaces for provider, format, MCP, skill, memory,
-vector, workflow, job, hook, or audit internals. Those may exist as ordinary
-files visible to an agent, or as implementation details behind tools, but they
-are not stable root ABI.
+Those top-level names are the contract. CortexFS does not add stable root
+namespaces for provider, format, MCP, skill, memory, vector, workflow, job, hook,
+or audit internals. Those concepts may exist as visible ordinary files, or as
+implementation details behind tools, but they are not part of the root ABI.
+
+Every executable object follows the same basic shape:
+
+```text
+name        exec or metadata endpoint
+name.sock   stateful JSONL stream endpoint, only when supported
+name.d/     small control files
+```
+
+Examples:
+
+```text
+/ctx/model/openai/gpt-5.4-mini
+/ctx/model/openai/gpt-5.4-mini.d/driver
+/ctx/agent/coder
+/ctx/agent/coder.sock
+/ctx/agent/coder.d/policy
+/ctx/tool/tsh
+/ctx/tool/tsh.d/schema
+```
 
 ## Models
 
-Models live under `/ctx/model/<provider>/<model>`.
+Models live under `/ctx/model/<provider>/<model>`:
 
 ```text
 /ctx/model/debug/echo
-/ctx/model/openai/gpt-4o
+/ctx/model/openai/gpt-5.4-mini
 /ctx/model/anthropic/claude-sonnet-4
 /ctx/model/google/gemini-2.5-pro
 ```
 
-`/ctx/model/main` is the conventional default model alias. It is just a symlink,
-not a special registry entry. Change the symlink to change the default model.
+They are executable files. You can call a model path directly for one-shot
+inference:
 
 ```bash
-ln -sfn /ctx/model/openai/gpt-4o /ctx/home/$(id -u)/model/main
+/ctx/model/openai/gpt-5.4-mini "explain this error"
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.4-mini
+ctx exec model/openai/gpt-5.4-mini "summarize README.md"
 ```
 
-Provider API differences are handled by Rig. CortexFS keeps the filesystem ABI
-above provider and API-format details. API keys are never stored in model files
-or process environments. Long-lived provider API keys live in the root-owned
-CortexFS system secret store.
+`/ctx/model/main` is the conventional default model alias. It is only a symlink,
+not a privileged registry entry. Change the symlink to change the default model:
+
+```bash
+ln -sfn /ctx/model/openai/gpt-5.4-mini /ctx/home/$(id -u)/model/main
+```
+
+Provider API differences are handled below the filesystem ABI. CortexFS keeps
+the visible model tree provider-neutral and API-format-neutral. API keys are not
+stored in model files or process environments; long-lived provider keys belong in
+the root-owned CortexFS system secret store.
 
 ## Agents
 
-Agents live under `/ctx/agent`.
+Agents live under `/ctx/agent`:
 
 ```text
 /ctx/agent/coder
@@ -148,27 +207,60 @@ Agents live under `/ctx/agent`.
   prompt.template.md
 ```
 
-Start and attach to an agent terminal:
+`/ctx/agent/coder.sock` is the chat/session wakeup point. The packaged systemd
+unit `cortexfs-agent@.socket` listens on the runtime socket and projects it back
+into the CortexFS tree. A client connection can wake the agent runtime on
+demand, instead of keeping every agent hot in the background.
+
+Start an agent and open the chat REPL:
 
 ```bash
 ctx agent start coder --session default
-ctx agent attach coder
+ctx agent repl coder
 ```
 
-Session commands default to the latest/current session when `--session` is
+Agents are executable files too. Use the REPL for live conversation, or call an
+agent path directly for a one-shot task:
+
+```bash
+/ctx/agent/coder "review /workspace/docs/DESIGN.md"
+echo '{"task":"fix tests"}' | /ctx/agent/coder
+ctx exec agent/coder "summarize the latest failure"
+```
+
+Use `ctx agent watch coder` to observe the persistent terminal, or
+`ctx agent attach coder` when you explicitly want to join it and write to stdin.
+
+`ctx agent start` launches the agent inside a lightweight sandbox. The default
+path is:
+
+```text
+ctx agent start
+  -> bwrap sandbox
+  -> ctxterm
+  -> tsh
+```
+
+`ctxterm` is the agent terminal emulator. It owns the PTY, keeps the terminal
+observable, and exposes `watch` and `attach`. `tsh` is the agent-facing tool
+shell that discovers tools, loads tool context, and invokes allowed
+capabilities.
+
+Session commands default to the latest or current session when `--session` is
 omitted:
 
 ```bash
 ctx send coder "summarize the current failure"
 ctx history coder
 ctx resume coder
+ctx agent repl coder
 ctx agent history coder
 ctx agent output coder
 ctx agent resume coder
 ctx agent pack coder
 ```
 
-Agent runtime visibility is derived from control files plus Linux permissions:
+An agent's runtime view is derived from control files plus Linux permissions:
 
 ```text
 agent.d/root
@@ -182,13 +274,12 @@ mode bits
 ```
 
 CLI `--mount` arguments are validated, but runtime execution uses the derived
-agent view. That keeps terminal startup from bypassing the policy and mount
-files that define the agent.
+agent view. Terminal startup cannot bypass the policy and mount files that
+define the agent.
 
-## Tools And tsh
+## Tools And `tsh`
 
-Tools live under `/ctx/tool` and are found through `CTX_PATH`, not through shell
-`PATH`.
+Tools live under `/ctx/tool` and are found through `CTX_PATH`, not shell `PATH`:
 
 ```sh
 export CTX_ROOT=/ctx
@@ -197,8 +288,16 @@ export CTX_PATH="$CTX_ROOT/tool:$CTX_HOME/tool"
 export PATH="$CTX_ROOT/bin:$PATH"
 ```
 
-`tsh` is the tool shell. It is the default native tool exposed to agents. Agents
-can use `tsh` to discover, load, pin, and run other tools according to policy.
+`tsh` is the tool shell and the default native tool exposed to agents. Agents use
+it to discover, load, pin, and run tools according to policy. A tool can be:
+
+```text
+discovered under /ctx/tool
+loaded into the agent's current tool context
+pinned so it stays available
+invoked from tsh
+called directly as a CLI-style CortexFS tool when policy allows it
+```
 
 Human usage:
 
@@ -209,15 +308,21 @@ tsh help fs.read
 tsh load fs.read
 ```
 
+Direct CLI-style usage:
+
+```bash
+/ctx/tool/fs.read '{"path":"README.md"}'
+echo '{"path":"README.md"}' | /ctx/tool/fs.read
+```
+
 Standalone `tsh` can inspect visible tools and metadata. Tool execution runs
-inside an agent terminal so CortexFS can apply the agent's policy, mounts, uid,
-gid, and `CTX_PATH` together.
+inside an agent terminal so CortexFS can apply policy, mounts, uid, gid, and
+`CTX_PATH` together.
 
 `ctx tool` is only a direct CLI entrypoint for allowlisted safe CortexFS core
-tools such as `tsh.config`. Ordinary visible tools and authority-bearing core
-tools such as `fs.write` and `shell.exec` still run through `tsh` or an
-authorized agent/runtime path, so `ctx tool` cannot bypass CortexFS tool
-authorization.
+tools such as `tsh.config`. Ordinary visible tools, plus authority-bearing core
+tools such as `fs.write` and `shell.exec`, still run through `tsh` or an
+authorized agent/runtime path.
 
 ```bash
 ctx tool tsh.config
@@ -234,13 +339,19 @@ tsh> pin bash
 tsh> loads
 ```
 
+Native dynamic tool artifacts are loaded on demand. The SDK keeps resident
+dynamic tools under a W-TinyLFU cache, so hot tools can stay in memory while cold
+unpinned tools are admitted or evicted by use. `tsh.config` controls the visible
+tool context size with `max_loaded_tools`; pinned tools are protected from
+automatic context eviction.
+
 Tool metadata printed to a terminal is escaped so untrusted descriptions and
 schemas cannot inject terminal control sequences.
 
 ## Files, Metadata, And xattrs
 
-`ctx file` describes CortexFS file types and ABI metadata. It is not a replacement
-for `cat`.
+`ctx file` describes CortexFS file types and ABI metadata. It is not a
+replacement for `cat`.
 
 ```bash
 ctx file type tool/fs.read
@@ -307,7 +418,7 @@ Policy v0 is a minimal allowlist:
 ```text
 allow coder_t tool:tsh execute
 allow coder_t tool:fs.read execute
-allow coder_t model:openai/gpt-4o use
+allow coder_t model:openai/gpt-5.4-mini use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
 ```
@@ -315,7 +426,7 @@ allow coder_t shared:project-a write
 There is no explicit deny, glob, priority, inheritance, variable expansion, or
 path matching. Default is deny.
 
-The security stack is intentionally layered:
+The security stack is layered:
 
 ```text
 Linux uid/gid/groups
@@ -345,6 +456,8 @@ ctx file type tool/fs.read
 ctx file check agent/coder.d/policy
 ctx agent ps
 ctx agent start coder
+ctx agent repl coder
+ctx agent watch coder
 ctx agent attach coder
 ctx agent history coder
 ctx agent output coder
