@@ -287,6 +287,60 @@ fn stream_agent_socket_request(
     render_agent_events(stream)
 }
 
+fn stream_agent_socket_request_streaming_interruptible(
+    socket: &Path,
+    request: &str,
+    raw: bool,
+    interrupt: Option<(&AgentInterruptGuard, &str, &str)>,
+) -> Result<ExitCode, CliError> {
+    if raw {
+        if let Some((guard, cancel_request, run_id)) = interrupt {
+            let interrupted =
+                stream_socket_request_interruptible(socket, request, guard.interrupted_flag())?;
+            if interrupted {
+                write_terminal_error(&format!(
+                    "ctx: interrupt requested; cancelling run {run_id}"
+                ))?;
+                return stream_socket_request(socket, cancel_request);
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        return stream_socket_request(socket, request);
+    }
+    if request.len() > MAX_SOCKET_FRAME_BYTES {
+        return Err(CliError::usage(format!(
+            "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
+        )));
+    }
+
+    let mut stream = UnixStream::connect(socket).map_err(|error| {
+        CliError::unavailable(format!("cannot connect {}: {error}", socket.display()))
+    })?;
+    stream
+        .write_all(request.as_bytes())
+        .and_then(|()| stream.shutdown(Shutdown::Write))
+        .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
+
+    let Some((guard, cancel_request, run_id)) = interrupt else {
+        return render_agent_events(stream);
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot configure interruptible socket: {error}"))
+        })?;
+    let rendered = render_agent_events_interruptible(stream, guard.interrupted_flag())?;
+    if rendered.interrupted {
+        write_terminal_error(&format!("ctx: interrupt requested; cancelling run {run_id}"))?;
+        let cancel_code = stream_agent_socket_request(socket, cancel_request, false)?;
+        if cancel_code != ExitCode::SUCCESS {
+            return Ok(cancel_code);
+        }
+    }
+    Ok(ExitCode::from(rendered.exit_code))
+}
+
+#[cfg(test)]
 fn stream_agent_socket_request_buffered_interruptible(
     socket: &Path,
     request: &str,
@@ -341,16 +395,61 @@ fn stream_agent_socket_request_buffered_interruptible(
     render_agent_events_buffered(stream)
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct AgentEventRender {
+    exit_code: u8,
+    interrupted: bool,
+}
+
 fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
     let reader = io::BufReader::new(stream);
+    Ok(ExitCode::from(render_agent_event_lines(reader, None)?.exit_code))
+}
+
+fn render_agent_events_interruptible(
+    stream: UnixStream,
+    interrupt: &AtomicBool,
+) -> Result<AgentEventRender, CliError> {
+    let reader = io::BufReader::new(stream);
+    render_agent_event_lines(reader, Some(interrupt))
+}
+
+fn render_agent_event_lines(
+    mut reader: impl BufRead,
+    interrupt: Option<&AtomicBool>,
+) -> Result<AgentEventRender, CliError> {
     let mut saw_delta = false;
     let mut exit = ExitCode::SUCCESS;
-    for line in reader.lines() {
-        let line = line.map_err(|error| {
-            CliError::unavailable(format!("cannot read socket response: {error}"))
-        })?;
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-            print_line(&line)?;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => break,
+            Ok(_bytes) => {}
+            Err(error)
+                if interrupt.is_some()
+                    && matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) =>
+            {
+                if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
+                    return Ok(AgentEventRender {
+                        exit_code: exit_code_u8(exit),
+                        interrupted: true,
+                    });
+                }
+                continue;
+            }
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot read socket response: {error}"
+                )));
+            }
+        }
+        let line = line.trim_end_matches(['\r', '\n']);
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            print_line(line)?;
             continue;
         };
         match value.get("type").and_then(serde_json::Value::as_str) {
@@ -392,9 +491,17 @@ fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
             _ => {}
         }
     }
-    Ok(exit)
+    Ok(AgentEventRender {
+        exit_code: exit_code_u8(exit),
+        interrupted: false,
+    })
 }
 
+fn exit_code_u8(code: ExitCode) -> u8 {
+    u8::from(code != ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
 fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError> {
     let reader = io::BufReader::new(stream);
     let rendered = collect_agent_events_buffered(reader)?;
@@ -407,6 +514,7 @@ fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError
     Ok(ExitCode::from(rendered.exit_code))
 }
 
+#[cfg(test)]
 fn render_agent_events_buffered_interruptible(
     stream: UnixStream,
     interrupt: &AtomicBool,
@@ -422,11 +530,16 @@ fn render_agent_events_buffered_interruptible(
     Ok(rendered.interrupted)
 }
 
+#[cfg(test)]
 const MAX_BUFFERED_AGENT_RESPONSE_BYTES: usize = MAX_SOCKET_FRAME_BYTES * 4;
+#[cfg(test)]
 const MAX_BUFFERED_AGENT_RENDERED_BYTES: usize = MAX_SOCKET_FRAME_BYTES;
+#[cfg(test)]
 const MAX_BUFFERED_AGENT_EVENTS: usize = 8192;
+#[cfg(test)]
 const MAX_BUFFERED_AGENT_DIAGNOSTICS: usize = 1024;
 
+#[cfg(test)]
 #[derive(Debug, Eq, PartialEq)]
 struct BufferedAgentEvents {
     output: String,
@@ -435,10 +548,12 @@ struct BufferedAgentEvents {
     interrupted: bool,
 }
 
+#[cfg(test)]
 fn collect_agent_events_buffered(reader: impl BufRead) -> Result<BufferedAgentEvents, CliError> {
     collect_agent_events_buffered_with(reader, None)
 }
 
+#[cfg(test)]
 fn collect_agent_events_buffered_interruptible(
     reader: impl BufRead,
     interrupt: &AtomicBool,
@@ -446,6 +561,7 @@ fn collect_agent_events_buffered_interruptible(
     collect_agent_events_buffered_with(reader, Some(interrupt))
 }
 
+#[cfg(test)]
 fn collect_agent_events_buffered_with(
     mut reader: impl BufRead,
     interrupt: Option<&AtomicBool>,
@@ -557,6 +673,7 @@ fn collect_agent_events_buffered_with(
     })
 }
 
+#[cfg(test)]
 fn push_buffered_output(output: &mut String, text: &str) -> Result<(), CliError> {
     let bytes = output.len().checked_add(text.len()).ok_or_else(|| {
         CliError::unavailable("agent output exceeds buffered output limit")
@@ -570,6 +687,7 @@ fn push_buffered_output(output: &mut String, text: &str) -> Result<(), CliError>
     Ok(())
 }
 
+#[cfg(test)]
 fn push_buffered_diagnostic(
     diagnostics: &mut Vec<String>,
     diagnostic: String,
