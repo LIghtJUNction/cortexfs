@@ -217,32 +217,38 @@ function FeatureRail({copy}: {copy: Copy}): ReactElement {
 function AgentConsole({copy}: {copy: Copy}): ReactElement {
   return (
     <div className="cortexStage" aria-label="CortexFS working product mockup">
-      <div className="cortexStageGrid" aria-hidden="true" />
-      <div className="cortexStageHeader">
-        <span>/ctx</span>
-        <strong>agent runtime surface</strong>
-      </div>
-      <div className="cortexRuntimeMap">
-        <div className="cortexAbiColumn">
-          {['model', 'agent', 'tool', 'session'].map((item) => (
-            <div className="cortexAbiNode" key={item}>
-              <span>{item}</span>
-            </div>
+      <div className="cortexStageGlow" aria-hidden="true" />
+      <div className="cortexWorkbench">
+        <div className="cortexWorkbenchTop">
+          <span>ctx</span>
+          <strong>/ctx/agent/coder</strong>
+          <em>live repl</em>
+        </div>
+        <div className="cortexShellLine">
+          <span>$</span>
+          <strong>ctx agent repl coder</strong>
+        </div>
+        <div className="cortexTranscript">
+          <article>
+            <span>user</span>
+            <p>review /workspace/docs/DESIGN.md</p>
+          </article>
+          <article>
+            <span>tool</span>
+            <p>tsh fs.read docs/DESIGN.md</p>
+          </article>
+          <article>
+            <span>usage</span>
+            <p>input 912 / output 184</p>
+          </article>
+        </div>
+        <div className="cortexCommitRail">
+          {[copy.commandOne, copy.commandTwo, copy.commandThree].map((item, index) => (
+            <span key={item}>
+              <strong>{String(index + 1).padStart(2, '0')}</strong>
+              {item}
+            </span>
           ))}
-        </div>
-        <div className="cortexRuntimePanel">
-          <div className="cortexPanelTop">
-            <span>agent/coder</span>
-            <strong>tool loop</strong>
-          </div>
-          <pre>{`{"type":"tool_call","name":"tsh"}
-{"role":"tool","content":"fs.read"}
-{"type":"usage","input_tokens":912}`}</pre>
-        </div>
-        <div className="cortexAuditPanel">
-          <span>{copy.commandOne}</span>
-          <span>{copy.commandTwo}</span>
-          <span>{copy.commandThree}</span>
         </div>
       </div>
       <div className="cortexStageCaption">

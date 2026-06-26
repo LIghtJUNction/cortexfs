@@ -451,8 +451,10 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
 }
 
 .cortexStage {
-  background: var(--cortex-coal);
-  border: 1px solid color-mix(in srgb, var(--cortex-paper-strong) 18%, transparent);
+  background:
+    radial-gradient(circle at 72% 18%, rgba(100, 200, 169, 0.16), transparent 34%),
+    linear-gradient(180deg, #181b19 0%, #0f1110 100%);
+  border: 1px solid rgba(255, 253, 250, 0.12);
   border-radius: 8px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
   min-height: 360px;
@@ -461,139 +463,146 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
   width: min(100%, 612px);
 }
 
-.cortexStageGrid {
-  background-image:
-    linear-gradient(rgba(216, 255, 102, 0.09) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(216, 255, 102, 0.09) 1px, transparent 1px);
-  background-size: 34px 34px;
+.cortexStageGlow {
+  background:
+    linear-gradient(rgba(216, 255, 102, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(216, 255, 102, 0.055) 1px, transparent 1px);
+  background-size: 38px 38px;
   inset: 0;
-  mask-image: radial-gradient(circle at 52% 44%, #000 0 44%, transparent 78%);
+  mask-image: radial-gradient(circle at 58% 48%, #000 0 42%, transparent 76%);
   position: absolute;
 }
 
-.cortexStageHeader {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  padding: 18px 20px 0;
+.cortexWorkbench {
+  background: rgba(15, 17, 16, 0.8);
+  border: 1px solid rgba(255, 253, 250, 0.1);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 253, 250, 0.08), 0 24px 52px rgba(0, 0, 0, 0.28);
+  margin: 40px;
+  overflow: hidden;
   position: relative;
   z-index: 1;
 }
 
-.cortexStageHeader span,
-.cortexStageHeader strong,
-.cortexPanelTop span,
-.cortexPanelTop strong {
+.cortexWorkbenchTop,
+.cortexShellLine,
+.cortexTranscript article,
+.cortexCommitRail {
+  font-family: var(--ifm-font-family-monospace);
+}
+
+.cortexWorkbenchTop {
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 253, 250, 0.1);
+  display: grid;
+  grid-template-columns: 52px 1fr auto;
+  min-height: 42px;
+}
+
+.cortexWorkbenchTop span {
+  align-items: center;
+  background: #d8ff66;
+  color: #111312;
+  display: flex;
+  font-size: 11px;
+  font-weight: 950;
+  height: 100%;
+  justify-content: center;
+}
+
+.cortexWorkbenchTop strong {
+  color: rgba(255, 253, 250, 0.86);
   font-family: var(--ifm-font-family-monospace);
   font-size: 11px;
+  font-weight: 900;
+  padding: 0 14px;
+}
+
+.cortexWorkbenchTop em {
+  color: rgba(255, 253, 250, 0.5);
+  font-size: 11px;
+  font-style: normal;
   font-weight: 800;
+  padding-right: 14px;
 }
 
-.cortexStageHeader span {
-  color: #d8ff66;
-}
-
-.cortexStageHeader strong {
-  color: rgba(255, 253, 250, 0.58);
-}
-
-.cortexRuntimeMap {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: 132px minmax(0, 1fr);
-  grid-template-rows: 1fr auto;
-  padding: 42px 32px 34px;
-  position: relative;
-  z-index: 1;
-}
-
-.cortexAbiColumn {
-  display: grid;
-  gap: 10px;
-}
-
-.cortexAbiNode {
+.cortexShellLine {
   align-items: center;
-  background: rgba(255, 253, 250, 0.06);
-  border: 1px solid rgba(216, 255, 102, 0.18);
-  border-radius: 6px;
-  color: rgba(255, 253, 250, 0.74);
+  background: rgba(255, 253, 250, 0.04);
+  border-bottom: 1px solid rgba(255, 253, 250, 0.08);
   display: flex;
-  font-family: var(--ifm-font-family-monospace);
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 18px;
+}
+
+.cortexShellLine span {
+  color: #d8ff66;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.cortexShellLine strong {
+  color: #fffdfa;
   font-size: 13px;
   font-weight: 900;
-  min-height: 44px;
-  padding: 0 14px;
-  position: relative;
 }
 
-.cortexAbiNode::after {
-  background: #d8ff66;
-  border-radius: 50%;
-  content: "";
-  height: 7px;
-  position: absolute;
-  right: -4px;
-  width: 7px;
-}
-
-.cortexRuntimePanel,
-.cortexAuditPanel {
-  background: rgba(255, 253, 250, 0.96);
-  border: 1px solid rgba(255, 253, 250, 0.16);
-  border-radius: 8px;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.26);
-  color: #111312;
-}
-
-.cortexRuntimePanel {
-  min-height: 198px;
-  padding: 16px;
-}
-
-.cortexPanelTop {
-  align-items: center;
-  border-bottom: 1px solid #e3dccd;
-  display: flex;
-  justify-content: space-between;
-  padding-bottom: 10px;
-}
-
-.cortexPanelTop span {
-  color: #5d6a62;
-}
-
-.cortexPanelTop strong {
-  color: #111312;
-}
-
-.cortexRuntimePanel pre {
-  background: transparent;
-  color: #18211d;
-  font-family: var(--ifm-font-family-monospace);
-  font-size: 12px;
-  line-height: 1.8;
-  margin: 16px 0 0;
-  white-space: pre-wrap;
-}
-
-.cortexAuditPanel {
+.cortexTranscript {
   display: grid;
-  gap: 8px;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 10px;
+  gap: 10px;
+  padding: 18px;
 }
 
-.cortexAuditPanel span {
-  background: #f3efe6;
-  border: 1px solid #e3dccd;
-  border-radius: 5px;
-  color: #25312d;
+.cortexTranscript article {
+  background: rgba(255, 253, 250, 0.055);
+  border: 1px solid rgba(255, 253, 250, 0.09);
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 66px 1fr;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.cortexTranscript span {
+  color: #64c8a9;
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.cortexTranscript p {
+  color: rgba(255, 253, 250, 0.82);
   font-size: 12px;
   font-weight: 800;
-  padding: 10px;
-  text-align: center;
+  margin: 0;
+}
+
+.cortexCommitRail {
+  background: rgba(216, 255, 102, 0.08);
+  border-top: 1px solid rgba(216, 255, 102, 0.18);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cortexCommitRail span {
+  color: rgba(255, 253, 250, 0.76);
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 850;
+  min-height: 64px;
+  padding: 12px 14px;
+}
+
+.cortexCommitRail span + span {
+  border-left: 1px solid rgba(216, 255, 102, 0.14);
+}
+
+.cortexCommitRail strong {
+  color: #d8ff66;
+  font-size: 11px;
 }
 
 .cortexStageCaption {
@@ -1005,26 +1014,30 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
     min-height: 330px;
   }
 
-  .cortexRuntimeMap {
-    gap: 12px;
+  .cortexWorkbench {
+    margin: 22px 14px;
+  }
+
+  .cortexWorkbenchTop {
+    grid-template-columns: 46px 1fr;
+  }
+
+  .cortexWorkbenchTop em {
+    display: none;
+  }
+
+  .cortexTranscript article {
+    gap: 6px;
     grid-template-columns: 1fr;
-    padding: 28px 18px 24px;
   }
 
-  .cortexAbiColumn {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .cortexAbiNode {
-    min-height: 38px;
-  }
-
-  .cortexAuditPanel {
+  .cortexCommitRail {
     grid-template-columns: 1fr;
   }
 
-  .cortexRuntimePanel pre {
-    font-size: 11px;
+  .cortexCommitRail span + span {
+    border-left: 0;
+    border-top: 1px solid rgba(216, 255, 102, 0.14);
   }
 
   .cortexStageCaption {
