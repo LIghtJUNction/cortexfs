@@ -1,5 +1,6 @@
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import type {ReactElement} from 'react';
 
@@ -216,36 +217,32 @@ function FeatureRail({copy}: {copy: Copy}): ReactElement {
 function AgentConsole({copy}: {copy: Copy}): ReactElement {
   return (
     <div className="cortexStage" aria-label="CortexFS working product mockup">
-      <div className="cortexCloud cortexCloudOne" />
-      <div className="cortexCloud cortexCloudTwo" />
-      <div className="cortexMountains" />
-      <div className="cortexProductWindow">
-        <div className="cortexWindowRail">
-          <span>ctx</span>
-          <span>fs</span>
-          <span>run</span>
-        </div>
-        <div className="cortexWindowMain">
-          <div className="cortexDocument">
-            <div className="cortexDocumentTop">
-              <span>/ctx/agent/coder</span>
-              <strong>request flow</strong>
+      <div className="cortexStageGrid" aria-hidden="true" />
+      <div className="cortexStageHeader">
+        <span>/ctx</span>
+        <strong>agent runtime surface</strong>
+      </div>
+      <div className="cortexRuntimeMap">
+        <div className="cortexAbiColumn">
+          {['model', 'agent', 'tool', 'session'].map((item) => (
+            <div className="cortexAbiNode" key={item}>
+              <span>{item}</span>
             </div>
-            <ol>
-              <li>{copy.commandOne}</li>
-              <li>{copy.commandTwo}</li>
-              <li>{copy.commandThree}</li>
-            </ol>
-            <pre>{`{
-  "agent": "coder",
-  "tool": "tsh",
-  "status": "accepted"
-}`}</pre>
+          ))}
+        </div>
+        <div className="cortexRuntimePanel">
+          <div className="cortexPanelTop">
+            <span>agent/coder</span>
+            <strong>tool loop</strong>
           </div>
-          <div className="cortexPrompt">
-            <span>tsh</span>
-            <strong>cat agent/coder/outbox/latest.json</strong>
-          </div>
+          <pre>{`{"type":"tool_call","name":"tsh"}
+{"role":"tool","content":"fs.read"}
+{"type":"usage","input_tokens":912}`}</pre>
+        </div>
+        <div className="cortexAuditPanel">
+          <span>{copy.commandOne}</span>
+          <span>{copy.commandTwo}</span>
+          <span>{copy.commandThree}</span>
         </div>
       </div>
       <div className="cortexStageCaption">
@@ -256,9 +253,11 @@ function AgentConsole({copy}: {copy: Copy}): ReactElement {
 }
 
 function HeroBrand(): ReactElement {
+  const logoSrc = useBaseUrl('/img/cortexfs-logo.svg');
+
   return (
     <div className="cortexHeroBrand" aria-label="CortexFS">
-      <span className="cortexLogoMark">/</span>
+      <img className="cortexLogoMark" src={logoSrc} alt="" />
       <span>CortexFS</span>
     </div>
   );
