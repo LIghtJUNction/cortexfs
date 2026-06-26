@@ -20,6 +20,8 @@
   --cortex-paper-strong: #fffdfa;
   --cortex-panel: #ffffff;
   --cortex-coal: #181b19;
+  --cortex-on-coal: #fffdfa;
+  --cortex-on-coal-muted: rgba(255, 253, 250, 0.68);
   --cortex-mint: #2a8f73;
   --cortex-amber: #d28a28;
   --cortex-rose: #b65348;
@@ -42,6 +44,8 @@
   --cortex-paper-strong: #181917;
   --cortex-panel: #20211e;
   --cortex-coal: #0f1110;
+  --cortex-on-coal: #f7f1e7;
+  --cortex-on-coal-muted: rgba(247, 241, 231, 0.7);
   --cortex-mint: #64c8a9;
   --cortex-amber: #efb75e;
   --cortex-rose: #e28175;
@@ -224,7 +228,7 @@ html[data-cortex-brand-phase='mark'] .navbar__title {
   line-height: 1;
 }
 
-.cortexBrandFull span:nth-child(2) {
+.cortexBrandAccent {
   color: var(--cortex-mint);
   font-style: italic;
 }
@@ -633,10 +637,11 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
 }
 
 .cortexTicker div {
-  animation: cortexTicker 28s linear infinite;
+  animation: cortexTicker 44s linear infinite;
   display: inline-flex;
-  gap: 46px;
-  min-width: 200%;
+  gap: clamp(34px, 4vw, 72px);
+  padding-right: clamp(34px, 4vw, 72px);
+  width: max-content;
 }
 
 .cortexTicker span {
@@ -764,11 +769,11 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
 }
 
 .cortexTerminal {
-  background: var(--cortex-coal);
-  border: 1px solid color-mix(in srgb, var(--cortex-line) 32%, transparent);
+  background: #0f1110;
+  border: 1px solid rgba(255, 253, 250, 0.14);
   border-radius: 8px;
   box-shadow: 0 28px 76px rgba(30, 24, 14, 0.2);
-  color: var(--cortex-paper-strong);
+  color: #f7f1e7;
   overflow: hidden;
 }
 
@@ -800,9 +805,10 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
 }
 
 .cortexTerminal pre {
-  color: var(--cortex-paper-strong);
+  color: #f7f1e7;
   font-size: 14px;
   line-height: 1.64;
+  opacity: 0.92;
   padding: 24px;
 }
 
@@ -825,12 +831,12 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
 
 .cortexManifest {
   background: var(--cortex-coal);
-  color: var(--cortex-paper-strong);
+  color: var(--cortex-on-coal);
   padding: 74px 0;
 }
 
 .cortexManifest p {
-  color: color-mix(in srgb, var(--cortex-paper-strong) 58%, transparent);
+  color: var(--cortex-on-coal-muted);
   font-size: 15px;
   font-weight: 900;
   margin: 0 0 16px;
@@ -846,7 +852,7 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
 
 .cortexManifest a {
   border-bottom: 1px solid currentColor;
-  color: var(--cortex-paper-strong);
+  color: var(--cortex-on-coal);
   display: inline-flex;
   font-weight: 900;
   margin-top: 28px;

@@ -88,24 +88,24 @@ const zh: Copy = {
   performanceTitle: '为什么高效',
   performanceText:
     '稳定 ABI 小，发现靠目录遍历，执行走文件或 Unix socket。tool 元数据可 load/pin，未 pin 的上下文由 W-TinyLFU 回收。',
-  developerTitle: '开发 agent 不需要新框架',
+  developerTitle: '一条命令启动 agent',
   developerText:
-    '描述身份、启动会话、调用 tool、观察上下文，就是 CortexFS 的开发模型。agent runtime 可以简单到一个脚本，也可以复杂到完整调度器。',
+    '不用接新框架，不用写 glue service。进入 agent REPL 后，模型、tool、上下文和审计仍然走同一套 CortexFS 文件 ABI。',
   developerSteps: [
     {
-      title: '定义身份',
-      text: '用 agent/<name>.d/system.md、model、policy、mount、path 描述 persona、模型、可见目录和工具边界。',
-      code: 'ctx set agent/coder.d/system.md "You are a careful Rust agent."',
+      title: '启动 REPL',
+      text: '选择一个 agent 名称进入会话。coder 的模型、policy、可见目录和工具边界从现有 agent 配置加载。',
+      code: 'ctx agent repl coder',
     },
     {
-      title: '发送任务',
-      text: '高层入口是 agent 会话。文本、路径、图片说明都进入同一条对话流；文件本体放在可见 workspace 或 shared space。',
-      code: 'ctx send coder "review /workspace/docs/DESIGN.md"',
+      title: '直接输入任务',
+      text: '在 REPL 里像普通对话一样输入需求。文本、路径和说明进入同一条会话流，tool 调用仍受 CTX_PATH 和 policy 约束。',
+      code: '> review /workspace/docs/DESIGN.md',
     },
     {
-      title: '观察运行',
-      text: '用普通文件查看 prompt、history、latest output 和 context pack。需要旁观终端时 attach 到 ctxterm。',
-      code: 'ctx agent prompt coder && ctx agent output coder',
+      title: '需要时观察',
+      text: '运行状态仍是普通文件。需要调试时查看 prompt、history、latest output 和 audit，而不是接入另一套 dashboard。',
+      code: 'ctx agent output coder',
     },
   ],
   architectureTitle: '高层抽象',
@@ -158,24 +158,24 @@ const en: Copy = {
   performanceTitle: 'Why it stays fast',
   performanceText:
     'The ABI is small, discovery is directory traversal, execution is file or Unix socket I/O, and loaded tool metadata is bounded by W-TinyLFU.',
-  developerTitle: 'Develop agents without a new framework',
+  developerTitle: 'Start an agent with one command',
   developerText:
-    'Describe identity, start sessions, invoke tools, and inspect context. An agent runtime can be a script or a full scheduler.',
+    'No new framework or glue service is required. Once you enter the agent REPL, models, tools, context, and audit still flow through the same CortexFS file ABI.',
   developerSteps: [
     {
-      title: 'Define identity',
-      text: 'Use agent/<name>.d/system.md, model, policy, mount, and path to describe persona, model, visible files, and tool boundaries.',
-      code: 'ctx set agent/coder.d/system.md "You are a careful Rust agent."',
+      title: 'Start the REPL',
+      text: 'Pick an agent name and enter its session. The coder model, policy, visible files, and tool boundary load from the existing agent configuration.',
+      code: 'ctx agent repl coder',
     },
     {
-      title: 'Send work',
-      text: 'The high-level entry is an agent session. Text, paths, and image instructions share one conversation stream; file bytes live in visible workspace or shared space.',
-      code: 'ctx send coder "review /workspace/docs/DESIGN.md"',
+      title: 'Type the task',
+      text: 'Use the REPL like a normal conversation. Text, paths, and instructions share one stream while tool calls remain bounded by CTX_PATH and policy.',
+      code: '> review /workspace/docs/DESIGN.md',
     },
     {
-      title: 'Observe runtime',
-      text: 'Use ordinary files to inspect prompt, history, latest output, and context packs. Attach to ctxterm when you need the terminal.',
-      code: 'ctx agent prompt coder && ctx agent output coder',
+      title: 'Inspect when needed',
+      text: 'Runtime state remains ordinary files. When debugging, inspect prompt, history, latest output, and audit instead of wiring another dashboard.',
+      code: 'ctx agent output coder',
     },
   ],
   architectureTitle: 'High-level abstraction',
@@ -258,8 +258,11 @@ function HeroBrand(): ReactElement {
   return (
     <div className="cortexHeroBrand" aria-label="CorTeXfs">
       <span className="cortexBrandStage cortexBrandFull" aria-hidden="true">
-        <span>Cor</span>
-        <span>TeX</span>
+        <span className="cortexBrandAccent">C</span>
+        <span>or</span>
+        <span className="cortexBrandAccent">T</span>
+        <span>e</span>
+        <span className="cortexBrandAccent">X</span>
         <span>fs</span>
       </span>
       <span className="cortexBrandStage cortexBrandInitials" aria-hidden="true">
@@ -277,11 +280,12 @@ function HeroBrand(): ReactElement {
 
 function RootTicker(): ReactElement {
   const roots = ['model', 'agent', 'tool', 'session', 'policy', 'shared', 'audit'];
+  const loopedRoots = Array.from({length: 8}, () => roots).flat();
 
   return (
     <div className="cortexTicker" aria-label="CortexFS root ABI ticker">
       <div>
-        {[...roots, ...roots].map((root, index) => (
+        {loopedRoots.map((root, index) => (
           <span key={`${root}-${index}`}>{root}</span>
         ))}
       </div>
