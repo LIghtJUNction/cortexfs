@@ -104,8 +104,5 @@ fn fuse_metadata_error(error: &std::io::Error) -> FuseV1Error {
 }
 
 fn is_fuse_v1_writable_control_path(abi_path: &str) -> bool {
-    matches!(
-        classify_abi_path(abi_path),
-        "ctx.model.control" | "ctx.agent.control" | "ctx.tool.control" | "ctx.shared.tool.control"
-    )
+    parse_abi_path(abi_path).is_writable_control_path()
 }
