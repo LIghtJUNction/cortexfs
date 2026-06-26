@@ -799,6 +799,16 @@ fn write_model_delta(stdout: &mut impl Write, run: &str, text: &str) -> io::Resu
     )
 }
 
+fn write_model_usage(stdout: &mut impl Write, run: &str, usage: TokenUsage) -> io::Result<()> {
+    writeln!(
+        stdout,
+        r#"{{"type":"usage","run":{},"input_tokens":{},"output_tokens":{}}}"#,
+        json_string(run),
+        usage.input_tokens,
+        usage.output_tokens
+    )
+}
+
 fn write_model_text_or_tool_call(stdout: &mut impl Write, run: &str, text: &str) -> io::Result<()> {
     if let Some(tool_call) = tool_call_from_text(text).map_err(io::Error::other)? {
         return write_tool_call_event(stdout, run, &tool_call);
