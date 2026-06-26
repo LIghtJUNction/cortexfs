@@ -466,6 +466,52 @@ html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
   padding-top: 108px;
 }
 
+.cortexDemo {
+  background:
+    linear-gradient(180deg, rgba(255, 253, 250, 0.08), rgba(255, 253, 250, 0.02)),
+    #0f1110;
+  border: 1px solid rgba(255, 253, 250, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.24);
+  margin: 0;
+  overflow: hidden;
+  width: min(100%, 720px);
+}
+
+.cortexDemo video {
+  aspect-ratio: 16 / 9;
+  background: #0f1110;
+  display: block;
+  height: auto;
+  object-fit: cover;
+  width: 100%;
+}
+
+.cortexDemo figcaption {
+  align-items: center;
+  background: #111312;
+  border-top: 1px solid rgba(255, 253, 250, 0.12);
+  color: rgba(255, 253, 250, 0.72);
+  display: flex;
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 12px;
+  font-weight: 850;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  min-height: 46px;
+  padding: 0 16px;
+}
+
+.cortexDemo figcaption span {
+  color: #d8ff66;
+}
+
+.cortexDemo figcaption strong {
+  color: rgba(255, 253, 250, 0.84);
+  font-size: 11px;
+}
+
 .cortexStage {
   background:
     radial-gradient(circle at 72% 18%, rgba(100, 200, 169, 0.16), transparent 34%),

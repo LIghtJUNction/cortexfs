@@ -2,11 +2,13 @@ import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
+const baseUrl = process.env.DOCUSAURUS_BASE_URL ?? '/cortexfs/';
+
 const config: Config = {
   title: 'CortexFS',
   tagline: 'A small Linux filesystem ABI for agent runtimes',
   url: 'https://lightjunction.github.io',
-  baseUrl: '/cortexfs/',
+  baseUrl,
   favicon: 'img/cortexfs-logo.svg',
   organizationName: 'LIghtJUNction',
   projectName: 'cortexfs',
