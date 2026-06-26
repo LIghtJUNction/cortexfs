@@ -229,16 +229,21 @@ Agents search for tools by `CTX_PATH`:
 /ctx/shared/project-a/tool/fs.read
 ```
 
-For human `tsh` sessions, the lookup path is chosen in this order:
+For standalone human `tsh` sessions, the lookup path is chosen in this order:
 
 ```text
-1. process CTX_PATH, when set
-2. CTX_HOME/.tshrc line CTX_PATH=...
+1. CTX_HOME/.tshrc line CTX_PATH=..., when present
+2. process CTX_PATH, when set
 3. default /ctx/tool:/ctx/home/<uid>/tool
 ```
 
 `.tshrc` is not shell code. It is a user-level data file for persistent tool
-path configuration.
+path configuration, and it takes precedence over inherited process
+environment.
+
+When `tsh` runs inside an agent terminal, the agent runtime's process
+`CTX_PATH` is authoritative because it is derived from policy, mounts, and
+uid/gid.
 
 `tsh` persistent runtime configuration lives in the `tsh` tool control
 directory:
@@ -332,6 +337,28 @@ policy v0
 
 Do not design a collaboration DSL here. Higher-level agents can create ordinary
 files under `shared/<project>`.
+
+`shared/cortexfs-docs` is reserved for the system-maintained Markdown manual
+bundle:
+
+```text
+/ctx/shared/cortexfs-docs/
+  README.md
+  man/
+    ctx.agent.md
+    ctx.tool.md
+    ctx.model.md
+    ctx.coreutils.md
+    ctx.root-abi.md
+    ctx.session.md
+    ctx.provider.md
+```
+
+`ctx man TOPIC` prints these files directly when present and falls back to the
+compiled-in copy when they are absent. Topic names such as `agent` and `model`
+are CLI aliases; durable file names use the `ctx.*.md` namespace. The manual
+bundle is ordinary read-only documentation data for users and agents. It does
+not grant authority and must not become a second root ABI namespace.
 
 Shared sessions are ordinary directories:
 

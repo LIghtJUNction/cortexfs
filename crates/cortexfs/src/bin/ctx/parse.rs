@@ -33,6 +33,9 @@ enum Command {
     Abi,
     Env,
     Root,
+    Man {
+        topic: Option<String>,
+    },
     Status,
     Bootstrap {
         source: Option<PathBuf>,
@@ -58,9 +61,6 @@ enum Command {
         input: String,
     },
     Agent(AgentArgs),
-    AgentSh {
-        args: Vec<String>,
-    },
     Provider(ProviderArgs),
     Ping {
         path: String,
@@ -120,6 +120,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Abi => success(print_abi()),
         Command::Env => success(print_env(&cli.root)),
         Command::Root => success(print_line(&cli.root.display().to_string())),
+        Command::Man { topic } => success(print_man(&cli.root, topic.as_deref())),
         Command::Status => success(print_status(&cli.root)),
         Command::Bootstrap { source } => success(bootstrap_reference_tree(source.as_deref())),
         Command::Mount { source, mountpoint } => success(mount_reference_tree(
@@ -142,7 +143,6 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             input,
         } => agent_send(&cli.root, &agent, session.as_deref(), &input, false),
         Command::Agent(args) => agent_command(&cli.root, &args),
-        Command::AgentSh { args } => agent_sh_command(&cli.root, args),
         Command::Provider(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
@@ -219,8 +219,13 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
         "abi" => Ok(Command::Abi),
         "env" => Ok(Command::Env),
         "root" => Ok(Command::Root),
+        "man" => {
+            let topic = values.next();
+            no_extra_args(values)?;
+            Ok(Command::Man { topic })
+        }
         "status" => Ok(Command::Status),
-        "bootstrap" => {
+        "bootstrap" | "update" => {
             let source = values.next().map(PathBuf::from);
             no_extra_args(values)?;
             Ok(Command::Bootstrap { source })
@@ -268,9 +273,6 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             })
         }
         "agent" => parse_agent_command(values.collect()),
-        "agent-sh" => Ok(Command::AgentSh {
-            args: values.collect(),
-        }),
         "provider" => parse_provider_command(values.collect()),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
@@ -342,7 +344,9 @@ fn is_top_level_help_topic(command: &str) -> bool {
             | "abi"
             | "env"
             | "root"
+            | "man"
             | "bootstrap"
+            | "update"
             | "mount"
             | "ls"
             | "which"
@@ -352,7 +356,6 @@ fn is_top_level_help_topic(command: &str) -> bool {
             | "resume"
             | "send"
             | "agent"
-            | "agent-sh"
             | "provider"
             | "ping"
             | "cancel"
@@ -369,6 +372,8 @@ enum ProviderArgs {
     Login { provider: String, timeout: u64 },
     Status { provider: String },
     Refresh { provider: String },
+    SecretSet { provider: String, slot: String },
+    SecretStatus { provider: String, slot: String },
     PresetList,
     PresetShow { preset: String },
     PresetInstall { preset: String },
@@ -376,7 +381,7 @@ enum ProviderArgs {
 
 fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
-    let command = required_arg(&mut values, "provider requires oauth or preset")?;
+    let command = required_arg(&mut values, "provider requires oauth, preset, or secret")?;
     let rest = values.collect::<Vec<_>>();
     if is_help_args(&rest) {
         return Ok(Command::HelpTopic(format!("provider {command}")));
@@ -389,13 +394,19 @@ fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
         };
         return Ok(Command::HelpTopic(format!("provider oauth {subcommand}")));
     }
+    if command == "secret"
+        && matches!(rest.as_slice(), [subcommand, help] if is_help_flag(help) && matches!(subcommand.as_str(), "set" | "status"))
+    {
+        return Ok(Command::HelpTopic("provider secret".to_owned()));
+    }
     if command == "help" && rest.is_empty() {
         return Ok(Command::HelpTopic("provider".to_owned()));
     }
     match command.as_str() {
         "oauth" => parse_provider_oauth_command(rest.into_iter()),
         "preset" => parse_provider_preset_command(rest.into_iter()),
-        _ => Err(CliError::usage("provider expects oauth or preset")),
+        "secret" => parse_provider_secret_command(rest.into_iter()),
+        _ => Err(CliError::usage("provider expects oauth, preset, or secret")),
     }
 }
 
@@ -454,6 +465,38 @@ fn parse_provider_preset_command(mut values: impl Iterator<Item = String>) -> Re
         }
         _ => Err(CliError::usage("provider preset expects list, show, or install")),
     }
+}
+
+fn parse_provider_secret_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let command = required_arg(&mut values, "provider secret requires set or status")?;
+    match command.as_str() {
+        "set" => {
+            let provider = required_arg(&mut values, "provider secret set requires a provider")?;
+            let slot = parse_provider_secret_slot(values)?;
+            Ok(Command::Provider(ProviderArgs::SecretSet { provider, slot }))
+        }
+        "status" => {
+            let provider = required_arg(&mut values, "provider secret status requires a provider")?;
+            let slot = parse_provider_secret_slot(values)?;
+            Ok(Command::Provider(ProviderArgs::SecretStatus { provider, slot }))
+        }
+        _ => Err(CliError::usage("provider secret expects set or status")),
+    }
+}
+
+fn parse_provider_secret_slot(mut values: impl Iterator<Item = String>) -> Result<String, CliError> {
+    let mut slot = "default".to_owned();
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--slot" => {
+                slot = required_arg(&mut values, "provider secret --slot requires a value")?;
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(slot)
 }
 
 fn is_help_flag(value: &str) -> bool {

@@ -38,17 +38,17 @@ host `PATH`.
 
 ## Default Human Entry
 
-`agent.sh` is a compatibility frontend over the Rust-owned `ctx agent-sh`
-entrypoint:
+`agent.sh` is a small defaults frontend over the Rust-owned `ctx agent`
+commands:
 
 ```text
-agent.sh AGENT           -> ctx agent-sh AGENT           -> ctx agent repl AGENT
-agent.sh AGENT INPUT...  -> ctx agent-sh AGENT INPUT...  -> ctx agent send AGENT INPUT...
-agent.sh --watch AGENT   -> ctx agent-sh --watch AGENT   -> ctx agent watch AGENT
-agent.sh --attach AGENT  -> ctx agent-sh --attach AGENT  -> ctx agent attach AGENT, starting the terminal if needed
+agent.sh AGENT           -> ctx agent repl AGENT --session default
+agent.sh AGENT INPUT...  -> ctx agent send AGENT --session default INPUT...
+agent.sh --watch AGENT   -> ctx agent watch AGENT --session default
+agent.sh --attach AGENT  -> ctx agent attach AGENT --session default
 ```
 
-`agent.sh` must remain a tiny executable resolver. Argument routing, socket
+`agent.sh` must remain a tiny defaults wrapper. Socket
 protocols, terminal emulation, model streaming, policy checks, tool discovery,
 and provider behavior belong in CortexFS, primarily under `ctx`.
 
@@ -211,8 +211,8 @@ tsh
 
 Other tools are discovered, loaded, pinned, and invoked through `tsh`.
 
-`tsh` resolves tools by `CTX_PATH`. If `CTX_PATH` is not set, it may read the
-data-only file:
+`tsh` resolves tools by `CTX_PATH`. For standalone human sessions, it reads the
+data-only startup file before inherited process `CTX_PATH` when the file exists:
 
 ```text
 CTX_HOME/.tshrc
@@ -223,6 +223,9 @@ The file supports only:
 ```text
 CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
 ```
+
+Inside an agent terminal, the runtime-provided process `CTX_PATH` remains
+authoritative because it is part of the agent view.
 
 It is not shell syntax and must not execute code.
 
@@ -282,7 +285,7 @@ command prints explicit placeholder text.
 The runtime design is healthy when all of these are true:
 
 ```text
-agent.sh contains no protocol implementation beyond resolving ctx and execing ctx agent-sh
+agent.sh contains no protocol implementation beyond resolving ctx and execing ctx agent
 ctx agent repl is the default human chat UI
 ctx agent watch is the read-only human path into ctxterm -> tsh
 ctx agent attach is the writable human path into ctxterm -> tsh

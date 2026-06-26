@@ -58,11 +58,13 @@ mod context_pack_build;
 mod context_pack_inspect;
 mod context_pack_source;
 mod core_tools;
+mod manuals;
 mod message_stream;
 mod model;
 mod mount_table;
 mod oauth;
 mod policy;
+mod provider_name;
 mod session_index;
 mod session_layout;
 mod shared_queue;
@@ -108,6 +110,10 @@ pub use core_tools::{
     FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
     run_core_tool_cli, run_core_tool_cli_with_root,
 };
+pub use manuals::{
+    CortexfsManual, MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MANUALS,
+    cortexfs_manual,
+};
 pub use model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
@@ -120,6 +126,15 @@ pub use oauth::{
     resolve_oauth_access_token, resolve_oauth_access_token_with,
 };
 pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
+pub use provider_name::{
+    ProviderNameError, ProviderSystemSecret, ProviderSystemSecretError, ProviderSystemSecretHandle,
+    open_provider_system_secret, open_provider_system_secret_for_model,
+    provider_host_from_base_url, provider_keychain_service, provider_name_from_base_url,
+    provider_name_from_config, provider_oauth_access_token_env_name,
+    provider_oauth_refresh_token_env_name, provider_system_secret_exists,
+    read_provider_system_secret, read_provider_system_secret_for_model,
+    store_provider_system_secret,
+};
 pub use session_index::{
     SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,
     inspect_session_index, update_session_index,

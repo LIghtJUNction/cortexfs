@@ -8,6 +8,24 @@ fn parses_spec_which_command() {
 }
 
 #[test]
+fn parses_man_command() {
+    let index = cmd!("man");
+    assert!(matches!(index, Ok(Command::Man { topic: None })));
+
+    let agent = cmd!("man", "agent");
+    assert!(matches!(
+        agent,
+        Ok(Command::Man { topic: Some(ref topic) }) if topic == "agent"
+    ));
+
+    let extra = cmd!("man", "agent", "extra");
+    assert!(matches!(
+        extra,
+        Err(ref error) if error.code == 2 && error.message == "unexpected argument: extra"
+    ));
+}
+
+#[test]
 fn parses_top_level_file_content_commands() {
     let cat = cmd!("cat", "agent/coder.d/cwd");
     assert!(matches!(
@@ -188,12 +206,6 @@ fn parses_subcommand_help_before_required_args() {
         Ok(Command::HelpTopic(ref topic)) if topic == "agent"
     ));
 
-    let agent_sh = cmd!("agent-sh", "--help");
-    assert!(matches!(
-        agent_sh,
-        Ok(Command::HelpTopic(ref topic)) if topic == "agent-sh"
-    ));
-
     let agent_watch = cmd!("agent", "watch", "--help");
     assert!(matches!(
         agent_watch,
@@ -278,189 +290,12 @@ fn parses_agent_session_client_commands() {
 }
 
 #[test]
-fn parses_agent_sh_compat_command() {
-    let command = cmd!("agent-sh", "--session", "focus", "coder", "hello", "world");
+fn rejects_removed_agent_sh_command() {
+    let command = cmd!("agent-sh", "--session", "focus", "coder");
     assert!(matches!(
         command,
-        Ok(Command::AgentSh { ref args })
-            if args == &vec![
-                "--session".to_owned(),
-                "focus".to_owned(),
-                "coder".to_owned(),
-                "hello".to_owned(),
-                "world".to_owned()
-            ]
+        Err(ref error) if error.code == 2 && error.message == "unknown command: agent-sh"
     ));
-}
-
-#[test]
-fn parses_agent_sh_compat_router_modes() {
-    let send = parse_agent_sh_args_with_session(
-        vec!["coder".to_owned(), "hello".to_owned(), "world".to_owned()],
-        None,
-    );
-    assert!(matches!(
-        send,
-        Ok(AgentShArgs {
-            session: None,
-            raw: false,
-            mode: AgentShMode::Auto,
-            ref name,
-            ref input,
-        }) if name == "coder" && input == &vec!["hello".to_owned(), "world".to_owned()]
-    ));
-
-    let repl = parse_agent_sh_args_with_session(
-        vec![
-            "--session".to_owned(),
-            "focus".to_owned(),
-            "--raw".to_owned(),
-            "--chat".to_owned(),
-            "coder".to_owned(),
-        ],
-        None,
-    );
-    assert!(matches!(
-        repl,
-        Ok(AgentShArgs {
-            session: Some(ref session),
-            raw: true,
-            mode: AgentShMode::Repl,
-            ref name,
-            ref input,
-        }) if session == "focus" && name == "coder" && input.is_empty()
-    ));
-
-    let inherited = parse_agent_sh_args_with_session(
-        vec!["--watch".to_owned(), "coder".to_owned()],
-        Some("env-session".to_owned()),
-    );
-    assert!(matches!(
-        inherited,
-        Ok(AgentShArgs {
-            session: Some(ref session),
-            raw: false,
-            mode: AgentShMode::Watch,
-            ref name,
-            ref input,
-        }) if session == "env-session" && name == "coder" && input.is_empty()
-    ));
-}
-
-#[test]
-fn agent_sh_help_is_only_recognized_before_agent_name() {
-    assert!(agent_sh_args_request_help(&["--help".to_owned()]));
-    assert!(agent_sh_args_request_help(&[
-        "--session".to_owned(),
-        "focus".to_owned(),
-        "help".to_owned()
-    ]));
-    assert!(!agent_sh_args_request_help(&[
-        "coder".to_owned(),
-        "help".to_owned()
-    ]));
-    assert!(!agent_sh_args_request_help(&[
-        "--".to_owned(),
-        "help".to_owned()
-    ]));
-
-    let parsed = parse_agent_sh_args_with_session(
-        vec!["coder".to_owned(), "help".to_owned()],
-        None,
-    );
-    assert!(matches!(
-        parsed,
-        Ok(AgentShArgs {
-            mode: AgentShMode::Auto,
-            ref name,
-            ref input,
-            ..
-        }) if name == "coder" && input == &vec!["help".to_owned()]
-    ));
-}
-
-#[test]
-fn rejects_agent_sh_cancel_with_multiple_run_ids() {
-    let result = agent_sh_command(
-        Path::new("/tmp/cortexfs-agent-sh-test"),
-        vec![
-            "--cancel".to_owned(),
-            "coder".to_owned(),
-            "run-1".to_owned(),
-            "run-2".to_owned(),
-        ],
-    );
-    assert!(matches!(
-        result,
-        Err(ref error)
-            if error.code == 2
-                && error.message == "agent.sh --cancel accepts at most one run id"
-    ));
-}
-
-#[test]
-fn agent_sh_attach_omitted_session_uses_current_session() {
-    let root = clean_test_dir("ctx-agent-sh-attach-current-session");
-    let current = root
-        .join("home")
-        .join("1000")
-        .join("agent")
-        .join("coder")
-        .join("session")
-        .join("index");
-    assert!(fs::create_dir_all(&current).is_ok());
-    assert!(fs::write(current.join("current"), "focus\n").is_ok());
-
-    let session = agent_sh_attach_session(&root, "coder", None);
-
-    assert!(matches!(session, Ok(ref session) if session == "focus"));
-}
-
-#[test]
-fn agent_sh_attach_explicit_session_overrides_current_session() {
-    let root = clean_test_dir("ctx-agent-sh-attach-explicit-session");
-    let current = root
-        .join("home")
-        .join("1000")
-        .join("agent")
-        .join("coder")
-        .join("session")
-        .join("index");
-    assert!(fs::create_dir_all(&current).is_ok());
-    assert!(fs::write(current.join("current"), "focus\n").is_ok());
-
-    let session = agent_sh_attach_session(&root, "coder", Some("debug"));
-
-    assert!(matches!(session, Ok(ref session) if session == "debug"));
-}
-
-#[test]
-fn agent_sh_with_input_uses_agent_send_request_shape() {
-    let root = clean_test_dir("ctx-agent-sh-send-agent-shape");
-    assert!(fs::create_dir_all(root.join("agent")).is_ok());
-    let server = spawn_agent_socket_request_capture(&root, "coder");
-
-    let result = agent_sh_command(
-        &root,
-        vec![
-            "coder".to_owned(),
-            "hello".to_owned(),
-            "from".to_owned(),
-            "wrapper".to_owned(),
-        ],
-    );
-
-    assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
-    let request = server.join();
-    assert!(request.is_ok());
-    let Ok(request) = request else {
-        return;
-    };
-    assert!(request.contains("\"op\":\"send\""));
-    assert!(request.contains("\"session\":\"default\""));
-    assert!(request.contains("\"scope\":\"private\""));
-    assert!(request.contains("\"cwd\":\"/workspace\""));
-    assert!(request.contains("\"input\":\"hello from wrapper\""));
 }
 
 #[test]
@@ -936,6 +771,36 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
 }
 
 #[test]
+fn agent_start_status_lines_follow_systemctl_shape() {
+    let lines = agent_start_status_lines(
+        false,
+        "coder",
+        "default",
+        "cortexfs-agent-coder-default-terminal",
+        Some("abc123"),
+        "/workspace",
+        Path::new("/ctx/home/1000/agent/coder/session/default/terminal/main.sock"),
+        Path::new("/run/user/1000/cortexfs/terminal/coder/default/main.sock"),
+        "1000",
+    );
+
+    assert_eq!(
+        lines,
+        vec![
+            "● cortexfs-agent-coder-default-terminal.service - CortexFS agent terminal",
+            "     Loaded: loaded (/run/user/1000/systemd/transient/cortexfs-agent-coder-default-terminal.service; transient)",
+            "     Active: active (running)",
+            " Invocation: abc123",
+            "      Agent: coder",
+            "    Session: default",
+            "        CWD: /workspace",
+            "     Socket: /ctx/home/1000/agent/coder/session/default/terminal/main.sock",
+            " Runtime Socket: /run/user/1000/cortexfs/terminal/coder/default/main.sock",
+        ]
+    );
+}
+
+#[test]
 fn agent_attach_missing_terminal_suggests_start_command() {
     let socket = unique_test_dir("agent-attach-missing-terminal").join("main.sock");
     let result = stream_terminal_socket(&socket, true, "coder", "test");
@@ -988,6 +853,24 @@ fn terminal_connect_error_classifies_socket_failures() {
 #[test]
 fn agent_repl_editor_enables_terminal_signals() {
     assert!(agent_repl_editor_config().enable_signals());
+}
+
+#[test]
+fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
+    let root = clean_test_dir("ctx-agent-repl-model-summary");
+    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
+    assert!(fs::create_dir_all(root.join("model")).is_ok());
+    assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
+    assert!(
+        std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))
+            .is_ok()
+    );
+
+    assert_eq!(agent_repl_prompt(false, "coder", "default"), "coder/default ❯ ");
+    assert_eq!(
+        agent_repl_model_summary(false, &root, "coder"),
+        "main -> /ctx/model/localhost/gpt-5.4-mini (missing)"
+    );
 }
 
 #[test]
@@ -1345,9 +1228,20 @@ fn parses_bootstrap_and_mount_commands() {
     let bootstrap = cmd!("bootstrap");
     assert!(matches!(bootstrap, Ok(Command::Bootstrap { source: None })));
 
+    let update = cmd!("update");
+    assert!(matches!(update, Ok(Command::Bootstrap { source: None })));
+
     let bootstrap_source = cmd!("bootstrap", "/tmp/cortexfs-source");
     assert!(matches!(
         bootstrap_source,
+        Ok(Command::Bootstrap {
+            source: Some(ref source)
+        }) if source == Path::new("/tmp/cortexfs-source")
+    ));
+
+    let update_source = cmd!("update", "/tmp/cortexfs-source");
+    assert!(matches!(
+        update_source,
         Ok(Command::Bootstrap {
             source: Some(ref source)
         }) if source == Path::new("/tmp/cortexfs-source")
@@ -1450,6 +1344,24 @@ fn parses_provider_preset_commands() {
         cmd!("provider", "preset", "install", "anthropic"),
         Ok(Command::Provider(ProviderArgs::PresetInstall { ref preset }))
             if preset == "anthropic"
+    ));
+}
+
+#[test]
+fn parses_provider_secret_commands() {
+    assert!(matches!(
+        cmd!("provider", "secret", "set", "local"),
+        Ok(Command::Provider(ProviderArgs::SecretSet {
+            ref provider,
+            ref slot
+        })) if provider == "local" && slot == "default"
+    ));
+    assert!(matches!(
+        cmd!("provider", "secret", "status", "openai", "--slot", "office"),
+        Ok(Command::Provider(ProviderArgs::SecretStatus {
+            ref provider,
+            ref slot
+        })) if provider == "openai" && slot == "office"
     ));
 }
 

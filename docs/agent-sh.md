@@ -1,7 +1,7 @@
 # agent.sh
 
-`agent.sh` is a tiny Linux compatibility frontend for the Rust-owned
-`ctx agent-sh` entrypoint. It is not the CortexFS runtime, a socket protocol
+`agent.sh` is a tiny Linux defaults frontend for the Rust-owned
+`ctx agent` commands. It is not the CortexFS runtime, a socket protocol
 implementation, a provider SDK, a scheduler, or a private chat database.
 
 It depends on Bash and one `ctx` binary. It does not use `nc`, `jq`, Python,
@@ -24,8 +24,8 @@ agent.sh --help
 
 ## Boundary
 
-`agent.sh` is an executable resolver, not an ABI reader. It resolves `ctx` and
-then execs `ctx agent-sh "$@"`. Legacy flag routing and validation live in Rust.
+`agent.sh` is a small defaults wrapper, not an ABI reader. It resolves `ctx` and
+then execs `ctx agent ...` with common defaults such as `--session default`.
 The stable paths below are the CortexFS state that `ctx` reads and writes:
 
 ```text
@@ -76,8 +76,8 @@ agent.sh --raw coder "prompt"
 ```
 
 With no prompt, `agent.sh AGENT` opens the agent chat REPL through
-`ctx agent-sh AGENT`, which dispatches to `ctx agent repl AGENT`. With a prompt,
-`ctx agent-sh` dispatches to `ctx agent send AGENT`.
+`ctx agent repl AGENT --session default`. With a prompt, it dispatches to
+`ctx agent send AGENT --session default`.
 
 Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 `agent.sh --attach AGENT` only when you want to join the terminal and see

@@ -8,7 +8,6 @@ use serde_json::json;
 #[derive(Clone, Debug, Deserialize)]
 struct RunnerProviderConfig {
     base_url: String,
-    api_key_env: Option<String>,
     oauth: Option<cortexfs::OAuthProviderConfig>,
     #[serde(default)]
     formats: Vec<String>,
@@ -36,6 +35,7 @@ struct CurlJsonTarget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderRuntimeDriver {
     OpenAiChat,
+    OpenAiResponses,
     AnthropicMessages,
 }
 
@@ -53,13 +53,24 @@ impl ProviderCredential {
     }
 }
 
-fn provider_runtime_driver(config: &RunnerProviderConfig) -> ProviderRuntimeDriver {
+fn provider_runtime_driver(config: &RunnerProviderConfig, agent_call: bool) -> ProviderRuntimeDriver {
     if config
         .formats
         .iter()
         .any(|format| format.trim() == "anthropic.messages")
     {
         ProviderRuntimeDriver::AnthropicMessages
+    } else if config
+        .formats
+        .iter()
+        .any(|format| format.trim() == "openai.responses")
+        && (agent_call
+            || !config
+                .formats
+                .iter()
+                .any(|format| matches!(format.trim(), "openai.chat" | "openai-compatible")))
+    {
+        ProviderRuntimeDriver::OpenAiResponses
     } else {
         ProviderRuntimeDriver::OpenAiChat
     }
@@ -80,12 +91,11 @@ fn provider_chat_completion(
         env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
     let route = fs::read_to_string(ctx_root.join("model").join("route")).ok();
     let route = provider_route(&config, provider, model, route.as_deref())?;
-    let driver = provider_runtime_driver(&config);
-    let credential = provider_credential(&config, route.key_slot.as_deref(), driver)?
-        .ok_or_else(|| format!("missing provider credential: {provider}"))?;
+    let driver = provider_runtime_driver(&config, env::var_os("CTX_AGENT").is_some());
+    let credential = provider_credential(provider, &config, route.key_slot.as_deref(), driver)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
-            let key = credential.secret();
+            let key = credential.as_ref().map(ProviderCredential::secret);
             match call_openai_chat_streaming(&route.transport, model, input, key, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
@@ -97,7 +107,16 @@ fn provider_chat_completion(
                 Err(error) => Err(error.message),
             }
         }
+        ProviderRuntimeDriver::OpenAiResponses => {
+            let content =
+                call_openai_responses(&route.transport, model, input, credential.as_ref().map(ProviderCredential::secret))?;
+            write_model_delta(stdout, run, &content)
+                .and_then(|()| stdout.flush())
+                .map_err(|error| format!("cannot write output: {error}"))
+        }
         ProviderRuntimeDriver::AnthropicMessages => {
+            let credential = credential
+                .ok_or_else(|| format!("missing provider credential: {provider}"))?;
             let content = call_anthropic_messages(&route.transport, model, input, &credential)?;
             write_model_delta(stdout, run, &content)
                 .and_then(|()| stdout.flush())
@@ -112,7 +131,10 @@ fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
         let content = fs::read_to_string(entry.path()).ok()?;
         let value = serde_json::from_str::<Value>(&content).ok()?;
         let base_url = value.get("base_url")?.as_str()?.to_owned();
-        if provider_name_from_base_url(&base_url).as_deref() != Some(provider) {
+        if provider_name_from_config(&base_url, value.get("name").and_then(Value::as_str))
+            .as_deref()
+            != Ok(provider)
+        {
             continue;
         }
         let mut config = serde_json::from_value::<RunnerProviderConfig>(value).ok()?;
@@ -289,7 +311,8 @@ struct ProviderRouteTarget {
 
 impl ProviderRouteTarget {
     fn from_provider_model(provider: &str, model: &str, base_url: &str) -> Result<Self, String> {
-        let host = provider_host(base_url).ok_or_else(|| "invalid provider base_url".to_owned())?;
+        let host = cortexfs::provider_host_from_base_url(base_url)
+            .ok_or_else(|| "invalid provider base_url".to_owned())?;
         let ip = host.parse::<IpAddr>().ok();
         Ok(Self {
             provider: provider.to_owned(),
@@ -495,138 +518,113 @@ fn is_url(value: &str) -> bool {
 }
 
 fn provider_credential(
+    provider: &str,
     config: &RunnerProviderConfig,
     key_slot: Option<&str>,
     driver: ProviderRuntimeDriver,
 ) -> Result<Option<ProviderCredential>, String> {
-    let Some(provider) = provider_name_from_base_url(&config.base_url) else {
-        return Ok(None);
-    };
     let account = key_slot.unwrap_or("default");
-    let api_key = resolve_api_key_from_env_names(
-        &provider_key_names(config, key_slot),
-        &provider_keychain_service(&provider),
-        account,
-    )
-    .map_err(|_error| format!("keychain unavailable: {provider}"))?;
-    if let Some(api_key) = api_key {
+    if let Some(api_key) = provider_secret_from_runtime_file(provider, account)
+        .map_err(|_error| format!("runtime provider secret unavailable: {provider}"))?
+    {
         return Ok(Some(match driver {
             ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
-            ProviderRuntimeDriver::OpenAiChat => ProviderCredential::Bearer(api_key),
+            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
+                ProviderCredential::Bearer(api_key)
+            }
+        }));
+    }
+    if let Some(api_key) = provider_secret_from_inherited_fd(provider, account)
+        .map_err(|_error| format!("inherited provider secret unavailable: {provider}"))?
+    {
+        return Ok(Some(match driver {
+            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
+            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
+                ProviderCredential::Bearer(api_key)
+            }
+        }));
+    }
+    if let Some(api_key) = cortexfs::read_provider_system_secret(provider, account)
+        .map_err(|_error| format!("system provider secret unavailable: {provider}"))?
+    {
+        return Ok(Some(match driver {
+            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
+            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
+                ProviderCredential::Bearer(api_key)
+            }
         }));
     }
     let Some(oauth) = config.oauth.as_ref() else {
         return Ok(None);
     };
     if key_slot.is_none() {
-        return cortexfs::resolve_oauth_access_token(&provider, oauth)
+        return cortexfs::resolve_oauth_access_token(provider, oauth)
             .map(|token| token.map(ProviderCredential::Bearer))
             .map_err(|_error| format!("oauth credential unavailable: {provider}"));
     }
     Ok(None)
 }
 
-fn provider_key_names(config: &RunnerProviderConfig, key_slot: Option<&str>) -> Vec<String> {
-    let mut names = Vec::new();
-    if let Some(name) = config.api_key_env.as_deref() {
-        append_provider_key_name_with_slot(name, key_slot, &mut names);
+fn provider_secret_from_runtime_file(
+    provider: &str,
+    account: &str,
+) -> Result<Option<String>, io::Error> {
+    if env::var("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
+        || env::var("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
+    {
+        return Ok(None);
     }
-    if let Some(host) = provider_name_from_base_url(&config.base_url) {
-        append_provider_key_name_for_host(&host, true, key_slot, &mut names);
-        append_provider_key_name_for_host(&host, false, key_slot, &mut names);
-    }
-    names
-}
-
-fn append_provider_key_name_for_host(
-    host: &str,
-    drop_api_prefix: bool,
-    key_slot: Option<&str>,
-    names: &mut Vec<String>,
-) {
-    let labels = host
-        .split('.')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    let labels = if drop_api_prefix && labels.first() == Some(&"api") {
-        labels.get(1..).unwrap_or_default()
-    } else {
-        labels.as_slice()
+    let Ok(path) = env::var("CTX_PROVIDER_SECRET_PATH") else {
+        return Ok(None);
     };
-    if labels.is_empty() {
-        return;
+    if path.is_empty() {
+        return Ok(None);
     }
-    let name = labels
-        .iter()
-        .map(|part| part.to_ascii_uppercase())
-        .collect::<Vec<_>>()
-        .join("_")
-        + "_API_KEY";
-    append_provider_key_name_with_slot(&name, key_slot, names);
-}
-
-fn append_provider_key_name_with_slot(name: &str, key_slot: Option<&str>, names: &mut Vec<String>) {
-    if let Some(slot) = key_slot.and_then(env_slot_suffix) {
-        append_provider_key_name(&format!("{name}_{slot}"), names);
-        if let Some(prefix) = name.strip_suffix("_API_KEY") {
-            append_provider_key_name(&format!("{prefix}_{slot}_API_KEY"), names);
-        }
-    }
-    append_provider_key_name(name, names);
-}
-
-fn env_slot_suffix(slot: &str) -> Option<String> {
-    let mut value = String::new();
-    for byte in slot.bytes() {
-        match byte {
-            b'a'..=b'z' => value.push(char::from(byte.to_ascii_uppercase())),
-            b'A'..=b'Z' | b'0'..=b'9' => value.push(char::from(byte)),
-            b'.' | b'-' | b'_' => value.push('_'),
-            _ => return None,
-        }
-    }
-    (!value.is_empty()).then_some(value)
-}
-
-fn append_provider_key_name(name: &str, names: &mut Vec<String>) {
-    if is_provider_key_name(name) && !names.contains(&name.to_owned()) {
-        names.push(name.to_owned());
+    let secret = fs::read_to_string(path)?;
+    let secret = secret.trim_end_matches(['\r', '\n']);
+    if secret.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(secret.to_owned()))
     }
 }
 
-fn is_provider_key_name(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
+fn provider_secret_from_inherited_fd(
+    provider: &str,
+    account: &str,
+) -> Result<Option<String>, io::Error> {
+    if env::var("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
+        || env::var("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
+    {
+        return Ok(None);
+    }
+    let Ok(fd) = env::var("CTX_PROVIDER_SECRET_FD") else {
+        return Ok(None);
+    };
+    if fd.is_empty() || !fd.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Ok(None);
+    }
+    let secret = fs::read_to_string(format!("/proc/self/fd/{fd}"))?;
+    let secret = secret.trim_end_matches(['\r', '\n']);
+    if secret.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(secret.to_owned()))
+    }
 }
 
-fn provider_keychain_service(provider: &str) -> String {
-    format!("cortexfs:{provider}")
-}
-
-fn provider_name_from_base_url(base_url: &str) -> Option<String> {
-    let host = provider_host(base_url)?;
-    (!host.is_empty()).then_some(host)
-}
-
-fn provider_host(base_url: &str) -> Option<String> {
-    let host = base_url
-        .trim()
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split(['/', ':'])
-        .next()?
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
-    (!host.is_empty()).then_some(host)
+fn provider_name_from_config(
+    base_url: &str,
+    name: Option<&str>,
+) -> Result<String, cortexfs::ProviderNameError> {
+    cortexfs::provider_name_from_config(base_url, name)
 }
 
 fn call_openai_chat(
     transport: &ResolvedTransport,
     model: &str,
     input: &str,
-    api_key: &str,
+    api_key: Option<&str>,
 ) -> Result<String, String> {
     let target = chat_completions_target(transport);
     let body = json!({
@@ -637,6 +635,23 @@ fn call_openai_chat(
     .to_string();
     let output = run_curl_json(&target, api_key, &body)?;
     parse_openai_chat_content(&output)
+}
+
+fn call_openai_responses(
+    transport: &ResolvedTransport,
+    model: &str,
+    input: &str,
+    api_key: Option<&str>,
+) -> Result<String, String> {
+    let target = responses_target(transport);
+    let body = json!({
+        "model": model,
+        "input": provider_messages(input),
+        "stream": false
+    })
+    .to_string();
+    let output = run_curl_json(&target, api_key, &body)?;
+    parse_openai_response_content(&output)
 }
 
 fn call_anthropic_messages(
@@ -666,7 +681,7 @@ fn call_openai_chat_streaming(
     transport: &ResolvedTransport,
     model: &str,
     input: &str,
-    api_key: &str,
+    api_key: Option<&str>,
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
@@ -777,8 +792,12 @@ fn provider_messages_for_agent(
     )
 }
 
-fn run_curl_json(target: &CurlJsonTarget, api_key: &str, body: &str) -> Result<Vec<u8>, String> {
-    let headers = [format!("Authorization: Bearer {api_key}")];
+fn run_curl_json(
+    target: &CurlJsonTarget,
+    api_key: Option<&str>,
+    body: &str,
+) -> Result<Vec<u8>, String> {
+    let headers = openai_headers(api_key);
     run_curl_json_with_headers(target, &headers, body)
 }
 
@@ -793,17 +812,37 @@ fn run_curl_json_with_headers(
     if output.status.success() {
         Ok(output.stdout)
     } else {
-        Err("provider request failed".to_owned())
+        Err(provider_request_failure_message(&output))
     }
+}
+
+fn provider_request_failure_message(output: &std::process::Output) -> String {
+    let body = String::from_utf8_lossy(&output.stdout);
+    let body = body.trim();
+    if !body.is_empty() {
+        return format!("provider request failed with {}: {body}", output.status);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        return format!("provider request failed with {}: {stderr}", output.status);
+    }
+    format!("provider request failed with {}", output.status)
 }
 
 fn start_curl_json(
     target: &CurlJsonTarget,
-    api_key: &str,
+    api_key: Option<&str>,
     body: &str,
 ) -> Result<std::process::Child, String> {
-    let headers = [format!("Authorization: Bearer {api_key}")];
+    let headers = openai_headers(api_key);
     start_curl_json_with_headers(target, &headers, body)
+}
+
+fn openai_headers(api_key: Option<&str>) -> Vec<String> {
+    api_key.map_or_else(Vec::new, |api_key| {
+        vec![format!("Authorization: Bearer {api_key}")]
+    })
 }
 
 fn start_curl_json_with_headers(
@@ -816,7 +855,7 @@ fn start_curl_json_with_headers(
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("cannot start curl: {error}"))?;
     let Some(mut stdin) = child.stdin.take() else {
@@ -861,6 +900,38 @@ fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
         .or_else(|| value.get("output_text").and_then(Value::as_str))
         .map(str::to_owned)
         .ok_or_else(|| "provider response missing content".to_owned())
+}
+
+fn parse_openai_response_content(output: &[u8]) -> Result<String, String> {
+    let value = serde_json::from_slice::<Value>(output)
+        .map_err(|error| format!("invalid provider json: {error}"))?;
+    if let Some(text) = value.get("output_text").and_then(Value::as_str)
+        && !text.is_empty()
+    {
+        return Ok(text.to_owned());
+    }
+    let mut content = String::new();
+    if let Some(items) = value.get("output").and_then(Value::as_array) {
+        for item in items {
+            let Some(parts) = item.get("content").and_then(Value::as_array) else {
+                continue;
+            };
+            for part in parts {
+                if matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("output_text" | "text")
+                ) && let Some(text) = part.get("text").and_then(Value::as_str)
+                {
+                    content.push_str(text);
+                }
+            }
+        }
+    }
+    if content.is_empty() {
+        Err("provider response missing content".to_owned())
+    } else {
+        Ok(content)
+    }
 }
 
 fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
@@ -919,6 +990,15 @@ fn chat_completions_url(base_url: &str) -> String {
     }
 }
 
+fn responses_url(base_url: &str) -> String {
+    let base = base_url.trim().trim_end_matches('/');
+    if base.rsplit('/').next() == Some("v1") {
+        format!("{base}/responses")
+    } else {
+        format!("{base}/v1/responses")
+    }
+}
+
 fn chat_completions_target(transport: &ResolvedTransport) -> CurlJsonTarget {
     let (base_url, unix_socket) = match *transport {
         ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
@@ -931,6 +1011,22 @@ fn chat_completions_target(transport: &ResolvedTransport) -> CurlJsonTarget {
     };
     CurlJsonTarget {
         url: chat_completions_url(base_url),
+        unix_socket,
+    }
+}
+
+fn responses_target(transport: &ResolvedTransport) -> CurlJsonTarget {
+    let (base_url, unix_socket) = match *transport {
+        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
+            (base_url, None)
+        }
+        ResolvedTransport::Unix {
+            ref base_url,
+            ref socket_path,
+        } => (base_url, Some(socket_path.clone())),
+    };
+    CurlJsonTarget {
+        url: responses_url(base_url),
         unix_socket,
     }
 }

@@ -1,6 +1,8 @@
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::io::{self, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -9,7 +11,7 @@ use cortexfs::{
     serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
-use nix::unistd::{Gid, Uid, getuid, setgid, setgroups, setuid};
+use nix::unistd::{Gid, Uid, chown};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 
@@ -40,49 +42,132 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let session_root = view.home().join("session");
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
-    drop_to_agent_identity(view.identity())?;
+    repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
+    let provider_secret =
+        cortexfs::read_provider_system_secret_for_model(&config.source, view.model())
+            .map_err(|_error| format!("provider secret unavailable: {}", view.model()))?;
+    let mut runtime_env = view.env().to_vec();
+    let runtime_secret = provider_secret
+        .as_ref()
+        .map(|secret| {
+            runtime_provider_secret_file(
+                view.identity().uid(),
+                view.identity().gid(),
+                &config.agent,
+                secret,
+            )
+        })
+        .transpose()?;
+    if let Some(secret) = runtime_secret.as_ref() {
+        runtime_env.extend(secret.env());
+    }
     let agent_executable = config.source.join("agent").join(&config.agent);
-    serve_agent_executable_socket_listener_once(
+    let result = serve_agent_executable_socket_listener_once(
         &listener,
         Some(peer_policy),
         AgentExecutableSocketRuntime {
             ctx_root: Path::new(cortexfs::CTX_ROOT),
             source_root: &config.source,
             identity: view.identity(),
-            env: view.env(),
+            env: &runtime_env,
             session_root: &session_root,
             default_cwd: &default_cwd,
             model: Some(view.model()),
             agent_name: view.agent_name(),
             agent_executable: &agent_executable,
         },
-    )
-    .map(|_response| ())
-    .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
+    );
+    repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
+    if let Some(secret) = runtime_secret.as_ref() {
+        secret.cleanup();
+    }
+    result
+        .map(|_response| ())
+        .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
 }
 
-fn drop_to_agent_identity(identity: &cortexfs::AgentUnixIdentity) -> Result<(), String> {
-    if getuid().as_raw() != 0 {
-        if getuid().as_raw() == identity.uid() {
-            return Ok(());
+fn repair_agent_session_permissions(session_root: &Path, uid: u32, gid: u32) -> Result<(), String> {
+    if !session_root.exists() {
+        return Ok(());
+    }
+    repair_path_permissions(session_root, uid, gid)
+}
+
+fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect session path {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    chown(path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+        .map_err(|error| format!("cannot chown session path {}: {error}", path.display()))?;
+    let mode = if metadata.is_dir() { 0o700 } else { 0o600 };
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+        .map_err(|error| format!("cannot chmod session path {}: {error}", path.display()))?;
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)
+            .map_err(|error| format!("cannot read session dir {}: {error}", path.display()))?
+        {
+            let entry = entry.map_err(|error| format!("cannot read session dir entry: {error}"))?;
+            repair_path_permissions(&entry.path(), uid, gid)?;
         }
-        return Err(format!(
-            "agent runtime must run as root or uid {}; current uid is {}",
-            identity.uid(),
-            getuid().as_raw()
-        ));
+    }
+    Ok(())
+}
+
+struct RuntimeProviderSecretFile {
+    path: PathBuf,
+    provider: String,
+    account: String,
+}
+
+impl RuntimeProviderSecretFile {
+    fn env(&self) -> [(String, String); 3] {
+        [
+            (
+                "CTX_PROVIDER_SECRET_PATH".to_owned(),
+                self.path.display().to_string(),
+            ),
+            (
+                "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+                self.provider.clone(),
+            ),
+            ("CTX_PROVIDER_SECRET_SLOT".to_owned(), self.account.clone()),
+        ]
     }
 
-    let groups = identity
-        .groups()
-        .iter()
-        .copied()
-        .map(Gid::from_raw)
-        .collect::<Vec<_>>();
-    setgroups(&groups).map_err(|error| format!("drop supplementary groups: {error}"))?;
-    setgid(Gid::from_raw(identity.gid())).map_err(|error| format!("drop gid: {error}"))?;
-    setuid(Uid::from_raw(identity.uid())).map_err(|error| format!("drop uid: {error}"))?;
-    Ok(())
+    fn cleanup(&self) {
+        let _ignored = fs::remove_file(&self.path);
+    }
+}
+
+fn runtime_provider_secret_file(
+    uid: u32,
+    gid: u32,
+    agent: &str,
+    secret: &cortexfs::ProviderSystemSecret,
+) -> Result<RuntimeProviderSecretFile, String> {
+    let dir = PathBuf::from(format!("/run/user/{uid}/cortexfs/credentials"));
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("cannot create runtime credential dir: {error}"))?;
+    let path = dir.join(format!("{agent}-provider-{}", secret.account()));
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|error| format!("cannot create runtime credential file: {error}"))?;
+    file.write_all(secret.secret().as_bytes())
+        .and_then(|()| file.write_all(b"\n"))
+        .map_err(|error| format!("cannot write runtime credential file: {error}"))?;
+    chown(&path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+        .map_err(|error| format!("cannot chown runtime credential file: {error}"))?;
+    Ok(RuntimeProviderSecretFile {
+        path,
+        provider: secret.provider().to_owned(),
+        account: secret.account().to_owned(),
+    })
 }
 
 fn write_error(line: &str) -> io::Result<()> {

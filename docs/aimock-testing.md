@@ -35,16 +35,16 @@ environment:
 
 ```json
 {
-  "base_url": "http://127.0.0.1:4010/v1",
-  "api_key_env": "CORTEXFS_AIMOCK_API_KEY"
+  "name": "aimock",
+  "base_url": "http://127.0.0.1:4010/v1"
 }
 ```
 
-Then set:
+Then store the fixture key in the CortexFS system secret store:
 
 ```bash
-export CORTEXFS_AIMOCK_API_KEY=mock
+printf '%s\n' mock | sudo ctx provider secret set aimock
 ```
 
-This stays outside the `/ctx` root ABI. It is a local provider test fixture,
-not a new CortexFS provider namespace.
+This stays outside the `/ctx` root ABI and outside process environments. It is a
+local provider test fixture, not a new CortexFS provider namespace.

@@ -23,6 +23,7 @@ ctx abi
 ctx env
 ctx root
 ctx bootstrap
+ctx update
 ctx mount
 
 ctx ls
@@ -73,6 +74,10 @@ ctx cluster
 Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
+
+`ctx update [SOURCE]` is an alias for `ctx bootstrap [SOURCE]`. It updates the
+reference source tree only; it does not remount `/ctx`, start a watcher, or add
+a second refresh boundary.
 
 Top-level agent session shortcuts follow the same current-session default as
 their `ctx agent ...` forms:
@@ -186,12 +191,16 @@ ctx agent watch <agent> --session <session>
 ctx agent attach <agent> --session <session>
 ```
 
-When `CTX_PATH` is not set, `tsh` reads `CTX_HOME/.tshrc` if it exists. The
-file is data-only and supports a single stable setting:
+For standalone human sessions, `tsh` reads `CTX_HOME/.tshrc` before inherited
+process `CTX_PATH` when the file exists. The file is data-only and supports a
+single stable setting:
 
 ```text
 CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
 ```
+
+Inside an agent terminal, `tsh` keeps the runtime-provided process `CTX_PATH`
+authoritative.
 
 Do not let `/ctx/bin` become a second `/usr/bin`.
 

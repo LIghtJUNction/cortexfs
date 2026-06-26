@@ -12,10 +12,23 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
     ensure_reference_agent(root, "reviewer", Some("agent:base"))?;
     remove_deprecated_reference_placeholder_tools(root)?;
     ensure_reference_global_tools(root)?;
+    ensure_reference_docs(root)?;
     ensure_reference_home(root)?;
     remove_deprecated_reference_home_tool_aliases(root)?;
     migrate_reference_legacy_session_meta_models(root)?;
     Ok(ReferenceTreeBootstrap::new(root.to_path_buf()))
+}
+
+fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeError> {
+    let docs = root.join("shared").join(MANUAL_SHARED_DIR);
+    let man = docs.join(MANUAL_MAN_DIR);
+    create_reference_dir(&docs)?;
+    create_reference_dir(&man)?;
+    write_reference_text(&docs.join(MANUAL_INDEX_FILE), MANUAL_INDEX)?;
+    for manual in MANUALS {
+        write_reference_text(&man.join(manual.file_name), manual.content)?;
+    }
+    Ok(())
 }
 
 fn create_reference_root(root: &Path) -> Result<(), ReferenceTreeError> {

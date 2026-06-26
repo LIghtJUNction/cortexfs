@@ -181,11 +181,86 @@ fn shell_quote(value: &str) -> String {
     }
 }
 
-fn print_lines(lines: &[&str]) -> Result<(), CliError> {
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_BOLD_CYAN: &str = "\x1b[1;36m";
+const ANSI_BOLD_BLUE: &str = "\x1b[1;34m";
+const ANSI_BOLD_YELLOW: &str = "\x1b[1;33m";
+const ANSI_CYAN: &str = "\x1b[36m";
+const ANSI_GREEN: &str = "\x1b[32m";
+const ANSI_YELLOW: &str = "\x1b[33m";
+const ANSI_RED: &str = "\x1b[31m";
+const ANSI_BLUE: &str = "\x1b[34m";
+const ANSI_DIM: &str = "\x1b[2m";
+
+fn color_enabled() -> bool {
+    if env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    if env::var_os("CLICOLOR_FORCE").is_some_and(|value| value != "0") {
+        return true;
+    }
+    io::stdout().is_terminal()
+}
+
+fn styled(enabled: bool, style: &str, text: &str) -> String {
+    if enabled {
+        format!("{style}{text}{ANSI_RESET}")
+    } else {
+        text.to_owned()
+    }
+}
+
+fn print_help_lines(lines: &[&str]) -> Result<(), CliError> {
+    let color = color_enabled();
     for line in lines {
-        print_line(line)?;
+        print_line(&help_line(color, line))?;
     }
     Ok(())
+}
+
+fn help_line(color: bool, line: &str) -> String {
+    if line.is_empty() {
+        return String::new();
+    }
+    if line == "ctx - CortexFS filesystem management CLI" {
+        return styled(color, ANSI_BOLD_CYAN, line);
+    }
+    if line.ends_with(':') && !line.starts_with(' ') {
+        return styled(color, ANSI_BOLD_YELLOW, line);
+    }
+    if line.trim_start().starts_with("ctx ") {
+        return styled(color, ANSI_GREEN, line);
+    }
+    styled(color, ANSI_DIM, line)
+}
+
+fn print_status_field(color: bool, label: &str, value: &str) -> Result<(), CliError> {
+    print_line(&format!(
+        "{} {value}",
+        styled(color, ANSI_BOLD_BLUE, label)
+    ))
+}
+
+fn status_state_value(color: bool, value: &str) -> String {
+    let style = match value {
+        "running" | "ready" => ANSI_GREEN,
+        "available" | "unknown" => ANSI_YELLOW,
+        "invalid" | "missing" | "failed" | "error" => ANSI_RED,
+        _ => ANSI_CYAN,
+    };
+    styled(color, style, value)
+}
+
+fn status_bool_value(color: bool, value: &str, ok: bool) -> String {
+    styled(color, if ok { ANSI_GREEN } else { ANSI_RED }, value)
+}
+
+fn status_tree_line(color: bool, line: &str) -> String {
+    let line = line
+        .replace("[idle]", &styled(color, ANSI_DIM, "[idle]"))
+        .replace("[running]", &styled(color, ANSI_GREEN, "[running]"))
+        .replace("[stopped]", &styled(color, ANSI_RED, "[stopped]"));
+    styled(color, ANSI_CYAN, &line)
 }
 
 fn print_line(line: &str) -> Result<(), CliError> {

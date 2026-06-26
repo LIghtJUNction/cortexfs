@@ -8,7 +8,9 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
         if !config.config.enabled {
             continue;
         }
-        let Some(provider) = provider_name_from_base_url(&config.config.base_url) else {
+        let Ok(provider) =
+            provider_name_from_config(&config.config.base_url, config.config.name.as_deref())
+        else {
             continue;
         };
         let Some(api_key) = provider_bearer_token(&config.config, &provider) else {
@@ -62,67 +64,12 @@ fn provider_model_cache_path(cache_dir: &Path, provider: &str) -> PathBuf {
 }
 
 fn provider_bearer_token(config: &ProviderConfig, provider: &str) -> Option<String> {
-    let api_key = resolve_api_key_from_env_names(
-        &provider_api_key_env_names(config),
-        &provider_keychain_service(provider),
-        "default",
-    )
-    .ok()
-    .flatten();
+    let api_key = read_provider_system_secret(provider, "default").ok().flatten();
     if api_key.is_some() {
         return api_key;
     }
     let oauth = config.oauth.as_ref()?;
     resolve_oauth_access_token(provider, oauth).ok().flatten()
-}
-
-fn provider_api_key_env_names(config: &ProviderConfig) -> Vec<String> {
-    let mut names = Vec::new();
-    if let Some(name) = config.api_key_env.as_deref()
-        && is_env_name(name)
-    {
-        names.push(name.to_owned());
-    }
-    if let Some(host) = provider_host(&config.base_url) {
-        append_env_name_for_host(&host, true, &mut names);
-        append_env_name_for_host(&host, false, &mut names);
-    }
-    names
-}
-
-fn append_env_name_for_host(host: &str, drop_api_prefix: bool, names: &mut Vec<String>) {
-    let labels = host
-        .split('.')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    let labels = if drop_api_prefix && labels.first() == Some(&"api") {
-        labels.get(1..).unwrap_or_default()
-    } else {
-        labels.as_slice()
-    };
-    if labels.is_empty() {
-        return;
-    }
-    let name = labels
-        .iter()
-        .map(|part| part.to_ascii_uppercase())
-        .collect::<Vec<_>>()
-        .join("_")
-        + "_API_KEY";
-    if is_env_name(&name) && !names.contains(&name) {
-        names.push(name);
-    }
-}
-
-fn is_env_name(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
-}
-
-fn provider_keychain_service(provider: &str) -> String {
-    format!("cortexfs:{provider}")
 }
 
 #[derive(Deserialize)]

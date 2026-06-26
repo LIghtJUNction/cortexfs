@@ -58,9 +58,7 @@ fn projected_provider_models(
         if !config.enabled {
             continue;
         }
-        let Some(provider) = provider_name_from_base_url(&config.base_url) else {
-            continue;
-        };
+        let provider = projected_provider_name(&config)?;
         let driver = provider_driver_route_table(&config.formats);
         let cap = provider_capability_text(&config.formats);
         for model in provider_config_models(&config, cache_dir, &provider) {
@@ -218,32 +216,9 @@ fn append_provider_model_name(model: &str, models: &mut Vec<String>, seen: &mut 
     }
 }
 
-fn provider_name_from_base_url(base_url: &str) -> Option<String> {
-    let host = provider_host(base_url)?;
-    is_object_name(&host).then_some(host)
-}
-
-fn provider_host(base_url: &str) -> Option<String> {
-    let mut rest = base_url.trim();
-    if let Some(value) = rest.strip_prefix("https://") {
-        rest = value;
-    } else if let Some(value) = rest.strip_prefix("http://") {
-        rest = value;
-    }
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default()
-        .rsplit('@')
-        .next()
-        .unwrap_or_default();
-    let host = authority
-        .split(':')
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
-    (!host.is_empty()).then_some(host)
+fn projected_provider_name(config: &ProviderConfig) -> Result<String, FuseV1Error> {
+    provider_name_from_config(&config.base_url, config.name.as_deref())
+        .map_err(|_error| FuseV1Error::InvalidContent)
 }
 
 fn normalize_provider_base_url(base_url: &str) -> String {

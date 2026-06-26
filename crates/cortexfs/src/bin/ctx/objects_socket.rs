@@ -699,7 +699,14 @@ fn current_session_name(session_root: &Path) -> Result<String, CliError> {
                 )))
             }
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok("default".to_owned()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            Ok("default".to_owned())
+        }
         Err(error) => Err(CliError::unavailable(format!(
             "cannot read {}: {error}",
             current_path.display()

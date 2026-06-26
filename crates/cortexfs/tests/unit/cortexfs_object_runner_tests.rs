@@ -1,8 +1,10 @@
 use super::{
-    is_passthrough_tool, openai_stream_event, parse_anthropic_message_content, provider_key_names,
-    provider_messages_for_agent, provider_route, provider_transport, resolve_model_alias,
-    resolved_model_path, run, run_cli_tool_to_writer, ObjectPath, OpenAiStreamEvent,
-    ProviderRoute, ResolvedTransport, RunnerProviderConfig,
+    is_passthrough_tool, openai_stream_event, parse_anthropic_message_content,
+    parse_openai_response_content, provider_messages_for_agent,
+    provider_request_failure_message, provider_route, provider_runtime_driver, provider_transport,
+    resolve_model_alias, resolved_model_path, missing_model_message, run, run_cli_tool_to_writer,
+    ObjectPath, OpenAiStreamEvent, ProviderRoute, ProviderRuntimeDriver, ResolvedTransport,
+    RunnerProviderConfig,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -53,8 +55,8 @@ fn runner_rejects_missing_object_path() {
 #[test]
 fn runner_rejects_unknown_model() {
     assert_eq!(
-        run(vec![OsString::from("/ctx/model/openai/gpt-4o")]),
-        Err("missing provider: openai".to_owned())
+        run(vec![OsString::from("/ctx/model/missing-provider/gpt-4o")]),
+        Err("missing provider: missing-provider".to_owned())
     );
 }
 
@@ -94,6 +96,21 @@ fn model_alias_rejects_cross_class_symlink_target() -> Result<(), Box<dyn std::e
     assert_eq!(
         resolve_model_alias(&root, "main"),
         Err("invalid model alias target: main".to_owned())
+    );
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn missing_model_message_names_dangling_alias_target() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-missing-model-message")?;
+    fs::create_dir_all(root.join("model"))?;
+    symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))?;
+
+    assert_eq!(
+        missing_model_message(&root, "main", &root.join("model/localhost/gpt-5.4-mini")),
+        "missing model: main -> /ctx/model/localhost/gpt-5.4-mini"
     );
 
     let _ignored = fs::remove_dir_all(root);
@@ -156,6 +173,24 @@ fn openai_stream_event_does_not_mix_reasoning_into_answer_text() {
 }
 
 #[test]
+fn openai_response_content_prefers_output_text() {
+    assert_eq!(
+        parse_openai_response_content(br#"{"output_text":"hello codex"}"#),
+        Ok("hello codex".to_owned())
+    );
+}
+
+#[test]
+fn openai_response_content_parses_output_parts() {
+    assert_eq!(
+        parse_openai_response_content(
+            br#"{"output":[{"content":[{"type":"output_text","text":"hello "},{"type":"output_text","text":"codex"}]}]}"#
+        ),
+        Ok("hello codex".to_owned())
+    );
+}
+
+#[test]
 fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     let messages = provider_messages_for_agent(
         "what tools?",
@@ -211,49 +246,46 @@ fn test_prompt_context() -> AgentPromptContext {
 }
 
 #[test]
-fn provider_key_names_accept_configured_and_host_fallbacks() {
+fn provider_runtime_driver_uses_responses_for_openai_agent_calls() {
+    let config = test_provider_config_with_formats(
+        "https://api.openai.com/v1",
+        &["openai.chat", "openai.responses"],
+    );
+
     assert_eq!(
-        provider_key_names(
-            &test_provider_config("https://api.openai.com/v1", Some("CORTEXFS_OPENAI_KEY")),
-            None
-        ),
-        vec![
-            "CORTEXFS_OPENAI_KEY".to_owned(),
-            "OPENAI_COM_API_KEY".to_owned(),
-            "API_OPENAI_COM_API_KEY".to_owned(),
-        ]
+        provider_runtime_driver(&config, false),
+        ProviderRuntimeDriver::OpenAiChat
+    );
+    assert_eq!(
+        provider_runtime_driver(&config, true),
+        ProviderRuntimeDriver::OpenAiResponses
     );
 }
 
 #[test]
-fn provider_key_names_reject_invalid_configured_names() {
+fn provider_runtime_driver_uses_responses_when_chat_is_absent() {
+    let config = test_provider_config_with_formats(
+        "https://api.openai.com/v1",
+        &["openai.responses"],
+    );
+
     assert_eq!(
-        provider_key_names(
-            &test_provider_config("https://localhost:11434/v1", Some("bad-name")),
-            None
-        ),
-        vec!["LOCALHOST_API_KEY".to_owned()]
+        provider_runtime_driver(&config, false),
+        ProviderRuntimeDriver::OpenAiResponses
     );
 }
 
 #[test]
-fn provider_key_names_support_route_key_slots() {
+fn provider_request_failure_includes_response_body() {
+    let output = std::process::Output {
+        status: std::os::unix::process::ExitStatusExt::from_raw(22 << 8),
+        stdout: br#"{"error":"Missing API key"}"#.to_vec(),
+        stderr: Vec::new(),
+    };
+
     assert_eq!(
-        provider_key_names(
-            &test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
-            Some("office-key")
-        ),
-        vec![
-            "OPENAI_API_KEY_OFFICE_KEY".to_owned(),
-            "OPENAI_OFFICE_KEY_API_KEY".to_owned(),
-            "OPENAI_API_KEY".to_owned(),
-            "OPENAI_COM_API_KEY_OFFICE_KEY".to_owned(),
-            "OPENAI_COM_OFFICE_KEY_API_KEY".to_owned(),
-            "OPENAI_COM_API_KEY".to_owned(),
-            "API_OPENAI_COM_API_KEY_OFFICE_KEY".to_owned(),
-            "API_OPENAI_COM_OFFICE_KEY_API_KEY".to_owned(),
-            "API_OPENAI_COM_API_KEY".to_owned(),
-        ]
+        provider_request_failure_message(&output),
+        r#"provider request failed with exit status: 22: {"error":"Missing API key"}"#
     );
 }
 
@@ -261,7 +293,7 @@ fn provider_key_names_support_route_key_slots() {
 fn provider_transport_defaults_to_direct_base_url() {
     assert_eq!(
         provider_transport(
-            &test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY")),
+            &test_provider_config("https://api.openai.com/v1"),
             None
         ),
         Ok(ResolvedTransport::Direct {
@@ -272,7 +304,7 @@ fn provider_transport_defaults_to_direct_base_url() {
 
 #[test]
 fn provider_transport_uses_exact_http_route() {
-    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+    let config = test_provider_config("https://api.openai.com/v1");
 
     assert_eq!(
         provider_transport(
@@ -287,7 +319,7 @@ fn provider_transport_uses_exact_http_route() {
 
 #[test]
 fn provider_transport_uses_wildcard_unix_route() {
-    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+    let config = test_provider_config("https://api.openai.com/v1");
 
     assert_eq!(
         provider_transport(
@@ -303,7 +335,7 @@ fn provider_transport_uses_wildcard_unix_route() {
 
 #[test]
 fn provider_route_selects_key_slot_by_model() {
-    let config = test_provider_config("https://api.openai.com/v1", Some("OPENAI_API_KEY"));
+    let config = test_provider_config("https://api.openai.com/v1");
 
     assert_eq!(
         provider_route(
@@ -331,12 +363,15 @@ fn anthropic_message_content_parses_text_parts() {
     );
 }
 
-fn test_provider_config(base_url: &str, api_key_env: Option<&str>) -> RunnerProviderConfig {
+fn test_provider_config(base_url: &str) -> RunnerProviderConfig {
+    test_provider_config_with_formats(base_url, &[])
+}
+
+fn test_provider_config_with_formats(base_url: &str, formats: &[&str]) -> RunnerProviderConfig {
     RunnerProviderConfig {
         base_url: base_url.to_owned(),
-        api_key_env: api_key_env.map(str::to_owned),
         oauth: None,
-        formats: Vec::new(),
+        formats: formats.iter().map(|format| (*format).to_owned()).collect(),
     }
 }
 

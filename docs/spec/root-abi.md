@@ -13,6 +13,16 @@ Stable root:
   tool/
   home/
   shared/
+    cortexfs-docs/
+      README.md
+      man/
+        ctx.agent.md
+        ctx.tool.md
+        ctx.model.md
+        ctx.coreutils.md
+        ctx.root-abi.md
+        ctx.session.md
+        ctx.provider.md
 ```
 
 Meaning:
@@ -365,7 +375,8 @@ PATH      normal shell command path, may include /ctx/bin
 
 `CTX_PATH` is only for tool lookup. It is not used to find models or agents.
 
-When a human starts `tsh` and `CTX_PATH` is not set, `tsh` may read:
+When a human starts standalone `tsh`, it reads the user startup file before
+inherited process `CTX_PATH` when the file exists:
 
 ```text
 /ctx/home/<uid>/.tshrc
@@ -377,9 +388,13 @@ The file is data, not shell. The stable line format is:
 CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool
 ```
 
-Blank lines and `#` comments are ignored. `tsh` must not execute `.tshrc`, must
-not process `export`, and must not use it when `CTX_PATH` is already set in the
-process environment.
+Blank lines and `#` comments are ignored. `tsh` must not execute `.tshrc` and
+must not process `export`. When `.tshrc` provides `CTX_PATH`, it overrides
+inherited process `CTX_PATH`; otherwise `tsh` falls back to inherited
+`CTX_PATH`, then to the default path.
+
+Inside an agent terminal, the runtime-provided process `CTX_PATH` remains
+authoritative and is not overridden by `.tshrc`.
 
 ## Legacy rc File
 

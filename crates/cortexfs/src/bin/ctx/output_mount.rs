@@ -1,5 +1,5 @@
 fn print_help() -> Result<(), CliError> {
-    print_lines(&[
+    print_help_lines(&[
         "ctx - CortexFS filesystem management CLI",
         "",
         "usage:",
@@ -7,7 +7,9 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] abi",
         "  ctx [--root PATH] env",
         "  ctx [--root PATH] root",
+        "  ctx man [agent|tool|model|ctx|root|session|provider]",
         "  ctx bootstrap [SOURCE]",
+        "  ctx update [SOURCE]",
         "  ctx [--root PATH] mount [--source SOURCE] [MOUNTPOINT]",
         "  ctx [--root PATH] ls [PATH|model|agent|tool]",
         "  ctx [--root PATH] which model|agent|tool NAME",
@@ -34,13 +36,14 @@ fn print_help() -> Result<(), CliError> {
         "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
         "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         "  ctx [--root PATH] agent attach NAME [--session SESSION]",
-        "  ctx [--root PATH] agent-sh [--session SESSION] AGENT [INPUT...]",
         "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
         "  ctx provider oauth status PROVIDER",
         "  ctx provider oauth refresh PROVIDER",
+        "  ctx provider secret set PROVIDER [--slot SLOT]",
+        "  ctx provider secret status PROVIDER [--slot SLOT]",
         "  ctx provider preset list",
-        "  ctx provider preset show openai|anthropic|google",
-        "  ctx provider preset install openai|anthropic|google",
+        "  ctx provider preset show openai|codex|anthropic|google",
+        "  ctx provider preset install openai|codex|anthropic|google",
         "  ctx [--root PATH] ping model/NAME|agent/NAME",
         "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN",
         "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
@@ -61,23 +64,87 @@ fn print_help() -> Result<(), CliError> {
     ])
 }
 
+fn print_man(root: &Path, topic: Option<&str>) -> Result<(), CliError> {
+    let Some(topic) = topic else {
+        return print_shared_or_builtin_man(root, MANUAL_INDEX_FILE, MANUAL_INDEX);
+    };
+    let Some(manual) = cortexfs_manual(topic) else {
+        return Err(CliError::usage(format!(
+            "unknown man topic: {topic}; expected agent, tool, model, ctx, root, session, or provider"
+        )));
+    };
+    print_shared_or_builtin_man(root, manual.file_name, manual.content)
+}
+
+fn print_shared_or_builtin_man(
+    root: &Path,
+    file_name: &str,
+    fallback: &str,
+) -> Result<(), CliError> {
+    let shared = root
+        .join("shared")
+        .join(MANUAL_SHARED_DIR)
+        .join(if file_name == MANUAL_INDEX_FILE {
+            ""
+        } else {
+            MANUAL_MAN_DIR
+        })
+        .join(file_name);
+    let content = fs::read_to_string(&shared).unwrap_or_else(|_error| fallback.to_owned());
+    print_terminal_text(ensure_trailing_newline(&content).as_ref())
+}
+
+fn ensure_trailing_newline(content: &str) -> Cow<'_, str> {
+    if content.ends_with('\n') {
+        Cow::Borrowed(content)
+    } else {
+        Cow::Owned(format!("{content}\n"))
+    }
+}
+
 #[expect(clippy::too_many_lines, reason = "CLI help topic table is intentionally flat")]
 fn print_help_topic(topic: &str) -> Result<(), CliError> {
     match topic {
-        "status" => print_lines(&["usage:", "  ctx [--root PATH] status"]),
-        "abi" => print_lines(&["usage:", "  ctx [--root PATH] abi"]),
-        "env" => print_lines(&["usage:", "  ctx [--root PATH] env"]),
-        "root" => print_lines(&["usage:", "  ctx [--root PATH] root"]),
-        "bootstrap" => print_lines(&["usage:", "  ctx bootstrap [SOURCE]"]),
-        "mount" => print_lines(&[
+        "status" => print_help_lines(&["usage:", "  ctx [--root PATH] status"]),
+        "abi" => print_help_lines(&["usage:", "  ctx [--root PATH] abi"]),
+        "env" => print_help_lines(&["usage:", "  ctx [--root PATH] env"]),
+        "root" => print_help_lines(&["usage:", "  ctx [--root PATH] root"]),
+        "man" => print_help_lines(&[
+            "usage:",
+            "  ctx man",
+            "  ctx man agent|tool|model|ctx|root|session|provider",
+            "",
+            "output:",
+            "  prints the full built-in Markdown document to stdout",
+            "  does not invoke less or any pager",
+        ]),
+        "bootstrap" => print_help_lines(&[
+            "usage:",
+            "  ctx bootstrap [SOURCE]",
+            "",
+            "alias:",
+            "  ctx update [SOURCE]",
+        ]),
+        "update" => print_help_lines(&[
+            "usage:",
+            "  ctx update [SOURCE]",
+            "",
+            "alias:",
+            "  ctx bootstrap [SOURCE]",
+            "",
+            "effect:",
+            "  updates the reference source tree only",
+            "  does not remount /ctx or start a watcher",
+        ]),
+        "mount" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] mount [--source SOURCE] [MOUNTPOINT]",
         ]),
-        "ls" => print_lines(&["usage:", "  ctx [--root PATH] ls [PATH|model|agent|tool]"]),
-        "which" => print_lines(&["usage:", "  ctx [--root PATH] which model|agent|tool NAME"]),
-        "which-tool" => print_lines(&["usage:", "  ctx [--root PATH] which-tool NAME"]),
-        "path" => print_lines(&["usage:", "  ctx [--root PATH] path shared NAME"]),
-        "history" => print_lines(&[
+        "ls" => print_help_lines(&["usage:", "  ctx [--root PATH] ls [PATH|model|agent|tool]"]),
+        "which" => print_help_lines(&["usage:", "  ctx [--root PATH] which model|agent|tool NAME"]),
+        "which-tool" => print_help_lines(&["usage:", "  ctx [--root PATH] which-tool NAME"]),
+        "path" => print_help_lines(&["usage:", "  ctx [--root PATH] path shared NAME"]),
+        "history" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] history AGENT [--session SESSION|SESSION]",
             "",
@@ -85,7 +152,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  omitting --session uses session/index/current, then default",
             "  positional SESSION is accepted for compatibility",
         ]),
-        "resume" => print_lines(&[
+        "resume" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] resume AGENT [--session SESSION|SESSION]",
             "",
@@ -97,7 +164,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  omitting --session uses session/index/current, then default",
             "  positional SESSION is accepted for compatibility",
         ]),
-        "send" => print_lines(&[
+        "send" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] send AGENT INPUT",
             "  ctx [--root PATH] send AGENT [--session SESSION] INPUT",
@@ -111,7 +178,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  omitting --session uses session/index/current, then default",
             "  positional SESSION is accepted for compatibility",
         ]),
-        "agent" => print_lines(&[
+        "agent" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent new NAME [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
             "  ctx [--root PATH] agent start NAME [--session SESSION] [--cwd PATH] [--mount SOURCE TARGET ro|rw] [--no-default-workspace]",
@@ -131,11 +198,11 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx [--root PATH] agent watch NAME [--session SESSION]",
             "  ctx [--root PATH] agent attach NAME [--session SESSION]",
         ]),
-        "agent new" => print_lines(&[
+        "agent new" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent new NAME [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]",
         ]),
-        "agent start" => print_lines(&[
+        "agent start" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent start NAME [--session SESSION] [--cwd PATH] [--mount SOURCE TARGET ro|rw] [--no-default-workspace]",
             "",
@@ -143,155 +210,141 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  binds the caller current directory to /workspace rw",
             "  starts ctxterm -> tsh inside a bwrap sandbox at /workspace",
         ]),
-        "agent stop" => print_lines(&["usage:", "  ctx [--root PATH] agent stop NAME"]),
-        "agent status" => print_lines(&["usage:", "  ctx [--root PATH] agent status NAME"]),
-        "agent ps" => print_lines(&["usage:", "  ctx [--root PATH] agent ps"]),
-        "agent send" => print_lines(&[
+        "agent stop" => print_help_lines(&["usage:", "  ctx [--root PATH] agent stop NAME"]),
+        "agent status" => print_help_lines(&["usage:", "  ctx [--root PATH] agent status NAME"]),
+        "agent ps" => print_help_lines(&["usage:", "  ctx [--root PATH] agent ps"]),
+        "agent send" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent send NAME [--session SESSION] [--raw] INPUT",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent repl" => print_lines(&[
+        "agent repl" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent repl NAME [--session SESSION] [--raw]",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent resume" => print_lines(&[
+        "agent resume" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent resume NAME [--session SESSION] [--raw]",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent history" => print_lines(&[
+        "agent history" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent history NAME [--session SESSION]",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent output" => print_lines(&[
+        "agent output" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent output NAME [--session SESSION]",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent pack" => print_lines(&[
+        "agent pack" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent pack NAME [--session SESSION]",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent prompt" => print_lines(&[
+        "agent prompt" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent prompt NAME",
             "",
             "prints the rendered runtime system prompt for the agent",
         ]),
-        "agent tools" => print_lines(&["usage:", "  ctx [--root PATH] agent tools NAME"]),
-        "agent children" => print_lines(&[
+        "agent tools" => print_help_lines(&["usage:", "  ctx [--root PATH] agent tools NAME"]),
+        "agent children" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent children NAME [--session SESSION]",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent cancel" => print_lines(&[
+        "agent cancel" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent cancel NAME [--session SESSION] [--raw] [RUN]",
             "",
             "session:",
             "  omitting --session uses session/index/current, then default",
         ]),
-        "agent watch" => print_lines(&[
+        "agent watch" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent watch NAME [--session SESSION]",
         ]),
-        "agent attach" => print_lines(&[
+        "agent attach" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] agent attach NAME [--session SESSION]",
         ]),
-        "agent-sh" => print_lines(&[
-            "usage:",
-            "  ctx [--root PATH] agent-sh [--session SESSION] AGENT",
-            "  ctx [--root PATH] agent-sh [--session SESSION] AGENT INPUT...",
-            "  ctx [--root PATH] agent-sh --chat AGENT",
-            "  ctx [--root PATH] agent-sh --attach AGENT",
-            "  ctx [--root PATH] agent-sh --watch AGENT",
-            "  ctx [--root PATH] agent-sh --resume AGENT",
-            "  ctx [--root PATH] agent-sh --history AGENT",
-            "  ctx [--root PATH] agent-sh --output AGENT",
-            "  ctx [--root PATH] agent-sh --pack AGENT",
-            "  ctx [--root PATH] agent-sh --tools AGENT",
-            "  ctx [--root PATH] agent-sh --children AGENT",
-            "  ctx [--root PATH] agent-sh --cancel AGENT [RUN]",
-            "  ctx [--root PATH] agent-sh --status AGENT",
-            "  ctx [--root PATH] agent-sh --raw AGENT \"prompt\"",
-            "",
-            "compatibility:",
-            "  agent.sh resolves ctx and execs this Rust-owned entrypoint",
-            "  no INPUT opens the human chat REPL",
-            "  INPUT sends one chat message",
-            "  --watch observes ctxterm -> tsh read-only",
-            "  --attach joins ctxterm -> tsh and starts it if needed",
-            "",
-            "session:",
-            "  omitting --session uses session/index/current, then default",
-        ]),
-        "provider" => print_lines(&[
+        "provider" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
+            "  ctx provider secret set PROVIDER [--slot SLOT]",
+            "  ctx provider secret status PROVIDER [--slot SLOT]",
             "  ctx provider preset list",
-            "  ctx provider preset show openai|anthropic|google",
-            "  ctx provider preset install openai|anthropic|google",
+            "  ctx provider preset show openai|codex|anthropic|google",
+            "  ctx provider preset install openai|codex|anthropic|google",
             "",
             "notes:",
             "  reads /etc/cortexfs/providers.d/*.json",
+            "  stores provider API keys in the root-owned CortexFS system secret store",
             "  stores OAuth tokens in the system keychain, not /ctx/model",
             "  provider presets install ordinary JSON files under /etc/cortexfs/providers.d",
         ]),
-        "provider oauth" => print_lines(&[
+        "provider oauth" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
             "  ctx provider oauth status PROVIDER",
             "  ctx provider oauth refresh PROVIDER",
         ]),
-        "provider oauth login" => print_lines(&[
+        "provider oauth login" => print_help_lines(&[
             "usage:",
             "  ctx provider oauth login PROVIDER [--timeout SECONDS]",
         ]),
         "provider oauth status" => {
-            print_lines(&["usage:", "  ctx provider oauth status PROVIDER"])
+            print_help_lines(&["usage:", "  ctx provider oauth status PROVIDER"])
         },
         "provider oauth refresh" => {
-            print_lines(&["usage:", "  ctx provider oauth refresh PROVIDER"])
+            print_help_lines(&["usage:", "  ctx provider oauth refresh PROVIDER"])
         },
-        "provider preset" => print_lines(&[
+        "provider secret" => print_help_lines(&[
+            "usage:",
+            "  ctx provider secret set PROVIDER [--slot SLOT]",
+            "  ctx provider secret status PROVIDER [--slot SLOT]",
+            "",
+            "secret:",
+            "  set reads the secret value from stdin",
+            "  stores it in the root-owned CortexFS system secret store",
+            "  model runtimes read the store directly; API keys are not placed in environment variables",
+        ]),
+        "provider preset" => print_help_lines(&[
             "usage:",
             "  ctx provider preset list",
-            "  ctx provider preset show openai|anthropic|google",
-            "  ctx provider preset install openai|anthropic|google",
+            "  ctx provider preset show openai|codex|anthropic|google",
+            "  ctx provider preset install openai|codex|anthropic|google",
             "",
             "aliases:",
             "  codex -> openai",
             "  gemini -> google",
             "  claude -> anthropic",
         ]),
-        "ping" => print_lines(&["usage:", "  ctx [--root PATH] ping model/NAME|agent/NAME"]),
-        "cancel" => print_lines(&["usage:", "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN"]),
-        "exec" => print_lines(&[
+        "ping" => print_help_lines(&["usage:", "  ctx [--root PATH] ping model/NAME|agent/NAME"]),
+        "cancel" => print_help_lines(&["usage:", "  ctx [--root PATH] cancel model/NAME|agent/NAME RUN"]),
+        "exec" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] exec model/NAME|agent/NAME|tool/NAME [ARG...]",
         ]),
-        "tool" => print_lines(&[
+        "tool" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] tool NAME [ARG...]",
             "",
@@ -304,10 +357,10 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  ctx tool tsh.config",
             "  ctx tool tsh.config '{\"max_loaded_tools\":32}'",
         ]),
-        "cat" => print_lines(&["usage:", "  ctx [--root PATH] cat PATH"]),
-        "set" => print_lines(&["usage:", "  ctx [--root PATH] set PATH VALUE"]),
-        "append" => print_lines(&["usage:", "  ctx [--root PATH] append PATH VALUE"]),
-        "file" => print_lines(&[
+        "cat" => print_help_lines(&["usage:", "  ctx [--root PATH] cat PATH"]),
+        "set" => print_help_lines(&["usage:", "  ctx [--root PATH] set PATH VALUE"]),
+        "append" => print_help_lines(&["usage:", "  ctx [--root PATH] append PATH VALUE"]),
+        "file" => print_help_lines(&[
             "usage:",
             "  ctx [--root PATH] file PATH",
             "  ctx [--root PATH] file info PATH",
@@ -317,8 +370,8 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "output:",
             "  file PATH prints CortexFS type, stat, token estimate, and user.cortexfs.* xattrs",
         ]),
-        "doctor" => print_lines(&["usage:", "  ctx [--root PATH] doctor"]),
-        "validate-name" => print_lines(&["usage:", "  ctx validate-name NAME"]),
+        "doctor" => print_help_lines(&["usage:", "  ctx [--root PATH] doctor"]),
+        "validate-name" => print_help_lines(&["usage:", "  ctx validate-name NAME"]),
         _ => Err(CliError::usage(format!("unknown help topic: {topic}"))),
     }
 }
@@ -368,25 +421,56 @@ fn print_status(root: &Path) -> Result<(), CliError> {
     let missing_entries = ROOT_ENTRIES.len().saturating_sub(present_entries);
     let agents = read_status_agent_processes(root)?;
 
-    print_line("ctx")?;
-    print_line(&format!("    State: {}", ctx_state(exists, is_dir, mounted)))?;
-    print_line(&format!("     Root: {}", root.display()))?;
-    print_line(&format!("   Status: {status}"))?;
-    print_line(&format!(
-        "  Mounted: {}",
-        if mounted { "yes" } else { "no" }
-    ))?;
-    print_line(&format!(
-        "  Entries: {present_entries}/{} loaded",
-        ROOT_ENTRIES.len()
-    ))?;
-    print_line(&format!("   Failed: {missing_entries} entries"))?;
-    print_line(&format!("   Agents: {} loaded", agents.len()))?;
+    let color = color_enabled();
+    print_line(&styled(color, ANSI_BOLD_CYAN, "ctx"))?;
+    print_status_field(
+        color,
+        "    State:",
+        &status_state_value(color, ctx_state(exists, is_dir, mounted)),
+    )?;
+    print_status_field(color, "     Root:", &styled(color, ANSI_CYAN, &root.display().to_string()))?;
+    print_status_field(color, "   Status:", &status_state_value(color, &status))?;
+    print_status_field(
+        color,
+        "  Mounted:",
+        &status_bool_value(color, if mounted { "yes" } else { "no" }, mounted),
+    )?;
+    print_status_field(
+        color,
+        "  Entries:",
+        &styled(
+            color,
+            if missing_entries == 0 {
+                ANSI_GREEN
+            } else {
+                ANSI_YELLOW
+            },
+            &format!("{present_entries}/{} loaded", ROOT_ENTRIES.len()),
+        ),
+    )?;
+    print_status_field(
+        color,
+        "   Failed:",
+        &styled(
+            color,
+            if missing_entries == 0 {
+                ANSI_GREEN
+            } else {
+                ANSI_RED
+            },
+            &format!("{missing_entries} entries"),
+        ),
+    )?;
+    print_status_field(
+        color,
+        "   Agents:",
+        &styled(color, ANSI_BLUE, &format!("{} loaded", agents.len())),
+    )?;
 
     if !agents.is_empty() {
-        print_line("    Tree:")?;
+        print_line(&styled(color, ANSI_BOLD_BLUE, "    Tree:"))?;
         for line in render_agent_status_lines(&agents) {
-            print_line(&format!("          {line}"))?;
+            print_line(&format!("          {}", status_tree_line(color, &line)))?;
         }
     }
 

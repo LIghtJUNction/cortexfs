@@ -121,9 +121,9 @@ ln -sfn /ctx/model/openai/gpt-4o /ctx/home/$(id -u)/model/main
 ```
 
 Provider API differences are handled by Rig. CortexFS keeps the filesystem ABI
-above provider and API-format details. API keys are never stored in model files;
-resolution prefers environment variables, then the system keychain, then reports
-unconfigured.
+above provider and API-format details. API keys are never stored in model files
+or process environments. Long-lived provider API keys live in the root-owned
+CortexFS system secret store.
 
 ## Agents
 

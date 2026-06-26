@@ -164,222 +164,6 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
-enum AgentShMode {
-    Auto,
-    Repl,
-    Attach,
-    Watch,
-    Resume,
-    History,
-    Output,
-    Pack,
-    Tools,
-    Children,
-    Cancel,
-    Status,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct AgentShArgs {
-    session: Option<String>,
-    raw: bool,
-    mode: AgentShMode,
-    name: String,
-    input: Vec<String>,
-}
-
-fn agent_sh_command(root: &Path, args: Vec<String>) -> Result<ExitCode, CliError> {
-    if agent_sh_args_request_help(&args) {
-        print_terminal_text(&format!("{}\n", agent_sh_usage()))?;
-        return Ok(ExitCode::SUCCESS);
-    }
-    let args = parse_agent_sh_args(args)?;
-    require_cli_name("agent name", &args.name)?;
-    match args.mode {
-        AgentShMode::Auto | AgentShMode::Repl if !args.input.is_empty() => agent_send(
-            root,
-            &args.name,
-            args.session.as_deref(),
-            &args.input.join(" "),
-            args.raw,
-        ),
-        AgentShMode::Auto | AgentShMode::Repl => {
-            agent_repl(root, &args.name, args.session.as_deref(), args.raw)
-        }
-        AgentShMode::Attach => agent_sh_attach_or_start(root, &args.name, args.session.as_deref()),
-        AgentShMode::Watch => agent_terminal(root, &args.name, args.session.as_deref(), false),
-        AgentShMode::Resume => agent_resume(root, &args.name, args.session.as_deref(), args.raw),
-        AgentShMode::History => success(history(root, &args.name, args.session.as_deref())),
-        AgentShMode::Output => success(latest(root, &args.name, args.session.as_deref())),
-        AgentShMode::Pack => success(agent_pack(root, &args.name, args.session.as_deref())),
-        AgentShMode::Tools => {
-            if args.session.is_some() {
-                return Err(CliError::usage("agent.sh --tools does not accept --session"));
-            }
-            success(agent_tools(root, &args.name))
-        }
-        AgentShMode::Children => success(agent_children(root, &args.name, args.session.as_deref())),
-        AgentShMode::Cancel => {
-            if args.input.len() > 1 {
-                return Err(CliError::usage("agent.sh --cancel accepts at most one run id"));
-            }
-            let run = args.input.first().map(String::as_str);
-            agent_cancel(root, &args.name, args.session.as_deref(), run, args.raw)
-        }
-        AgentShMode::Status => {
-            if args.session.is_some() {
-                return Err(CliError::usage("agent.sh --status does not accept --session"));
-            }
-            success(agent_status(root, &args.name))
-        }
-    }
-}
-
-fn agent_sh_args_request_help(args: &[String]) -> bool {
-    let mut values = args.iter();
-    while let Some(value) = values.next() {
-        match value.as_str() {
-            "--help" | "-h" | "help" => return true,
-            "--session" => {
-                let _ignored = values.next();
-            }
-            "--" => return false,
-            value if value.starts_with('-') => {}
-            _ => return false,
-        }
-    }
-    false
-}
-
-fn parse_agent_sh_args(args: Vec<String>) -> Result<AgentShArgs, CliError> {
-    let default_session = env::var("CORTEX_SESSION")
-        .ok()
-        .filter(|value| !value.is_empty());
-    parse_agent_sh_args_with_session(args, default_session)
-}
-
-fn parse_agent_sh_args_with_session(
-    args: Vec<String>,
-    default_session: Option<String>,
-) -> Result<AgentShArgs, CliError> {
-    let mut session = default_session;
-    let mut mode = AgentShMode::Auto;
-    let mut raw = false;
-    let mut values = args.into_iter();
-    let mut rest = Vec::new();
-
-    while let Some(value) = values.next() {
-        match value.as_str() {
-            "--session" => {
-                session = Some(required_arg(&mut values, "agent.sh --session requires a value")?);
-            }
-            "--raw" => raw = true,
-            "--resume" => mode = AgentShMode::Resume,
-            "--chat" | "--repl" => mode = AgentShMode::Repl,
-            "--attach" => mode = AgentShMode::Attach,
-            "--watch" => mode = AgentShMode::Watch,
-            "--history" => mode = AgentShMode::History,
-            "--output" => mode = AgentShMode::Output,
-            "--pack" => mode = AgentShMode::Pack,
-            "--tools" => mode = AgentShMode::Tools,
-            "--children" => mode = AgentShMode::Children,
-            "--cancel" => mode = AgentShMode::Cancel,
-            "--status" => mode = AgentShMode::Status,
-            "--help" | "-h" | "help" => {
-                return Err(CliError::usage(agent_sh_usage()));
-            }
-            "--" => {
-                rest.extend(values);
-                break;
-            }
-            _ if value.starts_with('-') => {
-                return Err(CliError::usage(format!("unknown agent.sh option: {value}")));
-            }
-            _ => {
-                rest.push(value);
-                rest.extend(values);
-                break;
-            }
-        }
-    }
-
-    if rest.is_empty() {
-        return Err(CliError::usage(agent_sh_usage()));
-    }
-    let name = rest.remove(0);
-    Ok(AgentShArgs {
-        session,
-        raw,
-        mode,
-        name,
-        input: rest,
-    })
-}
-
-fn agent_sh_usage() -> String {
-    [
-        "usage:",
-        "  agent.sh [--session SESSION] AGENT",
-        "  agent.sh [--session SESSION] AGENT INPUT...",
-        "  agent.sh --chat AGENT",
-        "  agent.sh --attach AGENT",
-        "  agent.sh --watch AGENT",
-        "  agent.sh --resume AGENT",
-        "  agent.sh --history AGENT",
-        "  agent.sh --output AGENT",
-        "  agent.sh --pack AGENT",
-        "  agent.sh --tools AGENT",
-        "  agent.sh --children AGENT",
-        "  agent.sh --cancel AGENT [RUN]",
-        "  agent.sh --status AGENT",
-        "  agent.sh --raw AGENT \"prompt\"",
-        "",
-        "agent.sh is a compatibility wrapper over ctx agent-sh.",
-        "With no INPUT, it opens the agent chat REPL. Use --attach for tsh.",
-    ]
-    .join("\n")
-}
-
-fn agent_sh_attach_or_start(
-    root: &Path,
-    name: &str,
-    session: Option<&str>,
-) -> Result<ExitCode, CliError> {
-    let session = agent_sh_attach_session(root, name, session)?;
-    let socket = agent_terminal_connect_socket(root, name, &session)?;
-    match open_terminal_socket(&socket) {
-        Ok(stream) => stream_terminal_stream(stream, true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            write_error("agent.sh terminal is not running; starting agent terminal")
-                .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
-            let start = AgentStartArgs {
-                name: name.to_owned(),
-                session: session.clone(),
-                cwd: "/workspace".to_owned(),
-                default_workspace: true,
-                mounts: Vec::new(),
-            };
-            let code = agent_start(root, &start)?;
-            if code != ExitCode::SUCCESS {
-                return Ok(code);
-            }
-            agent_terminal(root, name, Some(&session), true)
-        }
-        Err(error) => Err(terminal_connect_cli_error(&socket, name, &session, &error)),
-    }
-}
-
-fn agent_sh_attach_session(
-    root: &Path,
-    name: &str,
-    session: Option<&str>,
-) -> Result<String, CliError> {
-    let session = agent_session_name(root, name, session)?;
-    require_session_name(&session)?;
-    Ok(session)
-}
-
 fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
     require_cli_name("agent name", &args.name)?;
     require_session_name(&args.session)?;
@@ -398,24 +182,151 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     let socket = agent_runtime_socket(root, &args.name, &args.session)?;
     ensure_agent_terminal_socket(&visible_socket, &socket)?;
     let unit = agent_terminal_unit(&args.name, &args.session);
+    reset_agent_terminal_unit(&unit);
     let command = agent_start_systemd_command(root, args, &cli_mounts, &view, &socket, &unit);
-    let status = ProcessCommand::new(&command.program)
+    let output = ProcessCommand::new(&command.program)
         .args(&command.args)
-        .status()
+        .output()
         .map_err(|error| CliError::unavailable(format!("cannot start systemd-run: {error}")))?;
-    if !status.success() {
+    if !output.status.success() {
+        let diagnostics = systemd_run_diagnostics(&output);
         return Err(CliError::unavailable(format!(
-            "agent terminal service failed to start with {status}"
+            "agent terminal service failed to start with {}{diagnostics}",
+            output.status
         )));
     }
     wait_for_agent_terminal_socket(&socket)?;
-    print_line(&format!("agent={}", args.name))?;
-    print_line(&format!("session={}", args.session))?;
-    print_line(&format!("unit={unit}.service"))?;
-    print_line(&format!("cwd={}", args.cwd))?;
-    print_line(&format!("socket={}", visible_socket.display()))?;
-    print_line(&format!("runtime_socket={}", socket.display()))?;
+    let invocation = systemd_run_invocation_id(&output);
+    let uid = current_uid_for_ctx(root)?;
+    for line in agent_start_status_lines(
+        color_enabled(),
+        &args.name,
+        &args.session,
+        &unit,
+        invocation.as_deref(),
+        &args.cwd,
+        &visible_socket,
+        &socket,
+        &uid,
+    ) {
+        print_line(&line)?;
+    }
     Ok(ExitCode::SUCCESS)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "status output mirrors systemctl's flat field list"
+)]
+fn agent_start_status_lines(
+    color: bool,
+    agent: &str,
+    session: &str,
+    unit: &str,
+    invocation: Option<&str>,
+    cwd: &str,
+    visible_socket: &Path,
+    runtime_socket: &Path,
+    uid: &str,
+) -> Vec<String> {
+    let service = format!("{unit}.service");
+    let loaded_path = format!("/run/user/{uid}/systemd/transient/{service}");
+    let loaded = styled(color, ANSI_GREEN, "loaded");
+    let mut lines = vec![
+        format!(
+            "{} {} - {}",
+            styled(color, ANSI_BOLD_CYAN, "●"),
+            styled(color, ANSI_BOLD_CYAN, &service),
+            styled(color, ANSI_CYAN, "CortexFS agent terminal")
+        ),
+        format!(
+            "     {} {} ({loaded_path}; transient)",
+            styled(color, ANSI_BOLD_BLUE, "Loaded:"),
+            loaded
+        ),
+        format!(
+            "     {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Active:"),
+            styled(color, ANSI_GREEN, "active (running)")
+        ),
+    ];
+    if let Some(invocation) = invocation {
+        lines.push(format!(
+            " {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Invocation:"),
+            styled(color, ANSI_DIM, invocation)
+        ));
+    }
+    lines.extend([
+        format!(
+            "      {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Agent:"),
+            styled(color, ANSI_CYAN, agent)
+        ),
+        format!(
+            "    {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Session:"),
+            styled(color, ANSI_CYAN, session)
+        ),
+        format!(
+            "        {} {}",
+            styled(color, ANSI_BOLD_BLUE, "CWD:"),
+            styled(color, ANSI_CYAN, cwd)
+        ),
+        format!(
+            "     {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Socket:"),
+            styled(color, ANSI_CYAN, &visible_socket.display().to_string())
+        ),
+        format!(
+            " {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Runtime Socket:"),
+            styled(color, ANSI_DIM, &runtime_socket.display().to_string())
+        ),
+    ]);
+    lines
+}
+
+fn systemd_run_invocation_id(output: &std::process::Output) -> Option<String> {
+    let mut text = String::new();
+    text.push_str(&String::from_utf8_lossy(&output.stdout));
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    text.lines().find_map(|line| {
+        line.rsplit_once("invocation ID: ")
+            .map(|(_prefix, value)| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+fn systemd_run_diagnostics(output: &std::process::Output) -> String {
+    let mut diagnostics = String::new();
+    for bytes in [&output.stderr, &output.stdout] {
+        let text = String::from_utf8_lossy(bytes);
+        let text = text.trim();
+        if !text.is_empty() {
+            if diagnostics.is_empty() {
+                diagnostics.push_str(": ");
+            } else {
+                diagnostics.push('\n');
+            }
+            diagnostics.push_str(text);
+        }
+    }
+    diagnostics
+}
+
+fn reset_agent_terminal_unit(unit: &str) {
+    let service = format!("{unit}.service");
+    let _ignored = ProcessCommand::new("systemctl")
+        .args(["--user", "stop", &service])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ignored = ProcessCommand::new("systemctl")
+        .args(["--user", "reset-failed", &service])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 fn agent_send(
@@ -507,8 +418,7 @@ fn agent_repl(
 ) -> Result<ExitCode, CliError> {
     let session = agent_session_name(root, name, session)?;
     if io::stdin().is_terminal() {
-        write_error(&format!("ctx agent repl  agent={name}  session={session}"))
-            .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+        print_agent_repl_banner(root, name, &session)?;
     }
 
     if io::stdin().is_terminal() {
@@ -516,8 +426,9 @@ fn agent_repl(
             rustyline::DefaultEditor::with_config(agent_repl_editor_config()).map_err(|error| {
             CliError::unavailable(format!("cannot initialize line editor: {error}"))
         })?;
+        let color = color_enabled();
         loop {
-            let prompt = format!("{name} {session} > ");
+            let prompt = agent_repl_prompt(color, name, &session);
             let line = match editor.readline(&prompt) {
                 Ok(line) => line,
                 Err(error) if agent_repl_should_exit_on_readline_error(&error) => {
@@ -576,6 +487,78 @@ fn agent_repl(
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(), CliError> {
+    let color = color_enabled();
+    let lines = [
+        format!(
+            "{} {}/{} - {}",
+            styled(color, ANSI_BOLD_CYAN, "●"),
+            styled(color, ANSI_BOLD_CYAN, name),
+            styled(color, ANSI_CYAN, session),
+            styled(color, ANSI_CYAN, "CortexFS agent chat")
+        ),
+        format!(
+            "    {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Model:"),
+            agent_repl_model_summary(color, root, name)
+        ),
+        format!(
+            " {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Commands:"),
+            styled(
+                color,
+                ANSI_DIM,
+                "/resume /history /output /pack /tools /children /cancel /status /exit"
+            )
+        ),
+    ];
+    for line in lines {
+        write_error(&line)
+            .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+    }
+    Ok(())
+}
+
+fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
+    format!(
+        "{}{} ",
+        styled(color, ANSI_BOLD_CYAN, &format!("{name}/{session}")),
+        styled(color, ANSI_GREEN, " ❯")
+    )
+}
+
+fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> String {
+    let model = fs::read_to_string(root.join("agent").join(format!("{name}.d")).join("model"))
+        .ok()
+        .map(|content| content.trim().to_owned())
+        .filter(|content| !content.is_empty())
+        .unwrap_or_else(|| "main".to_owned());
+    let model_text = styled(color, ANSI_CYAN, &model);
+    if !matches!(model.as_str(), "main" | "helper") {
+        return model_text;
+    }
+    match fs::read_link(root.join("model").join(&model)) {
+        Ok(target) => {
+            let missing = if target.exists() { "" } else { " (missing)" };
+            format!(
+                "{} -> {}{}",
+                model_text,
+                styled(color, ANSI_DIM, &target.display().to_string()),
+                styled(
+                    color,
+                    if missing.is_empty() {
+                        ANSI_GREEN
+                    } else {
+                        ANSI_RED
+                    },
+                    missing
+                )
+            )
+        }
+        Err(_error) => format!("{} {}", model_text, styled(color, ANSI_RED, "(missing alias)")),
+    }
 }
 
 fn agent_repl_editor_config() -> rustyline::Config {
@@ -846,7 +829,7 @@ fn agent_start_systemd_command(
     command
 }
 
-fn agent_sandbox_env(view: &AgentRuntimeView) -> Vec<(String, String)> {
+fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, String)> {
     let mut env = vec![
         ("CTX_ROOT".to_owned(), view.ctx_root().display().to_string()),
         ("CTX_HOME".to_owned(), view.ctx_home().display().to_string()),
@@ -886,7 +869,7 @@ fn agent_sandbox_env(view: &AgentRuntimeView) -> Vec<(String, String)> {
 }
 
 fn agent_bwrap_args(
-    _root: &Path,
+    root: &Path,
     args: &AgentStartArgs,
     cli_mounts: &[AgentMount],
     view: &AgentRuntimeView,
@@ -895,7 +878,7 @@ fn agent_bwrap_args(
 ) -> Vec<String> {
     let agent_home = view.home();
     let mut bwrap = vec!["--clearenv".to_owned()];
-    for (key, value) in agent_sandbox_env(view) {
+    for (key, value) in agent_sandbox_env(root, view) {
         bwrap.extend(["--setenv".to_owned(), key, value]);
     }
     bwrap.extend([
