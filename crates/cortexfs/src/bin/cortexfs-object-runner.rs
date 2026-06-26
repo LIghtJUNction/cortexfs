@@ -535,6 +535,19 @@ fn shell_words(value: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
+fn validate_agent_tsh_args(args: &[OsString]) -> Result<(), String> {
+    let Some(first) = args.first() else {
+        return Ok(());
+    };
+    let Some(first) = first.to_str() else {
+        return Err("tool_call args must be valid UTF-8".to_owned());
+    };
+    if matches!(first, "--root" | "-r") {
+        return Err("tool_call args cannot override tsh root".to_owned());
+    }
+    Ok(())
+}
+
 fn execute_agent_tool_call(
     config: &AgentModelRunConfig,
     tool_call: &AgentToolCall,
@@ -574,6 +587,7 @@ fn execute_agent_tool_call(
         ),
     )
     .map_err(|denial| tool_denial_message(&tool_call.name, denial))?;
+    validate_agent_tsh_args(&tool_call.args)?;
 
     let output = Command::new(hit.path())
         .args(&tool_call.args)
