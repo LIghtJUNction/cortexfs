@@ -314,6 +314,18 @@ impl<'a> AbiPathKind<'a> {
         matches!(self, Self::SessionDir { session } if is_object_name(session))
     }
 
+    /// Returns whether this path is a writable global or shared control file.
+    #[must_use]
+    pub fn is_writable_control_path(self) -> bool {
+        matches!(
+            self,
+            Self::ObjectControl {
+                class: ObjectClass::Model | ObjectClass::Agent | ObjectClass::Tool,
+                ..
+            } | Self::SharedToolControl { .. }
+        )
+    }
+
     /// Returns a stable context JSONL kind for session `context/*` files.
     #[must_use]
     pub fn context_jsonl_kind(self) -> Option<ContextJsonlKind> {
@@ -345,5 +357,26 @@ impl<'a> AbiPathKind<'a> {
                 second: None,
             } if is_object_name(session)
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writable_control_path_classification() {
+        assert!(parse_abi_path("model/debug/echo.d/cap").is_writable_control_path());
+        assert!(parse_abi_path("agent/coder.d/cwd").is_writable_control_path());
+        assert!(parse_abi_path("tool/fs.read.d/schema").is_writable_control_path());
+        assert!(parse_abi_path("shared/team/tool/repo.d/schema").is_writable_control_path());
+    }
+
+    #[test]
+    fn non_writable_paths_are_not_control() {
+        assert!(!parse_abi_path("agent").is_writable_control_path());
+        assert!(!parse_abi_path("model/debug/echo").is_writable_control_path());
+        assert!(!parse_abi_path("shared/team/queue").is_writable_control_path());
+        assert!(!parse_abi_path("tool").is_writable_control_path());
     }
 }
