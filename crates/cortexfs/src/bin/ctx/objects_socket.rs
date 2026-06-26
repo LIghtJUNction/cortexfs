@@ -344,6 +344,7 @@ fn stream_agent_socket_request_buffered_interruptible(
 fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
     let reader = io::BufReader::new(stream);
     let mut saw_delta = false;
+    let mut usage_totals = AgentUsageTotals::default();
     let mut exit = ExitCode::SUCCESS;
     for line in reader.lines() {
         let line = line.map_err(|error| {
@@ -371,6 +372,11 @@ fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("tool_call");
                 write_terminal_error(&format!("[tool] {name}"))?;
+            }
+            Some("usage") => {
+                if let Some(diagnostic) = usage_totals.record_event(&value) {
+                    write_terminal_error(&diagnostic)?;
+                }
             }
             Some("error") => {
                 let code = value
@@ -451,6 +457,7 @@ fn collect_agent_events_buffered_with(
     interrupt: Option<&AtomicBool>,
 ) -> Result<BufferedAgentEvents, CliError> {
     let mut saw_delta = false;
+    let mut usage_totals = AgentUsageTotals::default();
     let mut output = String::new();
     let mut diagnostics = Vec::new();
     let mut exit_code = 0;
@@ -526,6 +533,11 @@ fn collect_agent_events_buffered_with(
                     .unwrap_or("tool_call");
                 push_buffered_diagnostic(&mut diagnostics, format!("[tool] {name}"))?;
             }
+            Some("usage") => {
+                if let Some(diagnostic) = usage_totals.record_event(&value) {
+                    push_buffered_diagnostic(&mut diagnostics, diagnostic)?;
+                }
+            }
             Some("error") => {
                 let code = value
                     .get("code")
@@ -555,6 +567,29 @@ fn collect_agent_events_buffered_with(
         exit_code,
         interrupted: false,
     })
+}
+
+#[derive(Default)]
+struct AgentUsageTotals {
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+impl AgentUsageTotals {
+    fn record_event(&mut self, value: &serde_json::Value) -> Option<String> {
+        let input_delta = value
+            .get("input_tokens")
+            .and_then(serde_json::Value::as_u64)?;
+        let output_delta = value
+            .get("output_tokens")
+            .and_then(serde_json::Value::as_u64)?;
+        self.input_tokens = self.input_tokens.saturating_add(input_delta);
+        self.output_tokens = self.output_tokens.saturating_add(output_delta);
+        Some(format!(
+            "[tokens] input +{}/{} output +{}/{}",
+            input_delta, self.input_tokens, output_delta, self.output_tokens
+        ))
+    }
 }
 
 fn push_buffered_output(output: &mut String, text: &str) -> Result<(), CliError> {

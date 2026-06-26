@@ -1,10 +1,11 @@
 use super::{
     ObjectPath, OpenAiStreamEvent, ProviderRoute, ProviderRuntimeDriver, ResolvedTransport,
-    RunnerProviderConfig, agent_tool_call_from_value, is_passthrough_tool, missing_model_message,
+    RunnerProviderConfig, TokenUsage, agent_tool_call_from_value, is_passthrough_tool,
+    missing_model_message, model_candidates, openai_chat_body, openai_responses_body,
     openai_stream_event, parse_anthropic_message_content, parse_openai_response_content,
     provider_messages_for_agent, provider_request_failure_message, provider_route,
     provider_runtime_driver, provider_transport, resolve_model_alias, resolved_model_path, run,
-    run_cli_tool_to_writer, tool_call_from_text, validate_agent_tsh_args,
+    run_cli_tool_to_writer, token_usage_from_value, tool_call_from_text, validate_agent_tsh_args,
     write_model_text_or_tool_call,
 };
 use cortexfs::{
@@ -129,6 +130,32 @@ fn model_path_rejects_traversal_reference() {
 }
 
 #[test]
+fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-model-fallback")?;
+    fs::create_dir_all(root.join("model/openai/gpt-5.5.d"))?;
+    fs::write(
+        root.join("model/openai/gpt-5.5.d/fallback"),
+        "openai/codex-auto-review\nopenai/gpt-5.3-codex-spark\n",
+    )?;
+
+    let candidates = model_candidates(&root, "openai/gpt-5.5")?;
+
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "openai/gpt-5.5",
+            "openai/codex-auto-review",
+            "openai/gpt-5.3-codex-spark"
+        ]
+    );
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn runner_recognizes_interactive_tool_passthroughs() {
     assert!(is_passthrough_tool("bash"));
     assert!(is_passthrough_tool("tmux"));
@@ -241,6 +268,20 @@ fn openai_stream_event_extracts_chat_delta_text() {
 }
 
 #[test]
+fn openai_stream_event_extracts_usage() {
+    let event = openai_stream_event(
+        r#"data: {"usage":{"prompt_tokens":12,"completion_tokens":5}}"#,
+    );
+    assert!(matches!(
+        event,
+        Ok(OpenAiStreamEvent::Usage(TokenUsage {
+            input_tokens: 12,
+            output_tokens: 5
+        }))
+    ));
+}
+
+#[test]
 fn openai_stream_event_accepts_done_marker() {
     assert!(matches!(
         openai_stream_event("data: [DONE]"),
@@ -262,6 +303,51 @@ fn openai_response_content_prefers_output_text() {
         parse_openai_response_content(br#"{"output_text":"hello codex"}"#),
         Ok("hello codex".to_owned())
     );
+}
+
+#[test]
+fn provider_usage_accepts_openai_and_anthropic_shapes() {
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3}
+        })),
+        Some(TokenUsage {
+            input_tokens: 10,
+            output_tokens: 3,
+        })
+    );
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "usage": {"input_tokens": 7, "output_tokens": 2}
+        })),
+        Some(TokenUsage {
+            input_tokens: 7,
+            output_tokens: 2,
+        })
+    );
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "response": {
+                "usage": {"input_tokens": 9, "output_tokens": 4}
+            }
+        })),
+        Some(TokenUsage {
+            input_tokens: 9,
+            output_tokens: 4,
+        })
+    );
+}
+
+#[test]
+fn openai_request_bodies_include_non_auto_effort() {
+    let chat = openai_chat_body("gpt-5.5", "hello", false, cortexfs::ModelEffort::High);
+    let responses =
+        openai_responses_body("gpt-5.5", "hello", true, cortexfs::ModelEffort::XHigh);
+
+    assert!(chat.contains(r#""reasoning":{"effort":"high"}"#));
+    assert!(responses.contains(r#""reasoning":{"effort":"xhigh"}"#));
+    assert!(!openai_chat_body("gpt-5.5", "hello", false, cortexfs::ModelEffort::Auto)
+        .contains("reasoning"));
 }
 
 #[test]
