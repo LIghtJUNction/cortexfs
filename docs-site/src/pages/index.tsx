@@ -285,7 +285,7 @@ function HeroBrand(): ReactElement {
 }
 
 function RootTicker(): ReactElement {
-  const roots = ['model', 'agent', 'tool', 'session', 'policy', 'shared', 'audit'];
+  const roots = ['status', 'bin', 'model', 'agent', 'tool', 'home', 'shared'];
   const loopedRoots = Array.from({length: 8}, () => roots).flat();
 
   return (
@@ -302,7 +302,7 @@ function RootTicker(): ReactElement {
 function TrustDots(): ReactElement {
   return (
     <div className="cortexTrustDots" aria-hidden="true">
-      {['/ctx', 'ABI', 'tsh', 'audit'].map((label) => (
+      {['/ctx', 'ABI', 'tsh', 'req'].map((label) => (
         <div key={label}>
           <span>{label}</span>
         </div>
@@ -332,11 +332,13 @@ export default function Home(): ReactElement {
               </div>
               <TrustDots />
               <div className="cortexProofRow" aria-label="CortexFS root ABI">
+                <span>status</span>
+                <span>bin</span>
                 <span>model</span>
                 <span>agent</span>
                 <span>tool</span>
-                <span>session</span>
-                <span>policy</span>
+                <span>home</span>
+                <span>shared</span>
               </div>
             </div>
             <div className="cortexHeroVisual">
