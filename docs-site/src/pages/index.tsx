@@ -54,16 +54,16 @@ type Copy = {
 const zh: Copy = {
   description: 'CortexFS 把 AI agent runtime 投影成稳定、可脚本化、可审计的 Linux 文件系统 ABI。',
   eyebrow: 'Filesystem as Agent OS',
-  title: '把 agent runtime 变成可以 ls、cat、exec 的文件系统',
+  title: '直接与模型文件、agent 文件和工具文件对话',
   lead:
-    'CortexFS 不把 AI 平台数据库搬进目录树。它只暴露少量稳定对象：model、agent、tool、session、policy 和 shared space。用户用 Unix 命令理解系统，开发者用普通文件操作扩展 agent。',
+    'CortexFS 把模型、agent、tool、session 和运行状态投影到 /ctx。你可以进入 agent REPL，对模型文件发起推理，把工具动态加载进内存，并随时 attach 到 agent 终端观察内部发生了什么。',
   primary: '从安装开始',
   secondary: '日常使用',
   developer: '开发指南',
-  trusted: '稳定 ABI，普通文件，可审计提交',
-  commandOne: '写临时文件',
-  commandTwo: '原子 rename 成 *.req.json',
-  commandThree: '从 outbox 读取事实',
+  trusted: '模型文件、agent 文件、tool shell、轻量沙箱',
+  commandOne: '直接对话模型文件',
+  commandTwo: '进入 agent REPL',
+  commandThree: 'attach 到 ctxterm',
   inspectTitle: '一眼可见',
   inspectText:
     '模型是文件，agent 是可执行对象和 socket，tool 是能力端点，session 是普通历史目录。隐藏状态变成可 inspect 的事实。',
@@ -113,7 +113,7 @@ const zh: Copy = {
     'CortexFS 是一层薄 ABI：它让模型、agent、tool、session 以同一种 Unix 形状组合，而不是把每个供应商或框架的内部状态变成新根目录。',
   manifestTitle: '不要把 runtime 藏在数据库里',
   manifestText:
-    'CortexFS 的判断很简单：可见状态应该是普通文件，可执行能力应该有明确边界，每次提交都应该留下可审计事实。',
+    'CortexFS 的判断很简单：可见状态应该是普通文件，可执行能力应该有明确边界，agent 内部发生的事应该能被直接看见。',
   model: '纯推理入口',
   agent: '策略约束的编排者',
   tool: '可执行能力',
@@ -124,16 +124,16 @@ const en: Copy = {
   description:
     'CortexFS projects an AI agent runtime as a stable, scriptable, inspectable Linux filesystem ABI.',
   eyebrow: 'Filesystem as Agent OS',
-  title: 'An agent runtime you can ls, cat, exec, and audit',
+  title: 'Talk directly to model files, agent files, and tool files',
   lead:
-    'CortexFS does not mirror an AI platform database into directories. It exposes a small set of stable objects: models, agents, tools, sessions, policy, and shared space. Users understand it with Unix commands; developers extend it with ordinary file operations.',
+    'CortexFS projects models, agents, tools, sessions, and runtime state into /ctx. Enter an agent REPL, call model files, load tools into memory, and attach to the agent terminal whenever you need to see what is happening inside.',
   primary: 'Install first',
   secondary: 'Daily usage',
   developer: 'Developer guide',
-  trusted: 'Stable ABI, ordinary files, auditable submissions',
-  commandOne: 'write a temp file',
-  commandTwo: 'atomic rename to *.req.json',
-  commandThree: 'read facts from outbox',
+  trusted: 'Model files, agent files, tool shell, lightweight sandbox',
+  commandOne: 'talk to model files',
+  commandTwo: 'enter the agent REPL',
+  commandThree: 'attach to ctxterm',
   inspectTitle: 'Visible by default',
   inspectText:
     'Models are files, agents are executables and sockets, tools are capability endpoints, and sessions are ordinary history directories.',
@@ -183,7 +183,7 @@ const en: Copy = {
     'CortexFS is a thin ABI that gives models, agents, tools, and sessions one Unix shape instead of turning every vendor or framework detail into a new root directory.',
   manifestTitle: 'Do not hide the runtime in a database',
   manifestText:
-    'CortexFS takes a simple position: visible state should be ordinary files, executable capability should have clear boundaries, and every submission should leave auditable facts.',
+    'CortexFS takes a simple position: visible state should be ordinary files, executable capability should have clear boundaries, and agent internals should be directly observable.',
   model: 'pure inference',
   agent: 'policy-bound orchestration',
   tool: 'executable capability',
@@ -255,6 +255,31 @@ function AgentConsole({copy}: {copy: Copy}): ReactElement {
         <span>{copy.trusted}</span>
       </div>
     </div>
+  );
+}
+
+function ProductDemo(): ReactElement {
+  const videoSrc = useBaseUrl('/video/cortexfs-demo.webm');
+  const posterSrc = useBaseUrl('/video/cortexfs-demo-poster.jpg');
+
+  return (
+    <figure className="cortexDemo">
+      <video
+        aria-label="CortexFS live agent demo"
+        autoPlay
+        controls
+        loop
+        muted
+        playsInline
+        poster={posterSrc}
+      >
+        <source src={videoSrc} type="video/webm" />
+      </video>
+      <figcaption>
+        <span>ctx agent repl coder</span>
+        <strong>/ctx/agent/coder</strong>
+      </figcaption>
+    </figure>
   );
 }
 
@@ -342,7 +367,7 @@ export default function Home(): ReactElement {
               </div>
             </div>
             <div className="cortexHeroVisual">
-              <AgentConsole copy={copy} />
+              <ProductDemo />
             </div>
           </div>
           <RootTicker />
