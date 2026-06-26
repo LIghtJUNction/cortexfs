@@ -1,61 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
   <title id="title">CortexFS turns AI runtimes into Unix-shaped files</title>
-  <desc id="desc">A concise visual showing /ctx with model, agent, tool, home, and shared entries.</desc>
+  <desc id="desc">A branded CortexFS hero card showing the ctx logo, the frozen /ctx root, and an agent REPL surface.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#0b1320"/>
-      <stop offset="0.55" stop-color="#10251f"/>
-      <stop offset="1" stop-color="#111827"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" x2="1">
-      <stop offset="0" stop-color="#58d68d"/>
-      <stop offset="1" stop-color="#38bdf8"/>
-    </linearGradient>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000" flood-opacity="0.32"/>
-    </filter>
-    <style>
-      .title{font:700 58px system-ui,-apple-system,Segoe UI,sans-serif;fill:#f8fafc;letter-spacing:0}
-      .sub{font:500 24px system-ui,-apple-system,Segoe UI,sans-serif;fill:#cbd5e1;letter-spacing:0}
-      .mono{font:600 24px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e5f7ef}
-      .small{font:500 18px system-ui,-apple-system,Segoe UI,sans-serif;fill:#cbd5e1}
-      .tag{font:700 16px system-ui,-apple-system,Segoe UI,sans-serif;fill:#07111f}
-      .node{fill:#142033;stroke:#2d405f;stroke-width:1.4}
-      .hot{fill:#102820;stroke:#58d68d;stroke-width:1.7}
-      .line{stroke:#58d68d;stroke-width:3;stroke-linecap:round;opacity:.9}
-      .muted{fill:#8aa0b8}
-    </style>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#181b19"/><stop offset="1" stop-color="#0f1110"/></linearGradient>
+    <radialGradient id="glow" cx="76%" cy="22%" r="58%"><stop offset="0" stop-color="#64c8a9" stop-opacity=".24"/><stop offset="1" stop-color="#64c8a9" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse"><path d="M38 0H0V38" fill="none" stroke="#d8ff66" stroke-opacity=".075"/></pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#000" flood-opacity=".3"/></filter>
+    <style>.serif{font-family:Georgia,"Times New Roman",serif}.sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.paper{fill:#fffdfa}.muted{fill:#bfb6a8}.mint{fill:#64c8a9}.lime{fill:#d8ff66}.ink{fill:#111312}.soft{fill:#fffdfa;fill-opacity:.06;stroke:#fffdfa;stroke-opacity:.1}</style>
   </defs>
-  <rect width="1200" height="520" fill="url(#bg)"/>
-  <path d="M0 436 C188 388 280 454 438 408 C612 357 710 389 851 335 C1005 277 1094 310 1200 248 L1200 520 L0 520 Z" fill="#0f1d2c" opacity=".9"/>
-  <g transform="translate(70 66)">
-    <text class="title" x="0" y="0">AI, exposed as files.</text>
-    <text class="sub" x="0" y="48">No provider tree. No workflow DSL. Just a small Linux ABI at /ctx.</text>
-    <g transform="translate(0 96)">
-      <rect width="178" height="40" rx="6" fill="url(#accent)"/>
-      <text class="tag" x="18" y="26">model as file</text>
-      <rect x="196" width="178" height="40" rx="6" fill="#eab308"/>
-      <text class="tag" x="216" y="26">agent as file</text>
-      <rect x="392" width="164" height="40" rx="6" fill="#f97316"/>
-      <text class="tag" x="412" y="26">tool as file</text>
-    </g>
+  <rect width="1200" height="520" fill="#111211"/><rect width="1200" height="520" fill="url(#glow)"/><rect x="578" y="36" width="548" height="404" fill="url(#grid)" opacity=".85"/>
+  <g transform="translate(72 58)">
+    <path fill="#d8ff66" d="M38 4.7c.4-.2.8-.2 1.2 0l28.2 16.2c.4.2.6.6.6 1.1v32.5c0 .5-.2.9-.6 1.1L39.2 71.8c-.4.2-.8.2-1.2 0L9.8 55.6c-.4-.2-.6-.6-.6-1.1V22c0-.5.2-.9.6-1.1L38 4.7Z"/>
+    <path fill="#111312" d="M42.7 17.3h8.6L34.4 60.4h-8.6l16.9-43.1Z"/>
+    <path fill="#111312" fill-rule="evenodd" d="M18.2 22.8h13.5c.8 0 1.5.3 2.1 1l2.4 2.9h10.3c1.5 0 2.6 1.1 2.6 2.6v9.3c0 1.5-1.1 2.6-2.6 2.6H18.2c-1.5 0-2.6-1.1-2.6-2.6V25.4c0-1.5 1.1-2.6 2.6-2.6Zm0 27.1c0-1.3 1.1-2.5 2.5-2.5h7.9c1.3 0 2.5 1.2 2.5 2.5v7.9c0 1.3-1.2 2.5-2.5 2.5h-7.9c-1.4 0-2.5-1.2-2.5-2.5v-7.9Zm34.4 2.8a5.4 5.4 0 1 1 8.6 4.5v5.2h5.6v5.1H51.1v-5.1h5.2v-5.1a5.4 5.4 0 0 1-3.7-4.6Z" clip-rule="evenodd"/>
+    <path fill="#fffdfa" d="M21.2 50.6H28v6.8h-6.8z"/>
+    <text class="serif paper" x="96" y="47" font-size="44" font-weight="700">Cor</text><text class="serif mint" x="171" y="47" font-size="44" font-weight="700" font-style="italic">TeX</text><text class="serif paper" x="244" y="47" font-size="44" font-weight="700">fs</text>
   </g>
-  <g transform="translate(666 74)" filter="url(#soft)">
-    <rect x="0" y="0" width="438" height="344" rx="8" fill="#0b1220" stroke="#2d405f"/>
-    <text class="mono" x="30" y="50">/ctx</text>
-    <line class="line" x1="55" y1="68" x2="55" y2="294"/>
-    <g transform="translate(86 86)">
-      <rect class="node" width="270" height="40" rx="6"/><text class="mono" x="18" y="27">status</text>
-      <rect class="node" y="48" width="270" height="40" rx="6"/><text class="mono" x="18" y="75">bin/</text>
-      <rect class="hot" y="96" width="270" height="40" rx="6"/><text class="mono" x="18" y="123">model/qwen</text>
-      <rect class="hot" y="144" width="270" height="40" rx="6"/><text class="mono" x="18" y="171">agent/coder.sock</text>
-      <rect class="hot" y="192" width="270" height="40" rx="6"/><text class="mono" x="18" y="219">tool/fs.read</text>
-      <rect class="node" y="240" width="270" height="40" rx="6"/><text class="mono" x="18" y="267">home/ shared/</text>
-    </g>
-  </g>
-  <g transform="translate(72 358)">
-    <text class="small" x="0" y="0">Install, mount, inspect:</text>
-    <rect x="0" y="18" width="488" height="54" rx="8" fill="#08111f" stroke="#26354f"/>
-    <text class="mono" x="20" y="53">ctx mount  &amp;&amp;  ctx doctor</text>
-  </g>
+  <g transform="translate(72 168)"><text class="sans mint" x="0" y="0" font-size="17" font-weight="900" letter-spacing="3">FILESYSTEM AS AGENT OS</text><text class="serif paper" x="0" y="72" font-size="64" font-weight="650">Agent runtime</text><text class="serif paper" x="0" y="144" font-size="64" font-weight="650">as a Unix ABI</text><text class="sans muted" x="0" y="210" font-size="23">No provider tree. No workflow DSL. Just /ctx.</text><rect x="0" y="250" width="434" height="58" rx="8" fill="#fffdfa"/><text class="mono ink" x="24" y="286" font-size="18" font-weight="900">ctx agent repl coder</text></g>
+  <g transform="translate(620 86)" filter="url(#shadow)"><rect width="424" height="332" rx="8" fill="url(#panel)" stroke="#fffdfa" stroke-opacity=".12"/><rect width="424" height="48" rx="8" fill="#101210"/><rect width="54" height="48" rx="8" fill="#d8ff66"/><text class="mono ink" x="17" y="31" font-size="14" font-weight="950">ctx</text><text class="mono paper" x="74" y="31" font-size="13" font-weight="850" fill-opacity=".86">/ctx/agent/coder</text><text class="mono paper" x="348" y="31" font-size="12" font-weight="850" fill-opacity=".5">repl</text><g transform="translate(28 72)"><text class="mono lime" x="0" y="17" font-size="15" font-weight="950">$</text><text class="mono paper" x="24" y="17" font-size="15" font-weight="900">ctx agent repl coder</text><rect class="soft" x="0" y="42" width="368" height="44" rx="6"/><text class="mono mint" x="16" y="70" font-size="13" font-weight="900">USER</text><text class="mono paper" x="86" y="70" font-size="13" font-weight="850" fill-opacity=".82">review docs/DESIGN.md</text><rect class="soft" x="0" y="96" width="368" height="44" rx="6"/><text class="mono mint" x="16" y="124" font-size="13" font-weight="900">TOOL</text><text class="mono paper" x="86" y="124" font-size="13" font-weight="850" fill-opacity=".82">tsh fs.read</text><rect x="0" y="150" width="368" height="56" rx="6" fill="#d8ff66" fill-opacity=".08" stroke="#d8ff66" stroke-opacity=".18"/><text class="mono lime" x="16" y="181" font-size="13" font-weight="900">COMMIT</text><text class="mono paper" x="96" y="181" font-size="13" font-weight="850" fill-opacity=".82">*.req.json -> outbox</text></g></g>
 </svg>

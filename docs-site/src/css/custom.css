@@ -165,6 +165,22 @@ html[data-cortex-brand-phase='mark'] .navbar__title {
   border-top: 1px solid color-mix(in srgb, var(--cortex-line) 30%, transparent);
 }
 
+.theme-code-block {
+  border: 1px solid var(--cortex-line);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+[data-theme='dark'] .theme-code-block {
+  background: var(--cortex-coal) !important;
+  border-color: rgba(255, 253, 250, 0.12);
+}
+
+[data-theme='dark'] .theme-code-block pre,
+[data-theme='dark'] .theme-code-block code {
+  background: transparent !important;
+}
+
 .cortexHome {
   color: var(--cortex-ink);
   overflow: hidden;
