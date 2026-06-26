@@ -1,10 +1,10 @@
 use super::{
-    is_passthrough_tool, openai_stream_event, parse_anthropic_message_content,
-    parse_openai_response_content, provider_messages_for_agent,
-    provider_request_failure_message, provider_route, provider_runtime_driver, provider_transport,
-    resolve_model_alias, resolved_model_path, missing_model_message, run, run_cli_tool_to_writer,
     ObjectPath, OpenAiStreamEvent, ProviderRoute, ProviderRuntimeDriver, ResolvedTransport,
-    RunnerProviderConfig,
+    RunnerProviderConfig, agent_tool_call_from_value, is_passthrough_tool, missing_model_message,
+    openai_stream_event, parse_anthropic_message_content, parse_openai_response_content,
+    provider_messages_for_agent, provider_request_failure_message, provider_route,
+    provider_runtime_driver, provider_transport, resolve_model_alias, resolved_model_path, run,
+    run_cli_tool_to_writer, tool_call_from_text, write_model_text_or_tool_call,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -55,7 +55,7 @@ fn runner_rejects_missing_object_path() {
 #[test]
 fn runner_rejects_unknown_model() {
     assert_eq!(
-        run(vec![OsString::from("/ctx/model/missing-provider/gpt-4o")]),
+        run(vec![OsString::from("/ctx/model/missing-provider/gpt-5.4")]),
         Err("missing provider: missing-provider".to_owned())
     );
 }
@@ -135,6 +135,57 @@ fn runner_recognizes_interactive_tool_passthroughs() {
     assert!(is_passthrough_tool("tsh"));
     assert!(!is_passthrough_tool("shell.exec"));
     assert!(!is_passthrough_tool("fs.read"));
+}
+
+#[test]
+fn tool_call_text_parses_tsh_argv() {
+    let call = tool_call_from_text(
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
+    );
+
+    assert!(matches!(
+        call,
+        Ok(Some(ref call))
+            if call.id == "call-1"
+                && call.name == "tsh"
+                && call.args == [OsString::from("tools")]
+    ));
+}
+
+#[test]
+fn tool_call_arguments_accept_command_string() {
+    let value = serde_json::json!({
+        "type": "tool_call",
+        "id": "call-1",
+        "name": "tsh",
+        "arguments": {
+            "command": "fs.read README.md"
+        }
+    });
+    let call = agent_tool_call_from_value(&value);
+
+    assert!(matches!(
+        call,
+        Ok(Some(ref call))
+            if call.args == [OsString::from("fs.read"), OsString::from("README.md")]
+    ));
+}
+
+#[test]
+fn provider_text_tool_call_writes_canonical_event() {
+    let mut output = Vec::new();
+    let result = write_model_text_or_tool_call(
+        &mut output,
+        "run-1",
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
+    );
+
+    assert!(result.is_ok());
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""type":"tool_call""#));
+    assert!(output.contains(r#""run":"run-1""#));
+    assert!(output.contains(r#""name":"tsh""#));
+    assert!(!output.contains(r#""type":"delta""#));
 }
 
 #[test]
@@ -341,7 +392,7 @@ fn provider_route_selects_key_slot_by_model() {
         provider_route(
             &config,
             "api.openai.com",
-            "gpt-4o",
+            "gpt-5.4",
             Some("group(paid) -> direct, key(office)\nmodel(gpt-*) -> paid\nfallback: direct\n")
         ),
         Ok(ProviderRoute {

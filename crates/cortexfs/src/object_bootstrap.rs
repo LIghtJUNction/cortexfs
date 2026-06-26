@@ -86,8 +86,12 @@ fn validate_model_control_content(file: &str, content: &str) -> Result<(), Objec
     match file {
         "cap" if inspect_model_capabilities(content).is_ok() => Ok(()),
         "driver" if parse_model_driver_routes(content).is_ok() => Ok(()),
+        "effort" if ModelEffort::parse(content).is_some() => Ok(()),
+        "fallback" if parse_model_fallback(content).1.is_ok() => Ok(()),
         "session" if matches!(content.trim(), "none" | "socket") => Ok(()),
-        "cap" | "driver" | "session" => Err(ObjectBootstrapError::InvalidControlValue),
+        "cap" | "driver" | "effort" | "fallback" | "session" => {
+            Err(ObjectBootstrapError::InvalidControlValue)
+        }
         _ if !content.contains('\0') => Ok(()),
         _ => Err(ObjectBootstrapError::InvalidControlValue),
     }
@@ -132,6 +136,8 @@ fn default_model_control_value(object_name: &str, file: &str) -> String {
         "id" => object_name.to_owned(),
         "driver" => "rig".to_owned(),
         "cap" => "chat\nstream".to_owned(),
+        "effort" => ModelEffort::Auto.as_control_value().to_owned(),
+        "fallback" => "\n".to_owned(),
         "session" => "none".to_owned(),
         "status" => "idle".to_owned(),
         _ => String::new(),
