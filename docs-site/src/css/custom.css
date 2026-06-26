@@ -63,10 +63,79 @@ body {
   backdrop-filter: blur(18px);
 }
 
+.navbar__brand {
+  min-width: 126px;
+  transition: min-width 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.navbar__logo {
+  transition: margin-right 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .navbar__title {
+  color: transparent;
+  display: inline-grid;
   font-size: 16px;
   font-weight: 900;
   letter-spacing: 0;
+  line-height: 1;
+  overflow: hidden;
+  position: relative;
+  transition: opacity 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    width 420ms cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+  width: 78px;
+}
+
+.navbar__title::before,
+.navbar__title::after {
+  color: var(--cortex-ink);
+  grid-area: 1 / 1;
+  transition: opacity 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.navbar__title::before {
+  content: "CorTeXfs";
+}
+
+.navbar__title::after {
+  content: "CTX";
+  opacity: 0;
+  transform: translateY(8px) scale(0.92);
+}
+
+html[data-cortex-brand-phase='initials'] .navbar__brand {
+  min-width: 78px;
+}
+
+html[data-cortex-brand-phase='initials'] .navbar__title {
+  width: 34px;
+}
+
+html[data-cortex-brand-phase='initials'] .navbar__title::before {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.94);
+}
+
+html[data-cortex-brand-phase='initials'] .navbar__title::after {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+html[data-cortex-brand-phase='mark'] .navbar__brand {
+  min-width: 36px;
+}
+
+html[data-cortex-brand-phase='mark'] .navbar__logo {
+  margin-right: 0;
+  transform: scale(0.9);
+}
+
+html[data-cortex-brand-phase='mark'] .navbar__title {
+  opacity: 0;
+  width: 0;
 }
 
 .navbar__link {
@@ -130,19 +199,98 @@ body {
 
 .cortexHeroBrand {
   align-items: center;
-  display: inline-flex;
-  gap: 10px;
+  display: inline-grid;
   font-family: Georgia, "Times New Roman", ui-serif, serif;
-  font-size: 30px;
   font-weight: 700;
   letter-spacing: 0;
   margin-bottom: 50px;
+  min-height: 76px;
+  place-items: center;
+  width: min(100%, 360px);
+}
+
+.cortexBrandStage {
+  align-items: center;
+  display: inline-flex;
+  grid-area: 1 / 1;
+  justify-content: center;
+  transition: opacity 520ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.cortexBrandFull {
+  font-size: clamp(34px, 4.3vw, 56px);
+  line-height: 1;
+}
+
+.cortexBrandFull span:nth-child(2) {
+  color: var(--cortex-mint);
+  font-style: italic;
+}
+
+.cortexBrandInitials {
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(18px) scale(0.88);
+}
+
+.cortexBrandInitials span {
+  align-items: center;
+  background: color-mix(in srgb, var(--cortex-panel) 86%, transparent);
+  border: 1px solid var(--cortex-line);
+  border-radius: 8px;
+  color: var(--cortex-ink);
+  display: inline-flex;
+  font-size: clamp(26px, 3.4vw, 42px);
+  height: 58px;
+  justify-content: center;
+  width: 58px;
+}
+
+.cortexBrandLogo {
+  gap: 10px;
+  opacity: 0;
+  transform: translateY(20px) scale(0.84);
+}
+
+.cortexBrandLogo span {
+  color: var(--cortex-ink);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 18px;
+  font-weight: 900;
 }
 
 .cortexLogoMark {
   height: 32px;
   object-fit: contain;
   width: 32px;
+}
+
+.cortexBrandLogo .cortexLogoMark {
+  height: 44px;
+  width: 44px;
+}
+
+html[data-cortex-brand-phase='initials'] .cortexBrandFull {
+  opacity: 0;
+  transform: translateY(-18px) scale(0.88);
+}
+
+html[data-cortex-brand-phase='initials'] .cortexBrandInitials {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+html[data-cortex-brand-phase='mark'] .cortexBrandFull,
+html[data-cortex-brand-phase='mark'] .cortexBrandInitials {
+  opacity: 0;
+  transform: translateY(-18px) scale(0.82);
+}
+
+html[data-cortex-brand-phase='mark'] .cortexBrandLogo {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .cortexEyebrow,
@@ -219,6 +367,17 @@ body {
 .cortexButtonPrimary:hover {
   background: #000;
   color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navbar__brand,
+  .navbar__logo,
+  .navbar__title,
+  .navbar__title::before,
+  .navbar__title::after,
+  .cortexBrandStage {
+    transition-duration: 1ms;
+  }
 }
 
 .cortexProofRow {
@@ -813,6 +972,22 @@ body {
 
   .cortexHeroBrand {
     margin-bottom: 34px;
+    min-height: 64px;
+  }
+
+  .cortexBrandFull {
+    font-size: 34px;
+  }
+
+  .cortexBrandInitials span {
+    font-size: 26px;
+    height: 48px;
+    width: 48px;
+  }
+
+  .cortexBrandLogo .cortexLogoMark {
+    height: 38px;
+    width: 38px;
   }
 
   .cortexButton {

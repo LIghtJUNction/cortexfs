@@ -256,9 +256,21 @@ function HeroBrand(): ReactElement {
   const logoSrc = useBaseUrl('/img/cortexfs-logo.svg');
 
   return (
-    <div className="cortexHeroBrand" aria-label="CortexFS">
-      <img className="cortexLogoMark" src={logoSrc} alt="" />
-      <span>CortexFS</span>
+    <div className="cortexHeroBrand" aria-label="CorTeXfs">
+      <span className="cortexBrandStage cortexBrandFull" aria-hidden="true">
+        <span>Cor</span>
+        <span>TeX</span>
+        <span>fs</span>
+      </span>
+      <span className="cortexBrandStage cortexBrandInitials" aria-hidden="true">
+        <span>C</span>
+        <span>T</span>
+        <span>X</span>
+      </span>
+      <span className="cortexBrandStage cortexBrandLogo" aria-hidden="true">
+        <img className="cortexLogoMark" src={logoSrc} alt="" />
+        <span>ctx</span>
+      </span>
     </div>
   );
 }
