@@ -1209,6 +1209,27 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
     }
     let value = serde_json::from_str::<Value>(data)
         .map_err(|error| format!("invalid provider stream json: {error}"))?;
+    match value.get("type").and_then(Value::as_str) {
+        Some("response.output_text.delta") => {
+            return Ok(OpenAiStreamEvent::Delta(
+                value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ));
+        }
+        Some("response.completed" | "response.done") => return Ok(OpenAiStreamEvent::Done),
+        Some("response.failed" | "response.incomplete" | "error") => {
+            let message = value
+                .pointer("/error/message")
+                .or_else(|| value.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("provider stream failed");
+            return Err(message.to_owned());
+        }
+        _ => {}
+    }
     if let Some(usage) = token_usage_from_value(&value) {
         return Ok(OpenAiStreamEvent::Usage(usage));
     }

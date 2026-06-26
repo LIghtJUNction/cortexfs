@@ -348,7 +348,7 @@ fn agent_send(
 }
 
 #[derive(Clone, Copy)]
-struct AgentBufferedSend<'a> {
+struct AgentInteractiveSend<'a> {
     session: Option<&'a str>,
     input: &'a str,
     raw: bool,
@@ -356,10 +356,10 @@ struct AgentBufferedSend<'a> {
     interrupt: Option<&'a AgentInterruptGuard>,
 }
 
-fn agent_send_buffered_with_run_id(
+fn agent_send_interactive_with_run_id(
     root: &Path,
     name: &str,
-    send: AgentBufferedSend<'_>,
+    send: AgentInteractiveSend<'_>,
 ) -> Result<ExitCode, CliError> {
     let session = agent_session_name(root, name, send.session)?;
     let request = format!(
@@ -370,7 +370,7 @@ fn agent_send_buffered_with_run_id(
         json_string(send.input)
     );
     let cancel_request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(send.run_id));
-    stream_agent_socket_request_buffered_interruptible(
+    stream_agent_socket_request_streaming_interruptible(
         &agent_socket_path(root, name)?,
         &request,
         send.raw,
@@ -462,7 +462,7 @@ fn agent_repl(
             }
             let run_id = request_id()?;
             let interrupt = AgentInterruptGuard::new()?;
-            let code = agent_send_buffered_with_run_id(root, name, AgentBufferedSend {
+            let code = agent_send_interactive_with_run_id(root, name, AgentInteractiveSend {
                 session: Some(&session),
                 input: &line,
                 raw,
