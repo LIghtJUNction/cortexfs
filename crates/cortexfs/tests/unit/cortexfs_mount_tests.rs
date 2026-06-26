@@ -5,7 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use cortexfs::{ensure_v1_reference_tree, FuseV1Attr, FuseV1FileType, FUSE_V1_ROOT_INODE};
 use fuser::{FileType, INodeNo};
 
-use super::{estimate_tokens_from_bytes, file_attr, parent_inode, CortexFuse};
+use super::{
+    estimate_tokens_from_bytes, file_attr, mount_statfs_for_source, parent_inode,
+    sanitize_mount_statfs, CortexFuse, MountStatfs,
+};
 
 #[test]
 fn file_attr_maps_projection_attributes_to_fuser_attributes() {
@@ -35,6 +38,42 @@ fn parent_inode_uses_known_parent_or_root() {
     assert_eq!(parent_inode("agent/coder.d/status", &paths), Ok(42));
     assert_eq!(parent_inode("agent", &paths), Ok(FUSE_V1_ROOT_INODE));
     assert_eq!(parent_inode("", &paths), Ok(FUSE_V1_ROOT_INODE));
+}
+
+#[test]
+fn statfs_sanitizes_zero_totals_to_avoid_false_full_mount() {
+    let stats = sanitize_mount_statfs(MountStatfs {
+        blocks: 0,
+        blocks_free: 0,
+        blocks_available: 0,
+        files: 0,
+        files_free: 0,
+        block_size: 0,
+        name_max: 0,
+        fragment_size: 0,
+    });
+
+    assert_eq!(stats.blocks, 1);
+    assert_eq!(stats.files, 1);
+    assert_eq!(stats.block_size, 1);
+    assert_eq!(stats.name_max, 1);
+    assert_eq!(stats.fragment_size, 1);
+}
+
+#[test]
+fn statfs_reports_backing_source_capacity() {
+    let root = unique_mount_test_dir("statfs");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    let stats = mount_statfs_for_source(&root);
+
+    assert!(stats.blocks > 0);
+    assert!(stats.files > 0);
+    assert!(stats.block_size > 0);
+    assert!(stats.name_max > 0);
+    assert!(stats.blocks_free <= stats.blocks);
+    assert!(stats.blocks_available <= stats.blocks);
+    assert!(stats.files_free <= stats.files);
 }
 
 #[test]
