@@ -164,8 +164,10 @@ agent 终端实现，不是新的后台监听、轮询或热加载子命令。
 /ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-`tsh` 只按 `CTX_PATH` 查找 tool，不回退到 host `PATH`。如果 `CTX_PATH` 未设置，可以读
-`CTX_HOME/.tshrc`，但该文件只能包含数据形式的 `CTX_PATH=...`。
+`tsh` 只按 `CTX_PATH` 查找 tool，不回退到 host `PATH`。standalone human session
+会先读 `CTX_HOME/.tshrc`，再使用继承的进程 `CTX_PATH`；该文件只能包含数据形式的
+`CTX_PATH=...`。agent terminal 里的 `CTX_PATH` 由 runtime 按 policy、mount、uid/gid
+生成，保持最高优先级。
 
 这个分层很重要：
 
@@ -229,13 +231,16 @@ smollm2:135m
 供应商 API key 的解析顺序固定为：
 
 ```text
-1. provider 配置指定的环境变量
-2. 系统 keychain，例如 service=cortexfs:<provider> account=default
-3. 未配置，返回稳定错误
+1. root-owned CortexFS system secret store
+2. 未配置，返回稳定错误或无认证请求
 ```
 
-OAuth access token 也按同样原则处理：环境变量优先，其次系统 keychain。provider 配置可以
-声明 Authorization Code + PKCE 元数据；access token 默认保存在
+provider 配置不要声明环境变量名，用户也不需要手动配置环境变量名。API key 不注入
+agent sandbox 环境；model/object runner 在请求时直接读取
+`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`。
+
+OAuth access token 也按同样原则处理：运行时内部变量优先，其次系统 keychain。provider
+配置可以声明 Authorization Code + PKCE 元数据；access token 默认保存在
 `service=cortexfs:<provider> account=oauth:access`，refresh token 默认保存在
 `account=oauth:refresh`。PKCE verifier、state、access token、refresh token 都不要写入
 `/ctx/model/*`、`.d/default` 或其他 ABI 文件。

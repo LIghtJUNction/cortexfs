@@ -5,6 +5,7 @@ const MAX_OAUTH_TOKEN_RESPONSE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 struct CtxProviderConfig {
+    name: Option<String>,
     base_url: String,
     oauth: Option<cortexfs::OAuthProviderConfig>,
 }
@@ -23,6 +24,14 @@ fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
         ProviderArgs::Refresh { ref provider } => {
             provider_oauth_refresh(provider).map(|()| ExitCode::SUCCESS)
         }
+        ProviderArgs::SecretSet {
+            ref provider,
+            ref slot,
+        } => provider_secret_set(provider, slot).map(|()| ExitCode::SUCCESS),
+        ProviderArgs::SecretStatus {
+            ref provider,
+            ref slot,
+        } => provider_secret_status(provider, slot).map(|()| ExitCode::SUCCESS),
         ProviderArgs::PresetList => provider_preset_list().map(|()| ExitCode::SUCCESS),
         ProviderArgs::PresetShow { ref preset } => {
             provider_preset_show(preset).map(|()| ExitCode::SUCCESS)
@@ -30,6 +39,62 @@ fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
         ProviderArgs::PresetInstall { ref preset } => {
             provider_preset_install(preset).map(|()| ExitCode::SUCCESS)
         }
+    }
+}
+
+fn provider_secret_set(provider: &str, slot: &str) -> Result<(), CliError> {
+    validate_provider_secret_target(provider, slot)?;
+    let mut secret = String::new();
+    io::stdin()
+        .read_to_string(&mut secret)
+        .map_err(|error| CliError::unavailable(format!("cannot read secret from stdin: {error}")))?;
+    let secret = secret.trim_end_matches(['\r', '\n']);
+    if secret.is_empty() {
+        return Err(CliError::usage(
+            "provider secret set reads a non-empty secret from stdin",
+        ));
+    }
+    cortexfs::store_provider_system_secret(provider, slot, secret)
+        .map_err(provider_system_secret_cli_error)?;
+    print_line(&format!("provider secret configured: {provider}/{slot}"))
+}
+
+fn provider_secret_status(provider: &str, slot: &str) -> Result<(), CliError> {
+    validate_provider_secret_target(provider, slot)?;
+    let configured = cortexfs::provider_system_secret_exists(provider, slot)
+        .map_err(provider_system_secret_cli_error)?;
+    print_line(&format!(
+        "provider secret {provider}/{slot}: {}",
+        if configured { "configured" } else { "missing" }
+    ))
+}
+
+fn validate_provider_secret_target(provider: &str, slot: &str) -> Result<(), CliError> {
+    if !is_provider_name(provider) {
+        return Err(CliError::usage("invalid provider name"));
+    }
+    if !is_provider_secret_slot(slot) {
+        return Err(CliError::usage("invalid provider secret slot"));
+    }
+    Ok(())
+}
+
+fn is_provider_secret_slot(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
+fn provider_system_secret_cli_error(error: cortexfs::ProviderSystemSecretError) -> CliError {
+    match error {
+        cortexfs::ProviderSystemSecretError::InvalidName => CliError::usage("invalid provider secret name"),
+        cortexfs::ProviderSystemSecretError::CannotRead => {
+            CliError::unavailable("cannot read provider system secret")
+        }
+        cortexfs::ProviderSystemSecretError::CannotWrite => CliError::unavailable(
+            "cannot write provider system secret; run with sudo or install via a privileged helper",
+        ),
     }
 }
 
@@ -48,7 +113,8 @@ const PROVIDER_PRESETS: &[ProviderPreset] = &[
         file: "api.openai.com.json",
         config: r#"{
   "base_url": "https://api.openai.com/v1",
-  "api_key_env": "OPENAI_API_KEY",
+  "default_model": "gpt-5.5",
+  "models": ["gpt-5.4-mini"],
   "enabled": true,
   "formats": ["openai.chat", "openai.responses"]
 }
@@ -60,7 +126,6 @@ const PROVIDER_PRESETS: &[ProviderPreset] = &[
         file: "api.anthropic.com.json",
         config: r#"{
   "base_url": "https://api.anthropic.com/v1",
-  "api_key_env": "ANTHROPIC_API_KEY",
   "enabled": true,
   "formats": ["anthropic.messages"]
 }
@@ -72,7 +137,6 @@ const PROVIDER_PRESETS: &[ProviderPreset] = &[
         file: "generativelanguage.googleapis.com.json",
         config: r#"{
   "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-  "api_key_env": "GOOGLE_API_KEY",
   "enabled": true,
   "formats": ["openai.chat"]
 }
@@ -239,7 +303,10 @@ fn read_provider_config(provider: &str) -> Result<CtxProviderConfig, CliError> {
         let content = read_file_to_string(&path)?;
         let config = serde_json::from_str::<CtxProviderConfig>(&content)
             .map_err(|error| CliError::usage(format!("invalid provider config: {error}")))?;
-        if provider_name_from_base_url(&config.base_url).as_deref() == Some(provider) {
+        if cortexfs::provider_name_from_config(&config.base_url, config.name.as_deref())
+            .as_deref()
+            == Ok(provider)
+        {
             return Ok(config);
         }
     }
@@ -491,18 +558,6 @@ fn hex_value(byte: u8) -> Result<u8, CliError> {
         b'A'..=b'F' => Ok(byte - b'A' + 10),
         _ => Err(CliError::usage("invalid oauth callback encoding")),
     }
-}
-
-fn provider_name_from_base_url(base_url: &str) -> Option<String> {
-    let host = base_url
-        .trim()
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split(['/', ':'])
-        .next()?
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
-    (!host.is_empty()).then_some(host)
 }
 
 fn is_provider_name(value: &str) -> bool {

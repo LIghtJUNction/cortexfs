@@ -307,9 +307,9 @@ fn agent_executable_socket_runtime_does_not_inherit_service_secrets() {
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
-if [ -n "$OPENAI_API_KEY" ]; then
+if [ -n "$CTX_SECRET_CANARY" ]; then
   printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
-  printf '{"type":"delta","run":"%s","text":"leaked:%s"}\n' "$CTX_RUN_ID" "$OPENAI_API_KEY"
+  printf '{"type":"delta","run":"%s","text":"leaked:%s"}\n' "$CTX_RUN_ID" "$CTX_SECRET_CANARY"
   printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
   exit 0
 fi

@@ -138,7 +138,7 @@ usage:
 
 principles:
   tsh resolves TOOL through CTX_PATH
-  when CTX_PATH is unset, tsh may read CTX_HOME/.tshrc
+  standalone tsh reads CTX_HOME/.tshrc before inherited CTX_PATH
   tsh never falls back to PATH for tool lookup
   bash, tmux, and zellij are tools, not built-ins
 
@@ -1236,15 +1236,31 @@ fn command_not_found<T>(name: &str) -> Result<T, TshError> {
 }
 
 fn ctx_tool_path(root: &Path) -> Result<ToolPath, TshError> {
-    match env::var("CTX_PATH") {
+    let home = ctx_home(root)?;
+    ctx_tool_path_with_home(
+        root,
+        &home,
+        env::var("CTX_PATH"),
+        env::var_os("CTX_AGENT").is_none(),
+    )
+}
+
+fn ctx_tool_path_with_home(
+    root: &Path,
+    home: &Path,
+    env_ctx_path: Result<String, env::VarError>,
+    prefer_tshrc: bool,
+) -> Result<ToolPath, TshError> {
+    if prefer_tshrc && let Some(value) = tshrc_ctx_path(root, home)? {
+        return Ok(ToolPath::parse(&value));
+    }
+
+    match env_ctx_path {
         Ok(value) => Ok(ToolPath::parse(&value)),
-        Err(env::VarError::NotPresent) => {
-            let home = ctx_home(root)?;
-            tshrc_ctx_path(root, &home)?.map_or_else(
-                || Ok(ToolPath::default(root, &home)),
-                |value| Ok(ToolPath::parse(&value)),
-            )
-        }
+        Err(env::VarError::NotPresent) => tshrc_ctx_path(root, home)?.map_or_else(
+            || Ok(ToolPath::default(root, home)),
+            |value| Ok(ToolPath::parse(&value)),
+        ),
         Err(env::VarError::NotUnicode(_value)) => Err(TshError::usage("CTX_PATH must be UTF-8")),
     }
 }
@@ -1381,10 +1397,10 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, help_text,
-        load_tool_context, parse_args, parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path,
-        requires_explicit_repl_input, run_repl_tool, run_tool, terminal_safe_text,
-        validate_tshrc_ctx_path,
+        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help,
+        ctx_tool_path_with_home, help_text, load_tool_context, parse_args, parse_repl_line,
+        parse_tsh_config, parse_tshrc_ctx_path, requires_explicit_repl_input, run_repl_tool,
+        run_tool, terminal_safe_text, validate_tshrc_ctx_path,
     };
     use cortexfs_tool_sdk::DynamicToolCache;
     use std::ffi::OsString;
@@ -1468,6 +1484,84 @@ CTX_PATH=/ctx/home/1000/tool:/ctx/tool
         assert!(validate_tshrc_ctx_path("/usr/bin", root, &home).is_err());
         assert!(validate_tshrc_ctx_path("/tmp/attacker", root, &home).is_err());
         assert!(validate_tshrc_ctx_path("/ctx/tool::/ctx/home/1000/tool", root, &home).is_err());
+    }
+
+    #[test]
+    fn standalone_tshrc_ctx_path_takes_precedence_over_process_env() {
+        let dir =
+            std::env::temp_dir().join(format!("cortexfs-tsh-ctx-path-{}", std::process::id()));
+        let root = dir.join("ctx");
+        let home = root.join("home").join("1000");
+        assert!(
+            fs::create_dir_all(&home).is_ok(),
+            "failed to create test home"
+        );
+        assert!(
+            fs::write(
+                home.join(".tshrc"),
+                "CTX_PATH=/ctx/home/1000/tool:/ctx/tool\n",
+            )
+            .is_ok(),
+            "failed to write test .tshrc"
+        );
+
+        let Ok(tool_path) = ctx_tool_path_with_home(
+            &root,
+            &home,
+            Ok(format!(
+                "{}:{}",
+                root.join("tool").display(),
+                home.join("tool").display()
+            )),
+            true,
+        ) else {
+            return;
+        };
+
+        assert_eq!(
+            tool_path.dirs(),
+            &[
+                PathBuf::from("/ctx/home/1000/tool"),
+                PathBuf::from("/ctx/tool")
+            ]
+        );
+
+        let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn agent_tsh_process_env_takes_precedence_over_tshrc() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-agent-ctx-path-{}",
+            std::process::id()
+        ));
+        let root = dir.join("ctx");
+        let home = root.join("home").join("1000");
+        assert!(
+            fs::create_dir_all(&home).is_ok(),
+            "failed to create test home"
+        );
+        assert!(
+            fs::write(
+                home.join(".tshrc"),
+                "CTX_PATH=/ctx/home/1000/tool:/ctx/tool\n",
+            )
+            .is_ok(),
+            "failed to write test .tshrc"
+        );
+
+        let env_path = format!(
+            "{}:{}",
+            root.join("tool").display(),
+            home.join("tool").display()
+        );
+        let Ok(tool_path) = ctx_tool_path_with_home(&root, &home, Ok(env_path), false) else {
+            return;
+        };
+
+        assert_eq!(tool_path.dirs(), &[root.join("tool"), home.join("tool")]);
+
+        let _ignored = fs::remove_dir_all(dir);
     }
 
     #[test]

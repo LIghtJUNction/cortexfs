@@ -175,7 +175,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
 #[test]
 fn api_key_resolution_prefers_environment_over_keychain() {
     let resolved = resolve_api_key_with(
-        "LMM_API_KEY",
+        "CTX_LMM_SECRET",
         "cortexfs:lmm",
         "default",
         |_name| Ok("env-secret".to_owned()),
@@ -187,7 +187,7 @@ fn api_key_resolution_prefers_environment_over_keychain() {
 #[test]
 fn api_key_resolution_uses_keychain_when_environment_is_empty_or_missing() {
     let empty_env = resolve_api_key_with(
-        "LMM_API_KEY",
+        "CTX_LMM_SECRET",
         "cortexfs:lmm",
         "default",
         |_name| Ok(" \n".to_owned()),
@@ -196,7 +196,7 @@ fn api_key_resolution_uses_keychain_when_environment_is_empty_or_missing() {
     assert_eq!(empty_env, Ok(Some("keychain-secret".to_owned())));
 
     let missing_env = resolve_api_key_with(
-        "LMM_API_KEY",
+        "CTX_LMM_SECRET",
         "cortexfs:lmm",
         "default",
         |_name| Err(std::env::VarError::NotPresent),
@@ -208,15 +208,15 @@ fn api_key_resolution_uses_keychain_when_environment_is_empty_or_missing() {
 #[test]
 fn api_key_resolution_checks_all_environment_candidates_before_keychain() {
     let env_names = vec![
-        "PRIMARY_API_KEY".to_owned(),
-        "SECONDARY_API_KEY".to_owned(),
+        "CTX_TEST_PRIMARY_SECRET".to_owned(),
+        "CTX_TEST_SECONDARY_SECRET".to_owned(),
     ];
     let resolved = resolve_api_key_from_env_names_with(
         &env_names,
         "cortexfs:test",
         "default",
         |name| {
-            if name == "SECONDARY_API_KEY" {
+            if name == "CTX_TEST_SECONDARY_SECRET" {
                 Ok("env-secret".to_owned())
             } else {
                 Err(std::env::VarError::NotPresent)
@@ -230,8 +230,8 @@ fn api_key_resolution_checks_all_environment_candidates_before_keychain() {
 #[test]
 fn api_key_resolution_uses_keychain_after_environment_candidates() {
     let env_names = vec![
-        "PRIMARY_API_KEY".to_owned(),
-        "SECONDARY_API_KEY".to_owned(),
+        "CTX_TEST_PRIMARY_SECRET".to_owned(),
+        "CTX_TEST_SECONDARY_SECRET".to_owned(),
     ];
     let resolved = resolve_api_key_from_env_names_with(
         &env_names,
@@ -263,7 +263,7 @@ fn api_key_resolution_uses_keychain_without_environment_candidates() {
 #[test]
 fn api_key_resolution_reports_unconfigured_without_environment_or_keychain() {
     let resolved = resolve_api_key_with(
-        "LMM_API_KEY",
+        "CTX_LMM_SECRET",
         "cortexfs:lmm",
         "default",
         |_name| Err(std::env::VarError::NotPresent),
@@ -335,7 +335,7 @@ fn oauth_access_token_resolution_prefers_environment_over_keychain() {
         "openai",
         &config,
         |name| {
-            if name == "OPENAI_OAUTH_ACCESS_TOKEN" {
+            if name == "CTX_OPENAI_OAUTH_ACCESS_TOKEN" {
                 Ok("env-access".to_owned())
             } else {
                 Err(std::env::VarError::NotPresent)
@@ -366,8 +366,6 @@ fn test_oauth_config() -> OAuthProviderConfig {
         token_url: "https://auth.example/token".to_owned(),
         redirect_uri: "http://127.0.0.1:8765/callback".to_owned(),
         scopes: vec!["model.read".to_owned(), "offline_access".to_owned()],
-        access_token_env: Some("OPENAI_OAUTH_ACCESS_TOKEN".to_owned()),
-        refresh_token_env: Some("OPENAI_OAUTH_REFRESH_TOKEN".to_owned()),
         access_token_account: None,
         refresh_token_account: None,
     }

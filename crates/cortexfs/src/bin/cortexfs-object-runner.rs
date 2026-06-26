@@ -7,8 +7,8 @@ use std::process::{Command, ExitCode, Stdio};
 
 use cortexfs::{
     DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata, current_time_unix,
-    is_model_name, resolve_api_key_from_env_names, run_core_tool, run_core_tool_cli,
-    run_echo_model, skill_metadata_budget_from_env,
+    is_model_name, run_core_tool, run_core_tool_cli, run_echo_model,
+    skill_metadata_budget_from_env,
 };
 use cortexfs_tool_sdk::ToolInvocation;
 use serde_json::Value;
@@ -150,8 +150,9 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     if !model_path.exists() {
         let stdout = io::stdout();
         let mut stdout = stdout.lock();
+        let message = missing_model_message(&ctx_root, &model, &model_path);
         return write_tool_start(&mut stdout, &run, name)
-            .and_then(|()| write_tool_error(&mut stdout, &run, "ENOENT", "missing model"))
+            .and_then(|()| write_tool_error(&mut stdout, &run, "ENOENT", &message))
             .map_err(|error| format!("cannot write output: {error}"));
     }
     let mut child = Command::new(model_path)
@@ -186,6 +187,15 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     } else {
         Err("agent model failed".to_owned())
     }
+}
+
+fn missing_model_message(ctx_root: &Path, model: &str, model_path: &Path) -> String {
+    if is_model_alias(model)
+        && let Ok(target) = fs::read_link(ctx_root.join("model").join(model))
+    {
+        return format!("missing model: {model} -> {}", target.display());
+    }
+    format!("missing model: {}", model_path.display())
 }
 
 fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {

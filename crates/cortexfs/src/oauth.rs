@@ -12,8 +12,6 @@ pub struct OAuthProviderConfig {
     pub redirect_uri: String,
     #[serde(default)]
     pub scopes: Vec<String>,
-    pub access_token_env: Option<String>,
-    pub refresh_token_env: Option<String>,
     pub access_token_account: Option<String>,
     pub refresh_token_account: Option<String>,
 }
@@ -179,7 +177,7 @@ pub fn parse_oauth_token_response(body: &[u8]) -> Result<OAuthTokenResponse, OAu
     Ok(response)
 }
 
-/// Resolves an OAuth access token with environment before system keychain.
+/// Resolves an OAuth access token with generated environment before system keychain.
 pub fn resolve_oauth_access_token(
     provider: &str,
     config: &OAuthProviderConfig,
@@ -206,16 +204,15 @@ where
     if provider.is_empty() || provider.contains('\0') || !is_valid_oauth_config(config) {
         return Err(OAuthError::InvalidConfig);
     }
-    if let Some(name) = config.access_token_env.as_deref() {
-        if !is_valid_env_key(name) {
-            return Err(OAuthError::InvalidConfig);
-        }
-        match env_lookup(name) {
-            Ok(value) if !value.trim().is_empty() => return Ok(Some(value)),
-            Ok(_value) => {}
-            Err(env::VarError::NotPresent) => {}
-            Err(env::VarError::NotUnicode(_value)) => return Err(OAuthError::InvalidConfig),
-        }
+    let name = crate::provider_oauth_access_token_env_name(provider);
+    if !is_valid_env_key(&name) {
+        return Err(OAuthError::InvalidConfig);
+    }
+    match env_lookup(&name) {
+        Ok(value) if !value.trim().is_empty() => return Ok(Some(value)),
+        Ok(_value) => {}
+        Err(env::VarError::NotPresent) => {}
+        Err(env::VarError::NotUnicode(_value)) => return Err(OAuthError::InvalidConfig),
     }
     keychain_lookup(&oauth_keychain_service(provider), config.access_account())
 }
@@ -252,14 +249,6 @@ fn is_valid_oauth_config(config: &OAuthProviderConfig) -> bool {
             .scopes
             .iter()
             .any(|scope| scope.trim().is_empty() || scope.contains('\0'))
-        && config
-            .access_token_env
-            .as_deref()
-            .is_none_or(is_valid_env_key)
-        && config
-            .refresh_token_env
-            .as_deref()
-            .is_none_or(is_valid_env_key)
 }
 
 fn is_valid_pkce_verifier(verifier: &str) -> bool {

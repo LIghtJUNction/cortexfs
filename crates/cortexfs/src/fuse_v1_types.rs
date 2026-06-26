@@ -79,6 +79,7 @@ struct VirtualExecObject {
 
 #[derive(Clone, Debug, Deserialize)]
 struct ProviderConfig {
+    name: Option<String>,
     base_url: String,
     default_model: Option<String>,
     #[serde(default)]
@@ -87,7 +88,6 @@ struct ProviderConfig {
     enabled: bool,
     #[serde(default)]
     formats: Vec<String>,
-    api_key_env: Option<String>,
     oauth: Option<OAuthProviderConfig>,
 }
 

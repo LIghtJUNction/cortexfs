@@ -280,18 +280,51 @@ fn system_keychain_secret(
 ) -> Result<Option<String>, ApiKeyResolutionError> {
     let entry = match keyring::Entry::new(service, account) {
         Ok(entry) => entry,
-        Err(keyring::Error::NoDefaultStore) => return Ok(None),
-        Err(_error) => return Err(ApiKeyResolutionError::KeychainUnavailable),
+        Err(keyring::Error::NoDefaultStore) => return secret_tool_lookup(service, account),
+        Err(_error) => return secret_tool_lookup(service, account),
     };
     let secret = match entry.get_password() {
         Ok(secret) => secret,
-        Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(_error) => return Err(ApiKeyResolutionError::KeychainUnavailable),
+        Err(keyring::Error::NoEntry) => return secret_tool_lookup(service, account),
+        Err(_error) => return secret_tool_lookup(service, account),
     };
     if secret.is_empty() {
         Ok(None)
     } else {
         Ok(Some(secret))
+    }
+}
+
+fn secret_tool_lookup(
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, ApiKeyResolutionError> {
+    let mut command = Command::new("secret-tool");
+    command
+        .args(["lookup", "service", service, "account", account])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        let uid = nix::unistd::geteuid().as_raw();
+        command.env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path=/run/user/{uid}/bus"),
+        );
+    }
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(_error) => return Ok(None),
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let secret =
+        String::from_utf8(output.stdout).map_err(|_error| ApiKeyResolutionError::InvalidName)?;
+    let secret = secret.trim_end_matches(['\r', '\n']);
+    if secret.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(secret.to_owned()))
     }
 }
 

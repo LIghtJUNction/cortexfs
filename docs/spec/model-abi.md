@@ -19,13 +19,30 @@ providers, `<provider>` is the original provider identity:
 /ctx/model/google/gemini-2.5-pro
 ```
 
-For a custom base URL without a declared original provider mapping,
+For a custom domain base URL without a declared original provider mapping,
 `<provider>` is the normalized host name. For example,
 `https://api.lmm.best:9000/` projects models under:
 
 ```text
 /ctx/model/api.lmm.best/gpt-5.4-mini
 ```
+
+Address-like endpoints such as `127.0.0.1`, `::1`, or `localhost` MUST set an
+explicit provider `name` in the host-side provider config. Without that name,
+the config is invalid because `/ctx/model/<provider>` must be a stable object
+name, not a transport address. For example:
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat", "openai.responses"]
+}
+```
+
+This projects as `/ctx/model/local/gpt-5.4-mini`.
 
 The custom base URL is provider-adapter configuration, not a root ABI namespace.
 It may be shown in `model/<provider>/<model>.d/default` for inspection, but
@@ -111,14 +128,16 @@ Secrets are never stored in model files or `.d/` control files. Provider
 credentials use this priority:
 
 ```text
-environment variable
-system keychain
+root-owned CortexFS system secret store
 unconfigured
 ```
 
-For example, a provider adapter may first read `LMM_API_KEY`, then look up a
-system keychain item such as `service=cortexfs:lmm account=default`. If both
-are absent, the model is not configured and must return a stable error.
+The API key is read from
+`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`. Provider JSON must not
+declare API-key environment variable names, and API keys must not be placed in
+process environments. If the system secret is absent, the model is not
+configured and must return a stable error unless the endpoint supports
+unauthenticated requests.
 
 OAuth providers use the same rule: access tokens are bearer credentials and
 remain provider-runtime state, not model ABI state. A provider config may
@@ -132,18 +151,19 @@ declare OAuth Authorization Code + PKCE metadata:
     "auth_url": "https://auth.example.com/oauth/authorize",
     "token_url": "https://auth.example.com/oauth/token",
     "redirect_uri": "http://127.0.0.1:8765/callback",
-    "scopes": ["model.read", "offline_access"],
-    "access_token_env": "EXAMPLE_OAUTH_ACCESS_TOKEN",
-    "refresh_token_env": "EXAMPLE_OAUTH_REFRESH_TOKEN"
+    "scopes": ["model.read", "offline_access"]
   }
 }
 ```
 
-`access_token_env` is checked before the system keychain. If it is absent or
-empty, the runtime looks up `service=cortexfs:<provider> account=oauth:access`.
-Refresh tokens, when used by a future provider adapter or CLI wrapper, use
-`account=oauth:refresh` by default. PKCE uses `S256`; the verifier and callback
-state are short-lived local flow state and must not be written into `/ctx/model`.
+OAuth token environment names are generated from provider identity, for example
+`CTX_EXAMPLE_OAUTH_ACCESS_TOKEN` and `CTX_EXAMPLE_OAUTH_REFRESH_TOKEN`; users do
+not configure those names in provider JSON. If the generated access-token
+variable is absent or empty, the runtime looks up
+`service=cortexfs:<provider> account=oauth:access`. Refresh tokens, when used by
+a provider adapter or CLI wrapper, use `account=oauth:refresh` by default. PKCE
+uses `S256`; the verifier and callback state are short-lived local flow state
+and must not be written into `/ctx/model`.
 `ctx provider oauth login PROVIDER` is the host-side helper that performs this
 PKCE login flow and writes tokens to the system keychain.
 
@@ -154,17 +174,23 @@ Provider presets are host-side JSON file templates. They install under
 
 ```text
 ctx provider preset list
-ctx provider preset show openai|anthropic|google
-ctx provider preset install openai|anthropic|google
+ctx provider preset show openai|codex|anthropic|google
+ctx provider preset install openai|codex|anthropic|google
 ```
 
 Canonical provider names:
 
 ```text
-openai     OpenAI-compatible `/v1/chat/completions`; `codex` is an alias
+openai     OpenAI API with `/v1/responses` for agent calls and
+           `/v1/chat/completions` fallback; `codex` is an alias
 anthropic  Claude Messages API
 google     Gemini through Google's OpenAI-compatible endpoint; `gemini` is an alias
 ```
+
+The `codex` alias installs the OpenAI preset and projects Codex-recommended
+OpenAI models under the canonical provider path, for example
+`/ctx/model/openai/gpt-5.5`. It does not create `/ctx/model/codex` or a second
+provider namespace.
 
 The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
 preset uses `anthropic.messages`, so the runner sends `POST /v1/messages` with
@@ -226,8 +252,10 @@ made; if the file is absent, the projected default is `fallback: direct`.
 
 Rules are evaluated top to bottom. A rule selects a group; a group selects both
 transport and an optional credential slot. Secrets are never written into the
-route file. `key(NAME)` selects `service=cortexfs:<provider> account=NAME` from
-the system keychain, with environment variables checked first.
+route file or provider JSON. `key(NAME)` selects
+`/var/lib/cortexfs/secrets/provider/<provider>/NAME` from the CortexFS system
+secret store. API keys are not placed in process environments. Without
+`key(...)`, the default credential slot is `default`.
 
 ```text
 group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)

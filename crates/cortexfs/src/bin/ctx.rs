@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::env;
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
@@ -19,14 +20,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use cortexfs::{
     AbiPathKind, AgentControlIssue, AgentPromptContext, AgentRuntimeView, CTX_ROOT,
     ContextJsonlIssue, ContextPackIssue, DEFAULT_AGENT_PROMPT_TEMPLATE, EventStreamIssue,
-    MAX_SOCKET_FRAME_BYTES, MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError,
-    MountMode, MountTable, ObjectClass, ObjectLayoutIssue, PolicyV0, ROOT_ENTRIES,
-    SessionControlIssue, SessionIndexIssue, SessionIndexKind, SessionLayoutIssue,
-    SharedQueueLayoutIssue, ToolPath, ToolSchemaIssue, classify_abi_path, collect_agent_rules,
-    collect_skill_metadata, current_time_unix, derive_agent_runtime_view, ensure_v1_reference_tree,
-    inspect_agent_control, inspect_context_jsonl, inspect_context_pack_json,
-    inspect_event_stream_jsonl, inspect_message_stream_jsonl, inspect_model_capabilities,
-    inspect_object_layout, inspect_session_control, inspect_session_index, inspect_session_layout,
+    MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MAX_SOCKET_FRAME_BYTES,
+    MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError, MountMode, MountTable,
+    ObjectClass, ObjectLayoutIssue, PolicyV0, ROOT_ENTRIES, SessionControlIssue, SessionIndexIssue,
+    SessionIndexKind, SessionLayoutIssue, SharedQueueLayoutIssue, ToolPath, ToolSchemaIssue,
+    classify_abi_path, collect_agent_rules, collect_skill_metadata, cortexfs_manual,
+    current_time_unix, derive_agent_runtime_view, ensure_v1_reference_tree, inspect_agent_control,
+    inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl,
+    inspect_message_stream_jsonl, inspect_model_capabilities, inspect_object_layout,
+    inspect_session_control, inspect_session_index, inspect_session_layout,
     inspect_shared_queue_layout, inspect_tool_schema_json, is_executable_file, is_model_name,
     is_object_name, parse_abi_path, parse_model_driver_routes, render_agent_system_prompt,
     run_core_tool_cli_with_root, skill_metadata_budget_from_env,

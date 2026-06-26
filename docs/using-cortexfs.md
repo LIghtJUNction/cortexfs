@@ -40,21 +40,30 @@ echo "summarize this file" | /ctx/model/main
 ```
 
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
-供应商密钥不写进 model 文件或 `.d/` 控制目录；provider adapter 会按环境变量、系统
-keychain、未配置的顺序解析。
+供应商密钥不写进 model 文件、`.d/` 控制目录或进程环境变量。provider adapter 从
+root-owned CortexFS system secret store 直接读取 API key；用户不需要在 provider JSON
+里手写环境变量名。长期凭据写入：
+`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`，通过 CLI 管理：
+
+```bash
+printf '%s\n' 'your-secret' | sudo ctx provider secret set local
+ctx provider secret status local
+```
 
 常见 provider 可以先安装文件化 preset：
 
 ```bash
 ctx provider preset list
 ctx provider preset show google
+ctx provider preset install codex
 ctx provider preset install openai
 ctx provider preset install anthropic
 ctx provider preset install google
 ```
 
 规范名称是 `openai`、`anthropic`、`google`。`codex` 是 `openai` preset 的别名；
-`gemini` 是 `google` preset 的别名。
+`gemini` 是 `google` preset 的别名。安装 `codex` 后模型仍投影在规范路径
+`/ctx/model/openai/<model>` 下，不新增 `/ctx/model/codex` 命名空间。
 
 模型代理不做成 agent，也不写进 provider JSON。全局唯一路由表是：
 
@@ -80,9 +89,25 @@ model(embedding-*) -> local-socket
 fallback: proxy
 ```
 
-`key(office)` 表示同一个 provider 的另一个凭据槽：先查匹配的环境变量，再查系统
-keychain 的 `service=cortexfs:<provider> account=office`。不写 `key(...)` 就用
-`account=default`。
+`key(office)` 表示同一个 provider 的另一个凭据槽，对应 system secret store 的
+`/var/lib/cortexfs/secrets/provider/<provider>/office`。不写 `key(...)` 就用
+`default` 槽。
+
+本地聚合 API 或 IP 地址 endpoint 必须显式配置稳定 provider 名，不要让地址字面量成为
+`/ctx/model/<provider>` 路径：
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat", "openai.responses"]
+}
+```
+
+对应模型路径是 `/ctx/model/local/gpt-5.4-mini`。密钥写入
+`service=cortexfs:local account=default`；不需要在 provider JSON 里写明文密钥。
 
 ## 管理 agent
 
@@ -174,13 +199,16 @@ ctx agent start coder --session review \
 
 ## 使用 tool shell
 
-`tsh` 是 CortexFS tool shell，不是 host shell。它解析命令的顺序是：
+`tsh` 是 CortexFS tool shell，不是 host shell。standalone human `tsh` 解析命令的顺序是：
 
 ```text
-1. 进程环境 CTX_PATH
-2. CTX_HOME/.tshrc 里的 CTX_PATH=...
+1. CTX_HOME/.tshrc 里的 CTX_PATH=...
+2. 进程环境 CTX_PATH
 3. 默认 /ctx/tool:/ctx/home/<uid>/tool
 ```
+
+agent terminal 里的 `tsh` 使用 agent runtime 按 policy、mount、uid/gid 生成的进程
+`CTX_PATH`，不会让用户 `.tshrc` 覆盖这条授权路径。
 
 `.tshrc` 是数据文件，不执行 shell 语法：
 
@@ -215,8 +243,8 @@ agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
 ```
 
-`agent.sh coder` 会通过 `ctx agent-sh coder` 进入 agent 聊天 REPL；带 prompt
-参数时由 `ctx agent-sh` 转发到 `ctx agent send` 发送一条消息。需要旁观 agent terminal 时使用 `agent.sh --watch coder`；需要进入
+`agent.sh coder` 会通过 `ctx agent repl coder --session default` 进入 agent 聊天 REPL；带 prompt
+参数时由脚本转发到 `ctx agent send coder --session default ...` 发送一条消息。需要旁观 agent terminal 时使用 `agent.sh --watch coder`；需要进入
 terminal、看到 `ctxterm -> tsh` 时，才使用 `agent.sh --attach coder`。
 `agent.sh` 不保存私有聊天数据库。
 

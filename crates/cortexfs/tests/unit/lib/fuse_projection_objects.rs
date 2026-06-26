@@ -352,6 +352,56 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 }
 
 #[test]
+fn fuse_v1_projection_requires_name_for_address_provider() {
+    let root = reference_tree("fuse-v1-address-provider-requires-name");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    assert_eq!(projection.readdir("model"), Err(FuseV1Error::InvalidContent));
+}
+
+#[test]
+fn fuse_v1_projection_uses_configured_provider_name_for_address_provider() {
+    let root = reference_tree("fuse-v1-address-provider-named");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    let model_entries = projection.readdir("model");
+    assert!(model_entries.is_ok());
+    let model_names = model_entries
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.name().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(model_names, ["debug", "helper", "local", "main", "route"]);
+    assert_eq!(
+        projection.read_to_string("model/local/gpt-5.4-mini.d/default"),
+        Ok("base_url=http://127.0.0.1:8317/v1\n".to_owned())
+    );
+}
+
+#[test]
 fn fuse_v1_projection_ignores_oversized_provider_model_cache() {
     let root = reference_tree("fuse-v1-oversized-provider-model-cache");
     let providers = root.join("providers.d");
