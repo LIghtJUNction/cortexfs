@@ -4,7 +4,8 @@ use super::{
     openai_stream_event, parse_anthropic_message_content, parse_openai_response_content,
     provider_messages_for_agent, provider_request_failure_message, provider_route,
     provider_runtime_driver, provider_transport, resolve_model_alias, resolved_model_path, run,
-    run_cli_tool_to_writer, tool_call_from_text, write_model_text_or_tool_call,
+    run_cli_tool_to_writer, tool_call_from_text, validate_agent_tsh_args,
+    write_model_text_or_tool_call,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -169,6 +170,38 @@ fn tool_call_arguments_accept_command_string() {
         Ok(Some(ref call))
             if call.args == [OsString::from("fs.read"), OsString::from("README.md")]
     ));
+}
+
+#[test]
+fn agent_tsh_args_reject_root_override() {
+    assert_eq!(
+        validate_agent_tsh_args(&[
+            OsString::from("--root"),
+            OsString::from("/tmp/fakectx"),
+            OsString::from("evil"),
+        ]),
+        Err("tool_call args cannot override tsh root".to_owned())
+    );
+    assert_eq!(
+        validate_agent_tsh_args(&[
+            OsString::from("-r"),
+            OsString::from("/tmp/fakectx"),
+            OsString::from("evil"),
+        ]),
+        Err("tool_call args cannot override tsh root".to_owned())
+    );
+}
+
+#[test]
+fn agent_tsh_args_allow_tool_arguments_after_tool_name() {
+    assert_eq!(
+        validate_agent_tsh_args(&[
+            OsString::from("fs.read"),
+            OsString::from("--root"),
+            OsString::from("README.md"),
+        ]),
+        Ok(())
+    );
 }
 
 #[test]
