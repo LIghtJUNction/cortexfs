@@ -1,10 +1,8 @@
 use std::env;
-use std::ffi::CString;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::ffi::OsStrExt;
+use std::os::fd::OwnedFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -14,8 +12,11 @@ use cortexfs::{
     serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
-use nix::libc;
+use nix::errno::Errno;
+use nix::fcntl::{OFlag, open, openat};
+use nix::sys::stat::{Mode, mkdirat};
 use nix::unistd::{Gid, Uid, chown};
+use nix::unistd::{UnlinkatFlags, fchown, unlinkat};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 
@@ -181,81 +182,54 @@ fn create_runtime_credential_file(
     uid: u32,
     gid: u32,
 ) -> Result<File, String> {
-    let name = cstring(file_name)?;
     // Remove only the entry inside the already-opened credentials directory. If a
     // user pre-created a symlink at the predictable path, this unlinks the
     // symlink itself instead of following it. The replacement is then created
     // with O_NOFOLLOW and owned by the target agent uid/gid via fchown on the fd.
-    unsafe {
-        if libc::unlinkat(dir_fd.as_raw_fd(), name.as_ptr(), 0) != 0 {
-            let error = io::Error::last_os_error();
-            if error.kind() != io::ErrorKind::NotFound {
-                return Err(format!("cannot replace runtime credential file: {error}"));
-            }
-        }
-        let fd = libc::openat(
-            dir_fd.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_CREAT | libc::O_EXCL | libc::O_WRONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-            0o600,
-        );
-        if fd < 0 {
-            return Err(format!(
-                "cannot create runtime credential file: {}",
-                io::Error::last_os_error()
-            ));
-        }
-        if libc::fchown(fd, uid, gid) != 0 {
-            let error = io::Error::last_os_error();
-            let _ignored = libc::close(fd);
-            return Err(format!("cannot chown runtime credential file: {error}"));
-        }
-        Ok(File::from_raw_fd(fd))
+    if let Err(error) = unlinkat(dir_fd, file_name, UnlinkatFlags::NoRemoveDir)
+        && error != Errno::ENOENT
+    {
+        return Err(format!("cannot replace runtime credential file: {error}"));
     }
+    let fd = openat(
+        dir_fd,
+        file_name,
+        OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|error| format!("cannot create runtime credential file: {error}"))?;
+    fchown(&fd, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+        .map_err(|error| format!("cannot chown runtime credential file: {error}"))?;
+    Ok(File::from(fd))
 }
 
 fn open_dir_no_follow(path: &Path) -> Result<OwnedFd, String> {
-    let path = cstring_path(path)?;
-    let fd = unsafe {
-        libc::open(
-            path.as_ptr(),
-            libc::O_DIRECTORY | libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        )
-    };
-    owned_fd(fd, "cannot open runtime credential dir")
+    open(
+        path,
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("cannot open runtime credential dir: {error}"))
 }
 
 fn open_child_dir_no_follow(parent: &OwnedFd, name: &str) -> Result<OwnedFd, String> {
-    let name = cstring(name)?;
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_DIRECTORY | libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        )
-    };
-    owned_fd(fd, "cannot open runtime credential dir")
+    openat(
+        parent,
+        name,
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("cannot open runtime credential dir: {error}"))
 }
 
-fn mkdirat_ignore_exists(parent: &OwnedFd, name: &str, mode: libc::mode_t) -> Result<(), String> {
-    let name = cstring(name)?;
-    let rc = unsafe { libc::mkdirat(parent.as_raw_fd(), name.as_ptr(), mode) };
-    if rc == 0 {
-        return Ok(());
+fn mkdirat_ignore_exists(parent: &OwnedFd, name: &str, mode: u32) -> Result<(), String> {
+    if let Err(error) = mkdirat(parent, name, Mode::from_bits_truncate(mode)) {
+        if error == Errno::EEXIST {
+            return Ok(());
+        }
+        return Err(format!("cannot create runtime credential dir: {error}"));
     }
-    let error = io::Error::last_os_error();
-    if error.kind() == io::ErrorKind::AlreadyExists {
-        Ok(())
-    } else {
-        Err(format!("cannot create runtime credential dir: {error}"))
-    }
-}
-
-fn owned_fd(fd: libc::c_int, context: &str) -> Result<OwnedFd, String> {
-    if fd < 0 {
-        return Err(format!("{context}: {}", io::Error::last_os_error()));
-    }
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    Ok(())
 }
 
 fn safe_runtime_credential_name(agent: &str, account: &str) -> Result<String, String> {
@@ -263,15 +237,6 @@ fn safe_runtime_credential_name(agent: &str, account: &str) -> Result<String, St
         return Err("runtime credential path components must not contain '/'".to_owned());
     }
     Ok(format!("{agent}-provider-{account}"))
-}
-
-fn cstring_path(path: &Path) -> Result<CString, String> {
-    CString::new(path.as_os_str().as_bytes())
-        .map_err(|_error| format!("path contains a NUL byte: {}", path.display()))
-}
-
-fn cstring(value: &str) -> Result<CString, String> {
-    CString::new(value).map_err(|_error| "path component contains a NUL byte".to_owned())
 }
 
 fn write_error(line: &str) -> io::Result<()> {

@@ -290,6 +290,33 @@ fn openai_stream_event_accepts_done_marker() {
 }
 
 #[test]
+fn openai_stream_event_extracts_responses_delta_text() {
+    let event = openai_stream_event(
+        r#"data: {"type":"response.output_text.delta","delta":"hel"}"#,
+    );
+    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
+}
+
+#[test]
+fn openai_stream_event_accepts_responses_completed_marker() {
+    assert!(matches!(
+        openai_stream_event(r#"data: {"type":"response.completed"}"#),
+        Ok(OpenAiStreamEvent::Done)
+    ));
+}
+
+#[test]
+fn openai_stream_event_reports_responses_failed_marker() {
+    assert_eq!(
+        openai_stream_event(
+            r#"data: {"type":"response.failed","error":{"message":"quota exceeded"}}"#
+        )
+        .map(|event| matches!(event, OpenAiStreamEvent::Ignore)),
+        Err("quota exceeded".to_owned())
+    );
+}
+
+#[test]
 fn openai_stream_event_does_not_mix_reasoning_into_answer_text() {
     let event = openai_stream_event(
         r#"data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}"#,
