@@ -1,11 +1,11 @@
 use super::{
     ObjectPath, OpenAiStreamEvent, ProviderRoute, ProviderRuntimeDriver, ResolvedTransport,
-    RunnerProviderConfig, agent_tool_call_from_value, is_passthrough_tool, missing_model_message,
+    RunnerProviderConfig, TokenUsage, agent_tool_call_from_value, is_passthrough_tool, missing_model_message,
     model_candidates, openai_chat_body, openai_responses_body, openai_stream_event,
     parse_anthropic_message_content, parse_openai_response_content, provider_messages_for_agent,
     provider_request_failure_message, provider_route, provider_runtime_driver, provider_transport,
     resolve_model_alias, resolved_model_path, run, run_cli_tool_to_writer, tool_call_from_text,
-    write_model_text_or_tool_call,
+    token_usage_from_value, write_model_text_or_tool_call,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -235,6 +235,20 @@ fn openai_stream_event_extracts_chat_delta_text() {
 }
 
 #[test]
+fn openai_stream_event_extracts_usage() {
+    let event = openai_stream_event(
+        r#"data: {"usage":{"prompt_tokens":12,"completion_tokens":5}}"#,
+    );
+    assert!(matches!(
+        event,
+        Ok(OpenAiStreamEvent::Usage(TokenUsage {
+            input_tokens: 12,
+            output_tokens: 5
+        }))
+    ));
+}
+
+#[test]
 fn openai_stream_event_accepts_done_marker() {
     assert!(matches!(
         openai_stream_event("data: [DONE]"),
@@ -255,6 +269,39 @@ fn openai_response_content_prefers_output_text() {
     assert_eq!(
         parse_openai_response_content(br#"{"output_text":"hello codex"}"#),
         Ok("hello codex".to_owned())
+    );
+}
+
+#[test]
+fn provider_usage_accepts_openai_and_anthropic_shapes() {
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3}
+        })),
+        Some(TokenUsage {
+            input_tokens: 10,
+            output_tokens: 3,
+        })
+    );
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "usage": {"input_tokens": 7, "output_tokens": 2}
+        })),
+        Some(TokenUsage {
+            input_tokens: 7,
+            output_tokens: 2,
+        })
+    );
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "response": {
+                "usage": {"input_tokens": 9, "output_tokens": 4}
+            }
+        })),
+        Some(TokenUsage {
+            input_tokens: 9,
+            output_tokens: 4,
+        })
     );
 }
 
