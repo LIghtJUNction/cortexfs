@@ -1,10 +1,12 @@
 use super::{
-    is_passthrough_tool, openai_stream_event, parse_anthropic_message_content,
-    parse_openai_response_content, provider_messages_for_agent,
-    provider_request_failure_message, provider_route, provider_runtime_driver, provider_transport,
-    resolve_model_alias, resolved_model_path, missing_model_message, run, run_cli_tool_to_writer,
     ObjectPath, OpenAiStreamEvent, ProviderRoute, ProviderRuntimeDriver, ResolvedTransport,
-    RunnerProviderConfig,
+    RunnerProviderConfig, TokenUsage, agent_tool_call_from_value, is_passthrough_tool,
+    missing_model_message, model_candidates, openai_chat_body, openai_responses_body,
+    openai_stream_event, parse_anthropic_message_content, parse_openai_response_content,
+    provider_messages_for_agent, provider_request_failure_message, provider_route,
+    provider_runtime_driver, provider_transport, resolve_model_alias, resolved_model_path, run,
+    run_cli_tool_to_writer, token_usage_from_value, tool_call_from_text, validate_agent_tsh_args,
+    write_model_text_or_tool_call,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
@@ -55,7 +57,7 @@ fn runner_rejects_missing_object_path() {
 #[test]
 fn runner_rejects_unknown_model() {
     assert_eq!(
-        run(vec![OsString::from("/ctx/model/missing-provider/gpt-4o")]),
+        run(vec![OsString::from("/ctx/model/missing-provider/gpt-5.4")]),
         Err("missing provider: missing-provider".to_owned())
     );
 }
@@ -128,6 +130,32 @@ fn model_path_rejects_traversal_reference() {
 }
 
 #[test]
+fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-model-fallback")?;
+    fs::create_dir_all(root.join("model/openai/gpt-5.5.d"))?;
+    fs::write(
+        root.join("model/openai/gpt-5.5.d/fallback"),
+        "openai/codex-auto-review\nopenai/gpt-5.3-codex-spark\n",
+    )?;
+
+    let candidates = model_candidates(&root, "openai/gpt-5.5")?;
+
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "openai/gpt-5.5",
+            "openai/codex-auto-review",
+            "openai/gpt-5.3-codex-spark"
+        ]
+    );
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn runner_recognizes_interactive_tool_passthroughs() {
     assert!(is_passthrough_tool("bash"));
     assert!(is_passthrough_tool("tmux"));
@@ -135,6 +163,89 @@ fn runner_recognizes_interactive_tool_passthroughs() {
     assert!(is_passthrough_tool("tsh"));
     assert!(!is_passthrough_tool("shell.exec"));
     assert!(!is_passthrough_tool("fs.read"));
+}
+
+#[test]
+fn tool_call_text_parses_tsh_argv() {
+    let call = tool_call_from_text(
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
+    );
+
+    assert!(matches!(
+        call,
+        Ok(Some(ref call))
+            if call.id == "call-1"
+                && call.name == "tsh"
+                && call.args == [OsString::from("tools")]
+    ));
+}
+
+#[test]
+fn tool_call_arguments_accept_command_string() {
+    let value = serde_json::json!({
+        "type": "tool_call",
+        "id": "call-1",
+        "name": "tsh",
+        "arguments": {
+            "command": "fs.read README.md"
+        }
+    });
+    let call = agent_tool_call_from_value(&value);
+
+    assert!(matches!(
+        call,
+        Ok(Some(ref call))
+            if call.args == [OsString::from("fs.read"), OsString::from("README.md")]
+    ));
+}
+
+#[test]
+fn agent_tsh_args_reject_root_override() {
+    assert_eq!(
+        validate_agent_tsh_args(&[
+            OsString::from("--root"),
+            OsString::from("/tmp/fakectx"),
+            OsString::from("evil"),
+        ]),
+        Err("tool_call args cannot override tsh root".to_owned())
+    );
+    assert_eq!(
+        validate_agent_tsh_args(&[
+            OsString::from("-r"),
+            OsString::from("/tmp/fakectx"),
+            OsString::from("evil"),
+        ]),
+        Err("tool_call args cannot override tsh root".to_owned())
+    );
+}
+
+#[test]
+fn agent_tsh_args_allow_tool_arguments_after_tool_name() {
+    assert_eq!(
+        validate_agent_tsh_args(&[
+            OsString::from("fs.read"),
+            OsString::from("--root"),
+            OsString::from("README.md"),
+        ]),
+        Ok(())
+    );
+}
+
+#[test]
+fn provider_text_tool_call_writes_canonical_event() {
+    let mut output = Vec::new();
+    let result = write_model_text_or_tool_call(
+        &mut output,
+        "run-1",
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
+    );
+
+    assert!(result.is_ok());
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""type":"tool_call""#));
+    assert!(output.contains(r#""run":"run-1""#));
+    assert!(output.contains(r#""name":"tsh""#));
+    assert!(!output.contains(r#""type":"delta""#));
 }
 
 #[test]
@@ -154,6 +265,20 @@ fn openai_stream_event_extracts_chat_delta_text() {
         r#"data: {"choices":[{"delta":{"content":"hel"}}]}"#,
     );
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
+}
+
+#[test]
+fn openai_stream_event_extracts_usage() {
+    let event = openai_stream_event(
+        r#"data: {"usage":{"prompt_tokens":12,"completion_tokens":5}}"#,
+    );
+    assert!(matches!(
+        event,
+        Ok(OpenAiStreamEvent::Usage(TokenUsage {
+            input_tokens: 12,
+            output_tokens: 5
+        }))
+    ));
 }
 
 #[test]
@@ -205,6 +330,51 @@ fn openai_response_content_prefers_output_text() {
         parse_openai_response_content(br#"{"output_text":"hello codex"}"#),
         Ok("hello codex".to_owned())
     );
+}
+
+#[test]
+fn provider_usage_accepts_openai_and_anthropic_shapes() {
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3}
+        })),
+        Some(TokenUsage {
+            input_tokens: 10,
+            output_tokens: 3,
+        })
+    );
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "usage": {"input_tokens": 7, "output_tokens": 2}
+        })),
+        Some(TokenUsage {
+            input_tokens: 7,
+            output_tokens: 2,
+        })
+    );
+    assert_eq!(
+        token_usage_from_value(&serde_json::json!({
+            "response": {
+                "usage": {"input_tokens": 9, "output_tokens": 4}
+            }
+        })),
+        Some(TokenUsage {
+            input_tokens: 9,
+            output_tokens: 4,
+        })
+    );
+}
+
+#[test]
+fn openai_request_bodies_include_non_auto_effort() {
+    let chat = openai_chat_body("gpt-5.5", "hello", false, cortexfs::ModelEffort::High);
+    let responses =
+        openai_responses_body("gpt-5.5", "hello", true, cortexfs::ModelEffort::XHigh);
+
+    assert!(chat.contains(r#""reasoning":{"effort":"high"}"#));
+    assert!(responses.contains(r#""reasoning":{"effort":"xhigh"}"#));
+    assert!(!openai_chat_body("gpt-5.5", "hello", false, cortexfs::ModelEffort::Auto)
+        .contains("reasoning"));
 }
 
 #[test]
@@ -368,7 +538,7 @@ fn provider_route_selects_key_slot_by_model() {
         provider_route(
             &config,
             "api.openai.com",
-            "gpt-4o",
+            "gpt-5.4",
             Some("group(paid) -> direct, key(office)\nmodel(gpt-*) -> paid\nfallback: direct\n")
         ),
         Ok(ProviderRoute {

@@ -6,8 +6,8 @@ There is only one model ABI:
 /ctx/model/<provider>/<model>       one-shot inference executable
 /ctx/model/<provider>/<model>.sock  optional CortexFS session socket
 /ctx/model/<provider>/<model>.d/    control files
-/ctx/model/main                     default model symlink
-/ctx/model/helper                   helper model symlink
+/ctx/model/main                     default coder model symlink
+/ctx/model/helper                   default reviewer model symlink
 ```
 
 `<provider>/<model>` is represented as two path components. For native model
@@ -59,15 +59,17 @@ Example:
 
 ```text
 /ctx/model/
-  main -> /ctx/model/debug/echo
-  helper -> /ctx/model/debug/echo
+  main -> /ctx/model/openai/gpt-5.5
+  helper -> /ctx/model/openai/codex-auto-review
   debug/
     echo
     echo.d/
       id
       driver
       cap
+      effort
       default
+      fallback
       session
       status
       log
@@ -77,7 +79,9 @@ Example:
       id
       driver
       cap
+      effort
       default
+      fallback
       session
       status
       log
@@ -89,11 +93,27 @@ Control files:
 id       provider-native model id or runtime-internal model id
 driver   driver route table; see below
 cap      capability list, one per line
+effort   provider-neutral reasoning effort: auto, low, medium, high, or xhigh
 default  default parameters, KEY=VALUE, one per line
+fallback ordered fallback model chain, one provider/model name per line
 session  none or socket
 status   dynamic status
 log      short call log or pointer to log location
 ```
+
+`fallback` is a model fallback chain, not a transport route. It lives next to
+the selected model in `model/<provider>/<model>.d/fallback`; each non-comment
+line is another stable provider/model reference, for example:
+
+```text
+openai/codex-auto-review
+openai/gpt-5.3-codex-spark
+```
+
+When the selected model is unavailable or fails before producing a successful
+answer, the runtime tries fallback models in order. Each candidate still uses
+the normal provider registry, secret lookup, and `/ctx/model/route` egress
+rules.
 
 `driver` may be a legacy single driver name:
 

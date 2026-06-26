@@ -54,6 +54,10 @@ const config: Config = {
     },
     navbar: {
       title: 'CortexFS',
+      logo: {
+        alt: 'CortexFS',
+        src: 'img/cortexfs-logo.svg',
+      },
       items: [
         {
           type: 'docSidebar',

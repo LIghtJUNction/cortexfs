@@ -1,8 +1,9 @@
 use std::env;
 use std::ffi::OsString;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::fd::OwnedFd;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -11,7 +12,11 @@ use cortexfs::{
     serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
+use nix::errno::Errno;
+use nix::fcntl::{OFlag, open, openat};
+use nix::sys::stat::{Mode, mkdirat};
 use nix::unistd::{Gid, Uid, chown};
+use nix::unistd::{UnlinkatFlags, fchown, unlinkat};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 
@@ -148,26 +153,90 @@ fn runtime_provider_secret_file(
     secret: &cortexfs::ProviderSystemSecret,
 ) -> Result<RuntimeProviderSecretFile, String> {
     let dir = PathBuf::from(format!("/run/user/{uid}/cortexfs/credentials"));
-    fs::create_dir_all(&dir)
-        .map_err(|error| format!("cannot create runtime credential dir: {error}"))?;
-    let path = dir.join(format!("{agent}-provider-{}", secret.account()));
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&path)
-        .map_err(|error| format!("cannot create runtime credential file: {error}"))?;
+    let dir_fd = open_runtime_credential_dir(uid)?;
+    let file_name = safe_runtime_credential_name(agent, secret.account())?;
+    let path = dir.join(&file_name);
+    let mut file = create_runtime_credential_file(&dir_fd, &file_name, uid, gid)?;
     file.write_all(secret.secret().as_bytes())
         .and_then(|()| file.write_all(b"\n"))
         .map_err(|error| format!("cannot write runtime credential file: {error}"))?;
-    chown(&path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
-        .map_err(|error| format!("cannot chown runtime credential file: {error}"))?;
     Ok(RuntimeProviderSecretFile {
         path,
         provider: secret.provider().to_owned(),
         account: secret.account().to_owned(),
     })
+}
+
+fn open_runtime_credential_dir(uid: u32) -> Result<OwnedFd, String> {
+    let user_dir = PathBuf::from(format!("/run/user/{uid}"));
+    let user_fd = open_dir_no_follow(&user_dir)?;
+    mkdirat_ignore_exists(&user_fd, "cortexfs", 0o700)?;
+    let cortex_fd = open_child_dir_no_follow(&user_fd, "cortexfs")?;
+    mkdirat_ignore_exists(&cortex_fd, "credentials", 0o700)?;
+    open_child_dir_no_follow(&cortex_fd, "credentials")
+}
+
+fn create_runtime_credential_file(
+    dir_fd: &OwnedFd,
+    file_name: &str,
+    uid: u32,
+    gid: u32,
+) -> Result<File, String> {
+    // Remove only the entry inside the already-opened credentials directory. If a
+    // user pre-created a symlink at the predictable path, this unlinks the
+    // symlink itself instead of following it. The replacement is then created
+    // with O_NOFOLLOW and owned by the target agent uid/gid via fchown on the fd.
+    if let Err(error) = unlinkat(dir_fd, file_name, UnlinkatFlags::NoRemoveDir)
+        && error != Errno::ENOENT
+    {
+        return Err(format!("cannot replace runtime credential file: {error}"));
+    }
+    let fd = openat(
+        dir_fd,
+        file_name,
+        OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_WRONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|error| format!("cannot create runtime credential file: {error}"))?;
+    fchown(&fd, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+        .map_err(|error| format!("cannot chown runtime credential file: {error}"))?;
+    Ok(File::from(fd))
+}
+
+fn open_dir_no_follow(path: &Path) -> Result<OwnedFd, String> {
+    open(
+        path,
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("cannot open runtime credential dir: {error}"))
+}
+
+fn open_child_dir_no_follow(parent: &OwnedFd, name: &str) -> Result<OwnedFd, String> {
+    openat(
+        parent,
+        name,
+        OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("cannot open runtime credential dir: {error}"))
+}
+
+fn mkdirat_ignore_exists(parent: &OwnedFd, name: &str, mode: u32) -> Result<(), String> {
+    if let Err(error) = mkdirat(parent, name, Mode::from_bits_truncate(mode)) {
+        if error == Errno::EEXIST {
+            return Ok(());
+        }
+        return Err(format!("cannot create runtime credential dir: {error}"));
+    }
+    Ok(())
+}
+
+fn safe_runtime_credential_name(agent: &str, account: &str) -> Result<String, String> {
+    if agent.contains('/') || account.contains('/') {
+        return Err("runtime credential path components must not contain '/'".to_owned());
+    }
+    Ok(format!("{agent}-provider-{account}"))
 }
 
 fn write_error(line: &str) -> io::Result<()> {
