@@ -16,8 +16,10 @@ use cortexfs::{
 use fuser::{
     BsdFileFlags, Config, Errno, FileAttr, FileHandle, FileType, Filesystem, Generation, INodeNo,
     LockOwner, MountOption, OpenFlags, RenameFlags, ReplyAttr, ReplyData, ReplyDirectory,
-    ReplyEmpty, ReplyEntry, ReplyWrite, ReplyXattr, Request, SessionACL, TimeOrNow, WriteFlags,
+    ReplyEmpty, ReplyEntry, ReplyStatfs, ReplyWrite, ReplyXattr, Request, SessionACL, TimeOrNow,
+    WriteFlags,
 };
+use nix::sys::statvfs;
 
 #[derive(Debug)]
 struct CortexFuse {
@@ -243,6 +245,20 @@ impl Filesystem for CortexFuse {
             }
         }
         reply.ok();
+    }
+
+    fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
+        let stats = mount_statfs_for_source(self.projection.root());
+        reply.statfs(
+            stats.blocks,
+            stats.blocks_free,
+            stats.blocks_available,
+            stats.files,
+            stats.files_free,
+            stats.block_size,
+            stats.name_max,
+            stats.fragment_size,
+        );
     }
 
     fn read(
