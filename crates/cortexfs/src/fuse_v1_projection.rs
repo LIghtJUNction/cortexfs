@@ -326,6 +326,9 @@ impl FuseV1Projection {
             else {
                 return Ok(None);
             };
+            if let Some(content) = self.backing_control_content(abi_path)? {
+                return Ok(Some(content));
+            }
             return Ok(provider_model_control_content(&model, file));
         };
         Ok(Some(provider_model_metadata(&model)))
@@ -379,6 +382,17 @@ impl FuseV1Projection {
         }
         let path = self.resolve(&normalized)?;
         let content = std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+        validate_model_control_write(&normalized, content)?;
+        if projected_provider_model_control_file(
+            &self.provider_config_dir,
+            &self.provider_model_cache_dir,
+            &normalized,
+        )?
+        .is_some()
+            && let Some(parent) = path.parent()
+        {
+            fs::create_dir_all(parent).map_err(|_error| FuseV1Error::Io)?;
+        }
         atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
     }
 
@@ -451,11 +465,22 @@ impl FuseV1Projection {
                 else {
                     return Ok(None);
                 };
+                if let Some(content) = self.backing_control_content(path)? {
+                    return virtual_regular_entry(&content, 0o644);
+                }
                 let Some(content) = provider_model_control_content(&model, file) else {
                     return Ok(None);
                 };
                 virtual_regular_entry(&content, 0o644)
             }
+        }
+    }
+
+    fn backing_control_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+        match fs::read_to_string(self.resolve(abi_path)?) {
+            Ok(content) => Ok(Some(content)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_error) => Err(FuseV1Error::Io),
         }
     }
 
@@ -466,7 +491,11 @@ impl FuseV1Projection {
         {
             return Ok(target);
         }
-        Ok(PathBuf::from(DEFAULT_MODEL_ALIAS_TARGET))
+        Ok(PathBuf::from(if alias == HELPER_MODEL_ALIAS {
+            HELPER_MODEL_ALIAS_TARGET
+        } else {
+            DEFAULT_MODEL_ALIAS_TARGET
+        }))
     }
 }
 
@@ -480,6 +509,21 @@ fn model_control_dir_entries() -> Vec<FuseV1DirEntry> {
         .iter()
         .map(|file| FuseV1DirEntry::new((*file).to_owned(), FuseV1FileType::Regular))
         .collect()
+}
+
+fn validate_model_control_write(abi_path: &str, content: &str) -> Result<(), FuseV1Error> {
+    match parse_abi_path(abi_path).model_control_file() {
+        Some("cap") if inspect_model_capabilities(content).is_ok() => Ok(()),
+        Some("driver") if parse_model_driver_routes(content).is_ok() => Ok(()),
+        Some("effort") if ModelEffort::parse(content).is_some() => Ok(()),
+        Some("fallback") if parse_model_fallback(content).1.is_ok() => Ok(()),
+        Some("session") if matches!(content.trim(), "none" | "socket") => Ok(()),
+        Some("cap" | "driver" | "effort" | "fallback" | "session") => {
+            Err(FuseV1Error::InvalidContent)
+        }
+        _ if !content.contains('\0') => Ok(()),
+        _ => Err(FuseV1Error::InvalidContent),
+    }
 }
 
 fn virtual_regular_entry(

@@ -81,52 +81,107 @@ fn provider_chat_completion(
     input: &str,
     run: &str,
     stdout: &mut impl Write,
-) -> Result<(), String> {
+) -> Result<(), ProviderCompletionError> {
     let (provider, model) = name
         .split_once('/')
-        .ok_or_else(|| format!("invalid provider model: {name}"))?;
+        .ok_or_else(|| ProviderCompletionError::fallback(format!("invalid provider model: {name}")))?;
     let config =
-        provider_config(provider).ok_or_else(|| format!("missing provider: {provider}"))?;
+        provider_config(provider).ok_or_else(|| ProviderCompletionError::fallback(format!("missing provider: {provider}")))?;
     let ctx_root =
         env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
     let route = fs::read_to_string(ctx_root.join("model").join("route")).ok();
-    let route = provider_route(&config, provider, model, route.as_deref())?;
+    let route = provider_route(&config, provider, model, route.as_deref())
+        .map_err(ProviderCompletionError::fallback)?;
+    let effort = model_effort(&ctx_root, provider, model);
     let driver = provider_runtime_driver(&config, env::var_os("CTX_AGENT").is_some());
-    let credential = provider_credential(provider, &config, route.key_slot.as_deref(), driver)?;
+    let credential = provider_credential(provider, &config, route.key_slot.as_deref(), driver)
+        .map_err(ProviderCompletionError::fallback)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
             let key = credential.as_ref().map(ProviderCredential::secret);
-            match call_openai_chat_streaming(&route.transport, model, input, key, run, stdout) {
+            let request = OpenAiProviderRequest {
+                model,
+                input,
+                api_key: key,
+                effort,
+            };
+            match call_openai_chat_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
-                    let content = call_openai_chat(&route.transport, model, input, key)?;
+                    let content = call_openai_chat(&route.transport, &request)
+                        .map_err(ProviderCompletionError::fallback)?;
                     write_model_text_or_tool_call(stdout, run, &content)
                         .and_then(|()| stdout.flush())
-                        .map_err(|error| format!("cannot write output: {error}"))
+                        .map_err(|error| {
+                            ProviderCompletionError::no_fallback(format!(
+                                "cannot write output: {error}"
+                            ))
+                        })
                 }
-                Err(error) => Err(error.message),
+                Err(error) => Err(ProviderCompletionError {
+                    message: error.message,
+                    can_fallback: error.can_fallback,
+                }),
             }
         }
         ProviderRuntimeDriver::OpenAiResponses => {
             let key = credential.as_ref().map(ProviderCredential::secret);
-            match call_openai_responses_streaming(&route.transport, model, input, key, run, stdout) {
+            let request = OpenAiProviderRequest {
+                model,
+                input,
+                api_key: key,
+                effort,
+            };
+            match call_openai_responses_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
-                    let content = call_openai_responses(&route.transport, model, input, key)?;
+                    let content = call_openai_responses(&route.transport, &request)
+                        .map_err(ProviderCompletionError::fallback)?;
                     write_model_text_or_tool_call(stdout, run, &content)
                         .and_then(|()| stdout.flush())
-                        .map_err(|error| format!("cannot write output: {error}"))
+                        .map_err(|error| {
+                            ProviderCompletionError::no_fallback(format!(
+                                "cannot write output: {error}"
+                            ))
+                        })
                 }
-                Err(error) => Err(error.message),
+                Err(error) => Err(ProviderCompletionError {
+                    message: error.message,
+                    can_fallback: error.can_fallback,
+                }),
             }
         }
         ProviderRuntimeDriver::AnthropicMessages => {
             let credential = credential
-                .ok_or_else(|| format!("missing provider credential: {provider}"))?;
-            let content = call_anthropic_messages(&route.transport, model, input, &credential)?;
+                .ok_or_else(|| ProviderCompletionError::fallback(format!("missing provider credential: {provider}")))?;
+            let content = call_anthropic_messages(&route.transport, model, input, &credential)
+                .map_err(ProviderCompletionError::fallback)?;
             write_model_text_or_tool_call(stdout, run, &content)
                 .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))
+                .map_err(|error| {
+                    ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
+                })
+        }
+    }
+}
+
+struct ProviderCompletionError {
+    message: String,
+    can_fallback: bool,
+}
+
+impl ProviderCompletionError {
+    fn fallback(message: String) -> Self {
+        Self {
+            message,
+            can_fallback: true,
+        }
+    }
+
+    fn no_fallback(message: String) -> Self {
+        Self {
+            message,
+            can_fallback: false,
         }
     }
 }
@@ -626,37 +681,42 @@ fn provider_name_from_config(
     cortexfs::provider_name_from_config(base_url, name)
 }
 
+fn model_effort(ctx_root: &Path, provider: &str, model: &str) -> cortexfs::ModelEffort {
+    let path = ctx_root
+        .join("model")
+        .join(provider)
+        .join(format!("{model}.d"))
+        .join("effort");
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|content| cortexfs::ModelEffort::parse(&content))
+        .unwrap_or(cortexfs::ModelEffort::Auto)
+}
+
+struct OpenAiProviderRequest<'a> {
+    model: &'a str,
+    input: &'a str,
+    api_key: Option<&'a str>,
+    effort: cortexfs::ModelEffort,
+}
+
 fn call_openai_chat(
     transport: &ResolvedTransport,
-    model: &str,
-    input: &str,
-    api_key: Option<&str>,
+    request: &OpenAiProviderRequest<'_>,
 ) -> Result<String, String> {
     let target = chat_completions_target(transport);
-    let body = json!({
-        "model": model,
-        "messages": provider_messages(input),
-        "stream": false
-    })
-    .to_string();
-    let output = run_curl_json(&target, api_key, &body)?;
+    let body = openai_chat_body(request.model, request.input, false, request.effort);
+    let output = run_curl_json(&target, request.api_key, &body)?;
     parse_openai_chat_content(&output)
 }
 
 fn call_openai_responses(
     transport: &ResolvedTransport,
-    model: &str,
-    input: &str,
-    api_key: Option<&str>,
+    request: &OpenAiProviderRequest<'_>,
 ) -> Result<String, String> {
     let target = responses_target(transport);
-    let body = json!({
-        "model": model,
-        "input": provider_messages(input),
-        "stream": false
-    })
-    .to_string();
-    let output = run_curl_json(&target, api_key, &body)?;
+    let body = openai_responses_body(request.model, request.input, false, request.effort);
+    let output = run_curl_json(&target, request.api_key, &body)?;
     parse_openai_response_content(&output)
 }
 
@@ -685,38 +745,68 @@ struct StreamFailure {
 
 fn call_openai_chat_streaming(
     transport: &ResolvedTransport,
-    model: &str,
-    input: &str,
-    api_key: Option<&str>,
+    request: &OpenAiProviderRequest<'_>,
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
     let target = chat_completions_target(transport);
-    let body = json!({
-        "model": model,
-        "messages": provider_messages(input),
-        "stream": true
-    })
-    .to_string();
-    call_openai_sse_streaming(&target, api_key, &body, run, stdout)
+    let body = openai_chat_body(request.model, request.input, true, request.effort);
+    call_openai_sse_streaming(&target, request.api_key, &body, run, stdout)
 }
 
 fn call_openai_responses_streaming(
     transport: &ResolvedTransport,
-    model: &str,
-    input: &str,
-    api_key: Option<&str>,
+    request: &OpenAiProviderRequest<'_>,
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
     let target = responses_target(transport);
-    let body = json!({
+    let body = openai_responses_body(request.model, request.input, true, request.effort);
+    call_openai_sse_streaming(&target, request.api_key, &body, run, stdout)
+}
+
+fn openai_chat_body(
+    model: &str,
+    input: &str,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+) -> String {
+    let mut body = json!({
+        "model": model,
+        "messages": provider_messages(input),
+        "stream": stream
+    });
+    apply_openai_effort(&mut body, effort);
+    body.to_string()
+}
+
+fn openai_responses_body(
+    model: &str,
+    input: &str,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+) -> String {
+    let mut body = json!({
         "model": model,
         "input": provider_messages(input),
-        "stream": true
-    })
-    .to_string();
-    call_openai_sse_streaming(&target, api_key, &body, run, stdout)
+        "stream": stream
+    });
+    apply_openai_effort(&mut body, effort);
+    body.to_string()
+}
+
+fn apply_openai_effort(body: &mut Value, effort: cortexfs::ModelEffort) {
+    if effort == cortexfs::ModelEffort::Auto {
+        return;
+    }
+    if let Some(object) = body.as_object_mut() {
+        object.insert(
+            "reasoning".to_owned(),
+            json!({
+                "effort": effort.to_string()
+            }),
+        );
+    }
 }
 
 fn call_openai_sse_streaming(
