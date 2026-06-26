@@ -108,11 +108,17 @@ fn provider_chat_completion(
             }
         }
         ProviderRuntimeDriver::OpenAiResponses => {
-            let content =
-                call_openai_responses(&route.transport, model, input, credential.as_ref().map(ProviderCredential::secret))?;
-            write_model_delta(stdout, run, &content)
-                .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))
+            let key = credential.as_ref().map(ProviderCredential::secret);
+            match call_openai_responses_streaming(&route.transport, model, input, key, run, stdout) {
+                Ok(()) => Ok(()),
+                Err(error) if error.can_fallback => {
+                    let content = call_openai_responses(&route.transport, model, input, key)?;
+                    write_model_delta(stdout, run, &content)
+                        .and_then(|()| stdout.flush())
+                        .map_err(|error| format!("cannot write output: {error}"))
+                }
+                Err(error) => Err(error.message),
+            }
         }
         ProviderRuntimeDriver::AnthropicMessages => {
             let credential = credential
@@ -692,7 +698,35 @@ fn call_openai_chat_streaming(
         "stream": true
     })
     .to_string();
-    let mut child = start_curl_json(&target, api_key, &body).map_err(|message| StreamFailure {
+    call_openai_sse_streaming(&target, api_key, &body, run, stdout)
+}
+
+fn call_openai_responses_streaming(
+    transport: &ResolvedTransport,
+    model: &str,
+    input: &str,
+    api_key: Option<&str>,
+    run: &str,
+    stdout: &mut impl Write,
+) -> Result<(), StreamFailure> {
+    let target = responses_target(transport);
+    let body = json!({
+        "model": model,
+        "input": provider_messages(input),
+        "stream": true
+    })
+    .to_string();
+    call_openai_sse_streaming(&target, api_key, &body, run, stdout)
+}
+
+fn call_openai_sse_streaming(
+    target: &CurlJsonTarget,
+    api_key: Option<&str>,
+    body: &str,
+    run: &str,
+    stdout: &mut impl Write,
+) -> Result<(), StreamFailure> {
+    let mut child = start_curl_json(target, api_key, body).map_err(|message| StreamFailure {
         message,
         can_fallback: true,
     })?;
@@ -973,6 +1007,27 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
     }
     let value = serde_json::from_str::<Value>(data)
         .map_err(|error| format!("invalid provider stream json: {error}"))?;
+    match value.get("type").and_then(Value::as_str) {
+        Some("response.output_text.delta") => {
+            return Ok(OpenAiStreamEvent::Delta(
+                value
+                    .get("delta")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ));
+        }
+        Some("response.completed" | "response.done") => return Ok(OpenAiStreamEvent::Done),
+        Some("response.failed" | "response.incomplete" | "error") => {
+            let message = value
+                .pointer("/error/message")
+                .or_else(|| value.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("provider stream failed");
+            return Err(message.to_owned());
+        }
+        _ => {}
+    }
     let text = value
         .pointer("/choices/0/delta/content")
         .and_then(Value::as_str)
