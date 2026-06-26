@@ -19,8 +19,9 @@ pub const EXEC_OBJECTS: &[&str] = &["model", "agent", "tool"];
 pub const MAX_OBJECT_NAME_LEN: usize = 64;
 
 /// Required model control files.
-pub const MODEL_CONTROL_FILES: &[&str] =
-    &["id", "driver", "cap", "default", "session", "status", "log"];
+pub const MODEL_CONTROL_FILES: &[&str] = &[
+    "id", "driver", "cap", "effort", "default", "fallback", "session", "status", "log",
+];
 pub(crate) const MODEL_ROUTE_FILE: &str = "route";
 pub(crate) const DEFAULT_MODEL_ROUTE: &str = "\
 # Global CortexFS model egress route.

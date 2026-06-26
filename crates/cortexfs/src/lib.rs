@@ -117,7 +117,8 @@ pub use manuals::{
 pub use model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
-    ModelRegistryError, inspect_model_capabilities, parse_model_driver_routes,
+    ModelEffort, ModelFallbackIssue, ModelFallbackReport, ModelFallbackTable, ModelRegistryError,
+    inspect_model_capabilities, parse_model_driver_routes, parse_model_fallback,
 };
 pub use mount_table::{MountEntry, MountError, MountMode, MountOption, MountTable};
 pub use oauth::{

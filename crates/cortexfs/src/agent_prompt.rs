@@ -100,6 +100,10 @@ If asked what tools you can call, answer that you can call `tsh` only.
 Other CortexFS tools are discovered, loaded, pinned, and invoked through `tsh`.
 Use `tsh tools` to discover tools, `tsh load TOOL` to load a tool description into context, \
 `tsh pin TOOL` to keep it resident, and `tsh TOOL ARG...` to invoke it.
+When you need to call a tool, output exactly one JSON object line and no prose:
+{{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}
+Use `arguments.args` for the `tsh` argv, for example [\"fs.read\",\"README.md\"].
+After the tool result is returned, continue answering the user normally.
 Interactive shells and multiplexers such as bash, tmux, and zellij are ordinary CortexFS tools \
 that must be invoked through `tsh` when visible."
     )

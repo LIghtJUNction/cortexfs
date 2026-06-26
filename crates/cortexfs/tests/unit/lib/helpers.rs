@@ -176,6 +176,10 @@ fn create_complete_object_layout(root: &Path, class: ObjectClass, name: &str, mo
             model_session
         } else if class == ObjectClass::Model && *file == "cap" {
             "chat"
+        } else if class == ObjectClass::Model && *file == "effort" {
+            "auto"
+        } else if class == ObjectClass::Model && *file == "fallback" {
+            ""
         } else if class == ObjectClass::Tool && *file == "schema" {
             "{\"type\":\"object\"}"
         } else if class == ObjectClass::Agent {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::abi_constants::{FORBIDDEN_MODEL_CAPABILITIES, STABLE_MODEL_CAPABILITIES};
-use crate::abi_path::is_object_name;
+use crate::abi_path::{is_model_name, is_object_name};
 
 /// Model capability control-file validation issue.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,6 +111,163 @@ pub enum ModelDriverRouteError {
     EmptyDriver { line: usize },
     /// A driver name is not a valid stable component.
     InvalidDriverName { line: usize, value: String },
+}
+
+/// Supported provider-neutral model reasoning effort levels for control files.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ModelEffort {
+    /// Use provider/implementation default.
+    Auto,
+    /// Use low effort.
+    Low,
+    /// Use medium effort.
+    Medium,
+    /// Use high effort.
+    High,
+    /// Use extra-high effort.
+    XHigh,
+}
+
+impl std::fmt::Display for ModelEffort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::Auto => write!(f, "auto"),
+            Self::Low => write!(f, "low"),
+            Self::Medium => write!(f, "medium"),
+            Self::High => write!(f, "high"),
+            Self::XHigh => write!(f, "xhigh"),
+        }
+    }
+}
+
+impl std::str::FromStr for ModelEffort {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(match value {
+            "auto" => Self::Auto,
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "xhigh" => Self::XHigh,
+            _ => return Err("unsupported effort"),
+        })
+    }
+}
+
+impl ModelEffort {
+    /// Parses effort from ABI control text, defaulting empty input to auto.
+    #[must_use]
+    pub fn parse(content: &str) -> Option<Self> {
+        let value = content.trim();
+        if value.is_empty() {
+            return Some(Self::Auto);
+        }
+        value.parse::<Self>().ok()
+    }
+
+    /// Parses effort from a `.d/effort` line.
+    #[must_use]
+    pub fn parse_line(content: &str) -> Option<Self> {
+        Self::parse(content)
+    }
+
+    /// Canonical ABI file body value for this effort.
+    #[must_use]
+    pub fn as_control_value(self) -> &'static str {
+        match self {
+            Self::Auto => "auto\n",
+            Self::Low => "low\n",
+            Self::Medium => "medium\n",
+            Self::High => "high\n",
+            Self::XHigh => "xhigh\n",
+        }
+    }
+}
+
+/// Problems while parsing and validating model-fallback references.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ModelFallbackIssue {
+    /// A referenced line is empty or contains non-model text.
+    InvalidLine { line: usize, value: String },
+    /// The fallback chain contains a repeated model reference.
+    DuplicateModel { line: usize, value: String },
+}
+
+impl_issue_report!(ModelFallbackReport, ModelFallbackIssue);
+
+/// Parsed `model/<provider>/<model>.d/fallback` contents.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelFallbackTable {
+    models: Vec<String>,
+}
+
+/// Parsed `model/<provider>/<model>.d/fallback` content report.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ModelFallbackReport {
+    issues: Vec<ModelFallbackIssue>,
+}
+
+impl ModelFallbackTable {
+    /// Returns the ordered fallback models.
+    #[must_use]
+    pub fn models(&self) -> &[String] {
+        &self.models
+    }
+}
+
+/// Parses and validates model fallback lines.
+#[must_use]
+pub fn parse_model_fallback(content: &str) -> (ModelFallbackTable, ModelFallbackReport) {
+    let mut models = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut issues = Vec::new();
+
+    for (index, line) in content.lines().enumerate() {
+        let line_number = index + 1;
+        let raw = line.trim();
+        if raw.is_empty() || raw.starts_with('#') {
+            continue;
+        }
+
+        let normalized = raw.split_once('#').map_or(raw, |(head, _)| head).trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        if !is_model_name(normalized) {
+            issues.push(ModelFallbackIssue::InvalidLine {
+                line: line_number,
+                value: normalized.to_owned(),
+            });
+            continue;
+        }
+        if !seen.insert(normalized.to_owned()) {
+            issues.push(ModelFallbackIssue::DuplicateModel {
+                line: line_number,
+                value: normalized.to_owned(),
+            });
+            continue;
+        }
+        models.push(normalized.to_owned());
+    }
+
+    (
+        ModelFallbackTable { models },
+        ModelFallbackReport { issues },
+    )
+}
+
+impl ModelFallbackTable {
+    /// Parses fallback text into a table.
+    pub fn parse(content: &str) -> Result<Self, ModelFallbackReport> {
+        let (table, report) = parse_model_fallback(content);
+        if report.is_ok() {
+            Ok(table)
+        } else {
+            Err(report)
+        }
+    }
 }
 
 /// Parsed `driver` control-file route table.
@@ -352,5 +509,54 @@ fn parse_driver_list(line: usize, value: &str) -> Result<Vec<String>, ModelDrive
         Err(ModelDriverRouteError::EmptyDriver { line })
     } else {
         Ok(drivers)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_effort_accepts_known_values() {
+        assert_eq!(ModelEffort::parse("auto"), Some(ModelEffort::Auto));
+        assert_eq!(ModelEffort::parse("low"), Some(ModelEffort::Low));
+        assert_eq!(ModelEffort::parse("medium"), Some(ModelEffort::Medium));
+        assert_eq!(ModelEffort::parse("high"), Some(ModelEffort::High));
+        assert_eq!(ModelEffort::parse("xhigh"), Some(ModelEffort::XHigh));
+        assert_eq!(ModelEffort::parse(""), Some(ModelEffort::Auto));
+        assert_eq!(ModelEffort::parse("bad"), None);
+    }
+
+    #[test]
+    fn model_fallback_parses_one_model_per_line() {
+        let (fallback, report) =
+            parse_model_fallback("\n# comment\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\n");
+        assert!(report.is_ok());
+        assert_eq!(fallback.models(), ["openai/gpt-5.4", "openai/gpt-5.4-mini"]);
+    }
+
+    #[test]
+    fn model_fallback_rejects_duplicate_or_invalid_model() {
+        let (_fallback, report) =
+            parse_model_fallback("openai/gpt-5.4\nbad/name/extra\nopenai/gpt-5.4\n");
+        assert_eq!(
+            report.issues(),
+            &[
+                ModelFallbackIssue::InvalidLine {
+                    line: 2,
+                    value: "bad/name/extra".to_owned()
+                },
+                ModelFallbackIssue::DuplicateModel {
+                    line: 3,
+                    value: "openai/gpt-5.4".to_owned()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn model_capabilities_parse_trims_stability_words() {
+        let report = inspect_model_capabilities("chat\nstream\n");
+        assert!(report.is_ok());
     }
 }

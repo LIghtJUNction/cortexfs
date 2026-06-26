@@ -34,6 +34,23 @@ fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
         });
     }
 
+    if parsed.model_control_file() == Some("effort") {
+        let content = read_file_to_string(&resolved)?;
+        return if ModelEffort::parse(&content).is_some() {
+            print_line("ok")
+        } else {
+            Err(CliError::usage("invalid model control effort"))
+        };
+    }
+
+    if parsed.model_control_file() == Some("fallback") {
+        let content = read_file_to_string(&resolved)?;
+        let (_fallback, report) = parse_model_fallback(&content);
+        return check_report("model fallback", report.is_ok(), || {
+            format_model_fallback_issues(report.issues())
+        });
+    }
+
     if file_check_model_driver(parsed, &resolved)? {
         return Ok(());
     }
@@ -192,4 +209,19 @@ fn file_check_model_driver(parsed: AbiPathKind<'_>, resolved: &Path) -> Result<b
             format_model_driver_route_error(&error)
         ))),
     }
+}
+
+fn format_model_fallback_issues(issues: &[ModelFallbackIssue]) -> String {
+    issues
+        .iter()
+        .map(|issue| match *issue {
+            ModelFallbackIssue::InvalidLine { line, ref value } => {
+                format!("line {line}: invalid model {value}")
+            }
+            ModelFallbackIssue::DuplicateModel { line, ref value } => {
+                format!("line {line}: duplicate model {value}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }

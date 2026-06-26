@@ -100,7 +100,7 @@ fn provider_chat_completion(
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
                     let content = call_openai_chat(&route.transport, model, input, key)?;
-                    write_model_delta(stdout, run, &content)
+                    write_model_text_or_tool_call(stdout, run, &content)
                         .and_then(|()| stdout.flush())
                         .map_err(|error| format!("cannot write output: {error}"))
                 }
@@ -108,17 +108,23 @@ fn provider_chat_completion(
             }
         }
         ProviderRuntimeDriver::OpenAiResponses => {
-            let content =
-                call_openai_responses(&route.transport, model, input, credential.as_ref().map(ProviderCredential::secret))?;
-            write_model_delta(stdout, run, &content)
-                .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))
+            let key = credential.as_ref().map(ProviderCredential::secret);
+            match call_openai_responses_streaming(&route.transport, model, input, key, run, stdout) {
+                Ok(()) => Ok(()),
+                Err(error) if error.can_fallback => {
+                    let content = call_openai_responses(&route.transport, model, input, key)?;
+                    write_model_text_or_tool_call(stdout, run, &content)
+                        .and_then(|()| stdout.flush())
+                        .map_err(|error| format!("cannot write output: {error}"))
+                }
+                Err(error) => Err(error.message),
+            }
         }
         ProviderRuntimeDriver::AnthropicMessages => {
             let credential = credential
                 .ok_or_else(|| format!("missing provider credential: {provider}"))?;
             let content = call_anthropic_messages(&route.transport, model, input, &credential)?;
-            write_model_delta(stdout, run, &content)
+            write_model_text_or_tool_call(stdout, run, &content)
                 .and_then(|()| stdout.flush())
                 .map_err(|error| format!("cannot write output: {error}"))
         }
@@ -692,7 +698,35 @@ fn call_openai_chat_streaming(
         "stream": true
     })
     .to_string();
-    let mut child = start_curl_json(&target, api_key, &body).map_err(|message| StreamFailure {
+    call_openai_sse_streaming(&target, api_key, &body, run, stdout)
+}
+
+fn call_openai_responses_streaming(
+    transport: &ResolvedTransport,
+    model: &str,
+    input: &str,
+    api_key: Option<&str>,
+    run: &str,
+    stdout: &mut impl Write,
+) -> Result<(), StreamFailure> {
+    let target = responses_target(transport);
+    let body = json!({
+        "model": model,
+        "input": provider_messages(input),
+        "stream": true
+    })
+    .to_string();
+    call_openai_sse_streaming(&target, api_key, &body, run, stdout)
+}
+
+fn call_openai_sse_streaming(
+    target: &CurlJsonTarget,
+    api_key: Option<&str>,
+    body: &str,
+    run: &str,
+    stdout: &mut impl Write,
+) -> Result<(), StreamFailure> {
+    let mut child = start_curl_json(target, api_key, body).map_err(|message| StreamFailure {
         message,
         can_fallback: true,
     })?;
@@ -703,6 +737,7 @@ fn call_openai_chat_streaming(
             can_fallback: true,
         });
     };
+    let mut text_emitter = OpenAiStreamTextEmitter::new(run);
     let mut emitted = false;
     let mut done = false;
     for line in BufReader::new(child_stdout).lines() {
@@ -718,7 +753,8 @@ fn call_openai_chat_streaming(
         };
         match openai_stream_event(&line) {
             Ok(OpenAiStreamEvent::Delta(text)) if !text.is_empty() => {
-                if let Err(error) = write_model_delta(stdout, run, &text)
+                if let Err(error) = text_emitter
+                    .push(stdout, &text)
                     .and_then(|()| stdout.flush())
                 {
                     cleanup_curl_child(&mut child);
@@ -751,6 +787,12 @@ fn call_openai_chat_streaming(
             can_fallback: !emitted,
         });
     }
+    if let Err(error) = text_emitter.finish(stdout).and_then(|()| stdout.flush()) {
+        return Err(StreamFailure {
+            message: format!("cannot write output: {error}"),
+            can_fallback: false,
+        });
+    }
     if emitted {
         Ok(())
     } else {
@@ -765,10 +807,64 @@ fn call_openai_chat_streaming(
     }
 }
 
+enum StreamTextMode {
+    Undecided,
+    BufferToolCall,
+    Plain,
+}
+
+struct OpenAiStreamTextEmitter<'a> {
+    run: &'a str,
+    mode: StreamTextMode,
+    buffer: String,
+}
+
+impl<'a> OpenAiStreamTextEmitter<'a> {
+    fn new(run: &'a str) -> Self {
+        Self {
+            run,
+            mode: StreamTextMode::Undecided,
+            buffer: String::new(),
+        }
+    }
+
+    fn push(&mut self, stdout: &mut impl Write, text: &str) -> io::Result<()> {
+        match self.mode {
+            StreamTextMode::Plain => write_model_delta(stdout, self.run, text),
+            StreamTextMode::BufferToolCall => {
+                self.buffer.push_str(text);
+                Ok(())
+            }
+            StreamTextMode::Undecided => {
+                self.buffer.push_str(text);
+                let trimmed = self.buffer.trim_start();
+                if trimmed.is_empty() {
+                    return Ok(());
+                }
+                if trimmed.starts_with('{') {
+                    self.mode = StreamTextMode::BufferToolCall;
+                    return Ok(());
+                }
+                self.mode = StreamTextMode::Plain;
+                let buffered = std::mem::take(&mut self.buffer);
+                write_model_delta(stdout, self.run, &buffered)
+            }
+        }
+    }
+
+    fn finish(&mut self, stdout: &mut impl Write) -> io::Result<()> {
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+        let buffered = std::mem::take(&mut self.buffer);
+        write_model_text_or_tool_call(stdout, self.run, &buffered)
+    }
+}
+
 fn provider_messages(input: &str) -> Value {
     let agent = env::var("CTX_AGENT")
         .ok()
-        .filter(|value| cortexfs::is_object_name(value));
+        .filter(|value| is_object_name(value));
     let agent_system = env::var("CTX_AGENT_SYSTEM").unwrap_or_default();
     let prompt_context = cortexfs::AgentPromptContext::from_env();
     provider_messages_for_agent(input, agent.as_deref(), &agent_system, &prompt_context)
