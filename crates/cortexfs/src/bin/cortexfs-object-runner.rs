@@ -1628,7 +1628,11 @@ fn split_object_args(args: Vec<OsString>) -> Result<(PathBuf, Vec<OsString>), St
     let Some(path) = values.next() else {
         return Err("missing object path".to_owned());
     };
-    Ok((PathBuf::from(path), values.collect()))
+    let path = PathBuf::from(path);
+    Ok((
+        object_path_from_exec_metadata(&path).unwrap_or(path),
+        values.collect(),
+    ))
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1661,6 +1665,45 @@ impl ObjectPath {
         };
         Ok(Self { class, name })
     }
+}
+
+fn object_path_from_exec_metadata(path: &Path) -> Option<PathBuf> {
+    let content = read_exec_metadata_text(path)?;
+    let mut class = None;
+    let mut name = None;
+    for line in content.lines().take(32) {
+        let Some(field) = line.strip_prefix("# cortexfs.") else {
+            continue;
+        };
+        let Some((key, value)) = field.split_once('=') else {
+            continue;
+        };
+        match key {
+            "object" => class = Some(value.trim()),
+            "name" => name = Some(value.trim()),
+            _ => {}
+        }
+    }
+    let class = class?;
+    let name = name?;
+    match class {
+        "model" if is_model_name(name) => Some(Path::new("/ctx").join(class).join(name)),
+        "agent" | "tool" if is_object_name(name) => Some(Path::new("/ctx").join(class).join(name)),
+        _ => None,
+    }
+}
+
+fn read_exec_metadata_text(path: &Path) -> Option<String> {
+    let path_text = path.to_string_lossy();
+    if !path_text.starts_with("/proc/self/fd/") && !path_text.starts_with("/dev/fd/") {
+        return read_small_plain_text_file(path).ok();
+    }
+    let file = fs::File::open(path).ok()?;
+    let mut content = String::new();
+    file.take(MAX_RUNNER_CONTROL_BYTES.saturating_add(1))
+        .read_to_string(&mut content)
+        .ok()?;
+    (u64::try_from(content.len()).ok()? <= MAX_RUNNER_CONTROL_BYTES).then_some(content)
 }
 
 fn write_error(line: &str) -> io::Result<()> {
