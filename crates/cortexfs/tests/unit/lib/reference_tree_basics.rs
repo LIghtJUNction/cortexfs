@@ -216,6 +216,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let base_policy = fs::read_to_string(root.join("agent").join("base.d").join("policy"));
     let base_policy = ok!(base_policy);
     assert!(base_policy.contains("allow base_t tool:tsh execute\n"));
+    assert!(base_policy.contains("allow base_t tool:fs.read execute\n"));
     assert!(base_policy.contains("allow base_t agent:coder create\n"));
     assert!(base_policy.contains("allow base_t agent:reviewer start\n"));
     assert!(base_policy.contains("allow base_t agent:executor start\n"));
@@ -259,6 +260,20 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(!root.join("shared").join("project-a").exists());
 
     assert_eq!(ensure_v1_reference_tree(&root), Ok(bootstrapped));
+}
+
+#[test]
+fn reference_tree_bootstrap_repairs_control_file_modes() {
+    let root = clean_test_dir("reference-tree-control-mode");
+    let status = root.join("tool").join("tsh.d").join("status");
+    assert!(fs::create_dir_all(status.parent().unwrap_or(root.as_path())).is_ok());
+    assert!(fs::write(&status, "idle\n").is_ok());
+    assert!(fs::set_permissions(&status, fs::Permissions::from_mode(0o600)).is_ok());
+
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    let mode = fs::metadata(status).map(|metadata| metadata.permissions().mode() & 0o777);
+    assert!(matches!(mode, Ok(0o644)));
 }
 
 #[test]

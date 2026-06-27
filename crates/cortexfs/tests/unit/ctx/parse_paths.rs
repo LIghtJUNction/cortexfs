@@ -871,6 +871,7 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
         agent_repl_model_summary(false, &root, "coder"),
         "main -> /ctx/model/localhost/gpt-5.4-mini (missing)"
     );
+    assert!(AGENT_REPL_COMMANDS.contains("/clear"));
 }
 
 #[test]
@@ -1006,7 +1007,7 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
         Ok(ref rendered)
             if rendered.output == "\u{4f60}\u{597d}\n"
                 && rendered.diagnostics
-                    == vec!["[tool] tsh".to_owned(), "error: EIO: boom".to_owned()]
+                    == vec!["tool tsh".to_owned(), "error EIO: boom".to_owned()]
                 && rendered.exit_code == 1
                 && !rendered.interrupted
     ));
@@ -1026,8 +1027,8 @@ fn buffered_agent_renderer_reports_token_delta_and_total() {
         Ok(ref rendered)
             if rendered.diagnostics
                 == vec![
-                    "[tokens] input +10/10 output +2/2".to_owned(),
-                    "[tokens] input +4/14 output +3/5".to_owned(),
+                    "tokens in +10/10 out +2/2".to_owned(),
+                    "tokens in +4/14 out +3/5".to_owned(),
                 ]
     ));
 }
@@ -1045,6 +1046,16 @@ fn debug_tool_line_reports_current_names_and_changes() {
         ),
         "[debug tools] +fs.write -tsh = fs.read fs.write"
     );
+}
+
+#[test]
+fn debug_tool_names_report_native_agent_tools_only() {
+    let root = clean_test_dir("ctx-agent-debug-native-tools");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    let tools = agent_native_tool_names(&root, "coder");
+
+    assert_eq!(tools, Ok(vec!["tsh".to_owned()]));
 }
 
 #[test]
@@ -1147,7 +1158,6 @@ fn interruptible_buffered_agent_request_sends_cancel_for_active_run() {
         };
         let mut second_request = String::new();
         assert!(std::io::Read::read_to_string(&mut second_stream, &mut second_request).is_ok());
-        assert!(std::io::Write::write_all(&mut second_stream, b"{\"type\":\"done\"}\n").is_ok());
 
         format!("{first_request}{second_request}")
     });

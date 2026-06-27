@@ -61,6 +61,9 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let mut context = ToolContext::new(config.max_loaded_tools);
     match command {
         TshCommand::Repl => run_repl(&root, &mut cache, &mut context),
+        TshCommand::Tool { name, args } if is_tsh_builtin(&name) => {
+            run_builtin_once(&root, &mut cache, &mut context, &name, args)
+        }
         TshCommand::Tool { name, args } => run_tool(&root, &name, args),
         TshCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
         TshCommand::List => list_tools(&root).map(|()| ExitCode::SUCCESS),
@@ -708,6 +711,40 @@ fn repl_help(root: &Path, words: &[String]) -> Result<(), TshError> {
     }
 }
 
+fn run_builtin_once(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
+    name: &str,
+    args: Vec<OsString>,
+) -> Result<ExitCode, TshError> {
+    let words = builtin_words(name, args)?;
+    match name {
+        "exit" | "quit" => parse_exit_code(&words),
+        "help" => repl_help(root, &words).map(|()| ExitCode::SUCCESS),
+        "tools" => repl_tools(root, &words).map(|()| ExitCode::SUCCESS),
+        "which" => repl_which(root, &words).map(|()| ExitCode::SUCCESS),
+        "type" => repl_type(root, &words).map(|()| ExitCode::SUCCESS),
+        "command" => repl_command(root, &words).map(|()| ExitCode::SUCCESS),
+        "load" => repl_load(root, cache, context, &words).map(|()| ExitCode::SUCCESS),
+        "unload" => repl_unload(root, cache, context, &words).map(|()| ExitCode::SUCCESS),
+        "loads" => repl_loads(context, &words).map(|()| ExitCode::SUCCESS),
+        "pin" => repl_pin(root, cache, context, &words).map(|()| ExitCode::SUCCESS),
+        "unpin" => repl_unpin(root, cache, context, &words).map(|()| ExitCode::SUCCESS),
+        "pins" => repl_pins(context, &words).map(|()| ExitCode::SUCCESS),
+        _ => command_not_found(name),
+    }
+}
+
+fn builtin_words(name: &str, args: Vec<OsString>) -> Result<Vec<String>, TshError> {
+    let mut words = Vec::with_capacity(args.len() + 1);
+    words.push(name.to_owned());
+    for arg in args {
+        words.push(os_string(arg)?);
+    }
+    Ok(words)
+}
+
 fn repl_tools(root: &Path, words: &[String]) -> Result<(), TshError> {
     if words.len() == 1 {
         return list_tools_with_mode(root, ToolListMode::Names);
@@ -1096,10 +1133,6 @@ fn authorize_tsh_tool_execution(
     root: &Path,
     name: &str,
 ) -> Result<cortexfs::ToolExecutionGrant, TshError> {
-    let tool_path = ctx_tool_path(root)?;
-    let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
-        return command_not_found(name);
-    };
     let agent_name = env::var("CTX_AGENT").map_err(|error| match error {
         env::VarError::NotPresent => {
             TshError::unavailable(
@@ -1113,11 +1146,6 @@ fn authorize_tsh_tool_execution(
     let Some(view_hit) = view.tool_path().find(name).map_err(tool_path_error)? else {
         return command_not_found(name);
     };
-    if view_hit.path() != hit.path() {
-        return Err(TshError::unavailable(format!(
-            "cannot execute tool:{name}: EACCES"
-        )));
-    }
     let policy_text =
         fs::read_to_string(view_hit.control_dir().join("policy")).map_err(|error| {
             TshError::unavailable(format!(
@@ -1397,7 +1425,7 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help,
+        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, builtin_words,
         ctx_tool_path_with_home, help_text, load_tool_context, parse_args, parse_repl_line,
         parse_tsh_config, parse_tshrc_ctx_path, requires_explicit_repl_input, run_repl_tool,
         run_tool, terminal_safe_text, validate_tshrc_ctx_path,
@@ -1427,6 +1455,14 @@ mod tests {
                     args: vec![OsString::from("-lc"), OsString::from("pwd")]
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn builtin_words_preserve_tsh_builtin_argv() {
+        assert_eq!(
+            builtin_words("tools", vec![OsString::from("-l")]),
+            Ok(vec!["tools".to_owned(), "-l".to_owned()])
         );
     }
 

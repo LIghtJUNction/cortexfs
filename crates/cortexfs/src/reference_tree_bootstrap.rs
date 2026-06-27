@@ -128,7 +128,8 @@ fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
     let model = reference_agent_model(name);
     let mut policy = format!(
         "allow {policy_subject} model:{model} use\n\
-         allow {policy_subject} tool:tsh execute\n"
+         allow {policy_subject} tool:tsh execute\n\
+         allow {policy_subject} tool:fs.read execute\n"
     );
     if name == "base" {
         for child in ["coder", "reviewer", "executor"] {

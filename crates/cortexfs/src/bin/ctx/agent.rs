@@ -356,6 +356,9 @@ struct AgentInteractiveSend<'a> {
     interrupt: Option<&'a AgentInterruptGuard>,
 }
 
+const AGENT_REPL_COMMANDS: &str =
+    "/resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
+
 fn agent_send_interactive_with_run_id(
     root: &Path,
     name: &str,
@@ -514,11 +517,7 @@ fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(),
         format!(
             " {} {}",
             styled(color, ANSI_BOLD_BLUE, "Commands:"),
-            styled(
-                color,
-                ANSI_DIM,
-                "/resume /history /output /pack /tools /children /cancel /debug /status /exit"
-            )
+            styled(color, ANSI_DIM, AGENT_REPL_COMMANDS)
         ),
     ];
     for line in lines {
@@ -656,6 +655,10 @@ fn agent_repl_command(
             agent_status(root, name)?;
             ExitCode::SUCCESS
         }
+        "/clear" => {
+            clear_terminal_screen()?;
+            ExitCode::SUCCESS
+        }
         command if command.starts_with('/') => {
             write_error(&format!("ctx: unknown repl command: {command}"))
                 .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
@@ -666,6 +669,14 @@ fn agent_repl_command(
     Ok(Some(code))
 }
 
+fn clear_terminal_screen() -> Result<(), CliError> {
+    let mut stdout = io::stdout().lock();
+    stdout
+        .write_all(b"\x1b[2J\x1b[H")
+        .and_then(|()| stdout.flush())
+        .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))
+}
+
 #[derive(Default)]
 struct AgentDebugState {
     enabled: bool,
@@ -674,7 +685,7 @@ struct AgentDebugState {
 
 impl AgentDebugState {
     fn report_tools(&mut self, root: &Path, name: &str) -> Result<(), CliError> {
-        let tools = agent_visible_tool_names(root, name)?;
+        let tools = agent_native_tool_names(root, name)?;
         let line = format_debug_tool_line(self.previous_tools.as_deref(), &tools);
         self.previous_tools = Some(tools);
         write_error(&line)
@@ -786,11 +797,41 @@ struct AgentVisibleTool {
     status: String,
 }
 
-fn agent_visible_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
-    Ok(agent_visible_tool_entries(root, name)?
-        .into_iter()
-        .map(|entry| entry.name)
-        .collect())
+fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
+    require_cli_name("agent name", name)?;
+    let view = derive_agent_runtime_view(root, name)
+        .map_err(|error| CliError::unavailable(format!("agent view {}: {name}", error.errno())))?;
+    let Some(hit) = view
+        .tool_path()
+        .find("tsh")
+        .map_err(|error| CliError::unavailable(format!("cannot inspect CTX_PATH: {error:?}")))?
+    else {
+        return Ok(Vec::new());
+    };
+    let policy = fs::read_to_string(hit.control_dir().join("policy")).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot read {}: {error}",
+            hit.control_dir().join("policy").display()
+        ))
+    })?;
+    let tool_policy = PolicyV0::parse(&policy)
+        .map_err(|_error| CliError::unavailable("invalid policy for tool:tsh"))?;
+    if authorize_tool_execution(
+        view.tool_path(),
+        "tsh",
+        ToolExecutionAuthority::new(
+            view.identity(),
+            view.mount_table(),
+            view.policy_subject(),
+            view.policy(),
+            &tool_policy,
+        ),
+    )
+    .is_err()
+    {
+        return Ok(Vec::new());
+    }
+    Ok(vec!["tsh".to_owned()])
 }
 
 fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibleTool>, CliError> {

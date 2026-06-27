@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
@@ -212,10 +213,19 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
             .and_then(|()| write_tool_error(&mut stdout, &config.run, "ENOENT", &message))
             .map_err(|error| format!("cannot write output: {error}"));
     }
-
+    let mut seen_tool_calls = BTreeSet::new();
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
-        let outcome = run_agent_model_once(&config, &input)?;
+        let outcome = run_agent_model_once(&config, &input, &mut stdout)?;
         if let Some(tool_call) = first_tool_call(&outcome.frames)? {
+            if !seen_tool_calls.insert(tool_call_signature(&tool_call)) {
+                return write_tool_error(
+                    &mut stdout,
+                    &config.run,
+                    "ELOOP",
+                    "agent repeated the same tool call",
+                )
+                .map_err(|error| format!("cannot write output: {error}"));
+            }
             write_agent_frames_for_tool_iteration(
                 &mut stdout,
                 &config.run,
@@ -241,8 +251,21 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
             continue;
         }
 
+        if outcome.streamed {
+            write_done_frames(&mut stdout, &outcome.frames)?;
+            if outcome.success {
+                return Ok(());
+            }
+            if frames_have_error(&outcome.frames) {
+                return Ok(());
+            }
+            return Err("agent model failed".to_owned());
+        }
         write_agent_frames(&mut stdout, &outcome.frames)?;
         if outcome.success {
+            return Ok(());
+        }
+        if frames_have_error(&outcome.frames) {
             return Ok(());
         }
         return Err("agent model failed".to_owned());
@@ -342,11 +365,13 @@ impl AgentModelRunConfig {
 struct AgentModelRunOutcome {
     frames: Vec<String>,
     success: bool,
+    streamed: bool,
 }
 
 fn run_agent_model_once(
     config: &AgentModelRunConfig,
     input: &str,
+    stdout: &mut impl Write,
 ) -> Result<AgentModelRunOutcome, String> {
     let mut child = Command::new(&config.model_path)
         .arg(input)
@@ -359,24 +384,95 @@ fn run_agent_model_once(
         .env("CTX_AGENT_CURRENT_TIME_UNIX", &config.current_time_unix)
         .env("CTX_AGENT_TOOL_CONTEXT", &config.tool_context)
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("cannot run agent model: {error}"))?;
     let child_stdout = child
         .stdout
         .take()
         .ok_or_else(|| "cannot read agent model output".to_owned())?;
+    let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
     let mut frames = Vec::new();
+    let mut streamed = false;
     for line in BufReader::new(child_stdout).lines() {
         let line = line.map_err(|error| format!("cannot read agent model output: {error}"))?;
+        let line = normalize_agent_model_frame(&line, &config.run);
+        if matches!(
+            event_type(&line).as_deref(),
+            Some("delta" | "reasoning_delta" | "usage" | "error")
+        ) {
+            writeln!(stdout, "{line}")
+                .and_then(|()| stdout.flush())
+                .map_err(|error| format!("cannot write output: {error}"))?;
+            streamed = true;
+        }
         frames.push(line);
     }
     let status = child
         .wait()
         .map_err(|error| format!("cannot run agent model: {error}"))?;
+    let stderr = collect_child_stderr(stderr_reader);
+    if !status.success() && !frames_have_error(&frames) {
+        let message = if stderr.trim().is_empty() {
+            format!("agent model exited with {status}")
+        } else {
+            stderr.trim().to_owned()
+        };
+        write_error_event(stdout, &config.run, "EIO", &message)
+            .and_then(|()| stdout.flush())
+            .map_err(|error| format!("cannot write output: {error}"))?;
+        frames.push(
+            serde_json::json!({
+                "type": "error",
+                "run": config.run,
+                "code": "EIO",
+                "message": message
+            })
+            .to_string(),
+        );
+    }
     Ok(AgentModelRunOutcome {
         frames,
         success: status.success(),
+        streamed,
     })
+}
+
+fn spawn_child_stderr_reader(
+    mut stderr: std::process::ChildStderr,
+) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut output = String::new();
+        let _ignored = stderr.read_to_string(&mut output);
+        output
+    })
+}
+
+fn collect_child_stderr(reader: Option<std::thread::JoinHandle<String>>) -> String {
+    let Some(reader) = reader else {
+        return String::new();
+    };
+    reader.join().unwrap_or_default()
+}
+
+fn normalize_agent_model_frame(frame: &str, run: &str) -> String {
+    let Ok(mut value) = serde_json::from_str::<Value>(frame) else {
+        return frame.to_owned();
+    };
+    if value.get("type").and_then(Value::as_str) == Some("error")
+        && value.get("run").is_none()
+        && let Some(object) = value.as_object_mut()
+    {
+        object.insert("run".to_owned(), Value::String(run.to_owned()));
+        return value.to_string();
+    }
+    frame.to_owned()
+}
+
+fn frames_have_error(frames: &[String]) -> bool {
+    frames
+        .iter()
+        .any(|frame| event_type(frame).as_deref() == Some("error"))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -398,6 +494,16 @@ fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>, String> {
         }
     }
     Ok(None)
+}
+
+fn tool_call_signature(tool_call: &AgentToolCall) -> String {
+    let args = tool_call
+        .args
+        .iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("\u{1f}");
+    format!("{}\u{1e}{args}", tool_call.name)
 }
 
 fn tool_call_from_event_frame(frame: &str) -> Result<Option<AgentToolCall>, String> {
@@ -647,6 +753,17 @@ fn write_agent_frames(stdout: &mut impl Write, frames: &[String]) -> Result<(), 
     Ok(())
 }
 
+fn write_done_frames(stdout: &mut impl Write, frames: &[String]) -> Result<(), String> {
+    for frame in frames {
+        if event_type(frame).as_deref() == Some("done") {
+            writeln!(stdout, "{frame}")
+                .and_then(|()| stdout.flush())
+                .map_err(|error| format!("cannot write output: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn write_agent_frames_for_tool_iteration(
     stdout: &mut impl Write,
     run: &str,
@@ -877,14 +994,23 @@ fn write_tool_error(
     code: &str,
     message: &str,
 ) -> io::Result<()> {
+    write_error_event(stdout, run, code, message)?;
+    write_tool_done(stdout, run, "error")
+}
+
+fn write_error_event(
+    stdout: &mut impl Write,
+    run: &str,
+    code: &str,
+    message: &str,
+) -> io::Result<()> {
     writeln!(
         stdout,
         r#"{{"type":"error","run":{},"code":{},"message":{}}}"#,
         json_string(run),
         json_string(code),
         json_string(message)
-    )?;
-    write_tool_done(stdout, run, "error")
+    )
 }
 
 fn json_string(value: &str) -> String {
