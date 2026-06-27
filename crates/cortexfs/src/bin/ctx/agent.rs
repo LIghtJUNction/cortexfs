@@ -779,7 +779,8 @@ fn format_debug_tool_line(previous: Option<&[String]>, current: &[String]) -> St
 
 fn agent_status(root: &Path, name: &str) -> Result<(), CliError> {
     require_cli_name("agent name", name)?;
-    cat_path(&root.join("agent").join(format!("{name}.d")).join("status"))
+    let status = read_file_to_string(&root.join("agent").join(format!("{name}.d")).join("status"))?;
+    print_terminal_text(&status)
 }
 
 fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
