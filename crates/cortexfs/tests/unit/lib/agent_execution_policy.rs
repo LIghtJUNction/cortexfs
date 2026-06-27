@@ -64,6 +64,56 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 }
 
 #[test]
+fn agent_executable_socket_runtime_wraps_plain_text_after_visible_events() {
+    let root = reference_tree("agent-plain-after-event");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
+printf '{"type":"delta","run":"%s","text":"before"}\n' "$CTX_RUN_ID"
+printf 'plain followup\n'
+"#,
+    );
+    set_file_mode(&agent_executable, 0o755);
+
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+    assert!(client
+        .write_all(
+            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+        },
+    );
+    let outcome = ok!(outcome);
+    assert!(outcome.jsonl().contains(r#""text":"before""#));
+    assert!(outcome.jsonl().contains(r#""text":"plain followup""#));
+    assert_file_text(
+        &session_root.join("default").join("latest.md"),
+        "beforeplain followup\n",
+    );
+}
+
+#[test]
 fn agent_executable_socket_runtime_rejects_symlink_executable_without_running_target() {
     let root = reference_tree("agent-executable-socket-runtime-symlink");
     let session_root = agent_session_root(&root, "coder");
