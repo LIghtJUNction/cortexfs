@@ -486,6 +486,25 @@ fn assistant_response_recorder_updates_latest_without_replacing_history() {
 }
 
 #[test]
+fn assistant_response_recorder_rejects_nul_content_without_recording() {
+    let root = clean_test_dir("assistant-response-record-nul");
+    let session = root.join("default");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "");
+    write_text_file(&session.join("events.jsonl"), "");
+    write_text_file(&session.join("latest.md"), "old\n");
+
+    assert_eq!(
+        record_assistant_response_to_session(&session, "run-1", "bad\0content"),
+        Err(SocketSessionRecordError::InvalidField("content"))
+    );
+    assert_file_text(&session.join("messages.jsonl"), "");
+    assert_file_text(&session.join("events.jsonl"), "");
+    assert_file_text(&session.join("latest.md"), "old\n");
+}
+
+#[test]
 fn tool_denial_recorder_makes_permission_failure_inspectable() {
     let root = clean_test_dir("tool-denial-record");
     let session = root.join("default");

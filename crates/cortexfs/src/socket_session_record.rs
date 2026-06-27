@@ -87,6 +87,9 @@ pub fn record_assistant_response_to_session(
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
     validate_socket_object_field("run", run_id)
         .map_err(|_error| SocketSessionRecordError::SessionMismatch)?;
+    if content.contains('\0') {
+        return Err(SocketSessionRecordError::InvalidField("content"));
+    }
     require_socket_session_files(session_dir)?;
 
     let content_parts = text_content_parts(content);
