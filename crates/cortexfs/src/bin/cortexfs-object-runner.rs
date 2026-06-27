@@ -3,8 +3,11 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Child, Command, ExitCode, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use cortexfs::{
     DEFAULT_AGENT_PROMPT_TEMPLATE, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
@@ -23,6 +26,8 @@ const MAX_MODEL_FALLBACK_CANDIDATES: usize = 16;
 const MAX_TOOL_RESULT_CHARS: usize = 16 * 1024;
 const MAX_CHILD_STDERR_BYTES: usize = 64 * 1024;
 const MAX_STREAM_TOOL_CALL_BUFFER_BYTES: usize = 64 * 1024;
+const MAX_AGENT_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
+const AGENT_TOOL_TIMEOUT_SECONDS: u64 = 20;
 
 include!("../cortexfs_object_runner_provider.rs");
 
@@ -440,13 +445,11 @@ fn run_agent_model_once(
     })
 }
 
-fn spawn_child_stderr_reader(
-    mut stderr: std::process::ChildStderr,
-) -> std::thread::JoinHandle<String> {
-    std::thread::spawn(move || read_limited_text(&mut stderr, MAX_CHILD_STDERR_BYTES))
+fn spawn_child_stderr_reader(mut stderr: std::process::ChildStderr) -> thread::JoinHandle<String> {
+    thread::spawn(move || read_limited_text(&mut stderr, MAX_CHILD_STDERR_BYTES))
 }
 
-fn collect_child_stderr(reader: Option<std::thread::JoinHandle<String>>) -> String {
+fn collect_child_stderr(reader: Option<thread::JoinHandle<String>>) -> String {
     let Some(reader) = reader else {
         return String::new();
     };
@@ -710,7 +713,8 @@ fn execute_agent_tool_call(
     .map_err(|denial| tool_denial_message(&tool_call.name, denial))?;
     validate_agent_tsh_args(&tool_call.args)?;
 
-    let output = Command::new(hit.path())
+    let mut command = Command::new(hit.path());
+    command
         .args(&tool_call.args)
         .env_clear()
         .envs(
@@ -722,8 +726,8 @@ fn execute_agent_tool_call(
         .env("CTX_ROOT", &config.ctx_root)
         .env("CTX_SOURCE", &config.source)
         .env("CTX_TOOL_MODE", "cli")
-        .env("PATH", "/usr/bin:/bin")
-        .output()
+        .env("PATH", "/usr/bin:/bin");
+    let output = run_agent_tool_process(&mut command)
         .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
     let mut result = String::new();
     result.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -744,6 +748,96 @@ fn execute_agent_tool_call(
         return Err(trim_tool_result(&result));
     }
     Ok(trim_tool_result(&result))
+}
+
+fn run_agent_tool_process(command: &mut Command) -> Result<std::process::Output, String> {
+    run_agent_tool_process_with_timeout(command, Duration::from_secs(agent_tool_timeout_seconds()))
+}
+
+fn run_agent_tool_process_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "cannot read tool stdout".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "cannot read tool stderr".to_owned())?;
+    let stdout_reader =
+        thread::spawn(move || read_limited_bytes(stdout, MAX_AGENT_TOOL_OUTPUT_BYTES));
+    let stderr_reader =
+        thread::spawn(move || read_limited_bytes(stderr, MAX_AGENT_TOOL_OUTPUT_BYTES));
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            terminate_process_group(&mut child);
+            let _ignored = child.wait();
+            return Err(format!("tool timed out after {}s", timeout.as_secs()));
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn agent_tool_timeout_seconds() -> u64 {
+    env::var("CTX_AGENT_TOOL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(AGENT_TOOL_TIMEOUT_SECONDS)
+}
+
+fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(limit.min(8 * 1024));
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        let remaining = limit.saturating_sub(output.len());
+        let kept = read.min(remaining);
+        if let Some(chunk) = buffer.get(..kept) {
+            output.extend_from_slice(chunk);
+        }
+    }
+    output
+}
+
+fn terminate_process_group(child: &mut Child) {
+    if let Ok(pid) = i32::try_from(child.id()) {
+        signal_process_group(pid, nix::sys::signal::Signal::SIGTERM);
+        for _attempt in 0..5 {
+            if child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+    }
+    let _ignored = child.kill();
+}
+
+fn signal_process_group(pid: i32, signal: nix::sys::signal::Signal) {
+    let _ignored = nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), signal);
 }
 
 fn tool_denial_message(name: &str, denial: ToolExecutionDenial) -> String {
