@@ -3,8 +3,12 @@
 ///
 /// The returned environment always contains the runtime-owned `CTX_ROOT`,
 /// `CTX_HOME`, `HOME`, and `CTX_PATH` values derived from the ABI controls.
-/// Reserved keys present in `env` are ignored so text config cannot expand the
-/// authority established by `path`, `mount`, and `policy`.
+/// The `env` control is validated as data, but v1 does not let it add process
+/// variables. Runtime environment authority is fixed here and by the sandbox
+/// launcher so text config cannot expand the authority established by `path`,
+/// `mount`, and `policy`.
+const MAX_AGENT_RUNTIME_CONTROL_BYTES: u64 = 64 * 1024;
+
 pub fn derive_agent_runtime_view(
     ctx_root: &Path,
     agent_name: &str,
@@ -14,7 +18,7 @@ pub fn derive_agent_runtime_view(
     }
 
     let control_dir = ctx_root.join("agent").join(format!("{agent_name}.d"));
-    if !control_dir.is_dir() {
+    if open_agent_runtime_plain_directory(&control_dir).is_err() {
         return Err(AgentRuntimeViewError::MissingControlDirectory);
     }
 
@@ -160,17 +164,14 @@ fn derive_agent_runtime_env(
     control_dir: &Path,
 ) -> Result<Vec<(String, String)>, AgentRuntimeViewError> {
     let env_content = read_required_agent_control(control_dir, "env")?;
-    let mut env = vec![
+    let env = vec![
         ("CTX_ROOT".to_owned(), ctx_root.display().to_string()),
         ("CTX_HOME".to_owned(), ctx_home.display().to_string()),
         ("HOME".to_owned(), home.display().to_string()),
+        ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
         ("CTX_PATH".to_owned(), ctx_path.to_owned()),
     ];
-    for (key, value) in parse_agent_env_control(&env_content)? {
-        if !matches!(key.as_str(), "CTX_ROOT" | "CTX_HOME" | "HOME" | "CTX_PATH") {
-            env.push((key, value));
-        }
-    }
+    let _validated_env = parse_agent_env_control(&env_content)?;
     Ok(env)
 }
 
@@ -295,23 +296,32 @@ fn system_keychain_secret(
     }
 }
 
+const SECRET_TOOL_PROGRAM: &str = "/usr/bin/secret-tool";
+const MAX_SECRET_TOOL_OUTPUT_BYTES: usize = 8 * 1024;
+const SECRET_TOOL_TIMEOUT_SECONDS: u64 = 5;
+
+fn get_secret_tool_program() -> &'static str {
+    SECRET_TOOL_PROGRAM
+}
+
 fn secret_tool_lookup(
     service: &str,
     account: &str,
 ) -> Result<Option<String>, ApiKeyResolutionError> {
-    let mut command = Command::new("secret-tool");
+    let mut command = Command::new(get_secret_tool_program());
     command
+        .env_clear()
         .args(["lookup", "service", service, "account", account])
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    if env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
-        let uid = nix::unistd::geteuid().as_raw();
-        command.env(
-            "DBUS_SESSION_BUS_ADDRESS",
-            format!("unix:path=/run/user/{uid}/bus"),
-        );
-    }
-    let output = match command.output() {
+    command.env(
+        "DBUS_SESSION_BUS_ADDRESS",
+        secret_tool_dbus_address(|name| env::var_os(name), nix::unistd::geteuid().as_raw()),
+    );
+    let output = match run_secret_tool_command_with_timeout(
+        command,
+        Duration::from_secs(SECRET_TOOL_TIMEOUT_SECONDS),
+    ) {
         Ok(output) => output,
         Err(_error) => return Ok(None),
     };
@@ -326,6 +336,115 @@ fn secret_tool_lookup(
     } else {
         Ok(Some(secret.to_owned()))
     }
+}
+
+fn run_secret_tool_command_with_timeout(
+    mut command: Command,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    command.process_group(0);
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("cannot run secret-tool: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "cannot read secret-tool stdout".to_owned())?;
+    let stdout_reader = thread::spawn(move || {
+        read_agent_runtime_limited_bytes(stdout, MAX_SECRET_TOOL_OUTPUT_BYTES.saturating_add(1))
+    });
+    let mut stdout_reader = Some(stdout_reader);
+    let mut stdout = None;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if stdout.is_none()
+            && stdout_reader
+                .as_ref()
+                .is_some_and(thread::JoinHandle::is_finished)
+        {
+            let output = stdout_reader
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .unwrap_or_default();
+            if output.len() > MAX_SECRET_TOOL_OUTPUT_BYTES {
+                terminate_agent_runtime_process_group(&mut child);
+                let _ignored = child.wait();
+                return Err("secret-tool output exceeds limit".to_owned());
+            }
+            stdout = Some(output);
+        }
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            terminate_agent_runtime_process_group(&mut child);
+            let _ignored = child.wait();
+            if let Some(reader) = stdout_reader.take() {
+                let _ignored = reader.join();
+            }
+            return Err(format!("secret-tool timed out after {}s", timeout.as_secs()));
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let stdout = stdout.unwrap_or_else(|| {
+        stdout_reader
+            .take()
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    });
+    if stdout.len() > MAX_SECRET_TOOL_OUTPUT_BYTES {
+        return Err("secret-tool output exceeds limit".to_owned());
+    }
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr: Vec::new(),
+    })
+}
+
+fn read_agent_runtime_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(limit.min(8 * 1024));
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        let remaining = limit.saturating_sub(output.len());
+        let kept = read.min(remaining);
+        if let Some(chunk) = buffer.get(..kept) {
+            output.extend_from_slice(chunk);
+        }
+        if output.len() >= limit {
+            break;
+        }
+    }
+    output
+}
+
+fn terminate_agent_runtime_process_group(child: &mut Child) {
+    if let Ok(pid) = i32::try_from(child.id()) {
+        signal_agent_runtime_process_group(pid, nix::sys::signal::Signal::SIGTERM);
+        for _attempt in 0..5 {
+            let _ignored = child.try_wait();
+            thread::sleep(Duration::from_millis(50));
+        }
+        signal_agent_runtime_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+    }
+    let _ignored = child.kill();
+}
+
+fn signal_agent_runtime_process_group(pid: i32, signal: nix::sys::signal::Signal) {
+    let _ignored = nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), signal);
+}
+
+fn secret_tool_dbus_address(
+    get_env: impl FnOnce(&str) -> Option<std::ffi::OsString>,
+    uid: u32,
+) -> std::ffi::OsString {
+    get_env("DBUS_SESSION_BUS_ADDRESS")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("unix:path=/run/user/{uid}/bus").into())
 }
 
 fn is_valid_secret_lookup_part(value: &str) -> bool {
@@ -357,13 +476,109 @@ fn read_required_agent_control(
     file: &str,
 ) -> Result<String, AgentRuntimeViewError> {
     let path = control_dir.join(file);
-    fs::read_to_string(&path).map_err(|error| {
+    read_agent_runtime_control_file(&path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             AgentRuntimeViewError::MissingControlFile(file.to_owned())
         } else {
             AgentRuntimeViewError::CannotReadControl(file.to_owned())
         }
     })
+}
+
+fn read_agent_runtime_control_file(path: &Path) -> std::io::Result<String> {
+    let mut file = open_agent_runtime_plain_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "path is not a regular file",
+        ));
+    }
+    if metadata.len() > MAX_AGENT_RUNTIME_CONTROL_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "agent runtime control file exceeds read limit",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_agent_runtime_plain_file(path: &Path) -> std::io::Result<fs::File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_agent_runtime_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(fs::File::from(file_fd))
+}
+
+fn open_agent_runtime_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_agent_runtime_single_plain_directory(Path::new("/"))?
+    } else {
+        open_agent_runtime_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_agent_runtime_single_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn required_single_agent_control_value(

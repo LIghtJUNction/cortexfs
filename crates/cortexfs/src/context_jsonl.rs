@@ -76,9 +76,15 @@ fn inspect_context_jsonl_line(
         }
         return;
     }
-    let Ok(record) = serde_path_to_error::deserialize::<_, ContextJsonlRecordJson>(
-        &mut serde_json::Deserializer::from_str(line),
-    ) else {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        issues.push(ContextJsonlIssue::InvalidJson(line_number));
+        return;
+    };
+    if !value.is_object() {
+        issues.push(ContextJsonlIssue::RecordNotObject(line_number));
+        return;
+    }
+    let Ok(record) = serde_json::from_value::<ContextJsonlRecordJson>(value) else {
         issues.push(ContextJsonlIssue::InvalidJson(line_number));
         return;
     };

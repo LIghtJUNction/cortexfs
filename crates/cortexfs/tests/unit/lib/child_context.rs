@@ -260,6 +260,45 @@ fn owned_child_cancellation_rejects_bad_names_and_missing_history() {
 }
 
 #[test]
+fn owned_child_cancellation_rejects_symlink_history_files() {
+    let root = clean_test_dir("owned-child-cancel-symlink-history");
+    let outside = clean_test_dir("owned-child-cancel-symlink-history-outside");
+    let parent_session = root.join("parent");
+    let child_session = root.join("child");
+    assert!(fs::create_dir_all(&parent_session).is_ok());
+    write_text_file(&outside.join("events.jsonl"), "");
+    write_text_file(&child_session.join("messages.jsonl"), "child message\n");
+    write_text_file(&child_session.join("events.jsonl"), "");
+    write_text_file(&child_session.join("state"), "idle\n");
+    assert!(symlink(
+        outside.join("events.jsonl"),
+        parent_session.join("events.jsonl")
+    )
+    .is_ok());
+
+    assert_eq!(
+        record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session),
+        Err(OwnedChildCancellationError::MissingParentEvents)
+    );
+    assert_file_text(&outside.join("events.jsonl"), "");
+
+    assert!(fs::remove_file(parent_session.join("events.jsonl")).is_ok());
+    write_text_file(&parent_session.join("events.jsonl"), "");
+    assert!(fs::remove_file(child_session.join("messages.jsonl")).is_ok());
+    assert!(symlink(
+        outside.join("events.jsonl"),
+        child_session.join("messages.jsonl")
+    )
+    .is_ok());
+
+    assert_eq!(
+        record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session),
+        Err(OwnedChildCancellationError::MissingChildHistory)
+    );
+    assert_file_text(&outside.join("events.jsonl"), "");
+}
+
+#[test]
 fn child_context_recorder_creates_handoff_and_result_channel() {
     let root = clean_test_dir("child-context-record");
     let session = root.join("default");
@@ -301,4 +340,27 @@ fn child_context_recorder_creates_handoff_and_result_channel() {
     assert!(validate_context_pack_source("context/child/rev-2/result.md").is_ok());
     assert!(validate_context_pack_source("context/child/rev-2/refs.jsonl").is_ok());
     assert!(inspect_session_layout(&session).is_ok());
+}
+
+#[test]
+fn child_context_recorder_rejects_symlink_parent_context() {
+    let root = clean_test_dir("child-context-parent-context-symlink");
+    let session = root.join("default");
+    let outside = clean_test_dir("child-context-parent-context-symlink-outside");
+    create_complete_session_layout(&session);
+    assert!(fs::remove_dir_all(session.join("context")).is_ok());
+    assert!(fs::create_dir_all(outside.join("context")).is_ok());
+    assert!(symlink(outside.join("context"), session.join("context")).is_ok());
+
+    assert_eq!(
+        record_child_handoff_to_parent_context(
+            &session,
+            "rev-2",
+            "reviewer",
+            "default",
+            "Task: review mount ABI\n",
+        ),
+        Err(ChildContextRecordError::MissingParentSession)
+    );
+    assert!(!outside.join("context").join("child").join("rev-2").exists());
 }

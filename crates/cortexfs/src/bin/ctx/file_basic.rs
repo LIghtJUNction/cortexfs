@@ -10,14 +10,8 @@ fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, Cli
     }
 
     let path = resolve_abi_path(root, path)?;
-    if !is_executable_file(&path) {
-        return Err(CliError::unavailable(format!(
-            "object is not executable: {}",
-            path.display()
-        )));
-    }
-
-    let status = ProcessCommand::new(&path)
+    let executable = open_executable_no_follow(&path)?;
+    let status = object_execution_command(root, &proc_fd_path(&executable))
         .args(args)
         .status()
         .map_err(|error| {
@@ -28,6 +22,15 @@ fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, Cli
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(70), ExitCode::from))
+}
+
+fn object_execution_command(root: &Path, path: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new(path);
+    command
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("CTX_ROOT", root);
+    command
 }
 
 fn file_command(root: &Path, args: &FileArgs) -> Result<(), CliError> {
@@ -44,9 +47,16 @@ fn file_cat(root: &Path, path: &str) -> Result<(), CliError> {
 }
 
 fn cat_path(path: &Path) -> Result<(), CliError> {
-    let mut file = fs::File::open(path).map_err(|error| {
-        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+    let mut file = open_plain_read_file(path)?;
+    let metadata = file.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
     })?;
+    if !metadata.is_file() {
+        return Err(CliError::unavailable(format!(
+            "cannot read {}: not a regular file",
+            path.display()
+        )));
+    }
     let mut stdout = io::stdout().lock();
     io::copy(&mut file, &mut stdout)
         .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))?;
@@ -58,41 +68,159 @@ fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     let Some(parent) = path.parent() else {
         return Err(CliError::usage("set requires a parent directory"));
     };
-    let temp = parent.join(temp_file_name());
+    let parent_dir = open_plain_file_parent_dir(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::usage("set requires a valid file name"))?;
     let content = newline_terminated(value);
 
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temp)
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot create {}: {error}", temp.display()))
-        })?;
-    file.write_all(content.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot write {}: {error}", temp.display()))
-        })?;
+    for attempt in 0..16 {
+        let temp_name = temp_file_name(attempt);
+        let file_fd = match nix::fcntl::openat(
+            &parent_dir,
+            temp_name.as_str(),
+            nix::fcntl::OFlag::O_CREAT
+                | nix::fcntl::OFlag::O_EXCL
+                | nix::fcntl::OFlag::O_WRONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::from_bits_truncate(0o644),
+        ) {
+            Ok(file_fd) => file_fd,
+            Err(nix::errno::Errno::EEXIST) => continue,
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot create temp file: {error}"
+                )));
+            }
+        };
+        let mut file = fs::File::from(file_fd);
+        file.write_all(content.as_bytes())
+            .and_then(|()| file.sync_all())
+            .map_err(|error| {
+                let _ignored = nix::unistd::unlinkat(
+                    &parent_dir,
+                    temp_name.as_str(),
+                    nix::unistd::UnlinkatFlags::NoRemoveDir,
+                );
+                CliError::unavailable(format!("cannot write temp file: {error}"))
+            })?;
+        drop(file);
 
-    fs::rename(&temp, &path).map_err(|error| {
-        let _ignored = fs::remove_file(&temp);
-        CliError::unavailable(format!("cannot replace {}: {error}", path.display()))
-    })
+        nix::fcntl::renameat(&parent_dir, temp_name.as_str(), &parent_dir, file_name).map_err(
+            |error| {
+                let _ignored = nix::unistd::unlinkat(
+                    &parent_dir,
+                    temp_name.as_str(),
+                    nix::unistd::UnlinkatFlags::NoRemoveDir,
+                );
+                CliError::unavailable(format!("cannot replace {}: {error}", path.display()))
+            },
+        )?;
+        return parent_dir.sync_all().map_err(|error| {
+            CliError::unavailable(format!("cannot sync {}: {error}", parent.display()))
+        });
+    }
+    Err(CliError::unavailable("cannot create unique temp file"))
 }
 
 fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     let path = resolve_abi_path(root, path)?;
+    let Some(parent) = path.parent() else {
+        return Err(CliError::usage("append requires a parent directory"));
+    };
+    let parent_dir = open_plain_file_parent_dir(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::usage("append requires a valid file name"))?;
     let content = newline_terminated(value);
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot append {}: {error}", path.display()))
-        })?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_APPEND
+            | nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(0o644),
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot append {}: {error}", path.display())))?;
+    let mut file = fs::File::from(file_fd);
+    if !file.metadata().is_ok_and(|metadata| metadata.is_file()) {
+        return Err(CliError::unavailable(format!(
+            "cannot append {}: not a regular file",
+            path.display()
+        )));
+    }
     file.write_all(content.as_bytes()).map_err(|error| {
         CliError::unavailable(format!("cannot append {}: {error}", path.display()))
+    })?;
+    file.sync_all().map_err(|error| {
+        CliError::unavailable(format!("cannot sync {}: {error}", path.display()))
+    })?;
+    parent_dir.sync_all().map_err(|error| {
+        CliError::unavailable(format!("cannot sync {}: {error}", parent.display()))
     })
+}
+
+fn open_plain_file_parent_dir(path: &Path) -> Result<fs::File, CliError> {
+    let mut directory = if path.is_absolute() {
+        open_single_plain_file_parent_dir(Path::new("/"))?
+    } else {
+        open_single_plain_file_parent_dir(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    CliError::unavailable(format!(
+                        "cannot open parent {}: invalid directory name",
+                        path.display()
+                    ))
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(|error| {
+                    CliError::unavailable(format!("cannot open parent {}: {error}", path.display()))
+                })?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot open parent {}: unsupported path component",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_plain_file_parent_dir(path: &Path) -> Result<fs::File, CliError> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot open parent {}: {error}", path.display()))
+        })?;
+    if !directory.metadata().is_ok_and(|metadata| metadata.is_dir()) {
+        return Err(CliError::unavailable(format!(
+            "cannot open parent {}: not a directory",
+            path.display()
+        )));
+    }
+    Ok(directory)
 }
 
 fn file_type(root: &Path, path: &str) -> Result<(), CliError> {
@@ -124,17 +252,28 @@ fn file_type_name(root: &Path, path: &str) -> Result<String, CliError> {
         return Ok(shape.to_owned());
     }
 
-    if fs::symlink_metadata(&resolved).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-        return Ok("ctx.symlink".to_owned());
+    let Some(parent) = resolved.parent() else {
+        return Err(CliError::unavailable(format!(
+            "unknown CortexFS path: {path}"
+        )));
+    };
+    let parent_dir = open_plain_file_parent_dir(parent)?;
+    let file_name = resolved
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::unavailable(format!("unknown CortexFS path: {path}")))?;
+    let metadata = nix::sys::stat::fstatat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| CliError::unavailable(format!("unknown CortexFS path: {path}")))?;
+    let file_type = nix::sys::stat::SFlag::from_bits_truncate(metadata.st_mode);
+    if file_type.contains(nix::sys::stat::SFlag::S_IFLNK) {
+        Ok("ctx.symlink".to_owned())
+    } else {
+        Ok("ctx.ordinary".to_owned())
     }
-
-    if resolved.exists() {
-        return Ok("ctx.ordinary".to_owned());
-    }
-
-    Err(CliError::unavailable(format!(
-        "unknown CortexFS path: {path}"
-    )))
 }
 
 fn fs_type_name(metadata: &fs::Metadata) -> &'static str {
@@ -179,10 +318,18 @@ fn print_cortexfs_xattrs(path: &Path) -> Result<(), CliError> {
     names.sort_unstable();
     for name in names {
         if let Some(value) = read_xattr_string(path, &name) {
-            print_line(&format!("xattr.{name}={value}"))?;
+            print_line(&cortexfs_xattr_line(&name, &value))?;
         }
     }
     Ok(())
+}
+
+fn cortexfs_xattr_line(name: &str, value: &str) -> String {
+    format!(
+        "xattr.{}={}",
+        terminal_safe_text(name),
+        terminal_safe_text(value)
+    )
 }
 
 fn read_xattr_string(path: &Path, name: &str) -> Option<String> {

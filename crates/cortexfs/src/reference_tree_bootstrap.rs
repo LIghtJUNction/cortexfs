@@ -46,14 +46,16 @@ fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
     let ctx = root.join("bin").join("ctx");
     write_reference_text(
         &ctx,
-        "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec ctx \"$@\"\n",
+        "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec /usr/bin/ctx \"$@\"\n",
     )?;
     set_reference_executable(&ctx)?;
     for name in ["ctxterm", "tsh"] {
         let path = root.join("bin").join(name);
         write_reference_text(
             &path,
-            &format!("#!/bin/sh\n# CortexFS reference-tree {name} placeholder.\nexec {name} \"$@\"\n"),
+            &format!(
+                "#!/bin/sh\n# CortexFS reference-tree {name} placeholder.\nexec /usr/bin/{name} \"$@\"\n"
+            ),
         )?;
         set_reference_executable(&path)?;
     }
@@ -63,11 +65,11 @@ fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
 
 fn remove_deprecated_reference_bin_te(root: &Path) -> Result<(), ReferenceTreeError> {
     let path = root.join("bin").join("te");
-    let Ok(content) = fs::read_to_string(&path) else {
+    let Ok(content) = read_reference_tree_small_text(&path) else {
         return Ok(());
     };
     if content.contains("# CortexFS reference-tree te placeholder.") {
-        fs::remove_file(path).map_err(|_error| ReferenceTreeError::CannotRemove)?;
+        remove_reference_entry(&path).map_err(|_error| ReferenceTreeError::CannotRemove)?;
     }
     Ok(())
 }
@@ -168,9 +170,9 @@ ctx_root="${{CTX_ROOT:-/ctx}}"
 run="${{CTX_RUN_ID:-r1}}"
 input="$*"
 if [ -z "$input" ]; then
-  input="$(cat)"
+  input="$(/usr/bin/cat)"
 fi
-model="$(tr -d '\n' < "$source_root/agent/{name}.d/model" 2>/dev/null || true)"
+model="$(/usr/bin/tr -d '\n' < "$source_root/agent/{name}.d/model" 2>/dev/null || true)"
 if [ -z "$model" ]; then
   model="main"
 fi
@@ -178,7 +180,7 @@ case "$model" in
   */*/*|/*|../*|*/../*|*/..|*//*) model="" ;;
   */*) ;;
   main|helper)
-    target="$(readlink "$ctx_root/model/$model" 2>/dev/null || true)"
+    target="$(/usr/bin/readlink "$ctx_root/model/$model" 2>/dev/null || true)"
     case "$target" in
       /ctx/model/*/*) model="${{target#/ctx/model/}}" ;;
       *) model="" ;;
@@ -197,8 +199,8 @@ if [ -z "$model" ] || [ ! -x "$ctx_root/model/$model" ]; then
   exit 1
 fi
 CTX_AGENT="{name}" \
-CTX_AGENT_SYSTEM="$(cat "$source_root/agent/{name}.d/system.md" 2>/dev/null || true)" \
-CTX_AGENT_PROMPT_TEMPLATE="$(cat "$source_root/agent/{name}.d/prompt.template.md" 2>/dev/null || true)" \
+CTX_AGENT_SYSTEM="$(/usr/bin/cat "$source_root/agent/{name}.d/system.md" 2>/dev/null || true)" \
+CTX_AGENT_PROMPT_TEMPLATE="$(/usr/bin/cat "$source_root/agent/{name}.d/prompt.template.md" 2>/dev/null || true)" \
 CTX_RUN_ID="$run" \
 exec "$ctx_root/model/$model" "$input"
 "#
@@ -250,34 +252,119 @@ fn remove_deprecated_reference_placeholder_tool(
 ) -> Result<(), ReferenceTreeError> {
     let executable = root.join("tool").join(name);
     let control_dir = root.join("tool").join(format!("{name}.d"));
-    if !executable.exists() && !control_dir.exists() {
+    if fs::symlink_metadata(&executable).is_err() && fs::symlink_metadata(&control_dir).is_err() {
         return Ok(());
     }
     if !is_deprecated_reference_placeholder_tool(&executable, &control_dir) {
         return Ok(());
     }
-    match fs::remove_file(&executable) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_error) => return Err(ReferenceTreeError::CannotRemove),
-    }
-    match fs::remove_dir_all(&control_dir) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_error) => return Err(ReferenceTreeError::CannotRemove),
-    }
+    remove_reference_entry(&executable).map_err(|_error| ReferenceTreeError::CannotRemove)?;
+    remove_deprecated_reference_placeholder_control_dir(&control_dir)?;
     Ok(())
 }
 
+fn remove_deprecated_reference_placeholder_control_dir(
+    control_dir: &Path,
+) -> Result<(), ReferenceTreeError> {
+    let control_dir_file =
+        open_reference_dir(control_dir).map_err(|_error| ReferenceTreeError::CannotRemove)?;
+    for file in TOOL_CONTROL_FILES {
+        nix::unistd::unlinkat(
+            &control_dir_file,
+            *file,
+            nix::unistd::UnlinkatFlags::NoRemoveDir,
+        )
+        .map_err(|_error| ReferenceTreeError::CannotRemove)?;
+    }
+    let Some(parent) = control_dir.parent() else {
+        return Err(ReferenceTreeError::CannotRemove);
+    };
+    let parent_dir = open_reference_dir(parent).map_err(|_error| ReferenceTreeError::CannotRemove)?;
+    let name = control_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(ReferenceTreeError::CannotRemove)?;
+    nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::RemoveDir)
+        .map_err(|_error| ReferenceTreeError::CannotRemove)
+}
+
 fn is_deprecated_reference_placeholder_tool(executable: &Path, control_dir: &Path) -> bool {
-    let Ok(wrapper) = fs::read_to_string(executable) else {
+    if !control_dir
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
+    {
+        return false;
+    }
+    let Ok(wrapper) = read_reference_tree_small_text(executable) else {
         return false;
     };
-    let Ok(description) = fs::read_to_string(control_dir.join("description")) else {
+    let Ok(description) = read_reference_tree_small_text(&control_dir.join("description")) else {
         return false;
     };
     wrapper == executable_wrapper_script("/bin/false")
         && description.trim_end_matches('\n') == "CortexFS reference-tree tool"
+        && deprecated_placeholder_tool_control_dir_is_exact(control_dir)
+}
+
+fn deprecated_placeholder_tool_control_dir_is_exact(control_dir: &Path) -> bool {
+    let Ok(control_dir_file) = open_reference_dir(control_dir) else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(reference_tree_proc_fd_path(&control_dir_file)) else {
+        return false;
+    };
+    let mut seen = Vec::new();
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            return false;
+        };
+        if !TOOL_CONTROL_FILES.contains(&file_name) {
+            return false;
+        }
+        let Ok(stat) = nix::sys::stat::fstatat(
+            &control_dir_file,
+            file_name,
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        ) else {
+            return false;
+        };
+        if stat.st_mode & libc::S_IFMT != libc::S_IFREG {
+            return false;
+        }
+        seen.push(file_name.to_owned());
+    }
+    TOOL_CONTROL_FILES
+        .iter()
+        .all(|required| seen.iter().any(|file| file == required))
+}
+
+fn reference_tree_proc_fd_path(directory: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+}
+
+fn read_reference_tree_small_text(path: &Path) -> std::io::Result<String> {
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_REFERENCE_SESSION_META_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "reference tree file is not a bounded regular file",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
 }
 
 struct ReferenceToolSpec {

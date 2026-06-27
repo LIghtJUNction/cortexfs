@@ -1,3 +1,5 @@
+const MAX_OBJECT_LAYOUT_CONTROL_BYTES: u64 = 64 * 1024;
+
 /// Inspects a model, agent, or tool object triple under a `CortexFS` root.
 #[must_use]
 pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> ObjectLayoutReport {
@@ -73,7 +75,7 @@ fn inspect_model_socket(
     issues: &mut Vec<ObjectLayoutIssue>,
 ) {
     let session_path = control_dir.join("session");
-    let Ok(content) = fs::read_to_string(&session_path) else {
+    let Ok(content) = read_object_layout_control_file(&session_path) else {
         return;
     };
     let value = content.trim();
@@ -97,7 +99,7 @@ fn inspect_model_capability_control(
         return;
     }
 
-    let Ok(content) = fs::read_to_string(control_dir.join("cap")) else {
+    let Ok(content) = read_object_layout_control_file(&control_dir.join("cap")) else {
         return;
     };
     for issue in inspect_model_capabilities(&content).issues() {
@@ -122,7 +124,7 @@ fn inspect_model_driver_control(
         return;
     }
 
-    let Ok(content) = fs::read_to_string(control_dir.join("driver")) else {
+    let Ok(content) = read_object_layout_control_file(&control_dir.join("driver")) else {
         return;
     };
     if let Err(error) = parse_model_driver_routes(&content) {
@@ -160,7 +162,7 @@ fn inspect_model_effort_control(
         return;
     }
 
-    let Ok(content) = fs::read_to_string(control_dir.join("effort")) else {
+    let Ok(content) = read_object_layout_control_file(&control_dir.join("effort")) else {
         return;
     };
     if ModelEffort::parse(&content).is_none() {
@@ -181,7 +183,7 @@ fn inspect_model_fallback_control(
         return;
     }
 
-    let Ok(content) = fs::read_to_string(control_dir.join("fallback")) else {
+    let Ok(content) = read_object_layout_control_file(&control_dir.join("fallback")) else {
         return;
     };
     for issue in parse_model_fallback(&content).1.issues() {
@@ -209,7 +211,7 @@ fn inspect_tool_schema_control(
         return;
     }
 
-    let Ok(content) = fs::read_to_string(control_dir.join("schema")) else {
+    let Ok(content) = read_object_layout_control_file(&control_dir.join("schema")) else {
         return;
     };
     for issue in inspect_tool_schema_json(&content).issues() {
@@ -243,7 +245,7 @@ fn inspect_agent_control_files(
         let Some(kind) = AgentControlKind::parse(file) else {
             continue;
         };
-        let Ok(content) = fs::read_to_string(control_dir.join(file)) else {
+        let Ok(content) = read_object_layout_control_file(&control_dir.join(file)) else {
             continue;
         };
         for issue in inspect_agent_control(kind, &content).issues() {
@@ -264,7 +266,7 @@ fn agent_control_issue_value(issue: &AgentControlIssue) -> &str {
 }
 
 fn require_executable_file(path: &Path, label: &str, issues: &mut Vec<ObjectLayoutIssue>) {
-    match fs::metadata(path) {
+    match object_layout_plain_path_metadata(path) {
         Ok(metadata) if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 => {}
         Ok(_metadata) => issues.push(ObjectLayoutIssue::NotExecutable(label.to_owned())),
         Err(_error) => issues.push(ObjectLayoutIssue::MissingExecutable(label.to_owned())),
@@ -272,7 +274,7 @@ fn require_executable_file(path: &Path, label: &str, issues: &mut Vec<ObjectLayo
 }
 
 fn require_object_control_dir(path: &Path, label: &str, issues: &mut Vec<ObjectLayoutIssue>) {
-    match fs::metadata(path) {
+    match object_layout_plain_path_metadata(path) {
         Ok(metadata) if metadata.is_dir() => {}
         Ok(_metadata) => issues.push(ObjectLayoutIssue::NotControlDirectory(label.to_owned())),
         Err(_error) => issues.push(ObjectLayoutIssue::MissingControlDirectory(label.to_owned())),
@@ -280,7 +282,7 @@ fn require_object_control_dir(path: &Path, label: &str, issues: &mut Vec<ObjectL
 }
 
 fn require_object_control_file(path: &Path, label: &str, issues: &mut Vec<ObjectLayoutIssue>) {
-    match fs::metadata(path) {
+    match object_layout_plain_path_metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
         Ok(_metadata) => issues.push(ObjectLayoutIssue::NotControlFile(label.to_owned())),
         Err(_error) => issues.push(ObjectLayoutIssue::MissingControlFile(label.to_owned())),
@@ -293,7 +295,7 @@ fn require_unix_socket(
     required: bool,
     issues: &mut Vec<ObjectLayoutIssue>,
 ) {
-    match fs::metadata(path) {
+    match object_layout_socket_metadata(path) {
         Ok(metadata) if metadata.file_type().is_socket() => {}
         Ok(_metadata) => issues.push(ObjectLayoutIssue::NotSocket(label.to_owned())),
         Err(_error) if required => issues.push(ObjectLayoutIssue::MissingSocket(label.to_owned())),
@@ -301,11 +303,124 @@ fn require_unix_socket(
     }
 }
 
+fn object_layout_socket_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_object_layout_plain_directory(parent)?;
+    let file_name = object_layout_plain_file_name(path)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    fs::File::from(file_fd).metadata()
+}
+
+fn read_object_layout_control_file(path: &Path) -> std::io::Result<String> {
+    let mut file = open_object_layout_plain_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_OBJECT_LAYOUT_CONTROL_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "object layout control file is too large or not a plain file",
+        ));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn object_layout_plain_path_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_object_layout_plain_directory(parent)?;
+    let file_name = object_layout_plain_file_name(path)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    fs::File::from(file_fd).metadata()
+}
+
+fn open_object_layout_plain_file(path: &Path) -> std::io::Result<fs::File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_object_layout_plain_directory(parent)?;
+    let file_name = object_layout_plain_file_name(path)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(fs::File::from(file_fd))
+}
+
+fn object_layout_plain_file_name(path: &Path) -> std::io::Result<&str> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))
+}
+
+fn open_object_layout_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_object_layout_single_plain_directory(Path::new("/"))?
+    } else {
+        open_object_layout_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_object_layout_single_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
+}
+
 pub(crate) fn is_stable_chroot_absolute_path(value: &str) -> bool {
     if !value.starts_with('/')
-        || value.contains('\0')
-        || value.contains('\t')
-        || value.contains('\n')
+        || value.bytes().any(|byte| byte.is_ascii_control())
     {
         return false;
     }

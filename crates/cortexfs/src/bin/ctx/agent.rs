@@ -59,6 +59,8 @@ enum AgentArgs {
     },
 }
 
+const MAX_AGENT_REPL_STDIN_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Eq, PartialEq)]
 struct AgentNewArgs {
     name: String,
@@ -184,8 +186,7 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     let unit = agent_terminal_unit(&args.name, &args.session);
     reset_agent_terminal_unit(&unit);
     let command = agent_start_systemd_command(root, args, &cli_mounts, &view, &socket, &unit);
-    let output = ProcessCommand::new(&command.program)
-        .args(&command.args)
+    let output = agent_start_process_command(&command)
         .output()
         .map_err(|error| CliError::unavailable(format!("cannot start systemd-run: {error}")))?;
     if !output.status.success() {
@@ -317,16 +318,30 @@ fn systemd_run_diagnostics(output: &std::process::Output) -> String {
 
 fn reset_agent_terminal_unit(unit: &str) {
     let service = format!("{unit}.service");
-    let _ignored = ProcessCommand::new("systemctl")
-        .args(["--user", "stop", &service])
+    let _ignored = systemctl_user_command(["stop", &service])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    let _ignored = ProcessCommand::new("systemctl")
-        .args(["--user", "reset-failed", &service])
+    let _ignored = systemctl_user_command(["reset-failed", &service])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+const SYSTEMCTL_PROGRAM: &str = "/usr/bin/systemctl";
+
+fn get_systemctl_program() -> &'static str {
+    SYSTEMCTL_PROGRAM
+}
+
+fn systemctl_user_command<const N: usize>(args: [&str; N]) -> ProcessCommand {
+    let mut command = ProcessCommand::new(get_systemctl_program());
+    command
+        .arg("--user")
+        .args(args)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin");
+    command
 }
 
 fn agent_send(
@@ -478,9 +493,7 @@ fn agent_repl(
         }
     }
 
-    let mut input = String::new();
-    io::stdin()
-        .read_to_string(&mut input)
+    let input = read_agent_repl_stdin_limited(io::stdin(), MAX_AGENT_REPL_STDIN_BYTES)
         .map_err(|error| CliError::unavailable(format!("cannot read stdin: {error}")))?;
     for line in input.lines() {
         if line.is_empty() {
@@ -497,6 +510,27 @@ fn agent_repl(
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn read_agent_repl_stdin_limited(
+    reader: impl Read,
+    max_bytes: usize,
+) -> io::Result<String> {
+    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("stdin read limit is invalid: {error}"),
+        )
+    })?;
+    let mut input = String::new();
+    reader.take(limit).read_to_string(&mut input)?;
+    if input.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "agent stdin exceeds input limit",
+        ));
+    }
+    Ok(input)
 }
 
 fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(), CliError> {
@@ -536,22 +570,25 @@ fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
 }
 
 fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> String {
-    let model = fs::read_to_string(root.join("agent").join(format!("{name}.d")).join("model"))
+    let model = read_optional_trimmed(&root.join("agent").join(format!("{name}.d")).join("model"))
         .ok()
-        .map(|content| content.trim().to_owned())
-        .filter(|content| !content.is_empty())
+        .flatten()
         .unwrap_or_else(|| "main".to_owned());
     let model_text = styled(color, ANSI_CYAN, &model);
     if !matches!(model.as_str(), "main" | "helper") {
         return model_text;
     }
-    match fs::read_link(root.join("model").join(&model)) {
+    match read_model_alias_target(root, &model) {
         Ok(target) => {
-            let missing = if target.exists() { "" } else { " (missing)" };
+            let missing = if model_alias_target_exists(root, &target) {
+                ""
+            } else {
+                " (missing)"
+            };
             format!(
                 "{} -> {}{}",
                 model_text,
-                styled(color, ANSI_DIM, &target.display().to_string()),
+                styled(color, ANSI_DIM, &target),
                 styled(
                     color,
                     if missing.is_empty() {
@@ -565,6 +602,26 @@ fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> String {
         }
         Err(_error) => format!("{} {}", model_text, styled(color, ANSI_RED, "(missing alias)")),
     }
+}
+
+fn model_alias_target_exists(root: &Path, target: &str) -> bool {
+    let Some(relative) = target.strip_prefix("/ctx/model/") else {
+        return false;
+    };
+    if relative
+        .split('/')
+        .any(|component| component.is_empty() || component == "." || component == "..")
+    {
+        return false;
+    }
+    fs::symlink_metadata(root.join("model").join(relative))
+        .is_ok_and(|metadata| !metadata.file_type().is_symlink())
+}
+
+fn read_model_alias_target(root: &Path, model: &str) -> io::Result<String> {
+    let model_dir = open_agent_terminal_runtime_dir(&root.join("model"))?;
+    let target = nix::fcntl::readlinkat(&model_dir, model).map_err(io::Error::from)?;
+    Ok(target.to_string_lossy().into_owned())
 }
 
 fn agent_repl_editor_config() -> rustyline::Config {
@@ -660,13 +717,17 @@ fn agent_repl_command(
             ExitCode::SUCCESS
         }
         command if command.starts_with('/') => {
-            write_error(&format!("ctx: unknown repl command: {command}"))
+            write_error(&agent_repl_unknown_command_line(command))
                 .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
             ExitCode::SUCCESS
         }
         _ => return Ok(None),
     };
     Ok(Some(code))
+}
+
+fn agent_repl_unknown_command_line(command: &str) -> String {
+    format!("ctx: unknown repl command: {}", terminal_safe_text(command))
 }
 
 fn clear_terminal_screen() -> Result<(), CliError> {
@@ -726,7 +787,10 @@ fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliE
     let context = session_dir.join("context");
     for file in ["pack.md", "pack.json", "summary.md"] {
         let path = context.join(file);
-        if path.is_file() {
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_file())
+        {
             return cat_path(&path);
         }
     }
@@ -768,12 +832,18 @@ fn build_agent_system_prompt(
 
 fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
     let child_root = agent_session_dir(root, name, session)?.join("context").join("child");
-    if !child_root.is_dir() {
+    if !child_root
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
+    {
         return Ok(());
     }
     for child in read_dir_names(&child_root)? {
         let dir = child_root.join(&child);
-        if !dir.is_dir() {
+        if !dir
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             continue;
         }
         let status = read_optional_trimmed(&dir.join("status"))?.unwrap_or_else(|| "unknown".to_owned());
@@ -808,10 +878,11 @@ fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliEr
     else {
         return Ok(Vec::new());
     };
-    let policy = fs::read_to_string(hit.control_dir().join("policy")).map_err(|error| {
+    let policy = read_file_to_string(&hit.control_dir().join("policy")).map_err(|error| {
         CliError::unavailable(format!(
-            "cannot read {}: {error}",
-            hit.control_dir().join("policy").display()
+            "cannot read {}: {}",
+            hit.control_dir().join("policy").display(),
+            error.message
         ))
     })?;
     let tool_policy = PolicyV0::parse(&policy)
@@ -839,14 +910,17 @@ fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibl
     let mut paths = Vec::new();
     paths.extend(ctx_tool_path(root)?.dirs().iter().map(PathBuf::from));
     let agent_path = root.join("agent").join(format!("{name}.d")).join("path");
-    if let Ok(content) = fs::read_to_string(agent_path) {
+    if let Ok(content) = read_file_to_string(&agent_path) {
         paths.extend(content.lines().map(PathBuf::from));
     }
     paths.sort();
     paths.dedup();
     let mut tools = Vec::new();
     for path in paths {
-        if !path.is_dir() {
+        if !path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             continue;
         }
         for tool in read_dir_names(&path)? {
@@ -889,8 +963,7 @@ fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<String, CliEr
         return Ok(run);
     }
     let events = session_dir.join("events.jsonl");
-    let content = fs::read_to_string(&events)
-        .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", events.display())))?;
+    let content = read_file_to_string(&events)?;
     let mut latest = None;
     for line in content.lines() {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
@@ -905,20 +978,22 @@ fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<String, CliEr
 }
 
 fn read_optional_trimmed(path: &Path) -> Result<Option<String>, CliError> {
-    match fs::read_to_string(path) {
-        Ok(value) => {
-            let value = value.trim();
-            if value.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(value.to_owned()))
-            }
+    match fs::symlink_metadata(path) {
+        Ok(_metadata) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot stat {}: {error}",
+                path.display()
+            )));
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(CliError::unavailable(format!(
-            "cannot read {}: {error}",
-            path.display()
-        ))),
+    }
+    let value = read_file_to_string(path)?;
+    let value = value.trim();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(value.to_owned()))
     }
 }
 
@@ -938,7 +1013,7 @@ fn agent_start_systemd_command(
 ) -> AgentStartCommand {
     let home = view.ctx_home();
     let mut command = AgentStartCommand {
-        program: "systemd-run".to_owned(),
+        program: get_systemd_run_program().to_owned(),
         args: vec![
             "--user".to_owned(),
             "--unit".to_owned(),
@@ -957,6 +1032,15 @@ fn agent_start_systemd_command(
         .args
         .extend(agent_bwrap_args(root, args, cli_mounts, view, socket, home));
     command
+}
+
+fn agent_start_process_command(command: &AgentStartCommand) -> ProcessCommand {
+    let mut process = ProcessCommand::new(&command.program);
+    process
+        .args(&command.args)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin");
+    process
 }
 
 fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, String)> {
@@ -1094,6 +1178,12 @@ fn agent_bwrap_args(
     bwrap
 }
 
+const SYSTEMD_RUN_PROGRAM: &str = "/usr/bin/systemd-run";
+
+fn get_systemd_run_program() -> &'static str {
+    SYSTEMD_RUN_PROGRAM
+}
+
 fn agent_start_mounts(args: &AgentStartArgs) -> Result<Vec<AgentMount>, CliError> {
     let default_source = env::current_dir()
         .map_err(|error| CliError::unavailable(format!("cannot read current directory: {error}")))?;
@@ -1188,10 +1278,10 @@ fn ensure_agent_terminal_socket(
     runtime_socket: &Path,
 ) -> Result<(), CliError> {
     if let Some(parent) = runtime_socket.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
+        create_agent_terminal_runtime_dir(parent).map_err(|error| {
             CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
         })?;
-        fs::write(parent.join(".empty-shell-startup"), "").map_err(|error| {
+        write_empty_shell_startup_stub(parent).map_err(|error| {
             CliError::unavailable(format!(
                 "cannot create {}: {error}",
                 parent.join(".empty-shell-startup").display()
@@ -1199,7 +1289,7 @@ fn ensure_agent_terminal_socket(
         })?;
     }
     ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)?;
-    match fs::remove_file(runtime_socket) {
+    match remove_stale_agent_terminal_socket(runtime_socket) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
@@ -1212,9 +1302,179 @@ fn ensure_agent_terminal_socket(
     Ok(())
 }
 
+fn create_agent_terminal_runtime_dir(path: &Path) -> io::Result<()> {
+    create_agent_terminal_plain_dir(path, 0o700)
+}
+
+fn create_agent_terminal_plain_dir(path: &Path, mode: u32) -> io::Result<()> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            sync_agent_terminal_runtime_dir(path)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "agent terminal runtime path is not a plain directory",
+            ))
+        };
+    }
+
+    let mut missing = Vec::new();
+    let mut cursor = Some(path);
+    while let Some(current) = cursor {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "agent terminal runtime path contains a non-directory entry",
+                ));
+            }
+            Ok(_metadata) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+                cursor = current.parent();
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    let mut parent_dir = if let Some(existing_parent) = missing.last().and_then(|path| path.parent())
+    {
+        open_agent_terminal_runtime_dir(existing_parent)?
+    } else {
+        return Ok(());
+    };
+
+    for directory in missing.iter().rev() {
+        let name = directory.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid agent terminal runtime directory name",
+            )
+        })?;
+        nix::sys::stat::mkdirat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(mode),
+        )?;
+        parent_dir.sync_all()?;
+        let child = nix::fcntl::openat(
+            &parent_dir,
+            name,
+            nix::fcntl::OFlag::O_DIRECTORY
+                | nix::fcntl::OFlag::O_RDONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )?;
+        parent_dir = fs::File::from(child);
+        parent_dir.sync_all()?;
+    }
+    Ok(())
+}
+
+fn sync_agent_terminal_runtime_dir(path: &Path) -> io::Result<()> {
+    let directory = open_agent_terminal_runtime_dir(path)?;
+    directory.sync_all()
+}
+
+fn open_agent_terminal_runtime_dir(path: &Path) -> io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_single_agent_terminal_runtime_dir(Path::new("/"))?
+    } else {
+        open_single_agent_terminal_runtime_dir(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "agent terminal runtime path is not utf-8",
+                    )
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "agent terminal runtime path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_agent_terminal_runtime_dir(path: &Path) -> io::Result<fs::File> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "agent terminal runtime path is not a directory",
+        ));
+    }
+    Ok(directory)
+}
+
+fn write_empty_shell_startup_stub(parent: &Path) -> io::Result<()> {
+    let path = parent.join(".empty-shell-startup");
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(&path)?;
+    file.write_all(b"")?;
+    file.sync_all()?;
+    sync_agent_terminal_runtime_dir(parent)
+}
+
+fn remove_stale_agent_terminal_socket(socket: &Path) -> io::Result<()> {
+    let parent = socket.parent().unwrap_or_else(|| Path::new("."));
+    let parent = open_agent_terminal_runtime_dir(parent)?;
+    let file_name = socket
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid terminal socket name"))?;
+    match nix::sys::stat::fstatat(
+        &parent,
+        file_name,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    ) {
+        Ok(stat)
+            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+                .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
+        {
+            nix::unistd::unlinkat(&parent, file_name, nix::unistd::UnlinkatFlags::NoRemoveDir)
+                .map_err(io::Error::from)
+        }
+        Ok(_metadata) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to remove non-socket terminal path",
+        )),
+        Err(nix::errno::Errno::ENOENT) => Ok(()),
+        Err(error) => Err(io::Error::from(error)),
+    }
+}
+
 fn wait_for_agent_terminal_socket(socket: &Path) -> Result<(), CliError> {
     for _ in 0..50 {
-        if socket.exists() {
+        if terminal_socket_exists(socket) {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -1254,9 +1514,10 @@ fn ensure_best_effort_visible_terminal_socket(
     visible_socket: &Path,
     runtime_socket: &Path,
 ) -> Result<(), CliError> {
-    if let Some(parent) = visible_socket.parent()
-        && let Err(error) = fs::create_dir_all(parent)
-    {
+    let Some(parent) = visible_socket.parent() else {
+        return Err(CliError::unavailable("terminal socket path has no parent"));
+    };
+    if let Err(error) = create_agent_terminal_plain_dir(parent, 0o755) {
         if error.kind() == io::ErrorKind::PermissionDenied {
             return Ok(());
         }
@@ -1265,16 +1526,22 @@ fn ensure_best_effort_visible_terminal_socket(
             parent.display()
         )));
     }
-    match fs::read_link(visible_socket) {
+    let parent_dir = open_agent_terminal_runtime_dir(parent).map_err(|error| {
+        CliError::unavailable(format!("cannot open {}: {error}", parent.display()))
+    })?;
+    let file_name = visible_socket
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::unavailable("invalid terminal socket link name"))?;
+    match nix::fcntl::readlinkat(&parent_dir, file_name).map(PathBuf::from) {
         Ok(target) if target == runtime_socket => Ok(()),
         Ok(_target) => Err(CliError::unavailable(format!(
             "{} already points at another socket",
             visible_socket.display()
         ))),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            match std::os::unix::fs::symlink(runtime_socket, visible_socket) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(()),
+        Err(nix::errno::Errno::ENOENT) => {
+            match nix::unistd::symlinkat(runtime_socket, &parent_dir, file_name) {
+                Ok(()) | Err(nix::errno::Errno::EACCES | nix::errno::Errno::EPERM) => Ok(()),
                 Err(error) => Err(CliError::unavailable(format!(
                     "cannot create terminal socket link {} -> {}: {error}",
                     visible_socket.display(),
@@ -1282,7 +1549,7 @@ fn ensure_best_effort_visible_terminal_socket(
                 ))),
             }
         }
-        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => Ok(()),
+        Err(nix::errno::Errno::EACCES | nix::errno::Errno::EPERM) => Ok(()),
         Err(error) => Err(CliError::unavailable(format!(
             "cannot inspect {}: {error}",
             visible_socket.display()
@@ -1304,11 +1571,18 @@ fn socket_runtime_dir(socket: &Path) -> Option<PathBuf> {
 }
 
 fn socket_bind_path(socket: &Path) -> PathBuf {
-    match fs::read_link(socket) {
+    let Some(parent) = socket.parent() else {
+        return socket.to_path_buf();
+    };
+    let Ok(parent_dir) = open_agent_terminal_runtime_dir(parent) else {
+        return socket.to_path_buf();
+    };
+    let Some(file_name) = socket.file_name().and_then(|name| name.to_str()) else {
+        return socket.to_path_buf();
+    };
+    match nix::fcntl::readlinkat(&parent_dir, file_name).map(PathBuf::from) {
         Ok(target) if target.is_absolute() => target,
-        Ok(target) => socket
-            .parent()
-            .map_or_else(|| target.clone(), |parent| parent.join(&target)),
+        Ok(target) => parent.join(&target),
         Err(_error) => socket.to_path_buf(),
     }
 }
@@ -1364,11 +1638,27 @@ fn agent_terminal_connect_socket(
         agent_runtime_socket(root, name, session)?,
         agent_legacy_runtime_socket(root, name, session)?,
     ] {
-        if socket.exists() {
+        if terminal_socket_exists(&socket) {
             return Ok(socket);
         }
     }
     agent_terminal_socket(root, name, session)
+}
+
+fn terminal_socket_exists(socket: &Path) -> bool {
+    let Some(parent) = socket.parent() else {
+        return false;
+    };
+    let Ok(parent) = open_agent_terminal_runtime_dir(parent) else {
+        return false;
+    };
+    let Some(file_name) = socket.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    nix::sys::stat::fstatat(&parent, file_name, nix::fcntl::AtFlags::empty()).is_ok_and(|stat| {
+        nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFSOCK)
+    })
 }
 
 fn require_session_name(session: &str) -> Result<(), CliError> {
@@ -1638,17 +1928,19 @@ fn read_agent_parent(control: &Path) -> Result<Option<String>, CliError> {
 
 fn read_agent_control_trimmed(control: &Path, file: &str) -> Result<Option<String>, CliError> {
     let path = control.join(file);
-    match fs::read_to_string(&path) {
-        Ok(content) => {
-            let value = content.trim().to_owned();
-            Ok((!value.is_empty()).then_some(value))
+    match fs::symlink_metadata(&path) {
+        Ok(_metadata) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot stat {}: {error}",
+                path.display()
+            )));
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(CliError::unavailable(format!(
-            "cannot read {}: {error}",
-            path.display()
-        ))),
     }
+    let content = read_file_to_string(&path)?;
+    let value = content.trim().to_owned();
+    Ok((!value.is_empty()).then_some(value))
 }
 
 fn agent_lifecycle_tool(root: &Path, name: &str, request: &str) -> Result<ExitCode, CliError> {
@@ -1657,7 +1949,8 @@ fn agent_lifecycle_tool(root: &Path, name: &str, request: &str) -> Result<ExitCo
             "agent lifecycle tool is not available: tool/{name}"
         )));
     };
-    let status = ProcessCommand::new(hit.path())
+    let executable = open_executable_no_follow(hit.path())?;
+    let status = agent_lifecycle_tool_command(root, &proc_fd_path(&executable))
         .arg(request)
         .status()
         .map_err(|error| {
@@ -1667,6 +1960,15 @@ fn agent_lifecycle_tool(root: &Path, name: &str, request: &str) -> Result<ExitCo
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(70), ExitCode::from))
+}
+
+fn agent_lifecycle_tool_command(root: &Path, path: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new(path);
+    command
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("CTX_ROOT", root);
+    command
 }
 
 fn agent_new_request_json(args: &AgentNewArgs) -> Result<String, CliError> {
@@ -1773,4 +2075,14 @@ fn is_absolute_small_path(value: &str) -> bool {
         && !value.contains('\0')
         && !value.contains('\n')
         && !value.contains('\t')
+}
+
+#[cfg(test)]
+mod agent_systemctl_program_tests {
+    use super::get_systemctl_program;
+
+    #[test]
+    fn get_systemctl_program_returns_absolute_path() {
+        assert_eq!(get_systemctl_program(), "/usr/bin/systemctl");
+    }
 }

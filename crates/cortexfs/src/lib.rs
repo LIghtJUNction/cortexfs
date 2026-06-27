@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 //! `CortexFS` Agent OS ABI design core.
 //!
 //! The old CLI, daemon, provider registry, and FUSE projection were removed
@@ -8,16 +10,15 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{
-    DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt, symlink,
-};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nix::libc;
 use nix::sys::socket::{getsockopt, sockopt};
@@ -138,7 +139,7 @@ pub use provider_name::{
 };
 pub use session_index::{
     SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,
-    inspect_session_index, update_session_index,
+    inspect_session_index, update_session_index, update_session_index_with_keys,
 };
 pub use session_layout::{
     SessionControlIssue, SessionControlKind, SessionControlReport, SessionLayoutIssue,
@@ -285,6 +286,8 @@ pub fn ensure_durable_session_layout(
     let index = session_root.join("index");
     create_dir(&index)?;
     create_dir(&index.join("by-cwd"))?;
+    create_dir(&index.join("by-hash"))?;
+    create_dir(&index.join("by-uuid"))?;
 
     let now = unix_timestamp_text();
     write_text_file_if_missing(&session_dir.join("messages.jsonl"), "")?;
@@ -366,19 +369,45 @@ fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
             Err(_) => return Err(DurableSessionLayoutError::CannotCreate),
         }
     }
+    let parent = missing
+        .last()
+        .and_then(|path| path.parent())
+        .ok_or(DurableSessionLayoutError::CannotCreate)?;
+    let mut parent_dir =
+        open_plain_directory(parent).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     for dir in missing.iter().rev() {
-        fs::DirBuilder::new()
-            .mode(0o700)
-            .create(dir)
+        let name = path_file_name(dir).ok_or(DurableSessionLayoutError::CannotCreate)?;
+        nix::sys::stat::mkdirat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(0o700),
+        )
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+        parent_dir
+            .sync_all()
             .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-        set_private_dir_permissions(dir)?;
+        let child = nix::fcntl::openat(
+            &parent_dir,
+            name,
+            nix::fcntl::OFlag::O_DIRECTORY
+                | nix::fcntl::OFlag::O_RDONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+        parent_dir = fs::File::from(child);
+        parent_dir
+            .set_permissions(fs::Permissions::from_mode(0o700))
+            .and_then(|()| parent_dir.sync_all())
+            .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     }
     Ok(())
 }
 
 fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
-    if path.exists() {
-        return if path.is_file() {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        return if metadata.is_file() {
             set_text_file_permissions(path)
         } else {
             Err(DurableSessionLayoutError::CannotCreate)
@@ -400,33 +429,124 @@ fn write_text_file(path: &Path, content: &str) -> Result<(), DurableSessionLayou
 }
 
 fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    let metadata =
-        fs::symlink_metadata(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
+    let parent = path
+        .parent()
+        .ok_or(DurableSessionLayoutError::CannotCreate)?;
+    let file_name = path_file_name(path).ok_or(DurableSessionLayoutError::CannotCreate)?;
+    let parent_dir =
+        open_plain_directory(parent).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDWR | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let file = fs::File::from(file_fd);
+    if !file
+        .metadata()
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?
+        .is_file()
+    {
         return Err(DurableSessionLayoutError::CannotCreate);
     }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .and_then(|()| file.sync_all())
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
 fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+    let dir =
+        open_plain_directory(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    dir.set_permissions(fs::Permissions::from_mode(0o700))
+        .and_then(|()| dir.sync_all())
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
+#[cfg(test)]
+fn sync_plain_directory(path: &Path) -> std::io::Result<()> {
+    open_plain_directory(path)?.sync_all()
+}
+
+fn open_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let mut dir = if path.is_absolute() {
+        open_single_plain_directory(Path::new("/"))?
+    } else {
+        open_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "path is not utf-8")
+                })?;
+                let next = nix::fcntl::openat(
+                    &dir,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                dir = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(dir)
+}
+
+fn open_single_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let dir = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !dir.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(dir)
+}
+
 fn write_private_text_file(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let parent = path
+        .parent()
+        .ok_or(DurableSessionLayoutError::CannotCreate)?;
+    let file_name = path_file_name(path).ok_or(DurableSessionLayoutError::CannotCreate)?;
+    let parent_dir =
+        open_plain_directory(parent).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_TRUNC
+            | nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let mut file = fs::File::from(file_fd);
     file.write_all(content.as_bytes())
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     file.flush()
+        .and_then(|()| file.sync_all())
+        .and_then(|()| parent_dir.sync_all())
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
+}
+
+fn path_file_name(path: &Path) -> Option<&str> {
+    path.file_name()?.to_str()
 }
 
 include!("socket_runtime.rs");
@@ -459,7 +579,21 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn set_executable_mode(path: &Path) -> Result<(), ObjectBootstrapError> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_error| ObjectBootstrapError::CannotChmod)?;
+    if !file
+        .metadata()
+        .map_err(|_error| ObjectBootstrapError::CannotChmod)?
+        .is_file()
+    {
+        return Err(ObjectBootstrapError::CannotChmod);
+    }
+    file.set_permissions(fs::Permissions::from_mode(0o755))
+        .and_then(|()| file.sync_all())
         .map_err(|_error| ObjectBootstrapError::CannotChmod)
 }
 

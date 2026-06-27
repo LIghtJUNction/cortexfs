@@ -13,6 +13,22 @@ fn shared_queue_finish_writes_readable_done_result_and_cleans_lease() {
         Ok(root.join("done").join("job-1.req.json.result"))
     );
     assert_file_text(&root.join("done").join("job-1.req.json.result"), "ok\n");
+    let mode = fs::metadata(root.join("done").join("job-1.req.json.result"))
+        .map(|metadata| metadata.mode() & 0o777);
+    assert!(matches!(mode, Ok(0o644)));
+    let temp_leftovers = fs::read_dir(root.join("done"))
+        .map_or(usize::MAX, |entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .contains(".result.tmp-")
+                })
+                .count()
+        });
+    assert_eq!(temp_leftovers, 0);
     assert_file_text(&root.join("done").join("job-1.req.json"), "one\n");
     assert!(!root.join("claimed").join("job-1.req.json").exists());
     assert!(!root.join("lease").join("job-1.req.json").exists());
@@ -37,7 +53,39 @@ fn shared_queue_finish_writes_readable_failed_result() {
         Ok(root.join("failed").join("job-1.req.json.result"))
     );
     assert_file_text(&root.join("failed").join("job-1.req.json.result"), "err\n");
+    let mode = fs::metadata(root.join("failed").join("job-1.req.json.result"))
+        .map(|metadata| metadata.mode() & 0o777);
+    assert!(matches!(mode, Ok(0o644)));
     assert_file_text(&root.join("failed").join("job-1.req.json"), "one\n");
+}
+
+#[test]
+fn shared_queue_finish_does_not_overwrite_existing_result() {
+    let root = clean_test_dir("shared-queue-finish-existing-result");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    write_text_file(&root.join("done").join("job-1.req.json.result"), "old\n");
+
+    let result = finish_shared_queue_job(
+        &root,
+        claimed.job_name(),
+        SharedQueueOutcome::Done,
+        b"new\n",
+    );
+
+    assert_eq!(result, Err(SharedQueueFinishError::CannotWriteResult));
+    assert_file_text(&root.join("done").join("job-1.req.json.result"), "old\n");
+    assert_file_text(
+        &root
+            .join("claimed")
+            .join("job-1.req.json")
+            .join("job-1.req.json"),
+        "one\n",
+    );
+    assert_file_text(&root.join("lease").join("job-1.req.json").join("worker"), "worker-a\n");
 }
 
 #[test]
@@ -63,6 +111,31 @@ fn shared_access_authority_rejects_symlink_paths() {
 
     assert_eq!(
         authorize_shared_access("project-a", &link, SharedAccess::Read, authority),
+        Err(SharedAccessDenial::CannotInspectPath)
+    );
+}
+
+#[test]
+fn shared_access_authority_rejects_symlink_intermediate_paths() {
+    let root = clean_test_dir("shared-authority-symlink-intermediate-deny");
+    let shared = root.join("shared-project-a");
+    let outside = root.join("outside-host");
+    let file = shared.join("data.txt");
+    write_fixture_file(&outside.join("data.txt"), 0o644);
+    assert!(symlink(&outside, &shared).is_ok());
+
+    let identity = ok!(unix_identity_for(&outside.join("data.txt")));
+    let mounts = mount_table_for_source_target(
+        "/ctx/shared/project-a",
+        &shared,
+        "ro",
+        "bind,nosuid,nodev,noexec",
+    );
+    let policy = allow_shared_policy("coder_t", "project-a", SharedAccess::Read);
+    let authority = SharedAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+
+    assert_eq!(
+        authorize_shared_access("project-a", &file, SharedAccess::Read, authority),
         Err(SharedAccessDenial::CannotInspectPath)
     );
 }
@@ -99,6 +172,39 @@ fn session_access_authority_rejects_symlink_paths() -> Result<(), Box<dyn std::e
 
     assert_eq!(
         authorize_session_access(&link, SessionAccess::Read, authority),
+        Err(SessionAccessDenial::CannotInspectPath)
+    );
+    Ok(())
+}
+
+#[test]
+fn session_access_authority_rejects_symlink_intermediate_paths(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = clean_test_dir("session-authority-symlink-intermediate-deny");
+    let home = root.join("home-1000");
+    let outside = root.join("outside-host");
+    let session_parent = home.join("agent").join("coder").join("session");
+    let file = session_parent.join("default").join("messages.jsonl");
+    write_fixture_file(&outside.join("default").join("messages.jsonl"), 0o644);
+    let Some(parent) = session_parent.parent() else {
+        return Err("session path has a parent".into());
+    };
+    assert!(fs::create_dir_all(parent).is_ok());
+    assert!(symlink(&outside, &session_parent).is_ok());
+
+    let metadata = fs::metadata(outside.join("default").join("messages.jsonl"))?;
+    let identity = AgentUnixIdentity::new(1000, metadata.gid(), []);
+    let mounts = mount_table_for_source_target(
+        "/ctx/home/1000",
+        &home,
+        "ro",
+        "bind,nosuid,nodev,noexec",
+    );
+    let policy = policy_with_rules(["allow coder_t session:default read"]);
+    let authority = SessionAccessAuthority::new(&identity, &mounts, "coder_t", &policy);
+
+    assert_eq!(
+        authorize_session_access(&file, SessionAccess::Read, authority),
         Err(SessionAccessDenial::CannotInspectPath)
     );
     Ok(())

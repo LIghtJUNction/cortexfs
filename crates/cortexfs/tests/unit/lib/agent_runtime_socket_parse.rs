@@ -5,7 +5,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     let control = root.join("agent").join("coder.d");
     write_text_file(
         &control.join("env"),
-        "CTX_ROOT=/ignored\nHOME=/ignored\nRUST_LOG=info\n",
+        "CTX_ROOT=/ignored\nHOME=/ignored\nPATH=/tmp/pwn\nLD_PRELOAD=/tmp/libpwn.so\nRUST_LOG=info\nCTX_PROVIDER_SECRET_PATH=/tmp/secret\nTERM=vt100\n",
     );
     write_text_file(&control.join("model"), "main\n");
     write_text_file(&control.join("policy"), "allow coder_t model:main use\n");
@@ -58,11 +58,84 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
         env_value(view.env(), "HOME").map(str::to_owned),
         Some(agent_home.display().to_string())
     );
+    assert_eq!(env_value(view.env(), "PATH"), Some("/usr/bin:/bin"));
     assert_eq!(
         env_value(view.env(), "CTX_PATH"),
         Some("/ctx/tool:/ctx/home/1000/tool")
     );
-    assert_eq!(env_value(view.env(), "RUST_LOG"), Some("info"));
+    assert_eq!(env_value(view.env(), "TERM"), None);
+    assert_eq!(env_value(view.env(), "LD_PRELOAD"), None);
+    assert_eq!(env_value(view.env(), "RUST_LOG"), None);
+    assert_eq!(env_value(view.env(), "CTX_PROVIDER_SECRET_PATH"), None);
+}
+
+#[test]
+fn secret_tool_lookup_uses_absolute_program_path() {
+    assert_eq!(super::get_secret_tool_program(), "/usr/bin/secret-tool");
+}
+
+#[test]
+fn secret_tool_lookup_uses_minimal_dbus_environment() {
+    let inherited = super::secret_tool_dbus_address(
+        |name| {
+            if name == "DBUS_SESSION_BUS_ADDRESS" {
+                Some("unix:path=/tmp/session-bus".into())
+            } else {
+                Some("ignored".into())
+            }
+        },
+        1000,
+    );
+    assert_eq!(inherited, std::ffi::OsString::from("unix:path=/tmp/session-bus"));
+
+    let defaulted = super::secret_tool_dbus_address(|_name| None, 1000);
+    assert_eq!(defaulted, std::ffi::OsString::from("unix:path=/run/user/1000/bus"));
+}
+
+#[test]
+fn secret_tool_runner_rejects_oversized_stdout() {
+    let mut command = std::process::Command::new("sh");
+    command
+        .arg("-c")
+        .arg("head -c 16384 /dev/zero | tr '\\0' x")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+
+    let output = super::run_secret_tool_command_with_timeout(command, Duration::from_secs(2));
+
+    assert!(matches!(output, Err(ref error) if error.contains("output exceeds limit")));
+}
+
+#[test]
+fn secret_tool_runner_kills_child_after_oversized_stdout() {
+    let mut command = std::process::Command::new("sh");
+    command
+        .arg("-c")
+        .arg("head -c 16384 /dev/zero | tr '\\0' x; sleep 5")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let started = std::time::Instant::now();
+
+    let output = super::run_secret_tool_command_with_timeout(command, Duration::from_secs(10));
+
+    assert!(matches!(output, Err(ref error) if error.contains("output exceeds limit")));
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
+fn secret_tool_runner_times_out_instead_of_hanging() {
+    let mut command = std::process::Command::new("sh");
+    command
+        .arg("-c")
+        .arg("sleep 5")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    let started = std::time::Instant::now();
+
+    let output = super::run_secret_tool_command_with_timeout(command, Duration::from_millis(100));
+
+    assert!(matches!(output, Err(ref error) if error.contains("timed out")));
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
 
 #[test]
@@ -94,6 +167,38 @@ fn agent_runtime_view_rejects_invalid_control_files() {
             "EINVAL"
         );
     }
+}
+
+#[test]
+fn agent_runtime_view_rejects_symlink_control_files() {
+    let root = clean_test_dir("agent-runtime-symlink-control");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let outside = root.join("outside-label");
+    write_text_file(&outside, "user_u:agent_r:coder_t:s0\n");
+    let label = root.join("agent").join("coder.d").join("label");
+    assert!(fs::remove_file(&label).is_ok());
+    assert!(symlink(&outside, &label).is_ok());
+
+    assert_eq!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::CannotReadControl(
+            "label".to_owned()
+        ))
+    );
+}
+
+#[test]
+fn agent_runtime_view_rejects_symlink_agent_directory() {
+    let root = clean_test_dir("agent-runtime-symlink-agent-dir");
+    let outside = clean_test_dir("agent-runtime-symlink-agent-dir-outside");
+    create_complete_object_layout(&outside, ObjectClass::Agent, "coder", "none");
+    assert!(fs::create_dir_all(&root).is_ok());
+    assert!(symlink(outside.join("agent"), root.join("agent")).is_ok());
+
+    assert_eq!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::MissingControlDirectory)
+    );
 }
 
 #[test]
@@ -153,7 +258,7 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
         env_value(view.env(), "CTX_PATH").map(str::to_owned),
         Some(allowed.display().to_string())
     );
-    assert_eq!(env_value(view.env(), "AGENT_RULES"), Some("allow"));
+    assert_eq!(env_value(view.env(), "AGENT_RULES"), None);
 
     let identity = ok!(unix_identity_for(&env_only.join("fs.read")));
     let mounts = mount_table_for_target(&env_only, "rw", "bind,nosuid,nodev");
@@ -490,6 +595,10 @@ fn socket_request_parser_rejects_invalid_ops_and_fields() {
         Err(SocketRequestError::RequestNotObject)
     );
     assert_eq!(
+        parse_socket_request_frame(r#"{"op":"ping"} trailing"#),
+        Err(SocketRequestError::InvalidJson)
+    );
+    assert_eq!(
         parse_socket_request_frame(r#"{"op":"native_thread"}"#),
         Err(SocketRequestError::UnknownOp("native_thread".to_owned()))
     );
@@ -516,6 +625,15 @@ fn socket_request_parser_rejects_invalid_ops_and_fields() {
         Err(SocketRequestError::InvalidField {
             field: "cwd",
             value: "/work/../secret".to_owned()
+        })
+    );
+    assert_eq!(
+        parse_socket_request_frame(
+            "{\"op\":\"send\",\"id\":\"msg-1\",\"cwd\":\"/work\\rsecret\",\"input\":\"hello\"}"
+        ),
+        Err(SocketRequestError::InvalidField {
+            field: "cwd",
+            value: "/work\rsecret".to_owned()
         })
     );
     assert_eq!(

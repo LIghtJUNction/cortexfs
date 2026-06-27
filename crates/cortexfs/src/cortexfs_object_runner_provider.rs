@@ -5,6 +5,13 @@ use std::net::IpAddr;
 
 use serde_json::json;
 
+const RUNNER_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+const MAX_RUNNER_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
+const MAX_RUNTIME_PROVIDER_SECRET_BYTES: u64 = 64 * 1024;
+const MAX_PROVIDER_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PROVIDER_STREAM_LINE_BYTES: usize = 256 * 1024;
+const PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
+
 #[derive(Clone, Debug, Deserialize)]
 struct RunnerProviderConfig {
     base_url: String,
@@ -31,6 +38,8 @@ struct CurlJsonTarget {
     url: String,
     unix_socket: Option<String>,
 }
+
+type CurlJsonOutputParts = (std::process::ExitStatus, Vec<u8>, Vec<u8>);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProviderRuntimeDriver {
@@ -101,7 +110,7 @@ fn provider_chat_completion(
         provider_config(provider).ok_or_else(|| ProviderCompletionError::fallback(format!("missing provider: {provider}")))?;
     let ctx_root =
         env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
-    let route = fs::read_to_string(ctx_root.join("model").join("route")).ok();
+    let route = read_small_plain_text_file(&ctx_root.join("model").join("route")).ok();
     let route = provider_route(&config, provider, model, route.as_deref())
         .map_err(ProviderCompletionError::fallback)?;
     let effort = model_effort(&ctx_root, provider, model);
@@ -206,9 +215,18 @@ impl ProviderCompletionError {
 }
 
 fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
-    let entries = fs::read_dir("/etc/cortexfs/providers.d").ok()?;
+    provider_config_from_dir(Path::new(RUNNER_PROVIDER_CONFIG_DIR), provider)
+}
+
+fn provider_config_from_dir(config_dir: &Path, provider: &str) -> Option<RunnerProviderConfig> {
+    let directory = open_runner_provider_config_dir(config_dir).ok()?;
+    let entries = fs::read_dir(runner_provider_proc_fd_path(&directory)).ok()?;
     for entry in entries.flatten() {
-        let content = fs::read_to_string(entry.path()).ok()?;
+        let name = entry.file_name().into_string().ok()?;
+        if Path::new(&name).extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let content = read_runner_provider_config_file(&directory, &name).ok()?;
         let value = serde_json::from_str::<Value>(&content).ok()?;
         let base_url = value.get("base_url")?.as_str()?.to_owned();
         if provider_name_from_config(&base_url, value.get("name").and_then(Value::as_str))
@@ -222,6 +240,81 @@ fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
         return Some(config);
     }
     None
+}
+
+fn read_runner_provider_config_file(directory: &fs::File, name: &str) -> io::Result<String> {
+    let fd = nix::fcntl::openat(
+        directory,
+        name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    let mut file = fs::File::from(fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_RUNNER_PROVIDER_CONFIG_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "provider config file is invalid",
+        ));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    read_utf8_exact_len(&mut file, len)
+}
+
+fn runner_provider_proc_fd_path(directory: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+}
+
+fn open_runner_provider_config_dir(config_dir: &Path) -> io::Result<fs::File> {
+    let mut directory = if config_dir.is_absolute() {
+        open_runner_provider_config_dir_leaf(Path::new("/"))?
+    } else {
+        open_runner_provider_config_dir_leaf(Path::new("."))?
+    };
+    for component in config_dir.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid provider config dir")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "provider config dir contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_runner_provider_config_dir_leaf(path: &Path) -> io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "provider config dir is not a directory",
+        ));
+    }
+    Ok(directory)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -487,10 +580,16 @@ fn parse_route_action(value: &str, line: usize) -> Result<RouteGroupAction, Stri
             let Some(socket_path) = values.first() else {
                 return Err(format!("invalid unix group on line {line}"));
             };
+            if !is_safe_absolute_unix_socket_path(socket_path) {
+                return Err(format!("invalid unix socket path on line {line}"));
+            }
             let base_url = values
                 .get(1)
                 .cloned()
                 .unwrap_or_else(|| "http://localhost/v1".to_owned());
+            if !is_url(&base_url) {
+                return Err(format!("invalid unix base_url on line {line}"));
+            }
             transport = Some(RouteAction::Unix {
                 socket_path: socket_path.to_owned(),
                 base_url,
@@ -597,6 +696,13 @@ fn is_url(value: &str) -> bool {
     value.starts_with("http://") || value.starts_with("https://")
 }
 
+fn is_safe_absolute_unix_socket_path(value: &str) -> bool {
+    value.starts_with('/')
+        && !value.contains('\0')
+        && !value.contains('\n')
+        && !value.contains('\r')
+}
+
 fn provider_credential(
     provider: &str,
     config: &RunnerProviderConfig,
@@ -649,18 +755,30 @@ fn provider_secret_from_runtime_file(
     provider: &str,
     account: &str,
 ) -> Result<Option<String>, io::Error> {
-    if env::var("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
-        || env::var("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
+    provider_secret_from_runtime_file_with_env(provider, account, |name| env::var(name))
+}
+
+fn provider_secret_from_runtime_file_with_env(
+    provider: &str,
+    account: &str,
+    get_env: impl Fn(&str) -> Result<String, env::VarError>,
+) -> Result<Option<String>, io::Error> {
+    if get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
+        || get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
     {
         return Ok(None);
     }
-    let Ok(path) = env::var("CTX_PROVIDER_SECRET_PATH") else {
+    let Ok(path) = get_env("CTX_PROVIDER_SECRET_PATH") else {
         return Ok(None);
     };
     if path.is_empty() {
         return Ok(None);
     }
-    let secret = fs::read_to_string(path)?;
+    let path = Path::new(&path);
+    if !path.is_absolute() {
+        return Ok(None);
+    }
+    let secret = read_runtime_provider_secret_file(path)?;
     let secret = secret.trim_end_matches(['\r', '\n']);
     if secret.is_empty() {
         Ok(None)
@@ -669,28 +787,73 @@ fn provider_secret_from_runtime_file(
     }
 }
 
+fn read_runtime_provider_secret_file(path: &Path) -> Result<String, io::Error> {
+    let mut file = open_plain_read_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_RUNTIME_PROVIDER_SECRET_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "runtime provider secret file is invalid",
+        ));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    read_utf8_exact_len(&mut file, len)
+}
+
 fn provider_secret_from_inherited_fd(
     provider: &str,
     account: &str,
 ) -> Result<Option<String>, io::Error> {
-    if env::var("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
-        || env::var("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
+    provider_secret_from_inherited_fd_with_env(provider, account, |name| env::var(name))
+}
+
+fn provider_secret_from_inherited_fd_with_env(
+    provider: &str,
+    account: &str,
+    get_env: impl Fn(&str) -> Result<String, env::VarError>,
+) -> Result<Option<String>, io::Error> {
+    if get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
+        || get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
     {
         return Ok(None);
     }
-    let Ok(fd) = env::var("CTX_PROVIDER_SECRET_FD") else {
+    let Ok(fd) = get_env("CTX_PROVIDER_SECRET_FD") else {
         return Ok(None);
     };
     if fd.is_empty() || !fd.bytes().all(|byte| byte.is_ascii_digit()) {
         return Ok(None);
     }
-    let secret = fs::read_to_string(format!("/proc/self/fd/{fd}"))?;
+    let fd = fd
+        .parse::<i32>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    if fd <= libc::STDERR_FILENO {
+        return Ok(None);
+    }
+    let mut file = fs::File::open(format!("/proc/self/fd/{fd}"))?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_RUNTIME_PROVIDER_SECRET_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "inherited provider secret fd is invalid",
+        ));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+    let secret = read_utf8_exact_len(&mut file, len)?;
     let secret = secret.trim_end_matches(['\r', '\n']);
     if secret.is_empty() {
         Ok(None)
     } else {
         Ok(Some(secret.to_owned()))
     }
+}
+
+fn read_utf8_exact_len(file: &mut fs::File, len: usize) -> Result<String, io::Error> {
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
 }
 
 fn provider_name_from_config(
@@ -706,7 +869,7 @@ fn model_effort(ctx_root: &Path, provider: &str, model: &str) -> cortexfs::Model
         .join(provider)
         .join(format!("{model}.d"))
         .join("effort");
-    fs::read_to_string(path)
+    read_small_plain_text_file(&path)
         .ok()
         .and_then(|content| cortexfs::ModelEffort::parse(&content))
         .unwrap_or(cortexfs::ModelEffort::Auto)
@@ -858,20 +1021,15 @@ fn call_openai_sse_streaming(
         message,
         can_fallback: true,
     })?;
-    let Some(child_stdout) = child.stdout.take() else {
-        cleanup_curl_child(&mut child);
-        return Err(StreamFailure {
-            message: "cannot read provider stream".to_owned(),
-            can_fallback: true,
-        });
-    };
-    let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
+    let (child_stdout, stderr_reader) = provider_stream_pipes(&mut child)?;
     let mut text_emitter = OpenAiStreamTextEmitter::new(run);
     let mut emitted = false;
     let mut done = false;
-    for line in BufReader::new(child_stdout).lines() {
-        let line = match line {
-            Ok(line) => line,
+    let mut stream = BufReader::new(child_stdout);
+    loop {
+        let line = match read_provider_stream_line(&mut stream) {
+            Ok(Some(line)) => line,
+            Ok(None) => break,
             Err(error) => {
                 cleanup_curl_child(&mut child);
                 return Err(StreamFailure {
@@ -976,6 +1134,44 @@ fn call_openai_sse_streaming(
     }
 }
 
+fn provider_stream_pipes(
+    child: &mut Child,
+) -> Result<(std::process::ChildStdout, Option<thread::JoinHandle<String>>), StreamFailure> {
+    let Some(child_stdout) = child.stdout.take() else {
+        cleanup_curl_child(child);
+        return Err(StreamFailure {
+            message: "cannot read provider stream".to_owned(),
+            can_fallback: true,
+        });
+    };
+    Ok((child_stdout, child.stderr.take().map(spawn_child_stderr_reader)))
+}
+
+fn read_provider_stream_line(reader: &mut impl BufRead) -> io::Result<Option<String>> {
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAX_PROVIDER_STREAM_LINE_BYTES.saturating_add(1))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let read = reader.take(limit).read_until(b'\n', &mut bytes)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_PROVIDER_STREAM_LINE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "provider stream line exceeds byte limit",
+        ));
+    }
+    if bytes.ends_with(b"\n") {
+        bytes.pop();
+        if bytes.ends_with(b"\r") {
+            bytes.pop();
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
 enum StreamTextMode {
     Undecided,
     BufferToolCall,
@@ -1073,9 +1269,7 @@ fn run_curl_json_with_headers(
     headers: &[String],
     body: &str,
 ) -> Result<Vec<u8>, String> {
-    let output = start_curl_json_with_headers(target, headers, body)?
-        .wait_with_output()
-        .map_err(|error| format!("cannot run curl: {error}"))?;
+    let output = wait_for_curl_json_output(start_curl_json_with_headers(target, headers, body)?)?;
     if output.status.success() {
         Ok(output.stdout)
     } else {
@@ -1117,9 +1311,7 @@ fn start_curl_json_with_headers(
     headers: &[String],
     body: &str,
 ) -> Result<Child, String> {
-    let mut child = Command::new("curl")
-        .arg("--config")
-        .arg("-")
+    let mut child = provider_curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1132,19 +1324,19 @@ fn start_curl_json_with_headers(
     let mut config = format!(
         "fail\nsilent\nshow-error\nno-buffer\nconnect-timeout = 5\nmax-time = {}\nrequest = POST\nurl = {}\n",
         provider_max_time_seconds(),
-        curl_config_quote(&target.url),
+        curl_config_quote(&target.url)?,
     );
     if let Some(socket_path) = target.unix_socket.as_deref() {
-        let _ignored = writeln!(config, "unix-socket = {}", curl_config_quote(socket_path));
+        let _ignored = writeln!(config, "unix-socket = {}", curl_config_quote(socket_path)?);
     }
     for header in headers {
-        let _ignored = writeln!(config, "header = {}", curl_config_quote(header));
+        let _ignored = writeln!(config, "header = {}", curl_config_quote(header)?);
     }
     let _ignored = write!(
         config,
         "header = {}\ndata = {}\n",
-        curl_config_quote("Content-Type: application/json"),
-        curl_config_quote(body),
+        curl_config_quote("Content-Type: application/json")?,
+        curl_config_quote(body)?,
     );
     if let Err(error) = stdin.write_all(config.as_bytes()) {
         cleanup_curl_child(&mut child);
@@ -1152,6 +1344,114 @@ fn start_curl_json_with_headers(
     }
     drop(stdin);
     Ok(child)
+}
+
+fn provider_curl_command() -> Command {
+    let mut command = Command::new(PROVIDER_CURL_BIN);
+    command.env_clear().arg("-q").arg("--config").arg("-");
+    command
+}
+
+fn wait_for_curl_json_output(mut child: Child) -> Result<std::process::Output, String> {
+    let Some(stdout) = child.stdout.take() else {
+        cleanup_curl_child(&mut child);
+        return Err("cannot read curl response".to_owned());
+    };
+    let Some(stderr) = child.stderr.take() else {
+        cleanup_curl_child(&mut child);
+        return Err("cannot read curl diagnostics".to_owned());
+    };
+    let stdout_reader =
+        thread::spawn(move || read_limited_bytes(stdout, MAX_PROVIDER_RESPONSE_BYTES + 1));
+    let stderr_reader = thread::spawn(move || read_limited_bytes(stderr, MAX_CHILD_STDERR_BYTES + 1));
+    let (status, mut stdout, stderr) =
+        wait_for_limited_curl_output(child, stdout_reader, stderr_reader)?;
+    Ok(std::process::Output {
+        status,
+        stdout: std::mem::take(&mut stdout),
+        stderr,
+    })
+}
+
+fn wait_for_limited_curl_output(
+    mut child: Child,
+    stdout_reader: thread::JoinHandle<Vec<u8>>,
+    stderr_reader: thread::JoinHandle<Vec<u8>>,
+) -> Result<CurlJsonOutputParts, String> {
+    let mut stdout_reader = Some(stdout_reader);
+    let mut stderr_reader = Some(stderr_reader);
+    let mut stdout = None;
+    let mut stderr = None;
+    let status = loop {
+        if stdout.is_none()
+            && stdout_reader
+                .as_ref()
+                .is_some_and(thread::JoinHandle::is_finished)
+        {
+            let output = stdout_reader
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .unwrap_or_default();
+            if output.len() > MAX_PROVIDER_RESPONSE_BYTES {
+                cleanup_curl_child(&mut child);
+                if let Some(reader) = stderr_reader.take() {
+                    let _ignored = reader.join();
+                }
+                return Err(format!(
+                    "provider response exceeds {MAX_PROVIDER_RESPONSE_BYTES} bytes"
+                ));
+            }
+            stdout = Some(output);
+        }
+        if stderr.is_none()
+            && stderr_reader
+                .as_ref()
+                .is_some_and(thread::JoinHandle::is_finished)
+        {
+            let output = stderr_reader
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .unwrap_or_default();
+            if output.len() > MAX_CHILD_STDERR_BYTES {
+                cleanup_curl_child(&mut child);
+                if let Some(reader) = stdout_reader.take() {
+                    let _ignored = reader.join();
+                }
+                return Err(format!(
+                    "provider diagnostics exceeds {MAX_CHILD_STDERR_BYTES} bytes"
+                ));
+            }
+            stderr = Some(output);
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("cannot run curl: {error}"))?
+        {
+            break status;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let stdout = stdout.unwrap_or_else(|| {
+        stdout_reader
+            .take()
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    });
+    let mut stderr = stderr.unwrap_or_else(|| {
+        stderr_reader
+            .take()
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    });
+    if stdout.len() > MAX_PROVIDER_RESPONSE_BYTES {
+        return Err(format!(
+            "provider response exceeds {MAX_PROVIDER_RESPONSE_BYTES} bytes"
+        ));
+    }
+    if stderr.len() > MAX_CHILD_STDERR_BYTES {
+        stderr.truncate(MAX_CHILD_STDERR_BYTES);
+    }
+    Ok((status, stdout, stderr))
 }
 
 fn provider_max_time_seconds() -> u64 {
@@ -1472,14 +1772,17 @@ fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> {
     vec![auth, "anthropic-version: 2023-06-01".to_owned()]
 }
 
-fn curl_config_quote(value: &str) -> String {
+fn curl_config_quote(value: &str) -> Result<String, String> {
     let mut quoted = String::from("\"");
     for character in value.chars() {
+        if matches!(character, '\0' | '\n' | '\r') {
+            return Err("curl config value contains a forbidden control character".to_owned());
+        }
         if matches!(character, '"' | '\\') {
             quoted.push('\\');
         }
         quoted.push(character);
     }
     quoted.push('"');
-    quoted
+    Ok(quoted)
 }

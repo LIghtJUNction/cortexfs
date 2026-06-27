@@ -3,13 +3,30 @@ fn append_jsonl_event(path: &Path, event: &str) -> std::io::Result<()> {
 }
 
 fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_plain_directory_for_sync(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_APPEND
+            | nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(nix_errno_to_io)?;
+    let mut file = fs::File::from(file_fd);
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::other("jsonl target is not a regular file"));
+    }
     file.write_all(line.as_bytes())?;
     file.write_all(b"\n")?;
-    file.flush()
+    file.flush()?;
+    file.sync_all()
 }
 
 pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result<()> {
@@ -22,14 +39,119 @@ pub(crate) fn atomic_replace_text_with_mode(
     mode: u32,
 ) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    temp.write_all(content.as_bytes())?;
-    temp.flush()?;
-    temp.as_file()
-        .set_permissions(fs::Permissions::from_mode(mode))?;
-    temp.persist(path)
-        .map(|_file| ())
-        .map_err(std::io::Error::from)
+    let parent_dir = open_plain_directory_for_sync(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))?;
+    for attempt in 0..16 {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let temp_name = format!(
+            ".{file_name}.tmp-{}-{nonce}-{attempt}",
+            std::process::id()
+        );
+        let file_fd = match nix::fcntl::openat(
+            &parent_dir,
+            temp_name.as_str(),
+            nix::fcntl::OFlag::O_CREAT
+                | nix::fcntl::OFlag::O_EXCL
+                | nix::fcntl::OFlag::O_WRONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::from_bits_truncate(mode),
+        ) {
+            Ok(file_fd) => file_fd,
+            Err(nix::errno::Errno::EEXIST) => continue,
+            Err(error) => return Err(nix_errno_to_io(error)),
+        };
+        let mut file = fs::File::from(file_fd);
+        if let Err(error) = file.write_all(content.as_bytes()) {
+            let _ignored = nix::unistd::unlinkat(
+                &parent_dir,
+                temp_name.as_str(),
+                nix::unistd::UnlinkatFlags::NoRemoveDir,
+            );
+            return Err(error);
+        }
+        if let Err(error) = file.sync_all() {
+            let _ignored = nix::unistd::unlinkat(
+                &parent_dir,
+                temp_name.as_str(),
+                nix::unistd::UnlinkatFlags::NoRemoveDir,
+            );
+            return Err(error);
+        }
+        drop(file);
+        if let Err(error) = nix::fcntl::renameat(&parent_dir, temp_name.as_str(), &parent_dir, file_name) {
+            let _ignored = nix::unistd::unlinkat(
+                &parent_dir,
+                temp_name.as_str(),
+                nix::unistd::UnlinkatFlags::NoRemoveDir,
+            );
+            return Err(nix_errno_to_io(error));
+        }
+        return parent_dir.sync_all();
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "cannot create unique temp file",
+    ))
+}
+
+fn nix_errno_to_io(error: nix::errno::Errno) -> std::io::Error {
+    std::io::Error::from(error)
+}
+
+fn open_plain_directory_for_sync(path: &Path) -> std::io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_single_plain_directory_for_sync(Path::new("/"))?
+    } else {
+        open_single_plain_directory_for_sync(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(nix_errno_to_io)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_plain_directory_for_sync(path: &Path) -> std::io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn unix_timestamp_text() -> String {
@@ -47,7 +169,20 @@ fn tool_path_denial(error: ToolPathError) -> ToolExecutionDenial {
 }
 
 fn symlink_safe_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
-    let metadata = fs::symlink_metadata(path)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_plain_directory_for_sync(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(nix_errno_to_io)?;
+    let metadata = fs::File::from(file_fd).metadata()?;
     if metadata.file_type().is_symlink() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

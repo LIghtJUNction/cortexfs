@@ -135,6 +135,50 @@ fn doctor_reports_reference_tree_layout_breakage() {
 }
 
 #[test]
+fn doctor_rejects_symlink_root_entries_without_following() {
+    let root = clean_test_dir("ctx-doctor-root-symlink-entry");
+    let outside = clean_test_dir("ctx-doctor-root-symlink-entry-outside");
+    let ensured = ensure_v1_reference_tree(&root);
+    assert!(ensured.is_ok());
+    assert!(fs::remove_dir_all(root.join("shared")).is_ok());
+    assert!(fs::create_dir_all(outside.join("shared").join("project-a")).is_ok());
+    assert!(std::os::unix::fs::symlink(outside.join("shared"), root.join("shared")).is_ok());
+
+    let checked = doctor(&root);
+
+    assert!(matches!(
+        checked,
+        Err(ref error) if error.code == 69 && error.message.contains("doctor found ABI problems")
+    ));
+}
+
+#[test]
+fn doctor_lines_escape_terminal_controls() {
+    let root_line = doctor_root_line("ok", Path::new("/tmp/ctx\u{1b}]52;c;payload\u{7}"));
+    let entry_line = doctor_unexpected_entry_line("shared\u{1b}[31m");
+    let report_line = doctor_report_line(
+        "invalid",
+        "shared/project\u{1b}[31m/queue",
+        Some("missing directory done\u{7}"),
+    );
+
+    assert_eq!(
+        root_line,
+        "ok root /tmp/ctx\\u{1b}]52;c;payload\\u{7}"
+    );
+    assert_eq!(entry_line, "unexpected shared\\u{1b}[31m");
+    assert_eq!(
+        report_line,
+        "invalid shared/project\\u{1b}[31m/queue: missing directory done\\u{7}"
+    );
+    assert!(!root_line.as_bytes().contains(&0x1b));
+    assert!(!entry_line.as_bytes().contains(&0x1b));
+    assert!(!report_line.as_bytes().contains(&0x1b));
+    assert!(!root_line.as_bytes().contains(&0x07));
+    assert!(!report_line.as_bytes().contains(&0x07));
+}
+
+#[test]
 fn formats_shared_queue_layout_issues_for_doctor() {
     assert_eq!(
         format_shared_queue_layout_issues(&[

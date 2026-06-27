@@ -43,6 +43,30 @@ fn tool_lookup_rejects_executable_symlink() {
 }
 
 #[test]
+fn tool_lookup_rejects_symlink_tool_directory() {
+    let root = clean_test_dir("tool-dir-symlink-deny");
+    let tools = root.join("tool");
+    let outside = root.join("outside");
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_fixture_file(&outside.join("fs.read"), 0o755);
+    assert!(symlink(&outside, &tools).is_ok());
+
+    let tool_path = ToolPath::new([tools.clone()]);
+    assert_eq!(tool_path.find("fs.read"), Ok(None));
+    assert_eq!(tool_path.list(), Err(ToolPathError::CannotReadDirectory));
+
+    let identity = ok!(unix_identity_for(&outside.join("fs.read")));
+    let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
+    let policy = allow_tool_policy("coder_t", "fs.read");
+    let denied = authorize_tool_execution(
+        &tool_path,
+        "fs.read",
+        ToolExecutionAuthority::new(&identity, &mounts, "coder_t", &policy, &policy),
+    );
+    assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));
+}
+
+#[test]
 fn tool_execution_authority_requires_all_layers() {
     let root = clean_test_dir("tool-authority-ok");
     let tools = root.join("tool");

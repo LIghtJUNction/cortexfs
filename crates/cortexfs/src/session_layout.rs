@@ -1,5 +1,8 @@
-use std::fs;
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::io::Read;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Component, Path};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -9,6 +12,8 @@ use crate::{
     CONTEXT_REQUIRED_FILES, JsonStringField, SESSION_REQUIRED_FILES, abi_path,
     is_stable_chroot_absolute_path,
 };
+
+const MAX_SESSION_LAYOUT_CONTROL_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionLayoutIssue {
@@ -131,7 +136,7 @@ fn inspect_session_control_files(session_dir: &Path, issues: &mut Vec<SessionLay
         let Some(kind) = SessionControlKind::parse(file) else {
             continue;
         };
-        let Ok(content) = fs::read_to_string(session_dir.join(file)) else {
+        let Ok(content) = read_session_layout_control_file(&session_dir.join(file)) else {
             continue;
         };
         for issue in inspect_session_control(kind, &content).issues() {
@@ -216,9 +221,13 @@ fn inspect_session_meta_json(content: &str) -> SessionControlReport {
         }
         return SessionControlReport::new(vec![SessionControlIssue::InvalidJson]);
     }
-    let Ok(meta) = serde_path_to_error::deserialize::<_, SessionMetaJson>(
-        &mut serde_json::Deserializer::from_str(content),
-    ) else {
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
+        return SessionControlReport::new(vec![SessionControlIssue::InvalidJson]);
+    };
+    if !value.is_object() {
+        return SessionControlReport::new(vec![SessionControlIssue::NotObject]);
+    }
+    let Ok(meta) = serde_json::from_value::<SessionMetaJson>(value) else {
         return SessionControlReport::new(vec![SessionControlIssue::InvalidJson]);
     };
 
@@ -268,16 +277,26 @@ fn inspect_optional_meta_string(
 }
 
 fn inspect_child_result_dirs(child_root: &Path, issues: &mut Vec<SessionLayoutIssue>) {
-    let Ok(entries) = fs::read_dir(child_root) else {
+    let Ok(child_root_dir) = open_session_layout_plain_directory(child_root) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(session_layout_proc_fd_path(&child_root_dir)) else {
         return;
     };
 
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
+        let child_name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(stat) = nix::sys::stat::fstatat(
+            &child_root_dir,
+            child_name.as_str(),
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        ) else {
+            continue;
+        };
+        if stat.st_mode & nix::libc::S_IFMT != nix::libc::S_IFDIR {
             continue;
         }
-        let child_name = entry.file_name().to_string_lossy().into_owned();
+        let path = child_root.join(&child_name);
         inspect_child_result_dir(&path, &child_name, issues);
     }
 }
@@ -298,7 +317,7 @@ fn inspect_child_result_dir(
 }
 
 fn require_file(path: &Path, label: &str, issues: &mut Vec<SessionLayoutIssue>) {
-    match fs::metadata(path) {
+    match plain_path_metadata(path) {
         Ok(metadata) if metadata.is_file() => {}
         Ok(_metadata) => issues.push(SessionLayoutIssue::NotFile(label.to_owned())),
         Err(_error) => issues.push(SessionLayoutIssue::MissingFile(label.to_owned())),
@@ -306,9 +325,118 @@ fn require_file(path: &Path, label: &str, issues: &mut Vec<SessionLayoutIssue>) 
 }
 
 fn require_directory(path: &Path, label: &str, issues: &mut Vec<SessionLayoutIssue>) {
-    match fs::metadata(path) {
+    match plain_path_metadata(path) {
         Ok(metadata) if metadata.is_dir() => {}
         Ok(_metadata) => issues.push(SessionLayoutIssue::NotDirectory(label.to_owned())),
         Err(_error) => issues.push(SessionLayoutIssue::MissingDirectory(label.to_owned())),
     }
+}
+
+fn read_session_layout_control_file(path: &Path) -> std::io::Result<String> {
+    let mut file = open_session_layout_plain_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_SESSION_LAYOUT_CONTROL_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "session layout control file is too large or not a plain file",
+        ));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn plain_path_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_session_layout_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    File::from(file_fd).metadata()
+}
+
+fn open_session_layout_plain_file(path: &Path) -> std::io::Result<File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_session_layout_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(File::from(file_fd))
+}
+
+fn open_session_layout_plain_directory(path: &Path) -> std::io::Result<File> {
+    let mut directory = if path.is_absolute() {
+        open_session_layout_single_plain_directory(Path::new("/"))?
+    } else {
+        open_session_layout_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = File::from(next);
+            }
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_session_layout_single_plain_directory(path: &Path) -> std::io::Result<File> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
+}
+
+fn session_layout_proc_fd_path(directory: &File) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
 }

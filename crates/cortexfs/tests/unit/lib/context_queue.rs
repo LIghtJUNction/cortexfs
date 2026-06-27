@@ -60,9 +60,144 @@ fn context_pack_rebuild_respects_budget_and_validates_inputs() {
 }
 
 #[test]
+fn context_pack_rebuild_rejects_symlink_session_files() {
+    let root = clean_test_dir("context-pack-rebuild-symlink-session");
+    let session = root.join("default");
+    let context = session.join("context");
+    let outside = clean_test_dir("context-pack-rebuild-symlink-session-outside");
+
+    create_complete_session_layout(&session);
+    write_text_file(&outside.join("messages.jsonl"), "{\"role\":\"user\",\"content\":\"outside\"}\n");
+    assert!(fs::remove_file(session.join("messages.jsonl")).is_ok());
+    assert!(symlink(outside.join("messages.jsonl"), session.join("messages.jsonl")).is_ok());
+    write_text_file(&context.join("budget"), "0\n");
+
+    assert_eq!(
+        rebuild_context_pack(&session, Some("coder"), 5),
+        Err(ContextPackBuildError::MissingSession)
+    );
+}
+
+#[test]
+fn context_pack_rebuild_ignores_symlink_pinned_files() {
+    let root = clean_test_dir("context-pack-rebuild-symlink-pinned");
+    let session = root.join("default");
+    let context = session.join("context");
+    let outside = clean_test_dir("context-pack-rebuild-symlink-pinned-outside");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "{\"role\":\"user\",\"content\":\"ok\"}\n");
+    write_text_file(&context.join("budget"), "0\n");
+    write_text_file(&context.join("summary.md"), "");
+    write_text_file(&context.join("facts.jsonl"), "");
+    write_text_file(&context.join("decisions.jsonl"), "");
+    write_text_file(&context.join("todo.md"), "");
+    write_text_file(&context.join("refs.jsonl"), "");
+    write_text_file(&context.join("child").join("rev-1").join("result.md"), "");
+    write_text_file(&context.join("child").join("rev-1").join("refs.jsonl"), "");
+    write_text_file(&outside.join("system.md"), "outside pinned\n");
+    assert!(symlink(
+        outside.join("system.md"),
+        context.join("pinned").join("system.md")
+    )
+    .is_ok());
+
+    let built = rebuild_context_pack(&session, Some("coder"), 5);
+    let built = ok!(built);
+    assert!(!built.pack_md().contains("outside pinned"));
+    assert!(!built
+        .items()
+        .iter()
+        .any(|item| item.source() == "context/pinned/system.md"));
+}
+
+#[test]
+fn context_pack_rebuild_refuses_symlink_pinned_directory() {
+    let root = clean_test_dir("context-pack-rebuild-symlink-pinned-dir");
+    let session = root.join("default");
+    let context = session.join("context");
+    let outside = clean_test_dir("context-pack-rebuild-symlink-pinned-dir-outside");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "{\"role\":\"user\",\"content\":\"ok\"}\n");
+    write_text_file(&context.join("budget"), "0\n");
+    write_text_file(&outside.join("system.md"), "outside pinned\n");
+    assert!(fs::remove_dir(context.join("pinned")).is_ok());
+    assert!(symlink(&outside, context.join("pinned")).is_ok());
+
+    assert_eq!(
+        rebuild_context_pack(&session, Some("coder"), 5),
+        Err(ContextPackBuildError::MissingSession)
+    );
+}
+
+#[test]
+fn context_pack_rebuild_refuses_symlink_child_directory() {
+    let root = clean_test_dir("context-pack-rebuild-symlink-child-dir");
+    let session = root.join("default");
+    let context = session.join("context");
+    let outside = clean_test_dir("context-pack-rebuild-symlink-child-dir-outside");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "{\"role\":\"user\",\"content\":\"ok\"}\n");
+    write_text_file(&context.join("budget"), "0\n");
+    write_text_file(&outside.join("rev-1").join("result.md"), "outside result\n");
+    assert!(fs::remove_dir_all(context.join("child")).is_ok());
+    assert!(symlink(&outside, context.join("child")).is_ok());
+
+    assert_eq!(
+        rebuild_context_pack(&session, Some("coder"), 5),
+        Err(ContextPackBuildError::MissingSession)
+    );
+}
+
+#[test]
+fn context_pack_rebuild_rejects_oversized_messages_file() {
+    let root = clean_test_dir("context-pack-rebuild-oversized-messages");
+    let session = root.join("default");
+    let context = session.join("context");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), &"x".repeat((1024 * 1024) + 1));
+    write_text_file(&context.join("budget"), "0\n");
+
+    assert_eq!(
+        rebuild_context_pack(&session, Some("coder"), 5),
+        Err(ContextPackBuildError::CannotRead)
+    );
+}
+
+#[test]
+fn context_pack_rebuild_rejects_oversized_context_sources() {
+    let root = clean_test_dir("context-pack-rebuild-oversized-source");
+    let session = root.join("default");
+    let context = session.join("context");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "{\"role\":\"user\",\"content\":\"ok\"}\n");
+    write_text_file(&context.join("budget"), "0\n");
+    write_text_file(&context.join("summary.md"), &"x".repeat((1024 * 1024) + 1));
+    write_text_file(&context.join("facts.jsonl"), "");
+    write_text_file(&context.join("decisions.jsonl"), "");
+    write_text_file(&context.join("todo.md"), "");
+    write_text_file(&context.join("refs.jsonl"), "");
+    write_text_file(&context.join("child").join("rev-1").join("result.md"), "");
+    write_text_file(&context.join("child").join("rev-1").join("refs.jsonl"), "");
+
+    assert_eq!(
+        rebuild_context_pack(&session, Some("coder"), 5),
+        Err(ContextPackBuildError::CannotRead)
+    );
+}
+
+#[test]
 fn context_pack_rejects_invalid_json_shape() {
     assert_eq!(
         inspect_context_pack_json("{").issues(),
+        &[ContextPackIssue::InvalidJson]
+    );
+    assert_eq!(
+        inspect_context_pack_json(r#"{"items": []} trailing"#).issues(),
         &[ContextPackIssue::InvalidJson]
     );
     assert_eq!(
@@ -164,20 +299,21 @@ fn context_jsonl_accepts_spec_record_shapes() {
 fn context_jsonl_rejects_invalid_records() {
     let facts = inspect_context_jsonl(
         ContextJsonlKind::Facts,
-        "not-json\n[]\n{\"id\":\"bad/id\",\"text\":\"ok\"}\n",
+        "not-json\n[]\n{\"id\":\"fact-1\",\"text\":\"ok\",\"source\":\"messages:1\"} trailing\n{\"id\":\"bad/id\",\"text\":\"ok\"}\n",
     );
     assert_eq!(
         facts.issues(),
         [
             ContextJsonlIssue::InvalidJson(1),
             ContextJsonlIssue::RecordNotObject(2),
+            ContextJsonlIssue::InvalidJson(3),
             ContextJsonlIssue::InvalidField {
-                line: 3,
+                line: 4,
                 field: "id".to_owned(),
                 value: "bad/id".to_owned()
             },
             ContextJsonlIssue::MissingStringField {
-                line: 3,
+                line: 4,
                 field: "source".to_owned()
             }
         ]
@@ -353,6 +489,26 @@ fn shared_queue_layout_inspector_checks_recommended_dirs() {
 }
 
 #[test]
+fn shared_queue_layout_rejects_symlink_directories() {
+    let root = clean_test_dir("shared-queue-layout-symlink");
+    create_shared_queue_layout(&root);
+    let outside = clean_test_dir("shared-queue-layout-symlink-outside");
+    assert!(fs::remove_dir_all(root.join("pending")).is_ok());
+    assert!(symlink(&outside, root.join("pending")).is_ok());
+
+    let report = inspect_shared_queue_layout(&root);
+    assert!(report
+        .issues()
+        .contains(&SharedQueueLayoutIssue::NotDirectory(
+            "pending".to_owned()
+        )));
+    assert_eq!(
+        claim_next_shared_queue_job(&root, "worker-a"),
+        Err(SharedQueueClaimError::InvalidQueueDirectory)
+    );
+}
+
+#[test]
 fn shared_queue_claim_uses_atomic_claim_directories() {
     let root = clean_test_dir("shared-queue-claim");
     create_shared_queue_layout(&root);
@@ -377,6 +533,27 @@ fn shared_queue_claim_uses_atomic_claim_directories() {
 }
 
 #[test]
+fn shared_queue_claim_ignores_non_req_json_and_symlink_jobs() {
+    let root = clean_test_dir("shared-queue-claim-ignore");
+    create_shared_queue_layout(&root);
+    let outside = clean_test_dir("shared-queue-claim-ignore-outside");
+    write_text_file(&outside.join("secret.txt"), "secret\n");
+    assert!(symlink(
+        outside.join("secret.txt"),
+        root.join("pending").join("job-0.req.json")
+    )
+    .is_ok());
+    write_text_file(&root.join("pending").join("job-1.req.json.tmp"), "tmp\n");
+    write_text_file(&root.join("pending").join("job-2.req.json"), "real\n");
+
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    assert_eq!(claimed.job_name(), "job-2.req.json");
+    assert!(root.join("pending").join("job-0.req.json").exists());
+    assert!(root.join("pending").join("job-1.req.json.tmp").exists());
+}
+
+#[test]
 fn shared_queue_claim_skips_existing_claim_lock() {
     let root = clean_test_dir("shared-queue-claim-lock");
     create_shared_queue_layout(&root);
@@ -388,6 +565,60 @@ fn shared_queue_claim_skips_existing_claim_lock() {
     let Some(claimed) = ok!(claimed) else { return };
     assert_eq!(claimed.job_name(), "job-2.req.json");
     assert!(root.join("pending").join("job-1.req.json").exists());
+}
+
+#[test]
+fn shared_queue_claim_rolls_back_when_lease_recording_fails() {
+    let root = clean_test_dir("shared-queue-claim-lease-fail");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    assert!(fs::write(root.join("lease").join("job-1.req.json"), "not a dir\n").is_ok());
+
+    assert_eq!(
+        claim_next_shared_queue_job(&root, "worker-a"),
+        Err(SharedQueueClaimError::CannotRecordLease)
+    );
+    assert_file_text(&root.join("pending").join("job-1.req.json"), "one\n");
+    assert!(!root.join("claimed").join("job-1.req.json").exists());
+}
+
+#[test]
+fn shared_queue_claim_rejects_symlink_queue_root_without_touching_target() {
+    let root = clean_test_dir("shared-queue-claim-symlink-root");
+    let outside = clean_test_dir("shared-queue-claim-symlink-root-outside");
+    create_shared_queue_layout(&outside);
+    write_text_file(&outside.join("pending").join("job-1.req.json"), "one\n");
+    assert!(symlink(&outside, &root).is_ok());
+
+    assert_eq!(
+        claim_next_shared_queue_job(&root, "worker-a"),
+        Err(SharedQueueClaimError::InvalidQueueDirectory)
+    );
+    assert_file_text(&outside.join("pending").join("job-1.req.json"), "one\n");
+    assert!(!outside.join("claimed").join("job-1.req.json").exists());
+}
+
+#[test]
+fn shared_queue_finish_and_recover_reject_non_request_job_names() {
+    let root = clean_test_dir("shared-queue-invalid-job-name");
+    create_shared_queue_layout(&root);
+
+    assert_eq!(
+        finish_shared_queue_job(&root, "job-1", SharedQueueOutcome::Done, b"ok\n"),
+        Err(SharedQueueFinishError::InvalidJobName)
+    );
+    assert_eq!(
+        finish_shared_queue_job(&root, "job-1.req.json.tmp", SharedQueueOutcome::Done, b"ok\n"),
+        Err(SharedQueueFinishError::InvalidJobName)
+    );
+    assert_eq!(
+        recover_shared_queue_job(&root, "job-1"),
+        Err(SharedQueueRecoverError::InvalidJobName)
+    );
+    assert_eq!(
+        recover_shared_queue_job(&root, "job-1.req.json.tmp"),
+        Err(SharedQueueRecoverError::InvalidJobName)
+    );
 }
 
 #[test]
@@ -409,6 +640,151 @@ fn shared_queue_recovery_requeues_claimed_job_with_lease() {
 }
 
 #[test]
+fn shared_queue_finish_does_not_write_result_without_claim() {
+    let root = clean_test_dir("shared-queue-finish-without-claim");
+    create_shared_queue_layout(&root);
+
+    assert_eq!(
+        finish_shared_queue_job(&root, "job-1.req.json", SharedQueueOutcome::Done, b"ok\n"),
+        Err(SharedQueueFinishError::CannotMoveClaimedJob)
+    );
+    assert!(!root.join("done").join("job-1.req.json.result").exists());
+}
+
+#[test]
+fn shared_queue_finish_refuses_to_overwrite_output_entries() {
+    let root = clean_test_dir("shared-queue-finish-no-overwrite");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    write_text_file(&root.join("done").join("job-1.req.json.result"), "old\n");
+
+    assert_eq!(
+        finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"new\n"),
+        Err(SharedQueueFinishError::CannotWriteResult)
+    );
+    assert_file_text(&root.join("done").join("job-1.req.json.result"), "old\n");
+    assert!(claimed.claimed_path().exists());
+
+    assert!(fs::remove_file(root.join("done").join("job-1.req.json.result")).is_ok());
+    write_text_file(&root.join("done").join("job-1.req.json"), "old request\n");
+    assert_eq!(
+        finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"new\n"),
+        Err(SharedQueueFinishError::CannotWriteResult)
+    );
+    assert_file_text(&root.join("done").join("job-1.req.json"), "old request\n");
+    assert!(!root.join("done").join("job-1.req.json.result").exists());
+}
+
+#[test]
+fn shared_queue_finish_refuses_symlink_result_without_writing_target() {
+    let root = clean_test_dir("shared-queue-finish-symlink-result");
+    let outside = clean_test_dir("shared-queue-finish-symlink-result-outside");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    write_text_file(&outside.join("result"), "outside\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    assert!(symlink(
+        outside.join("result"),
+        root.join("done").join("job-1.req.json.result")
+    )
+    .is_ok());
+
+    assert_eq!(
+        finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"new\n"),
+        Err(SharedQueueFinishError::CannotWriteResult)
+    );
+    assert_file_text(&outside.join("result"), "outside\n");
+    assert!(claimed.claimed_path().exists());
+}
+
+#[test]
+fn shared_queue_recovery_refuses_to_overwrite_pending_job() {
+    let root = clean_test_dir("shared-queue-recover-no-overwrite");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    write_text_file(&root.join("pending").join("job-1.req.json"), "new\n");
+
+    assert_eq!(
+        recover_shared_queue_job(&root, claimed.job_name()),
+        Err(SharedQueueRecoverError::CannotRequeue)
+    );
+    assert_file_text(&root.join("pending").join("job-1.req.json"), "new\n");
+    assert!(claimed.claimed_path().exists());
+}
+
+#[test]
+fn shared_queue_finish_rejects_symlink_output_directory_without_writing_target() {
+    let root = clean_test_dir("shared-queue-finish-symlink-dir");
+    let outside = clean_test_dir("shared-queue-finish-symlink-dir-outside");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    assert!(fs::remove_dir_all(root.join("done")).is_ok());
+    assert!(symlink(&outside, root.join("done")).is_ok());
+
+    assert_eq!(
+        finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"ok\n"),
+        Err(SharedQueueFinishError::InvalidQueueDirectory)
+    );
+    assert!(!outside.join("job-1.req.json.result").exists());
+}
+
+#[test]
+fn shared_queue_finish_rejects_symlink_lease_directory_without_touching_target() {
+    let root = clean_test_dir("shared-queue-finish-symlink-lease");
+    let outside = clean_test_dir("shared-queue-finish-symlink-lease-outside");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    assert!(fs::remove_dir_all(root.join("lease").join(claimed.job_name())).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_text_file(&outside.join("worker"), "worker-a\n");
+    assert!(symlink(&outside, root.join("lease").join(claimed.job_name())).is_ok());
+
+    assert_eq!(
+        finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"ok\n"),
+        Err(SharedQueueFinishError::CannotMoveClaimedJob)
+    );
+    assert_file_text(&outside.join("worker"), "worker-a\n");
+    assert!(!root.join("done").join(claimed.job_name()).exists());
+    assert!(!root
+        .join("done")
+        .join(format!("{}.result", claimed.job_name()))
+        .exists());
+}
+
+#[test]
+fn shared_queue_finish_rejects_symlink_claim_directory_without_touching_target() {
+    let root = clean_test_dir("shared-queue-finish-symlink-claim");
+    let outside = clean_test_dir("shared-queue-finish-symlink-claim-outside");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    assert!(fs::remove_dir_all(root.join("claimed").join(claimed.job_name())).is_ok());
+    write_text_file(&outside.join(claimed.job_name()), "outside\n");
+    assert!(symlink(&outside, root.join("claimed").join(claimed.job_name())).is_ok());
+
+    assert_eq!(
+        finish_shared_queue_job(&root, claimed.job_name(), SharedQueueOutcome::Done, b"ok\n"),
+        Err(SharedQueueFinishError::CannotMoveClaimedJob)
+    );
+    assert_file_text(&outside.join(claimed.job_name()), "outside\n");
+    assert!(!root.join("done").join(claimed.job_name()).exists());
+    assert!(!root
+        .join("done")
+        .join(format!("{}.result", claimed.job_name()))
+        .exists());
+}
+
+#[test]
 fn shared_queue_recovery_requires_existing_claim_and_lease() {
     let root = clean_test_dir("shared-queue-recover-missing");
     create_shared_queue_layout(&root);
@@ -424,4 +800,46 @@ fn shared_queue_recovery_requires_existing_claim_and_lease() {
         recover_shared_queue_job(&root, "job-1.req.json"),
         Err(SharedQueueRecoverError::MissingLease)
     );
+}
+
+#[test]
+fn shared_queue_recovery_rejects_symlink_lease_directory_without_touching_target() {
+    let root = clean_test_dir("shared-queue-recover-symlink-lease");
+    let outside = clean_test_dir("shared-queue-recover-symlink-lease-outside");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    assert!(fs::remove_dir_all(root.join("lease").join(claimed.job_name())).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_text_file(&outside.join("worker"), "worker-a\n");
+    assert!(symlink(&outside, root.join("lease").join(claimed.job_name())).is_ok());
+
+    assert_eq!(
+        recover_shared_queue_job(&root, claimed.job_name()),
+        Err(SharedQueueRecoverError::MissingLease)
+    );
+    assert_file_text(&outside.join("worker"), "worker-a\n");
+    assert!(!root.join("pending").join(claimed.job_name()).exists());
+    assert!(claimed.claimed_path().exists());
+}
+
+#[test]
+fn shared_queue_recovery_rejects_symlink_claim_directory_without_touching_target() {
+    let root = clean_test_dir("shared-queue-recover-symlink-claim");
+    let outside = clean_test_dir("shared-queue-recover-symlink-claim-outside");
+    create_shared_queue_layout(&root);
+    write_text_file(&root.join("pending").join("job-1.req.json"), "one\n");
+    let claimed = claim_next_shared_queue_job(&root, "worker-a");
+    let Some(claimed) = ok!(claimed) else { return };
+    assert!(fs::remove_dir_all(root.join("claimed").join(claimed.job_name())).is_ok());
+    write_text_file(&outside.join(claimed.job_name()), "outside\n");
+    assert!(symlink(&outside, root.join("claimed").join(claimed.job_name())).is_ok());
+
+    assert_eq!(
+        recover_shared_queue_job(&root, claimed.job_name()),
+        Err(SharedQueueRecoverError::MissingClaim)
+    );
+    assert_file_text(&outside.join(claimed.job_name()), "outside\n");
+    assert!(!root.join("pending").join(claimed.job_name()).exists());
 }

@@ -90,7 +90,7 @@ fn print_shared_or_builtin_man(
             MANUAL_MAN_DIR
         })
         .join(file_name);
-    let content = fs::read_to_string(&shared).unwrap_or_else(|_error| fallback.to_owned());
+    let content = read_file_to_string(&shared).unwrap_or_else(|_error| fallback.to_owned());
     print_terminal_text(ensure_trailing_newline(&content).as_ref())
 }
 
@@ -410,13 +410,12 @@ fn env_exports(root: &Path, home_env: Option<&str>, path_env: Option<&str>) -> [
 }
 
 fn print_status(root: &Path) -> Result<(), CliError> {
-    let exists = root.exists();
-    let is_dir = root.is_dir();
+    let (exists, is_dir) = ctx_root_shape(root);
     let mounted = is_mount_point(root).unwrap_or(false);
     let status = read_ctx_status(root);
     let present_entries = ROOT_ENTRIES
         .iter()
-        .filter(|entry| root.join(entry).exists())
+        .filter(|entry| ctx_root_entry_present(root, entry))
         .count();
     let missing_entries = ROOT_ENTRIES.len().saturating_sub(present_entries);
     let agents = read_status_agent_processes(root)?;
@@ -477,6 +476,18 @@ fn print_status(root: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
+fn ctx_root_shape(root: &Path) -> (bool, bool) {
+    match fs::symlink_metadata(root) {
+        Ok(metadata) => (true, metadata.is_dir()),
+        Err(_error) => (false, false),
+    }
+}
+
+fn ctx_root_entry_present(root: &Path, entry: &str) -> bool {
+    fs::symlink_metadata(root.join(entry))
+        .is_ok_and(|metadata| !metadata.file_type().is_symlink())
+}
+
 fn ctx_state(exists: bool, is_dir: bool, mounted: bool) -> &'static str {
     if mounted {
         "running"
@@ -490,7 +501,7 @@ fn ctx_state(exists: bool, is_dir: bool, mounted: bool) -> &'static str {
 }
 
 fn read_ctx_status(root: &Path) -> String {
-    fs::read_to_string(root.join("status"))
+    read_file_to_string(&root.join("status"))
         .ok()
         .map(|content| content.trim().to_owned())
         .filter(|content| !content.is_empty())
@@ -565,12 +576,8 @@ fn mount_reference_tree(
             error.errno(),
         ))
     })?;
-    fs::create_dir_all(mountpoint).map_err(|error| {
-        CliError::unavailable(format!(
-            "cannot create mountpoint {}: {error}",
-            mountpoint.display()
-        ))
-    })?;
+    create_plain_mountpoint_dir(mountpoint)?;
+    ensure_plain_mountpoint_dir(mountpoint)?;
     let mountpoint = absolute_existing_path(mountpoint).map_err(|error| {
         CliError::unavailable(format!(
             "cannot resolve mountpoint {}: {error}",
@@ -602,6 +609,116 @@ fn mount_reference_tree(
     )))
 }
 
+fn create_plain_mountpoint_dir(mountpoint: &Path) -> Result<(), CliError> {
+    if let Ok(metadata) = fs::symlink_metadata(mountpoint) {
+        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            Ok(())
+        } else {
+            Err(CliError::unavailable(format!(
+                "mountpoint is not a plain directory: {}",
+                mountpoint.display()
+            )))
+        };
+    }
+
+    let mut missing = Vec::new();
+    let mut cursor = Some(mountpoint);
+    while let Some(current) = cursor {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
+                return Err(CliError::unavailable(format!(
+                    "mountpoint path contains a non-directory entry: {}",
+                    current.display()
+                )));
+            }
+            Ok(_metadata) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+                cursor = current.parent();
+            }
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot inspect mountpoint {}: {error}",
+                    current.display()
+                )));
+            }
+        }
+    }
+
+    let mut parent_dir = if let Some(existing_parent) = missing.last().and_then(|path| path.parent())
+    {
+        open_plain_file_parent_dir(existing_parent)?
+    } else {
+        return Ok(());
+    };
+    for directory in missing.iter().rev() {
+        let name = directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                CliError::unavailable(format!(
+                    "invalid mountpoint directory name: {}",
+                    directory.display()
+                ))
+            })?;
+        nix::sys::stat::mkdirat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(0o755),
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot create mountpoint {}: {error}",
+                directory.display()
+            ))
+        })?;
+        parent_dir.sync_all().map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot sync mountpoint parent {}: {error}",
+                directory.display()
+            ))
+        })?;
+        let child = nix::fcntl::openat(
+            &parent_dir,
+            name,
+            nix::fcntl::OFlag::O_DIRECTORY
+                | nix::fcntl::OFlag::O_RDONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot open mountpoint {}: {error}",
+                directory.display()
+            ))
+        })?;
+        parent_dir = fs::File::from(child);
+        parent_dir.sync_all().map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot sync mountpoint {}: {error}",
+                directory.display()
+            ))
+        })?;
+    }
+    Ok(())
+}
+
+fn ensure_plain_mountpoint_dir(mountpoint: &Path) -> Result<(), CliError> {
+    let directory = open_plain_file_parent_dir(mountpoint)?;
+    let metadata = directory.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat mountpoint {}: {error}", mountpoint.display()))
+    })?;
+    if metadata.is_dir() {
+        Ok(())
+    } else {
+        Err(CliError::unavailable(format!(
+            "mountpoint is not a plain directory: {}",
+            mountpoint.display()
+        )))
+    }
+}
+
 fn default_source_root() -> Result<PathBuf, CliError> {
     if let Some(data_home) = env::var_os("XDG_DATA_HOME") {
         return Ok(PathBuf::from(data_home).join("cortexfs").join("v1-root"));
@@ -620,32 +737,30 @@ fn default_source_root() -> Result<PathBuf, CliError> {
 
 fn cortexfs_mount_bin() -> PathBuf {
     if let Ok(current) = env::current_exe()
-        && let Some(dir) = current.parent()
+        && let Some(sibling) = plain_sibling_mount_bin(&current)
     {
-        let sibling = dir.join("cortexfs-mount");
-        if sibling.is_file() {
-            return sibling;
-        }
+        return sibling;
     }
-    PathBuf::from("cortexfs-mount")
+    PathBuf::from(CORTEXFS_MOUNT_PROGRAM)
 }
 
+fn plain_sibling_mount_bin(current_exe: &Path) -> Option<PathBuf> {
+    let sibling = current_exe.parent()?.join("cortexfs-mount");
+    let metadata = sibling.symlink_metadata().ok()?;
+    (metadata.is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.permissions().mode() & 0o111 != 0)
+        .then_some(sibling)
+}
+
+const CORTEXFS_MOUNT_PROGRAM: &str = "/usr/bin/cortexfs-mount";
 const TRUSTED_SETSID_BIN: &str = "/usr/bin/setsid";
 
 fn spawn_mount_process(mount_bin: &Path, source: &Path, mountpoint: &Path) -> Result<(), CliError> {
-    let mut detached = ProcessCommand::new(TRUSTED_SETSID_BIN);
-    detached
-        .arg("-f")
-        .arg(mount_bin)
-        .arg("--source")
-        .arg(source)
-        .arg(mountpoint);
-    match spawn_null(detached) {
+    match spawn_null(detached_mount_command(mount_bin, source, mountpoint)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let mut direct = ProcessCommand::new(mount_bin);
-            direct.arg("--source").arg(source).arg(mountpoint);
-            spawn_null(direct).map_err(|error| {
+            spawn_null(direct_mount_command(mount_bin, source, mountpoint)).map_err(|error| {
                 CliError::unavailable(format!("cannot start {}: {error}", mount_bin.display()))
             })
         }
@@ -654,6 +769,30 @@ fn spawn_mount_process(mount_bin: &Path, source: &Path, mountpoint: &Path) -> Re
             mount_bin.display()
         ))),
     }
+}
+
+fn detached_mount_command(mount_bin: &Path, source: &Path, mountpoint: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new(TRUSTED_SETSID_BIN);
+    command
+        .arg("-f")
+        .arg(mount_bin)
+        .arg("--source")
+        .arg(source)
+        .arg(mountpoint)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin");
+    command
+}
+
+fn direct_mount_command(mount_bin: &Path, source: &Path, mountpoint: &Path) -> ProcessCommand {
+    let mut command = ProcessCommand::new(mount_bin);
+    command
+        .arg("--source")
+        .arg(source)
+        .arg(mountpoint)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin");
+    command
 }
 
 fn spawn_null(mut command: ProcessCommand) -> io::Result<()> {

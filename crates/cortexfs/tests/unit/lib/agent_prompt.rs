@@ -16,6 +16,79 @@ fn agent_prompt_rules_collect_existing_files_once_in_order() {
 }
 
 #[test]
+fn agent_prompt_rules_refuse_symlinked_files() {
+    let root = clean_test_dir("agent-prompt-rules-symlink");
+    let outside = root.join("outside").join("AGENTS.md");
+    write_text_file(&outside, "outside rule\n");
+    let link = root.join("AGENTS.md");
+    assert!(symlink(&outside, &link).is_ok());
+
+    let rules = collect_agent_rules_from_paths([link]);
+
+    assert_eq!(rules, "(no AGENTS.md rules discovered)");
+}
+
+#[test]
+fn agent_prompt_rules_refuse_symlinked_parent_dirs() {
+    let root = clean_test_dir("agent-prompt-rules-symlink-parent");
+    let outside = root.join("outside");
+    let link_parent = root.join("project");
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_text_file(&outside.join("AGENTS.md"), "outside rule\n");
+    assert!(symlink(&outside, &link_parent).is_ok());
+
+    let rules = collect_agent_rules_from_paths([link_parent.join("AGENTS.md")]);
+
+    assert_eq!(rules, "(no AGENTS.md rules discovered)");
+}
+
+#[test]
+fn agent_prompt_rules_refuse_symlinked_intermediate_dirs() {
+    let root = clean_test_dir("agent-prompt-rules-symlink-intermediate");
+    let outside = root.join("outside").join("nested");
+    let link_parent = root.join("project");
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_text_file(&outside.join("AGENTS.md"), "outside rule\n");
+    assert!(symlink(root.join("outside"), &link_parent).is_ok());
+
+    let rules = collect_agent_rules_from_paths([link_parent.join("nested").join("AGENTS.md")]);
+
+    assert_eq!(rules, "(no AGENTS.md rules discovered)");
+}
+
+#[test]
+fn agent_prompt_rules_refuse_oversized_files() {
+    let root = clean_test_dir("agent-prompt-rules-oversized");
+    let rules_path = root.join("AGENTS.md");
+    write_text_file(&rules_path, &"x".repeat(64 * 1024 + 1));
+
+    let rules = collect_agent_rules_from_paths([rules_path]);
+
+    assert_eq!(rules, "(no AGENTS.md rules discovered)");
+}
+
+#[test]
+fn agent_prompt_skill_discovery_rejects_symlinked_skill_root_parent(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = clean_test_dir("agent-prompt-skills-symlink-parent");
+    let outside = root.join("outside").join(".agents");
+    let skill = outside.join("skills").join("escape").join("SKILL.md");
+    write_text_file(
+        &skill,
+        "---\nname: escape-skill\nsummary: outside skill\n---\n",
+    );
+    assert!(symlink(&outside, root.join(".agents")).is_ok());
+
+    let original_cwd = std::env::current_dir()?;
+    std::env::set_current_dir(&root)?;
+    let skills = collect_skill_metadata(8_000);
+    std::env::set_current_dir(original_cwd)?;
+
+    assert!(!skills.contains("escape-skill"));
+    Ok(())
+}
+
+#[test]
 fn agent_prompt_skill_metadata_shortens_then_omits_over_budget() {
     let skills = vec![
         SkillMetadata {
@@ -42,6 +115,19 @@ fn agent_prompt_skill_metadata_shortens_then_omits_over_budget() {
 }
 
 #[test]
+fn agent_prompt_skill_metadata_respects_tiny_budget() {
+    let skills = vec![SkillMetadata {
+        name: "alpha".to_owned(),
+        description: "A ".repeat(300),
+        path: PathBuf::from("/skills/alpha/SKILL.md"),
+    }];
+
+    let tiny = format_skill_metadata_with_budget(skills, 1);
+
+    assert!(tiny.len() <= 1);
+}
+
+#[test]
 fn agent_prompt_history_messages_are_bounded_and_recent() {
     let messages = concat!(
         "{\"role\":\"user\",\"content\":\"old question old question old question old question old question old question old question old question old question old question\"}\n",
@@ -60,6 +146,18 @@ fn agent_prompt_history_messages_are_bounded_and_recent() {
     assert!(bounded.contains("new question"));
 }
 
+#[test]
+fn agent_prompt_history_messages_respect_tiny_budget() {
+    let messages = serde_json::json!({
+        "role": "user",
+        "content": "large message"
+    })
+    .to_string();
+
+    let tiny = format_history_messages_jsonl(&messages, 1);
+
+    assert!(tiny.len() <= 1);
+}
 
 #[test]
 fn agent_prompt_history_session_reads_only_bounded_recent_tail() {
@@ -113,4 +211,55 @@ fn agent_prompt_history_messages_read_session_file() {
     let history = collect_history_messages_from_session(&session, 10_000);
 
     assert_eq!(history, "- user: hello");
+}
+
+#[test]
+fn agent_prompt_history_refuses_symlinked_messages_file() {
+    let root = clean_test_dir("agent-prompt-history-symlink");
+    let session = root.join("session").join("default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    let outside = root.join("outside-messages.jsonl");
+    write_text_file(
+        &outside,
+        "{\"role\":\"user\",\"content\":\"external secret\"}\n",
+    );
+    assert!(symlink(&outside, session.join("messages.jsonl")).is_ok());
+
+    let history = collect_history_messages_from_session(&session, 10_000);
+
+    assert_eq!(history, "(no historical messages injected)");
+}
+
+#[test]
+fn agent_prompt_history_refuses_symlinked_session_dir() {
+    let root = clean_test_dir("agent-prompt-history-symlink-session");
+    let outside = root.join("outside-session");
+    let link = root.join("session-link");
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_text_file(
+        &outside.join("messages.jsonl"),
+        "{\"role\":\"user\",\"content\":\"external secret\"}\n",
+    );
+    assert!(symlink(&outside, &link).is_ok());
+
+    let history = collect_history_messages_from_session(&link, 10_000);
+
+    assert_eq!(history, "(no historical messages injected)");
+}
+
+#[test]
+fn agent_prompt_history_refuses_symlinked_intermediate_session_dir() {
+    let root = clean_test_dir("agent-prompt-history-symlink-intermediate");
+    let outside = root.join("outside").join("default");
+    let link = root.join("sessions");
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_text_file(
+        &outside.join("messages.jsonl"),
+        "{\"role\":\"user\",\"content\":\"external secret\"}\n",
+    );
+    assert!(symlink(root.join("outside"), &link).is_ok());
+
+    let history = collect_history_messages_from_session(&link.join("default"), 10_000);
+
+    assert_eq!(history, "(no historical messages injected)");
 }

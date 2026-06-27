@@ -9,7 +9,7 @@ const config: Config = {
   tagline: 'A small Linux filesystem ABI for agent runtimes',
   url: 'https://lightjunction.github.io',
   baseUrl,
-  favicon: 'img/cortexfs-logo.svg',
+  favicon: 'img/cortexfs-logo.jpg',
   organizationName: 'LIghtJUNction',
   projectName: 'cortexfs',
   onBrokenLinks: 'throw',
@@ -60,7 +60,7 @@ const config: Config = {
       title: 'CortexFS',
       logo: {
         alt: 'CortexFS',
-        src: 'img/cortexfs-logo.svg',
+        src: 'img/cortexfs-logo.jpg',
       },
       items: [
         {

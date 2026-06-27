@@ -64,6 +64,100 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 }
 
 #[test]
+fn agent_executable_socket_runtime_rejects_symlink_executable_without_running_target() {
+    let root = reference_tree("agent-executable-socket-runtime-symlink");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let outside = clean_test_dir("agent-executable-socket-runtime-symlink-outside");
+    let target = outside.join("coder-target");
+    let marker = outside.join("ran");
+    write_text_file(
+        &target,
+        &format!(
+            "#!/bin/sh\nprintf ran > {}\nprintf '{{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}}\\n' \"$CTX_RUN_ID\"\n",
+            marker.display()
+        ),
+    );
+    set_file_mode(&target, 0o755);
+    let agent_executable = root.join("agent").join("coder");
+    assert!(fs::remove_file(&agent_executable).is_ok());
+    assert!(symlink(&target, &agent_executable).is_ok());
+
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+    assert!(client
+        .write_all(
+            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+        },
+    );
+
+    assert_eq!(outcome, Err(SocketRuntimeError::InvalidAgentExecutable));
+    assert!(!marker.exists());
+}
+
+#[test]
+fn agent_executable_socket_runtime_rejects_oversized_output_frame() {
+    let root = reference_tree("agent-oversized-frame");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r"#!/bin/sh
+head -c 262144 /dev/zero | tr '\0' x
+printf '\n'
+",
+    );
+    set_file_mode(&agent_executable, 0o755);
+
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+    assert!(client
+        .write_all(
+            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+        },
+    );
+
+    assert_eq!(outcome, Err(SocketRuntimeError::InvalidAgentOutput));
+}
+
+#[test]
 fn agent_executable_socket_runtime_passes_source_root() {
     let root = reference_tree("agent-executable-socket-runtime-source-root");
     let session_root = agent_session_root(&root, "coder");
@@ -543,6 +637,18 @@ fn mount_table_rejects_invalid_v0_format() {
     );
     assert_eq!(
         MountEntry::parse("/ctx\tctx\tro\trbind"),
+        Err(MountError::InvalidPath)
+    );
+    assert_eq!(
+        MountEntry::parse("/ctx/shared/project-a/..\t/ctx\tro\trbind"),
+        Err(MountError::InvalidPath)
+    );
+    assert_eq!(
+        MountEntry::parse("/ctx/./shared/project-a\t/ctx\tro\trbind"),
+        Err(MountError::InvalidPath)
+    );
+    assert_eq!(
+        MountEntry::parse("/ctx\0/shared/project-a\t/ctx\tro\trbind"),
         Err(MountError::InvalidPath)
     );
     assert_eq!(

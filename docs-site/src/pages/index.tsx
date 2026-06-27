@@ -284,7 +284,7 @@ function ProductDemo(): ReactElement {
 }
 
 function HeroBrand(): ReactElement {
-  const logoSrc = useBaseUrl('/img/cortexfs-logo.svg');
+  const logoSrc = useBaseUrl('/img/cortexfs-logo.jpg');
 
   return (
     <div className="cortexHeroBrand" aria-label="CorTeXfs">

@@ -355,11 +355,11 @@ fn require_parent_session_context(
     parent_session_dir: &Path,
 ) -> Result<(), ChildContextRecordError> {
     for file in SESSION_REQUIRED_FILES {
-        if !parent_session_dir.join(file).is_file() {
+        if !is_plain_existing_file(&parent_session_dir.join(file)) {
             return Err(ChildContextRecordError::MissingParentSession);
         }
     }
-    if !parent_session_dir.join("context").is_dir() {
+    if !is_plain_existing_dir(&parent_session_dir.join("context")) {
         return Err(ChildContextRecordError::MissingParentSession);
     }
     Ok(())
@@ -367,12 +367,12 @@ fn require_parent_session_context(
 
 fn require_child_context_files(child_dir: &Path) -> Result<(), ChildContextRecordError> {
     for file in CHILD_RESULT_REQUIRED_FILES {
-        if !child_dir.join(file).is_file() {
+        if !is_plain_existing_file(&child_dir.join(file)) {
             return Err(ChildContextRecordError::MissingParentSession);
         }
     }
     for dir in CHILD_RESULT_REQUIRED_DIRS {
-        if !child_dir.join(dir).is_dir() {
+        if !is_plain_existing_dir(&child_dir.join(dir)) {
             return Err(ChildContextRecordError::MissingParentSession);
         }
     }
@@ -411,36 +411,97 @@ fn touch_session(dir: &Path) -> SocketRecordResult<()> {
 }
 
 fn write_text_file_if_absent(path: &Path, content: &str) -> std::io::Result<()> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        return if !metadata.file_type().is_symlink() && metadata.is_file() {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-            Ok(())
-        } else {
-            Err(std::io::Error::other("path is not a regular file"))
-        };
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "text file must have a parent",
+        )
+    })?;
+    let name = path_file_name(path).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "text file must have a name")
+    })?;
+    let parent_dir = open_plain_directory(parent)?;
+    match nix::fcntl::openat(
+        &parent_dir,
+        name,
+        nix::fcntl::OFlag::O_RDWR | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    ) {
+        Ok(file_fd) => {
+            let file = fs::File::from(file_fd);
+            if !file.metadata()?.is_file() {
+                return Err(std::io::Error::other("path is not a regular file"));
+            }
+            file.set_permissions(fs::Permissions::from_mode(0o600))?;
+            file.sync_all()?;
+            parent_dir.sync_all()?;
+            return Ok(());
+        }
+        Err(nix::errno::Errno::ENOENT) => {}
+        Err(error) => return Err(std::io::Error::from(error)),
     }
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        name,
+        nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_EXCL
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(0o600),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut file = fs::File::from(file_fd);
     file.write_all(content.as_bytes())?;
-    file.flush()
+    file.flush()?;
+    file.sync_all()?;
+    parent_dir.sync_all()?;
+    Ok(())
 }
 
 fn create_private_context_dir(path: &Path) -> std::io::Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-            Err(std::io::Error::other("path is not a directory"))
+    match open_private_context_dir(path) {
+        Ok(dir) => {
+            dir.set_permissions(fs::Permissions::from_mode(0o700))?;
+            dir.sync_all()
         }
-        Ok(_) => fs::set_permissions(path, fs::Permissions::from_mode(0o700)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::DirBuilder::new().mode(0o700).create(path)?;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            let parent = path.parent().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "context directory must have a parent",
+                )
+            })?;
+            let name = path_file_name(path).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "context directory must have a file name",
+                )
+            })?;
+            let parent_dir = open_plain_directory(parent)?;
+            nix::sys::stat::mkdirat(
+                &parent_dir,
+                name,
+                nix::sys::stat::Mode::from_bits_truncate(0o700),
+            )
+            .map_err(std::io::Error::from)?;
+            parent_dir.sync_all()?;
+            let dir = open_private_context_dir(path)?;
+            dir.set_permissions(fs::Permissions::from_mode(0o700))?;
+            dir.sync_all()?;
+            parent_dir.sync_all()?;
+            Ok(())
         }
         Err(error) => Err(error),
     }
+}
+
+fn open_private_context_dir(path: &Path) -> std::io::Result<fs::File> {
+    let dir = open_plain_directory_for_sync(path)?;
+    if !dir.metadata()?.is_dir() {
+        return Err(std::io::Error::other("path is not a directory"));
+    }
+    Ok(dir)
 }
 
 fn ensure_trailing_newline(content: &str) -> String {
@@ -464,11 +525,21 @@ fn require_socket_session_name(
 
 fn require_socket_session_files(session_dir: &Path) -> Result<(), SocketSessionRecordError> {
     for file in SESSION_REQUIRED_FILES {
-        if !session_dir.join(file).is_file() {
+        if !is_plain_existing_file(&session_dir.join(file)) {
             return Err(SocketSessionRecordError::MissingSessionFile(file));
         }
     }
     Ok(())
+}
+
+fn is_plain_existing_file(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_file())
+}
+
+fn is_plain_existing_dir(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
 }
 
 fn validate_socket_object_field(

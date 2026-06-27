@@ -30,6 +30,27 @@ fn formats_context_pack_issues_for_file_check() {
 }
 
 #[test]
+fn file_check_formatters_escape_terminal_controls() {
+    let rendered = format_message_stream_issues(&[
+        MessageStreamIssue::ProviderNativeField {
+            line: 1,
+            field: "thread\u{1b}]52;c;payload\u{7}".to_owned(),
+        },
+        MessageStreamIssue::InvalidRole {
+            line: 2,
+            role: "developer\u{1b}[31m".to_owned(),
+        },
+    ]);
+
+    assert_eq!(
+        rendered,
+        "provider native field line 1 thread\\u{1b}]52;c;payload\\u{7}, invalid role line 2 developer\\u{1b}[31m"
+    );
+    assert!(!rendered.as_bytes().contains(&0x1b));
+    assert!(!rendered.as_bytes().contains(&0x07));
+}
+
+#[test]
 fn formats_event_stream_issues_for_file_check() {
     assert_eq!(
         format_event_stream_issues(&[
@@ -242,9 +263,13 @@ fn file_check_validates_session_index_files() {
         &["shared", "im-qq-dev", "agent", "bot", "session", "index"],
     );
     assert!(fs::create_dir_all(index.join("by-cwd")).is_ok());
+    assert!(fs::create_dir_all(index.join("by-hash")).is_ok());
+    assert!(fs::create_dir_all(index.join("by-uuid")).is_ok());
     assert!(fs::write(index.join("list"), "group-456\nbad/name\n").is_ok());
     assert!(fs::write(index.join("current"), "group-456\n").is_ok());
     assert!(fs::write(index.join("by-cwd").join("hash-1"), "group-456\n").is_ok());
+    assert!(fs::write(index.join("by-hash").join("hash-1"), "group-456\n").is_ok());
+    assert!(fs::write(index.join("by-uuid").join("uuid-1"), "group-456\n").is_ok());
 
     assert_file_check_error_contains(
         &root,
@@ -257,6 +282,16 @@ fn file_check_validates_session_index_files() {
         "shared/im-qq-dev/agent/bot/session/index/by-cwd/hash-1"
     )
     .is_ok());
+    assert!(file_check(
+        &root,
+        "shared/im-qq-dev/agent/bot/session/index/by-hash/hash-1"
+    )
+    .is_ok());
+    assert!(file_check(
+        &root,
+        "shared/im-qq-dev/agent/bot/session/index/by-uuid/uuid-1"
+    )
+    .is_ok());
 }
 
 #[test]
@@ -265,7 +300,7 @@ fn file_check_rejects_by_cwd_symlink_index_entries() {
     let by_cwd = fixture_path(
         &root,
         &[
-            "home", "1000", "agent", "coder", "session", "index", "by-cwd",
+            "home", "1000", "agent", "coder", "session", "index", "by-hash",
         ],
     );
     assert!(fs::create_dir_all(&by_cwd).is_ok());
@@ -274,8 +309,8 @@ fn file_check_rejects_by_cwd_symlink_index_entries() {
 
     assert_file_check_error_contains(
         &root,
-        "home/1000/agent/coder/session/index/by-cwd/hash-1",
-        &["by-cwd entry is a symlink"],
+        "home/1000/agent/coder/session/index/by-hash/hash-1",
+        &["secondary index entry is a symlink"],
     );
 }
 

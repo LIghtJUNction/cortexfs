@@ -64,12 +64,15 @@ fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
     }
 
     if let Some(kind) = parsed.session_index_kind() {
-        if kind == SessionIndexKind::ByCwd
+        if matches!(
+            kind,
+            SessionIndexKind::ByCwd | SessionIndexKind::ByHash | SessionIndexKind::ByUuid
+        )
             && fs::symlink_metadata(&resolved)
                 .is_ok_and(|metadata| metadata.file_type().is_symlink())
         {
             return Err(CliError::usage(
-                "invalid session index: by-cwd entry is a symlink",
+                "invalid session index: secondary index entry is a symlink",
             ));
         }
         let content = read_file_to_string(&resolved)?;

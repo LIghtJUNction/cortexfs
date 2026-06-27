@@ -73,7 +73,11 @@ fn normalized_ls_path(path: &str) -> String {
 }
 
 fn read_dir_names(dir: &Path) -> Result<Vec<String>, CliError> {
-    let entries = fs::read_dir(dir).map_err(|error| {
+    let directory = open_read_dir_plain_directory(dir).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", dir.display()))
+    })?;
+    let fd_path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
+    let entries = fs::read_dir(fd_path).map_err(|error| {
         CliError::unavailable(format!("cannot read {}: {error}", dir.display()))
     })?;
     let mut names = Vec::new();
@@ -87,6 +91,56 @@ fn read_dir_names(dir: &Path) -> Result<Vec<String>, CliError> {
 
     names.sort();
     Ok(names)
+}
+
+fn open_read_dir_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_single_read_dir_plain_directory(Path::new("/"))?
+    } else {
+        open_single_read_dir_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "directory path is not utf-8")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_read_dir_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "path is not a directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn which_object(root: &Path, class: ObjectClass, name: &str) -> Result<(), CliError> {
@@ -440,9 +494,9 @@ fn render_agent_event_lines(
     let mut line = String::new();
     loop {
         line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(_bytes) => {}
+        match read_agent_socket_event_line_limited(&mut reader, &mut line) {
+            Ok(None) => break,
+            Ok(Some(_bytes)) => {}
             Err(error)
                 if interrupt.is_some()
                     && matches!(
@@ -519,6 +573,32 @@ fn render_agent_event_lines(
     })
 }
 
+fn read_agent_socket_event_line_limited(
+    reader: &mut impl BufRead,
+    line: &mut String,
+) -> io::Result<Option<usize>> {
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAX_SOCKET_FRAME_BYTES.saturating_add(1)).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("socket frame read limit is invalid: {error}"),
+        )
+    })?;
+    let read = reader.take(limit).read_until(b'\n', &mut bytes)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_SOCKET_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "agent socket response frame exceeds limit",
+        ));
+    }
+    *line = String::from_utf8(bytes)
+        .map_err(|_error| io::Error::new(io::ErrorKind::InvalidData, "agent socket response is not UTF-8"))?;
+    Ok(Some(read))
+}
+
 fn exit_code_u8(code: ExitCode) -> u8 {
     u8::from(code != ExitCode::SUCCESS)
 }
@@ -569,9 +649,9 @@ fn collect_agent_events_buffered_with(
     let mut line = String::new();
     loop {
         line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break,
-            Ok(bytes) => {
+        match read_agent_socket_event_line_limited(&mut reader, &mut line) {
+            Ok(None) => break,
+            Ok(Some(bytes)) => {
                 response_bytes = response_bytes.checked_add(bytes).ok_or_else(|| {
                     CliError::unavailable("agent response exceeds buffered response limit")
                 })?;
@@ -856,7 +936,7 @@ fn object_socket_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
 
 fn current_session_name(session_root: &Path) -> Result<String, CliError> {
     let current_path = session_root.join("index").join("current");
-    match fs::read_to_string(&current_path) {
+    match read_current_session_file(&current_path) {
         Ok(value) => {
             let session = value.trim();
             if is_object_name(session) {
@@ -883,6 +963,48 @@ fn current_session_name(session_root: &Path) -> Result<String, CliError> {
     }
 }
 
+fn read_current_session_file(path: &Path) -> io::Result<String> {
+    let mut file = open_current_session_plain_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > 64 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "current session file is not a bounded regular file",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_current_session_plain_file(path: &Path) -> io::Result<fs::File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "session file has no parent"))?;
+    let parent_dir = open_read_dir_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid session file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    Ok(fs::File::from(file_fd))
+}
+
 fn ctx_home(root: &Path) -> Result<PathBuf, CliError> {
     if let Some(home) = env::var_os("CTX_HOME") {
         return Ok(PathBuf::from(home));
@@ -892,8 +1014,7 @@ fn ctx_home(root: &Path) -> Result<PathBuf, CliError> {
 }
 
 fn current_uid() -> Result<String, CliError> {
-    let output = std::process::Command::new("id")
-        .arg("-u")
+    let output = id_command()
         .output()
         .map_err(|error| CliError::unavailable(format!("cannot run id -u: {error}")))?;
     if !output.status.success() {
@@ -901,9 +1022,75 @@ fn current_uid() -> Result<String, CliError> {
     }
     let uid = String::from_utf8(output.stdout)
         .map_err(|_error| CliError::unavailable("id -u returned non-UTF-8 output"))?;
-    let uid = uid.trim();
+    parse_current_uid(&uid)
+}
+
+fn parse_current_uid(output: &str) -> Result<String, CliError> {
+    let uid = output.trim();
     if uid.is_empty() {
         return Err(CliError::unavailable("id -u returned empty output"));
     }
+    if !uid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(CliError::unavailable("id -u returned invalid uid"));
+    }
     Ok(uid.to_owned())
+}
+
+const ID_PROGRAM: &str = "/usr/bin/id";
+
+fn get_id_program() -> &'static str {
+    ID_PROGRAM
+}
+
+fn id_command() -> std::process::Command {
+    let mut command = std::process::Command::new(get_id_program());
+    command
+        .arg("-u")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin");
+    command
+}
+
+#[cfg(test)]
+mod objects_socket_id_program_tests {
+    use super::{get_id_program, id_command, parse_current_uid};
+
+    #[test]
+    fn get_id_program_returns_absolute_path() {
+        assert_eq!(get_id_program(), "/usr/bin/id");
+    }
+
+    #[test]
+    fn id_command_uses_clean_runtime_environment() {
+        let command = id_command();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let mut envs = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+        envs.sort();
+
+        assert_eq!(command.get_program(), "/usr/bin/id");
+        assert_eq!(args, vec!["-u".to_owned()]);
+        assert_eq!(
+            envs,
+            vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
+        );
+    }
+
+    #[test]
+    fn parse_current_uid_accepts_digits_only() {
+        assert_eq!(parse_current_uid("1000\n"), Ok("1000".to_owned()));
+        assert!(parse_current_uid("1000\n1001\n").is_err());
+        assert!(parse_current_uid("user\n").is_err());
+        assert!(parse_current_uid("\n").is_err());
+    }
 }

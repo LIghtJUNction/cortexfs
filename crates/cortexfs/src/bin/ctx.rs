@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 use std::borrow::Cow;
 use std::env;
 use std::ffi::OsString;
@@ -6,8 +8,8 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::Shutdown;
-use std::os::fd::AsFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::fd::{AsFd, AsRawFd};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
@@ -41,10 +43,14 @@ fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(code) => code,
         Err(error) => {
-            let _ignored = write_error(&format!("ctx: {}", error.message));
+            let _ignored = write_error(&cli_error_line(&error));
             ExitCode::from(error.code)
         }
     }
+}
+
+fn cli_error_line(error: &CliError) -> String {
+    format!("ctx: {}", terminal_safe_text(&error.message))
 }
 
 include!("ctx/parse.rs");

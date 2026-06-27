@@ -1,11 +1,14 @@
 use std::collections::VecDeque;
 use std::env;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::DEFAULT_AGENT_PROMPT_TEMPLATE;
+use nix::libc;
 use serde_json::Value;
 
 pub const MAX_SKILL_METADATA_CHARS: usize = 8_000;
@@ -208,7 +211,8 @@ pub fn format_skill_metadata_with_budget(
     let warning = format!(
         "WARNING: skill metadata exceeded the {max_chars} character budget; some skills were omitted.\n\n"
     );
-    let mut output = warning;
+    let mut output = String::new();
+    push_str_byte_limit(&mut output, &warning, max_chars);
     for skill in &skills {
         let line = format_skill_metadata_item(skill, true);
         if output.len() + line.len() > max_chars {
@@ -216,7 +220,7 @@ pub fn format_skill_metadata_with_budget(
         }
         output.push_str(&line);
     }
-    if output.trim().is_empty() {
+    if max_chars > 0 && output.trim().is_empty() {
         "(no skills discovered)".to_owned()
     } else {
         output
@@ -248,10 +252,13 @@ fn discover_skill_metadata() -> Vec<SkillMetadata> {
 }
 
 fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
-    if depth > 8 || paths.len() >= MAX_SKILL_FILES || !is_regular_directory(root) {
+    if depth > 8 || paths.len() >= MAX_SKILL_FILES {
         return;
     }
-    let Ok(entries) = fs::read_dir(root) else {
+    let Ok(root_dir) = open_directory_no_symlink_components(root) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(proc_fd_path(&root_dir)) else {
         return;
     };
     for entry in entries.flatten() {
@@ -264,12 +271,14 @@ fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
         if file_type.is_symlink() {
             continue;
         }
-        let path = entry.path();
-        if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
-            if !file_type.is_dir() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let path = root.join(name.as_ref());
+        if name.as_ref() == "SKILL.md" {
+            if fd_entry_is_regular_file(&root_dir, &name) {
                 paths.push(path);
             }
-        } else if file_type.is_dir() {
+        } else if fd_entry_is_directory(&root_dir, &name) {
             collect_skill_files(&path, paths, depth + 1);
         }
     }
@@ -330,25 +339,129 @@ fn push_str_byte_limit(output: &mut String, value: &str, max_bytes: usize) {
     }
 }
 
-fn is_regular_directory(path: &Path) -> bool {
-    fs::symlink_metadata(path).is_ok_and(|metadata| {
-        let file_type = metadata.file_type();
-        file_type.is_dir() && !file_type.is_symlink()
-    })
-}
-
 fn read_bounded_regular_utf8(path: &Path, max_bytes: u64) -> Option<String> {
-    let metadata = fs::symlink_metadata(path).ok()?;
+    let mut content = String::new();
+    let file = open_plain_file_no_follow(path).ok()?;
+    let metadata = file.metadata().ok()?;
     if !metadata.is_file() || metadata.len() > max_bytes {
         return None;
     }
-    let mut content = String::new();
-    File::open(path)
-        .ok()?
-        .take(max_bytes)
+    file.take(max_bytes.saturating_add(1))
         .read_to_string(&mut content)
         .ok()?;
+    if u64::try_from(content.len()).ok()? > max_bytes {
+        return None;
+    }
     Some(content)
+}
+
+fn open_plain_file_no_follow(path: &Path) -> std::io::Result<File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
+    let parent_dir = open_directory_no_symlink_components(parent)?;
+    let file = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(File::from(file))
+}
+
+fn open_directory_no_symlink_components(path: &Path) -> std::io::Result<File> {
+    let mut directory = if path.is_absolute() {
+        open_directory_no_follow(Path::new("/"))?
+    } else {
+        open_directory_no_follow(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = File::from(next);
+            }
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_directory_no_follow(path: &Path) -> std::io::Result<File> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
+}
+
+fn fd_entry_is_regular_file(parent_dir: &File, name: &str) -> bool {
+    nix::sys::stat::fstatat(parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .is_ok_and(|stat| stat.st_mode & libc::S_IFMT == libc::S_IFREG)
+}
+
+fn fd_entry_is_directory(parent_dir: &File, name: &str) -> bool {
+    nix::sys::stat::fstatat(parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .is_ok_and(|stat| stat.st_mode & libc::S_IFMT == libc::S_IFDIR)
+}
+
+fn proc_fd_path(directory: &File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+}
+
+fn read_history_messages_tail(path: &Path) -> std::io::Result<String> {
+    let mut file = open_plain_file_no_follow(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "history messages path is not a plain file",
+        ));
+    }
+    let len = metadata.len();
+    let read_len = len.min(MAX_HISTORY_MESSAGES_READ_BYTES);
+    let start = len.saturating_sub(read_len);
+    file.seek(SeekFrom::Start(start))?;
+
+    let read_len_usize = usize::try_from(read_len)
+        .map_err(|_error| std::io::Error::other("history tail too large"))?;
+    let mut bytes = vec![0; read_len_usize];
+    file.read_exact(&mut bytes)?;
+    if start > 0
+        && let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n')
+    {
+        bytes.drain(..=first_newline);
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn format_skill_metadata(skills: &[SkillMetadata], shorten: bool) -> String {
@@ -399,25 +512,6 @@ pub fn collect_history_messages_from_session(session_dir: &Path, max_chars: usiz
     format_history_messages_jsonl(&messages, max_chars)
 }
 
-fn read_history_messages_tail(path: &Path) -> std::io::Result<String> {
-    let mut file = File::open(path)?;
-    let len = file.metadata()?.len();
-    let read_len = len.min(MAX_HISTORY_MESSAGES_READ_BYTES);
-    let start = len.saturating_sub(read_len);
-    file.seek(SeekFrom::Start(start))?;
-
-    let read_len_usize = usize::try_from(read_len)
-        .map_err(|_error| std::io::Error::other("history tail too large"))?;
-    let mut bytes = vec![0; read_len_usize];
-    file.read_exact(&mut bytes)?;
-    if start > 0
-        && let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n')
-    {
-        bytes.drain(..=first_newline);
-    }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
-}
-
 #[must_use]
 pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String {
     let mut rendered = VecDeque::new();
@@ -447,7 +541,7 @@ pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String
     }
     if rendered.is_empty() {
         if truncated {
-            return history_budget_warning(max_chars).trim_end().to_owned();
+            return clipped_history_budget_warning(max_chars);
         }
         return "(no historical messages injected)".to_owned();
     }
@@ -494,8 +588,18 @@ fn history_budget_warning(max_chars: usize) -> String {
     )
 }
 
+fn clipped_history_budget_warning(max_chars: usize) -> String {
+    let warning = history_budget_warning(max_chars);
+    let mut output = String::new();
+    push_str_byte_limit(&mut output, &warning, max_chars);
+    output.trim_end().to_owned()
+}
+
 fn fit_history_lines(lines: Vec<String>, max_chars: usize) -> String {
     let warning = history_budget_warning(max_chars);
+    if warning.len() > max_chars {
+        return clipped_history_budget_warning(max_chars);
+    }
     let mut selected = Vec::new();
     let mut used = warning.len();
     for line in lines.into_iter().rev() {
@@ -508,7 +612,7 @@ fn fit_history_lines(lines: Vec<String>, max_chars: usize) -> String {
     }
     selected.reverse();
     if selected.is_empty() {
-        warning.trim_end().to_owned()
+        clipped_history_budget_warning(max_chars)
     } else {
         format!("{warning}{}", selected.join("\n"))
     }

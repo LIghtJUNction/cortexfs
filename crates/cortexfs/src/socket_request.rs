@@ -114,6 +114,7 @@ pub fn parse_socket_request_frame(frame: &str) -> Result<SocketRequest, SocketRe
     if !frame.trim_start().starts_with('{') {
         return Err(SocketRequestError::RequestNotObject);
     }
+    serde_json::from_str::<Value>(frame).map_err(|_error| SocketRequestError::InvalidJson)?;
     let request = serde_path_to_error::deserialize::<_, SocketRequestFrame>(
         &mut serde_json::Deserializer::from_str(frame),
     )

@@ -1,8 +1,12 @@
+#![forbid(unsafe_code)]
+
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
@@ -17,6 +21,7 @@ use cortexfs::{
     skill_metadata_budget_from_env,
 };
 use cortexfs_tool_sdk::ToolInvocation;
+use nix::libc;
 use serde_json::Value;
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
@@ -27,7 +32,17 @@ const MAX_TOOL_RESULT_CHARS: usize = 16 * 1024;
 const MAX_CHILD_STDERR_BYTES: usize = 64 * 1024;
 const MAX_STREAM_TOOL_CALL_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_AGENT_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
+const MAX_AGENT_TOOL_CONTEXT_BYTES: usize = 64 * 1024;
+const MAX_AGENT_TOOL_ARGC: usize = 64;
+const MAX_AGENT_TOOL_ARG_BYTES: usize = 8 * 1024;
+const MAX_AGENT_MODEL_FRAME_BYTES: usize = 256 * 1024;
+const MAX_AGENT_MODEL_FRAMES: usize = 1024;
+const MAX_RUNNER_STDIN_INPUT_BYTES: usize = 1024 * 1024;
+const MAX_RUNNER_CONTROL_BYTES: u64 = 64 * 1024;
 const AGENT_TOOL_TIMEOUT_SECONDS: u64 = 20;
+const MAX_AGENT_TOOL_TIMEOUT_SECONDS: u64 = 120;
+const AGENT_MODEL_TIMEOUT_SECONDS: u64 = 120;
+const MAX_AGENT_MODEL_TIMEOUT_SECONDS: u64 = 600;
 
 include!("../cortexfs_object_runner_provider.rs");
 
@@ -81,11 +96,8 @@ fn resolve_model_name(name: &str) -> Result<String, String> {
 }
 
 fn resolve_model_alias(ctx_root: &Path, name: &str) -> Result<String, String> {
-    let target = fs::read_link(ctx_root.join("model").join(name))
+    let target = read_model_alias_target(ctx_root, name)
         .map_err(|_error| format!("missing model alias: {name}"))?;
-    let Some(target) = target.to_str() else {
-        return Err(format!("invalid model alias: {name}"));
-    };
     let Some(model) = target.strip_prefix("/ctx/model/") else {
         return Err(format!("invalid model alias target: {name}"));
     };
@@ -93,6 +105,12 @@ fn resolve_model_alias(ctx_root: &Path, name: &str) -> Result<String, String> {
         return Err(format!("invalid model alias target: {name}"));
     }
     Ok(model.to_owned())
+}
+
+fn read_model_alias_target(ctx_root: &Path, name: &str) -> io::Result<String> {
+    let model_dir = open_plain_directory(&ctx_root.join("model"))?;
+    let target = nix::fcntl::readlinkat(&model_dir, name)?;
+    Ok(target.to_string_lossy().into_owned())
 }
 
 fn is_model_alias(name: &str) -> bool {
@@ -198,7 +216,7 @@ fn model_fallback_chain(ctx_root: &Path, model: &str) -> Vec<String> {
         .join(provider)
         .join(format!("{name}.d"))
         .join("fallback");
-    let Ok(content) = fs::read_to_string(path) else {
+    let Ok(content) = read_small_plain_text_file(&path) else {
         return Vec::new();
     };
     let (fallback, report) = parse_model_fallback(&content);
@@ -214,19 +232,40 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let mut config = AgentModelRunConfig::new(name)?;
-    if !config.model_path.exists() {
+    if !is_regular_file_no_follow(&config.model_path) {
         let message = missing_model_message(&config.ctx_root, &config.model, &config.model_path);
         return write_tool_start(&mut stdout, &config.run, name)
             .and_then(|()| write_tool_error(&mut stdout, &config.run, "ENOENT", &message))
             .map_err(|error| format!("cannot write output: {error}"));
     }
+    run_agent_tool_loop(
+        &mut config,
+        &input,
+        &mut stdout,
+        run_agent_model_once,
+        execute_agent_tool_call,
+    )
+}
+
+fn run_agent_tool_loop<W, M, T>(
+    config: &mut AgentModelRunConfig,
+    input: &str,
+    stdout: &mut W,
+    mut run_model_once: M,
+    mut execute_tool_call: T,
+) -> Result<(), String>
+where
+    W: Write,
+    M: FnMut(&AgentModelRunConfig, &str, &mut W) -> Result<AgentModelRunOutcome, String>,
+    T: FnMut(&AgentModelRunConfig, &AgentToolCall) -> Result<String, String>,
+{
     let mut seen_tool_calls = BTreeSet::new();
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
-        let outcome = run_agent_model_once(&config, &input, &mut stdout)?;
+        let outcome = run_model_once(config, input, stdout)?;
         if let Some(tool_call) = first_tool_call(&outcome.frames)? {
             if !seen_tool_calls.insert(tool_call_signature(&tool_call)) {
                 return write_tool_error(
-                    &mut stdout,
+                    stdout,
                     &config.run,
                     "ELOOP",
                     "agent repeated the same tool call",
@@ -234,21 +273,21 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
                 .map_err(|error| format!("cannot write output: {error}"));
             }
             write_agent_frames_for_tool_iteration(
-                &mut stdout,
+                stdout,
                 &config.run,
                 &outcome.frames,
                 &tool_call,
             )?;
-            let result = execute_agent_tool_call(&config, &tool_call)
+            let result = execute_tool_call(config, &tool_call)
                 .unwrap_or_else(|error| format!("ERROR: {error}\n"));
-            write_tool_result_event(&mut stdout, &config.run, &tool_call, &result)?;
+            write_tool_result_event(stdout, &config.run, &tool_call, &result)?;
             stdout
                 .flush()
                 .map_err(|error| format!("cannot write output: {error}"))?;
             config.push_tool_result(&tool_call, &result);
             if iteration == MAX_AGENT_TOOL_ITERATIONS {
                 return write_tool_error(
-                    &mut stdout,
+                    stdout,
                     &config.run,
                     "ELOOP",
                     "agent tool loop limit exceeded",
@@ -259,7 +298,7 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
         }
 
         if outcome.streamed {
-            write_done_frames(&mut stdout, &outcome.frames)?;
+            write_done_frames(stdout, &outcome.frames)?;
             if outcome.success {
                 return Ok(());
             }
@@ -268,7 +307,7 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
             }
             return Err("agent model failed".to_owned());
         }
-        write_agent_frames(&mut stdout, &outcome.frames)?;
+        write_agent_frames(stdout, &outcome.frames)?;
         if outcome.success {
             return Ok(());
         }
@@ -303,13 +342,11 @@ impl AgentModelRunConfig {
         let ctx_root =
             env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
         let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
-        let model = fs::read_to_string(
-            source
-                .join("agent")
-                .join(format!("{agent}.d"))
-                .join("model"),
-        )
-        .map_or_else(
+        let model_path = source
+            .join("agent")
+            .join(format!("{agent}.d"))
+            .join("model");
+        let model = read_small_plain_text_file(&model_path).map_or_else(
             |_error| "main".to_owned(),
             |content| content.trim().to_owned(),
         );
@@ -321,25 +358,16 @@ impl AgentModelRunConfig {
         let candidates = model_candidates(&ctx_root, &model)?;
         let selected = candidates
             .iter()
-            .find(|candidate| candidate.path.exists())
+            .find(|candidate| is_regular_file_no_follow(&candidate.path))
             .or_else(|| candidates.first())
             .ok_or_else(|| format!("invalid model reference: {model}"))?;
         let model_path = selected.path.clone();
         let model = selected.name.clone();
-        let system_prompt = fs::read_to_string(
-            source
-                .join("agent")
-                .join(format!("{agent}.d"))
-                .join("system.md"),
-        )
-        .unwrap_or_default();
-        let prompt_template = fs::read_to_string(
-            source
-                .join("agent")
-                .join(format!("{agent}.d"))
-                .join("prompt.template.md"),
-        )
-        .unwrap_or_else(|_error| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());
+        let agent_dir = source.join("agent").join(format!("{agent}.d"));
+        let system_prompt =
+            read_small_plain_text_file(&agent_dir.join("system.md")).unwrap_or_default();
+        let prompt_template = read_small_plain_text_file(&agent_dir.join("prompt.template.md"))
+            .unwrap_or_else(|_error| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());
         Ok(Self {
             agent: agent.to_owned(),
             source,
@@ -366,6 +394,7 @@ impl AgentModelRunConfig {
         self.tool_context.push_str(&tool_call.name);
         self.tool_context.push_str(":\n");
         self.tool_context.push_str(result);
+        trim_tool_context_to_limit(&mut self.tool_context);
     }
 }
 
@@ -380,8 +409,29 @@ fn run_agent_model_once(
     input: &str,
     stdout: &mut impl Write,
 ) -> Result<AgentModelRunOutcome, String> {
-    let mut child = Command::new(&config.model_path)
+    run_agent_model_once_with_timeout(
+        config,
+        input,
+        stdout,
+        Duration::from_secs(agent_model_timeout_seconds()),
+    )
+}
+
+fn run_agent_model_once_with_timeout(
+    config: &AgentModelRunConfig,
+    input: &str,
+    stdout: &mut impl Write,
+    timeout: Duration,
+) -> Result<AgentModelRunOutcome, String> {
+    let model_executable = open_executable_no_follow(&config.model_path)
+        .map_err(|error| format!("cannot run agent model: {error}"))?;
+    let mut command = Command::new(proc_fd_path(&model_executable));
+    command
         .arg(input)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("CTX_ROOT", &config.ctx_root)
+        .env("CTX_SOURCE", &config.source)
         .env("CTX_RUN_ID", &config.run)
         .env("CTX_AGENT", &config.agent)
         .env("CTX_AGENT_SYSTEM", &config.system_prompt)
@@ -389,32 +439,73 @@ fn run_agent_model_once(
         .env("CTX_AGENT_RULES", &config.rules)
         .env("CTX_AGENT_SKILLS", &config.skills)
         .env("CTX_AGENT_CURRENT_TIME_UNIX", &config.current_time_unix)
-        .env("CTX_AGENT_TOOL_CONTEXT", &config.tool_context)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .env("CTX_AGENT_TOOL_CONTEXT", &config.tool_context);
+    command.process_group(0);
+    pass_runtime_provider_secret_env(&mut command);
+    let mut child = spawn_with_etxtbsy_retry(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
         .map_err(|error| format!("cannot run agent model: {error}"))?;
     let child_stdout = child
         .stdout
         .take()
         .ok_or_else(|| "cannot read agent model output".to_owned())?;
     let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
+    let stdout_reader = spawn_agent_model_stdout_reader(child_stdout);
     let mut frames = Vec::new();
     let mut streamed = false;
-    for line in BufReader::new(child_stdout).lines() {
-        let line = line.map_err(|error| format!("cannot read agent model output: {error}"))?;
-        let line = normalize_agent_model_frame(&line, &config.run);
-        if matches!(
-            event_type(&line).as_deref(),
-            Some("delta" | "reasoning_delta" | "usage" | "error")
-        ) {
-            writeln!(stdout, "{line}")
-                .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))?;
-            streamed = true;
+    let deadline = Instant::now() + timeout;
+    loop {
+        let wait = deadline
+            .checked_duration_since(Instant::now())
+            .map(|remaining| remaining.min(Duration::from_millis(50)))
+            .unwrap_or_default();
+        match stdout_reader.receiver.recv_timeout(wait) {
+            Ok(Ok(line)) => {
+                if frames.len() >= MAX_AGENT_MODEL_FRAMES {
+                    let message = "agent model output frame count exceeds limit";
+                    terminate_process_group(&mut child);
+                    let _ignored = child.wait();
+                    let _stderr = collect_child_stderr(stderr_reader);
+                    let _ignored = stdout_reader.handle.join();
+                    return overflow_agent_model_outcome(stdout, &config.run, message);
+                }
+                let line = normalize_agent_model_frame(&line, &config.run);
+                if matches!(
+                    event_type(&line).as_deref(),
+                    Some("delta" | "reasoning_delta" | "usage" | "error")
+                ) {
+                    writeln!(stdout, "{line}")
+                        .and_then(|()| stdout.flush())
+                        .map_err(|error| {
+                            terminate_process_group(&mut child);
+                            let _ignored = child.wait();
+                            format!("cannot write output: {error}")
+                        })?;
+                    streamed = true;
+                }
+                frames.push(line);
+            }
+            Ok(Err(error)) => {
+                terminate_process_group(&mut child);
+                let _ignored = child.wait();
+                let _stderr = collect_child_stderr(stderr_reader);
+                let _ignored = stdout_reader.handle.join();
+                return overflow_agent_model_outcome(stdout, &config.run, &error);
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if Instant::now() >= deadline {
+                    let message = format!("agent model timed out after {}s", timeout.as_secs());
+                    terminate_process_group(&mut child);
+                    let _ignored = child.wait();
+                    let _stderr = collect_child_stderr(stderr_reader);
+                    let _ignored = stdout_reader.handle.join();
+                    return agent_model_error_outcome(stdout, &config.run, "ETIMEDOUT", &message);
+                }
+                let _ignored = child.try_wait().map_err(|error| error.to_string())?;
+            }
         }
-        frames.push(line);
     }
+    let _ignored = stdout_reader.handle.join();
     let status = child
         .wait()
         .map_err(|error| format!("cannot run agent model: {error}"))?;
@@ -445,6 +536,116 @@ fn run_agent_model_once(
     })
 }
 
+fn overflow_agent_model_outcome(
+    stdout: &mut impl Write,
+    run: &str,
+    message: &str,
+) -> Result<AgentModelRunOutcome, String> {
+    agent_model_error_outcome(stdout, run, "EOVERFLOW", message)
+}
+
+fn agent_model_error_outcome(
+    stdout: &mut impl Write,
+    run: &str,
+    code: &str,
+    message: &str,
+) -> Result<AgentModelRunOutcome, String> {
+    write_error_event(stdout, run, code, message)
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("cannot write output: {error}"))?;
+    Ok(AgentModelRunOutcome {
+        frames: vec![
+            serde_json::json!({
+                "type": "error",
+                "run": run,
+                "code": code,
+                "message": message
+            })
+            .to_string(),
+        ],
+        success: false,
+        streamed: true,
+    })
+}
+
+struct AgentModelStdoutReader {
+    receiver: std::sync::mpsc::Receiver<Result<String, String>>,
+    handle: thread::JoinHandle<()>,
+}
+
+fn spawn_agent_model_stdout_reader(stdout: std::process::ChildStdout) -> AgentModelStdoutReader {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let handle = thread::spawn(move || {
+        let mut stdout = BufReader::new(stdout);
+        loop {
+            match read_agent_model_frame_line(&mut stdout) {
+                Ok(Some(line)) => {
+                    if sender.send(Ok(line)).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let _ignored = sender.send(Err(error));
+                    break;
+                }
+            }
+        }
+    });
+    AgentModelStdoutReader { receiver, handle }
+}
+
+fn spawn_with_etxtbsy_retry(command: &mut Command) -> io::Result<Child> {
+    for _attempt in 0..4 {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if error.raw_os_error() == Some(libc::ETXTBSY) => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    command.spawn()
+}
+
+fn read_agent_model_frame_line(reader: &mut impl BufRead) -> Result<Option<String>, String> {
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAX_AGENT_MODEL_FRAME_BYTES.saturating_add(1))
+        .map_err(|_error| "agent model output frame limit is invalid".to_owned())?;
+    let read = reader
+        .take(limit)
+        .read_until(b'\n', &mut bytes)
+        .map_err(|error| format!("cannot read agent model output: {error}"))?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_AGENT_MODEL_FRAME_BYTES {
+        return Err("agent model output frame exceeds byte limit".to_owned());
+    }
+    if bytes.ends_with(b"\n") {
+        bytes.pop();
+        if bytes.ends_with(b"\r") {
+            bytes.pop();
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| format!("agent model output frame is not utf-8: {error}"))
+}
+
+fn pass_runtime_provider_secret_env(command: &mut Command) {
+    for name in [
+        "CTX_PROVIDER_SECRET_FD",
+        "CTX_PROVIDER_SECRET_PATH",
+        "CTX_PROVIDER_SECRET_PROVIDER",
+        "CTX_PROVIDER_SECRET_SLOT",
+    ] {
+        if let Some(value) = env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+}
+
 fn spawn_child_stderr_reader(mut stderr: std::process::ChildStderr) -> thread::JoinHandle<String> {
     thread::spawn(move || read_limited_text(&mut stderr, MAX_CHILD_STDERR_BYTES))
 }
@@ -471,6 +672,154 @@ fn read_limited_text(reader: &mut impl Read, limit: usize) -> String {
         }
     }
     String::from_utf8_lossy(&output).into_owned()
+}
+
+fn read_small_plain_text_file(path: &Path) -> io::Result<String> {
+    let mut file = open_plain_read_file(path)?;
+    let metadata = file.metadata()?;
+    if metadata.len() > MAX_RUNNER_CONTROL_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "file exceeds runner control read limit",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_plain_read_file(path: &Path) -> io::Result<fs::File> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
+    })?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
+    // ponytail: no O_CLOEXEC here; shebang interpreters reopen /proc/self/fd/N after exec.
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW,
+        nix::sys::stat::Mode::empty(),
+    )?;
+    let file = fs::File::from(file_fd);
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "path is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+fn open_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_single_plain_directory(Path::new("/"))?
+    } else {
+        open_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
+}
+
+fn is_regular_file_no_follow(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    let Ok(parent_dir) = open_plain_directory(parent) else {
+        return false;
+    };
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Ok(file_fd) = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    ) else {
+        return false;
+    };
+    fs::File::from(file_fd)
+        .metadata()
+        .is_ok_and(|metadata| metadata.is_file())
+}
+
+fn open_executable_no_follow(path: &Path) -> io::Result<fs::File> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
+    })?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW,
+        nix::sys::stat::Mode::empty(),
+    )?;
+    let file = fs::File::from(file_fd);
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "path is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+fn proc_fd_path(file: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
 
 fn normalize_agent_model_frame(frame: &str, run: &str) -> String {
@@ -536,10 +885,7 @@ fn tool_call_from_event_frame(frame: &str) -> Result<Option<AgentToolCall>, Stri
 
 fn event_text(frame: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(frame).ok()?;
-    if !matches!(
-        value.get("type").and_then(Value::as_str),
-        Some("delta" | "reasoning_delta")
-    ) {
+    if value.get("type").and_then(Value::as_str) != Some("delta") {
         return None;
     }
     value.get("text").and_then(Value::as_str).map(str::to_owned)
@@ -583,29 +929,26 @@ fn agent_tool_call_from_value(value: &Value) -> Result<Option<AgentToolCall>, St
 }
 
 fn tool_call_args(arguments: Option<&Value>) -> Result<Vec<OsString>, String> {
-    let Some(arguments) = arguments else {
-        return Ok(Vec::new());
+    let args = match arguments {
+        None => Vec::new(),
+        Some(arguments) => {
+            if let Some(args) = arguments.get("args").or_else(|| arguments.get("argv")) {
+                json_string_array(args)?
+            } else if let Some(command) = arguments.get("command").and_then(Value::as_str) {
+                shell_words(command)?
+            } else if let Some(input) = arguments.get("input").and_then(Value::as_str) {
+                vec![input.to_owned()]
+            } else if let Some(value) = arguments.as_str() {
+                shell_words(value)?
+            } else {
+                return Err(
+                    "tool_call arguments must contain args, argv, command, or input".to_owned(),
+                );
+            }
+        }
     };
-    if let Some(args) = arguments.get("args").or_else(|| arguments.get("argv")) {
-        return json_string_array(args)
-            .map(|values| values.into_iter().map(OsString::from).collect());
-    }
-    if let Some(command) = arguments.get("command").and_then(Value::as_str) {
-        return Ok(shell_words(command)?
-            .into_iter()
-            .map(OsString::from)
-            .collect());
-    }
-    if let Some(input) = arguments.get("input").and_then(Value::as_str) {
-        return Ok(vec![OsString::from(input)]);
-    }
-    if let Some(value) = arguments.as_str() {
-        return Ok(shell_words(value)?
-            .into_iter()
-            .map(OsString::from)
-            .collect());
-    }
-    Err("tool_call arguments must contain args, argv, command, or input".to_owned())
+    validate_tool_call_arg_limits(&args)?;
+    Ok(args.into_iter().map(OsString::from).collect())
 }
 
 fn json_string_array(value: &Value) -> Result<Vec<String>, String> {
@@ -659,6 +1002,21 @@ fn shell_words(value: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
+fn validate_tool_call_arg_limits(args: &[String]) -> Result<(), String> {
+    if args.len() > MAX_AGENT_TOOL_ARGC {
+        return Err("tool_call args exceed argument count limit".to_owned());
+    }
+    let bytes = args
+        .iter()
+        .map(String::len)
+        .try_fold(0_usize, usize::checked_add)
+        .ok_or_else(|| "tool_call args exceed byte limit".to_owned())?;
+    if bytes > MAX_AGENT_TOOL_ARG_BYTES {
+        return Err("tool_call args exceed byte limit".to_owned());
+    }
+    Ok(())
+}
+
 fn validate_agent_tsh_args(args: &[OsString]) -> Result<(), String> {
     let Some(first) = args.first() else {
         return Ok(());
@@ -691,15 +1049,12 @@ fn execute_agent_tool_call(
     else {
         return Err(format!("tool not found: {}", tool_call.name));
     };
-    let policy_text = fs::read_to_string(hit.control_dir().join("policy")).map_err(|error| {
-        format!(
-            "cannot read {}: {error}",
-            hit.control_dir().join("policy").display()
-        )
-    })?;
+    let policy_path = hit.control_dir().join("policy");
+    let policy_text = read_small_plain_text_file(&policy_path)
+        .map_err(|error| format!("cannot read {}: {error}", policy_path.display()))?;
     let tool_policy = PolicyV0::parse(&policy_text)
         .map_err(|_error| format!("invalid policy for tool:{}", tool_call.name))?;
-    authorize_tool_execution(
+    let grant = authorize_tool_execution(
         view.tool_path(),
         &tool_call.name,
         ToolExecutionAuthority::new(
@@ -713,7 +1068,9 @@ fn execute_agent_tool_call(
     .map_err(|denial| tool_denial_message(&tool_call.name, denial))?;
     validate_agent_tsh_args(&tool_call.args)?;
 
-    let mut command = Command::new(hit.path());
+    let tool_executable = open_executable_no_follow(grant.hit().path())
+        .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
+    let mut command = Command::new(proc_fd_path(&tool_executable));
     command
         .args(&tool_call.args)
         .env_clear()
@@ -763,7 +1120,7 @@ fn run_agent_tool_process_with_timeout(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let mut child = spawn_with_etxtbsy_retry(command).map_err(|error| error.to_string())?;
     let stdout = child
         .stdout
         .take()
@@ -773,11 +1130,57 @@ fn run_agent_tool_process_with_timeout(
         .take()
         .ok_or_else(|| "cannot read tool stderr".to_owned())?;
     let stdout_reader =
-        thread::spawn(move || read_limited_bytes(stdout, MAX_AGENT_TOOL_OUTPUT_BYTES));
+        thread::spawn(move || read_limited_bytes(stdout, MAX_AGENT_TOOL_OUTPUT_BYTES + 1));
     let stderr_reader =
-        thread::spawn(move || read_limited_bytes(stderr, MAX_AGENT_TOOL_OUTPUT_BYTES));
+        thread::spawn(move || read_limited_bytes(stderr, MAX_AGENT_TOOL_OUTPUT_BYTES + 1));
+    let mut stdout_reader = Some(stdout_reader);
+    let mut stderr_reader = Some(stderr_reader);
+    let mut stdout = None;
+    let mut stderr = None;
     let deadline = Instant::now() + timeout;
     let status = loop {
+        if stdout.is_none()
+            && stdout_reader
+                .as_ref()
+                .is_some_and(thread::JoinHandle::is_finished)
+        {
+            let output = stdout_reader
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .unwrap_or_default();
+            if output.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
+                terminate_process_group(&mut child);
+                let _ignored = child.wait();
+                if let Some(reader) = stderr_reader.take() {
+                    let _ignored = reader.join();
+                }
+                return Err(format!(
+                    "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
+                ));
+            }
+            stdout = Some(output);
+        }
+        if stderr.is_none()
+            && stderr_reader
+                .as_ref()
+                .is_some_and(thread::JoinHandle::is_finished)
+        {
+            let output = stderr_reader
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .unwrap_or_default();
+            if output.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
+                terminate_process_group(&mut child);
+                let _ignored = child.wait();
+                if let Some(reader) = stdout_reader.take() {
+                    let _ignored = reader.join();
+                }
+                return Err(format!(
+                    "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
+                ));
+            }
+            stderr = Some(output);
+        }
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
             break status;
         }
@@ -788,8 +1191,23 @@ fn run_agent_tool_process_with_timeout(
         }
         thread::sleep(Duration::from_millis(50));
     };
-    let stdout = stdout_reader.join().unwrap_or_default();
-    let stderr = stderr_reader.join().unwrap_or_default();
+    let stdout = stdout.unwrap_or_else(|| {
+        stdout_reader
+            .take()
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    });
+    let stderr = stderr.unwrap_or_else(|| {
+        stderr_reader
+            .take()
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    });
+    if stdout.len() > MAX_AGENT_TOOL_OUTPUT_BYTES || stderr.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
+        return Err(format!(
+            "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
+        ));
+    }
     Ok(std::process::Output {
         status,
         stdout,
@@ -798,11 +1216,25 @@ fn run_agent_tool_process_with_timeout(
 }
 
 fn agent_tool_timeout_seconds() -> u64 {
-    env::var("CTX_AGENT_TOOL_TIMEOUT_SECONDS")
-        .ok()
+    agent_tool_timeout_seconds_from_env(|name| env::var(name).ok())
+}
+
+fn agent_model_timeout_seconds() -> u64 {
+    agent_model_timeout_seconds_from_env(|name| env::var(name).ok())
+}
+
+fn agent_tool_timeout_seconds_from_env(get_env: impl Fn(&str) -> Option<String>) -> u64 {
+    get_env("CTX_AGENT_TOOL_TIMEOUT_SECONDS")
         .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
+        .filter(|value| (1..=MAX_AGENT_TOOL_TIMEOUT_SECONDS).contains(value))
         .unwrap_or(AGENT_TOOL_TIMEOUT_SECONDS)
+}
+
+fn agent_model_timeout_seconds_from_env(get_env: impl Fn(&str) -> Option<String>) -> u64 {
+    get_env("CTX_AGENT_MODEL_TIMEOUT_SECONDS")
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| (1..=MAX_AGENT_MODEL_TIMEOUT_SECONDS).contains(value))
+        .unwrap_or(AGENT_MODEL_TIMEOUT_SECONDS)
 }
 
 fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
@@ -818,6 +1250,9 @@ fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
         if let Some(chunk) = buffer.get(..kept) {
             output.extend_from_slice(chunk);
         }
+        if output.len() >= limit {
+            break;
+        }
     }
     output
 }
@@ -826,9 +1261,7 @@ fn terminate_process_group(child: &mut Child) {
     if let Ok(pid) = i32::try_from(child.id()) {
         signal_process_group(pid, nix::sys::signal::Signal::SIGTERM);
         for _attempt in 0..5 {
-            if child.try_wait().ok().flatten().is_some() {
-                return;
-            }
+            let _ignored = child.try_wait();
             thread::sleep(Duration::from_millis(50));
         }
         signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
@@ -847,10 +1280,44 @@ fn tool_denial_message(name: &str, denial: ToolExecutionDenial) -> String {
 fn trim_tool_result(result: &str) -> String {
     let mut result = result.to_owned();
     if result.len() > MAX_TOOL_RESULT_CHARS {
-        result.truncate(MAX_TOOL_RESULT_CHARS);
-        result.push_str("\n[truncated]\n");
+        let marker = "\n[truncated]\n";
+        let mut end = MAX_TOOL_RESULT_CHARS.saturating_sub(marker.len());
+        while !result.is_char_boundary(end) {
+            end = end.saturating_sub(1);
+        }
+        result.truncate(end);
+        result.push_str(marker);
     }
     result
+}
+
+fn trim_tool_context_to_limit(context: &mut String) {
+    if context.len() <= MAX_AGENT_TOOL_CONTEXT_BYTES {
+        return;
+    }
+    let marker = "[earlier tool context truncated]\n\n";
+    let budget = MAX_AGENT_TOOL_CONTEXT_BYTES.saturating_sub(marker.len());
+    let mut start = context.len().saturating_sub(budget);
+    while !context.is_char_boundary(start) {
+        start = start.saturating_add(1);
+    }
+    let tail = context.get(start..).unwrap_or_default();
+    if let Some(offset) = tail.find("\n\nTool result ") {
+        start = start.saturating_add(offset).saturating_add(2);
+    }
+    let mut trimmed = String::with_capacity(marker.len() + context.len().saturating_sub(start));
+    trimmed.push_str(marker);
+    trimmed.push_str(context.get(start..).unwrap_or_default());
+    if trimmed.len() > MAX_AGENT_TOOL_CONTEXT_BYTES {
+        let mut retry_start = trimmed.len().saturating_sub(MAX_AGENT_TOOL_CONTEXT_BYTES);
+        while !trimmed.is_char_boundary(retry_start) {
+            retry_start = retry_start.saturating_add(1);
+        }
+        let tail = trimmed.get(retry_start..).unwrap_or_default().to_owned();
+        trimmed.clear();
+        trimmed.push_str(&tail);
+    }
+    *context = trimmed;
 }
 
 fn write_agent_frames(stdout: &mut impl Write, frames: &[String]) -> Result<(), String> {
@@ -931,9 +1398,9 @@ fn write_tool_result_event(
 
 fn missing_model_message(ctx_root: &Path, model: &str, model_path: &Path) -> String {
     if is_model_alias(model)
-        && let Ok(target) = fs::read_link(ctx_root.join("model").join(model))
+        && let Ok(target) = read_model_alias_target(ctx_root, model)
     {
-        return format!("missing model: {model} -> {}", target.display());
+        return format!("missing model: {model} -> {target}");
     }
     format!("missing model: {}", model_path.display())
 }
@@ -991,13 +1458,27 @@ fn run_cli_tool_to_writer(
     }
 }
 
+fn passthrough_tool_program(name: &str) -> Option<&'static str> {
+    match name {
+        "bash" => Some("/usr/bin/bash"),
+        "tmux" => Some("/usr/bin/tmux"),
+        "zellij" => Some("/usr/bin/zellij"),
+        "tsh" => Some("/usr/bin/tsh"),
+        _ => None,
+    }
+}
+
 fn is_passthrough_tool(name: &str) -> bool {
-    matches!(name, "bash" | "tmux" | "zellij" | "tsh")
+    passthrough_tool_program(name).is_some()
 }
 
 fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), String> {
-    let status = Command::new(name)
+    let program = passthrough_tool_program(name)
+        .ok_or_else(|| format!("tool is not implemented by cortexfs-object-runner: {name}"))?;
+    let status = Command::new(program)
         .args(args)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
         .status()
         .map_err(|error| format!("cannot run {name} tool: {error}"))?;
     if status.success() {
@@ -1016,8 +1497,24 @@ fn collect_input(args: &[OsString]) -> io::Result<String> {
     if !input.is_empty() {
         return Ok(input);
     }
+    read_runner_stdin_limited(io::stdin(), MAX_RUNNER_STDIN_INPUT_BYTES)
+}
+
+fn read_runner_stdin_limited(reader: impl Read, max_bytes: usize) -> io::Result<String> {
+    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("stdin read limit is invalid: {error}"),
+        )
+    })?;
     let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+    reader.take(limit).read_to_string(&mut input)?;
+    if input.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "stdin exceeds runner input limit",
+        ));
+    }
     Ok(input)
 }
 

@@ -181,6 +181,16 @@ tmux    也是普通 tool，用来做后台任务或长期 pane
 agent 默认 native tool 只有 `tsh`。后续工具不是凭 prompt 自动出现，而是通过 `tsh tools`、
 `tsh load TOOL`、`tsh pin TOOL` 和 `tsh TOOL ARG...` 逐步进入上下文和执行路径。
 
+不依赖 live 模型的 agent tool-loop smoke：
+
+```bash
+npm run agent-tool-loop:smoke
+```
+
+该 smoke 会验证 `tsh tools`、`tsh load/unload`、object-runner 多轮 tool call、
+工具结果通过 `CTX_AGENT_TOOL_CONTEXT` 回灌给下一轮模型进程，以及授权后的可见 `tsh`
+子进程调用。
+
 ### 上下文窗口管理
 
 CortexFS 把 context 当作工作集，而不是事实源：

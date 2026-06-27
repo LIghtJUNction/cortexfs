@@ -9,13 +9,11 @@ use crate::{
 /// source references.
 #[must_use]
 pub fn inspect_context_pack_json(content: &str) -> ContextPackReport {
-    let Ok(pack) = serde_path_to_error::deserialize::<_, ContextPackJson>(
-        &mut serde_json::Deserializer::from_str(content),
-    ) else {
-        if serde_json::from_str::<Value>(content).is_ok() {
-            return ContextPackReport::new(vec![ContextPackIssue::ItemsNotArray]);
-        }
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
         return ContextPackReport::new(vec![ContextPackIssue::InvalidJson]);
+    };
+    let Ok(pack) = serde_json::from_value::<ContextPackJson>(value) else {
+        return ContextPackReport::new(vec![ContextPackIssue::ItemsNotArray]);
     };
 
     let mut issues = Vec::new();

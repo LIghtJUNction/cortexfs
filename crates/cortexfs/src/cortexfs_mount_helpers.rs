@@ -2,9 +2,11 @@ const TTL: Duration = Duration::from_secs(1);
 const S_IFMT: u32 = 0o170_000;
 const S_IFSOCK: u32 = 0o140_000;
 const FALLBACK_STATFS_BLOCKS: u64 = 1024 * 1024;
-const FALLBACK_STATFS_FREE_BLOCKS: u64 = FALLBACK_STATFS_BLOCKS / 2;
+const FALLBACK_STATFS_USED_BLOCKS: u64 = 1024;
+const FALLBACK_STATFS_FREE_BLOCKS: u64 = FALLBACK_STATFS_BLOCKS - FALLBACK_STATFS_USED_BLOCKS;
 const FALLBACK_STATFS_FILES: u64 = 1024 * 1024;
-const FALLBACK_STATFS_FREE_FILES: u64 = FALLBACK_STATFS_FILES / 2;
+const FALLBACK_STATFS_USED_FILES: u64 = 1024;
+const FALLBACK_STATFS_FREE_FILES: u64 = FALLBACK_STATFS_FILES - FALLBACK_STATFS_USED_FILES;
 const FALLBACK_STATFS_BLOCK_SIZE: u32 = 4096;
 const FALLBACK_STATFS_NAME_MAX: u32 = 255;
 
@@ -86,17 +88,33 @@ fn mount_statfs_for_source(source: &Path) -> MountStatfs {
 }
 
 fn sanitize_mount_statfs(stats: MountStatfs) -> MountStatfs {
-    let blocks = stats.blocks.max(1);
-    let files = stats.files.max(1);
+    let (blocks, blocks_free, blocks_available) = if stats.blocks == 0 {
+        (
+            FALLBACK_STATFS_BLOCKS,
+            FALLBACK_STATFS_FREE_BLOCKS,
+            FALLBACK_STATFS_FREE_BLOCKS,
+        )
+    } else {
+        (
+            stats.blocks,
+            stats.blocks_free.min(stats.blocks),
+            stats.blocks_available.min(stats.blocks),
+        )
+    };
+    let (files, files_free) = if stats.files == 0 {
+        (FALLBACK_STATFS_FILES, FALLBACK_STATFS_FREE_FILES)
+    } else {
+        (stats.files, stats.files_free.min(stats.files))
+    };
     let block_size = stats.block_size.max(1);
     let fragment_size = stats.fragment_size.max(1);
     let name_max = stats.name_max.max(1);
     MountStatfs {
         blocks,
-        blocks_free: stats.blocks_free.min(blocks),
-        blocks_available: stats.blocks_available.min(blocks),
+        blocks_free,
+        blocks_available,
         files,
-        files_free: stats.files_free.min(files),
+        files_free,
         block_size,
         name_max,
         fragment_size,
@@ -251,9 +269,10 @@ impl CortexFuse {
         let Ok(path) = self.model_symlink_child_path(parent, name) else {
             return Ok(false);
         };
-        match fs::remove_file(self.projection.root().join(&path)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        let (parent, file_name) =
+            open_backing_socket_parent(self.projection.root(), &path).map_err(|_error| FuseV1Error::Io)?;
+        match unlinkat(&parent, file_name.as_str(), UnlinkatFlags::NoRemoveDir) {
+            Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
             Err(_error) => return Err(FuseV1Error::Io),
         }
         self.forget_path(&path)?;
@@ -467,7 +486,8 @@ fn estimate_tokens_from_bytes(bytes: u64) -> u64 {
 }
 
 fn child_path(parent: &str, name: &str) -> Option<String> {
-    if name.is_empty() || name.contains('/') {
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0')
+    {
         return None;
     }
     if parent.is_empty() {

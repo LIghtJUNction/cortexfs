@@ -1,6 +1,10 @@
-use std::fs;
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::io::Read as _;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Component, Path, PathBuf};
 
+use nix::libc;
 use serde_json::Value;
 
 use crate::{
@@ -8,6 +12,8 @@ use crate::{
     ContextPackBuiltItem, SESSION_REQUIRED_FILES, atomic_replace_text, inspect_context_jsonl,
     inspect_message_stream_jsonl, is_object_name,
 };
+
+const MAX_CONTEXT_PACK_SOURCE_BYTES: u64 = 1024 * 1024;
 
 /// Error while rebuilding an inspectable context pack.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,7 +82,7 @@ pub fn rebuild_context_pack(
 
     let context = session_dir.join("context");
     let budget = read_context_budget(&context.join("budget"))?;
-    let messages = fs::read_to_string(session_dir.join("messages.jsonl"))
+    let messages = read_plain_text_file(&session_dir.join("messages.jsonl"))
         .map_err(|_error| ContextPackBuildError::CannotRead)?;
     if !inspect_message_stream_jsonl(&messages).is_ok() {
         return Err(ContextPackBuildError::InvalidMessages);
@@ -149,21 +155,21 @@ impl PackCandidate {
 
 fn require_pack_session_files(session_dir: &Path) -> Result<(), ContextPackBuildError> {
     for file in SESSION_REQUIRED_FILES {
-        if !session_dir.join(file).is_file() {
+        if !is_plain_file_path(&session_dir.join(file)) {
             return Err(ContextPackBuildError::MissingSession);
         }
     }
     let context = session_dir.join("context");
-    if !context.is_dir() {
+    if !is_plain_dir_path(&context) {
         return Err(ContextPackBuildError::MissingSession);
     }
     for file in CONTEXT_REQUIRED_FILES {
-        if !context.join(file).is_file() {
+        if !is_plain_file_path(&context.join(file)) {
             return Err(ContextPackBuildError::MissingSession);
         }
     }
     for dir in CONTEXT_REQUIRED_DIRS {
-        if !context.join(dir).is_dir() {
+        if !is_plain_dir_path(&context.join(dir)) {
             return Err(ContextPackBuildError::MissingSession);
         }
     }
@@ -171,7 +177,7 @@ fn require_pack_session_files(session_dir: &Path) -> Result<(), ContextPackBuild
 }
 
 fn read_context_budget(path: &Path) -> Result<Option<u64>, ContextPackBuildError> {
-    let content = fs::read_to_string(path).map_err(|_error| ContextPackBuildError::CannotRead)?;
+    let content = read_plain_text_file(path).map_err(|_error| ContextPackBuildError::CannotRead)?;
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
     let Some(line) = lines.next() else {
         return Ok(None);
@@ -201,7 +207,7 @@ fn append_pinned_pack_candidates(
             continue;
         }
         let path = pinned.join(&name);
-        if !path.is_file() {
+        if !is_plain_file_path(&path) {
             continue;
         }
         let source = format!("context/pinned/{name}");
@@ -286,7 +292,7 @@ fn append_child_result_candidates(
             return Err(ContextPackBuildError::InvalidChildName);
         }
         let child_dir = child_root.join(&child);
-        if !child_dir.is_dir() {
+        if !is_plain_dir_path(&child_dir) {
             continue;
         }
         let result_source = format!("context/child/{child}/result.md");
@@ -308,13 +314,112 @@ fn read_context_source(context: &Path, source: &str) -> Result<String, ContextPa
     let relative = source
         .strip_prefix("context/")
         .ok_or(ContextPackBuildError::CannotRead)?;
-    fs::read_to_string(context.join(relative)).map_err(|error| {
+    read_plain_text_file(&context.join(relative)).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             ContextPackBuildError::MissingSession
         } else {
             ContextPackBuildError::CannotRead
         }
     })
+}
+
+fn is_plain_dir_path(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_dir())
+}
+
+fn is_plain_file_path(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_file())
+}
+
+fn read_plain_text_file(path: &Path) -> std::io::Result<String> {
+    let mut file = open_plain_file_no_follow(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::other("path is not a plain file"));
+    }
+    if metadata.len() > MAX_CONTEXT_PACK_SOURCE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "context pack source is too large",
+        ));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_plain_file_no_follow(path: &Path) -> std::io::Result<File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
+    let parent_dir = open_directory_no_symlink_components(parent)?;
+    let file = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(File::from(file))
+}
+
+fn open_directory_no_symlink_components(path: &Path) -> std::io::Result<File> {
+    let mut directory = if path.is_absolute() {
+        open_directory_no_follow(Path::new("/"))?
+    } else {
+        open_directory_no_follow(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = File::from(next);
+            }
+            Component::ParentDir | Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_directory_no_follow(path: &Path) -> std::io::Result<File> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn select_pack_candidates(
@@ -418,7 +523,14 @@ fn push_markdown_kv(output: &mut String, key: &str, value: &str) {
 }
 
 fn directory_entry_names(path: &Path) -> Result<Vec<String>, ContextPackBuildError> {
-    let entries = fs::read_dir(path).map_err(|error| {
+    let directory = open_directory_no_symlink_components(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ContextPackBuildError::MissingSession
+        } else {
+            ContextPackBuildError::CannotRead
+        }
+    })?;
+    let entries = fs::read_dir(proc_fd_path(&directory)).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             ContextPackBuildError::MissingSession
         } else {
@@ -436,6 +548,10 @@ fn directory_entry_names(path: &Path) -> Result<Vec<String>, ContextPackBuildErr
         names.push(name);
     }
     Ok(names)
+}
+
+fn proc_fd_path(directory: &File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
 }
 
 fn is_safe_relative_file_name(name: &str) -> bool {
