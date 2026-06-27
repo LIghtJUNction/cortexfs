@@ -1770,7 +1770,7 @@ fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> {
 fn curl_config_quote(value: &str) -> Result<String, String> {
     let mut quoted = String::from("\"");
     for character in value.chars() {
-        if matches!(character, '\0' | '\n' | '\r') {
+        if character.is_ascii_control() {
             return Err("curl config value contains a forbidden control character".to_owned());
         }
         if matches!(character, '"' | '\\') {
