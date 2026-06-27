@@ -181,7 +181,7 @@ fn parse_agent_env_control(content: &str) -> Result<Vec<(String, String)>, Agent
         let (key, value) = raw_line
             .split_once('=')
             .ok_or_else(|| AgentRuntimeViewError::InvalidControlFile("env".to_owned()))?;
-        if !is_valid_env_key(key) || value.contains('\0') {
+        if !is_valid_env_key(key) || value.bytes().any(|byte| byte.is_ascii_control()) {
             return Err(AgentRuntimeViewError::InvalidControlFile("env".to_owned()));
         }
         env.push((key.to_owned(), value.to_owned()));
