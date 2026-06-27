@@ -179,6 +179,21 @@ fn handle_agent_executable_socket_request_frame_streaming(
     )?;
     write_socket_runtime_response(stream, &recorder_response)?;
 
+    if let Some(content) = local_agent_response(input) {
+        let local_frames = local_agent_response_frames(id, content);
+        if scope != SocketSessionScope::Temp {
+            let session_dir = runtime.session_root.join(session);
+            record_assistant_response_to_session(&session_dir, id, content)
+                .map_err(SocketRuntimeError::Record)?;
+        }
+        for frame in &local_frames {
+            write_socket_frame(stream, frame)?;
+        }
+        let mut frames = recorder_response.frames().to_vec();
+        frames.extend(local_frames);
+        return Ok(SocketRuntimeResponse::new(frames));
+    }
+
     let agent_frames = run_agent_executable_streaming(stream, runtime, id, session, input)?;
     if scope != SocketSessionScope::Temp {
         let session_dir = runtime.session_root.join(session);
@@ -193,6 +208,68 @@ fn handle_agent_executable_socket_request_frame_streaming(
     let mut frames = recorder_response.frames().to_vec();
     frames.extend(agent_frames);
     Ok(SocketRuntimeResponse::new(frames))
+}
+
+fn local_agent_response(input: &str) -> Option<&'static str> {
+    if asks_to_read_file_without_path(input) {
+        return Some("请提供要读取的文件路径。");
+    }
+    None
+}
+
+fn asks_to_read_file_without_path(input: &str) -> bool {
+    let normalized = input.to_ascii_lowercase();
+    let asks_read = input.contains("读文件")
+        || input.contains("读取文件")
+        || input.contains("看文件")
+        || input.contains("打开文件")
+        || normalized.contains("read file")
+        || normalized.contains("read a file")
+        || normalized.contains("open file")
+        || normalized.contains("cat file");
+    asks_read && !contains_file_path_hint(input)
+}
+
+fn contains_file_path_hint(input: &str) -> bool {
+    input.split_whitespace().any(|word| {
+        let word = word.trim_matches(|character: char| {
+            matches!(
+                character,
+                '`' | '\'' | '"' | '“' | '”' | '‘' | '’' | ',' | '，' | ':' | '：' | ';' | '；'
+            )
+        });
+        word.contains('/')
+            || word.contains('\\')
+            || word.starts_with('.')
+            || word.starts_with('~')
+            || word.rsplit_once('.').is_some_and(|(stem, ext)| {
+                !stem.is_empty()
+                    && ext.len() <= 12
+                    && ext.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            })
+    })
+}
+
+fn local_agent_response_frames(run_id: &str, content: &str) -> Vec<String> {
+    let content_parts = vec![serde_json::json!({
+        "type": "text",
+        "text": content
+    })];
+    vec![
+        serde_json::json!({
+            "type": "message",
+            "run": run_id,
+            "role": "assistant",
+            "content": content_parts
+        })
+        .to_string(),
+        serde_json::json!({
+            "type": "done",
+            "run": run_id,
+            "status": "ok"
+        })
+        .to_string(),
+    ]
 }
 
 fn run_agent_executable_streaming(
