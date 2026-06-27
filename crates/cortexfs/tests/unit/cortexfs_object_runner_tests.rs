@@ -643,7 +643,7 @@ fn agent_tool_loop_wraps_followup_plain_text_as_event() {
 }
 
 #[test]
-fn agent_tool_loop_rejects_repeated_identical_tsh_call() {
+fn agent_tool_loop_falls_back_on_repeated_identical_tsh_call() {
     let mut config = test_agent_run_config();
     let mut output = Vec::new();
     let mut step = 0_u8;
@@ -673,8 +673,10 @@ fn agent_tool_loop_rejects_repeated_identical_tsh_call() {
     assert_eq!(result, Ok(()));
     assert_eq!(executions, 1);
     let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""code":"ELOOP""#));
-    assert!(output.contains("agent repeated the same tool call"));
+    assert!(output.contains(r#""status":"ok""#));
+    assert!(output.contains("工具 `tsh` 已执行"));
+    assert!(output.contains("fs.read"));
+    assert!(!output.contains(r#""code":"ELOOP""#), "{output}");
 }
 
 #[test]
@@ -1613,6 +1615,7 @@ fn test_agent_run_config() -> AgentModelRunConfig {
         current_time_unix: "123".to_owned(),
         tool_context: String::new(),
         suppress_model_error_events: false,
+        debug_timing_start_unix_ms: None,
     }
 }
 

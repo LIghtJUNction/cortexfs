@@ -141,7 +141,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             agent,
             session,
             input,
-        } => agent_send(&cli.root, &agent, session.as_deref(), &input, false),
+        } => agent_send(&cli.root, &agent, session.as_deref(), &input, false, false),
         Command::Agent(args) => agent_command(&cli.root, &args),
         Command::Provider(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
@@ -175,7 +175,13 @@ fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
                 };
                 root = PathBuf::from(next);
             }
-            _ => rest.push(text),
+            _ => {
+                rest.push(text);
+                for value in values {
+                    rest.push(os_string(value)?);
+                }
+                break;
+            }
         }
     }
 
@@ -216,15 +222,27 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
 
     match command.as_str() {
         "help" | "--help" | "-h" => Ok(Command::Help),
-        "abi" => Ok(Command::Abi),
-        "env" => Ok(Command::Env),
-        "root" => Ok(Command::Root),
+        "abi" => {
+            no_extra_args(values)?;
+            Ok(Command::Abi)
+        }
+        "env" => {
+            no_extra_args(values)?;
+            Ok(Command::Env)
+        }
+        "root" => {
+            no_extra_args(values)?;
+            Ok(Command::Root)
+        }
         "man" => {
             let topic = values.next();
             no_extra_args(values)?;
             Ok(Command::Man { topic })
         }
-        "status" => Ok(Command::Status),
+        "status" => {
+            no_extra_args(values)?;
+            Ok(Command::Status)
+        }
         "bootstrap" | "update" => {
             let source = values.next().map(PathBuf::from);
             no_extra_args(values)?;

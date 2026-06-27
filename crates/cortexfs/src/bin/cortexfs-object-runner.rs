@@ -11,7 +11,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
     DEFAULT_AGENT_PROMPT_TEMPLATE, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
@@ -232,6 +232,7 @@ fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let mut config = AgentModelRunConfig::new(name)?;
+    write_agent_debug_timing(&mut stdout, &config, "agent_runner_ready")?;
     if !is_regular_file_no_follow(&config.model_path) {
         let message = missing_model_message(&config.ctx_root, &config.model, &config.model_path);
         return write_tool_start(&mut stdout, &config.run, name)
@@ -270,6 +271,14 @@ where
         }
         if let Some(tool_call) = first_tool_call(&outcome.frames)? {
             if !seen_tool_calls.insert(tool_call_signature(&tool_call)) {
+                if let Some(pair) = last_tool_result.as_ref() {
+                    return write_tool_result_fallback_response(
+                        stdout,
+                        &config.run,
+                        &pair.0,
+                        &pair.1,
+                    );
+                }
                 return write_tool_error(
                     stdout,
                     &config.run,
@@ -342,6 +351,7 @@ struct AgentModelRunConfig {
     current_time_unix: String,
     tool_context: String,
     suppress_model_error_events: bool,
+    debug_timing_start_unix_ms: Option<u128>,
 }
 
 impl AgentModelRunConfig {
@@ -391,6 +401,7 @@ impl AgentModelRunConfig {
             current_time_unix: current_time_unix().to_string(),
             tool_context: env::var("CTX_AGENT_TOOL_CONTEXT").unwrap_or_default(),
             suppress_model_error_events: false,
+            debug_timing_start_unix_ms: agent_debug_timing_start_unix_ms(),
         })
     }
 
@@ -406,6 +417,40 @@ impl AgentModelRunConfig {
         self.tool_context.push_str(result);
         trim_tool_context_to_limit(&mut self.tool_context);
     }
+}
+
+fn agent_debug_timing_start_unix_ms() -> Option<u128> {
+    if env::var("CTX_AGENT_DEBUG_TIMING").ok().as_deref() != Some("1") {
+        return None;
+    }
+    env::var("CTX_AGENT_DEBUG_START_UNIX_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+}
+
+fn current_unix_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis())
+}
+
+fn write_agent_debug_timing(
+    stdout: &mut impl Write,
+    config: &AgentModelRunConfig,
+    stage: &str,
+) -> Result<(), String> {
+    let Some(start_unix_ms) = config.debug_timing_start_unix_ms else {
+        return Ok(());
+    };
+    let elapsed_ms = current_unix_millis().saturating_sub(start_unix_ms);
+    let frame = serde_json::json!({
+        "type": "debug",
+        "stage": stage,
+        "elapsed_ms": elapsed_ms
+    });
+    writeln!(stdout, "{frame}")
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("cannot write output: {error}"))
 }
 
 struct AgentModelRunOutcome {
@@ -433,6 +478,7 @@ fn run_agent_model_once_with_timeout(
     stdout: &mut impl Write,
     timeout: Duration,
 ) -> Result<AgentModelRunOutcome, String> {
+    write_agent_debug_timing(stdout, config, "model_spawn_start")?;
     let model_executable = open_executable_no_follow(&config.model_path)
         .map_err(|error| format!("cannot run agent model: {error}"))?;
     let mut command = Command::new(proc_fd_path(&model_executable));
@@ -454,6 +500,7 @@ fn run_agent_model_once_with_timeout(
     pass_runtime_provider_secret_env(&mut command);
     let mut child = spawn_with_etxtbsy_retry(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
         .map_err(|error| format!("cannot run agent model: {error}"))?;
+    write_agent_debug_timing(stdout, config, "model_spawned")?;
     let child_stdout = child
         .stdout
         .take()
@@ -462,6 +509,7 @@ fn run_agent_model_once_with_timeout(
     let stdout_reader = spawn_agent_model_stdout_reader(child_stdout);
     let mut frames = Vec::new();
     let mut streamed = false;
+    let mut saw_model_frame = false;
     let deadline = Instant::now() + timeout;
     loop {
         let wait = deadline
@@ -470,6 +518,10 @@ fn run_agent_model_once_with_timeout(
             .unwrap_or_default();
         match stdout_reader.receiver.recv_timeout(wait) {
             Ok(Ok(line)) => {
+                if !saw_model_frame {
+                    write_agent_debug_timing(stdout, config, "first_model_frame")?;
+                    saw_model_frame = true;
+                }
                 if frames.len() >= MAX_AGENT_MODEL_FRAMES {
                     let message = "agent model output frame count exceeds limit";
                     terminate_process_group(&mut child);

@@ -1,5 +1,55 @@
 use std::fmt::Write;
 
+fn parse_cli_args(args: &[&str]) -> Result<Cli, CliError> {
+    parse(args.iter().map(std::ffi::OsString::from).collect())
+}
+
+#[test]
+fn parses_leading_root_global_option_only() {
+    let cli = parse_cli_args(&["--root", "/tmp/ctx-alt", "status"]);
+    assert!(matches!(
+        cli,
+        Ok(Cli {
+            ref root,
+            command: Command::Status,
+        }) if root == Path::new("/tmp/ctx-alt")
+    ));
+
+    let exec = parse_cli_args(&["exec", "agent/coder", "--root", "/tmp/ctx-alt"]);
+    assert!(matches!(
+        exec,
+        Ok(Cli {
+            command: Command::Exec { ref path, ref args },
+            ..
+        }) if path == "agent/coder"
+            && args == &["--root".to_owned(), "/tmp/ctx-alt".to_owned()]
+    ));
+
+    let tool = parse_cli_args(&["tool", "tsh.config", "--root"]);
+    assert!(matches!(
+        tool,
+        Ok(Cli {
+            command: Command::Tool { ref name, ref args },
+            ..
+        }) if name == "tsh.config" && args == &["--root".to_owned()]
+    ));
+}
+
+#[test]
+fn zero_arg_commands_reject_extra_arguments() {
+    let status = cmd!("status", "extra");
+    assert!(matches!(
+        status,
+        Err(ref error) if error.code == 2 && error.message == "unexpected argument: extra"
+    ));
+
+    let abi = cmd!("abi", "extra");
+    assert!(matches!(
+        abi,
+        Err(ref error) if error.code == 2 && error.message == "unexpected argument: extra"
+    ));
+}
+
 #[test]
 fn parses_spec_which_command() {
     let command = cmd!("which", "tool", "fs.read");
@@ -1300,6 +1350,36 @@ fn debug_tool_line_reports_current_names_and_changes() {
             &["fs.read".to_owned(), "fs.write".to_owned()]
         ),
         "[debug tools] +fs.write -tsh = fs.read fs.write"
+    );
+}
+
+#[test]
+fn debug_agent_send_request_marks_socket_frame() {
+    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", true);
+
+    assert!(request.contains(r#""debug":true"#));
+    assert!(request.ends_with('\n'));
+}
+
+#[test]
+fn normal_agent_send_request_does_not_mark_socket_frame() {
+    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", false);
+
+    assert!(!request.contains(r#""debug""#));
+    assert!(request.ends_with('\n'));
+}
+
+#[test]
+fn debug_timing_diagnostic_is_readable() {
+    let value = serde_json::json!({
+        "type": "debug",
+        "stage": "first_model_frame",
+        "elapsed_ms": 42
+    });
+
+    assert_eq!(
+        debug_timing_diagnostic(&value),
+        Some("[debug timing] +42ms first_model_frame".to_owned())
     );
 }
 
