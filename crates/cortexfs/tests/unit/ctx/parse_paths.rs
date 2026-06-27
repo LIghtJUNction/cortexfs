@@ -2060,6 +2060,20 @@ fn ctx_env_quotes_path_export_root_bin() {
 }
 
 #[test]
+fn ctx_env_escapes_terminal_controls_in_exports() {
+    let exports = env_exports(
+        Path::new("/tmp/ctx\u{1b}]52;c;payload\u{7}"),
+        Some("/home/user\u{1b}[31m"),
+        None,
+    );
+
+    assert!(exports.iter().all(|line| !line.as_bytes().contains(&0x1b)));
+    assert!(exports.iter().all(|line| !line.as_bytes().contains(&0x07)));
+    assert!(exports[0].contains("\\u{1b}]52;c;payload\\u{7}"));
+    assert!(exports[1].contains("\\u{1b}[31m"));
+}
+
+#[test]
 fn ctx_env_preserves_path_expansion_for_safe_root() {
     let exports = env_exports(Path::new("/ctx"), None, None);
 
