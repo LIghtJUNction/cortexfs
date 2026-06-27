@@ -5,9 +5,9 @@ use super::{
     openai_stream_event, parse_anthropic_message_content, parse_openai_response_content,
     provider_messages_for_agent, provider_request_failure_message, provider_route,
     provider_runtime_driver, provider_transport, resolve_model_alias, resolved_model_path, run,
-    run_cli_tool_to_writer, token_usage_from_value, tool_call_from_text, validate_agent_tsh_args,
-    write_model_text_or_tool_call, first_tool_call, collect_child_stderr,
-    spawn_child_stderr_reader, OpenAiStreamTextEmitter, MAX_CHILD_STDERR_BYTES,
+    run_agent_tool_process_with_timeout, run_cli_tool_to_writer, token_usage_from_value,
+    tool_call_from_text, validate_agent_tsh_args, write_model_text_or_tool_call, first_tool_call,
+    collect_child_stderr, spawn_child_stderr_reader, OpenAiStreamTextEmitter, MAX_CHILD_STDERR_BYTES,
     MAX_STREAM_TOOL_CALL_BUFFER_BYTES,
 };
 use cortexfs::{
@@ -18,6 +18,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(unix)]
@@ -250,6 +251,18 @@ fn stream_tool_call_buffer_rejects_oversized_json_prefix() {
 }
 
 #[test]
+fn agent_tool_process_times_out_instead_of_hanging() {
+    let mut command = std::process::Command::new("sh");
+    command.arg("-c").arg("sleep 5");
+    let started = Instant::now();
+
+    let result = run_agent_tool_process_with_timeout(&mut command, Duration::from_millis(100));
+
+    assert!(matches!(result, Err(ref error) if error.contains("timed out")));
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
 fn agent_tsh_args_reject_root_override() {
     assert_eq!(
         validate_agent_tsh_args(&[
@@ -352,17 +365,47 @@ fn openai_stream_event_extracts_responses_done_text() {
     let event = openai_stream_event(
         r#"data: {"type":"response.output_text.done","text":"hel"}"#,
     );
-    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
+    assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "hel"));
 
     let event = openai_stream_event(
         r#"data: {"type":"response.content_part.done","part":{"type":"output_text","text":"lo"}}"#,
     );
-    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "lo"));
+    assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "lo"));
 
     let event = openai_stream_event(
         r#"data: {"type":"response.output_item.done","item":{"content":[{"type":"output_text","text":"ok"}]}}"#,
     );
-    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "ok"));
+    assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "ok"));
+}
+
+#[test]
+fn responses_done_text_is_not_treated_as_stream_delta() -> Result<(), Box<dyn std::error::Error>> {
+    let events = [
+        openai_stream_event(r#"data: {"type":"response.output_text.delta","delta":"Hi!"}"#),
+        openai_stream_event(r#"data: {"type":"response.output_text.done","text":"Hi!"}"#),
+    ];
+    let mut output = Vec::new();
+    let mut emitter = OpenAiStreamTextEmitter::new("run-1");
+    let mut has_delta = false;
+
+    for event in events {
+        match event? {
+            OpenAiStreamEvent::Delta(text) if !text.is_empty() => {
+                emitter.push(&mut output, &text)?;
+                has_delta = true;
+            }
+            OpenAiStreamEvent::FinalText(text) if !has_delta && !text.is_empty() => {
+                emitter.push(&mut output, &text)?;
+                has_delta = true;
+            }
+            _ => {}
+        }
+    }
+    emitter.finish(&mut output)?;
+
+    let rendered = String::from_utf8(output)?;
+    assert_eq!(rendered.matches("Hi!").count(), 1);
+    Ok(())
 }
 
 #[test]

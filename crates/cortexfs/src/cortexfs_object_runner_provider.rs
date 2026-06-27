@@ -895,6 +895,20 @@ fn call_openai_sse_streaming(
                 emitted = true;
             }
             Ok(OpenAiStreamEvent::Delta(_empty)) => {}
+            Ok(OpenAiStreamEvent::FinalText(text)) if !emitted && !text.is_empty() => {
+                if let Err(error) = text_emitter
+                    .push(stdout, &text)
+                    .and_then(|()| stdout.flush())
+                {
+                    cleanup_curl_child(&mut child);
+                    return Err(StreamFailure {
+                        message: format!("cannot write output: {error}"),
+                        can_fallback: false,
+                    });
+                }
+                emitted = true;
+            }
+            Ok(OpenAiStreamEvent::FinalText(_text)) => {}
             Ok(OpenAiStreamEvent::Usage(usage)) => {
                 if let Err(error) = write_model_usage(stdout, run, usage)
                     .and_then(|()| stdout.flush())
@@ -1087,7 +1101,7 @@ fn start_curl_json(
     target: &CurlJsonTarget,
     api_key: Option<&str>,
     body: &str,
-) -> Result<std::process::Child, String> {
+) -> Result<Child, String> {
     let headers = openai_headers(api_key);
     start_curl_json_with_headers(target, &headers, body)
 }
@@ -1102,7 +1116,7 @@ fn start_curl_json_with_headers(
     target: &CurlJsonTarget,
     headers: &[String],
     body: &str,
-) -> Result<std::process::Child, String> {
+) -> Result<Child, String> {
     let mut child = Command::new("curl")
         .arg("--config")
         .arg("-")
@@ -1168,7 +1182,7 @@ fn provider_stream_failure_message(status: std::process::ExitStatus, stderr: &st
     }
 }
 
-fn cleanup_curl_child(child: &mut std::process::Child) {
+fn cleanup_curl_child(child: &mut Child) {
     let _ignored = child.kill();
     let _ignored = child.wait();
 }
@@ -1240,6 +1254,7 @@ fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
 
 enum OpenAiStreamEvent {
     Delta(String),
+    FinalText(String),
     Usage(TokenUsage),
     Done,
     Ignore,
@@ -1257,18 +1272,26 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
     let value = serde_json::from_str::<Value>(data)
         .map_err(|error| format!("invalid provider stream json: {error}"))?;
     match value.get("type").and_then(Value::as_str) {
-        Some("response.output_text.delta" | "response.output_text.done") => {
+        Some("response.output_text.delta") => {
             return Ok(OpenAiStreamEvent::Delta(
                 value
                     .get("delta")
-                    .or_else(|| value.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ));
+        }
+        Some("response.output_text.done") => {
+            return Ok(OpenAiStreamEvent::FinalText(
+                value
+                    .get("text")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned(),
             ));
         }
         Some("response.content_part.done") => {
-            return Ok(OpenAiStreamEvent::Delta(
+            return Ok(OpenAiStreamEvent::FinalText(
                 value
                     .pointer("/part/text")
                     .or_else(|| value.get("text"))
@@ -1278,7 +1301,7 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
             ));
         }
         Some("response.output_item.done") => {
-            return Ok(OpenAiStreamEvent::Delta(response_output_item_text(
+            return Ok(OpenAiStreamEvent::FinalText(response_output_item_text(
                 value.get("item"),
             )));
         }
