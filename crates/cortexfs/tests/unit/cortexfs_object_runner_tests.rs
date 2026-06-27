@@ -1918,6 +1918,7 @@ fn curl_config_quote_rejects_line_break_injection() {
     assert!(curl_config_quote("https://api.openai.com/v1").is_ok());
     assert!(curl_config_quote("https://api.openai.com/v1\noutput = /tmp/leak").is_err());
     assert!(curl_config_quote("Authorization: Bearer bad\rheader = injected").is_err());
+    assert!(curl_config_quote("Authorization: Bearer \u{1b}]52;c;payload").is_err());
     assert!(curl_config_quote("abc\0def").is_err());
 }
 
