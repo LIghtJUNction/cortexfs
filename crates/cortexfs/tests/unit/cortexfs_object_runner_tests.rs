@@ -554,6 +554,95 @@ fn agent_tool_loop_supports_multiple_distinct_tsh_calls() {
 }
 
 #[test]
+fn agent_tool_loop_falls_back_to_tool_result_when_followup_model_fails() {
+    let mut config = test_agent_run_config();
+    let mut output = Vec::new();
+    let mut step = 0_u8;
+
+    let result = run_agent_tool_loop(
+        &mut config,
+        "test tools",
+        &mut output,
+        |config, _input, _stdout| {
+            step = step.saturating_add(1);
+            match step {
+                1 => {
+                    assert!(!config.suppress_model_error_events);
+                    Ok(AgentModelRunOutcome {
+                        frames: vec![
+                            r#"{"type":"tool_call","run":"r1","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#.to_owned(),
+                        ],
+                        success: true,
+                        streamed: false,
+                    })
+                }
+                2 => {
+                    assert!(config.suppress_model_error_events);
+                    Ok(AgentModelRunOutcome {
+                        frames: vec![
+                            r#"{"type":"error","run":"r1","code":"EIO","message":"model failed after tool result"}"#.to_owned(),
+                        ],
+                        success: false,
+                        streamed: false,
+                    })
+                }
+                _ => Err(format!("unexpected model iteration {step}")),
+            }
+        },
+        |_config, tool_call| {
+            assert_eq!(tool_call.name, "tsh");
+            Ok("fs.read\nshell.exec\ntsh\n".to_owned())
+        },
+    );
+
+    assert_eq!(result, Ok(()));
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""tool_call_id":"call-1""#));
+    assert!(output.contains("fs.read"));
+    assert!(output.contains("shell.exec"));
+    assert!(output.contains("工具 `tsh` 已执行"));
+    assert!(output.contains(r#""status":"ok""#));
+    assert!(!output.contains(r#""type":"error""#), "{output}");
+}
+
+#[test]
+fn agent_tool_loop_wraps_followup_plain_text_as_event() {
+    let mut config = test_agent_run_config();
+    let mut output = Vec::new();
+    let mut step = 0_u8;
+
+    let result = run_agent_tool_loop(
+        &mut config,
+        "test tools",
+        &mut output,
+        |_config, _input, _stdout| {
+            step = step.saturating_add(1);
+            match step {
+                1 => Ok(AgentModelRunOutcome {
+                    frames: vec![
+                        r#"{"type":"tool_call","run":"r1","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#.to_owned(),
+                    ],
+                    success: true,
+                    streamed: false,
+                }),
+                2 => Ok(AgentModelRunOutcome {
+                    frames: vec!["工具已经列出。".to_owned()],
+                    success: true,
+                    streamed: false,
+                }),
+                _ => Err(format!("unexpected model iteration {step}")),
+            }
+        },
+        |_config, _tool_call| Ok("fs.read\ntsh\n".to_owned()),
+    );
+
+    assert_eq!(result, Ok(()));
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""type":"delta""#), "{output}");
+    assert!(output.contains("工具已经列出。"), "{output}");
+}
+
+#[test]
 fn agent_tool_loop_rejects_repeated_identical_tsh_call() {
     let mut config = test_agent_run_config();
     let mut output = Vec::new();
@@ -1523,6 +1612,7 @@ fn test_agent_run_config() -> AgentModelRunConfig {
         skills: String::new(),
         current_time_unix: "123".to_owned(),
         tool_context: String::new(),
+        suppress_model_error_events: false,
     }
 }
 

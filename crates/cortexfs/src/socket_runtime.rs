@@ -179,21 +179,6 @@ fn handle_agent_executable_socket_request_frame_streaming(
     )?;
     write_socket_runtime_response(stream, &recorder_response)?;
 
-    if let Some(content) = local_agent_response(input) {
-        let local_frames = local_agent_response_frames(id, content);
-        if scope != SocketSessionScope::Temp {
-            let session_dir = runtime.session_root.join(session);
-            record_assistant_response_to_session(&session_dir, id, content)
-                .map_err(SocketRuntimeError::Record)?;
-        }
-        for frame in &local_frames {
-            write_socket_frame(stream, frame)?;
-        }
-        let mut frames = recorder_response.frames().to_vec();
-        frames.extend(local_frames);
-        return Ok(SocketRuntimeResponse::new(frames));
-    }
-
     let agent_frames = run_agent_executable_streaming(stream, runtime, id, session, input)?;
     if scope != SocketSessionScope::Temp {
         let session_dir = runtime.session_root.join(session);
@@ -208,101 +193,6 @@ fn handle_agent_executable_socket_request_frame_streaming(
     let mut frames = recorder_response.frames().to_vec();
     frames.extend(agent_frames);
     Ok(SocketRuntimeResponse::new(frames))
-}
-
-fn local_agent_response(input: &str) -> Option<&'static str> {
-    if asks_for_tsh_usage(input) {
-        return Some(TSH_USAGE_RESPONSE);
-    }
-    if asks_to_read_file_without_path(input) {
-        return Some("请提供要读取的文件路径。");
-    }
-    None
-}
-
-const TSH_USAGE_RESPONSE: &str = "\
-`tsh` 是 CortexFS 工具 shell，用来发现、加载和调用当前 agent 可见的工具。
-
-常用命令：
-- `tsh tools`：列出可见工具
-- `tsh help`：查看 tsh 帮助
-- `tsh help TOOL`：查看某个工具说明
-- `tsh load TOOL`：把工具元数据加载进上下文
-- `tsh loads`：查看已加载工具
-- `tsh unload TOOL`：卸载未固定的工具元数据
-- `tsh pin TOOL` / `tsh unpin TOOL`：固定或取消固定工具
-- `tsh TOOL ARG...`：调用工具，例如 `tsh fs.read PATH`
-
-当前 agent 只能原生调用 `tsh`；其他工具都要通过 `tsh` 间接调用。";
-
-fn asks_for_tsh_usage(input: &str) -> bool {
-    let normalized = input.to_ascii_lowercase();
-    let mentions_tsh = normalized.contains("tsh");
-    let asks_usage = input.contains("用法")
-        || input.contains("怎么用")
-        || input.contains("如何用")
-        || input.contains("探索")
-        || input.contains("查看")
-        || input.contains("了解")
-        || normalized.contains("usage")
-        || normalized.contains("how to use")
-        || normalized.contains("help");
-    mentions_tsh && asks_usage
-}
-
-fn asks_to_read_file_without_path(input: &str) -> bool {
-    let normalized = input.to_ascii_lowercase();
-    let asks_read = input.contains("读文件")
-        || input.contains("读取文件")
-        || input.contains("看文件")
-        || input.contains("打开文件")
-        || normalized.contains("read file")
-        || normalized.contains("read a file")
-        || normalized.contains("open file")
-        || normalized.contains("cat file");
-    asks_read && !contains_file_path_hint(input)
-}
-
-fn contains_file_path_hint(input: &str) -> bool {
-    input.split_whitespace().any(|word| {
-        let word = word.trim_matches(|character: char| {
-            matches!(
-                character,
-                '`' | '\'' | '"' | '“' | '”' | '‘' | '’' | ',' | '，' | ':' | '：' | ';' | '；'
-            )
-        });
-        word.contains('/')
-            || word.contains('\\')
-            || word.starts_with('.')
-            || word.starts_with('~')
-            || word.rsplit_once('.').is_some_and(|(stem, ext)| {
-                !stem.is_empty()
-                    && ext.len() <= 12
-                    && ext.bytes().all(|byte| byte.is_ascii_alphanumeric())
-            })
-    })
-}
-
-fn local_agent_response_frames(run_id: &str, content: &str) -> Vec<String> {
-    let content_parts = vec![serde_json::json!({
-        "type": "text",
-        "text": content
-    })];
-    vec![
-        serde_json::json!({
-            "type": "message",
-            "run": run_id,
-            "role": "assistant",
-            "content": content_parts
-        })
-        .to_string(),
-        serde_json::json!({
-            "type": "done",
-            "run": run_id,
-            "status": "ok"
-        })
-        .to_string(),
-    ]
 }
 
 fn run_agent_executable_streaming(
@@ -368,9 +258,15 @@ fn run_agent_executable_streaming(
                     continue;
                 }
                 if !inspect_event_stream_jsonl(&line).is_ok() {
-                    terminate_agent_process_group(&mut child);
-                    let _ignored = child.wait();
-                    return Err(SocketRuntimeError::InvalidAgentOutput);
+                    if frames.is_empty() {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(SocketRuntimeError::InvalidAgentOutput);
+                    }
+                    let wrapped = agent_plain_text_frame(run_id, &line);
+                    write_socket_frame(stream, &wrapped)?;
+                    frames.push(wrapped);
+                    continue;
                 }
                 if event_type(&line).as_deref() != Some("start") {
                     write_socket_frame(stream, &line)?;
@@ -411,6 +307,15 @@ fn run_agent_executable_streaming(
         return Err(SocketRuntimeError::CannotRunAgent);
     }
     Ok(frames)
+}
+
+fn agent_plain_text_frame(run_id: &str, text: &str) -> String {
+    serde_json::json!({
+        "type": "delta",
+        "run": run_id,
+        "text": text
+    })
+    .to_string()
 }
 
 fn read_agent_executable_frame_line(

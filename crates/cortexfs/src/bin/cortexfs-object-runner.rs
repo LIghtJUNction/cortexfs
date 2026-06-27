@@ -260,8 +260,14 @@ where
     T: FnMut(&AgentModelRunConfig, &AgentToolCall) -> Result<String, String>,
 {
     let mut seen_tool_calls = BTreeSet::new();
+    let mut last_tool_result: Option<(AgentToolCall, String)> = None;
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
         let outcome = run_model_once(config, input, stdout)?;
+        if frames_have_error(&outcome.frames)
+            && let Some(pair) = last_tool_result.as_ref()
+        {
+            return write_tool_result_fallback_response(stdout, &config.run, &pair.0, &pair.1);
+        }
         if let Some(tool_call) = first_tool_call(&outcome.frames)? {
             if !seen_tool_calls.insert(tool_call_signature(&tool_call)) {
                 return write_tool_error(
@@ -285,6 +291,8 @@ where
                 .flush()
                 .map_err(|error| format!("cannot write output: {error}"))?;
             config.push_tool_result(&tool_call, &result);
+            config.suppress_model_error_events = true;
+            last_tool_result = Some((tool_call, result));
             if iteration == MAX_AGENT_TOOL_ITERATIONS {
                 return write_tool_error(
                     stdout,
@@ -307,7 +315,7 @@ where
             }
             return Err("agent model failed".to_owned());
         }
-        write_agent_frames(stdout, &outcome.frames)?;
+        write_agent_frames(stdout, &config.run, &outcome.frames)?;
         if outcome.success {
             return Ok(());
         }
@@ -333,6 +341,7 @@ struct AgentModelRunConfig {
     skills: String,
     current_time_unix: String,
     tool_context: String,
+    suppress_model_error_events: bool,
 }
 
 impl AgentModelRunConfig {
@@ -381,6 +390,7 @@ impl AgentModelRunConfig {
             skills: collect_skill_metadata(skill_metadata_budget_from_env()),
             current_time_unix: current_time_unix().to_string(),
             tool_context: env::var("CTX_AGENT_TOOL_CONTEXT").unwrap_or_default(),
+            suppress_model_error_events: false,
         })
     }
 
@@ -466,13 +476,15 @@ fn run_agent_model_once_with_timeout(
                     let _ignored = child.wait();
                     let _stderr = collect_child_stderr(stderr_reader);
                     let _ignored = stdout_reader.handle.join();
-                    return overflow_agent_model_outcome(stdout, &config.run, message);
+                    return overflow_agent_model_outcome(
+                        stdout,
+                        &config.run,
+                        message,
+                        config.suppress_model_error_events,
+                    );
                 }
                 let line = normalize_agent_model_frame(&line, &config.run);
-                if matches!(
-                    event_type(&line).as_deref(),
-                    Some("delta" | "reasoning_delta" | "usage" | "error")
-                ) {
+                if should_write_streamed_model_frame(&line, config.suppress_model_error_events) {
                     writeln!(stdout, "{line}")
                         .and_then(|()| stdout.flush())
                         .map_err(|error| {
@@ -489,7 +501,12 @@ fn run_agent_model_once_with_timeout(
                 let _ignored = child.wait();
                 let _stderr = collect_child_stderr(stderr_reader);
                 let _ignored = stdout_reader.handle.join();
-                return overflow_agent_model_outcome(stdout, &config.run, &error);
+                return overflow_agent_model_outcome(
+                    stdout,
+                    &config.run,
+                    &error,
+                    config.suppress_model_error_events,
+                );
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -499,7 +516,13 @@ fn run_agent_model_once_with_timeout(
                     let _ignored = child.wait();
                     let _stderr = collect_child_stderr(stderr_reader);
                     let _ignored = stdout_reader.handle.join();
-                    return agent_model_error_outcome(stdout, &config.run, "ETIMEDOUT", &message);
+                    return agent_model_error_outcome(
+                        stdout,
+                        &config.run,
+                        "ETIMEDOUT",
+                        &message,
+                        config.suppress_model_error_events,
+                    );
                 }
                 let _ignored = child.try_wait().map_err(|error| error.to_string())?;
             }
@@ -510,25 +533,7 @@ fn run_agent_model_once_with_timeout(
         .wait()
         .map_err(|error| format!("cannot run agent model: {error}"))?;
     let stderr = collect_child_stderr(stderr_reader);
-    if !status.success() && !frames_have_error(&frames) {
-        let message = if stderr.trim().is_empty() {
-            format!("agent model exited with {status}")
-        } else {
-            stderr.trim().to_owned()
-        };
-        write_error_event(stdout, &config.run, "EIO", &message)
-            .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
-        frames.push(
-            serde_json::json!({
-                "type": "error",
-                "run": config.run,
-                "code": "EIO",
-                "message": message
-            })
-            .to_string(),
-        );
-    }
+    append_model_exit_error(stdout, config, status, &stderr, &mut frames)?;
     Ok(AgentModelRunOutcome {
         frames,
         success: status.success(),
@@ -536,12 +541,45 @@ fn run_agent_model_once_with_timeout(
     })
 }
 
+fn append_model_exit_error(
+    stdout: &mut impl Write,
+    config: &AgentModelRunConfig,
+    status: std::process::ExitStatus,
+    stderr: &str,
+    frames: &mut Vec<String>,
+) -> Result<(), String> {
+    if status.success() || frames_have_error(frames) {
+        return Ok(());
+    }
+    let message = if stderr.trim().is_empty() {
+        format!("agent model exited with {status}")
+    } else {
+        stderr.trim().to_owned()
+    };
+    if !config.suppress_model_error_events {
+        write_error_event(stdout, &config.run, "EIO", &message)
+            .and_then(|()| stdout.flush())
+            .map_err(|error| format!("cannot write output: {error}"))?;
+    }
+    frames.push(
+        serde_json::json!({
+            "type": "error",
+            "run": config.run,
+            "code": "EIO",
+            "message": message
+        })
+        .to_string(),
+    );
+    Ok(())
+}
+
 fn overflow_agent_model_outcome(
     stdout: &mut impl Write,
     run: &str,
     message: &str,
+    suppress_output: bool,
 ) -> Result<AgentModelRunOutcome, String> {
-    agent_model_error_outcome(stdout, run, "EOVERFLOW", message)
+    agent_model_error_outcome(stdout, run, "EOVERFLOW", message, suppress_output)
 }
 
 fn agent_model_error_outcome(
@@ -549,10 +587,13 @@ fn agent_model_error_outcome(
     run: &str,
     code: &str,
     message: &str,
+    suppress_output: bool,
 ) -> Result<AgentModelRunOutcome, String> {
-    write_error_event(stdout, run, code, message)
-        .and_then(|()| stdout.flush())
-        .map_err(|error| format!("cannot write output: {error}"))?;
+    if !suppress_output {
+        write_error_event(stdout, run, code, message)
+            .and_then(|()| stdout.flush())
+            .map_err(|error| format!("cannot write output: {error}"))?;
+    }
     Ok(AgentModelRunOutcome {
         frames: vec![
             serde_json::json!({
@@ -564,7 +605,7 @@ fn agent_model_error_outcome(
             .to_string(),
         ],
         success: false,
-        streamed: true,
+        streamed: !suppress_output,
     })
 }
 
@@ -834,6 +875,14 @@ fn normalize_agent_model_frame(frame: &str, run: &str) -> String {
         return value.to_string();
     }
     frame.to_owned()
+}
+
+fn should_write_streamed_model_frame(frame: &str, suppress_error: bool) -> bool {
+    match event_type(frame).as_deref() {
+        Some("delta" | "reasoning_delta" | "usage") => true,
+        Some("error") => !suppress_error,
+        _ => false,
+    }
 }
 
 fn frames_have_error(frames: &[String]) -> bool {
@@ -1320,11 +1369,17 @@ fn trim_tool_context_to_limit(context: &mut String) {
     *context = trimmed;
 }
 
-fn write_agent_frames(stdout: &mut impl Write, frames: &[String]) -> Result<(), String> {
+fn write_agent_frames(stdout: &mut impl Write, run: &str, frames: &[String]) -> Result<(), String> {
     for frame in frames {
-        writeln!(stdout, "{frame}")
-            .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
+        if event_type(frame).is_some() {
+            writeln!(stdout, "{frame}")
+                .and_then(|()| stdout.flush())
+                .map_err(|error| format!("cannot write output: {error}"))?;
+        } else {
+            write_model_text_or_tool_call(stdout, run, frame)
+                .and_then(|()| stdout.flush())
+                .map_err(|error| format!("cannot write output: {error}"))?;
+        }
     }
     Ok(())
 }
@@ -1394,6 +1449,35 @@ fn write_tool_result_event(
         return Err("generated invalid tool result event".to_owned());
     }
     writeln!(stdout, "{event}").map_err(|error| format!("cannot write output: {error}"))
+}
+
+fn write_tool_result_fallback_response(
+    stdout: &mut impl Write,
+    run: &str,
+    tool_call: &AgentToolCall,
+    result: &str,
+) -> Result<(), String> {
+    let text = format!("工具 `{}` 已执行，输出：\n\n{}", tool_call.name, result);
+    let message = serde_json::json!({
+        "type": "message",
+        "run": run,
+        "role": "assistant",
+        "content": [{
+            "type": "text",
+            "text": text
+        }]
+    })
+    .to_string();
+    let done = serde_json::json!({
+        "type": "done",
+        "run": run,
+        "status": "ok"
+    })
+    .to_string();
+    writeln!(stdout, "{message}")
+        .and_then(|()| writeln!(stdout, "{done}"))
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("cannot write output: {error}"))
 }
 
 fn missing_model_message(ctx_root: &Path, model: &str, model_path: &Path) -> String {
