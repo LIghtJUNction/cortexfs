@@ -921,9 +921,23 @@ fn call_openai_sse_streaming(
         can_fallback: !emitted,
     })?;
     if !status.success() {
+        let stderr = child_stderr_text(&mut child);
+        if emitted {
+            return text_emitter
+                .finish(stdout)
+                .and_then(|()| stdout.flush())
+                .map_err(|error| StreamFailure {
+                    message: format!("cannot write output: {error}"),
+                    can_fallback: false,
+                });
+        }
         return Err(StreamFailure {
-            message: "provider stream request failed".to_owned(),
-            can_fallback: !emitted,
+            message: if stderr.trim().is_empty() {
+                format!("provider stream request failed with {status}")
+            } else {
+                format!("provider stream request failed with {status}: {}", stderr.trim())
+            },
+            can_fallback: !emitted && !stderr.contains("Operation timed out"),
         });
     }
     if let Err(error) = text_emitter.finish(stdout).and_then(|()| stdout.flush()) {
@@ -1098,7 +1112,8 @@ fn start_curl_json_with_headers(
         return Err("cannot write curl config".to_owned());
     };
     let mut config = format!(
-        "fail\nsilent\nshow-error\nno-buffer\nmax-time = 60\nrequest = POST\nurl = {}\n",
+        "fail\nsilent\nshow-error\nno-buffer\nconnect-timeout = 5\nmax-time = {}\nrequest = POST\nurl = {}\n",
+        provider_max_time_seconds(),
         curl_config_quote(&target.url),
     );
     if let Some(socket_path) = target.unix_socket.as_deref() {
@@ -1121,9 +1136,26 @@ fn start_curl_json_with_headers(
     Ok(child)
 }
 
+fn provider_max_time_seconds() -> u64 {
+    env::var("CTX_PROVIDER_MAX_TIME_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| (1..=600).contains(value))
+        .unwrap_or(20)
+}
+
 fn cleanup_curl_child(child: &mut std::process::Child) {
     let _ignored = child.kill();
     let _ignored = child.wait();
+}
+
+fn child_stderr_text(child: &mut std::process::Child) -> String {
+    let Some(mut stderr) = child.stderr.take() else {
+        return String::new();
+    };
+    let mut output = String::new();
+    let _ignored = stderr.read_to_string(&mut output);
+    output
 }
 
 fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
@@ -1210,14 +1242,30 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
     let value = serde_json::from_str::<Value>(data)
         .map_err(|error| format!("invalid provider stream json: {error}"))?;
     match value.get("type").and_then(Value::as_str) {
-        Some("response.output_text.delta") => {
+        Some("response.output_text.delta" | "response.output_text.done") => {
             return Ok(OpenAiStreamEvent::Delta(
                 value
                     .get("delta")
+                    .or_else(|| value.get("text"))
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned(),
             ));
+        }
+        Some("response.content_part.done") => {
+            return Ok(OpenAiStreamEvent::Delta(
+                value
+                    .pointer("/part/text")
+                    .or_else(|| value.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            ));
+        }
+        Some("response.output_item.done") => {
+            return Ok(OpenAiStreamEvent::Delta(response_output_item_text(
+                value.get("item"),
+            )));
         }
         Some("response.completed" | "response.done") => return Ok(OpenAiStreamEvent::Done),
         Some("response.failed" | "response.incomplete" | "error") => {
@@ -1240,6 +1288,29 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
         .or_else(|| value.get("output_text").and_then(Value::as_str))
         .unwrap_or_default();
     Ok(OpenAiStreamEvent::Delta(text.to_owned()))
+}
+
+fn response_output_item_text(item: Option<&Value>) -> String {
+    let Some(item) = item else {
+        return String::new();
+    };
+    if let Some(text) = item.get("output_text").and_then(Value::as_str) {
+        return text.to_owned();
+    }
+    let Some(parts) = item.get("content").and_then(Value::as_array) else {
+        return String::new();
+    };
+    let mut output = String::new();
+    for part in parts {
+        if matches!(
+            part.get("type").and_then(Value::as_str),
+            Some("output_text" | "text")
+        ) && let Some(text) = part.get("text").and_then(Value::as_str)
+        {
+            output.push_str(text);
+        }
+    }
+    output
 }
 
 fn parse_provider_usage(output: &[u8]) -> Result<Option<TokenUsage>, String> {

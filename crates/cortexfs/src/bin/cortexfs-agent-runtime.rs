@@ -66,7 +66,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     if let Some(secret) = runtime_secret.as_ref() {
         runtime_env.extend(secret.env());
     }
-    let agent_executable = config.source.join("agent").join(&config.agent);
+    let agent_executable = runtime_agent_executable(Path::new(cortexfs::CTX_ROOT), &config.agent);
     let result = serve_agent_executable_socket_listener_once(
         &listener,
         Some(peer_policy),
@@ -89,6 +89,10 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     result
         .map(|_response| ())
         .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
+}
+
+fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {
+    ctx_root.join("agent").join(agent)
 }
 
 fn repair_agent_session_permissions(session_root: &Path, uid: u32, gid: u32) -> Result<(), String> {

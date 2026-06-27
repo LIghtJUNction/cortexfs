@@ -1,6 +1,7 @@
-use super::{RuntimeConfig, DEFAULT_SOURCE};
+use super::{runtime_agent_executable, RuntimeConfig, DEFAULT_SOURCE};
 use std::ffi::OsString;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[test]
 fn runtime_config_parses_agent_and_default_source() {
@@ -39,5 +40,13 @@ fn runtime_credential_name_rejects_path_separators() {
     assert_eq!(
         super::safe_runtime_credential_name("agent", "../default"),
         Err("runtime credential path components must not contain '/'".to_owned())
+    );
+}
+
+#[test]
+fn runtime_agent_executable_uses_ctx_abi_path() {
+    assert_eq!(
+        runtime_agent_executable(Path::new("/ctx"), "coder"),
+        PathBuf::from("/ctx/agent/coder")
     );
 }

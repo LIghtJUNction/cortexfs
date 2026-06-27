@@ -332,10 +332,7 @@ fn stream_agent_socket_request_streaming_interruptible(
     let rendered = render_agent_events_interruptible(stream, guard.interrupted_flag())?;
     if rendered.interrupted {
         write_terminal_error(&format!("ctx: interrupt requested; cancelling run {run_id}"))?;
-        let cancel_code = stream_agent_socket_request(socket, cancel_request, false)?;
-        if cancel_code != ExitCode::SUCCESS {
-            return Ok(cancel_code);
-        }
+        send_socket_request_best_effort(socket, cancel_request)?;
     }
     Ok(ExitCode::from(rendered.exit_code))
 }
@@ -355,7 +352,8 @@ fn stream_agent_socket_request_buffered_interruptible(
                 write_terminal_error(&format!(
                     "ctx: interrupt requested; cancelling run {run_id}"
                 ))?;
-                return stream_socket_request(socket, cancel_request);
+                send_socket_request_best_effort(socket, cancel_request)?;
+                return Ok(ExitCode::SUCCESS);
             }
             return Ok(ExitCode::SUCCESS);
         }
@@ -381,18 +379,36 @@ fn stream_agent_socket_request_buffered_interruptible(
             .map_err(|error| {
                 CliError::unavailable(format!("cannot configure interruptible socket: {error}"))
             })?;
-        let interrupted = render_agent_events_buffered_interruptible(stream, guard.interrupted_flag())?;
-        if interrupted {
+        let rendered = render_agent_events_interruptible(stream, guard.interrupted_flag())?;
+        if rendered.interrupted {
             write_terminal_error(&format!("ctx: interrupt requested; cancelling run {run_id}"))?;
-            let cancel_code = stream_agent_socket_request(socket, cancel_request, false)?;
-            if cancel_code != ExitCode::SUCCESS {
-                return Ok(cancel_code);
-            }
+            send_socket_request_best_effort(socket, cancel_request)?;
         }
         return Ok(ExitCode::SUCCESS);
     }
 
-    render_agent_events_buffered(stream)
+    render_agent_events(stream)
+}
+
+fn send_socket_request_best_effort(socket: &Path, request: &str) -> Result<(), CliError> {
+    if request.len() > MAX_SOCKET_FRAME_BYTES {
+        return Err(CliError::usage(format!(
+            "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
+        )));
+    }
+    let mut stream = UnixStream::connect(socket).map_err(|error| {
+        CliError::unavailable(format!("cannot connect {}: {error}", socket.display()))
+    })?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(100)))
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot configure cancel socket: {error}"))
+        })?;
+    stream
+        .write_all(request.as_bytes())
+        .and_then(|()| stream.shutdown(Shutdown::Write))
+        .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
+    Ok(())
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -470,11 +486,11 @@ fn render_agent_event_lines(
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("tool_call");
-                write_terminal_error(&format!("[tool] {name}"))?;
+                write_terminal_diagnostic(&tool_diagnostic(name))?;
             }
             Some("usage") => {
                 if let Some(diagnostic) = usage_totals.record_event(&value) {
-                    write_terminal_error(&diagnostic)?;
+                    write_terminal_diagnostic(&diagnostic)?;
                 }
             }
             Some("error") => {
@@ -486,7 +502,7 @@ fn render_agent_event_lines(
                     .get("message")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("runtime error");
-                write_terminal_error(&format!("error: {code}: {message}"))?;
+                write_terminal_diagnostic(&error_diagnostic(code, message))?;
                 exit = ExitCode::from(1);
             }
             Some("pong") => print_line("pong")?,
@@ -505,35 +521,6 @@ fn render_agent_event_lines(
 
 fn exit_code_u8(code: ExitCode) -> u8 {
     u8::from(code != ExitCode::SUCCESS)
-}
-
-#[cfg(test)]
-fn render_agent_events_buffered(stream: UnixStream) -> Result<ExitCode, CliError> {
-    let reader = io::BufReader::new(stream);
-    let rendered = collect_agent_events_buffered(reader)?;
-    if !rendered.output.is_empty() {
-        print_terminal_text(&rendered.output)?;
-    }
-    for diagnostic in rendered.diagnostics {
-        write_terminal_error(&diagnostic)?;
-    }
-    Ok(ExitCode::from(rendered.exit_code))
-}
-
-#[cfg(test)]
-fn render_agent_events_buffered_interruptible(
-    stream: UnixStream,
-    interrupt: &AtomicBool,
-) -> Result<bool, CliError> {
-    let mut reader = io::BufReader::new(stream);
-    let rendered = collect_agent_events_buffered_interruptible(&mut reader, interrupt)?;
-    if !rendered.output.is_empty() {
-        print_terminal_text(&rendered.output)?;
-    }
-    for diagnostic in rendered.diagnostics {
-        write_terminal_error(&diagnostic)?;
-    }
-    Ok(rendered.interrupted)
 }
 
 #[cfg(test)]
@@ -647,7 +634,7 @@ fn collect_agent_events_buffered_with(
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("tool_call");
-                push_buffered_diagnostic(&mut diagnostics, format!("[tool] {name}"))?;
+                push_buffered_diagnostic(&mut diagnostics, tool_diagnostic(name))?;
             }
             Some("usage") => {
                 if let Some(diagnostic) = usage_totals.record_event(&value) {
@@ -665,7 +652,7 @@ fn collect_agent_events_buffered_with(
                     .unwrap_or("runtime error");
                 push_buffered_diagnostic(
                     &mut diagnostics,
-                    format!("error: {code}: {message}"),
+                    error_diagnostic(code, message),
                 )?;
                 exit_code = 1;
             }
@@ -701,11 +688,36 @@ impl AgentUsageTotals {
             .and_then(serde_json::Value::as_u64)?;
         self.input_tokens = self.input_tokens.saturating_add(input_delta);
         self.output_tokens = self.output_tokens.saturating_add(output_delta);
+        let color = color_enabled();
         Some(format!(
-            "[tokens] input +{}/{} output +{}/{}",
-            input_delta, self.input_tokens, output_delta, self.output_tokens
+            "{} {} {}",
+            styled(color, ANSI_DIM, "tokens"),
+            styled(color, ANSI_CYAN, &format!("in +{input_delta}/{}", self.input_tokens)),
+            styled(color, ANSI_GREEN, &format!("out +{output_delta}/{}", self.output_tokens))
         ))
     }
+}
+
+fn tool_diagnostic(name: &str) -> String {
+    let color = color_enabled();
+    let name = terminal_safe_text(name);
+    format!(
+        "{} {}",
+        styled(color, ANSI_BOLD_YELLOW, "tool"),
+        styled(color, ANSI_CYAN, &name)
+    )
+}
+
+fn error_diagnostic(code: &str, message: &str) -> String {
+    let color = color_enabled();
+    let code = terminal_safe_text(code);
+    let message = terminal_safe_text(message);
+    format!(
+        "{} {}: {}",
+        styled(color, ANSI_RED, "error"),
+        styled(color, ANSI_BOLD_YELLOW, &code),
+        message
+    )
 }
 
 #[cfg(test)]
@@ -760,6 +772,10 @@ fn print_terminal_line(line: &str) -> Result<(), CliError> {
 fn write_terminal_error(line: &str) -> Result<(), CliError> {
     let line = terminal_safe_text(line);
     write_error(&line).map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
+}
+
+fn write_terminal_diagnostic(line: &str) -> Result<(), CliError> {
+    write_error(line).map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
 }
 
 fn terminal_safe_text(text: &str) -> String {

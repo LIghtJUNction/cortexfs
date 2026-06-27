@@ -31,7 +31,7 @@ pub fn install_executable_object_wrapper(
 
     for file in control_files_for(class) {
         let content = object_control_content(class, name, file, control_overrides)?;
-        atomic_replace_text(&control_dir.join(file), &content)
+        atomic_replace_text_with_mode(&control_dir.join(file), &content, 0o644)
             .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
     }
 

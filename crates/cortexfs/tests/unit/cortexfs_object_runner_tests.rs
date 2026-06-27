@@ -6,11 +6,12 @@ use super::{
     provider_messages_for_agent, provider_request_failure_message, provider_route,
     provider_runtime_driver, provider_transport, resolve_model_alias, resolved_model_path, run,
     run_cli_tool_to_writer, token_usage_from_value, tool_call_from_text, validate_agent_tsh_args,
-    write_model_text_or_tool_call,
+    write_model_text_or_tool_call, first_tool_call, collect_child_stderr,
+    spawn_child_stderr_reader,
 };
 use cortexfs::{
-    AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, collect_agent_rules, collect_skill_metadata,
-    render_agent_system_prompt,
+    AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, agent_runtime_contract, collect_agent_rules,
+    collect_skill_metadata, render_agent_system_prompt,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -200,6 +201,39 @@ fn tool_call_arguments_accept_command_string() {
 }
 
 #[test]
+fn runtime_contract_requires_immediate_tsh_tool_calls() {
+    let contract = agent_runtime_contract("coder");
+
+    assert!(contract.contains("you must call `tsh` immediately"));
+    assert!(contract.contains("output exactly one JSON object line and no prose"));
+    assert!(contract.contains(r#""name":"tsh""#));
+    assert!(contract.contains("If no concrete file path is provided"));
+}
+
+#[test]
+fn deferred_tool_text_is_not_treated_as_a_tool_call() {
+    let frames = [r#"{"type":"delta","text":"我先通过 `tsh` 查看可用工具，再测试 lazy load 机制。"}"#.to_owned()];
+
+    assert!(matches!(first_tool_call(&frames), Ok(None)));
+}
+
+#[test]
+fn async_stderr_reader_drains_large_child_stderr() -> Result<(), Box<dyn std::error::Error>> {
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("i=0; while [ $i -lt 10000 ]; do printf 'stderr line %04d\\n' \"$i\" >&2; i=$((i + 1)); done")
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
+    let status = child.wait()?;
+    let stderr = collect_child_stderr(stderr_reader);
+
+    assert!(status.success());
+    assert!(stderr.contains("stderr line 9999"));
+    Ok(())
+}
+
+#[test]
 fn agent_tsh_args_reject_root_override() {
     assert_eq!(
         validate_agent_tsh_args(&[
@@ -295,6 +329,24 @@ fn openai_stream_event_extracts_responses_delta_text() {
         r#"data: {"type":"response.output_text.delta","delta":"hel"}"#,
     );
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
+}
+
+#[test]
+fn openai_stream_event_extracts_responses_done_text() {
+    let event = openai_stream_event(
+        r#"data: {"type":"response.output_text.done","text":"hel"}"#,
+    );
+    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
+
+    let event = openai_stream_event(
+        r#"data: {"type":"response.content_part.done","part":{"type":"output_text","text":"lo"}}"#,
+    );
+    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "lo"));
+
+    let event = openai_stream_event(
+        r#"data: {"type":"response.output_item.done","item":{"content":[{"type":"output_text","text":"ok"}]}}"#,
+    );
+    assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "ok"));
 }
 
 #[test]
