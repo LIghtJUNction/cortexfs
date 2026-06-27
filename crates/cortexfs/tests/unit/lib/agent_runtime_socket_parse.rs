@@ -147,6 +147,7 @@ fn agent_runtime_view_rejects_invalid_control_files() {
         ("root", "../root\n"),
         ("cwd", "/work/../secret\n"),
         ("env", "1BAD=value\n"),
+        ("env", "OK=\u{1b}]52;c;payload\u{7}\n"),
         ("path", "/ctx/tool:../tool\n"),
         ("mount", "bad\n"),
         ("model", "bad/name/extra\n"),
