@@ -38,7 +38,8 @@ use super::{
     open_executable_no_follow, CliError,
     ProviderArgs, MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS,
     MAX_BUFFERED_AGENT_RENDERED_BYTES, MAX_SOCKET_FRAME_BYTES, terminal_safe_text,
-    systemctl_user_command, temp_file_name, CTX_PROVIDER_CURL_BIN, MAX_AGENT_REPL_STDIN_BYTES,
+    systemctl_user_command, temp_file_name, waiting_diagnostic, CTX_PROVIDER_CURL_BIN,
+    MAX_AGENT_REPL_STDIN_BYTES,
     MAX_OAUTH_CALLBACK_REQUEST_BYTES, MAX_PROVIDER_SECRET_STDIN_BYTES,
 };
 use cortexfs::{

@@ -472,6 +472,11 @@ struct AgentEventRender {
 }
 
 fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot configure socket progress: {error}"))
+        })?;
     let reader = io::BufReader::new(stream);
     Ok(ExitCode::from(render_agent_event_lines(reader, None)?.exit_code))
 }
@@ -491,6 +496,8 @@ fn render_agent_event_lines(
     let mut saw_delta = false;
     let mut usage_totals = AgentUsageTotals::default();
     let mut exit = ExitCode::SUCCESS;
+    let mut quiet_since = std::time::Instant::now();
+    let mut next_waiting_notice = Duration::from_secs(3);
     let mut line = String::new();
     loop {
         line.clear();
@@ -498,17 +505,21 @@ fn render_agent_event_lines(
             Ok(None) => break,
             Ok(Some(_bytes)) => {}
             Err(error)
-                if interrupt.is_some()
-                    && matches!(
-                        error.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
             {
                 if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
                     return Ok(AgentEventRender {
                         exit_code: exit_code_u8(exit),
                         interrupted: true,
                     });
+                }
+                let elapsed = quiet_since.elapsed();
+                if elapsed >= next_waiting_notice {
+                    write_terminal_diagnostic(&waiting_diagnostic(elapsed.as_secs()))?;
+                    next_waiting_notice += Duration::from_secs(3);
                 }
                 continue;
             }
@@ -518,6 +529,8 @@ fn render_agent_event_lines(
                 )));
             }
         }
+        quiet_since = std::time::Instant::now();
+        next_waiting_notice = Duration::from_secs(3);
         let line = line.trim_end_matches(['\r', '\n']);
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             print_line(line)?;
@@ -530,6 +543,11 @@ fn render_agent_event_lines(
                     saw_delta = true;
                 }
             }
+            Some("message")
+                if value.get("role").and_then(serde_json::Value::as_str) == Some("tool") =>
+            {
+                write_terminal_diagnostic(&tool_result_diagnostic(&value))?;
+            }
             Some("message" | "reasoning_message") if !saw_delta => {
                 if let Some(text) = json_text_field(&value) {
                     print_terminal_line(text)?;
@@ -540,7 +558,7 @@ fn render_agent_event_lines(
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("tool_call");
-                write_terminal_diagnostic(&tool_diagnostic(name))?;
+                write_terminal_diagnostic(&tool_running_diagnostic(name))?;
             }
             Some("usage") => {
                 if let Some(diagnostic) = usage_totals.record_event(&value) {
@@ -703,6 +721,11 @@ fn collect_agent_events_buffered_with(
                     saw_delta = true;
                 }
             }
+            Some("message")
+                if value.get("role").and_then(serde_json::Value::as_str) == Some("tool") =>
+            {
+                push_buffered_diagnostic(&mut diagnostics, tool_result_diagnostic(&value))?;
+            }
             Some("message" | "reasoning_message") if !saw_delta => {
                 if let Some(text) = json_text_field(&value) {
                     push_buffered_output(&mut output, text)?;
@@ -714,7 +737,7 @@ fn collect_agent_events_buffered_with(
                     .get("name")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("tool_call");
-                push_buffered_diagnostic(&mut diagnostics, tool_diagnostic(name))?;
+                push_buffered_diagnostic(&mut diagnostics, tool_running_diagnostic(name))?;
             }
             Some("usage") => {
                 if let Some(diagnostic) = usage_totals.record_event(&value) {
@@ -778,14 +801,62 @@ impl AgentUsageTotals {
     }
 }
 
-fn tool_diagnostic(name: &str) -> String {
+fn waiting_diagnostic(seconds: u64) -> String {
+    let color = color_enabled();
+    format!(
+        "{} {}",
+        styled(color, ANSI_DIM, "waiting"),
+        styled(color, ANSI_CYAN, &format!("{seconds}s for agent event"))
+    )
+}
+
+fn tool_running_diagnostic(name: &str) -> String {
     let color = color_enabled();
     let name = terminal_safe_text(name);
     format!(
-        "{} {}",
+        "{} {} {}",
         styled(color, ANSI_BOLD_YELLOW, "tool"),
-        styled(color, ANSI_CYAN, &name)
+        styled(color, ANSI_CYAN, &name),
+        styled(color, ANSI_DIM, "running")
     )
+}
+
+fn tool_result_diagnostic(value: &serde_json::Value) -> String {
+    let color = color_enabled();
+    let name = value
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("tool");
+    let name = terminal_safe_text(name);
+    let bytes = tool_message_content_bytes(value);
+    format!(
+        "{} {} {} {}",
+        styled(color, ANSI_BOLD_YELLOW, "tool"),
+        styled(color, ANSI_CYAN, &name),
+        styled(color, ANSI_GREEN, "done"),
+        styled(color, ANSI_DIM, &format!("{bytes} bytes"))
+    )
+}
+
+fn tool_message_content_bytes(value: &serde_json::Value) -> usize {
+    match value.get("content") {
+        Some(content) if content.is_string() => {
+            content.as_str().map_or(0, str::len)
+        }
+        Some(content) if content.is_array() => content.as_array().map_or(0, |items| {
+            items
+                .iter()
+                .map(|item| {
+                    item.get("content")
+                        .or_else(|| item.get("text"))
+                        .and_then(serde_json::Value::as_str)
+                        .map_or_else(|| item.to_string().len(), str::len)
+                })
+                .sum()
+        }),
+        Some(other) => other.to_string().len(),
+        None => 0,
+    }
 }
 
 fn error_diagnostic(code: &str, message: &str) -> String {

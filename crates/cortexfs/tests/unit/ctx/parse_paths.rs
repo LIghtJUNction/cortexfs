@@ -1240,6 +1240,7 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
     let input = concat!(
         "{\"type\":\"delta\",\"text\":\"\\u4f60\"}\n",
         "{\"type\":\"tool_call\",\"name\":\"tsh\"}\n",
+        "{\"type\":\"message\",\"role\":\"tool\",\"name\":\"tsh\",\"content\":[{\"type\":\"tool_result\",\"content\":\"abc\"}]}\n",
         "{\"type\":\"delta\",\"text\":\"\\u597d\"}\n",
         "{\"type\":\"done\"}\n",
         "{\"type\":\"error\",\"code\":\"EIO\",\"message\":\"boom\"}\n",
@@ -1252,7 +1253,11 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
         Ok(ref rendered)
             if rendered.output == "\u{4f60}\u{597d}\n"
                 && rendered.diagnostics
-                    == vec!["tool tsh".to_owned(), "error EIO: boom".to_owned()]
+                    == vec![
+                        "tool tsh running".to_owned(),
+                        "tool tsh done 3 bytes".to_owned(),
+                        "error EIO: boom".to_owned()
+                    ]
                 && rendered.exit_code == 1
                 && !rendered.interrupted
     ));
@@ -1276,6 +1281,11 @@ fn buffered_agent_renderer_reports_token_delta_and_total() {
                     "tokens in +4/14 out +3/5".to_owned(),
                 ]
     ));
+}
+
+#[test]
+fn agent_renderer_waiting_diagnostic_is_readable() {
+    assert_eq!(waiting_diagnostic(12), "waiting 12s for agent event");
 }
 
 #[test]
