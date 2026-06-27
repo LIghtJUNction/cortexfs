@@ -55,10 +55,19 @@ pub fn record_indexed_socket_send_to_session(
         ));
     }
 
+    let by_cwd_key = cwd.and_then(session_index_key_for_cwd);
+    preflight_session_index_update(
+        session_root,
+        session,
+        by_cwd_key.as_deref(),
+        None,
+        None,
+    )
+    .map_err(IndexedSocketSessionRecordError::Index)?;
+
     let session_dir = session_root.join(session);
     let record = record_socket_request_to_session(&session_dir, request)
         .map_err(IndexedSocketSessionRecordError::Session)?;
-    let by_cwd_key = cwd.and_then(session_index_key_for_cwd);
     update_session_index(session_root, session, by_cwd_key.as_deref())
         .map_err(IndexedSocketSessionRecordError::Index)?;
 

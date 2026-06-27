@@ -646,6 +646,34 @@ fn indexed_socket_send_records_history_and_updates_session_index() {
 }
 
 #[test]
+fn indexed_socket_send_preflights_index_before_recording_history() {
+    let root = clean_test_dir("indexed-socket-send-bad-index");
+    let session_root = root.join("session");
+    let session = session_root.join("default");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "");
+    write_text_file(&session.join("events.jsonl"), "");
+    write_text_file(&session_root.join("index").join("list"), "bad/name\n");
+    write_text_file(&session_root.join("index").join("current"), "default\n");
+    assert!(fs::create_dir_all(session_root.join("index").join("by-cwd")).is_ok());
+
+    let request = parse_socket_request_frame(
+        r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
+    );
+    let request = ok!(request);
+
+    assert_eq!(
+        record_indexed_socket_send_to_session(&session_root, &request),
+        Err(IndexedSocketSessionRecordError::Index(
+            SessionIndexUpdateError::InvalidIndex
+        ))
+    );
+    assert_file_text(&session.join("messages.jsonl"), "");
+    assert_file_text(&session.join("events.jsonl"), "");
+}
+
+#[test]
 fn indexed_socket_send_rejects_non_send_requests() {
     let root = clean_test_dir("indexed-socket-non-send");
     let session_root = root.join("session");
