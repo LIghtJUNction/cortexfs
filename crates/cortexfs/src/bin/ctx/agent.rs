@@ -120,7 +120,7 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
             ref session,
             ref input,
             raw,
-        } => agent_send(root, name, session.as_deref(), input, raw),
+        } => agent_send(root, name, session.as_deref(), input, raw, false),
         AgentArgs::Repl {
             ref name,
             ref session,
@@ -349,15 +349,11 @@ fn agent_send(
     session: Option<&str>,
     input: &str,
     raw: bool,
+    debug: bool,
 ) -> Result<ExitCode, CliError> {
     let session = agent_session_name(root, name, session)?;
-    let request = format!(
-        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
-        json_string(&request_id()?),
-        json_string(&session),
-        json_string(&agent_cwd(root, name)?),
-        json_string(input)
-    );
+    let request =
+        agent_send_request_json(&request_id()?, &session, &agent_cwd(root, name)?, input, debug);
     stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
 }
 
@@ -368,6 +364,7 @@ struct AgentInteractiveSend<'a> {
     raw: bool,
     run_id: &'a str,
     interrupt: Option<&'a AgentInterruptGuard>,
+    debug: bool,
 }
 
 const AGENT_REPL_COMMANDS: &str =
@@ -379,12 +376,12 @@ fn agent_send_interactive_with_run_id(
     send: AgentInteractiveSend<'_>,
 ) -> Result<ExitCode, CliError> {
     let session = agent_session_name(root, name, send.session)?;
-    let request = format!(
-        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
-        json_string(send.run_id),
-        json_string(&session),
-        json_string(&agent_cwd(root, name)?),
-        json_string(send.input)
+    let request = agent_send_request_json(
+        send.run_id,
+        &session,
+        &agent_cwd(root, name)?,
+        send.input,
+        send.debug,
     );
     let cancel_request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(send.run_id));
     stream_agent_socket_request_streaming_interruptible(
@@ -393,6 +390,31 @@ fn agent_send_interactive_with_run_id(
         send.raw,
         send.interrupt
             .map(|guard| (guard, cancel_request.as_str(), send.run_id)),
+    )
+}
+
+fn agent_send_request_json(
+    run_id: &str,
+    session: &str,
+    cwd: &str,
+    input: &str,
+    debug: bool,
+) -> String {
+    if debug {
+        return format!(
+            "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{},\"debug\":true}}\n",
+            json_string(run_id),
+            json_string(session),
+            json_string(cwd),
+            json_string(input)
+        );
+    }
+    format!(
+        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
+        json_string(run_id),
+        json_string(session),
+        json_string(cwd),
+        json_string(input)
     )
 }
 
@@ -485,6 +507,7 @@ fn agent_repl(
                 raw,
                 run_id: &run_id,
                 interrupt: Some(&interrupt),
+                debug: debug.enabled,
             })?;
             if code != ExitCode::SUCCESS {
                 return Ok(code);
@@ -505,7 +528,7 @@ fn agent_repl(
             if debug.enabled {
                 debug.report_tools(root, name)?;
             }
-            let _code = agent_send(root, name, Some(&session), line, raw)?;
+            let _code = agent_send(root, name, Some(&session), line, raw, debug.enabled)?;
         }
     }
     Ok(ExitCode::SUCCESS)

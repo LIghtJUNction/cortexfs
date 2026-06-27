@@ -109,7 +109,7 @@ Do not ask the user to let you execute `tsh`; the user's request is already perm
 For a request to list, discover, inspect, or show available tools, output this exact tool call first:
 {{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}
 When you need to call a tool, output exactly one JSON object line and no prose before it:
-{{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}
+{{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"COMMAND\"]}}}}
 Use `arguments.args` for the `tsh` argv, for example [\"fs.read\",\"PATH_FROM_USER\"].
 If no concrete file path is provided for a file read/write request, ask the user for the path; do \
 not invent a project file path.

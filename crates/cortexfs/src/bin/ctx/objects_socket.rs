@@ -565,6 +565,11 @@ fn render_agent_event_lines(
                     write_terminal_diagnostic(&diagnostic)?;
                 }
             }
+            Some("debug") => {
+                if let Some(diagnostic) = debug_timing_diagnostic(&value) {
+                    write_terminal_diagnostic(&diagnostic)?;
+                }
+            }
             Some("error") => {
                 let code = value
                     .get("code")
@@ -808,6 +813,23 @@ fn waiting_diagnostic(seconds: u64) -> String {
         styled(color, ANSI_DIM, "waiting"),
         styled(color, ANSI_CYAN, &format!("{seconds}s for agent event"))
     )
+}
+
+fn debug_timing_diagnostic(value: &serde_json::Value) -> Option<String> {
+    let elapsed = value
+        .get("elapsed_ms")
+        .and_then(serde_json::Value::as_u64)?;
+    let stage = value
+        .get("stage")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("event");
+    let color = color_enabled();
+    Some(format!(
+        "{} {} {}",
+        styled(color, ANSI_DIM, "[debug timing]"),
+        styled(color, ANSI_CYAN, &format!("+{elapsed}ms")),
+        styled(color, ANSI_DIM, &terminal_safe_text(stage))
+    ))
 }
 
 fn tool_running_diagnostic(name: &str) -> String {

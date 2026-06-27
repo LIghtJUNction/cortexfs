@@ -146,13 +146,14 @@ fn inspect_single_agent_control_value(
     validate: impl Fn(usize, &str, &mut Vec<AgentControlIssue>),
 ) -> AgentControlReport {
     let mut issues = Vec::new();
-    let lines = content.lines().collect::<Vec<_>>();
-    let value = lines.first().map_or("", |line| line.trim());
+    let mut lines = content.lines();
+    let first_line = lines.next();
+    let value = first_line.map_or("", str::trim);
     if value.is_empty() {
         if required {
             issues.push(AgentControlIssue::EmptyValue);
         }
-    } else if lines.first().is_some_and(|line| *line != value) {
+    } else if first_line.is_some_and(|line| line != value) {
         issues.push(AgentControlIssue::InvalidValue {
             line: 1,
             value: value.to_owned(),
@@ -160,7 +161,7 @@ fn inspect_single_agent_control_value(
     } else {
         validate(1, value, &mut issues);
     }
-    if lines.len() > 1 {
+    if lines.next().is_some() {
         issues.push(AgentControlIssue::MultipleValues { line: 2 });
     }
     AgentControlReport::new(issues)

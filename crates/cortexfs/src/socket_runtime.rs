@@ -152,6 +152,7 @@ fn handle_agent_executable_socket_request_frame_streaming(
     runtime: AgentExecutableSocketRuntime<'_>,
     frame: &str,
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    let debug = socket_debug_timing_from_frame(frame);
     let request = parse_socket_request_frame(frame).map_err(SocketRuntimeError::Request)?;
     let SocketRequest::Send {
         ref id,
@@ -170,6 +171,9 @@ fn handle_agent_executable_socket_request_frame_streaming(
         write_socket_runtime_response(stream, &response)?;
         return Ok(response);
     };
+    if let Some(debug) = debug {
+        write_socket_debug_timing_frame(stream, debug, "socket_send_received")?;
+    }
 
     let recorder_response = handle_socket_request(
         runtime.session_root,
@@ -178,8 +182,11 @@ fn handle_agent_executable_socket_request_frame_streaming(
         &request,
     )?;
     write_socket_runtime_response(stream, &recorder_response)?;
+    if let Some(debug) = debug {
+        write_socket_debug_timing_frame(stream, debug, "session_recorded")?;
+    }
 
-    let agent_frames = run_agent_executable_streaming(stream, runtime, id, session, input)?;
+    let agent_frames = run_agent_executable_streaming(stream, runtime, id, session, input, debug)?;
     if scope != SocketSessionScope::Temp {
         let session_dir = runtime.session_root.join(session);
         record_tool_results_from_event_frames(&session_dir, id, &agent_frames)
@@ -201,11 +208,13 @@ fn run_agent_executable_streaming(
     run_id: &str,
     session: &str,
     input: &str,
+    debug: Option<SocketDebugTiming>,
 ) -> Result<Vec<String>, SocketRuntimeError> {
     let history_messages = collect_history_messages_from_session(
         &runtime.session_root.join(session),
         MAX_HISTORY_MESSAGES_CHARS,
     );
+    write_optional_socket_debug_timing_frame(stream, debug, "history_collected")?;
     let agent_executable = open_agent_executable_no_follow(runtime.agent_executable)?;
     let mut command = Command::new(proc_fd_path(&agent_executable));
     command
@@ -230,10 +239,12 @@ fn run_agent_executable_streaming(
         .env("CTX_AGENT_HISTORY_MESSAGES", history_messages)
         .stdout(Stdio::piped())
         .process_group(0);
+    apply_socket_debug_timing_env(&mut command, debug);
     apply_agent_identity_to_command(&mut command, runtime.identity);
     let mut child = command
         .spawn()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    write_optional_socket_debug_timing_frame(stream, debug, "agent_spawned")?;
     let stdout = child
         .stdout
         .take()
@@ -251,11 +262,20 @@ fn run_agent_executable_streaming(
     let mut frames = Vec::new();
     let session_dir = runtime.session_root.join(session);
     let mut cancelled = false;
+    let mut saw_agent_frame = false;
     loop {
         match stdout_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(line) => {
                 if line.trim().is_empty() {
                     continue;
+                }
+                if is_socket_debug_timing_frame(&line) {
+                    write_socket_frame(stream, &line)?;
+                    continue;
+                }
+                if !saw_agent_frame {
+                    write_optional_socket_debug_timing_frame(stream, debug, "first_agent_frame")?;
+                    saw_agent_frame = true;
                 }
                 if !inspect_event_stream_jsonl(&line).is_ok() {
                     if frames.is_empty() {
@@ -614,6 +634,69 @@ fn write_socket_frame(stream: &mut UnixStream, frame: &str) -> Result<(), Socket
         .and_then(|()| stream.write_all(b"\n"))
         .and_then(|()| stream.flush())
         .map_err(|_error| SocketRuntimeError::CannotWriteResponse)
+}
+
+#[derive(Clone, Copy)]
+struct SocketDebugTiming {
+    start_unix_ms: u128,
+}
+
+fn socket_debug_timing_from_frame(frame: &str) -> Option<SocketDebugTiming> {
+    let value = serde_json::from_str::<Value>(frame).ok()?;
+    if value.get("debug").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    Some(SocketDebugTiming {
+        start_unix_ms: current_unix_millis(),
+    })
+}
+
+fn current_unix_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis())
+}
+
+fn write_socket_debug_timing_frame(
+    stream: &mut UnixStream,
+    timing: SocketDebugTiming,
+    stage: &str,
+) -> Result<(), SocketRuntimeError> {
+    let elapsed_ms = current_unix_millis().saturating_sub(timing.start_unix_ms);
+    let frame = serde_json::json!({
+        "type": "debug",
+        "stage": stage,
+        "elapsed_ms": elapsed_ms
+    })
+    .to_string();
+    write_socket_frame(stream, &frame)
+}
+
+fn write_optional_socket_debug_timing_frame(
+    stream: &mut UnixStream,
+    timing: Option<SocketDebugTiming>,
+    stage: &str,
+) -> Result<(), SocketRuntimeError> {
+    if let Some(timing) = timing {
+        write_socket_debug_timing_frame(stream, timing, stage)?;
+    }
+    Ok(())
+}
+
+fn apply_socket_debug_timing_env(command: &mut Command, timing: Option<SocketDebugTiming>) {
+    if let Some(timing) = timing {
+        command
+            .env("CTX_AGENT_DEBUG_TIMING", "1")
+            .env("CTX_AGENT_DEBUG_START_UNIX_MS", timing.start_unix_ms.to_string());
+    }
+}
+
+fn is_socket_debug_timing_frame(frame: &str) -> bool {
+    serde_json::from_str::<Value>(frame)
+        .ok()
+        .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_owned))
+        .as_deref()
+        == Some("debug")
 }
 
 fn handle_socket_send(
