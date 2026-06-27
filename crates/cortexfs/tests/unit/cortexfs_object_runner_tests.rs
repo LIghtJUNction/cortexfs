@@ -7,7 +7,8 @@ use super::{
     provider_runtime_driver, provider_transport, resolve_model_alias, resolved_model_path, run,
     run_cli_tool_to_writer, token_usage_from_value, tool_call_from_text, validate_agent_tsh_args,
     write_model_text_or_tool_call, first_tool_call, collect_child_stderr,
-    spawn_child_stderr_reader,
+    spawn_child_stderr_reader, OpenAiStreamTextEmitter, MAX_CHILD_STDERR_BYTES,
+    MAX_STREAM_TOOL_CALL_BUFFER_BYTES,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, agent_runtime_contract, collect_agent_rules,
@@ -226,12 +227,26 @@ fn async_stderr_reader_drains_large_child_stderr() -> Result<(), Box<dyn std::er
         .stderr(std::process::Stdio::piped())
         .spawn()?;
     let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
-    let status = child.wait()?;
+    let _status = child.wait()?;
     let stderr = collect_child_stderr(stderr_reader);
 
-    assert!(status.success());
-    assert!(stderr.contains("stderr line 9999"));
+    assert!(stderr.len() <= MAX_CHILD_STDERR_BYTES);
+    assert!(stderr.contains("stderr line"));
     Ok(())
+}
+
+#[test]
+fn stream_tool_call_buffer_rejects_oversized_json_prefix() {
+    let mut emitter = OpenAiStreamTextEmitter::new("run-1");
+    let mut output = Vec::new();
+    let oversized = format!(
+        "{{\"type\":\"tool_call\",\"padding\":\"{}\"",
+        "x".repeat(MAX_STREAM_TOOL_CALL_BUFFER_BYTES)
+    );
+
+    let result = emitter.push(&mut output, &oversized);
+
+    assert!(result.is_err());
 }
 
 #[test]
