@@ -21,6 +21,8 @@ const DEFAULT_CTX_ROOT: &str = "/ctx";
 const MAX_AGENT_TOOL_ITERATIONS: usize = 8;
 const MAX_MODEL_FALLBACK_CANDIDATES: usize = 16;
 const MAX_TOOL_RESULT_CHARS: usize = 16 * 1024;
+const MAX_CHILD_STDERR_BYTES: usize = 64 * 1024;
+const MAX_STREAM_TOOL_CALL_BUFFER_BYTES: usize = 64 * 1024;
 
 include!("../cortexfs_object_runner_provider.rs");
 
@@ -441,11 +443,7 @@ fn run_agent_model_once(
 fn spawn_child_stderr_reader(
     mut stderr: std::process::ChildStderr,
 ) -> std::thread::JoinHandle<String> {
-    std::thread::spawn(move || {
-        let mut output = String::new();
-        let _ignored = stderr.read_to_string(&mut output);
-        output
-    })
+    std::thread::spawn(move || read_limited_text(&mut stderr, MAX_CHILD_STDERR_BYTES))
 }
 
 fn collect_child_stderr(reader: Option<std::thread::JoinHandle<String>>) -> String {
@@ -453,6 +451,23 @@ fn collect_child_stderr(reader: Option<std::thread::JoinHandle<String>>) -> Stri
         return String::new();
     };
     reader.join().unwrap_or_default()
+}
+
+fn read_limited_text(reader: &mut impl Read, limit: usize) -> String {
+    let mut output = Vec::with_capacity(limit.min(8 * 1024));
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        let remaining = limit.saturating_sub(output.len());
+        let kept = read.min(remaining);
+        if let Some(chunk) = buffer.get(..kept) {
+            output.extend_from_slice(chunk);
+        }
+    }
+    String::from_utf8_lossy(&output).into_owned()
 }
 
 fn normalize_agent_model_frame(frame: &str, run: &str) -> String {

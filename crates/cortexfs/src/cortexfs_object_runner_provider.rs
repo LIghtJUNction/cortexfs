@@ -865,6 +865,7 @@ fn call_openai_sse_streaming(
             can_fallback: true,
         });
     };
+    let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
     let mut text_emitter = OpenAiStreamTextEmitter::new(run);
     let mut emitted = false;
     let mut done = false;
@@ -921,22 +922,23 @@ fn call_openai_sse_streaming(
         can_fallback: !emitted,
     })?;
     if !status.success() {
-        let stderr = child_stderr_text(&mut child);
+        let stderr = collect_child_stderr(stderr_reader);
+        let message = provider_stream_failure_message(status, &stderr);
         if emitted {
-            return text_emitter
+            text_emitter
                 .finish(stdout)
                 .and_then(|()| stdout.flush())
                 .map_err(|error| StreamFailure {
                     message: format!("cannot write output: {error}"),
                     can_fallback: false,
-                });
+                })?;
+            return Err(StreamFailure {
+                message,
+                can_fallback: false,
+            });
         }
         return Err(StreamFailure {
-            message: if stderr.trim().is_empty() {
-                format!("provider stream request failed with {status}")
-            } else {
-                format!("provider stream request failed with {status}: {}", stderr.trim())
-            },
+            message,
             can_fallback: !emitted && !stderr.contains("Operation timed out"),
         });
     }
@@ -986,10 +988,12 @@ impl<'a> OpenAiStreamTextEmitter<'a> {
             StreamTextMode::Plain => write_model_delta(stdout, self.run, text),
             StreamTextMode::BufferToolCall => {
                 self.buffer.push_str(text);
+                reject_oversized_stream_tool_call_buffer(&self.buffer)?;
                 Ok(())
             }
             StreamTextMode::Undecided => {
                 self.buffer.push_str(text);
+                reject_oversized_stream_tool_call_buffer(&self.buffer)?;
                 let trimmed = self.buffer.trim_start();
                 if trimmed.is_empty() {
                     return Ok(());
@@ -1144,18 +1148,29 @@ fn provider_max_time_seconds() -> u64 {
         .unwrap_or(60)
 }
 
+fn reject_oversized_stream_tool_call_buffer(buffer: &str) -> io::Result<()> {
+    if buffer.len() > MAX_STREAM_TOOL_CALL_BUFFER_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "stream tool call buffer exceeds {MAX_STREAM_TOOL_CALL_BUFFER_BYTES} bytes"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn provider_stream_failure_message(status: std::process::ExitStatus, stderr: &str) -> String {
+    if stderr.trim().is_empty() {
+        format!("provider stream request failed with {status}")
+    } else {
+        format!("provider stream request failed with {status}: {}", stderr.trim())
+    }
+}
+
 fn cleanup_curl_child(child: &mut std::process::Child) {
     let _ignored = child.kill();
     let _ignored = child.wait();
-}
-
-fn child_stderr_text(child: &mut std::process::Child) -> String {
-    let Some(mut stderr) = child.stderr.take() else {
-        return String::new();
-    };
-    let mut output = String::new();
-    let _ignored = stderr.read_to_string(&mut output);
-    output
 }
 
 fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
