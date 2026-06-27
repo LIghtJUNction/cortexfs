@@ -257,10 +257,11 @@ fn unescape_mountinfo(value: &str) -> String {
 }
 
 fn shell_quote(value: &str) -> String {
+    let value = terminal_safe_text(value);
     if value.bytes().all(|byte| {
         byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b':')
     }) {
-        value.to_owned()
+        value
     } else {
         format!("'{}'", value.replace('\'', "'\\''"))
     }
