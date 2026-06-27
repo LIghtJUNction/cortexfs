@@ -205,6 +205,7 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     let contract = agent_runtime_contract("coder");
 
     assert!(contract.contains("you must call `tsh` immediately"));
+    assert!(contract.contains("Do not ask the user to let you execute `tsh`"));
     assert!(contract.contains("output exactly one JSON object line and no prose"));
     assert!(contract.contains(r#""name":"tsh""#));
     assert!(contract.contains("If no concrete file path is provided"));

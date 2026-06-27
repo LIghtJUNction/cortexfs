@@ -102,6 +102,9 @@ Use `tsh tools` to discover tools, `tsh load TOOL` to load a tool description in
 `tsh pin TOOL` to keep it resident, and `tsh TOOL ARG...` to invoke it.
 When a user asks you to use, test, discover, load, read with, write with, or otherwise try a tool, \
 you must call `tsh` immediately instead of describing what you would do.
+Do not ask the user to let you execute `tsh`; the user's request is already permission to call it.
+For a request to list, discover, inspect, or show available tools, output this exact tool call first:
+{{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}
 When you need to call a tool, output exactly one JSON object line and no prose before it:
 {{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}
 Use `arguments.args` for the `tsh` argv, for example [\"fs.read\",\"PATH_FROM_USER\"].

@@ -1141,7 +1141,7 @@ fn provider_max_time_seconds() -> u64 {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| (1..=600).contains(value))
-        .unwrap_or(20)
+        .unwrap_or(60)
 }
 
 fn cleanup_curl_child(child: &mut std::process::Child) {
