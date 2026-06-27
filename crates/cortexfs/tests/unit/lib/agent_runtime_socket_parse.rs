@@ -384,6 +384,15 @@ fn api_key_resolution_reports_unconfigured_without_environment_or_keychain() {
         |_service, _account| Ok(None),
     );
     assert_eq!(invalid, Err(ApiKeyResolutionError::InvalidName));
+
+    let invalid_service = resolve_api_key_with(
+        "CTX_LMM_SECRET",
+        "cortexfs:\u{1b}lmm",
+        "default",
+        |_name| Err(std::env::VarError::NotPresent),
+        |_service, _account| Ok(None),
+    );
+    assert_eq!(invalid_service, Err(ApiKeyResolutionError::InvalidName));
 }
 
 #[test]
@@ -419,6 +428,33 @@ fn oauth_authorization_url_and_token_form_include_pkce() {
     assert!(form.contains("grant_type=authorization_code"));
     assert!(form.contains("code=auth%20code"));
     assert!(form.contains("code_verifier=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"));
+}
+
+#[test]
+fn oauth_forms_reject_control_characters() {
+    let mut config = test_oauth_config();
+    let pkce = ok!(OAuthPkce::from_verifier(
+        "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    ));
+
+    assert_eq!(
+        oauth_authorization_url(&config, "state\u{1b}", &pkce),
+        Err(OAuthError::InvalidConfig)
+    );
+    assert_eq!(
+        oauth_authorization_code_form(&config, "code\r", &pkce),
+        Err(OAuthError::InvalidConfig)
+    );
+    assert_eq!(
+        oauth_refresh_token_form(&config, "refresh\u{1b}"),
+        Err(OAuthError::InvalidConfig)
+    );
+
+    config.scopes.push("bad\u{1b}scope".to_owned());
+    assert_eq!(
+        oauth_authorization_url(&config, "state", &pkce),
+        Err(OAuthError::InvalidConfig)
+    );
 }
 
 #[test]
@@ -462,6 +498,14 @@ fn oauth_access_token_resolution_prefers_environment_over_keychain() {
         },
     );
     assert_eq!(fallback, Ok(Some("keychain-access".to_owned())));
+
+    let invalid_provider = resolve_oauth_access_token_with(
+        "openai\u{1b}",
+        &config,
+        |_name| Err(std::env::VarError::NotPresent),
+        |_service, _account| Ok(Some("keychain-access".to_owned())),
+    );
+    assert_eq!(invalid_provider, Err(OAuthError::InvalidConfig));
 }
 
 fn test_oauth_config() -> OAuthProviderConfig {

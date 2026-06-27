@@ -9,10 +9,10 @@ use crate::{
 /// source references.
 #[must_use]
 pub fn inspect_context_pack_json(content: &str) -> ContextPackReport {
-    let Ok(value) = serde_json::from_str::<Value>(content) else {
+    let Ok(_value) = serde_json::from_str::<Value>(content) else {
         return ContextPackReport::new(vec![ContextPackIssue::InvalidJson]);
     };
-    let Ok(pack) = serde_json::from_value::<ContextPackJson>(value) else {
+    let Ok(pack) = serde_json::from_str::<ContextPackJson>(content) else {
         return ContextPackReport::new(vec![ContextPackIssue::ItemsNotArray]);
     };
 

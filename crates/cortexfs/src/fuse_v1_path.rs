@@ -14,7 +14,7 @@ fn resolve_fuse_abi_path(root: &Path, abi_path: &str) -> Result<PathBuf, FuseV1E
 }
 
 fn normalize_fuse_abi_path(abi_path: &str) -> Result<String, FuseV1Error> {
-    if abi_path.contains('\0') {
+    if abi_path.bytes().any(|byte| byte.is_ascii_control()) {
         return Err(FuseV1Error::InvalidPath);
     }
     let trimmed = abi_path.trim_start_matches('/');
@@ -54,7 +54,12 @@ fn read_bytes_at(content: &[u8], offset: u64, size: usize) -> Result<Vec<u8>, Fu
 }
 
 fn fuse_join_child_path(parent: &str, name: &str) -> Result<String, FuseV1Error> {
-    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.bytes().any(|byte| byte.is_ascii_control())
+    {
         return Err(FuseV1Error::InvalidPath);
     }
     if parent.is_empty() {

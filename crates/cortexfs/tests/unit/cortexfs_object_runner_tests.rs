@@ -1684,6 +1684,22 @@ fn provider_config_from_dir_reads_plain_json_configs() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn provider_config_from_dir_rejects_duplicate_known_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-provider-config-duplicate")?;
+    let providers = root.join("providers.d");
+    fs::create_dir_all(&providers)?;
+    fs::write(
+        providers.join("local.json"),
+        "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\",\"base_url\":\"http://evil/v1\"}\n",
+    )?;
+
+    assert!(provider_config_from_dir(&providers, "local").is_none());
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn provider_runner_uses_absolute_curl_path() {
     let command = provider_curl_command();
     assert_eq!(command.get_program(), PROVIDER_CURL_BIN);
@@ -1876,6 +1892,17 @@ fn provider_transport_rejects_relative_unix_socket_route() {
 }
 
 #[test]
+fn provider_transport_rejects_control_character_unix_socket_route() {
+    let config = test_provider_config("https://api.openai.com/v1");
+
+    assert!(provider_transport(
+        &config,
+        Some("group(local-socket) -> unix(/run/cortexfs/\u{1b}proxy.sock)\ndomain(openai.com) -> local-socket\n")
+    )
+    .is_err());
+}
+
+#[test]
 fn provider_transport_rejects_non_url_unix_base_url() {
     let config = test_provider_config("https://api.openai.com/v1");
 
@@ -1944,6 +1971,7 @@ fn test_provider_config(base_url: &str) -> RunnerProviderConfig {
 
 fn test_provider_config_with_formats(base_url: &str, formats: &[&str]) -> RunnerProviderConfig {
     RunnerProviderConfig {
+        name: None,
         base_url: base_url.to_owned(),
         oauth: None,
         formats: formats.iter().map(|format| (*format).to_owned()).collect(),

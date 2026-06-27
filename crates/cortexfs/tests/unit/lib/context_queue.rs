@@ -112,6 +112,29 @@ fn context_pack_rebuild_ignores_symlink_pinned_files() {
 }
 
 #[test]
+fn context_pack_rebuild_ignores_control_character_pinned_files() {
+    let root = clean_test_dir("context-pack-rebuild-control-pinned");
+    let session = root.join("default");
+    let context = session.join("context");
+
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "{\"role\":\"user\",\"content\":\"ok\"}\n");
+    write_text_file(&context.join("budget"), "0\n");
+    write_text_file(&context.join("summary.md"), "");
+    write_text_file(&context.join("facts.jsonl"), "");
+    write_text_file(&context.join("decisions.jsonl"), "");
+    write_text_file(&context.join("todo.md"), "");
+    write_text_file(&context.join("refs.jsonl"), "");
+    write_text_file(&context.join("child").join("rev-1").join("result.md"), "");
+    write_text_file(&context.join("child").join("rev-1").join("refs.jsonl"), "");
+    write_text_file(&context.join("pinned").join("bad\u{1b}.md"), "hidden pinned\n");
+
+    let built = rebuild_context_pack(&session, Some("coder"), 5);
+    let built = ok!(built);
+    assert!(!built.pack_md().contains("hidden pinned"));
+}
+
+#[test]
 fn context_pack_rebuild_refuses_symlink_pinned_directory() {
     let root = clean_test_dir("context-pack-rebuild-symlink-pinned-dir");
     let session = root.join("default");
@@ -202,6 +225,10 @@ fn context_pack_rejects_invalid_json_shape() {
     );
     assert_eq!(
         inspect_context_pack_json(r#"{"items": {"source": "messages.jsonl"}}"#).issues(),
+        &[ContextPackIssue::ItemsNotArray]
+    );
+    assert_eq!(
+        inspect_context_pack_json(r#"{"items":[],"items":[]}"#).issues(),
         &[ContextPackIssue::ItemsNotArray]
     );
     assert_eq!(
@@ -319,6 +346,12 @@ fn context_jsonl_rejects_invalid_records() {
         ]
     );
 
+    let duplicate = inspect_context_jsonl(
+        ContextJsonlKind::Facts,
+        "{\"id\":\"fact-1\",\"id\":\"fact-2\",\"text\":\"ok\",\"source\":\"messages:1\"}\n",
+    );
+    assert_eq!(duplicate.issues(), [ContextJsonlIssue::InvalidJson(1)]);
+
     let refs = inspect_context_jsonl(
         ContextJsonlKind::Refs,
         r#"{"id":"r1","path":"../secret","kind":"provider_thread","summary":"bad"}
@@ -338,6 +371,19 @@ fn context_jsonl_rejects_invalid_records() {
                 value: "provider_thread".to_owned()
             }
         ]
+    );
+
+    let control_path = inspect_context_jsonl(
+        ContextJsonlKind::Refs,
+        "{\"id\":\"r1\",\"path\":\"context/\\u001bhidden.md\",\"kind\":\"file\",\"summary\":\"bad\"}\n",
+    );
+    assert_eq!(
+        control_path.issues(),
+        [ContextJsonlIssue::InvalidField {
+            line: 1,
+            field: "path".to_owned(),
+            value: "context/\u{1b}hidden.md".to_owned()
+        }]
     );
 
     let dedup = inspect_context_jsonl(

@@ -448,7 +448,7 @@ fn secret_tool_dbus_address(
 }
 
 fn is_valid_secret_lookup_part(value: &str) -> bool {
-    !value.is_empty() && !value.contains('\0') && !value.contains('\n')
+    !value.is_empty() && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 fn validate_agent_ctx_path(value: &str) -> Result<(), AgentRuntimeViewError> {

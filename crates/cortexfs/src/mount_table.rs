@@ -208,7 +208,7 @@ fn bind_rank(options: &[MountOption]) -> u8 {
 }
 
 fn is_absolute_mount_path(value: &str) -> bool {
-    if value.contains('\t') || value.contains('\n') || value.contains('\0') {
+    if value.bytes().any(|byte| byte.is_ascii_control()) {
         return false;
     }
     if value

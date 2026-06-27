@@ -18,6 +18,20 @@ fn fuse_v1_projection_root_is_traversable_when_backing_root_is_private() {
 }
 
 #[test]
+fn fuse_v1_paths_reject_control_characters() {
+    let root = Path::new("/ctx");
+
+    assert_eq!(
+        resolve_fuse_abi_path(root, "agent/coder\u{1b}.d/status"),
+        Err(FuseV1Error::InvalidPath)
+    );
+    assert_eq!(
+        resolve_fuse_abi_path(root, "agent/coder\r.d/status"),
+        Err(FuseV1Error::InvalidPath)
+    );
+}
+
+#[test]
 #[expect(
     clippy::too_many_lines,
     reason = "single projection smoke test keeps related FUSE ABI assertions together"
