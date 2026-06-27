@@ -22,6 +22,7 @@ use super::{
     MAX_CHILD_STDERR_BYTES, MAX_PROVIDER_RESPONSE_BYTES, MAX_PROVIDER_STREAM_LINE_BYTES,
     MAX_RUNNER_STDIN_INPUT_BYTES, MAX_STREAM_TOOL_CALL_BUFFER_BYTES, MAX_TOOL_RESULT_CHARS,
     PROVIDER_CURL_BIN, collect_child_stderr, first_tool_call, spawn_child_stderr_reader,
+    split_object_args,
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, agent_runtime_contract, collect_agent_rules,
@@ -87,6 +88,34 @@ fn object_path_parses_class_and_name() {
             name: "debug/echo".to_owned(),
         })
     );
+}
+
+#[test]
+fn object_args_use_exec_metadata_for_proc_fd_wrappers(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-object-path-proc-fd")?;
+    let wrapper = root.join("coder");
+    fs::write(
+        &wrapper,
+        "#!/usr/bin/cortexfs-object-runner\n# cortexfs.object=agent\n# cortexfs.name=coder\n",
+    )?;
+    let file = fs::File::open(&wrapper)?;
+    let fd_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+
+    let (path, rest) = split_object_args(vec![fd_path.into_os_string(), OsString::from("hello")])?;
+
+    assert_eq!(path, PathBuf::from("/ctx/agent/coder"));
+    assert_eq!(rest, vec![OsString::from("hello")]);
+    assert_eq!(
+        ObjectPath::parse(&path),
+        Ok(ObjectPath {
+            class: "agent".to_owned(),
+            name: "coder".to_owned(),
+        })
+    );
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
 }
 
 #[test]
