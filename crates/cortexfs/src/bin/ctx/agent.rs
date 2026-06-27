@@ -338,9 +338,8 @@ fn systemctl_user_command<const N: usize>(args: [&str; N]) -> ProcessCommand {
     let mut command = ProcessCommand::new(get_systemctl_program());
     command
         .arg("--user")
-        .args(args)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin");
+        .args(args);
+    set_user_systemd_client_env(&mut command);
     command
 }
 
@@ -1047,11 +1046,18 @@ fn agent_start_systemd_command(
 
 fn agent_start_process_command(command: &AgentStartCommand) -> ProcessCommand {
     let mut process = ProcessCommand::new(&command.program);
+    process.args(&command.args);
+    set_user_systemd_client_env(&mut process);
     process
-        .args(&command.args)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin");
-    process
+}
+
+fn set_user_systemd_client_env(command: &mut ProcessCommand) {
+    command.env_clear().env("PATH", "/usr/bin:/bin");
+    for key in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
+        if let Some(value) = env::var_os(key) {
+            command.env(key, value);
+        }
+    }
 }
 
 fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, String)> {
@@ -1176,9 +1182,10 @@ fn agent_bwrap_args(
             "/etc/bash.bashrc".to_owned(),
         ]);
     }
+    let sandbox_cwd = agent_start_sandbox_cwd(args, cli_mounts);
     bwrap.extend([
         "--chdir".to_owned(),
-        args.cwd.clone(),
+        sandbox_cwd,
         "/usr/bin/ctxterm".to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
@@ -1187,6 +1194,22 @@ fn agent_bwrap_args(
         "/ctx/bin/tsh".to_owned(),
     ]);
     bwrap
+}
+
+fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
+    let cwd = Path::new(&args.cwd);
+    for mount in mounts {
+        let source = Path::new(&mount.source);
+        let Ok(relative) = cwd.strip_prefix(source) else {
+            continue;
+        };
+        let mut target = PathBuf::from(&mount.target);
+        if !relative.as_os_str().is_empty() {
+            target.push(relative);
+        }
+        return target.display().to_string();
+    }
+    args.cwd.clone()
 }
 
 const SYSTEMD_RUN_PROGRAM: &str = "/usr/bin/systemd-run";
@@ -1529,7 +1552,7 @@ fn ensure_best_effort_visible_terminal_socket(
         return Err(CliError::unavailable("terminal socket path has no parent"));
     };
     if let Err(error) = create_agent_terminal_plain_dir(parent, 0o755) {
-        if error.kind() == io::ErrorKind::PermissionDenied {
+        if visible_terminal_write_error_is_best_effort(&error) {
             return Ok(());
         }
         return Err(CliError::unavailable(format!(
@@ -1552,7 +1575,8 @@ fn ensure_best_effort_visible_terminal_socket(
         ))),
         Err(nix::errno::Errno::ENOENT) => {
             match nix::unistd::symlinkat(runtime_socket, &parent_dir, file_name) {
-                Ok(()) | Err(nix::errno::Errno::EACCES | nix::errno::Errno::EPERM) => Ok(()),
+                Ok(()) => Ok(()),
+                Err(error) if visible_terminal_errno_is_best_effort(error) => Ok(()),
                 Err(error) => Err(CliError::unavailable(format!(
                     "cannot create terminal socket link {} -> {}: {error}",
                     visible_socket.display(),
@@ -1560,12 +1584,36 @@ fn ensure_best_effort_visible_terminal_socket(
                 ))),
             }
         }
-        Err(nix::errno::Errno::EACCES | nix::errno::Errno::EPERM) => Ok(()),
+        Err(error) if visible_terminal_errno_is_best_effort(error) => Ok(()),
         Err(error) => Err(CliError::unavailable(format!(
             "cannot inspect {}: {error}",
             visible_socket.display()
         ))),
     }
+}
+
+fn visible_terminal_write_error_is_best_effort(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported
+    ) || matches!(
+        error.raw_os_error(),
+        Some(code)
+            if code == nix::libc::EACCES
+                || code == nix::libc::EPERM
+                || code == nix::libc::ENOSYS
+                || code == nix::libc::EROFS
+    )
+}
+
+fn visible_terminal_errno_is_best_effort(error: nix::errno::Errno) -> bool {
+    matches!(
+        error,
+        nix::errno::Errno::EACCES
+            | nix::errno::Errno::EPERM
+            | nix::errno::Errno::ENOSYS
+            | nix::errno::Errno::EROFS
+    )
 }
 
 fn current_uid_for_ctx(root: &Path) -> Result<String, CliError> {

@@ -727,6 +727,22 @@ fn agent_start_default_workspace_remounts_git_read_only() {
     ));
 }
 
+#[test]
+fn agent_start_maps_host_cwd_to_sandbox_mount_target() {
+    let source = clean_test_dir("ctx-agent-start-host-cwd");
+    let subdir = source.join("nested");
+    assert!(fs::create_dir_all(&subdir).is_ok());
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: subdir.display().to_string(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+
+    assert_eq!(agent_start_sandbox_cwd(&args, &mounts), "/workspace/nested");
+}
 
 #[test]
 fn agent_start_default_workspace_does_not_remount_symlinked_git() {
@@ -892,10 +908,7 @@ fn agent_start_process_command_uses_clean_runtime_environment() {
         .collect::<Vec<_>>();
     envs.sort();
 
-    assert_eq!(
-        envs,
-        vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
-    );
+    assert_clean_user_systemd_env(&envs);
 }
 
 #[test]
@@ -925,9 +938,21 @@ fn systemctl_user_command_uses_clean_runtime_environment() {
             "cortexfs-agent-coder-test-terminal.service".to_owned()
         ]
     );
-    assert_eq!(
-        envs,
-        vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
+    assert_clean_user_systemd_env(&envs);
+}
+
+fn assert_clean_user_systemd_env(envs: &[(String, Option<String>)]) {
+    assert!(
+        envs.iter()
+            .any(|entry| entry.0 == "PATH" && entry.1.as_deref() == Some("/usr/bin:/bin")),
+        "missing sanitized PATH in {envs:?}"
+    );
+    assert!(
+        envs.iter().all(|entry| matches!(
+            entry.0.as_str(),
+            "PATH" | "XDG_RUNTIME_DIR" | "DBUS_SESSION_BUS_ADDRESS"
+        )),
+        "unexpected systemd client environment in {envs:?}"
     );
 }
 
@@ -959,6 +984,22 @@ fn agent_start_status_lines_follow_systemctl_shape() {
             " Runtime Socket: /run/user/1000/cortexfs/terminal/coder/default/main.sock",
         ]
     );
+}
+
+#[test]
+fn visible_terminal_socket_treats_readonly_fuse_errors_as_best_effort() {
+    assert!(visible_terminal_write_error_is_best_effort(
+        &std::io::Error::from_raw_os_error(nix::libc::ENOSYS)
+    ));
+    assert!(visible_terminal_write_error_is_best_effort(
+        &std::io::Error::from_raw_os_error(nix::libc::EROFS)
+    ));
+    assert!(visible_terminal_errno_is_best_effort(
+        nix::errno::Errno::ENOSYS
+    ));
+    assert!(visible_terminal_errno_is_best_effort(
+        nix::errno::Errno::EROFS
+    ));
 }
 
 #[test]
