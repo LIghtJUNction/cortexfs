@@ -208,7 +208,23 @@ fn bind_rank(options: &[MountOption]) -> u8 {
 }
 
 fn is_absolute_mount_path(value: &str) -> bool {
-    value.starts_with('/') && !value.contains('\t') && !value.contains('\n')
+    if value.contains('\t') || value.contains('\n') || value.contains('\0') {
+        return false;
+    }
+    if value
+        .split('/')
+        .any(|component| matches!(component, "." | ".."))
+    {
+        return false;
+    }
+    let path = std::path::Path::new(value);
+    path.is_absolute()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::RootDir | std::path::Component::Normal(_)
+            )
+        })
 }
 
 fn parse_mount_options(value: &str) -> Result<Vec<MountOption>, MountError> {

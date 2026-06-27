@@ -1,15 +1,17 @@
 use super::{
-    authorize_child_agent, authorize_session_access, authorize_shared_access,
+    append_jsonl_line, atomic_replace_text_with_mode, authorize_child_agent, authorize_session_access, authorize_shared_access,
     authorize_tool_execution, claim_next_shared_queue_job, classify_abi_path,
-    collect_agent_rules_from_paths, collect_history_messages_from_session, derive_agent_runtime_view,
-    ensure_durable_session_layout, ensure_v1_reference_tree, finish_shared_queue_job,
+    collect_agent_rules_from_paths, collect_history_messages_from_session, collect_skill_metadata,
+    create_private_context_dir,
+    derive_agent_runtime_view, ensure_durable_session_layout, ensure_v1_reference_tree, finish_shared_queue_job,
     format_history_messages_jsonl, format_skill_metadata_with_budget, handle_socket_request_frame,
     inspect_agent_control, inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
     inspect_model_capabilities, inspect_object_layout, inspect_session_control,
     inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
     inspect_tool_schema_json, install_executable_object_wrapper, is_object_name, is_root_entry,
     model_exec_metadata, owned_child_cancellation_events, parse_model_driver_routes,
-    parse_socket_request_frame, peer_credentials, rebuild_context_pack,
+    parse_socket_request_frame, peer_credentials, read_echo_model_stdin_limited,
+    rebuild_context_pack,
     record_assistant_response_to_session, record_child_handoff_to_parent_context,
     record_child_result_to_parent_context, record_indexed_socket_send_to_session,
     record_owned_child_cancellation, record_socket_request_to_session,
@@ -18,8 +20,10 @@ use super::{
     resolve_oauth_access_token_with, run_echo_model,
     serve_agent_executable_socket_stream_once, serve_unix_socket_listener_once,
     serve_unix_socket_stream_once, session_index_key_for_cwd, socket_runtime_error_response,
-    update_session_index, validate_context_pack_source, oauth_authorization_code_form,
-    oauth_authorization_url, parse_oauth_token_response,
+    sync_plain_directory,
+    set_private_dir_permissions, set_text_file_permissions, update_session_index,
+    update_session_index_with_keys, validate_context_pack_source, write_text_file_if_absent,
+    oauth_authorization_code_form, oauth_authorization_url, parse_oauth_token_response,
     AgentControlIssue, AgentControlKind, AgentExecutableSocketRuntime, AgentRuntimeViewError,
     AgentUnixIdentity, ApiKeyResolutionError, ChildAgentAuthority, ChildAgentControls,
     ChildAgentDenial, ChildAgentRequest, ChildContextRecordError, ChildContextStatus,
@@ -32,14 +36,16 @@ use super::{
     PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0, ReferenceTreeError, SessionAccess,
     SessionAccessAuthority, SessionAccessDenial, SessionControlIssue, SessionControlKind,
     SessionIndexIssue, SessionIndexKind, SessionIndexUpdateError, SessionLayoutIssue,
-    SharedAccess, SharedAccessAuthority, SharedAccessDenial, SharedQueueLayoutIssue, SkillMetadata,
-    SharedQueueOutcome, SharedQueueRecoverError, SocketPeerPolicy, SocketRequest, SocketRequestError,
+    SharedAccess, SharedAccessAuthority, SharedAccessDenial, SharedQueueClaimError,
+    SharedQueueFinishError, SharedQueueLayoutIssue, SkillMetadata, SharedQueueOutcome,
+    SharedQueueRecoverError, SocketPeerPolicy, SocketRequest, SocketRequestError,
     OAuthPkce, OAuthProviderConfig, SocketRuntimeError,
     SocketSessionRecordError, SocketSessionScope, ToolExecutionAuthority, ToolExecutionDenial,
     ToolExecutionPrincipal, ToolHit, ToolPath, ToolPathError, ToolSchemaIssue, AGENT_CONTROL_FILES,
     CORTEXFS_OBJECT_RUNNER, CTX_ROOT, EXEC_OBJECTS, FUSE_V1_ROOT_INODE,
-    MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES,
-    MODEL_CONTROL_FILES, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, TOOL_CONTROL_FILES,
+    MAX_ECHO_MODEL_STDIN_BYTES, MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN,
+    MAX_SOCKET_FRAME_BYTES, MODEL_CONTROL_FILES, SESSION_REQUIRED_FILES,
+    SHARED_QUEUE_REQUIRED_DIRS, TOOL_CONTROL_FILES,
 };
 use std::fs;
 use std::io::{Read, Write};
@@ -63,3 +69,4 @@ include!("lib/session_context.rs");
 include!("lib/context_queue.rs");
 include!("lib/shared_queue_access.rs");
 include!("lib/tool_authority.rs");
+include!("lib/atomic_replace.rs");

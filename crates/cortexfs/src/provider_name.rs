@@ -1,6 +1,6 @@
 use std::fs;
 use std::fs::File;
-use std::io::Write as _;
+use std::io::Read as _;
 use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -9,6 +9,7 @@ use std::path::Path;
 use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 
 const PROVIDER_SYSTEM_SECRET_ROOT: &str = "/var/lib/cortexfs/secrets/provider";
+const MAX_PROVIDER_SYSTEM_SECRET_BYTES: u64 = 64 * 1024;
 
 /// Error returned when a provider config cannot produce a stable provider name.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -110,26 +111,13 @@ pub fn store_provider_system_secret(
     let Some(parent) = path.parent() else {
         return Err(ProviderSystemSecretError::InvalidName);
     };
-    fs::create_dir_all(parent).map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+    create_private_provider_secret_dir(parent)?;
     set_private_dir_permissions(Path::new("/var/lib/cortexfs/secrets"))?;
     set_private_dir_permissions(Path::new(PROVIDER_SYSTEM_SECRET_ROOT))?;
     set_private_dir_permissions(parent)?;
-    let temp = path.with_extension("tmp");
-    {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(&temp)
-            .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
-        file.write_all(secret.as_bytes())
-            .and_then(|()| file.write_all(b"\n"))
-            .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
-    }
-    fs::set_permissions(&temp, fs::Permissions::from_mode(0o600))
+    super::atomic_replace_text_with_mode(&path, &format!("{secret}\n"), 0o600)
         .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
-    fs::rename(&temp, &path).map_err(|_error| ProviderSystemSecretError::CannotWrite)
+    sync_provider_secret_dir(parent)
 }
 
 /// Reads a provider API secret from the root-owned `CortexFS` system secret store.
@@ -138,7 +126,7 @@ pub fn read_provider_system_secret(
     account: &str,
 ) -> Result<Option<String>, ProviderSystemSecretError> {
     let path = provider_system_secret_path(provider, account)?;
-    let content = match fs::read_to_string(path) {
+    let content = match read_provider_secret_file(&path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_error) => return Err(ProviderSystemSecretError::CannotRead),
@@ -158,7 +146,7 @@ pub fn open_provider_system_secret(
     account: &str,
 ) -> Result<Option<ProviderSystemSecretHandle>, ProviderSystemSecretError> {
     let path = provider_system_secret_path(provider, account)?;
-    let file = match File::open(path) {
+    let file = match open_provider_secret_file(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_error) => return Err(ProviderSystemSecretError::CannotRead),
@@ -177,8 +165,12 @@ pub fn provider_system_secret_exists(
     account: &str,
 ) -> Result<bool, ProviderSystemSecretError> {
     let path = provider_system_secret_path(provider, account)?;
-    match fs::metadata(path) {
-        Ok(metadata) => Ok(metadata.is_file()),
+    provider_secret_file_exists(&path)
+}
+
+fn provider_secret_file_exists(path: &Path) -> Result<bool, ProviderSystemSecretError> {
+    match open_provider_secret_file(path) {
+        Ok(_file) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(_error) => Err(ProviderSystemSecretError::CannotRead),
     }
@@ -302,8 +294,7 @@ fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
     if !matches!(model, "main" | "helper") {
         return None;
     }
-    let target = fs::read_link(ctx_root.join("model").join(model)).ok()?;
-    let target = target.to_string_lossy();
+    let target = read_model_alias_target(ctx_root, model).ok()?;
     let target = target
         .strip_prefix("/ctx/model/")
         .or_else(|| target.strip_prefix("model/"))
@@ -311,6 +302,12 @@ fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
     target.split_once('/').and_then(|(provider, model)| {
         (!provider.is_empty() && !model.is_empty()).then_some(provider.to_owned())
     })
+}
+
+fn read_model_alias_target(ctx_root: &Path, alias: &str) -> std::io::Result<String> {
+    let model_dir = open_plain_directory_no_follow(&ctx_root.join("model"))?;
+    let target = nix::fcntl::readlinkat(&model_dir, alias).map_err(std::io::Error::from)?;
+    Ok(target.to_string_lossy().into_owned())
 }
 
 fn provider_system_secret_path(
@@ -326,18 +323,191 @@ fn provider_system_secret_path(
 }
 
 fn is_secret_account_name(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+    crate::is_object_name(value)
+}
+
+fn read_provider_secret_file(path: &Path) -> std::io::Result<String> {
+    let mut file = open_provider_secret_file(path)?;
+    let len = file.metadata()?.len();
+    let len = usize::try_from(len)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_provider_secret_file(path: &Path) -> std::io::Result<File> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "provider secret has no parent",
+        )
+    })?;
+    let parent_dir = open_plain_directory_no_follow(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid provider secret name",
+            )
+        })?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )?;
+    let file = File::from(file_fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_PROVIDER_SYSTEM_SECRET_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "provider secret file is invalid",
+        ));
+    }
+    Ok(file)
 }
 
 fn set_private_dir_permissions(path: &Path) -> Result<(), ProviderSystemSecretError> {
-    match fs::set_permissions(path, fs::Permissions::from_mode(0o700)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(_error) => Err(ProviderSystemSecretError::CannotWrite),
+    let dir = match open_plain_directory_no_follow(path) {
+        Ok(dir) => dir,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_error) => return Err(ProviderSystemSecretError::CannotWrite),
+    };
+    if !dir
+        .metadata()
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)?
+        .is_dir()
+    {
+        return Err(ProviderSystemSecretError::CannotWrite);
     }
+    dir.set_permissions(fs::Permissions::from_mode(0o700))
+        .and_then(|()| dir.sync_all())
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)
+}
+
+fn create_private_provider_secret_dir(path: &Path) -> Result<(), ProviderSystemSecretError> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            set_private_dir_permissions(path)
+        } else {
+            Err(ProviderSystemSecretError::CannotWrite)
+        };
+    }
+
+    let mut missing = Vec::new();
+    let mut cursor = Some(path);
+    while let Some(current) = cursor {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
+                return Err(ProviderSystemSecretError::CannotWrite);
+            }
+            Ok(_metadata) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+                cursor = current.parent();
+            }
+            Err(_error) => return Err(ProviderSystemSecretError::CannotWrite),
+        }
+    }
+
+    let parent = missing
+        .last()
+        .and_then(|path| path.parent())
+        .ok_or(ProviderSystemSecretError::CannotWrite)?;
+    let mut parent_dir = open_plain_directory_no_follow(parent)
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+    for directory in missing.iter().rev() {
+        let name = plain_file_name(directory).ok_or(ProviderSystemSecretError::CannotWrite)?;
+        nix::sys::stat::mkdirat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(0o700),
+        )
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+        parent_dir
+            .sync_all()
+            .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+        let child = nix::fcntl::openat(
+            &parent_dir,
+            name,
+            nix::fcntl::OFlag::O_DIRECTORY
+                | nix::fcntl::OFlag::O_RDONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+        parent_dir = File::from(child);
+        parent_dir
+            .set_permissions(fs::Permissions::from_mode(0o700))
+            .and_then(|()| parent_dir.sync_all())
+            .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+    }
+    Ok(())
+}
+
+fn sync_provider_secret_dir(path: &Path) -> Result<(), ProviderSystemSecretError> {
+    let dir = open_plain_directory_no_follow(path)
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+    dir.sync_all()
+        .map_err(|_error| ProviderSystemSecretError::CannotWrite)
+}
+
+fn open_plain_directory_no_follow(path: &Path) -> std::io::Result<File> {
+    let mut directory = if path.is_absolute() {
+        open_plain_directory_no_follow_leaf(Path::new("/"))?
+    } else {
+        open_plain_directory_no_follow_leaf(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )?;
+                directory = File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_plain_directory_no_follow_leaf(path: &Path) -> std::io::Result<File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
+}
+
+fn plain_file_name(path: &Path) -> Option<&str> {
+    path.file_name()?.to_str()
 }
 
 fn clear_fd_cloexec(file: &File) -> Result<(), ProviderSystemSecretError> {
@@ -359,4 +529,291 @@ fn provider_env_label(provider: &str) -> String {
             _ => '_',
         })
         .collect()
+}
+
+#[cfg(test)]
+mod provider_secret_file_tests {
+    use super::{
+        create_private_provider_secret_dir, is_secret_account_name, open_provider_secret_file,
+        provider_secret_file_exists, read_provider_secret_file, selected_model_provider,
+        set_private_dir_permissions,
+    };
+    use std::fs;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn provider_secret_account_names_use_object_name_rules() {
+        assert!(is_secret_account_name("default"));
+        assert!(is_secret_account_name("office.prod"));
+        assert!(!is_secret_account_name(""));
+        assert!(!is_secret_account_name("."));
+        assert!(!is_secret_account_name(".."));
+        assert!(!is_secret_account_name("../default"));
+        assert!(!is_secret_account_name("bad/name"));
+        assert!(!is_secret_account_name("-bad"));
+    }
+
+    #[test]
+    fn provider_secret_file_helpers_refuse_symlink_targets()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root)?;
+        let target = root.join("target");
+        let link = root.join("link");
+        fs::write(&target, "secret\n")?;
+        symlink(&target, &link)?;
+
+        assert!(read_provider_secret_file(&link).is_err());
+        assert!(open_provider_secret_file(&link).is_err());
+        assert_eq!(
+            provider_secret_file_exists(&link),
+            Err(super::ProviderSystemSecretError::CannotRead)
+        );
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_file_helpers_reject_symlink_intermediate_directory()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-symlink-parent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let outside = root.join("outside");
+        fs::create_dir_all(outside.join("local"))?;
+        fs::write(outside.join("local/default"), "secret\n")?;
+        symlink(&outside, root.join("provider"))?;
+
+        let path = root.join("provider").join("local").join("default");
+        assert!(read_provider_secret_file(&path).is_err());
+        assert!(open_provider_secret_file(&path).is_err());
+        assert_eq!(
+            provider_secret_file_exists(&path),
+            Err(super::ProviderSystemSecretError::CannotRead)
+        );
+        assert_eq!(
+            fs::read_to_string(outside.join("local/default"))?,
+            "secret\n"
+        );
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn selected_model_provider_rejects_symlink_model_directory()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-selected-model-provider-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let outside = root.join("outside");
+        fs::create_dir_all(&outside)?;
+        symlink("/ctx/model/evil/model", outside.join("main"))?;
+        symlink(&outside, root.join("model"))?;
+
+        assert_eq!(selected_model_provider(&root, "main"), None);
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_file_helpers_read_plain_files() -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-plain-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root)?;
+        let path = root.join("default");
+        fs::write(&path, "secret\n")?;
+
+        assert_eq!(read_provider_secret_file(&path)?, "secret\n");
+        assert!(open_provider_secret_file(&path).is_ok());
+        assert_eq!(provider_secret_file_exists(&path), Ok(true));
+        assert_eq!(
+            provider_secret_file_exists(&root.join("missing")),
+            Ok(false)
+        );
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_file_helpers_reject_non_regular_and_oversized_files()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-invalid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root)?;
+        let dir = root.join("dir");
+        fs::create_dir_all(&dir)?;
+        let oversized = root.join("oversized");
+        fs::write(&oversized, "x".repeat((64 * 1024) + 1))?;
+
+        assert!(open_provider_secret_file(&dir).is_err());
+        assert!(read_provider_secret_file(&dir).is_err());
+        assert!(open_provider_secret_file(&oversized).is_err());
+        assert!(read_provider_secret_file(&oversized).is_err());
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_private_dir_permissions_repair_plain_directories()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-dir-plain-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root)?;
+        let target = root.join("target");
+        fs::create_dir_all(&target)?;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))?;
+
+        assert_eq!(set_private_dir_permissions(&target), Ok(()));
+        assert_eq!(fs::metadata(&target)?.permissions().mode() & 0o777, 0o700);
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_private_dir_permissions_refuse_symlink_directories()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-dir-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root)?;
+        let target = root.join("target");
+        let link = root.join("link");
+        fs::create_dir_all(&target)?;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))?;
+        symlink(&target, &link)?;
+
+        assert_eq!(
+            set_private_dir_permissions(&link),
+            Err(super::ProviderSystemSecretError::CannotWrite)
+        );
+        assert_eq!(fs::metadata(&target)?.permissions().mode() & 0o777, 0o755);
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_private_dir_permissions_reject_symlink_intermediate_directory()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-dir-symlink-parent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let outside = root.join("outside");
+        fs::create_dir_all(outside.join("local"))?;
+        fs::set_permissions(outside.join("local"), fs::Permissions::from_mode(0o755))?;
+        symlink(&outside, root.join("provider"))?;
+
+        assert_eq!(
+            set_private_dir_permissions(&root.join("provider").join("local")),
+            Err(super::ProviderSystemSecretError::CannotWrite)
+        );
+        assert_eq!(
+            fs::metadata(outside.join("local"))?.permissions().mode() & 0o777,
+            0o755
+        );
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_dir_creation_sets_private_modes() -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-create-private-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let path = root.join("secrets").join("provider").join("local");
+
+        assert_eq!(create_private_provider_secret_dir(&path), Ok(()));
+        assert_eq!(fs::metadata(&path)?.permissions().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(root.join("secrets"))?.permissions().mode() & 0o777,
+            0o700
+        );
+
+        let _ignored = fs::remove_dir_all(root);
+        Ok(())
+    }
+
+    #[test]
+    fn provider_secret_dir_creation_refuses_symlink_parent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-create-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-provider-secret-create-symlink-outside-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("secrets"))?;
+        fs::create_dir_all(&outside)?;
+        symlink(&outside, root.join("secrets").join("provider"))?;
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o755))?;
+
+        assert_eq!(
+            create_private_provider_secret_dir(
+                &root.join("secrets").join("provider").join("local")
+            ),
+            Err(super::ProviderSystemSecretError::CannotWrite)
+        );
+        assert!(!outside.join("local").exists());
+        assert_eq!(fs::metadata(&outside)?.permissions().mode() & 0o777, 0o755);
+
+        let _ignored = fs::remove_dir_all(root);
+        let _ignored = fs::remove_dir_all(outside);
+        Ok(())
+    }
 }

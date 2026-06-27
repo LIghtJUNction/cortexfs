@@ -47,6 +47,8 @@ fn default_provider_enabled() -> bool {
     true
 }
 
+const MAX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
+
 fn projected_provider_models(
     config_dir: &Path,
     cache_dir: &Path,
@@ -93,7 +95,12 @@ struct ProviderConfigEntry {
 }
 
 fn read_provider_configs(config_dir: &Path) -> Result<Vec<ProviderConfigEntry>, FuseV1Error> {
-    let entries = match fs::read_dir(config_dir) {
+    let directory = match open_fuse_v1_plain_directory(config_dir) {
+        Ok(directory) => directory,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_error) => return Err(FuseV1Error::Io),
+    };
+    let entries = match fs::read_dir(fuse_v1_proc_fd_path(&directory)) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_error) => return Err(FuseV1Error::Io),
@@ -101,24 +108,50 @@ fn read_provider_configs(config_dir: &Path) -> Result<Vec<ProviderConfigEntry>, 
     let mut configs = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_error| FuseV1Error::Io)?;
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
-        if metadata.file_type().is_dir() {
-            continue;
-        }
-        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_error| FuseV1Error::InvalidPath)?;
+        let Some(extension) = Path::new(&name).extension().and_then(|value| value.to_str()) else {
             continue;
         };
         if extension != "json" {
             continue;
         }
-        let content = fs::read_to_string(&path).map_err(|_error| FuseV1Error::Io)?;
+        let Ok(content) = read_provider_config_file_at(&directory, &name) else {
+            continue;
+        };
         let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
             continue;
         };
         configs.push(ProviderConfigEntry { config });
     }
     Ok(configs)
+}
+
+fn read_provider_config_file_at(directory: &fs::File, name: &str) -> std::io::Result<String> {
+    let file_fd = nix::fcntl::openat(
+        directory,
+        name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut file = fs::File::from(file_fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_PROVIDER_CONFIG_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "provider config file is invalid",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
 }
 
 fn projected_provider_models_for_provider(
@@ -350,23 +383,32 @@ fn default_provider_model_fallback(provider: &str, default_model: Option<&str>) 
 }
 
 fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {
-    let entries = fs::read_dir(model_root).map_err(|_error| FuseV1Error::Io)?;
+    let directory = open_fuse_v1_plain_directory(model_root).map_err(|_error| FuseV1Error::Io)?;
+    let entries = fs::read_dir(fuse_v1_proc_fd_path(&directory)).map_err(|_error| FuseV1Error::Io)?;
     let mut names = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_error| FuseV1Error::Io)?;
-        let metadata =
-            fs::symlink_metadata(entry.path()).map_err(|error| fuse_metadata_error(&error))?;
-        if !metadata.is_dir() {
-            continue;
-        }
         let name = entry
             .file_name()
             .into_string()
             .map_err(|_error| FuseV1Error::InvalidPath)?;
+        let stat = nix::sys::stat::fstatat(
+            &directory,
+            name.as_str(),
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        )
+        .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
+        if stat.st_mode & libc::S_IFMT != libc::S_IFDIR {
+            continue;
+        }
         if is_object_name(&name) {
             names.push(name);
         }
     }
     names.sort();
     Ok(names)
+}
+
+fn fuse_v1_proc_fd_path(directory: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
 }

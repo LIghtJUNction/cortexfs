@@ -1,7 +1,11 @@
 const PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+const MAX_CTX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
+const MAX_PROVIDER_SECRET_STDIN_BYTES: usize = 8 * 1024;
+const CTX_PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
 const OAUTH_CALLBACK_RESPONSE_BODY: &str =
     "CortexFS OAuth login complete. You may close this tab.\n";
 const MAX_OAUTH_TOKEN_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_OAUTH_CALLBACK_REQUEST_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 struct CtxProviderConfig {
@@ -44,9 +48,7 @@ fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
 
 fn provider_secret_set(provider: &str, slot: &str) -> Result<(), CliError> {
     validate_provider_secret_target(provider, slot)?;
-    let mut secret = String::new();
-    io::stdin()
-        .read_to_string(&mut secret)
+    let secret = read_provider_secret_stdin_limited(io::stdin(), MAX_PROVIDER_SECRET_STDIN_BYTES)
         .map_err(|error| CliError::unavailable(format!("cannot read secret from stdin: {error}")))?;
     let secret = secret.trim_end_matches(['\r', '\n']);
     if secret.is_empty() {
@@ -57,6 +59,27 @@ fn provider_secret_set(provider: &str, slot: &str) -> Result<(), CliError> {
     cortexfs::store_provider_system_secret(provider, slot, secret)
         .map_err(provider_system_secret_cli_error)?;
     print_line(&format!("provider secret configured: {provider}/{slot}"))
+}
+
+fn read_provider_secret_stdin_limited(
+    reader: impl Read,
+    max_bytes: usize,
+) -> io::Result<String> {
+    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("stdin read limit is invalid: {error}"),
+        )
+    })?;
+    let mut secret = String::new();
+    reader.take(limit).read_to_string(&mut secret)?;
+    if secret.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "provider secret stdin exceeds limit",
+        ));
+    }
+    Ok(secret)
 }
 
 fn provider_secret_status(provider: &str, slot: &str) -> Result<(), CliError> {
@@ -158,8 +181,7 @@ fn provider_preset_show(preset: &str) -> Result<(), CliError> {
 
 fn provider_preset_install(preset: &str) -> Result<(), CliError> {
     let preset = provider_preset(preset)?;
-    fs::create_dir_all(PROVIDER_CONFIG_DIR)
-        .map_err(|error| CliError::unavailable(format!("cannot create provider config dir: {error}")))?;
+    create_provider_config_dir(Path::new(PROVIDER_CONFIG_DIR))?;
     let path = PathBuf::from(PROVIDER_CONFIG_DIR).join(preset.file);
     atomic_write_provider_config(&path, preset.config)?;
     print_line(&format!("installed {}", path.display()))
@@ -174,11 +196,214 @@ fn provider_preset(name: &str) -> Result<ProviderPreset, CliError> {
 }
 
 fn atomic_write_provider_config(path: &Path, content: &str) -> Result<(), CliError> {
-    let temp = path.with_extension("json.tmp");
-    fs::write(&temp, content)
-        .map_err(|error| CliError::unavailable(format!("cannot write provider config: {error}")))?;
-    fs::rename(&temp, path)
-        .map_err(|error| CliError::unavailable(format!("cannot install provider config: {error}")))
+    let parent = path
+        .parent()
+        .ok_or_else(|| CliError::unavailable("provider config path has no parent"))?;
+    let parent_dir = open_provider_config_dir(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::unavailable("provider config path has no file name"))?;
+    for attempt in 0..16 {
+        let temp_name = temp_file_name(attempt);
+        let file_fd = match nix::fcntl::openat(
+            &parent_dir,
+            temp_name.as_str(),
+            nix::fcntl::OFlag::O_CREAT
+                | nix::fcntl::OFlag::O_EXCL
+                | nix::fcntl::OFlag::O_WRONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::from_bits_truncate(0o600),
+        ) {
+            Ok(file_fd) => file_fd,
+            Err(nix::errno::Errno::EEXIST) => continue,
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot write provider config: {error}"
+                )));
+            }
+        };
+        let mut temp = fs::File::from(file_fd);
+        temp.write_all(content.as_bytes())
+            .and_then(|()| temp.flush())
+            .and_then(|()| temp.sync_all())
+            .map_err(|error| {
+                let _ignored = nix::unistd::unlinkat(
+                    &parent_dir,
+                    temp_name.as_str(),
+                    nix::unistd::UnlinkatFlags::NoRemoveDir,
+                );
+                CliError::unavailable(format!("cannot write provider config: {error}"))
+            })?;
+        drop(temp);
+        nix::fcntl::renameat(&parent_dir, temp_name.as_str(), &parent_dir, file_name).map_err(
+            |error| {
+                let _ignored = nix::unistd::unlinkat(
+                    &parent_dir,
+                    temp_name.as_str(),
+                    nix::unistd::UnlinkatFlags::NoRemoveDir,
+                );
+                CliError::unavailable(format!("cannot install provider config: {error}"))
+            },
+        )?;
+        return parent_dir.sync_all().map_err(|error| {
+            CliError::unavailable(format!("cannot sync provider config dir: {error}"))
+        });
+    }
+    Err(CliError::unavailable(
+        "cannot create unique provider config temp file",
+    ))
+}
+
+fn create_provider_config_dir(path: &Path) -> Result<(), CliError> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            sync_provider_config_dir(path)
+        } else {
+            Err(CliError::unavailable(
+                "provider config directory is not a plain directory",
+            ))
+        };
+    }
+
+    let mut missing = Vec::new();
+    let mut cursor = Some(path);
+    while let Some(current) = cursor {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
+                return Err(CliError::unavailable(
+                    "provider config path contains a non-directory entry",
+                ));
+            }
+            Ok(_metadata) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+                cursor = current.parent();
+            }
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot inspect provider config dir: {error}"
+                )));
+            }
+        }
+    }
+
+    let existing_parent = missing
+        .last()
+        .and_then(|path| path.parent())
+        .ok_or_else(|| CliError::unavailable("invalid provider config dir"))?;
+    let mut parent_dir = open_provider_config_dir(existing_parent)?;
+    for directory in missing.iter().rev() {
+        let name = provider_config_file_name(directory)?;
+        nix::sys::stat::mkdirat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(0o755),
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot create provider config dir: {error}"))
+        })?;
+        parent_dir.sync_all().map_err(|error| {
+            CliError::unavailable(format!("cannot sync provider config dir: {error}"))
+        })?;
+        let child = nix::fcntl::openat(
+            &parent_dir,
+            name,
+            nix::fcntl::OFlag::O_DIRECTORY
+                | nix::fcntl::OFlag::O_RDONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot open provider config dir: {error}"))
+        })?;
+        parent_dir = fs::File::from(child);
+        parent_dir.sync_all().map_err(|error| {
+            CliError::unavailable(format!("cannot sync provider config dir: {error}"))
+        })?;
+    }
+    Ok(())
+}
+
+fn sync_provider_config_dir(path: &Path) -> Result<(), CliError> {
+    let directory = open_provider_config_dir(path)?;
+    directory
+        .sync_all()
+        .map_err(|error| CliError::unavailable(format!("cannot sync provider config dir: {error}")))
+}
+
+fn open_provider_config_dir(path: &Path) -> Result<fs::File, CliError> {
+    let mut directory = if path.is_absolute() {
+        open_single_provider_config_dir(Path::new("/"))?
+    } else {
+        open_single_provider_config_dir(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    CliError::unavailable(format!(
+                        "cannot open provider config dir {}: invalid directory name",
+                        path.display()
+                    ))
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(|error| {
+                    CliError::unavailable(format!(
+                        "cannot open provider config dir {}: {error}",
+                        path.display()
+                    ))
+                })?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot open provider config dir {}: unsupported path component",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_provider_config_dir(path: &Path) -> Result<fs::File, CliError> {
+    let directory = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot open provider config dir: {error}"))
+        })?;
+    if !directory
+        .metadata()
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot inspect provider config dir: {error}"))
+        })?
+        .is_dir()
+    {
+        return Err(CliError::unavailable(
+            "provider config path is not a directory",
+        ));
+    }
+    Ok(directory)
+}
+
+fn provider_config_file_name(path: &Path) -> Result<&str, CliError> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::unavailable("invalid provider config path"))
 }
 
 fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliError> {
@@ -290,17 +515,32 @@ fn provider_oauth_config(provider: &str) -> Result<cortexfs::OAuthProviderConfig
 }
 
 fn read_provider_config(provider: &str) -> Result<CtxProviderConfig, CliError> {
-    let entries = fs::read_dir(PROVIDER_CONFIG_DIR).map_err(|error| {
+    read_provider_config_from_dir(provider, Path::new(PROVIDER_CONFIG_DIR))
+}
+
+fn read_provider_config_from_dir(
+    provider: &str,
+    dir: &Path,
+) -> Result<CtxProviderConfig, CliError> {
+    let directory = open_provider_config_dir(dir)?;
+    let entries = fs::read_dir(provider_config_proc_fd_path(&directory)).map_err(|error| {
         CliError::unavailable(format!("cannot read provider config dir: {error}"))
     })?;
     for entry in entries {
         let entry = entry
             .map_err(|error| CliError::unavailable(format!("cannot read provider config: {error}")))?;
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if Path::new(file_name)
+            .extension()
+            .and_then(|value| value.to_str())
+            != Some("json")
+        {
             continue;
         }
-        let content = read_file_to_string(&path)?;
+        let content = read_provider_config_file_at(&directory, file_name)?;
         let config = serde_json::from_str::<CtxProviderConfig>(&content)
             .map_err(|error| CliError::usage(format!("invalid provider config: {error}")))?;
         if cortexfs::provider_name_from_config(&config.base_url, config.name.as_deref())
@@ -313,10 +553,73 @@ fn read_provider_config(provider: &str) -> Result<CtxProviderConfig, CliError> {
     Err(CliError::usage(format!("missing provider: {provider}")))
 }
 
+fn provider_config_proc_fd_path(directory: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+}
+
+fn read_provider_config_file_at(parent_dir: &fs::File, file_name: &str) -> Result<String, CliError> {
+    let file_fd = nix::fcntl::openat(
+        parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot read provider config: {error}")))?;
+    read_provider_config_open_file(fs::File::from(file_fd), "provider config")
+}
+
+#[cfg(test)]
+fn read_provider_config_file(path: &Path) -> Result<String, CliError> {
+    let Some(parent) = path.parent() else {
+        return Err(CliError::unavailable("provider config path has no parent"));
+    };
+    let parent_dir = open_provider_config_dir(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::unavailable("provider config path has no file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|error| {
+        CliError::unavailable(format!("cannot read provider config {}: {error}", path.display()))
+    })?;
+    read_provider_config_open_file(fs::File::from(file_fd), &path.display().to_string())
+}
+
+fn read_provider_config_open_file(mut file: fs::File, label: &str) -> Result<String, CliError> {
+    let metadata = file.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot inspect provider config {label}: {error}"))
+    })?;
+    if !metadata.is_file() {
+        return Err(CliError::unavailable(format!(
+            "provider config is not a regular file: {label}",
+        )));
+    }
+    if metadata.len() > MAX_CTX_PROVIDER_CONFIG_BYTES {
+        return Err(CliError::unavailable(format!(
+            "provider config is too large: {label}",
+        )));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|_error| CliError::unavailable("provider config is too large"))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content).map_err(|error| {
+        CliError::unavailable(format!("cannot read provider config {label}: {error}"))
+    })?;
+    String::from_utf8(content)
+        .map_err(|_error| CliError::usage(format!("provider config is not utf-8: {label}")))
+}
+
 fn exchange_oauth_token(token_url: &str, form: &str) -> Result<cortexfs::OAuthTokenResponse, CliError> {
-    let mut child = ProcessCommand::new("curl")
-        .arg("--config")
-        .arg("-")
+    let mut child = ctx_provider_curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -328,9 +631,9 @@ fn exchange_oauth_token(token_url: &str, form: &str) -> Result<cortexfs::OAuthTo
     };
     let config = format!(
         "fail\nsilent\nshow-error\nmax-time = 30\nrequest = POST\nurl = {}\nheader = {}\ndata = {}\n",
-        curl_config_quote(token_url),
-        curl_config_quote("Content-Type: application/x-www-form-urlencoded"),
-        curl_config_quote(form),
+        curl_config_quote(token_url)?,
+        curl_config_quote("Content-Type: application/x-www-form-urlencoded")?,
+        curl_config_quote(form)?,
     );
     stdin
         .write_all(config.as_bytes())
@@ -357,6 +660,12 @@ fn exchange_oauth_token(token_url: &str, form: &str) -> Result<cortexfs::OAuthTo
     }
     cortexfs::parse_oauth_token_response(&output)
         .map_err(|_error| CliError::unavailable("invalid oauth token response"))
+}
+
+fn ctx_provider_curl_command() -> ProcessCommand {
+    let mut command = ProcessCommand::new(CTX_PROVIDER_CURL_BIN);
+    command.env_clear().arg("-q").arg("--config").arg("-");
+    command
 }
 
 fn store_oauth_tokens(
@@ -472,15 +781,51 @@ struct OAuthCallbackParams {
 }
 
 fn read_oauth_callback_request(stream: &mut std::net::TcpStream) -> Result<String, CliError> {
-    let mut buffer = [0_u8; 8192];
-    let size = stream
-        .read(&mut buffer)
-        .map_err(|error| CliError::unavailable(format!("cannot read oauth callback: {error}")))?;
-    let Some(bytes) = buffer.get(..size) else {
-        return Err(CliError::unavailable("oauth callback exceeded buffer"));
-    };
-    String::from_utf8(bytes.to_vec())
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|error| CliError::unavailable(format!("cannot configure oauth callback: {error}")))?;
+    read_oauth_callback_request_from_reader(stream, MAX_OAUTH_CALLBACK_REQUEST_BYTES)
+}
+
+fn read_oauth_callback_request_from_reader(
+    mut reader: impl Read,
+    max_bytes: usize,
+) -> Result<String, CliError> {
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 1024];
+    loop {
+        let size = reader
+            .read(&mut chunk)
+            .map_err(|error| CliError::unavailable(format!("cannot read oauth callback: {error}")))?;
+        if size == 0 {
+            break;
+        }
+        let Some(read_bytes) = chunk.get(..size) else {
+            return Err(CliError::unavailable("oauth callback exceeded buffer"));
+        };
+        bytes.extend_from_slice(read_bytes);
+        if bytes.len() > max_bytes {
+            return Err(CliError::unavailable("oauth callback exceeded buffer"));
+        }
+        if let Some(end) = oauth_callback_headers_end(&bytes) {
+            bytes.truncate(end);
+            break;
+        }
+    }
+    String::from_utf8(bytes)
         .map_err(|_error| CliError::usage("oauth callback must be valid UTF-8"))
+}
+
+fn oauth_callback_headers_end(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4)
+        .or_else(|| {
+            bytes.windows(2)
+                .position(|window| window == b"\n\n")
+                .map(|position| position + 2)
+        })
 }
 
 fn parse_oauth_callback_params(
@@ -493,8 +838,12 @@ fn parse_oauth_callback_params(
     let mut fields = first_line.split_whitespace();
     let method = fields.next().unwrap_or_default();
     let target = fields.next().unwrap_or_default();
+    let version = fields.next().unwrap_or_default();
     if method != "GET" {
         return Err(CliError::usage("oauth callback must use GET"));
+    }
+    if !matches!(version, "HTTP/1.0" | "HTTP/1.1") || fields.next().is_some() {
+        return Err(CliError::usage("oauth callback request line is invalid"));
     }
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     if path != expected_path {
@@ -506,8 +855,16 @@ fn parse_oauth_callback_params(
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         let value = percent_decode(value)?;
         match key {
-            "code" => code = Some(value),
-            "state" => state = Some(value),
+            "code" if value.is_empty() => {
+                return Err(CliError::usage("oauth callback empty code"));
+            }
+            "code" if code.is_none() => code = Some(value),
+            "code" => return Err(CliError::usage("oauth callback repeated code")),
+            "state" if value.is_empty() => {
+                return Err(CliError::usage("oauth callback empty state"));
+            }
+            "state" if state.is_none() => state = Some(value),
+            "state" => return Err(CliError::usage("oauth callback repeated state")),
             _ => {}
         }
     }
@@ -568,16 +925,21 @@ fn is_provider_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
-fn curl_config_quote(value: &str) -> String {
+fn curl_config_quote(value: &str) -> Result<String, CliError> {
     let mut quoted = String::from("\"");
     for character in value.chars() {
+        if matches!(character, '\0' | '\n' | '\r') {
+            return Err(CliError::usage(
+                "curl config value contains a forbidden control character",
+            ));
+        }
         if matches!(character, '"' | '\\') {
             quoted.push('\\');
         }
         quoted.push(character);
     }
     quoted.push('"');
-    quoted
+    Ok(quoted)
 }
 
 fn terminate_process_child(child: &mut std::process::Child) {

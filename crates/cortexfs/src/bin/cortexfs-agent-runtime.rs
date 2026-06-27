@@ -1,21 +1,22 @@
+#![forbid(unsafe_code)]
+
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::fd::OwnedFd;
-use std::os::unix::fs::PermissionsExt;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cortexfs::{
-    AgentExecutableSocketRuntime, SocketPeerPolicy, derive_agent_runtime_view,
+    AgentExecutableSocketRuntime, SocketPeerPolicy, derive_agent_runtime_view, is_object_name,
     serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
 use nix::errno::Errno;
-use nix::fcntl::{OFlag, open, openat};
-use nix::sys::stat::{Mode, fchmod, mkdirat};
-use nix::unistd::{Gid, Uid, chown};
+use nix::fcntl::{AtFlags, OFlag, open, openat};
+use nix::sys::stat::{Mode, fchmod, fstatat, mkdirat};
+use nix::unistd::{Gid, Uid};
 use nix::unistd::{UnlinkatFlags, fchown, unlinkat};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
@@ -83,9 +84,6 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         },
     );
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
-    if let Some(secret) = runtime_secret.as_ref() {
-        secret.cleanup();
-    }
     result
         .map(|_response| ())
         .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
@@ -96,10 +94,14 @@ fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {
 }
 
 fn repair_agent_session_permissions(session_root: &Path, uid: u32, gid: u32) -> Result<(), String> {
-    if !session_root.exists() {
-        return Ok(());
+    match fs::symlink_metadata(session_root) {
+        Ok(_metadata) => repair_path_permissions(session_root, uid, gid),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "cannot inspect session path {}: {error}",
+            session_root.display()
+        )),
     }
-    repair_path_permissions(session_root, uid, gid)
 }
 
 fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
@@ -108,23 +110,113 @@ fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String
     if metadata.file_type().is_symlink() {
         return Ok(());
     }
-    chown(path, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
-        .map_err(|error| format!("cannot chown session path {}: {error}", path.display()))?;
-    let mode = if metadata.is_dir() { 0o700 } else { 0o600 };
-    fs::set_permissions(path, fs::Permissions::from_mode(mode))
-        .map_err(|error| format!("cannot chmod session path {}: {error}", path.display()))?;
-    if metadata.is_dir() {
-        for entry in fs::read_dir(path)
-            .map_err(|error| format!("cannot read session dir {}: {error}", path.display()))?
+    if !metadata.is_dir() && !metadata.is_file() {
+        return Ok(());
+    }
+    let fd = open_session_repair_path_no_follow(path, metadata.is_dir())?;
+    repair_open_path_permissions(
+        &fd,
+        &path.display().to_string(),
+        metadata.is_dir(),
+        uid,
+        gid,
+    )
+}
+
+fn repair_open_path_permissions(
+    fd: &OwnedFd,
+    label: &str,
+    is_dir: bool,
+    uid: u32,
+    gid: u32,
+) -> Result<(), String> {
+    fchown(fd, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+        .map_err(|error| format!("cannot chown session path {label}: {error}"))?;
+    let mode = if is_dir { 0o700 } else { 0o600 };
+    fchmod(fd, Mode::from_bits_truncate(mode))
+        .map_err(|error| format!("cannot chmod session path {label}: {error}"))?;
+    if is_dir {
+        for entry in fs::read_dir(proc_fd_path(fd))
+            .map_err(|error| format!("cannot read session dir {label}: {error}"))?
         {
             let entry = entry.map_err(|error| format!("cannot read session dir entry: {error}"))?;
-            repair_path_permissions(&entry.path(), uid, gid)?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_error| "session path contains invalid component".to_owned())?;
+            repair_child_path_permissions(fd, label, &name, uid, gid)?;
         }
     }
     Ok(())
 }
 
+fn repair_child_path_permissions(
+    parent_fd: &OwnedFd,
+    parent_label: &str,
+    name: &str,
+    uid: u32,
+    gid: u32,
+) -> Result<(), String> {
+    let stat = fstatat(parent_fd, name, AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(|error| format!("cannot inspect session path {parent_label}/{name}: {error}"))?;
+    let file_type = stat.st_mode & nix::libc::S_IFMT;
+    if file_type == nix::libc::S_IFLNK {
+        return Ok(());
+    }
+    let is_dir = file_type == nix::libc::S_IFDIR;
+    if !is_dir && file_type != nix::libc::S_IFREG {
+        return Ok(());
+    }
+    let mut flags = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+    if is_dir {
+        flags |= OFlag::O_DIRECTORY;
+    }
+    let fd = openat(parent_fd, name, flags, Mode::empty())
+        .map_err(|error| format!("cannot open session path {parent_label}/{name}: {error}"))?;
+    repair_open_path_permissions(&fd, &format!("{parent_label}/{name}"), is_dir, uid, gid)
+}
+
+fn proc_fd_path(fd: &OwnedFd) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", fd.as_raw_fd()))
+}
+
+fn open_session_repair_path_no_follow(path: &Path, is_dir: bool) -> Result<OwnedFd, String> {
+    let mut current = if path.is_absolute() {
+        open_dir_no_follow(Path::new("/"))?
+    } else {
+        open_dir_no_follow(Path::new("."))?
+    };
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name
+                    .to_str()
+                    .ok_or_else(|| "session path contains invalid component".to_owned())?;
+                let final_component = components.peek().is_none();
+                let mut flags = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+                if !final_component || is_dir {
+                    flags |= OFlag::O_DIRECTORY;
+                }
+                current = openat(&current, name, flags, Mode::empty()).map_err(|error| {
+                    format!("cannot open session path {}: {error}", path.display())
+                })?;
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(format!(
+                    "cannot open session path {}: unsupported path component",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(current)
+}
+
 struct RuntimeProviderSecretFile {
+    dir_fd: OwnedFd,
+    file_name: String,
     path: PathBuf,
     provider: String,
     account: String,
@@ -144,9 +236,15 @@ impl RuntimeProviderSecretFile {
             ("CTX_PROVIDER_SECRET_SLOT".to_owned(), self.account.clone()),
         ]
     }
+}
 
-    fn cleanup(&self) {
-        let _ignored = fs::remove_file(&self.path);
+impl Drop for RuntimeProviderSecretFile {
+    fn drop(&mut self) {
+        let _ignored = unlinkat(
+            &self.dir_fd,
+            self.file_name.as_str(),
+            UnlinkatFlags::NoRemoveDir,
+        );
     }
 }
 
@@ -165,6 +263,8 @@ fn runtime_provider_secret_file(
         .and_then(|()| file.write_all(b"\n"))
         .map_err(|error| format!("cannot write runtime credential file: {error}"))?;
     Ok(RuntimeProviderSecretFile {
+        dir_fd,
+        file_name,
         path,
         provider: secret.provider().to_owned(),
         account: secret.account().to_owned(),
@@ -247,8 +347,8 @@ fn mkdirat_ignore_exists(parent: &OwnedFd, name: &str, mode: u32) -> Result<(), 
 }
 
 fn safe_runtime_credential_name(agent: &str, account: &str) -> Result<String, String> {
-    if agent.contains('/') || account.contains('/') {
-        return Err("runtime credential path components must not contain '/'".to_owned());
+    if !is_object_name(agent) || !is_object_name(account) {
+        return Err("runtime credential path components must be object names".to_owned());
     }
     Ok(format!("{agent}-provider-{account}"))
 }

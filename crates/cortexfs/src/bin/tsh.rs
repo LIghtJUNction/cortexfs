@@ -1,8 +1,11 @@
+#![forbid(unsafe_code)]
+
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
-use std::io::{self, IsTerminal, Read, Write};
-use std::os::fd::{AsFd, BorrowedFd};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::{env, fs};
@@ -21,6 +24,12 @@ struct TshError {
     code: u8,
     message: String,
 }
+
+const MAX_TSH_CONTROL_BYTES: u64 = 64 * 1024;
+const MAX_TSH_REPL_LINE_BYTES: usize = 1024 * 1024;
+const MAX_TSH_TOOL_COUNT: usize = 1024;
+type TshToolEnv = Vec<(String, String)>;
+type AuthorizedTshTool = (cortexfs::ToolExecutionGrant, TshToolEnv);
 
 impl TshError {
     fn usage(message: impl Into<String>) -> Self {
@@ -231,7 +240,7 @@ impl TshConfig {
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
         {
-            config.cache_capacity = capacity.max(1);
+            config.cache_capacity = capacity.clamp(1, MAX_TSH_TOOL_COUNT);
         }
         Ok(config)
     }
@@ -243,7 +252,7 @@ fn read_tsh_config_text(root: &Path) -> Result<Option<String>, TshError> {
         return Ok(None);
     };
     let path = hit.control_dir().join("config");
-    match fs::read_to_string(&path) {
+    match read_small_plain_text_file(&path) {
         Ok(content) => Ok(Some(content)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(TshError::unavailable(format!(
@@ -273,13 +282,18 @@ fn parse_tsh_config(content: &str) -> Result<TshConfig, String> {
             )
         })?;
         match key {
-            "max_loaded_tools" if value > 0 => config.max_loaded_tools = value,
-            "cache_capacity" if value > 0 => config.cache_capacity = value,
+            "max_loaded_tools" | "cache_capacity" if (1..=MAX_TSH_TOOL_COUNT).contains(&value) => {
+                if key == "max_loaded_tools" {
+                    config.max_loaded_tools = value;
+                } else {
+                    config.cache_capacity = value;
+                }
+            }
             "window_percent" if (1..=100).contains(&value) => config.window_percent = value,
             "max_loaded_tools" | "cache_capacity" => {
                 return Err(format!(
-                    "line {} value must be greater than zero",
-                    index.saturating_add(1)
+                    "line {} value must be 1..{MAX_TSH_TOOL_COUNT}",
+                    index.saturating_add(1),
                 ));
             }
             "window_percent" => {
@@ -329,6 +343,12 @@ impl ToolContext {
     fn insert(&mut self, mut tool: LoadedTool) -> Vec<LoadedTool> {
         self.clock = self.clock.saturating_add(1);
         tool.last_used = self.clock;
+        if let Some(existing) = self.tools.get(&tool.name) {
+            tool.pinned |= existing.pinned;
+            if existing.path == tool.path {
+                tool.dynamic_resident |= existing.dynamic_resident;
+            }
+        }
         let _old = self.tools.insert(tool.name.clone(), tool);
         self.evict_over_limit()
     }
@@ -471,6 +491,9 @@ fn read_repl_line(prompt: &str, history: &[String]) -> Result<Option<String>, Ts
                 }
             }
             ReplKey::Byte(byte) if byte.is_ascii_graphic() || byte == b' ' => {
+                if buffer.len() >= MAX_TSH_REPL_LINE_BYTES {
+                    return Err(TshError::usage("tsh input line exceeds limit"));
+                }
                 buffer.insert(cursor, char::from(byte));
                 cursor += 1;
                 history_cursor = None;
@@ -534,8 +557,17 @@ fn read_repl_line(prompt: &str, history: &[String]) -> Result<Option<String>, Ts
 
 fn read_repl_line_canonical(prompt: &str) -> Result<Option<String>, TshError> {
     write_stdout(prompt)?;
+    let stdin = io::stdin();
+    let mut stdin = stdin.lock();
+    read_repl_line_canonical_from(&mut stdin)
+}
+
+fn read_repl_line_canonical_from(reader: &mut impl BufRead) -> Result<Option<String>, TshError> {
     let mut line = String::new();
-    let bytes = io::stdin()
+    let limit = u64::try_from(MAX_TSH_REPL_LINE_BYTES.saturating_add(2))
+        .map_err(|error| TshError::unavailable(format!("input limit is invalid: {error}")))?;
+    let bytes = reader
+        .take(limit)
         .read_line(&mut line)
         .map_err(|error| TshError::unavailable(format!("cannot read input: {error}")))?;
     if bytes == 0 {
@@ -543,6 +575,9 @@ fn read_repl_line_canonical(prompt: &str) -> Result<Option<String>, TshError> {
     }
     while line.ends_with(['\n', '\r']) {
         line.pop();
+    }
+    if line.len() > MAX_TSH_REPL_LINE_BYTES {
+        return Err(TshError::usage("tsh input line exceeds limit"));
     }
     Ok(Some(line))
 }
@@ -1105,7 +1140,7 @@ fn parse_repl_line(line: &str) -> Result<Vec<String>, TshError> {
 }
 
 fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
-    let grant = authorize_tsh_tool_execution(root, name)?;
+    let (grant, env) = authorize_tsh_tool_execution(root, name)?;
     let hit = grant.hit();
     if args.len() == 1
         && matches!(
@@ -1115,9 +1150,16 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
     {
         return print_tool_help(root, name).map(|()| ExitCode::SUCCESS);
     }
-    let status = ProcessCommand::new(hit.path())
+    let tool_executable = open_executable_no_follow(hit.path())
+        .map_err(|error| TshError::unavailable(format!("cannot run tool: {error}")))?;
+    let status = ProcessCommand::new(proc_fd_path(&tool_executable))
         .args(args)
+        .env_clear()
+        .envs(env.iter().map(|env| (env.0.as_str(), env.1.as_str())))
+        .env("CTX_ROOT", root)
+        .env("CTX_AGENT", agent_name_from_env()?)
         .env("CTX_TOOL_MODE", "cli")
+        .env("PATH", "/usr/bin:/bin")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -1129,33 +1171,20 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
 }
 
-fn authorize_tsh_tool_execution(
-    root: &Path,
-    name: &str,
-) -> Result<cortexfs::ToolExecutionGrant, TshError> {
-    let agent_name = env::var("CTX_AGENT").map_err(|error| match error {
-        env::VarError::NotPresent => {
-            TshError::unavailable(
-                "cannot authorize tool execution: CTX_AGENT is not set; use `ctx agent attach AGENT` to run tools in an agent terminal",
-            )
-        }
-        env::VarError::NotUnicode(_value) => TshError::usage("CTX_AGENT must be UTF-8"),
-    })?;
+fn authorize_tsh_tool_execution(root: &Path, name: &str) -> Result<AuthorizedTshTool, TshError> {
+    let agent_name = agent_name_from_env()?;
     let view = derive_agent_runtime_view(root, &agent_name)
         .map_err(|error| agent_view_error_to_tsh(&error))?;
     let Some(view_hit) = view.tool_path().find(name).map_err(tool_path_error)? else {
         return command_not_found(name);
     };
-    let policy_text =
-        fs::read_to_string(view_hit.control_dir().join("policy")).map_err(|error| {
-            TshError::unavailable(format!(
-                "cannot read {}: {error}",
-                view_hit.control_dir().join("policy").display()
-            ))
-        })?;
+    let policy_path = view_hit.control_dir().join("policy");
+    let policy_text = read_small_plain_text_file(&policy_path).map_err(|error| {
+        TshError::unavailable(format!("cannot read {}: {error}", policy_path.display()))
+    })?;
     let tool_policy = PolicyV0::parse(&policy_text)
         .map_err(|_error| TshError::unavailable(format!("invalid policy for tool:{name}")))?;
-    authorize_tool_execution(
+    let grant = authorize_tool_execution(
         view.tool_path(),
         name,
         ToolExecutionAuthority::new(
@@ -1166,7 +1195,17 @@ fn authorize_tsh_tool_execution(
             &tool_policy,
         ),
     )
-    .map_err(|denial| tool_execution_denial_to_tsh(name, denial))
+    .map_err(|denial| tool_execution_denial_to_tsh(name, denial))?;
+    Ok((grant, view.env().to_vec()))
+}
+
+fn agent_name_from_env() -> Result<String, TshError> {
+    env::var("CTX_AGENT").map_err(|error| match error {
+        env::VarError::NotPresent => TshError::unavailable(
+            "cannot authorize tool execution: CTX_AGENT is not set; use `ctx agent attach AGENT` to run tools in an agent terminal",
+        ),
+        env::VarError::NotUnicode(_value) => TshError::usage("CTX_AGENT must be UTF-8"),
+    })
 }
 
 fn agent_view_error_to_tsh(error: &AgentRuntimeViewError) -> TshError {
@@ -1222,10 +1261,134 @@ fn tool_schema(hit: &cortexfs::ToolHit) -> Option<String> {
 }
 
 fn read_control_text(hit: &cortexfs::ToolHit, file: &str) -> Option<String> {
-    fs::read_to_string(hit.control_dir().join(file))
+    read_small_plain_text_file(&hit.control_dir().join(file))
         .ok()
         .map(|content| content.trim().to_owned())
         .filter(|content| !content.is_empty())
+}
+
+fn read_small_plain_text_file(path: &Path) -> io::Result<String> {
+    let mut file = open_plain_read_file(path)?;
+    let metadata = file.metadata()?;
+    if metadata.len() > MAX_TSH_CONTROL_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "file exceeds tsh control read limit",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_plain_read_file(path: &Path) -> io::Result<fs::File> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
+    })?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )?;
+    let file = fs::File::from(file_fd);
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "path is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+fn open_executable_no_follow(path: &Path) -> io::Result<fs::File> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
+    })?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW,
+        nix::sys::stat::Mode::empty(),
+    )?;
+    let file = fs::File::from(file_fd);
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "path is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+fn proc_fd_path(file: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
+}
+
+fn open_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_single_plain_directory(Path::new("/"))?
+    } else {
+        open_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn terminal_safe_text(text: &str) -> String {
@@ -1280,22 +1443,37 @@ fn ctx_tool_path_with_home(
     prefer_tshrc: bool,
 ) -> Result<ToolPath, TshError> {
     if prefer_tshrc && let Some(value) = tshrc_ctx_path(root, home)? {
-        return Ok(ToolPath::parse(&value));
+        return Ok(tshrc_tool_path(root, home, &value));
     }
 
     match env_ctx_path {
         Ok(value) => Ok(ToolPath::parse(&value)),
         Err(env::VarError::NotPresent) => tshrc_ctx_path(root, home)?.map_or_else(
             || Ok(ToolPath::default(root, home)),
-            |value| Ok(ToolPath::parse(&value)),
+            |value| Ok(tshrc_tool_path(root, home, &value)),
         ),
         Err(env::VarError::NotUnicode(_value)) => Err(TshError::usage("CTX_PATH must be UTF-8")),
     }
 }
 
+fn tshrc_tool_path(root: &Path, home: &Path, value: &str) -> ToolPath {
+    ToolPath::new(value.split(':').map(|component| {
+        let path = Path::new(component);
+        if path == Path::new("/ctx/tool") {
+            return root.join("tool");
+        }
+        if let Some(uid) = home.file_name()
+            && path == Path::new("/ctx/home").join(uid).join("tool")
+        {
+            return home.join("tool");
+        }
+        path.to_path_buf()
+    }))
+}
+
 fn tshrc_ctx_path(root: &Path, home: &Path) -> Result<Option<String>, TshError> {
     let path = home.join(".tshrc");
-    let content = match fs::read_to_string(&path) {
+    let content = match read_small_plain_text_file(&path) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -1375,9 +1553,20 @@ fn ctx_home(root: &Path) -> Result<PathBuf, TshError> {
     Ok(root.join("home").join(current_uid()?))
 }
 
+const ID_PROGRAM: &str = "/usr/bin/id";
+
+fn get_id_program() -> &'static str {
+    ID_PROGRAM
+}
+
+fn id_command() -> ProcessCommand {
+    let mut command = ProcessCommand::new(get_id_program());
+    command.arg("-u").env_clear().env("PATH", "/usr/bin:/bin");
+    command
+}
+
 fn current_uid() -> Result<String, TshError> {
-    let output = ProcessCommand::new("id")
-        .arg("-u")
+    let output = id_command()
         .output()
         .map_err(|error| TshError::unavailable(format!("cannot run id -u: {error}")))?;
     if !output.status.success() {
@@ -1385,9 +1574,16 @@ fn current_uid() -> Result<String, TshError> {
     }
     let uid = String::from_utf8(output.stdout)
         .map_err(|_error| TshError::unavailable("id -u returned non-UTF-8 output"))?;
-    let uid = uid.trim();
+    parse_current_uid(&uid)
+}
+
+fn parse_current_uid(output: &str) -> Result<String, TshError> {
+    let uid = output.trim();
     if uid.is_empty() {
         return Err(TshError::unavailable("id -u returned empty output"));
+    }
+    if !uid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(TshError::unavailable("id -u returned invalid uid"));
     }
     Ok(uid.to_owned())
 }
@@ -1425,17 +1621,21 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, ToolContext, TshCommand, TshConfig, append_schema_help, builtin_words,
-        ctx_tool_path_with_home, help_text, load_tool_context, parse_args, parse_repl_line,
-        parse_tsh_config, parse_tshrc_ctx_path, requires_explicit_repl_input, run_repl_tool,
-        run_tool, terminal_safe_text, validate_tshrc_ctx_path,
+        LoadedTool, MAX_TSH_REPL_LINE_BYTES, ToolContext, TshCommand, TshConfig,
+        append_schema_help, builtin_words, ctx_tool_path_with_home, get_id_program, help_text,
+        id_command, load_tool_context, open_executable_no_follow, parse_args, parse_current_uid,
+        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, read_repl_line_canonical_from,
+        read_tsh_config_text, requires_explicit_repl_input, run_repl_tool, run_tool,
+        terminal_safe_text, tshrc_ctx_path, validate_tshrc_ctx_path,
     };
     use cortexfs_tool_sdk::DynamicToolCache;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::symlink;
     use std::path::Path;
     use std::path::PathBuf;
+    use std::process::ExitCode;
 
     #[test]
     fn parses_tool_command_and_root() {
@@ -1475,6 +1675,45 @@ mod tests {
     }
 
     #[test]
+    fn get_id_program_returns_absolute_path() {
+        assert_eq!(get_id_program(), "/usr/bin/id");
+    }
+
+    #[test]
+    fn id_command_uses_clean_runtime_environment() {
+        let command = id_command();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let mut envs = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+        envs.sort();
+
+        assert_eq!(command.get_program(), "/usr/bin/id");
+        assert_eq!(args, vec!["-u".to_owned()]);
+        assert_eq!(
+            envs,
+            vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
+        );
+    }
+
+    #[test]
+    fn parse_current_uid_accepts_digits_only() {
+        assert_eq!(parse_current_uid("1000\n"), Ok("1000".to_owned()));
+        assert!(parse_current_uid("1000\n1001\n").is_err());
+        assert!(parse_current_uid("user\n").is_err());
+        assert!(parse_current_uid("\n").is_err());
+    }
+
+    #[test]
     fn parses_repl_words_without_shell_operators() {
         assert_eq!(
             parse_repl_line(r#"fs.read '{"path":"/tmp/a b"}'"#),
@@ -1484,6 +1723,29 @@ mod tests {
             ])
         );
         assert!(parse_repl_line("bash 'unterminated").is_err());
+    }
+
+    #[test]
+    fn canonical_repl_reader_accepts_line_at_limit() {
+        let input = format!("{}\n", "x".repeat(MAX_TSH_REPL_LINE_BYTES));
+        let mut reader = std::io::Cursor::new(input);
+
+        let line = read_repl_line_canonical_from(&mut reader);
+
+        assert_eq!(
+            line.map(|line| line.map(|line| line.len())),
+            Ok(Some(MAX_TSH_REPL_LINE_BYTES))
+        );
+    }
+
+    #[test]
+    fn canonical_repl_reader_rejects_line_over_limit() {
+        let input = format!("{}\n", "x".repeat(MAX_TSH_REPL_LINE_BYTES + 1));
+        let mut reader = std::io::Cursor::new(input);
+
+        let line = read_repl_line_canonical_from(&mut reader);
+
+        assert!(matches!(line, Err(ref error) if error.message.contains("exceeds limit")));
     }
 
     #[test]
@@ -1554,13 +1816,37 @@ CTX_PATH=/ctx/home/1000/tool:/ctx/tool
             return;
         };
 
-        assert_eq!(
-            tool_path.dirs(),
-            &[
-                PathBuf::from("/ctx/home/1000/tool"),
-                PathBuf::from("/ctx/tool")
-            ]
+        assert_eq!(tool_path.dirs(), &[home.join("tool"), root.join("tool")]);
+
+        let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn standalone_tshrc_abi_paths_are_resolved_under_selected_root() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-ctx-path-rooted-{}",
+            std::process::id()
+        ));
+        let root = dir.join("ctx");
+        let home = root.join("home").join("1000");
+        assert!(fs::create_dir_all(home.join("tool")).is_ok());
+        assert!(fs::create_dir_all(root.join("tool")).is_ok());
+        assert!(
+            fs::write(
+                home.join(".tshrc"),
+                "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n"
+            )
+            .is_ok()
         );
+
+        let Ok(tool_path) =
+            ctx_tool_path_with_home(&root, &home, Err(std::env::VarError::NotPresent), true)
+        else {
+            return;
+        };
+
+        assert_eq!(tool_path.dirs(), &[root.join("tool"), home.join("tool")]);
+        assert!(!tool_path.dirs().contains(&PathBuf::from("/ctx/tool")));
 
         let _ignored = fs::remove_dir_all(dir);
     }
@@ -1601,6 +1887,49 @@ CTX_PATH=/ctx/home/1000/tool:/ctx/tool
     }
 
     #[test]
+    fn tshrc_ctx_path_refuses_symlink() {
+        let dir =
+            std::env::temp_dir().join(format!("cortexfs-tshrc-symlink-{}", std::process::id()));
+        let root = dir.join("ctx");
+        let home = root.join("home").join("1000");
+        assert!(fs::create_dir_all(&home).is_ok());
+        let outside = dir.join("outside-tshrc");
+        assert!(
+            fs::write(&outside, "CTX_PATH=/ctx/tool\n").is_ok(),
+            "failed to write outside .tshrc"
+        );
+        assert!(
+            symlink(&outside, home.join(".tshrc")).is_ok(),
+            "failed to create .tshrc symlink"
+        );
+
+        let result = tshrc_ctx_path(&root, &home);
+
+        assert!(matches!(result, Err(error) if error.message.contains("cannot read")));
+        let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tshrc_ctx_path_refuses_symlink_intermediate_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tshrc-symlink-intermediate-{}",
+            std::process::id()
+        ));
+        let root = dir.join("ctx");
+        let outside = dir.join("outside-home");
+        let home = root.join("home").join("1000");
+        assert!(fs::create_dir_all(root.join("home")).is_ok());
+        assert!(fs::create_dir_all(&outside).is_ok());
+        assert!(fs::write(outside.join(".tshrc"), "CTX_PATH=/ctx/tool\n").is_ok());
+        assert!(symlink(&outside, &home).is_ok());
+
+        let result = tshrc_ctx_path(&root, &home);
+
+        assert!(matches!(result, Err(error) if error.message.contains("cannot read")));
+        let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn parses_tsh_config_as_data() {
         assert_eq!(
             parse_tsh_config(
@@ -1618,8 +1947,48 @@ window_percent=25
             })
         );
         assert!(parse_tsh_config("max_loaded_tools=0\n").is_err());
+        assert!(parse_tsh_config("cache_capacity=1025\n").is_err());
         assert!(parse_tsh_config("window_percent=101\n").is_err());
         assert!(parse_tsh_config("export cache_capacity=8\n").is_err());
+    }
+
+    #[test]
+    fn read_tsh_config_text_refuses_symlink_config() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-config-symlink-{}",
+            std::process::id()
+        ));
+        let root = dir.join("ctx");
+        let control_dir = root.join("tool").join("tsh.d");
+        assert!(fs::create_dir_all(&control_dir).is_ok());
+        let tool = root.join("tool").join("tsh");
+        assert!(fs::write(&tool, "#!/bin/sh\nexit 0\n").is_ok());
+        assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+        let outside = dir.join("outside-config");
+        assert!(fs::write(&outside, "max_loaded_tools=1\n").is_ok());
+        assert!(symlink(&outside, control_dir.join("config")).is_ok());
+
+        let result = read_tsh_config_text(&root);
+
+        assert!(matches!(result, Err(error) if error.message.contains("cannot read")));
+        let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn open_executable_no_follow_refuses_symlink_tool() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-executable-symlink-{}",
+            std::process::id()
+        ));
+        assert!(fs::create_dir_all(&dir).is_ok());
+        let target = dir.join("target");
+        let link = dir.join("tool");
+        assert!(fs::write(&target, "#!/bin/sh\nexit 0\n").is_ok());
+        assert!(fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).is_ok());
+        assert!(symlink(&target, &link).is_ok());
+
+        assert!(open_executable_no_follow(&link).is_err());
+        let _ignored = fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1638,12 +2007,58 @@ window_percent=25
     }
 
     #[test]
+    fn tool_context_touch_preserves_recently_used_tool() {
+        let mut context = ToolContext::new(2);
+        assert!(context.insert(test_loaded_tool("a", false)).is_empty());
+        assert!(context.insert(test_loaded_tool("b", false)).is_empty());
+        context.touch("a");
+
+        let evicted = context.insert(test_loaded_tool("c", false));
+
+        assert_eq!(
+            evicted
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b"]
+        );
+        assert!(context.tools.contains_key("a"));
+        assert!(context.tools.contains_key("c"));
+    }
+
+    #[test]
     fn tool_context_keeps_pinned_tools_over_limit() {
         let mut context = ToolContext::new(1);
         assert!(context.insert(test_loaded_tool("a", true)).is_empty());
         assert!(context.insert(test_loaded_tool("b", false)).is_empty());
         assert!(context.tools.contains_key("a"));
         assert!(context.tools.contains_key("b"));
+    }
+
+    #[test]
+    fn tool_context_reload_preserves_existing_pin() {
+        let mut context = ToolContext::new(1);
+        assert!(context.insert(test_loaded_tool("a", true)).is_empty());
+        assert!(context.insert(test_loaded_tool("a", false)).is_empty());
+
+        let evicted = context.insert(test_loaded_tool("b", false));
+
+        assert!(evicted.is_empty());
+        assert!(context.tools.get("a").is_some_and(|tool| tool.pinned));
+        assert!(context.tools.contains_key("b"));
+    }
+
+    #[test]
+    fn tool_context_unload_removes_only_unpinned_tools() {
+        let mut context = ToolContext::new(2);
+        assert!(context.insert(test_loaded_tool("a", true)).is_empty());
+        assert!(context.insert(test_loaded_tool("b", false)).is_empty());
+
+        assert!(context.remove_unpinned("a").is_err());
+        assert!(context.tools.contains_key("a"));
+        let removed = context.remove_unpinned("b");
+        assert!(matches!(removed, Ok(Some(ref tool)) if tool.name == "b"));
+        assert!(!context.tools.contains_key("b"));
     }
 
     #[test]
@@ -1672,6 +2087,60 @@ window_percent=25
         assert!(!cache.contains_path(&tool.display().to_string()));
         assert!(!cache.is_pinned_path(&tool.display().to_string()));
 
+        let _ignored = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_tool_context_ignores_symlink_metadata() {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-load-context-symlink-{}",
+            std::process::id()
+        ));
+        let tool_dir = root.join("tool");
+        let control_dir = root.join("tool").join("meta.d");
+        assert!(fs::create_dir_all(&control_dir).is_ok());
+        let tool = tool_dir.join("meta");
+        assert!(fs::write(&tool, "#!/bin/sh\nexit 0\n").is_ok());
+        assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+        let outside = root.join("outside-description");
+        assert!(fs::write(&outside, "attacker metadata\n").is_ok());
+        assert!(symlink(&outside, control_dir.join("description")).is_ok());
+
+        let cache = DynamicToolCache::new(4);
+        let loaded = load_tool_context(&root, &cache, "meta", true);
+        assert!(loaded.is_ok(), "load metadata: {loaded:?}");
+        let Ok(loaded) = loaded else {
+            return;
+        };
+
+        assert_eq!(loaded.description, "");
+        let _ignored = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn load_tool_context_ignores_symlink_intermediate_metadata_dir() {
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-load-context-symlink-intermediate-{}",
+            std::process::id()
+        ));
+        let outside = root.join("outside");
+        let tool_dir = root.join("tool");
+        assert!(fs::create_dir_all(&tool_dir).is_ok());
+        assert!(fs::create_dir_all(outside.join("meta.d")).is_ok());
+        assert!(fs::write(outside.join("meta.d/description"), "attacker metadata\n").is_ok());
+        let tool = tool_dir.join("meta");
+        assert!(fs::write(&tool, "#!/bin/sh\nexit 0\n").is_ok());
+        assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+        assert!(symlink(&outside, tool_dir.join("meta.d")).is_ok());
+
+        let cache = DynamicToolCache::new(4);
+        let loaded = load_tool_context(&root, &cache, "meta", true);
+        assert!(loaded.is_ok(), "load metadata: {loaded:?}");
+        let Ok(loaded) = loaded else {
+            return;
+        };
+
+        assert_eq!(loaded.description, "");
         let _ignored = fs::remove_dir_all(root);
     }
 
@@ -1719,6 +2188,100 @@ window_percent=25
                 if error.message.contains("CTX_AGENT")
                     && error.message.contains("ctx agent attach AGENT")
         ));
+        let _ignored = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn tsh_tool_execution_gets_clean_agent_environment() {
+        if std::env::var_os("CORTEXFS_TSH_ENV_CHILD").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap_or_default())
+                .arg("--exact")
+                .arg("tests::tsh_tool_execution_gets_clean_agent_environment")
+                .arg("--nocapture")
+                .env("CORTEXFS_TSH_ENV_CHILD", "1")
+                .env("CORTEXFS_SHOULD_NOT_LEAK", "secret")
+                .env("CTX_AGENT", "coder")
+                .output();
+            assert!(matches!(output, Ok(ref output) if output.status.success()));
+            return;
+        }
+
+        let root = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-clean-tool-env-{}",
+            std::process::id()
+        ));
+        let control = root.join("agent").join("coder.d");
+        let tool_control = root.join("tool").join("probe.d");
+        assert!(fs::create_dir_all(&control).is_ok());
+        assert!(fs::create_dir_all(&tool_control).is_ok());
+        assert!(fs::write(control.join("owner"), "1000\n").is_ok());
+        assert!(fs::write(control.join("uid"), "1000\n").is_ok());
+        assert!(fs::write(control.join("gid"), "1000\n").is_ok());
+        assert!(fs::write(control.join("groups"), "1000\n").is_ok());
+        assert!(fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n").is_ok());
+        assert!(fs::write(control.join("iso"), "shared\n").is_ok());
+        assert!(fs::write(control.join("parent"), "\n").is_ok());
+        assert!(fs::write(control.join("life"), "owned\n").is_ok());
+        assert!(fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n").is_ok());
+        assert!(fs::write(control.join("cwd"), "/workspace\n").is_ok());
+        assert!(fs::write(control.join("env"), "\n").is_ok());
+        assert!(fs::write(control.join("model"), "main\n").is_ok());
+        assert!(fs::write(control.join("status"), "idle\n").is_ok());
+        assert!(fs::write(control.join("pid"), "\n").is_ok());
+        assert!(fs::write(control.join("log"), "\n").is_ok());
+        assert!(fs::write(control.join("meta.json"), "{}\n").is_ok());
+        assert!(
+            fs::write(
+                control.join("path"),
+                format!("{}\n", root.join("tool").display())
+            )
+            .is_ok()
+        );
+        assert!(
+            fs::write(
+                control.join("mount"),
+                format!(
+                    "{}\t{}\tro\trbind,nosuid,nodev\n",
+                    root.display(),
+                    root.display()
+                ),
+            )
+            .is_ok()
+        );
+        assert!(
+            fs::write(
+                control.join("policy"),
+                "allow coder_t model:main use\nallow coder_t tool:probe execute\n",
+            )
+            .is_ok()
+        );
+        assert!(
+            fs::write(
+                tool_control.join("policy"),
+                "allow coder_t tool:probe execute\n"
+            )
+            .is_ok()
+        );
+        let tool = root.join("tool").join("probe");
+        assert!(
+            fs::write(
+                &tool,
+                r#"#!/bin/sh
+[ -z "$CORTEXFS_SHOULD_NOT_LEAK" ] || exit 10
+[ "$CTX_TOOL_MODE" = cli ] || exit 11
+[ "$CTX_AGENT" = coder ] || exit 12
+[ "$PATH" = /usr/bin:/bin ] || exit 13
+[ -n "$CTX_ROOT" ] || exit 14
+exit 0
+"#,
+            )
+            .is_ok()
+        );
+        assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
+
+        let result = run_tool(&root, "probe", Vec::new());
+
+        assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
         let _ignored = fs::remove_dir_all(root);
     }
 

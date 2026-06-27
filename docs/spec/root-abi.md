@@ -256,12 +256,16 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
           session/
             index/
               by-cwd/
+              by-hash/
+              by-uuid/
 
         coder/
           root/
           session/
             index/
               by-cwd/
+              by-hash/
+              by-uuid/
 
           data/
           cache/
@@ -289,6 +293,8 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
           session/
             index/
               by-cwd/
+              by-hash/
+              by-uuid/
 
       queue/
         inbox/

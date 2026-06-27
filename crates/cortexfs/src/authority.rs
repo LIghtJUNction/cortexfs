@@ -260,10 +260,13 @@ pub fn record_owned_child_cancellation(
     let child_events = child_session_dir.join("events.jsonl");
     let child_state = child_session_dir.join("state");
 
-    if !parent_events.is_file() {
+    if !is_plain_authority_file(&parent_events) {
         return Err(OwnedChildCancellationError::MissingParentEvents);
     }
-    if !child_messages.is_file() || !child_events.is_file() || !child_state.is_file() {
+    if !is_plain_authority_file(&child_messages)
+        || !is_plain_authority_file(&child_events)
+        || !is_plain_authority_file(&child_state)
+    {
         return Err(OwnedChildCancellationError::MissingChildHistory);
     }
 
@@ -275,6 +278,11 @@ pub fn record_owned_child_cancellation(
         .map_err(|_error| OwnedChildCancellationError::CannotRecord)?;
 
     Ok(events)
+}
+
+fn is_plain_authority_file(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_file())
 }
 
 fn parent_ref_matches(value: &str, parent_agent: &str) -> Result<bool, ChildAgentDenial> {

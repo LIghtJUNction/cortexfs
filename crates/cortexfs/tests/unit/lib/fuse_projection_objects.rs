@@ -210,6 +210,91 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
 }
 
 #[test]
+fn fuse_v1_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
+    let root = reference_tree("fuse-v1-model-alias-temp");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let old_predictable_temp = root
+        .join("model")
+        .join(format!(".main.tmp.{}", std::process::id()));
+    assert!(symlink("/ctx/model/keep", &old_predictable_temp).is_ok());
+
+    assert!(projection
+        .set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4"))
+        .is_ok());
+
+    assert!(matches!(
+        fs::read_link(&old_predictable_temp),
+        Ok(ref target) if target == Path::new("/ctx/model/keep")
+    ));
+    assert_eq!(
+        projection.readlink("model/main"),
+        Ok(PathBuf::from("/ctx/model/api.lmm.best/gpt-5.4"))
+    );
+    let temp_leftovers = fs::read_dir(root.join("model"))
+        .map_or(usize::MAX, |entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with(".main.tmp-"))
+                .count()
+        });
+    assert_eq!(temp_leftovers, 0);
+}
+
+#[test]
+fn fuse_v1_projection_renames_model_alias_symlink_atomically() {
+    let root = reference_tree("fuse-v1-model-alias-rename");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    assert!(projection
+        .set_model_alias_symlink("model/tmp", Path::new("api.lmm.best/gpt-5.4"))
+        .is_ok());
+    assert!(projection
+        .rename_model_alias_symlink("model/tmp", "model/main")
+        .is_ok());
+
+    assert_eq!(
+        projection.readlink("model/main"),
+        Ok(PathBuf::from("/ctx/model/api.lmm.best/gpt-5.4"))
+    );
+    assert!(!root.join("model").join("tmp").exists());
+}
+
+#[test]
+fn fuse_v1_projection_model_alias_rejects_symlink_model_directory_without_touching_target() {
+    let root = clean_test_dir("fuse-v1-model-alias-symlink-model");
+    let outside = clean_test_dir("fuse-v1-model-alias-symlink-model-outside");
+    assert!(fs::create_dir_all(&root).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(symlink(&outside, root.join("model")).is_ok());
+    assert!(symlink("/ctx/model/keep", outside.join("main")).is_ok());
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    assert_eq!(
+        projection.readlink("model/main"),
+        Ok(PathBuf::from("/ctx/model/openai/gpt-5.5"))
+    );
+    assert_eq!(
+        projection.set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4")),
+        Err(FuseV1Error::Io)
+    );
+    assert_eq!(projection.remove_model_alias("model/main"), Err(FuseV1Error::Io));
+    assert!(matches!(
+        fs::read_link(outside.join("main")),
+        Ok(ref target) if target == Path::new("/ctx/model/keep")
+    ));
+    let temp_leftovers = fs::read_dir(&outside).map_or(usize::MAX, |entries| {
+        entries
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".main.tmp-"))
+            .count()
+    });
+    assert_eq!(temp_leftovers, 0);
+}
+
+#[test]
 fn fuse_v1_projection_reads_and_writes_control_files() {
     let root = reference_tree("fuse-v1-projection-control-files");
     let projection =
@@ -261,6 +346,101 @@ fn fuse_v1_projection_reads_and_writes_control_files() {
     );
     assert_eq!(FuseV1Error::TooLarge.errno(), "EMSGSIZE");
     assert_eq!(FuseV1Error::InvalidOffset.errno(), "EINVAL");
+}
+
+#[test]
+fn fuse_v1_projection_refuses_to_read_symlink_as_file() {
+    let root = clean_test_dir("fuse-v1-projection-read-symlink");
+    let outside = clean_test_dir("fuse-v1-projection-read-symlink-outside");
+    assert!(fs::create_dir_all(&root).is_ok());
+    write_text_file(&outside.join("status"), "outside\n");
+    assert!(symlink(outside.join("status"), root.join("status")).is_ok());
+    let projection = FuseV1Projection::new(&root);
+
+    assert_eq!(projection.read_to_string("status"), Err(FuseV1Error::NotFile));
+    assert_eq!(projection.read_at("status", 0, 7), Err(FuseV1Error::NotFile));
+    assert_file_text(&outside.join("status"), "outside\n");
+}
+
+#[test]
+fn fuse_v1_projection_refuses_to_read_through_symlink_directory() {
+    let root = clean_test_dir("fuse-v1-projection-read-symlink-dir");
+    let outside = clean_test_dir("fuse-v1-projection-read-symlink-dir-outside");
+    assert!(fs::create_dir_all(&root).is_ok());
+    write_text_file(&outside.join("model").join("route"), "fallback: leaked\n");
+    assert!(symlink(outside.join("model"), root.join("model")).is_ok());
+    let projection = FuseV1Projection::new(&root);
+
+    assert_eq!(projection.read_to_string("model/route"), Err(FuseV1Error::Io));
+    assert_eq!(projection.read_at("model/route", 0, 8), Err(FuseV1Error::Io));
+}
+
+#[test]
+fn fuse_v1_projection_refuses_symlink_model_route() {
+    let root = clean_test_dir("fuse-v1-projection-route-symlink");
+    let outside = clean_test_dir("fuse-v1-projection-route-symlink-outside");
+    assert!(fs::create_dir_all(root.join("model")).is_ok());
+    write_text_file(&outside.join("route"), "fallback: direct\n");
+    assert!(symlink(outside.join("route"), root.join("model").join("route")).is_ok());
+    let projection = FuseV1Projection::new(&root);
+
+    assert_eq!(projection.read_to_string("model/route"), Err(FuseV1Error::Io));
+}
+
+#[test]
+fn fuse_v1_projection_refuses_to_readdir_symlink_as_directory() {
+    let root = clean_test_dir("fuse-v1-projection-readdir-symlink");
+    let outside = clean_test_dir("fuse-v1-projection-readdir-symlink-outside");
+    assert!(fs::create_dir_all(&root).is_ok());
+    assert!(fs::create_dir_all(outside.join("home")).is_ok());
+    write_text_file(&outside.join("home").join("leaked"), "outside\n");
+    assert!(symlink(outside.join("home"), root.join("home")).is_ok());
+    let projection = FuseV1Projection::new(&root);
+
+    assert_eq!(projection.readdir("home"), Err(FuseV1Error::NotDirectory));
+}
+
+#[test]
+fn fuse_v1_projection_refuses_to_readdir_through_symlink_directory() {
+    let root = clean_test_dir("fuse-v1-projection-readdir-symlink-dir");
+    let outside = clean_test_dir("fuse-v1-projection-readdir-symlink-dir-outside");
+    assert!(fs::create_dir_all(&root).is_ok());
+    assert!(fs::create_dir_all(outside.join("1000")).is_ok());
+    write_text_file(&outside.join("1000").join("leaked"), "outside\n");
+    assert!(symlink(&outside, root.join("home")).is_ok());
+    let projection = FuseV1Projection::new(&root);
+
+    assert_eq!(projection.readdir("home/1000"), Err(FuseV1Error::Io));
+}
+
+#[test]
+fn fuse_v1_projection_rejects_symlink_model_directory_for_provider_listing() {
+    let root = reference_tree("fuse-v1-model-provider-dir-symlink");
+    let outside = clean_test_dir("fuse-v1-model-provider-dir-symlink-outside");
+    assert!(fs::remove_dir_all(root.join("model")).is_ok());
+    assert!(fs::create_dir_all(outside.join("local")).is_ok());
+    assert!(symlink(outside.join("local"), root.join("model")).is_ok());
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    assert_eq!(projection.readdir("model"), Err(FuseV1Error::Io));
+}
+
+#[test]
+fn fuse_v1_projection_does_not_virtualize_symlink_object_control_dir() {
+    let root = clean_test_dir("fuse-v1-symlink-object-control-dir");
+    let outside = clean_test_dir("fuse-v1-symlink-object-control-dir-outside");
+    assert!(fs::create_dir_all(root.join("agent")).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    write_text_file(&root.join("agent").join("coder"), "plain executable\n");
+    assert!(symlink(&outside, root.join("agent").join("coder.d")).is_ok());
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    assert_eq!(
+        projection.read_to_string("agent/coder"),
+        Ok("plain executable\n".to_owned())
+    );
 }
 
 #[test]
@@ -367,6 +547,54 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 }
 
 #[test]
+fn fuse_v1_projection_rejects_symlink_provider_model_control_dir() {
+    let root = reference_tree("fuse-v1-provider-model-control-symlink");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    let outside = clean_test_dir("fuse-v1-provider-model-control-symlink-outside");
+    write_text_file(
+        &providers.join("api.lmm.best.json"),
+        r#"{
+  "base_url": "https://api.lmm.best:9000/",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    write_text_file(
+        &cache.join("api.lmm.best.models.json"),
+        r#"{"models":["gpt-5.4-mini"]}"#,
+    );
+    assert!(fs::create_dir_all(root.join("model").join("api.lmm.best")).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(
+        symlink(
+            &outside,
+            root.join("model")
+                .join("api.lmm.best")
+                .join("gpt-5.4-mini.d")
+        )
+        .is_ok()
+    );
+    let projection = FuseV1Projection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    assert_eq!(
+        projection.write_control_file("model/api.lmm.best/gpt-5.4-mini.d/effort", "high\n"),
+        Err(FuseV1Error::Io)
+    );
+    assert!(!outside.join("effort").exists());
+    assert!(
+        root.join("model")
+            .join("api.lmm.best")
+            .join("gpt-5.4-mini.d")
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    );
+}
+
+#[test]
 fn fuse_v1_projection_requires_name_for_address_provider() {
     let root = reference_tree("fuse-v1-address-provider-requires-name");
     let providers = root.join("providers.d");
@@ -414,6 +642,132 @@ fn fuse_v1_projection_uses_configured_provider_name_for_address_provider() {
         projection.read_to_string("model/local/gpt-5.4-mini.d/default"),
         Ok("base_url=http://127.0.0.1:8317/v1\n".to_owned())
     );
+}
+
+#[test]
+fn fuse_v1_projection_ignores_symlink_provider_configs() {
+    let root = reference_tree("fuse-v1-symlink-provider-config");
+    let providers = root.join("providers.d");
+    let outside = root.join("outside-provider.json");
+    write_text_file(
+        &outside,
+        r#"{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    assert!(fs::create_dir_all(&providers).is_ok());
+    assert!(symlink(&outside, providers.join("local.json")).is_ok());
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    let model_entries = projection.readdir("model");
+    assert!(model_entries.is_ok());
+    let model_names = model_entries
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.name().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(model_names, ["debug", "helper", "main", "route"]);
+    assert_eq!(projection.getattr("model/local"), Err(FuseV1Error::NotFound));
+}
+
+#[test]
+fn fuse_v1_projection_rejects_symlink_provider_config_dir() {
+    let root = reference_tree("fuse-v1-symlink-provider-config-dir");
+    let providers = root.join("providers.d");
+    let outside = clean_test_dir("fuse-v1-symlink-provider-config-dir-outside");
+    write_text_file(
+        &outside.join("local.json"),
+        r#"{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    assert!(symlink(&outside, &providers).is_ok());
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    assert_eq!(projection.readdir("model"), Err(FuseV1Error::Io));
+    assert_eq!(projection.getattr("model/local"), Err(FuseV1Error::Io));
+}
+
+#[test]
+fn fuse_v1_projection_ignores_symlink_provider_model_cache() {
+    let root = reference_tree("fuse-v1-symlink-provider-model-cache");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    let outside = root.join("outside-provider-cache.json");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "base",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    write_text_file(&outside, r#"{"models":["leaked"]}"#);
+    assert!(fs::create_dir_all(&cache).is_ok());
+    assert!(symlink(&outside, cache.join("local.models.json")).is_ok());
+    let projection = FuseV1Projection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    let provider_entries = projection.readdir("model/local");
+    assert!(provider_entries.is_ok());
+    let provider_names = provider_entries
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.name().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(provider_names, ["base", "base.d"]);
+    assert_eq!(
+        projection.getattr("model/local/leaked"),
+        Err(FuseV1Error::NotFound)
+    );
+}
+
+#[test]
+fn fuse_v1_projection_ignores_symlink_provider_model_cache_dir() {
+    let root = reference_tree("fuse-v1-symlink-provider-model-cache-dir");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    let outside = clean_test_dir("fuse-v1-symlink-provider-model-cache-dir-outside");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "base",
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    write_text_file(&outside.join("local.models.json"), r#"{"models":["leaked"]}"#);
+    assert!(symlink(&outside, &cache).is_ok());
+    let projection = FuseV1Projection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    let provider_entries = projection.readdir("model/local");
+    assert!(provider_entries.is_ok());
+    let provider_names = provider_entries
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.name().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(provider_names, ["base", "base.d"]);
+    assert_eq!(projection.getattr("model/local/leaked"), Err(FuseV1Error::NotFound));
 }
 
 #[test]

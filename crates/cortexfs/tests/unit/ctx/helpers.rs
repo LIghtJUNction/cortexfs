@@ -8,10 +8,68 @@ fn unique_test_dir(name: &str) -> PathBuf {
     ))
 }
 
-fn clean_test_dir(name: &str) -> PathBuf {
+struct TestDir(PathBuf);
+
+impl std::ops::Deref for TestDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TestDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for TestDir {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        // ponytail: best-effort test cleanup; stale startup cleanup covers killed test processes.
+        let _ignored = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn clean_test_dir(name: &str) -> TestDir {
+    remove_stale_test_dirs();
     let root = unique_test_dir(name);
     assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    root
+    TestDir(root)
+}
+
+fn remove_stale_test_dirs() {
+    static CLEAN: std::sync::Once = std::sync::Once::new();
+    CLEAN.call_once(|| {
+        let Ok(entries) = fs::read_dir(std::env::temp_dir()) else {
+            return;
+        };
+        let stale_before = SystemTime::now()
+            .checked_sub(std::time::Duration::from_hours(1))
+            .unwrap_or(UNIX_EPOCH);
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("cortexfs-ctx-"))
+            {
+                continue;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.modified().is_ok_and(|modified| modified < stale_before) {
+                let _ignored = fs::remove_dir_all(path);
+            }
+        }
+    });
 }
 
 fn assert_path_matches(paths: &[&str], predicate: fn(&str) -> bool, expected: bool) {

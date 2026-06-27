@@ -1,5 +1,9 @@
 # CortexFS
 
+<p align="center">
+  <img src="docs/assets/cortexfs-logo.jpg" alt="CortexFS logo" width="220">
+</p>
+
 ![CortexFS turns AI runtimes into Unix-shaped files](docs/assets/cortexfs-hero.svg)
 
 CortexFS makes AI runtimes feel like Unix.
@@ -472,6 +476,12 @@ cargo fmt --check
 cargo check --locked --workspace --all-targets --all-features
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
+```
+
+Run the deterministic agent tool-loop smoke without a live model:
+
+```bash
+npm run agent-tool-loop:smoke
 ```
 
 Regenerate README images and the local benchmark chart:

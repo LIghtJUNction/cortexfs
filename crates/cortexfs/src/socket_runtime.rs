@@ -1,3 +1,8 @@
+const MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES: u64 = 64 * 1024;
+const MAX_SOCKET_RUNTIME_EVENTS_BYTES: u64 = 1024 * 1024;
+const MAX_AGENT_EXECUTABLE_FRAME_BYTES: usize = 256 * 1024;
+const SOCKET_REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Handles one JSONL socket request frame against a durable session root.
 ///
 /// This is the reusable core for a future Unix socket loop: it parses one
@@ -201,7 +206,8 @@ fn run_agent_executable_streaming(
         &runtime.session_root.join(session),
         MAX_HISTORY_MESSAGES_CHARS,
     );
-    let mut command = Command::new(runtime.agent_executable);
+    let agent_executable = open_agent_executable_no_follow(runtime.agent_executable)?;
+    let mut command = Command::new(proc_fd_path(&agent_executable));
     command
         .arg(input)
         // The socket-activated service may hold provider credentials in its
@@ -234,8 +240,8 @@ fn run_agent_executable_streaming(
         .ok_or(SocketRuntimeError::CannotRunAgent)?;
     let (stdout_sender, stdout_receiver) = mpsc::sync_channel(MAX_AGENT_STDOUT_QUEUE_FRAMES);
     let reader = thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let line = line.map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+        let mut stdout = BufReader::new(stdout);
+        while let Some(line) = read_agent_executable_frame_line(&mut stdout)? {
             if stdout_sender.send(line).is_err() {
                 break;
             }
@@ -261,6 +267,21 @@ fn run_agent_executable_streaming(
                     frames.push(line);
                 }
             }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                match reader.join() {
+                    Ok(Ok(())) => break,
+                    Ok(Err(error)) => {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(error);
+                    }
+                    Err(_error) => {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(SocketRuntimeError::CannotReadFrame);
+                    }
+                }
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if agent_run_cancelled(&session_dir, run_id) {
                     cancelled = true;
@@ -268,15 +289,11 @@ fn run_agent_executable_streaming(
                     break;
                 }
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
     let status = child
         .wait()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    reader
-        .join()
-        .map_err(|_error| SocketRuntimeError::CannotReadFrame)??;
     if cancelled {
         return Ok(frames);
     }
@@ -284,6 +301,33 @@ fn run_agent_executable_streaming(
         return Err(SocketRuntimeError::CannotRunAgent);
     }
     Ok(frames)
+}
+
+fn read_agent_executable_frame_line(
+    reader: &mut impl BufRead,
+) -> Result<Option<String>, SocketRuntimeError> {
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAX_AGENT_EXECUTABLE_FRAME_BYTES.saturating_add(1))
+        .map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+    let read = reader
+        .take(limit)
+        .read_until(b'\n', &mut bytes)
+        .map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_AGENT_EXECUTABLE_FRAME_BYTES {
+        return Err(SocketRuntimeError::InvalidAgentOutput);
+    }
+    if bytes.ends_with(b"\n") {
+        bytes.pop();
+        if bytes.ends_with(b"\r") {
+            bytes.pop();
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_error| SocketRuntimeError::InvalidAgentOutput)
 }
 
 fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
@@ -294,6 +338,41 @@ fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixId
     if nix::unistd::geteuid().is_root() {
         command.gid(identity.gid()).uid(identity.uid());
     }
+}
+
+fn open_agent_executable_no_follow(path: &Path) -> Result<fs::File, SocketRuntimeError> {
+    if !path.is_absolute() {
+        return Err(SocketRuntimeError::InvalidAgentExecutable);
+    }
+    let parent = path
+        .parent()
+        .ok_or(SocketRuntimeError::InvalidAgentExecutable)?;
+    let parent_dir = open_socket_runtime_plain_directory(parent)
+        .map_err(|_error| SocketRuntimeError::InvalidAgentExecutable)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(SocketRuntimeError::InvalidAgentExecutable)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|_error| SocketRuntimeError::InvalidAgentExecutable)?;
+    let file = fs::File::from(file_fd);
+    let metadata = file
+        .metadata()
+        .map_err(|_error| SocketRuntimeError::InvalidAgentExecutable)?;
+    if metadata.is_file() {
+        Ok(file)
+    } else {
+        Err(SocketRuntimeError::InvalidAgentExecutable)
+    }
+}
+
+fn proc_fd_path(file: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
 
 fn terminate_agent_process_group(child: &mut Child) {
@@ -321,13 +400,19 @@ fn event_type(line: &str) -> Option<String> {
 }
 
 fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
-    let Ok(state) = fs::read_to_string(session_dir.join("state")) else {
+    let Ok(state) = socket_runtime_read_plain_text_file(
+        &session_dir.join("state"),
+        MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES,
+    ) else {
         return false;
     };
     if state.trim() != "cancelled" {
         return false;
     }
-    let Ok(events) = fs::read_to_string(session_dir.join("events.jsonl")) else {
+    let Ok(events) = socket_runtime_read_plain_text_file(
+        &session_dir.join("events.jsonl"),
+        MAX_SOCKET_RUNTIME_EVENTS_BYTES,
+    ) else {
         return false;
     };
     events.lines().any(|line| {
@@ -454,6 +539,25 @@ fn message_event_text(value: &Value) -> Option<String> {
 fn read_socket_request_frame_from_stream(
     stream: &mut UnixStream,
 ) -> Result<String, SocketRuntimeError> {
+    let restore_blocking = stream
+        .read_timeout()
+        .map_err(|_error| SocketRuntimeError::CannotReadFrame)?
+        .is_none();
+    if restore_blocking {
+        stream
+            .set_read_timeout(Some(SOCKET_REQUEST_READ_TIMEOUT))
+            .map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+    }
+    let frame = read_socket_request_frame_body(stream);
+    if restore_blocking {
+        stream
+            .set_read_timeout(None)
+            .map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+    }
+    frame
+}
+
+fn read_socket_request_frame_body(stream: &mut UnixStream) -> Result<String, SocketRuntimeError> {
     let mut buffer = Vec::new();
     let mut byte = [0_u8; 1];
     loop {
@@ -549,7 +653,10 @@ fn handle_socket_resume(
     if !is_object_name(session) {
         return Err(SocketRuntimeError::InvalidSessionName);
     }
-    let events = fs::read_to_string(session_root.join(session).join("events.jsonl"))
+    let events = socket_runtime_read_plain_text_file(
+        &session_root.join(session).join("events.jsonl"),
+        MAX_SOCKET_RUNTIME_EVENTS_BYTES,
+    )
         .map_err(|_error| SocketRuntimeError::CannotReadEvents)?;
     Ok(SocketRuntimeResponse::new(resume_event_frames(
         &events, after,
@@ -597,7 +704,7 @@ fn event_id_matches(line: &str, cursor: &str) -> bool {
 
 fn current_or_default_session_name(session_root: &Path) -> Result<String, SocketRuntimeError> {
     let current_path = session_root.join("index").join("current");
-    match fs::read_to_string(current_path) {
+    match socket_runtime_read_plain_text_file(&current_path, MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES) {
         Ok(value) => {
             let session = value.trim();
             if is_object_name(session) {
@@ -609,6 +716,90 @@ fn current_or_default_session_name(session_root: &Path) -> Result<String, Socket
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok("default".to_owned()),
         Err(_error) => Err(SocketRuntimeError::CannotReadEvents),
     }
+}
+
+fn socket_runtime_read_plain_text_file(path: &Path, limit: u64) -> std::io::Result<String> {
+    let mut file = open_socket_runtime_plain_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "socket runtime file is too large or not a plain file",
+        ));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_socket_runtime_plain_file(path: &Path) -> std::io::Result<fs::File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_socket_runtime_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(fs::File::from(file_fd))
+}
+
+fn open_socket_runtime_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_socket_runtime_single_plain_directory(Path::new("/"))?
+    } else {
+        open_socket_runtime_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_socket_runtime_single_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn socket_start_frame(run_id: &str, model: Option<&str>) -> String {

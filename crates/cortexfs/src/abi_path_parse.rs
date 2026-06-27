@@ -296,12 +296,18 @@ fn parse_session_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
             AbiPathKind::SessionIndex {
                 kind: SessionIndexKind::Current,
             }
-        } else if *first == "by-cwd"
-            && tail.len() == 1
-            && tail.first().is_some_and(|hash| !hash.is_empty())
-        {
-            AbiPathKind::SessionIndex {
-                kind: SessionIndexKind::ByCwd,
+        } else if tail.len() == 1 && tail.first().is_some_and(|key| is_object_name(key)) {
+            match *first {
+                "by-cwd" => AbiPathKind::SessionIndex {
+                    kind: SessionIndexKind::ByCwd,
+                },
+                "by-hash" => AbiPathKind::SessionIndex {
+                    kind: SessionIndexKind::ByHash,
+                },
+                "by-uuid" => AbiPathKind::SessionIndex {
+                    kind: SessionIndexKind::ByUuid,
+                },
+                _ => AbiPathKind::Ordinary,
             }
         } else {
             AbiPathKind::Ordinary

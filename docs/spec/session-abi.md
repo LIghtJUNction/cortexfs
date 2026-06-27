@@ -72,7 +72,7 @@ first and fall back to `default`. There is no separate `ctx latest` command.
 ## Session Index
 
 Reserved index files live under `session/index/` to avoid colliding with user
-session names such as `list`, `current`, or `by-cwd`.
+session names such as `list`, `current`, `by-cwd`, `by-hash`, or `by-uuid`.
 
 ```text
 session/
@@ -81,6 +81,10 @@ session/
     current
     by-cwd/
       <hash>
+    by-hash/
+      <hash>
+    by-uuid/
+      <uuid>
   default/
     messages.jsonl
     events.jsonl
@@ -98,10 +102,13 @@ Index file formats are fixed:
 index/list            one session name per line, newest updated_at first
 index/current         single value, current session name
 index/by-cwd/<hash>   single value, session name for that cwd
+index/by-hash/<hash>  single value, session name for that external hash
+index/by-uuid/<uuid>  single value, session name for that external uuid
 ```
 
-`index/by-cwd/<hash>` is not a symlink. That keeps the ABI identical across
-mounts and different backing stores.
+`index/by-cwd/<hash>`, `index/by-hash/<hash>`, and `index/by-uuid/<uuid>` are
+not symlinks. That keeps the ABI identical across mounts and different backing
+stores.
 
 Resume is not a root-level feature. Clients read the session index for the
 current agent:
@@ -110,6 +117,8 @@ current agent:
 /ctx/home/1000/agent/coder/session/index/list
 /ctx/home/1000/agent/coder/session/index/current
 /ctx/home/1000/agent/coder/session/index/by-cwd/<hash>
+/ctx/home/1000/agent/coder/session/index/by-hash/<hash>
+/ctx/home/1000/agent/coder/session/index/by-uuid/<uuid>
 ```
 
 Shared resume reads the matching index under `shared`. Temp sessions do not

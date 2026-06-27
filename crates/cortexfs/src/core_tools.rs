@@ -1,4 +1,4 @@
-use crate::CTX_ROOT;
+use crate::{CTX_ROOT, MAX_FUSE_V1_SMALL_WRITE_BYTES};
 use cortexfs_tool_sdk::{
     Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
 };
@@ -6,8 +6,19 @@ use serde_json::{Map, Value};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Child, Command, ExitCode, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const SHELL_EXEC_SHELL: &str = "/bin/sh";
+const MAX_FS_READ_BYTES: u64 = 1024 * 1024;
+const MAX_TSH_CONFIG_BYTES: u64 = 64 * 1024;
+const MAX_TSH_TOOL_COUNT: usize = 1024;
+const MAX_SHELL_EXEC_OUTPUT_BYTES: usize = 64 * 1024;
+const SHELL_EXEC_TIMEOUT_SECONDS: u64 = 20;
 
 #[derive(Debug)]
 pub struct FsReadTool;
@@ -41,7 +52,7 @@ impl Tool for FsReadTool {
         if path.is_empty() {
             return Err(ToolError::invalid("missing path"));
         }
-        match fs::read_to_string(&path) {
+        match read_regular_utf8_file(Path::new(&path), MAX_FS_READ_BYTES) {
             Ok(content) => output
                 .message(&content)
                 .map_err(|error| ToolError::new("EIO", error.to_string())),
@@ -72,7 +83,8 @@ impl Tool for FsWriteTool {
         if path.is_empty() {
             return Err(ToolError::invalid("missing path"));
         }
-        fs::write(path, content).map_err(|_error| ToolError::denied("write failed"))?;
+        write_text_file_atomic(Path::new(&path), &content)
+            .map_err(|_error| ToolError::denied("write failed"))?;
         output
             .message("written")
             .map_err(|error| ToolError::new("EIO", error.to_string()))
@@ -99,11 +111,8 @@ impl Tool for ShellExecTool {
         if command.is_empty() {
             return Err(ToolError::invalid("missing cmd"));
         }
-        let command_output = Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .output()
-            .map_err(|error| ToolError::new("EIO", format!("cannot run shell command: {error}")))?;
+        let command_output =
+            run_shell_exec_command(&command).map_err(|error| ToolError::new("EIO", error))?;
         let mut text = String::from_utf8_lossy(&command_output.stdout).to_string();
         text.push_str(&String::from_utf8_lossy(&command_output.stderr));
         output
@@ -147,10 +156,10 @@ impl Tool for TshConfigTool {
             || object.contains_key("cache_capacity")
             || object.contains_key("window_percent");
         if let Some(value) = object.get("max_loaded_tools") {
-            config.max_loaded_tools = positive_usize(value, "max_loaded_tools")?;
+            config.max_loaded_tools = tsh_tool_count(value, "max_loaded_tools")?;
         }
         if let Some(value) = object.get("cache_capacity") {
-            config.cache_capacity = positive_usize(value, "cache_capacity")?;
+            config.cache_capacity = tsh_tool_count(value, "cache_capacity")?;
         }
         if let Some(value) = object.get("window_percent") {
             let window_percent = positive_usize(value, "window_percent")?;
@@ -263,7 +272,7 @@ fn requested_tsh_config_path(root: &Path, object: &Map<String, Value>) -> ToolRe
 }
 
 fn read_tsh_runtime_config(path: &Path) -> ToolResult<TshRuntimeConfig> {
-    let content = match fs::read_to_string(path) {
+    let content = match read_regular_utf8_file(path, MAX_TSH_CONFIG_BYTES) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(TshRuntimeConfig::default());
@@ -293,13 +302,18 @@ fn parse_tsh_runtime_config(content: &str) -> ToolResult<TshRuntimeConfig> {
             ))
         })?;
         match key {
-            "max_loaded_tools" if value > 0 => config.max_loaded_tools = value,
-            "cache_capacity" if value > 0 => config.cache_capacity = value,
+            "max_loaded_tools" | "cache_capacity" if (1..=MAX_TSH_TOOL_COUNT).contains(&value) => {
+                if key == "max_loaded_tools" {
+                    config.max_loaded_tools = value;
+                } else {
+                    config.cache_capacity = value;
+                }
+            }
             "window_percent" if (1..=100).contains(&value) => config.window_percent = value,
             "max_loaded_tools" | "cache_capacity" => {
                 return Err(ToolError::invalid(format!(
-                    "line {} value must be greater than zero",
-                    index.saturating_add(1)
+                    "line {} value must be 1..{MAX_TSH_TOOL_COUNT}",
+                    index.saturating_add(1),
                 )));
             }
             "window_percent" => {
@@ -325,48 +339,91 @@ fn write_tsh_runtime_config(path: &Path, config: TshRuntimeConfig) -> ToolResult
             "config path must have a parent directory",
         ));
     };
-    fs::create_dir_all(parent)
-        .map_err(|error| ToolError::denied(format!("cannot create config directory: {error}")))?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| ToolError::invalid("config path must end with a valid UTF-8 file name"))?;
+    create_tsh_config_dir(parent)?;
     let content = format_tsh_runtime_config(config);
-    for attempt in 0..16 {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_nanos());
-        let tmp = parent.join(format!(
-            ".{file_name}.tmp-{}-{nonce}-{attempt}",
-            std::process::id()
-        ));
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)
-        {
-            Ok(mut file) => {
-                if let Err(error) = file.write_all(content.as_bytes()) {
-                    let _ignored = fs::remove_file(&tmp);
-                    return Err(ToolError::denied(format!("cannot write config: {error}")));
-                }
-                if let Err(error) = file.sync_all() {
-                    let _ignored = fs::remove_file(&tmp);
-                    return Err(ToolError::denied(format!("cannot sync config: {error}")));
-                }
-                drop(file);
-                return fs::rename(&tmp, path)
-                    .map_err(|error| ToolError::denied(format!("cannot install config: {error}")));
+    write_text_file_atomic(path, &content)
+        .map_err(|error| ToolError::denied(format!("cannot write config: {error}")))
+}
+
+fn create_tsh_config_dir(path: &Path) -> ToolResult<()> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            sync_tsh_config_dir(path)
+        } else {
+            Err(ToolError::denied(
+                "config directory is not a plain directory",
+            ))
+        };
+    }
+
+    let mut missing = Vec::new();
+    let mut cursor = Some(path);
+    while let Some(current) = cursor {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
+                return Err(ToolError::denied(
+                    "config path contains a non-directory entry",
+                ));
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Ok(_metadata) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+                cursor = current.parent();
+            }
             Err(error) => {
                 return Err(ToolError::denied(format!(
-                    "cannot create config temp file: {error}"
+                    "cannot inspect config directory: {error}"
                 )));
             }
         }
     }
-    Err(ToolError::denied("cannot create unique config temp file"))
+
+    let mut parent_dir =
+        if let Some(existing_parent) = missing.last().and_then(|path| path.parent()) {
+            open_plain_directory(existing_parent)
+                .map_err(|error| ToolError::denied(format!("cannot open config parent: {error}")))?
+        } else {
+            return Ok(());
+        };
+
+    for directory in missing.iter().rev() {
+        let name = directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| ToolError::denied("invalid config directory name"))?;
+        nix::sys::stat::mkdirat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(0o755),
+        )
+        .map_err(|error| ToolError::denied(format!("cannot create config directory: {error}")))?;
+        parent_dir
+            .sync_all()
+            .map_err(|error| ToolError::denied(format!("cannot sync config parent: {error}")))?;
+        let child = nix::fcntl::openat(
+            &parent_dir,
+            name,
+            nix::fcntl::OFlag::O_DIRECTORY
+                | nix::fcntl::OFlag::O_RDONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|error| ToolError::denied(format!("cannot open config directory: {error}")))?;
+        parent_dir = fs::File::from(child);
+        parent_dir
+            .sync_all()
+            .map_err(|error| ToolError::denied(format!("cannot sync config directory: {error}")))?;
+    }
+    Ok(())
+}
+
+fn sync_tsh_config_dir(path: &Path) -> ToolResult<()> {
+    let directory = open_plain_directory(path)
+        .map_err(|error| ToolError::denied(format!("cannot open config directory: {error}")))?;
+    directory
+        .sync_all()
+        .map_err(|error| ToolError::denied(format!("cannot sync config directory: {error}")))
 }
 
 fn format_tsh_runtime_config(config: TshRuntimeConfig) -> String {
@@ -388,14 +445,73 @@ fn positive_usize(value: &Value, field: &str) -> ToolResult<usize> {
         .ok_or_else(|| ToolError::invalid(format!("{field} must be a positive integer")))
 }
 
+fn tsh_tool_count(value: &Value, field: &str) -> ToolResult<usize> {
+    let value = positive_usize(value, field)?;
+    if value <= MAX_TSH_TOOL_COUNT {
+        Ok(value)
+    } else {
+        Err(ToolError::invalid(format!(
+            "{field} must be 1..{MAX_TSH_TOOL_COUNT}"
+        )))
+    }
+}
+
 fn run_fs_read_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
     let Some(path) = args.first() else {
         writeln!(io::stderr(), "fs.read: missing path")?;
         return Ok(ExitCode::from(2));
     };
-    let content = fs::read_to_string(PathBuf::from(path))?;
+    let content = read_regular_utf8_file(&PathBuf::from(path), MAX_FS_READ_BYTES)?;
     writer.write_all(content.as_bytes())?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn read_regular_utf8_file(path: &Path, max_bytes: u64) -> io::Result<String> {
+    let Some(parent) = path.parent() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path must have a parent directory",
+        ));
+    };
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let parent_dir = open_plain_directory(parent)?;
+    let fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )?;
+    let mut file = fs::File::from(fd);
+    let metadata = file.metadata()?;
+    let len = regular_file_len(&metadata, max_bytes)?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn regular_file_len(metadata: &fs::Metadata, max_bytes: u64) -> io::Result<usize> {
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "path is not a regular file",
+        ));
+    }
+    if metadata.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "file exceeds read limit",
+        ));
+    }
+    usize::try_from(metadata.len()).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })
 }
 
 fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
@@ -410,13 +526,302 @@ fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<Exi
             .collect::<Vec<_>>()
             .join(" ")
     } else {
-        let mut content = String::new();
-        io::stdin().read_to_string(&mut content)?;
-        content
+        read_text_from_stdin_limited(io::stdin(), MAX_FUSE_V1_SMALL_WRITE_BYTES)?
     };
-    fs::write(PathBuf::from(path), content)?;
+    write_text_file_atomic(Path::new(path), &content)?;
     writeln!(writer, "written")?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn read_text_from_stdin_limited(reader: impl Read, max_bytes: usize) -> io::Result<String> {
+    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("stdin read limit is invalid: {error}"),
+        )
+    })?;
+    let mut content = String::new();
+    reader.take(limit).read_to_string(&mut content)?;
+    if content.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "stdin exceeds fs.write input limit",
+        ));
+    }
+    Ok(content)
+}
+
+fn run_shell_exec_command(command: &str) -> Result<std::process::Output, String> {
+    run_shell_exec_command_with_timeout(command, Duration::from_secs(SHELL_EXEC_TIMEOUT_SECONDS))
+}
+
+fn run_shell_exec_command_with_timeout(
+    command: &str,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    let mut child = shell_exec_command()
+        .arg("-c")
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| format!("cannot run shell command: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "cannot read shell stdout".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "cannot read shell stderr".to_owned())?;
+    let stdout_reader =
+        thread::spawn(move || read_limited_bytes(stdout, MAX_SHELL_EXEC_OUTPUT_BYTES + 1));
+    let stderr_reader =
+        thread::spawn(move || read_limited_bytes(stderr, MAX_SHELL_EXEC_OUTPUT_BYTES + 1));
+    let mut stdout_reader = Some(stdout_reader);
+    let mut stderr_reader = Some(stderr_reader);
+    let mut stdout = None;
+    let mut stderr = None;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if stdout.is_none()
+            && stdout_reader
+                .as_ref()
+                .is_some_and(thread::JoinHandle::is_finished)
+        {
+            let output = stdout_reader
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .unwrap_or_default();
+            if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
+                terminate_process_group(&mut child);
+                let _ignored = child.wait();
+                if let Some(reader) = stderr_reader.take() {
+                    let _ignored = reader.join();
+                }
+                return Err(format!(
+                    "shell command output exceeds {MAX_SHELL_EXEC_OUTPUT_BYTES} bytes"
+                ));
+            }
+            stdout = Some(output);
+        }
+        if stderr.is_none()
+            && stderr_reader
+                .as_ref()
+                .is_some_and(thread::JoinHandle::is_finished)
+        {
+            let output = stderr_reader
+                .take()
+                .and_then(|reader| reader.join().ok())
+                .unwrap_or_default();
+            if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
+                terminate_process_group(&mut child);
+                let _ignored = child.wait();
+                if let Some(reader) = stdout_reader.take() {
+                    let _ignored = reader.join();
+                }
+                return Err(format!(
+                    "shell command output exceeds {MAX_SHELL_EXEC_OUTPUT_BYTES} bytes"
+                ));
+            }
+            stderr = Some(output);
+        }
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            terminate_process_group(&mut child);
+            let _ignored = child.wait();
+            if let Some(reader) = stdout_reader.take() {
+                let _ignored = reader.join();
+            }
+            if let Some(reader) = stderr_reader.take() {
+                let _ignored = reader.join();
+            }
+            return Err(format!(
+                "shell command timed out after {}s",
+                timeout.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let stdout = stdout.unwrap_or_else(|| {
+        stdout_reader
+            .take()
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    });
+    let stderr = stderr.unwrap_or_else(|| {
+        stderr_reader
+            .take()
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default()
+    });
+    if stdout.len() > MAX_SHELL_EXEC_OUTPUT_BYTES || stderr.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
+        return Err(format!(
+            "shell command output exceeds {MAX_SHELL_EXEC_OUTPUT_BYTES} bytes"
+        ));
+    }
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(limit.min(8 * 1024));
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => read,
+        };
+        let remaining = limit.saturating_sub(output.len());
+        let kept = read.min(remaining);
+        if let Some(chunk) = buffer.get(..kept) {
+            output.extend_from_slice(chunk);
+        }
+        if output.len() >= limit {
+            break;
+        }
+    }
+    output
+}
+
+fn terminate_process_group(child: &mut Child) {
+    if let Ok(pid) = i32::try_from(child.id()) {
+        signal_process_group(pid, nix::sys::signal::Signal::SIGTERM);
+        for _attempt in 0..5 {
+            let _ignored = child.try_wait();
+            thread::sleep(Duration::from_millis(50));
+        }
+        signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+    }
+    let _ignored = child.kill();
+}
+
+fn signal_process_group(pid: i32, signal: nix::sys::signal::Signal) {
+    let _ignored = nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), signal);
+}
+
+fn write_text_file_atomic(path: &Path, content: &str) -> io::Result<()> {
+    let Some(parent) = path.parent() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path must have a parent directory",
+        ));
+    };
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
+    let parent_dir = open_plain_directory(parent)?;
+    for attempt in 0..16 {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let tmp_name = format!(".{file_name}.tmp-{}-{nonce}-{attempt}", std::process::id());
+        match nix::fcntl::openat(
+            &parent_dir,
+            tmp_name.as_str(),
+            nix::fcntl::OFlag::O_CREAT
+                | nix::fcntl::OFlag::O_EXCL
+                | nix::fcntl::OFlag::O_WRONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::from_bits_truncate(0o644),
+        ) {
+            Ok(fd) => {
+                let mut file = fs::File::from(fd);
+                if let Err(error) = file.write_all(content.as_bytes()) {
+                    let _ignored = nix::unistd::unlinkat(
+                        &parent_dir,
+                        tmp_name.as_str(),
+                        nix::unistd::UnlinkatFlags::NoRemoveDir,
+                    );
+                    return Err(error);
+                }
+                if let Err(error) = file.sync_all() {
+                    let _ignored = nix::unistd::unlinkat(
+                        &parent_dir,
+                        tmp_name.as_str(),
+                        nix::unistd::UnlinkatFlags::NoRemoveDir,
+                    );
+                    return Err(error);
+                }
+                drop(file);
+                if let Err(error) =
+                    nix::fcntl::renameat(&parent_dir, tmp_name.as_str(), &parent_dir, file_name)
+                {
+                    let _ignored = nix::unistd::unlinkat(
+                        &parent_dir,
+                        tmp_name.as_str(),
+                        nix::unistd::UnlinkatFlags::NoRemoveDir,
+                    );
+                    return Err(io::Error::from(error));
+                }
+                return parent_dir.sync_all();
+            }
+            Err(nix::errno::Errno::EEXIST) => {}
+            Err(error) => return Err(io::Error::from(error)),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "cannot create unique temp file",
+    ))
+}
+
+fn open_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_single_plain_directory(Path::new("/"))?
+    } else {
+        open_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_single_plain_directory(path: &Path) -> io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
@@ -429,10 +834,16 @@ fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<E
         writeln!(io::stderr(), "shell.exec: missing command")?;
         return Ok(ExitCode::from(2));
     }
-    let output = Command::new("sh").arg("-c").arg(command).output()?;
+    let output = run_shell_exec_command(&command).map_err(io::Error::other)?;
     writer.write_all(&output.stdout)?;
     io::stderr().write_all(&output.stderr)?;
     Ok(exit_code_from_status(output.status))
+}
+
+fn shell_exec_command() -> Command {
+    let mut command = Command::new(SHELL_EXEC_SHELL);
+    command.env_clear().env("PATH", "/usr/bin:/bin");
+    command
 }
 
 fn run_tsh_config_cli(
@@ -460,11 +871,11 @@ fn run_tsh_config_cli(
         || object.contains_key("window_percent");
     if let Some(value) = object.get("max_loaded_tools") {
         config.max_loaded_tools =
-            positive_usize(value, "max_loaded_tools").map_err(|error| tool_error_to_io(&error))?;
+            tsh_tool_count(value, "max_loaded_tools").map_err(|error| tool_error_to_io(&error))?;
     }
     if let Some(value) = object.get("cache_capacity") {
         config.cache_capacity =
-            positive_usize(value, "cache_capacity").map_err(|error| tool_error_to_io(&error))?;
+            tsh_tool_count(value, "cache_capacity").map_err(|error| tool_error_to_io(&error))?;
     }
     if let Some(value) = object.get("window_percent") {
         let window_percent =
@@ -559,11 +970,13 @@ const TSH_CONFIG_SCHEMA: &str = r#"{
     "max_loaded_tools": {
       "type": "integer",
       "minimum": 1,
+      "maximum": 1024,
       "description": "Maximum unpinned tool metadata entries kept in the tsh context."
     },
     "cache_capacity": {
       "type": "integer",
       "minimum": 1,
+      "maximum": 1024,
       "description": "Maximum unpinned dynamic tool artifacts kept resident by W-TinyLFU."
     },
     "window_percent": {
@@ -577,10 +990,17 @@ const TSH_CONFIG_SCHEMA: &str = r#"{
 
 #[cfg(test)]
 mod tests {
-    use super::{FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, run_core_tool_cli};
+    use super::{
+        FsReadTool, FsWriteTool, MAX_SHELL_EXEC_OUTPUT_BYTES, SHELL_EXEC_SHELL, ShellExecTool,
+        TshConfigTool, read_text_from_stdin_limited, run_core_tool_cli,
+        run_shell_exec_command_with_timeout, shell_exec_command,
+    };
     use cortexfs_tool_sdk::{ToolInvocation, run_tool};
     use std::ffi::OsString;
     use std::fs;
+    use std::io::Cursor;
+    use std::os::unix::fs::symlink;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn fs_read_tool_emits_file_content() {
@@ -594,6 +1014,66 @@ mod tests {
         assert!(text.contains(r#""tool":"fs.read""#));
         assert!(text.contains(r#""text":"visible""#));
         let _ignored = fs::remove_file(path);
+    }
+
+    #[test]
+    fn fs_read_tool_refuses_symlink_targets() {
+        let dir =
+            std::env::temp_dir().join(format!("cortexfs-fs-read-symlink-{}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-fs-read-symlink-outside-{}",
+            std::process::id()
+        ));
+        assert!(fs::create_dir_all(&dir).is_ok());
+        assert!(fs::write(&outside, "outside").is_ok());
+        let link = dir.join("link");
+        assert!(symlink(&outside, &link).is_ok());
+
+        let tool = FsReadTool;
+        let invocation = ToolInvocation::new("r1", format!(r#"{{"path":"{}"}}"#, link.display()));
+        let mut output = Vec::new();
+        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+
+        let text = String::from_utf8(output).unwrap_or_default();
+        assert!(text.contains(r#""code":"EACCES""#));
+        assert!(!text.contains("outside"));
+        let _ignored = fs::remove_dir_all(dir);
+        let _ignored = fs::remove_file(outside);
+    }
+
+    #[test]
+    fn fs_read_tool_refuses_symlink_intermediate_parent() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-fs-read-symlink-intermediate-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-fs-read-symlink-intermediate-outside-{}",
+            std::process::id()
+        ));
+        let _ignored = fs::remove_dir_all(&dir);
+        let _ignored = fs::remove_dir_all(&outside);
+        assert!(fs::create_dir_all(&dir).is_ok());
+        assert!(fs::create_dir_all(outside.join("sub")).is_ok());
+        assert!(fs::write(outside.join("sub/secret.txt"), "outside").is_ok());
+        assert!(symlink(&outside, dir.join("workspace")).is_ok());
+
+        let tool = FsReadTool;
+        let invocation = ToolInvocation::new(
+            "r1",
+            format!(
+                r#"{{"path":"{}"}}"#,
+                dir.join("workspace/sub/secret.txt").display()
+            ),
+        );
+        let mut output = Vec::new();
+        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+
+        let text = String::from_utf8(output).unwrap_or_default();
+        assert!(text.contains(r#""code":"EACCES""#));
+        assert!(!text.contains("outside"));
+        let _ignored = fs::remove_dir_all(dir);
+        let _ignored = fs::remove_dir_all(outside);
     }
 
     #[test]
@@ -611,6 +1091,165 @@ mod tests {
     }
 
     #[test]
+    fn fs_write_tool_replaces_symlink_without_writing_target() {
+        let dir =
+            std::env::temp_dir().join(format!("cortexfs-fs-write-symlink-{}", std::process::id()));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-fs-write-symlink-outside-{}",
+            std::process::id()
+        ));
+        assert!(fs::create_dir_all(&dir).is_ok());
+        assert!(fs::write(&outside, "outside").is_ok());
+        let link = dir.join("link");
+        assert!(symlink(&outside, &link).is_ok());
+
+        let tool = FsWriteTool;
+        let invocation = ToolInvocation::new(
+            "r1",
+            format!(r#"{{"path":"{}","content":"stored"}}"#, link.display()),
+        );
+        let mut output = Vec::new();
+        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+
+        assert_eq!(fs::read_to_string(&outside).unwrap_or_default(), "outside");
+        assert_eq!(fs::read_to_string(&link).unwrap_or_default(), "stored");
+        assert!(
+            link.symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_file())
+        );
+        let _ignored = fs::remove_dir_all(dir);
+        let _ignored = fs::remove_file(outside);
+    }
+
+    #[test]
+    fn fs_write_tool_rejects_symlink_parent_without_writing_target() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-fs-write-symlink-parent-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-fs-write-symlink-parent-outside-{}",
+            std::process::id()
+        ));
+        let _ignored = fs::remove_dir_all(&dir);
+        let _ignored = fs::remove_dir_all(&outside);
+        assert!(fs::create_dir_all(&dir).is_ok());
+        assert!(fs::create_dir_all(&outside).is_ok());
+        let link = dir.join("workspace");
+        assert!(symlink(&outside, &link).is_ok());
+
+        let tool = FsWriteTool;
+        let invocation = ToolInvocation::new(
+            "r1",
+            format!(
+                r#"{{"path":"{}","content":"stored"}}"#,
+                link.join("result.txt").display()
+            ),
+        );
+        let mut output = Vec::new();
+        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+
+        let text = String::from_utf8(output).unwrap_or_default();
+        assert!(text.contains(r#""code":"EACCES""#));
+        assert!(!outside.join("result.txt").exists());
+        assert!(!fs::read_dir(&outside).map_or(true, |entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".result.txt.tmp-")
+            })
+        }));
+        let _ignored = fs::remove_dir_all(dir);
+        let _ignored = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn fs_write_tool_rejects_symlink_intermediate_parent() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-fs-write-symlink-intermediate-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-fs-write-symlink-intermediate-outside-{}",
+            std::process::id()
+        ));
+        let _ignored = fs::remove_dir_all(&dir);
+        let _ignored = fs::remove_dir_all(&outside);
+        assert!(fs::create_dir_all(&dir).is_ok());
+        assert!(fs::create_dir_all(outside.join("sub")).is_ok());
+        assert!(symlink(&outside, dir.join("workspace")).is_ok());
+
+        let tool = FsWriteTool;
+        let invocation = ToolInvocation::new(
+            "r1",
+            format!(
+                r#"{{"path":"{}","content":"stored"}}"#,
+                dir.join("workspace/sub/result.txt").display()
+            ),
+        );
+        let mut output = Vec::new();
+        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+
+        let text = String::from_utf8(output).unwrap_or_default();
+        assert!(text.contains(r#""code":"EACCES""#));
+        assert!(!outside.join("sub/result.txt").exists());
+        assert!(!fs::read_dir(outside.join("sub")).map_or(true, |entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".result.txt.tmp-")
+            })
+        }));
+        let _ignored = fs::remove_dir_all(dir);
+        let _ignored = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn fs_write_cli_uses_atomic_writer() {
+        let path =
+            std::env::temp_dir().join(format!("cortexfs-fs-write-cli-{}", std::process::id()));
+        let mut output = Vec::new();
+        let result = run_core_tool_cli(
+            "fs.write",
+            &[OsString::from(&path), OsString::from("stored")],
+            &mut output,
+        );
+        assert!(matches!(result, Ok(Some(code)) if code == std::process::ExitCode::SUCCESS));
+        assert_eq!(String::from_utf8(output).unwrap_or_default(), "written\n");
+        assert_eq!(fs::read_to_string(&path).unwrap_or_default(), "stored");
+        let _ignored = fs::remove_file(path);
+    }
+
+    #[test]
+    fn fs_write_stdin_reader_accepts_input_at_limit() {
+        let content = "x".repeat(crate::MAX_FUSE_V1_SMALL_WRITE_BYTES);
+
+        let read = read_text_from_stdin_limited(
+            Cursor::new(content.as_bytes()),
+            crate::MAX_FUSE_V1_SMALL_WRITE_BYTES,
+        );
+
+        assert_eq!(
+            read.unwrap_or_default().len(),
+            crate::MAX_FUSE_V1_SMALL_WRITE_BYTES
+        );
+    }
+
+    #[test]
+    fn fs_write_stdin_reader_rejects_input_over_limit() {
+        let content = "x".repeat(crate::MAX_FUSE_V1_SMALL_WRITE_BYTES + 1);
+
+        let read = read_text_from_stdin_limited(
+            Cursor::new(content.as_bytes()),
+            crate::MAX_FUSE_V1_SMALL_WRITE_BYTES,
+        );
+
+        assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));
+    }
+
+    #[test]
     fn shell_exec_tool_returns_stdout() {
         let tool = ShellExecTool;
         let invocation = ToolInvocation::new("r1", r#"{"cmd":"printf shell-ok"}"#);
@@ -619,6 +1258,90 @@ mod tests {
         let text = String::from_utf8(output).unwrap_or_default();
         assert!(text.contains(r#""tool":"shell.exec""#));
         assert!(text.contains("shell-ok"));
+    }
+
+    #[test]
+    fn shell_exec_rejects_oversized_output() {
+        let output = run_shell_exec_command_with_timeout(
+            "head -c 131072 /dev/zero | tr '\\0' x",
+            Duration::from_secs(2),
+        );
+
+        assert!(matches!(output, Err(ref error) if error.contains("output exceeds")));
+    }
+
+    #[test]
+    fn shell_exec_cli_rejects_oversized_output() {
+        let mut output = Vec::new();
+        let result = run_core_tool_cli(
+            "shell.exec",
+            &[
+                OsString::from("head -c 131072 /dev/zero"),
+                OsString::from("| tr '\\0' x"),
+            ],
+            &mut output,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn shell_exec_kills_process_after_oversized_output() {
+        let started = Instant::now();
+
+        let output = run_shell_exec_command_with_timeout("yes x", Duration::from_secs(10));
+
+        assert!(matches!(output, Err(ref error) if error.contains("output exceeds")));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn shell_exec_accepts_output_at_limit() {
+        let output = run_shell_exec_command_with_timeout(
+            &format!("head -c {MAX_SHELL_EXEC_OUTPUT_BYTES} /dev/zero | tr '\\0' x"),
+            Duration::from_secs(2),
+        );
+
+        assert!(output.is_ok());
+        let Ok(output) = output else {
+            return;
+        };
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), MAX_SHELL_EXEC_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn shell_exec_times_out_instead_of_hanging() {
+        let started = Instant::now();
+
+        let output = run_shell_exec_command_with_timeout("sleep 5", Duration::from_millis(100));
+
+        assert!(matches!(output, Err(ref error) if error.contains("timed out")));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn shell_exec_uses_absolute_shell_path() {
+        assert_eq!(shell_exec_command().get_program(), SHELL_EXEC_SHELL);
+    }
+
+    #[test]
+    fn shell_exec_command_uses_clean_runtime_environment() {
+        let command = shell_exec_command();
+        let envs = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            envs,
+            vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
+        );
     }
 
     #[test]
@@ -636,6 +1359,130 @@ mod tests {
         assert!(config.contains("cache_capacity=6\n"));
         assert!(config.contains("window_percent=10\n"));
         let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tsh_runtime_config_rejects_oversized_tool_counts() {
+        assert!(super::parse_tsh_runtime_config("max_loaded_tools=1025\n").is_err());
+        assert!(super::parse_tsh_runtime_config("cache_capacity=1025\n").is_err());
+        assert!(super::tsh_tool_count(&serde_json::json!(1025), "cache_capacity").is_err());
+    }
+
+    #[test]
+    fn tsh_config_writer_rejects_symlink_parent_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-config-parent-symlink-{}",
+            std::process::id()
+        ));
+        let path = dir.join("tool/tsh.d/config");
+        let outside = dir.join("outside");
+        let config = super::TshRuntimeConfig {
+            max_loaded_tools: 12,
+            cache_capacity: 6,
+            window_percent: 10,
+        };
+        let _ignored = fs::remove_dir_all(&dir);
+        assert!(fs::create_dir_all(dir.join("tool")).is_ok());
+        assert!(fs::create_dir_all(&outside).is_ok());
+        assert!(symlink(&outside, dir.join("tool/tsh.d")).is_ok());
+
+        assert!(super::write_tsh_runtime_config(&path, config).is_err());
+        assert!(!outside.join("config").exists());
+        assert!(!fs::read_dir(&outside).map_or(true, |entries| {
+            entries.filter_map(Result::ok).any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".config.tmp-")
+            })
+        }));
+        assert!(
+            dir.join("tool/tsh.d")
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        );
+        let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tsh_config_writer_rejects_symlink_intermediate_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-config-intermediate-symlink-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-config-intermediate-outside-{}",
+            std::process::id()
+        ));
+        let path = dir.join("tool/tsh.d/config");
+        let config = super::TshRuntimeConfig {
+            max_loaded_tools: 12,
+            cache_capacity: 6,
+            window_percent: 10,
+        };
+        let _ignored = fs::remove_dir_all(&dir);
+        let _ignored = fs::remove_dir_all(&outside);
+        assert!(fs::create_dir_all(&dir).is_ok());
+        assert!(fs::create_dir_all(outside.join("tsh.d")).is_ok());
+        assert!(symlink(&outside, dir.join("tool")).is_ok());
+
+        assert!(super::write_tsh_runtime_config(&path, config).is_err());
+        assert!(!outside.join("tsh.d/config").exists());
+        assert!(
+            !fs::read_dir(outside.join("tsh.d")).map_or(true, |entries| {
+                entries.filter_map(Result::ok).any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".config.tmp-")
+                })
+            })
+        );
+        let _ignored = fs::remove_dir_all(dir);
+        let _ignored = fs::remove_dir_all(outside);
+    }
+
+    #[test]
+    fn tsh_config_reader_refuses_symlink_targets() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-config-symlink-{}",
+            std::process::id()
+        ));
+        let path = dir.join("tool/tsh.d/config");
+        let outside = dir.join("outside-config");
+        assert!(fs::create_dir_all(path.parent().unwrap_or(&dir)).is_ok());
+        assert!(fs::write(&outside, "max_loaded_tools=12\n").is_ok());
+        assert!(symlink(&outside, &path).is_ok());
+
+        let result = super::read_tsh_runtime_config(&path);
+
+        assert!(result.is_err());
+        let _ignored = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tsh_config_reader_refuses_symlink_intermediate_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-config-read-intermediate-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "cortexfs-tsh-config-read-intermediate-outside-{}",
+            std::process::id()
+        ));
+        let path = dir.join("tool/tsh.d/config");
+        let _ignored = fs::remove_dir_all(&dir);
+        let _ignored = fs::remove_dir_all(&outside);
+        assert!(fs::create_dir_all(&dir).is_ok());
+        assert!(fs::create_dir_all(outside.join("tsh.d")).is_ok());
+        assert!(fs::write(outside.join("tsh.d/config"), "max_loaded_tools=12\n").is_ok());
+        assert!(symlink(&outside, dir.join("tool")).is_ok());
+
+        let result = super::read_tsh_runtime_config(&path);
+
+        assert!(result.is_err());
+        let _ignored = fs::remove_dir_all(dir);
+        let _ignored = fs::remove_dir_all(outside);
     }
 
     #[test]

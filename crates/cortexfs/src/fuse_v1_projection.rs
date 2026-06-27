@@ -1,3 +1,5 @@
+const MAX_FUSE_V1_SMALL_READ_BYTES: u64 = 1024 * 1024;
+
 impl FuseV1Projection {
     /// Creates a local projection over a `/ctx`-shaped root.
     #[must_use]
@@ -87,10 +89,13 @@ impl FuseV1Projection {
             return Ok(entries);
         }
         let path = self.resolve(&normalized)?;
-        if !path.is_dir() {
+        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if !metadata.is_dir() {
             return Err(FuseV1Error::NotDirectory);
         }
-        let entries = fs::read_dir(&path).map_err(|_error| FuseV1Error::Io)?;
+        let directory = open_fuse_v1_plain_directory(&path).map_err(|_error| FuseV1Error::Io)?;
+        let entries = fs::read_dir(fuse_v1_proc_fd_path(&directory))
+            .map_err(|_error| FuseV1Error::Io)?;
         let mut output = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|_error| FuseV1Error::Io)?;
@@ -98,11 +103,15 @@ impl FuseV1Projection {
                 .file_name()
                 .into_string()
                 .map_err(|_error| FuseV1Error::InvalidPath)?;
-            let metadata =
-                fs::symlink_metadata(entry.path()).map_err(|error| fuse_metadata_error(&error))?;
+            let stat = nix::sys::stat::fstatat(
+                &directory,
+                name.as_str(),
+                nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+            )
+            .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
             output.push(FuseV1DirEntry::new(
                 name,
-                fuse_file_type(metadata.file_type()),
+                fuse_file_type_from_mode(stat.st_mode),
             ));
         }
         output.sort_by(|left, right| left.name.cmp(&right.name));
@@ -121,16 +130,21 @@ impl FuseV1Projection {
             return Ok(content);
         }
         let path = self.resolve(&normalized)?;
-        if path.is_dir() {
+        let metadata =
+            fuse_v1_plain_path_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if !metadata.is_file() {
             return Err(FuseV1Error::NotFile);
         }
-        fs::read_to_string(path).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                FuseV1Error::NotFound
-            } else {
-                FuseV1Error::Io
-            }
-        })
+        if metadata.len() > MAX_FUSE_V1_SMALL_READ_BYTES {
+            return Err(FuseV1Error::TooLarge);
+        }
+        let len = usize::try_from(metadata.len()).map_err(|_error| FuseV1Error::TooLarge)?;
+        let mut file =
+            open_fuse_v1_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
+        let mut content = vec![0; len];
+        file.read_exact(&mut content)
+            .map_err(|_error| FuseV1Error::Io)?;
+        String::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)
     }
 
     /// Projects an offset `read`.
@@ -145,10 +159,13 @@ impl FuseV1Projection {
             return read_bytes_at(content.as_bytes(), offset, size);
         }
         let path = self.resolve(&normalized)?;
-        if path.is_dir() {
+        let metadata =
+            fuse_v1_plain_path_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if !metadata.is_file() {
             return Err(FuseV1Error::NotFile);
         }
-        let mut file = fs::File::open(path).map_err(|error| fuse_metadata_error(&error))?;
+        let mut file =
+            open_fuse_v1_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|_error| FuseV1Error::Io)?;
         let mut buffer = vec![0; size];
@@ -164,7 +181,7 @@ impl FuseV1Projection {
             return self.default_model_alias_target(alias);
         }
         let path = self.resolve(&normalized)?;
-        fs::read_link(path).map_err(|error| {
+        read_fuse_v1_symlink_target(&path).map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 FuseV1Error::NotFound
             } else {
@@ -205,7 +222,7 @@ impl FuseV1Projection {
             "model" => {
                 let mut provider_names = HashSet::from([DEBUG_ECHO_PROVIDER.to_owned()]);
                 let model_root = self.root.join("model");
-                if model_root.is_dir() {
+                if fuse_v1_plain_dir_exists(&model_root)? {
                     for name in read_model_provider_dirs(&model_root)? {
                         provider_names.insert(name);
                     }
@@ -298,7 +315,7 @@ impl FuseV1Projection {
     fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
         if abi_path == format!("model/{MODEL_ROUTE_FILE}") {
             let path = self.resolve(abi_path)?;
-            return match fs::read_to_string(path) {
+            return match read_fuse_v1_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
                 Ok(content) => Ok(Some(content)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     Ok(Some(DEFAULT_MODEL_ROUTE.to_owned()))
@@ -338,7 +355,7 @@ impl FuseV1Projection {
         let (class, name) = parse_abi_path(abi_path).executable_object()?;
         let name = name.into_owned();
         let control_dir = self.root.join(class.as_str()).join(format!("{name}.d"));
-        if !control_dir.is_dir() {
+        if !fuse_v1_plain_dir_exists(&control_dir).ok()? {
             return None;
         }
         Some(VirtualExecObject {
@@ -391,7 +408,7 @@ impl FuseV1Projection {
         .is_some()
             && let Some(parent) = path.parent()
         {
-            fs::create_dir_all(parent).map_err(|_error| FuseV1Error::Io)?;
+            create_fuse_v1_plain_dir(parent)?;
         }
         atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
     }
@@ -477,7 +494,10 @@ impl FuseV1Projection {
     }
 
     fn backing_control_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
-        match fs::read_to_string(self.resolve(abi_path)?) {
+        match read_fuse_v1_small_text_file(
+            &self.resolve(abi_path)?,
+            MAX_FUSE_V1_SMALL_READ_BYTES,
+        ) {
             Ok(content) => Ok(Some(content)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(_error) => Err(FuseV1Error::Io),
@@ -486,7 +506,7 @@ impl FuseV1Projection {
 
     fn default_model_alias_target(&self, alias: &str) -> Result<PathBuf, FuseV1Error> {
         let path = self.resolve(&format!("model/{alias}"))?;
-        if let Ok(target) = fs::read_link(path)
+        if let Ok(target) = read_fuse_v1_symlink_target(&path)
             && is_valid_ctx_model_symlink(&target)
         {
             return Ok(target);
@@ -497,6 +517,217 @@ impl FuseV1Projection {
             DEFAULT_MODEL_ALIAS_TARGET
         }))
     }
+}
+
+fn fuse_file_type_from_mode(mode: libc::mode_t) -> FuseV1FileType {
+    match mode & libc::S_IFMT {
+        libc::S_IFDIR => FuseV1FileType::Directory,
+        libc::S_IFREG => FuseV1FileType::Regular,
+        libc::S_IFLNK => FuseV1FileType::Symlink,
+        libc::S_IFSOCK => FuseV1FileType::Socket,
+        _ => FuseV1FileType::Other,
+    }
+}
+
+fn fuse_v1_plain_dir_exists(path: &Path) -> Result<bool, FuseV1Error> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() => Ok(true),
+        Ok(_metadata) => Err(FuseV1Error::Io),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_error) => Err(FuseV1Error::Io),
+    }
+}
+
+fn read_fuse_v1_symlink_target(path: &Path) -> std::io::Result<PathBuf> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_fuse_v1_plain_directory(parent)?;
+    let file_name = fuse_v1_plain_file_name(path)?;
+    nix::fcntl::readlinkat(&parent_dir, file_name)
+        .map(PathBuf::from)
+        .map_err(std::io::Error::from)
+}
+
+fn read_fuse_v1_small_text_file(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    let mut file = open_fuse_v1_plain_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "path is not a regular file",
+        ));
+    }
+    if metadata.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file exceeds read limit",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn fuse_v1_plain_path_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_fuse_v1_plain_directory(parent)?;
+    let file_name = fuse_v1_plain_file_name(path)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    fs::File::from(file_fd).metadata()
+}
+
+fn open_fuse_v1_plain_file(path: &Path) -> std::io::Result<fs::File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_fuse_v1_plain_directory(parent)?;
+    let file_name = fuse_v1_plain_file_name(path)?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(fs::File::from(file_fd))
+}
+
+fn fuse_v1_plain_file_name(path: &Path) -> std::io::Result<&str> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))
+}
+
+fn open_fuse_v1_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_fuse_v1_single_plain_directory(Path::new("/"))?
+    } else {
+        open_fuse_v1_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_fuse_v1_single_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
+}
+
+fn create_fuse_v1_plain_dir(path: &Path) -> Result<(), FuseV1Error> {
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            sync_fuse_v1_dir(path)
+        } else {
+            Err(FuseV1Error::Io)
+        };
+    }
+
+    let mut missing = Vec::new();
+    let mut cursor = Some(path);
+    while let Some(current) = cursor {
+        match fs::symlink_metadata(current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
+                return Err(FuseV1Error::Io);
+            }
+            Ok(_metadata) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(current.to_path_buf());
+                cursor = current.parent();
+            }
+            Err(_error) => return Err(FuseV1Error::Io),
+        }
+    }
+
+    let existing_parent = missing
+        .last()
+        .and_then(|path| path.parent())
+        .ok_or(FuseV1Error::Io)?;
+    let mut parent_dir = open_fuse_v1_plain_directory(existing_parent)
+        .map_err(|_error| FuseV1Error::Io)?;
+    for directory in missing.iter().rev() {
+        let name = fuse_v1_plain_file_name(directory).map_err(|_error| FuseV1Error::Io)?;
+        nix::sys::stat::mkdirat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(0o755),
+        )
+        .map_err(|_error| FuseV1Error::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)?;
+        let child = nix::fcntl::openat(
+            &parent_dir,
+            name,
+            nix::fcntl::OFlag::O_DIRECTORY
+                | nix::fcntl::OFlag::O_RDONLY
+                | nix::fcntl::OFlag::O_NOFOLLOW
+                | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        )
+        .map_err(|_error| FuseV1Error::Io)?;
+        parent_dir = fs::File::from(child);
+        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)?;
+    }
+    Ok(())
+}
+
+fn sync_fuse_v1_dir(path: &Path) -> Result<(), FuseV1Error> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_error| FuseV1Error::Io)?;
+    if !directory
+        .metadata()
+        .map_err(|_error| FuseV1Error::Io)?
+        .is_dir()
+    {
+        return Err(FuseV1Error::Io);
+    }
+    directory.sync_all().map_err(|_error| FuseV1Error::Io)
 }
 
 fn model_alias_name(abi_path: &str) -> Option<&str> {

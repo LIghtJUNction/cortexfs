@@ -1,3 +1,5 @@
+#![deny(unsafe_op_in_unsafe_fn)]
+
 //! Rust SDK for `CortexFS` tools.
 //!
 //! A tool written with this crate has one canonical implementation:
@@ -18,6 +20,9 @@ use libloading::Library;
 use serde_json::{Value, json};
 
 const TOOL_ABI_MAGIC_V1: u64 = 0x4354_5854_4f4f_4c31;
+const MAX_CLI_STDIN_INPUT_BYTES: usize = 1024 * 1024;
+#[doc(hidden)]
+pub const MAX_TOOL_ABI_STRING_BYTES: usize = 1024 * 1024;
 
 /// Static metadata exported by a `CortexFS` tool.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,6 +64,12 @@ impl ToolStr {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "tool ABI string has null pointer",
+            ));
+        }
+        if self.len > MAX_TOOL_ABI_STRING_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "tool ABI string is too large",
             ));
         }
         // SAFETY: The dynamic tool ABI requires `ptr,len` to reference immutable
@@ -700,6 +711,9 @@ extern "C" fn abi_write(ctx: *mut c_void, ptr: *const u8, len: usize) -> i32 {
     if ctx.is_null() || ptr.is_null() {
         return -1;
     }
+    if len > MAX_TOOL_ABI_STRING_BYTES {
+        return -1;
+    }
     // SAFETY: The callee receives `ctx` from `DynamicTool::call`, where it was
     // created from a live mutable `AbiWriter`. The byte pointer is valid for the
     // duration of this callback by ABI contract.
@@ -744,7 +758,8 @@ fn run_cli_inner<I>(tool: &dyn Tool, args: I) -> io::Result<()>
 where
     I: IntoIterator<Item = OsString>,
 {
-    let input = collect_input(args)?;
+    let stdin = io::stdin();
+    let input = collect_input_from_reader(args, stdin.lock())?;
     let run_id = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let invocation = ToolInvocation::new(run_id, input);
     let stdout = io::stdout();
@@ -752,7 +767,7 @@ where
     run_tool(tool, &invocation, &mut stdout)
 }
 
-fn collect_input<I>(args: I) -> io::Result<String>
+fn collect_input_from_reader<I>(args: I, reader: impl Read) -> io::Result<String>
 where
     I: IntoIterator<Item = OsString>,
 {
@@ -765,7 +780,16 @@ where
         return Ok(input);
     }
     let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+    let limit = u64::try_from(MAX_CLI_STDIN_INPUT_BYTES.saturating_add(1))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let mut reader = reader.take(limit);
+    reader.read_to_string(&mut input)?;
+    if input.len() > MAX_CLI_STDIN_INPUT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "tool CLI stdin exceeds input limit",
+        ));
+    }
     Ok(input)
 }
 
@@ -807,7 +831,7 @@ macro_rules! cortexfs_tool_artifact {
                 }
 
                 fn read_abi(value: $crate::ToolStr) -> Result<&'static str, ()> {
-                    if value.ptr.is_null() {
+                    if value.ptr.is_null() || value.len > $crate::MAX_TOOL_ABI_STRING_BYTES {
                         return Err(());
                     }
                     // SAFETY: Tool ABI strings are required to be valid for the
@@ -847,11 +871,13 @@ macro_rules! cortexfs_tool_artifact {
 #[cfg(test)]
 mod tests {
     use super::{
-        Registry, RegistryError, Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult,
-        ToolSpec, collect_input, run_tool, tiny_lfu_admits, wtinylfu_victim_path,
+        AbiWriter, MAX_CLI_STDIN_INPUT_BYTES, MAX_TOOL_ABI_STRING_BYTES, Registry, RegistryError,
+        Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, ToolStr, abi_write,
+        collect_input_from_reader, run_tool, tiny_lfu_admits, wtinylfu_victim_path,
     };
     use std::ffi::OsString;
-    use std::io::{self, Write};
+    use std::ffi::c_void;
+    use std::io::{self, Cursor, Write};
 
     #[derive(Debug)]
     struct EchoTool;
@@ -923,7 +949,34 @@ mod tests {
     #[test]
     fn cli_input_collector_joins_args_as_input() {
         let args = [OsString::from("hello"), OsString::from("world")];
-        assert_eq!(collect_input(args).unwrap_or_default(), "hello world");
+        assert_eq!(
+            collect_input_from_reader(args, io::empty()).unwrap_or_default(),
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn cli_input_collector_accepts_stdin_at_limit() {
+        let input = vec![b'x'; MAX_CLI_STDIN_INPUT_BYTES];
+
+        let collected =
+            collect_input_from_reader(std::iter::empty::<OsString>(), Cursor::new(input))
+                .unwrap_or_default();
+
+        assert_eq!(collected.len(), MAX_CLI_STDIN_INPUT_BYTES);
+    }
+
+    #[test]
+    fn cli_input_collector_rejects_oversized_stdin() {
+        let input = vec![b'x'; MAX_CLI_STDIN_INPUT_BYTES.saturating_add(1)];
+
+        let collected =
+            collect_input_from_reader(std::iter::empty::<OsString>(), Cursor::new(input));
+
+        assert!(matches!(
+            collected,
+            Err(ref error) if error.kind() == io::ErrorKind::InvalidData
+        ));
     }
 
     #[test]
@@ -931,6 +984,68 @@ mod tests {
         let error = RegistryError::Io(io::Error::other("boom"));
         let text = format!("{error:?}");
         assert!(text.contains("boom"));
+    }
+
+    #[test]
+    fn tool_abi_string_rejects_null_pointer() {
+        let value = ToolStr {
+            ptr: std::ptr::null(),
+            len: 0,
+        };
+
+        assert!(matches!(
+            value.as_str(),
+            Err(ref error) if error.kind() == io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn tool_abi_string_rejects_oversized_length() {
+        let value = ToolStr {
+            ptr: b"x".as_ptr(),
+            len: MAX_TOOL_ABI_STRING_BYTES.saturating_add(1),
+        };
+
+        assert!(matches!(
+            value.as_str(),
+            Err(ref error) if error.kind() == io::ErrorKind::InvalidData
+        ));
+    }
+
+    #[test]
+    fn abi_write_rejects_oversized_length_before_writing() {
+        let mut sink = Vec::new();
+        let mut emitter = ToolEmitter::new("r-test".to_owned(), &mut sink as &mut dyn Write);
+        let mut writer = AbiWriter {
+            output: &mut emitter,
+        };
+
+        let status = abi_write(
+            (&mut writer as *mut AbiWriter<'_, '_>).cast::<c_void>(),
+            b"x".as_ptr(),
+            MAX_TOOL_ABI_STRING_BYTES.saturating_add(1),
+        );
+
+        assert_eq!(status, -1);
+        assert!(sink.is_empty());
+    }
+
+    #[test]
+    fn abi_write_accepts_small_buffer() {
+        let mut sink = Vec::new();
+        let mut emitter = ToolEmitter::new("r-test".to_owned(), &mut sink as &mut dyn Write);
+        let mut writer = AbiWriter {
+            output: &mut emitter,
+        };
+
+        let status = abi_write(
+            (&mut writer as *mut AbiWriter<'_, '_>).cast::<c_void>(),
+            b"ok".as_ptr(),
+            2,
+        );
+
+        assert_eq!(status, 0);
+        assert_eq!(sink, b"ok");
     }
 
     #[test]

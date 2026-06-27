@@ -2,7 +2,8 @@
   "private": true,
   "scripts": {
     "aimock": "llmock -p 4010 -f tests/fixtures/aimock --strict --validate-on-load",
-    "aimock:smoke": "scripts/aimock-smoke.sh"
+    "aimock:smoke": "scripts/aimock-smoke.sh",
+    "agent-tool-loop:smoke": "scripts/agent-tool-loop-smoke.sh"
   },
   "devDependencies": {
     "@copilotkit/aimock": "^1.33.0"

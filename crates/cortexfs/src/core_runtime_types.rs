@@ -211,6 +211,8 @@ pub enum SocketRuntimeError {
     CannotWriteResponse,
     /// Unix socket listener could not accept a connection.
     CannotAcceptConnection,
+    /// Agent executable path is not an absolute regular file.
+    InvalidAgentExecutable,
     /// Agent executable could not be run.
     CannotRunAgent,
     /// Agent executable returned invalid canonical event JSONL.
@@ -235,6 +237,7 @@ impl SocketRuntimeError {
             | Self::CannotAcceptConnection
             | Self::CannotRunAgent
             | Self::InvalidAgentOutput => "EIO",
+            Self::InvalidAgentExecutable => "ENOENT",
         }
     }
 }

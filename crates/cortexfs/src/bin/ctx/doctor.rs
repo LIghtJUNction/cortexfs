@@ -1,18 +1,18 @@
 fn doctor(root: &Path) -> Result<(), CliError> {
     let mut ok = true;
-    if root.is_dir() {
-        print_line(&format!("ok root {}", root.display()))?;
+    if doctor_is_dir(root) {
+        print_line(&doctor_root_line("ok", root))?;
     } else {
         ok = false;
-        print_line(&format!("missing root {}", root.display()))?;
+        print_line(&doctor_root_line("missing", root))?;
     }
 
     for entry in ROOT_ENTRIES {
         let path = root.join(entry);
         let entry_shape_matches = if entry == &"status" {
-            path.is_file()
+            doctor_is_file(&path)
         } else {
-            path.is_dir()
+            doctor_is_dir(&path)
         };
         if entry_shape_matches {
             print_line(&format!("ok {entry}"))?;
@@ -22,11 +22,11 @@ fn doctor(root: &Path) -> Result<(), CliError> {
         }
     }
 
-    if root.is_dir() {
+    if doctor_is_dir(root) {
         for entry in read_dir_names(root)? {
             if !cortexfs::is_root_entry(&entry) {
                 ok = false;
-                print_line(&format!("unexpected {entry}"))?;
+                print_line(&doctor_unexpected_entry_line(&entry))?;
             }
         }
     }
@@ -46,7 +46,7 @@ fn doctor_objects(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     for class in [ObjectClass::Model, ObjectClass::Agent, ObjectClass::Tool] {
         let dir = root.join(class.as_str());
-        if !dir.is_dir() {
+        if !doctor_is_dir(&dir) {
             continue;
         }
         let names = object_names_for_doctor(&dir, class)?;
@@ -71,7 +71,7 @@ fn object_names_for_doctor(dir: &Path, class: ObjectClass) -> Result<Vec<String>
             continue;
         }
         let provider_dir = dir.join(&provider);
-        if !provider_dir.is_dir() {
+        if !doctor_is_dir(&provider_dir) {
             continue;
         }
         for entry in read_dir_names(&provider_dir)? {
@@ -92,14 +92,13 @@ fn object_names_for_doctor(dir: &Path, class: ObjectClass) -> Result<Vec<String>
 fn doctor_object(root: &Path, class: ObjectClass, name: &str) -> Result<bool, CliError> {
     let report = inspect_object_layout(root, class, name);
     if report.is_ok() {
-        print_line(&format!("ok {}/{}", class.as_str(), name))?;
+        print_line(&doctor_object_line("ok", class, name))?;
         Ok(true)
     } else {
-        print_line(&format!(
-            "invalid {}/{}: {}",
-            class.as_str(),
+        print_line(&doctor_invalid_object_line(
+            class,
             name,
-            format_object_layout_issues(report.issues())
+            &format_object_layout_issues(report.issues()),
         ))?;
         Ok(false)
     }
@@ -121,7 +120,7 @@ fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
 fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     let shared = root.join("shared");
-    if !shared.is_dir() {
+    if !doctor_is_dir(&shared) {
         return Ok(ok);
     }
     for space in read_dir_names(&shared)? {
@@ -129,7 +128,7 @@ fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
             continue;
         }
         let queue = shared.join(&space).join("queue");
-        if !queue.exists() {
+        if !doctor_exists(&queue) {
             continue;
         }
         let report = inspect_shared_queue_layout(&queue);
@@ -144,11 +143,45 @@ fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
 
 fn print_doctor_report(label: &str, ok: bool, issues: &str) -> Result<bool, CliError> {
     if ok {
-        print_line(&format!("ok {label}"))?;
+        print_line(&doctor_report_line("ok", label, None))?;
     } else {
-        print_line(&format!("invalid {label}: {issues}"))?;
+        print_line(&doctor_report_line("invalid", label, Some(issues)))?;
     }
     Ok(ok)
+}
+
+fn doctor_root_line(status: &str, root: &Path) -> String {
+    format!("{} root {}", status, terminal_safe_text(&root.display().to_string()))
+}
+
+fn doctor_unexpected_entry_line(entry: &str) -> String {
+    format!("unexpected {}", terminal_safe_text(entry))
+}
+
+fn doctor_object_line(status: &str, class: ObjectClass, name: &str) -> String {
+    format!(
+        "{} {}/{}",
+        status,
+        class.as_str(),
+        terminal_safe_text(name)
+    )
+}
+
+fn doctor_invalid_object_line(class: ObjectClass, name: &str, issues: &str) -> String {
+    format!(
+        "invalid {}/{}: {}",
+        class.as_str(),
+        terminal_safe_text(name),
+        terminal_safe_text(issues)
+    )
+}
+
+fn doctor_report_line(status: &str, label: &str, issues: Option<&str>) -> String {
+    let label = terminal_safe_text(label);
+    issues.map_or_else(
+        || format!("{status} {label}"),
+        |issues| format!("{} {}: {}", status, label, terminal_safe_text(issues)),
+    )
 }
 
 fn discover_session_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
@@ -164,7 +197,7 @@ fn collect_home_sessions(
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
     let home = root.join("home");
-    if !home.is_dir() {
+    if !doctor_is_dir(&home) {
         return Ok(());
     }
     for uid in read_dir_names(&home)? {
@@ -178,7 +211,7 @@ fn collect_shared_sessions(
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
     let shared = root.join("shared");
-    if !shared.is_dir() {
+    if !doctor_is_dir(&shared) {
         return Ok(());
     }
     for space in read_dir_names(&shared)? {
@@ -204,7 +237,7 @@ fn collect_agent_sessions(
     label_prefix: &str,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
-    if !agent_root.is_dir() {
+    if !doctor_is_dir(agent_root) {
         return Ok(());
     }
     for agent in read_dir_names(agent_root)? {
@@ -225,7 +258,7 @@ fn collect_model_sessions(
     label_prefix: &str,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
-    if !model_root.is_dir() {
+    if !doctor_is_dir(model_root) {
         return Ok(());
     }
     for provider in read_dir_names(model_root)? {
@@ -233,7 +266,7 @@ fn collect_model_sessions(
             continue;
         }
         let provider_root = model_root.join(&provider);
-        if !provider_root.is_dir() {
+        if !doctor_is_dir(&provider_root) {
             continue;
         }
         for model_dir in read_dir_names(&provider_root)? {
@@ -259,7 +292,7 @@ fn collect_named_sessions(
     label_prefix: &str,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
-    if !session_root.is_dir() {
+    if !doctor_is_dir(session_root) {
         return Ok(());
     }
     for session in read_dir_names(session_root)? {
@@ -272,4 +305,18 @@ fn collect_named_sessions(
         ));
     }
     Ok(())
+}
+
+fn doctor_is_file(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_file())
+}
+
+fn doctor_is_dir(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
+}
+
+fn doctor_exists(path: &Path) -> bool {
+    path.symlink_metadata().is_ok()
 }

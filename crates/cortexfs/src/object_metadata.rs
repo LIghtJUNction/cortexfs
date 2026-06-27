@@ -1,3 +1,6 @@
+const MAX_OBJECT_METADATA_CONTROL_BYTES: u64 = 64 * 1024;
+const MAX_ECHO_MODEL_STDIN_BYTES: usize = 1024 * 1024;
+
 /// Returns executable metadata text for a model object.
 pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
     if !is_model_name(name) {
@@ -160,7 +163,7 @@ where
         .collect::<Vec<_>>()
         .join(" ");
     if input.is_empty() {
-        std::io::stdin().read_to_string(&mut input)?;
+        input = read_echo_model_stdin_limited(std::io::stdin(), MAX_ECHO_MODEL_STDIN_BYTES)?;
     }
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let text = serde_json::to_string(&input).unwrap_or_else(|_error| "\"\"".to_owned());
@@ -174,10 +177,131 @@ where
     stdout.write_all(b"\n")
 }
 
+fn read_echo_model_stdin_limited(
+    reader: impl Read,
+    max_bytes: usize,
+) -> std::io::Result<String> {
+    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("stdin read limit is invalid: {error}"),
+        )
+    })?;
+    let mut input = String::new();
+    reader.take(limit).read_to_string(&mut input)?;
+    if input.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "stdin exceeds debug echo model input limit",
+        ));
+    }
+    Ok(input)
+}
+
 fn read_object_control_for_metadata(control_dir: &Path, file: &str) -> Result<String, FuseV1Error> {
-    fs::read_to_string(control_dir.join(file))
+    let path = control_dir.join(file);
+    let metadata =
+        object_metadata_plain_path_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+    if !metadata.is_file() || metadata.len() > MAX_OBJECT_METADATA_CONTROL_BYTES {
+        return Err(FuseV1Error::InvalidContent);
+    }
+    let len = usize::try_from(metadata.len()).map_err(|_error| FuseV1Error::InvalidContent)?;
+    let mut file =
+        open_object_metadata_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)
+        .map_err(|error| fuse_metadata_error(&error))?;
+    String::from_utf8(content)
         .map(|content| content.trim_end_matches('\n').to_owned())
-        .map_err(|error| fuse_metadata_error(&error))
+        .map_err(|_error| FuseV1Error::InvalidContent)
+}
+
+fn object_metadata_plain_path_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_object_metadata_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    fs::File::from(file_fd).metadata()
+}
+
+fn open_object_metadata_plain_file(path: &Path) -> std::io::Result<fs::File> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_object_metadata_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    Ok(fs::File::from(file_fd))
+}
+
+fn open_object_metadata_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let mut directory = if path.is_absolute() {
+        open_object_metadata_single_plain_directory(Path::new("/"))?
+    } else {
+        open_object_metadata_single_plain_directory(Path::new("."))?
+    };
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                let name = name.to_str().ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
+                })?;
+                let next = nix::fcntl::openat(
+                    &directory,
+                    name,
+                    nix::fcntl::OFlag::O_DIRECTORY
+                        | nix::fcntl::OFlag::O_RDONLY
+                        | nix::fcntl::OFlag::O_NOFOLLOW
+                        | nix::fcntl::OFlag::O_CLOEXEC,
+                    nix::sys::stat::Mode::empty(),
+                )
+                .map_err(std::io::Error::from)?;
+                directory = fs::File::from(next);
+            }
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "directory path contains unsupported components",
+                ));
+            }
+        }
+    }
+    Ok(directory)
+}
+
+fn open_object_metadata_single_plain_directory(path: &Path) -> std::io::Result<fs::File> {
+    let directory = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "path is not a plain directory",
+        ));
+    }
+    Ok(directory)
 }
 
 fn policy_subject_from_label(label: &str) -> Option<&str> {

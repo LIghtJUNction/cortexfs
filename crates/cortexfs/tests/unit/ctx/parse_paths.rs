@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 #[test]
 fn parses_spec_which_command() {
     let command = cmd!("which", "tool", "fs.read");
@@ -299,6 +301,33 @@ fn rejects_removed_agent_sh_command() {
 }
 
 #[test]
+fn object_execution_command_uses_clean_runtime_environment() {
+    let root = Path::new("/tmp/cortexfs-clean-exec-root");
+    let command = object_execution_command(root, &root.join("tool").join("example"));
+    let mut envs = command
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect::<Vec<_>>();
+    envs.sort();
+
+    assert_eq!(
+        envs,
+        vec![
+            (
+                "CTX_ROOT".to_owned(),
+                Some(root.display().to_string())
+            ),
+            ("PATH".to_owned(), Some("/usr/bin:/bin".to_owned())),
+        ]
+    );
+}
+
+#[test]
 fn parses_agent_lifecycle_commands() {
     let new = cmd!(
         "agent",
@@ -385,6 +414,33 @@ fn parses_agent_lifecycle_commands() {
             session: None
         })) if name == "coder"
     ));
+}
+
+#[test]
+fn agent_lifecycle_tool_command_uses_clean_runtime_environment() {
+    let root = Path::new("/tmp/cortexfs-clean-lifecycle-root");
+    let command = agent_lifecycle_tool_command(root, &root.join("tool").join("agent.create"));
+    let mut envs = command
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect::<Vec<_>>();
+    envs.sort();
+
+    assert_eq!(
+        envs,
+        vec![
+            (
+                "CTX_ROOT".to_owned(),
+                Some(root.display().to_string())
+            ),
+            ("PATH".to_owned(), Some("/usr/bin:/bin".to_owned())),
+        ]
+    );
 }
 
 #[test]
@@ -490,6 +546,32 @@ fn status_helpers_report_ctx_and_agent_tree() {
             "`- reviewer [busy] pid=123".to_owned(),
         ]
     );
+}
+
+#[test]
+fn ctx_root_shape_does_not_follow_symlink_root() {
+    let root = clean_test_dir("ctx-status-root-shape");
+    let outside = clean_test_dir("ctx-status-root-shape-outside");
+    assert!(fs::create_dir_all(&root).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    let link = root.join("ctx");
+    assert!(std::os::unix::fs::symlink(&outside, &link).is_ok());
+
+    assert_eq!(ctx_root_shape(&outside), (true, true));
+    assert_eq!(ctx_root_shape(&link), (true, false));
+    assert_eq!(ctx_state(true, false, false), "invalid");
+}
+
+#[test]
+fn ctx_root_entry_present_does_not_follow_symlink_entry() {
+    let root = clean_test_dir("ctx-status-root-entry-shape");
+    let outside = clean_test_dir("ctx-status-root-entry-shape-outside");
+    assert!(fs::create_dir_all(root.join("status")).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(std::os::unix::fs::symlink(&outside, root.join("bin")).is_ok());
+
+    assert!(ctx_root_entry_present(&root, "status"));
+    assert!(!ctx_root_entry_present(&root, "bin"));
 }
 
 #[test]
@@ -736,7 +818,7 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
         "cortexfs-agent-coder-test-terminal",
     );
     assert!(
-        command.program == "systemd-run"
+        command.program == "/usr/bin/systemd-run"
                 && command.args.contains(&"--user".to_owned())
                 && contains_arg_pair(&command.args, "--property", "Restart=always")
                 && contains_arg_pair(&command.args, "--property", "RestartSec=250ms")
@@ -749,6 +831,7 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
                 && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT", "coder")
                 && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_SUBJECT", "coder_t")
                 && contains_arg_triplet(&command.args, "--setenv", "HOME", "/home/agent")
+                && contains_arg_triplet(&command.args, "--setenv", "PATH", "/usr/bin:/bin")
                 && contains_arg_triplet(&command.args, "--setenv", "USER", "coder")
                 && contains_arg_triplet(&command.args, "--setenv", "LOGNAME", "coder")
                 && contains_arg_triplet(&command.args, "--setenv", "SHELL", "/usr/bin/bash")
@@ -767,6 +850,63 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
             .iter()
             .any(|arg| arg.starts_with("CTX_") && arg.contains('=')),
         "bwrap arguments must not contain raw KEY=value env entries: {command:?}"
+    );
+}
+
+#[test]
+fn agent_start_process_command_uses_clean_runtime_environment() {
+    let command = AgentStartCommand {
+        program: "/usr/bin/systemd-run".to_owned(),
+        args: vec!["--user".to_owned(), "/usr/bin/env".to_owned()],
+    };
+    let process = agent_start_process_command(&command);
+    let mut envs = process
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect::<Vec<_>>();
+    envs.sort();
+
+    assert_eq!(
+        envs,
+        vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
+    );
+}
+
+#[test]
+fn systemctl_user_command_uses_clean_runtime_environment() {
+    let command = systemctl_user_command(["stop", "cortexfs-agent-coder-test-terminal.service"]);
+    let args = command
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let mut envs = command
+        .get_envs()
+        .map(|(name, value)| {
+            (
+                name.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect::<Vec<_>>();
+    envs.sort();
+
+    assert_eq!(command.get_program(), "/usr/bin/systemctl");
+    assert_eq!(
+        args,
+        vec![
+            "--user".to_owned(),
+            "stop".to_owned(),
+            "cortexfs-agent-coder-test-terminal.service".to_owned()
+        ]
+    );
+    assert_eq!(
+        envs,
+        vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
     );
 }
 
@@ -872,6 +1012,49 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
         "main -> /ctx/model/localhost/gpt-5.4-mini (missing)"
     );
     assert!(AGENT_REPL_COMMANDS.contains("/clear"));
+}
+
+#[test]
+fn agent_repl_model_summary_rejects_symlink_model_directory() {
+    let root = clean_test_dir("ctx-agent-repl-model-summary-symlink-model");
+    let outside = clean_test_dir("ctx-agent-repl-model-summary-symlink-model-outside");
+    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
+    assert!(
+        std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", outside.join("main"))
+            .is_ok()
+    );
+    assert!(std::os::unix::fs::symlink(&outside, root.join("model")).is_ok());
+
+    assert_eq!(
+        agent_repl_model_summary(false, &root, "coder"),
+        "main (missing alias)"
+    );
+}
+
+#[test]
+fn agent_repl_model_summary_does_not_follow_symlink_alias_target() {
+    let root = clean_test_dir("ctx-agent-repl-model-summary-symlink-target");
+    let outside = clean_test_dir("ctx-agent-repl-model-summary-symlink-target-outside");
+    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
+    assert!(fs::create_dir_all(root.join("model/localhost")).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
+    assert!(
+        std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))
+            .is_ok()
+    );
+    assert!(std::os::unix::fs::symlink(
+        &outside,
+        root.join("model/localhost/gpt-5.4-mini")
+    )
+    .is_ok());
+
+    assert_eq!(
+        agent_repl_model_summary(false, &root, "coder"),
+        "main -> /ctx/model/localhost/gpt-5.4-mini (missing)"
+    );
 }
 
 #[test]
@@ -1060,14 +1243,33 @@ fn debug_tool_names_report_native_agent_tools_only() {
 
 #[test]
 fn buffered_agent_renderer_rejects_too_much_output() {
-    let input = format!(
-        "{{\"type\":\"delta\",\"text\":\"{}\"}}\n",
-        "x".repeat(MAX_BUFFERED_AGENT_RENDERED_BYTES + 1)
-    );
+    let chunk = "x".repeat(1024);
+    let mut input = String::new();
+    for _index in 0..(MAX_BUFFERED_AGENT_RENDERED_BYTES / chunk.len() + 2) {
+        let _ignored = writeln!(input, "{{\"type\":\"delta\",\"text\":\"{chunk}\"}}");
+    }
 
     let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
 
     assert!(matches!(rendered, Err(ref error) if error.message.contains("agent output exceeds")));
+}
+
+#[test]
+fn streaming_agent_renderer_rejects_oversized_frame() {
+    let input = format!("{}\n", "x".repeat(MAX_SOCKET_FRAME_BYTES));
+
+    let rendered = render_agent_event_lines(std::io::Cursor::new(input), None);
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("cannot read socket response")));
+}
+
+#[test]
+fn buffered_agent_renderer_rejects_oversized_frame_before_rendering() {
+    let input = format!("{}\n", "x".repeat(MAX_SOCKET_FRAME_BYTES));
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(rendered, Err(ref error) if error.message.contains("cannot read socket response")));
 }
 
 #[test]
@@ -1533,6 +1735,18 @@ fn ls_lists_abi_paths_and_keeps_object_filtering() {
 }
 
 #[test]
+fn ls_rejects_symlink_directories_without_listing_targets() {
+    let root = clean_test_dir("ctx-ls-symlink-directory");
+    let outside = clean_test_dir("ctx-ls-symlink-directory-outside");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(fs::remove_dir_all(root.join("home")).is_ok());
+    assert!(fs::create_dir_all(outside.join("1000")).is_ok());
+    assert!(std::os::unix::fs::symlink(&outside, root.join("home")).is_ok());
+
+    assert!(list_names(&root, &LsTarget::Path("home".to_owned())).is_err());
+}
+
+#[test]
 fn detects_durable_session_instance_paths() {
     assert_path_matches(
         &[
@@ -1674,6 +1888,15 @@ fn detects_private_and_shared_session_index_paths() {
             "shared/im-qq-dev/agent/bot/session/index/by-cwd/hash-1",
             Some(SessionIndexKind::ByCwd),
         ),
+        (
+            "home/1000/agent/coder/session/index/by-hash/hash-1",
+            Some(SessionIndexKind::ByHash),
+        ),
+        (
+            "home/1000/agent/coder/session/index/by-uuid/uuid-1",
+            Some(SessionIndexKind::ByUuid),
+        ),
+        ("home/1000/agent/coder/session/index/by-hash/bad:key", None),
         ("home/1000/agent/coder/session/default", None),
         ("home/1000/agent/bad/name/session/index/list", None),
     ] {

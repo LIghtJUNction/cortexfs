@@ -5,6 +5,41 @@ fn unique_test_dir(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("cortexfs-{name}-{}-{nanos}", std::process::id()))
 }
 
+struct TestDir(PathBuf);
+
+impl TestDir {
+    fn as_path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for TestDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TestDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<std::ffi::OsStr> for TestDir {
+    fn as_ref(&self) -> &std::ffi::OsStr {
+        self.0.as_os_str()
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        // ponytail: best-effort test cleanup; stale startup cleanup covers killed test processes.
+        let _ignored = fs::remove_dir_all(&self.0);
+    }
+}
+
 macro_rules! ok {
     ($result:expr) => {{
         let result = $result;
@@ -14,19 +49,49 @@ macro_rules! ok {
     }};
 }
 
-fn clean_test_dir(name: &str) -> PathBuf {
+fn clean_test_dir(name: &str) -> TestDir {
+    remove_stale_test_dirs();
     let root = unique_test_dir(name);
     assert!(fs::remove_dir_all(&root).is_ok() || !root.exists());
-    root
+    TestDir(root)
+}
+
+fn remove_stale_test_dirs() {
+    static CLEAN: std::sync::Once = std::sync::Once::new();
+    CLEAN.call_once(|| {
+        let Ok(entries) = fs::read_dir(std::env::temp_dir()) else {
+            return;
+        };
+        let stale_before = SystemTime::now()
+            .checked_sub(Duration::from_hours(1))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("cortexfs-"))
+            {
+                continue;
+            }
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.modified().is_ok_and(|modified| modified < stale_before) {
+                let _ignored = fs::remove_dir_all(path);
+            }
+        }
+    });
 }
 
 fn assert_abi_class(path: &str, expected: &str) {
     assert_eq!(classify_abi_path(path), expected, "{path}");
 }
 
-fn reference_tree(name: &str) -> PathBuf {
+fn reference_tree(name: &str) -> TestDir {
     let root = clean_test_dir(name);
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let result = ensure_v1_reference_tree(&root);
+    assert!(result.is_ok(), "{result:?}");
     root
 }
 

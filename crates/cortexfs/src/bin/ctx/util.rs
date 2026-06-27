@@ -1,6 +1,78 @@
+const MAX_CTX_FILE_CHECK_BYTES: u64 = 1024 * 1024;
+
 fn read_file_to_string(path: &Path) -> Result<String, CliError> {
-    fs::read_to_string(path)
+    let mut file = open_plain_read_file(path)?;
+    let metadata = file.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+    })?;
+    if !metadata.is_file() || metadata.len() > MAX_CTX_FILE_CHECK_BYTES {
+        return Err(CliError::unavailable(format!(
+            "cannot read {}: not a small regular file",
+            path.display()
+        )));
+    }
+    let len = usize::try_from(metadata.len())
+        .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+    })?;
+    String::from_utf8(content)
         .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))
+}
+
+fn open_plain_read_file(path: &Path) -> Result<fs::File, CliError> {
+    let Some(parent) = path.parent() else {
+        return Err(CliError::usage("file path must have a parent directory"));
+    };
+    let parent_dir = open_plain_file_parent_dir(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::usage("file path must end with a valid UTF-8 file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))?;
+    Ok(fs::File::from(file_fd))
+}
+
+fn open_executable_no_follow(path: &Path) -> Result<fs::File, CliError> {
+    let Some(parent) = path.parent() else {
+        return Err(CliError::usage("executable path must have a parent directory"));
+    };
+    let parent_dir = open_plain_file_parent_dir(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::usage("executable path must end with a valid UTF-8 file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot open {}: {error}", path.display())))?;
+    let file = fs::File::from(file_fd);
+    let metadata = file.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+    })?;
+    if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return Err(CliError::unavailable(format!(
+            "object is not executable: {}",
+            path.display()
+        )));
+    }
+    Ok(file)
+}
+
+fn proc_fd_path(file: &fs::File) -> PathBuf {
+    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
 }
 
 fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
@@ -108,11 +180,11 @@ fn hex_digit(value: u32) -> char {
     }
 }
 
-fn temp_file_name() -> String {
+fn temp_file_name(attempt: u8) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
-    format!(".ctx.tmp.{}.{}", std::process::id(), nanos)
+    format!(".ctx.tmp.{}.{}.{}", std::process::id(), nanos, attempt)
 }
 
 fn validate_name(name: &str) -> Result<(), CliError> {
