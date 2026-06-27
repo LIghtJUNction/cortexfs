@@ -56,6 +56,8 @@ fn child_path_rejects_special_or_escaped_names() {
     assert_eq!(child_path("agent", "../coder.sock"), None);
     assert_eq!(child_path("agent", "coder/sock"), None);
     assert_eq!(child_path("agent", "coder\0sock"), None);
+    assert_eq!(child_path("agent", "coder\u{1b}sock"), None);
+    assert_eq!(child_path("agent", "coder\rsock"), None);
 }
 
 #[test]

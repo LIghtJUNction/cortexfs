@@ -652,6 +652,10 @@ fn mount_table_rejects_invalid_v0_format() {
         Err(MountError::InvalidPath)
     );
     assert_eq!(
+        MountEntry::parse("/ctx\u{1b}/shared/project-a\t/ctx\tro\trbind"),
+        Err(MountError::InvalidPath)
+    );
+    assert_eq!(
         MountEntry::parse("/ctx\t/ctx\tbad\trbind"),
         Err(MountError::InvalidMode)
     );

@@ -84,7 +84,7 @@ fn inspect_context_jsonl_line(
         issues.push(ContextJsonlIssue::RecordNotObject(line_number));
         return;
     }
-    let Ok(record) = serde_json::from_value::<ContextJsonlRecordJson>(value) else {
+    let Ok(record) = serde_json::from_str::<ContextJsonlRecordJson>(line) else {
         issues.push(ContextJsonlIssue::InvalidJson(line_number));
         return;
     };
@@ -316,13 +316,11 @@ fn is_context_hash_id(value: &str) -> bool {
 }
 
 fn is_nonempty_single_line(value: &str) -> bool {
-    !value.is_empty() && !value.contains('\n') && !value.contains('\0')
+    !value.is_empty() && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 fn is_stable_context_ref_path(value: &str) -> bool {
-    is_nonempty_single_line(value)
-        && !value.contains('\t')
-        && !value.split('/').any(|part| part == "." || part == "..")
+    is_nonempty_single_line(value) && !value.split('/').any(|part| part == "." || part == "..")
 }
 
 fn is_context_ref_kind(value: &str) -> bool {

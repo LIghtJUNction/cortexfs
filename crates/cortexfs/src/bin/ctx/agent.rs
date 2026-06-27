@@ -1662,12 +1662,7 @@ fn terminal_socket_exists(socket: &Path) -> bool {
 }
 
 fn require_session_name(session: &str) -> Result<(), CliError> {
-    if !session.is_empty()
-        && !matches!(session, "." | "..")
-        && !session.contains('/')
-        && !session.contains('\n')
-        && !session.contains('\t')
-    {
+    if is_object_name(session) {
         Ok(())
     } else {
         Err(CliError::usage("invalid session name"))
@@ -2071,10 +2066,7 @@ fn json_string_list(values: &[String]) -> String {
 }
 
 fn is_absolute_small_path(value: &str) -> bool {
-    value.starts_with('/')
-        && !value.contains('\0')
-        && !value.contains('\n')
-        && !value.contains('\t')
+    value.starts_with('/') && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 #[cfg(test)]

@@ -14,6 +14,8 @@ const PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
 
 #[derive(Clone, Debug, Deserialize)]
 struct RunnerProviderConfig {
+    #[serde(default)]
+    name: Option<String>,
     base_url: String,
     oauth: Option<cortexfs::OAuthProviderConfig>,
     #[serde(default)]
@@ -227,16 +229,12 @@ fn provider_config_from_dir(config_dir: &Path, provider: &str) -> Option<RunnerP
             continue;
         }
         let content = read_runner_provider_config_file(&directory, &name).ok()?;
-        let value = serde_json::from_str::<Value>(&content).ok()?;
-        let base_url = value.get("base_url")?.as_str()?.to_owned();
-        if provider_name_from_config(&base_url, value.get("name").and_then(Value::as_str))
-            .as_deref()
+        let config = serde_json::from_str::<RunnerProviderConfig>(&content).ok()?;
+        if provider_name_from_config(&config.base_url, config.name.as_deref()).as_deref()
             != Ok(provider)
         {
             continue;
         }
-        let mut config = serde_json::from_value::<RunnerProviderConfig>(value).ok()?;
-        config.base_url = base_url;
         return Some(config);
     }
     None
@@ -697,10 +695,7 @@ fn is_url(value: &str) -> bool {
 }
 
 fn is_safe_absolute_unix_socket_path(value: &str) -> bool {
-    value.starts_with('/')
-        && !value.contains('\0')
-        && !value.contains('\n')
-        && !value.contains('\r')
+    value.starts_with('/') && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 fn provider_credential(

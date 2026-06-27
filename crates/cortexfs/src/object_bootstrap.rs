@@ -291,7 +291,7 @@ fn default_tool_control_value(object_name: &str, file: &str) -> String {
 }
 
 fn is_valid_wrapper_target(value: &str) -> bool {
-    !value.trim().is_empty() && !value.contains('\0') && !value.contains('\n')
+    !value.trim().is_empty() && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 fn executable_wrapper_script(wrapper_target: &str) -> String {

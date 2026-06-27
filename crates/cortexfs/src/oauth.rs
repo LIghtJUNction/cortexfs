@@ -112,7 +112,7 @@ pub fn oauth_authorization_url(
     state: &str,
     pkce: &OAuthPkce,
 ) -> Result<String, OAuthError> {
-    if !is_valid_oauth_config(config) || state.is_empty() || state.contains('\0') {
+    if !is_valid_oauth_config(config) || state.is_empty() || has_ascii_control(state) {
         return Err(OAuthError::InvalidConfig);
     }
     let mut query = vec![
@@ -135,7 +135,7 @@ pub fn oauth_authorization_code_form(
     code: &str,
     pkce: &OAuthPkce,
 ) -> Result<String, OAuthError> {
-    if !is_valid_oauth_config(config) || code.is_empty() || code.contains('\0') {
+    if !is_valid_oauth_config(config) || code.is_empty() || has_ascii_control(code) {
         return Err(OAuthError::InvalidConfig);
     }
     Ok(form_urlencoded(&[
@@ -152,7 +152,10 @@ pub fn oauth_refresh_token_form(
     config: &OAuthProviderConfig,
     refresh_token: &str,
 ) -> Result<String, OAuthError> {
-    if !is_valid_oauth_config(config) || refresh_token.trim().is_empty() {
+    if !is_valid_oauth_config(config)
+        || refresh_token.trim().is_empty()
+        || has_ascii_control(refresh_token)
+    {
         return Err(OAuthError::InvalidConfig);
     }
     Ok(form_urlencoded(&[
@@ -201,7 +204,7 @@ where
     E: Fn(&str) -> Result<String, env::VarError>,
     K: FnOnce(&str, &str) -> Result<Option<String>, OAuthError>,
 {
-    if provider.is_empty() || provider.contains('\0') || !is_valid_oauth_config(config) {
+    if provider.is_empty() || has_ascii_control(provider) || !is_valid_oauth_config(config) {
         return Err(OAuthError::InvalidConfig);
     }
     let name = crate::provider_oauth_access_token_env_name(provider);
@@ -248,7 +251,11 @@ fn is_valid_oauth_config(config: &OAuthProviderConfig) -> bool {
         && !config
             .scopes
             .iter()
-            .any(|scope| scope.trim().is_empty() || scope.contains('\0'))
+            .any(|scope| scope.trim().is_empty() || has_ascii_control(scope))
+}
+
+fn has_ascii_control(value: &str) -> bool {
+    value.bytes().any(|byte| byte.is_ascii_control())
 }
 
 fn is_valid_pkce_verifier(verifier: &str) -> bool {

@@ -486,7 +486,11 @@ fn estimate_tokens_from_bytes(bytes: u64) -> u64 {
 }
 
 fn child_path(parent: &str, name: &str) -> Option<String> {
-    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0')
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.bytes().any(|byte| byte.is_ascii_control())
     {
         return None;
     }

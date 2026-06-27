@@ -557,9 +557,7 @@ fn proc_fd_path(directory: &File) -> PathBuf {
 fn is_safe_relative_file_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains('/')
-        && !name.contains('\0')
-        && !name.contains('\t')
-        && !name.contains('\n')
+        && !name.bytes().any(|byte| byte.is_ascii_control())
         && name != "."
         && name != ".."
 }

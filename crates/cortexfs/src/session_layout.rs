@@ -227,7 +227,7 @@ fn inspect_session_meta_json(content: &str) -> SessionControlReport {
     if !value.is_object() {
         return SessionControlReport::new(vec![SessionControlIssue::NotObject]);
     }
-    let Ok(meta) = serde_json::from_value::<SessionMetaJson>(value) else {
+    let Ok(meta) = serde_json::from_str::<SessionMetaJson>(content) else {
         return SessionControlReport::new(vec![SessionControlIssue::InvalidJson]);
     };
 

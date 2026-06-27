@@ -1431,6 +1431,13 @@ fn cli_names_accept_abi_valid_uppercase_names() {
     }
 }
 
+#[test]
+fn session_names_reject_control_characters() {
+    for name in ["bad\rname", "bad\u{1b}name"] {
+        assert!(require_session_name(name).is_err(), "{name:?}");
+    }
+}
+
 fn contains_arg_pair(args: &[String], first: &str, second: &str) -> bool {
     args.windows(2)
         .any(|window| window.first().map(String::as_str) == Some(first)

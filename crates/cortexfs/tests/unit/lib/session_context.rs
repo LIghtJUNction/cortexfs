@@ -197,6 +197,14 @@ fn session_controls_reject_invalid_state_cwd_and_meta() {
         &[SessionControlIssue::InvalidJson]
     );
     assert_eq!(
+        inspect_session_control(
+            SessionControlKind::MetaJson,
+            "{\"client\":\"a\",\"client\":\"b\"}\n"
+        )
+        .issues(),
+        &[SessionControlIssue::InvalidJson]
+    );
+    assert_eq!(
         inspect_session_control(SessionControlKind::MetaJson, "[]\n").issues(),
         &[SessionControlIssue::NotObject]
     );

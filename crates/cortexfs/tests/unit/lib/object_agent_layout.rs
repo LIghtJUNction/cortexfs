@@ -20,6 +20,10 @@ fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
         Err(ObjectBootstrapError::InvalidWrapperTarget)
     );
     assert_eq!(
+        install_executable_object_wrapper(&root, ObjectClass::Tool, "fs.read", "bad\u{1b}cmd", &[]),
+        Err(ObjectBootstrapError::InvalidWrapperTarget)
+    );
+    assert_eq!(
         install_executable_object_wrapper(
             &root,
             ObjectClass::Tool,
