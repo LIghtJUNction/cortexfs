@@ -592,6 +592,7 @@ fn provider_oauth_curl_quote_rejects_line_breaks() {
     assert!(curl_config_quote("https://oauth.example/token").is_ok());
     assert!(curl_config_quote("https://oauth.example/token\noutput = /tmp/leak").is_err());
     assert!(curl_config_quote("grant_type=refresh_token\rheader = injected").is_err());
+    assert!(curl_config_quote("Authorization: Bearer \u{1b}]52;c;payload").is_err());
     assert!(curl_config_quote("abc\0def").is_err());
 }
 

@@ -928,7 +928,7 @@ fn is_provider_name(value: &str) -> bool {
 fn curl_config_quote(value: &str) -> Result<String, CliError> {
     let mut quoted = String::from("\"");
     for character in value.chars() {
-        if matches!(character, '\0' | '\n' | '\r') {
+        if character.is_ascii_control() {
             return Err(CliError::usage(
                 "curl config value contains a forbidden control character",
             ));
