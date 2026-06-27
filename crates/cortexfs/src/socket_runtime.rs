@@ -211,10 +211,43 @@ fn handle_agent_executable_socket_request_frame_streaming(
 }
 
 fn local_agent_response(input: &str) -> Option<&'static str> {
+    if asks_for_tsh_usage(input) {
+        return Some(TSH_USAGE_RESPONSE);
+    }
     if asks_to_read_file_without_path(input) {
         return Some("请提供要读取的文件路径。");
     }
     None
+}
+
+const TSH_USAGE_RESPONSE: &str = "\
+`tsh` 是 CortexFS 工具 shell，用来发现、加载和调用当前 agent 可见的工具。
+
+常用命令：
+- `tsh tools`：列出可见工具
+- `tsh help`：查看 tsh 帮助
+- `tsh help TOOL`：查看某个工具说明
+- `tsh load TOOL`：把工具元数据加载进上下文
+- `tsh loads`：查看已加载工具
+- `tsh unload TOOL`：卸载未固定的工具元数据
+- `tsh pin TOOL` / `tsh unpin TOOL`：固定或取消固定工具
+- `tsh TOOL ARG...`：调用工具，例如 `tsh fs.read PATH`
+
+当前 agent 只能原生调用 `tsh`；其他工具都要通过 `tsh` 间接调用。";
+
+fn asks_for_tsh_usage(input: &str) -> bool {
+    let normalized = input.to_ascii_lowercase();
+    let mentions_tsh = normalized.contains("tsh");
+    let asks_usage = input.contains("用法")
+        || input.contains("怎么用")
+        || input.contains("如何用")
+        || input.contains("探索")
+        || input.contains("查看")
+        || input.contains("了解")
+        || normalized.contains("usage")
+        || normalized.contains("how to use")
+        || normalized.contains("help");
+    mentions_tsh && asks_usage
 }
 
 fn asks_to_read_file_without_path(input: &str) -> bool {
