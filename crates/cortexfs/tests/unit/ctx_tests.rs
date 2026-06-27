@@ -28,7 +28,7 @@ use super::{
     plain_sibling_mount_bin, read_agent_processes, read_ctx_status, read_status_agent_processes,
     render_agent_event_lines, render_agent_process_tree, render_agent_status_lines,
     require_agent_mount, require_cli_name, require_session_name,
-    resolve_abi_path, run_visible_tool, run_visible_tool_with_writer, shell_quote_arg,
+    classify_input_path, resolve_abi_path, run_visible_tool, run_visible_tool_with_writer, shell_quote_arg,
     stream_agent_socket_request_buffered_interruptible, stream_socket_request,
     stream_terminal_socket, terminal_connect_cli_error, AgentArgs, AgentMount,
     AgentStartArgs, AgentStartCommand, Command, FileCommand, LsTarget, ObjectClass,
