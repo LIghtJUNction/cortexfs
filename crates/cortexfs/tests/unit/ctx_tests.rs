@@ -22,7 +22,7 @@ use super::{
     agent_start_status_lines, agent_start_systemd_command, agent_terminal_socket,
     cli_error_line, cortexfs_xattr_line, socket_bind_path, terminal_socket_exists,
     build_agent_system_prompt,
-    AgentInterruptGuard, collect_agent_events_buffered,
+    AgentInterruptGuard, AgentProcess, collect_agent_events_buffered,
     collect_agent_events_buffered_interruptible, copy_socket_response_interruptible, ctx_state,
     cortexfs_mount_bin, ctx_root_entry_present, ctx_root_shape, env_exports, is_mount_point,
     plain_sibling_mount_bin, read_agent_processes, read_ctx_status, read_status_agent_processes,
