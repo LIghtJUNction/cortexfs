@@ -260,6 +260,7 @@ fn message_stream_rejects_native_state_and_bad_shape() {
 {"role":"assistant","response_id":"resp-1","content":"hi"}
 {"role":"assistant","content":[{"type":"provider_blob","text":"x"}]}
 {"role":"assistant"}
+{"role":"assistant","content":[{"type":"text","text":"safe","text":"shadow"}]}
 "#,
     );
     assert_eq!(
@@ -277,7 +278,8 @@ fn message_stream_rejects_native_state_and_bad_shape() {
                 field: "response_id".to_owned()
             },
             MessageStreamIssue::InvalidContent(6),
-            MessageStreamIssue::MissingContent(7)
+            MessageStreamIssue::MissingContent(7),
+            MessageStreamIssue::InvalidContent(8)
         ]
     );
 }

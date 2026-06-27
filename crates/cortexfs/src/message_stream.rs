@@ -67,9 +67,18 @@ fn inspect_message_stream_line(
         issues.push(MessageStreamIssue::MissingContent(line_number));
         return;
     };
-    if !serde_json::from_value::<MessageContentJson>(content.clone())
-        .is_ok_and(|content| content.is_well_formed())
-    {
+    if !content.is_object() && !content.is_string() && !content.is_array() {
+        issues.push(MessageStreamIssue::InvalidContent(line_number));
+        return;
+    }
+    if !serde_path_to_error::deserialize::<_, MessageContentLineJson>(
+        &mut serde_json::Deserializer::from_str(line),
+    )
+    .is_ok_and(|line| {
+        line.content
+            .as_ref()
+            .is_some_and(MessageContentJson::is_well_formed)
+    }) {
         issues.push(MessageStreamIssue::InvalidContent(line_number));
     }
 }
@@ -78,6 +87,11 @@ fn inspect_message_stream_line(
 struct MessageLineJson {
     role: Option<JsonStringField>,
     content: Option<Value>,
+}
+
+#[derive(Deserialize)]
+struct MessageContentLineJson {
+    content: Option<MessageContentJson>,
 }
 
 #[derive(Deserialize)]
