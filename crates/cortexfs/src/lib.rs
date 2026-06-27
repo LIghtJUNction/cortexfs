@@ -139,7 +139,8 @@ pub use provider_name::{
 };
 pub use session_index::{
     SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,
-    inspect_session_index, update_session_index, update_session_index_with_keys,
+    inspect_session_index, preflight_session_index_update, update_session_index,
+    update_session_index_with_keys,
 };
 pub use session_layout::{
     SessionControlIssue, SessionControlKind, SessionControlReport, SessionLayoutIssue,

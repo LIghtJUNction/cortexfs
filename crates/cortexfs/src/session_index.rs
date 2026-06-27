@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::Read as _;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use nix::libc;
 
@@ -151,6 +151,66 @@ pub fn update_session_index_with_keys(
     by_hash_key: Option<&str>,
     by_uuid_key: Option<&str>,
 ) -> Result<(), SessionIndexUpdateError> {
+    let update = prepare_session_index_update(
+        session_root,
+        session_name,
+        by_cwd_key,
+        by_hash_key,
+        by_uuid_key,
+    )?;
+
+    let mut sessions = vec![session_name.to_owned()];
+    sessions.extend(
+        update
+            .list
+            .lines()
+            .filter(|existing| *existing != session_name)
+            .map(str::to_owned),
+    );
+    atomic_replace_text(&update.list_path, &format!("{}\n", sessions.join("\n")))
+        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    atomic_replace_text(&update.current_path, &format!("{session_name}\n"))
+        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+
+    for path in update.secondary_paths.into_iter().flatten() {
+        atomic_replace_text(&path, &format!("{session_name}\n"))
+            .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    }
+
+    Ok(())
+}
+
+pub fn preflight_session_index_update(
+    session_root: &Path,
+    session_name: &str,
+    by_cwd_key: Option<&str>,
+    by_hash_key: Option<&str>,
+    by_uuid_key: Option<&str>,
+) -> Result<(), SessionIndexUpdateError> {
+    prepare_session_index_update(
+        session_root,
+        session_name,
+        by_cwd_key,
+        by_hash_key,
+        by_uuid_key,
+    )
+    .map(|_update| ())
+}
+
+struct SessionIndexUpdate {
+    list_path: PathBuf,
+    current_path: PathBuf,
+    secondary_paths: [Option<PathBuf>; 3],
+    list: String,
+}
+
+fn prepare_session_index_update(
+    session_root: &Path,
+    session_name: &str,
+    by_cwd_key: Option<&str>,
+    by_hash_key: Option<&str>,
+    by_uuid_key: Option<&str>,
+) -> Result<SessionIndexUpdate, SessionIndexUpdateError> {
     if !is_object_name(session_name) {
         return Err(SessionIndexUpdateError::InvalidSessionName);
     }
@@ -166,24 +226,26 @@ pub fn update_session_index_with_keys(
     {
         return Err(SessionIndexUpdateError::MissingIndex);
     }
-    let by_cwd_path = optional_index_path(
-        &index_dir,
-        "by-cwd",
-        by_cwd_key,
-        SessionIndexUpdateError::InvalidByCwdKey,
-    )?;
-    let by_hash_path = optional_index_path(
-        &index_dir,
-        "by-hash",
-        by_hash_key,
-        SessionIndexUpdateError::InvalidByHashKey,
-    )?;
-    let by_uuid_path = optional_index_path(
-        &index_dir,
-        "by-uuid",
-        by_uuid_key,
-        SessionIndexUpdateError::InvalidByUuidKey,
-    )?;
+    let secondary_paths = [
+        optional_index_path(
+            &index_dir,
+            "by-cwd",
+            by_cwd_key,
+            SessionIndexUpdateError::InvalidByCwdKey,
+        )?,
+        optional_index_path(
+            &index_dir,
+            "by-hash",
+            by_hash_key,
+            SessionIndexUpdateError::InvalidByHashKey,
+        )?,
+        optional_index_path(
+            &index_dir,
+            "by-uuid",
+            by_uuid_key,
+            SessionIndexUpdateError::InvalidByUuidKey,
+        )?,
+    ];
 
     let list = read_session_index_file(&list_path)
         .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
@@ -200,26 +262,12 @@ pub fn update_session_index_with_keys(
         return Err(SessionIndexUpdateError::InvalidIndex);
     }
 
-    let mut sessions = vec![session_name.to_owned()];
-    sessions.extend(
-        list.lines()
-            .filter(|existing| *existing != session_name)
-            .map(str::to_owned),
-    );
-    atomic_replace_text(&list_path, &format!("{}\n", sessions.join("\n")))
-        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-    atomic_replace_text(&current_path, &format!("{session_name}\n"))
-        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-
-    for path in [by_cwd_path, by_hash_path, by_uuid_path]
-        .into_iter()
-        .flatten()
-    {
-        atomic_replace_text(&path, &format!("{session_name}\n"))
-            .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-    }
-
-    Ok(())
+    Ok(SessionIndexUpdate {
+        list_path,
+        current_path,
+        secondary_paths,
+        list,
+    })
 }
 
 fn optional_index_path(
@@ -227,7 +275,7 @@ fn optional_index_path(
     dir_name: &str,
     key: Option<&str>,
     invalid_key: SessionIndexUpdateError,
-) -> Result<Option<std::path::PathBuf>, SessionIndexUpdateError> {
+) -> Result<Option<PathBuf>, SessionIndexUpdateError> {
     let Some(key) = key else {
         return Ok(None);
     };
