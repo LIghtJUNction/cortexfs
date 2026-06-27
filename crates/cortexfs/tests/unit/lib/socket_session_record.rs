@@ -30,6 +30,36 @@ fn socket_session_recorder_appends_send_to_durable_history() {
 }
 
 #[test]
+fn socket_session_recorder_revalidates_public_request_values() {
+    let root = clean_test_dir("socket-session-revalidate");
+    let session = root.join("default");
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "");
+    write_text_file(&session.join("events.jsonl"), "");
+
+    let bad_send = SocketRequest::Send {
+        id: "bad/id".to_owned(),
+        session: "default".to_owned(),
+        scope: SocketSessionScope::Private,
+        cwd: Some("/work".to_owned()),
+        input: "hello".to_owned(),
+    };
+    assert_eq!(
+        record_socket_request_to_session(&session, &bad_send),
+        Err(SocketSessionRecordError::InvalidField("id"))
+    );
+    let bad_cancel = SocketRequest::Cancel {
+        id: "bad/id".to_owned(),
+    };
+    assert_eq!(
+        record_socket_request_to_session(&session, &bad_cancel),
+        Err(SocketSessionRecordError::InvalidField("id"))
+    );
+    assert_file_text(&session.join("messages.jsonl"), "");
+    assert_file_text(&session.join("events.jsonl"), "");
+}
+
+#[test]
 fn durable_session_layout_uses_private_modes_for_session_state() {
     let root = clean_test_dir("durable-session-private-modes");
 

@@ -297,6 +297,11 @@ fn record_socket_send_to_session(
     if scope == SocketSessionScope::Temp {
         return Err(SocketSessionRecordError::TempSessionNotDurable);
     }
+    validate_socket_object_field("id", id)
+        .map_err(|_error| SocketSessionRecordError::InvalidField("id"))?;
+    if input.contains('\0') {
+        return Err(SocketSessionRecordError::InvalidField("input"));
+    }
     require_socket_session_name(session_dir, session)?;
     require_socket_session_files(session_dir)?;
 
@@ -326,6 +331,8 @@ fn record_socket_cancel_to_session(
     session_dir: &Path,
     run_id: &str,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
+    validate_socket_object_field("id", run_id)
+        .map_err(|_error| SocketSessionRecordError::InvalidField("id"))?;
     require_socket_session_files(session_dir)?;
 
     let event = done_event_json(run_id, "cancelled");
