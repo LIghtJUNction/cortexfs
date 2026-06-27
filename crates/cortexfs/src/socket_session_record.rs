@@ -275,6 +275,186 @@ pub fn record_child_result_to_parent_context(
     Ok(())
 }
 
+/// Validates and records a parent-owned hybrid DAG/ReAct schedule.
+///
+/// The schedule is ordinary parent session context at `context/plan.json`.
+/// Recording it does not create agents, enqueue jobs, start a watcher, or grant
+/// authority; every declared `requires` entry must already be allowed by the
+/// parent effective policy.
+pub fn record_agent_schedule_to_parent_context(
+    parent_session_dir: &Path,
+    schedule_json: &str,
+    parent_subject: &str,
+    parent_policy: &PolicyV0,
+) -> Result<(), AgentScheduleRecordError> {
+    if schedule_json.contains('\0') {
+        return Err(AgentScheduleRecordError::InvalidText);
+    }
+    let report = inspect_agent_schedule_json(schedule_json, parent_subject, parent_policy);
+    if !report.is_ok() {
+        return Err(AgentScheduleRecordError::InvalidSchedule(report));
+    }
+    require_agent_schedule_parent_context(parent_session_dir)?;
+    atomic_replace_text(
+        &parent_session_dir.join("context").join("plan.json"),
+        &ensure_trailing_newline(schedule_json),
+    )
+    .map_err(|_error| AgentScheduleRecordError::CannotRecord)
+}
+
+/// Records ready delegated schedule nodes into parent child handoff channels.
+///
+/// This materializes only parent-owned handoff files for ready nodes that
+/// declare `child` and `handoff` in `context/plan.json`. It does not create or
+/// start child agents and does not mark schedule nodes complete.
+pub fn record_ready_agent_schedule_child_handoffs_to_parent_context(
+    parent_session_dir: &Path,
+    schedule_json: &str,
+    parent_subject: &str,
+    parent_policy: &PolicyV0,
+    completed_nodes: &[&str],
+) -> Result<Vec<AgentScheduleChildHandoff>, AgentScheduleRecordError> {
+    let handoffs = ready_agent_schedule_child_handoffs(
+        schedule_json,
+        parent_subject,
+        parent_policy,
+        completed_nodes,
+    )
+    .map_err(AgentScheduleRecordError::InvalidSchedule)?;
+    require_agent_schedule_parent_context(parent_session_dir)?;
+
+    let mut recorded = Vec::new();
+    for handoff in handoffs {
+        if schedule_child_handoff_materialized(parent_session_dir, &handoff)? {
+            continue;
+        }
+        record_child_handoff_to_parent_context(
+            parent_session_dir,
+            handoff.child(),
+            handoff.agent(),
+            handoff.session(),
+            handoff.handoff(),
+        )
+        .map_err(agent_schedule_child_record_error)?;
+        recorded.push(handoff);
+    }
+
+    Ok(recorded)
+}
+
+/// Derives completed hybrid schedule nodes from durable parent-visible state.
+///
+/// Local parent-owned node completions are supplied explicitly. Delegated nodes
+/// are complete when their `context/child/<child>/status` file is a plain file
+/// containing `done`.
+pub fn completed_agent_schedule_nodes_from_parent_context(
+    parent_session_dir: &Path,
+    schedule_json: &str,
+    parent_subject: &str,
+    parent_policy: &PolicyV0,
+    local_completed_nodes: &[&str],
+) -> Result<Vec<String>, AgentScheduleRecordError> {
+    let nodes = agent_schedule_nodes(schedule_json, parent_subject, parent_policy)
+        .map_err(AgentScheduleRecordError::InvalidSchedule)?;
+    require_agent_schedule_parent_context(parent_session_dir)?;
+
+    let known = nodes
+        .iter()
+        .map(AgentScheduleNode::id)
+        .collect::<HashSet<_>>();
+    let mut completed = Vec::new();
+    let mut seen = HashSet::new();
+    let mut issues = Vec::new();
+    for node in local_completed_nodes {
+        if !is_object_name(node) || !known.contains(*node) {
+            issues.push(AgentScheduleIssue::UnknownCompletedNode {
+                node: (*node).to_owned(),
+            });
+        } else if nodes
+            .iter()
+            .any(|candidate| candidate.id() == *node && candidate.child().is_some())
+        {
+            issues.push(AgentScheduleIssue::DelegatedCompletionRequiresChildResult {
+                node: (*node).to_owned(),
+            });
+        } else if seen.insert((*node).to_owned()) {
+            completed.push((*node).to_owned());
+        }
+    }
+    if !issues.is_empty() {
+        return Err(AgentScheduleRecordError::InvalidSchedule(
+            AgentScheduleReport::new(issues),
+        ));
+    }
+
+    for node in nodes {
+        let Some(child) = node.child() else {
+            continue;
+        };
+        let child_dir = parent_session_dir
+            .join("context")
+            .join("child")
+            .join(child);
+        let Some(handoff) = node.handoff() else {
+            return Err(AgentScheduleRecordError::CannotRecord);
+        };
+        let Some(child_session) = node.child_session() else {
+            return Err(AgentScheduleRecordError::CannotRecord);
+        };
+        if !schedule_child_context_matches(
+            parent_session_dir,
+            child,
+            node.agent(),
+            child_session,
+            handoff,
+        )? {
+            continue;
+        }
+        match read_child_schedule_status(&child_dir)? {
+            Some(ChildContextStatus::Done) if seen.insert(node.id().to_owned()) => {
+                completed.push(node.id().to_owned());
+            }
+            Some(_) | None => {}
+        }
+    }
+
+    Ok(completed)
+}
+
+/// Advances a parent-owned hybrid schedule from durable parent context.
+///
+/// This reads delegated child statuses, combines them with explicit local
+/// completions, and materializes ready delegated handoffs. It is a single
+/// parent-session state transition helper, not a scheduler loop.
+pub fn advance_agent_schedule_from_parent_context(
+    parent_session_dir: &Path,
+    schedule_json: &str,
+    parent_subject: &str,
+    parent_policy: &PolicyV0,
+    local_completed_nodes: &[&str],
+) -> Result<AgentScheduleAdvance, AgentScheduleRecordError> {
+    let completed_nodes = completed_agent_schedule_nodes_from_parent_context(
+        parent_session_dir,
+        schedule_json,
+        parent_subject,
+        parent_policy,
+        local_completed_nodes,
+    )?;
+    let completed_refs = completed_nodes
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let handoffs = record_ready_agent_schedule_child_handoffs_to_parent_context(
+        parent_session_dir,
+        schedule_json,
+        parent_subject,
+        parent_policy,
+        &completed_refs,
+    )?;
+
+    Ok(AgentScheduleAdvance::new(completed_nodes, handoffs))
+}
+
 /// Derives the stable `session/index/by-cwd/<key>` file name for a chroot cwd.
 #[must_use]
 pub fn session_index_key_for_cwd(cwd: &str) -> Option<String> {
@@ -396,6 +576,133 @@ fn require_child_context_files(child_dir: &Path) -> Result<(), ChildContextRecor
         }
     }
     Ok(())
+}
+
+fn require_agent_schedule_parent_context(
+    parent_session_dir: &Path,
+) -> Result<(), AgentScheduleRecordError> {
+    for file in SESSION_REQUIRED_FILES {
+        if !is_plain_existing_file(&parent_session_dir.join(file)) {
+            return Err(AgentScheduleRecordError::MissingParentSession);
+        }
+    }
+    if !is_plain_existing_dir(&parent_session_dir.join("context")) {
+        return Err(AgentScheduleRecordError::MissingParentSession);
+    }
+    Ok(())
+}
+
+fn agent_schedule_child_record_error(error: ChildContextRecordError) -> AgentScheduleRecordError {
+    match error {
+        ChildContextRecordError::MissingParentSession => {
+            AgentScheduleRecordError::MissingParentSession
+        }
+        ChildContextRecordError::CannotRecord
+        | ChildContextRecordError::InvalidChildName
+        | ChildContextRecordError::InvalidAgentName
+        | ChildContextRecordError::InvalidSessionName
+        | ChildContextRecordError::InvalidStatus
+        | ChildContextRecordError::InvalidText
+        | ChildContextRecordError::InvalidRefs => AgentScheduleRecordError::CannotRecord,
+    }
+}
+
+fn schedule_child_handoff_materialized(
+    parent_session_dir: &Path,
+    handoff: &AgentScheduleChildHandoff,
+) -> Result<bool, AgentScheduleRecordError> {
+    schedule_child_context_matches(
+        parent_session_dir,
+        handoff.child(),
+        handoff.agent(),
+        handoff.session(),
+        handoff.handoff(),
+    )
+}
+
+fn schedule_child_context_matches(
+    parent_session_dir: &Path,
+    child_name: &str,
+    child_agent: &str,
+    child_session: &str,
+    handoff: &str,
+) -> Result<bool, AgentScheduleRecordError> {
+    let child_dir = parent_session_dir
+        .join("context")
+        .join("child")
+        .join(child_name);
+    match child_dir.symlink_metadata() {
+        Ok(metadata) if metadata.is_dir() => {
+            require_agent_schedule_child_context_files(&child_dir)?;
+            if read_child_schedule_file(&child_dir, "agent")? != format!("{child_agent}\n")
+                || read_child_schedule_file(&child_dir, "session")? != format!("{child_session}\n")
+                || read_child_schedule_file(&child_dir, "handoff.md")?
+                    != ensure_trailing_newline(handoff)
+            {
+                return Err(AgentScheduleRecordError::CannotRecord);
+            }
+            let _status = read_child_schedule_status(&child_dir)?;
+            let refs_jsonl = read_child_schedule_file(&child_dir, "refs.jsonl")?;
+            if !inspect_context_jsonl(ContextJsonlKind::Refs, &refs_jsonl).is_ok() {
+                return Err(AgentScheduleRecordError::CannotRecord);
+            }
+            Ok(true)
+        }
+        Ok(_metadata) => Err(AgentScheduleRecordError::CannotRecord),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_error) => Err(AgentScheduleRecordError::CannotRecord),
+    }
+}
+
+fn require_agent_schedule_child_context_files(
+    child_dir: &Path,
+) -> Result<(), AgentScheduleRecordError> {
+    for file in CHILD_RESULT_REQUIRED_FILES {
+        if !is_plain_existing_file(&child_dir.join(file)) {
+            return Err(AgentScheduleRecordError::CannotRecord);
+        }
+    }
+    for dir in CHILD_RESULT_REQUIRED_DIRS {
+        if !is_plain_existing_dir(&child_dir.join(dir)) {
+            return Err(AgentScheduleRecordError::CannotRecord);
+        }
+    }
+    Ok(())
+}
+
+fn read_child_schedule_file(
+    child_dir: &Path,
+    file: &str,
+) -> Result<String, AgentScheduleRecordError> {
+    fs::read_to_string(child_dir.join(file)).map_err(|_error| AgentScheduleRecordError::CannotRecord)
+}
+
+fn read_child_schedule_status(
+    child_dir: &Path,
+) -> Result<Option<ChildContextStatus>, AgentScheduleRecordError> {
+    let child_metadata = match child_dir.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_error) => return Err(AgentScheduleRecordError::CannotRecord),
+    };
+    if !child_metadata.is_dir() {
+        return Err(AgentScheduleRecordError::CannotRecord);
+    }
+    let status_path = child_dir.join("status");
+    let metadata = match status_path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_error) => return Err(AgentScheduleRecordError::CannotRecord),
+    };
+    if !metadata.is_file() {
+        return Err(AgentScheduleRecordError::CannotRecord);
+    }
+    let status = fs::read_to_string(status_path)
+        .map_err(|_error| AgentScheduleRecordError::CannotRecord)?;
+    let status = status.trim();
+    ChildContextStatus::parse(status).map_or(Err(AgentScheduleRecordError::CannotRecord), |status| {
+        Ok(Some(status))
+    })
 }
 
 fn write_child_context_file(

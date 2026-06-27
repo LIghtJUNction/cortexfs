@@ -6,15 +6,18 @@ use super::{
     derive_agent_runtime_view, ensure_durable_session_layout, ensure_v1_reference_tree, finish_shared_queue_job,
     format_history_messages_jsonl, format_skill_metadata_with_budget, handle_socket_request_frame,
     inspect_agent_control, inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
+    inspect_agent_schedule_json, ready_agent_schedule_child_handoffs, ready_agent_schedule_nodes,
     inspect_model_capabilities, inspect_object_layout, inspect_session_control,
     inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
     inspect_tool_schema_json, install_executable_object_wrapper, is_object_name, is_root_entry,
     model_exec_metadata, owned_child_cancellation_events, parse_model_driver_routes,
     parse_socket_request_frame, peer_credentials, read_echo_model_stdin_limited,
+    advance_agent_schedule_from_parent_context, completed_agent_schedule_nodes_from_parent_context,
     rebuild_context_pack,
     record_assistant_response_to_session, record_child_handoff_to_parent_context,
     record_child_result_to_parent_context, record_indexed_socket_send_to_session,
-    record_owned_child_cancellation, record_socket_request_to_session,
+    record_agent_schedule_to_parent_context, record_owned_child_cancellation,
+    record_ready_agent_schedule_child_handoffs_to_parent_context, record_socket_request_to_session,
     record_tool_execution_denial_to_session, record_tool_execution_result_to_session,
     recover_shared_queue_job, resolve_api_key_from_env_names_with, resolve_api_key_with,
     resolve_fuse_abi_path, resolve_oauth_access_token_with, run_echo_model,
@@ -26,6 +29,8 @@ use super::{
     oauth_authorization_code_form, oauth_authorization_url, oauth_refresh_token_form,
     parse_oauth_token_response,
     AgentControlIssue, AgentControlKind, AgentExecutableSocketRuntime, AgentRuntimeViewError,
+    AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNodeKind,
+    AgentScheduleRecordError,
     AgentUnixIdentity, ApiKeyResolutionError, ChildAgentAuthority, ChildAgentControls,
     ChildAgentDenial, ChildAgentRequest, ChildContextRecordError, ChildContextStatus,
     ChildLifecycle, ContextJsonlIssue, ContextJsonlKind, ContextPackBuildError,
@@ -65,6 +70,7 @@ include!("lib/agent_runtime_socket_parse.rs");
 include!("lib/socket_session_record.rs");
 include!("lib/socket_runtime.rs");
 include!("lib/agent_execution_policy.rs");
+include!("lib/agent_schedule.rs");
 include!("lib/child_context.rs");
 include!("lib/session_context.rs");
 include!("lib/context_queue.rs");

@@ -170,6 +170,82 @@ Example child refs:
 {"path":"artifact/patch.diff","kind":"patch","summary":"suggested patch"}
 ```
 
+## Hybrid DAG/ReAct Scheduling
+
+Scheduling is parent agent behavior, recorded as ordinary parent-session
+context. v1 does not add a root `workflow/`, `job/`, `hook/`, `scheduler/`, or
+`react/` namespace, and it does not add a background watcher. A parent may keep
+a bounded hybrid plan in its own session context, for example:
+
+```text
+/ctx/home/1000/agent/coder/session/default/context/plan.json
+```
+
+The stable shape is data:
+
+```json
+{
+  "version": 1,
+  "mode": "dag-react",
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "dag",
+      "agent": "planner",
+      "requires": [
+        {"class": "tool", "name": "fs.read", "permission": "execute"}
+      ]
+    },
+    {
+      "id": "review",
+      "kind": "react",
+      "agent": "reviewer",
+      "child": "rev-123",
+      "session": "default",
+      "handoff": "Task: review the plan\nScope:\n- Check the accepted refs\nOutput:\n- result.md summary\n",
+      "deps": ["plan"],
+      "max_steps": 8,
+      "requires": [
+        {"class": "agent", "name": "reviewer", "permission": "create"}
+      ]
+    }
+  ]
+}
+```
+
+Rules:
+
+```text
+plan.json is parent-owned context, not a submission queue.
+nodes form a directed acyclic graph.
+kind is either dag or react.
+react nodes must declare a bounded max_steps value.
+deps may only name other nodes in the same plan.
+requires only records permissions the parent effective policy already grants.
+child identifies the child result channel when a node is delegated.
+delegated nodes must include handoff text.
+session and handoff are only valid when child is present.
+delegated nodes require parent agent:<node.agent> create authority.
+ready nodes are incomplete nodes whose deps all have durable parent-visible results.
+ready delegated nodes may be materialized as context/child/<child>/handoff.md.
+delegated nodes are complete when context/child/<child>/status is done.
+local completion inputs only apply to non-delegated parent-owned nodes.
+advance means derive completed nodes from parent context and materialize ready delegated handoffs once.
+advance must not rewrite an already materialized child result channel.
+an already materialized child channel must match the node agent, session, and handoff.
+an already materialized child channel must have valid status and refs files.
+handoff/result/refs still use context/child/<child>/.
+```
+
+The parent uses DAG edges for known ordering and uses ReAct only inside a node's
+bounded execution loop. ReAct steps may decide tool calls and child handoffs,
+but each action is still checked against the agent's policy, mount view, tool
+visibility, and child attenuation rules.
+
+Git commit remains the development event boundary. A parent may revise
+`context/plan.json` after a commit, but the revision is just session context.
+It must not create a second hot-reload, polling, or hook trigger.
+
 ## Permission Attenuation
 
 Child authority is attenuated from the parent:

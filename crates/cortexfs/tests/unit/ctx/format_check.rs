@@ -30,6 +30,27 @@ fn formats_context_pack_issues_for_file_check() {
 }
 
 #[test]
+fn formats_agent_schedule_issues_for_file_check() {
+    let rendered = format_agent_schedule_issues(&[
+        AgentScheduleIssue::InvalidReactBound {
+            node: "review".to_owned(),
+        },
+        AgentScheduleIssue::PermissionNotGranted {
+            node: "fetch\u{1b}[31m".to_owned(),
+            class: "tool".to_owned(),
+            name: "fs.read".to_owned(),
+            permission: "execute".to_owned(),
+        },
+    ]);
+
+    assert_eq!(
+        rendered,
+        "invalid react bound node review, permission not granted node fetch\\u{1b}[31m tool:fs.read execute"
+    );
+    assert!(!rendered.as_bytes().contains(&0x1b));
+}
+
+#[test]
 fn file_check_formatters_escape_terminal_controls() {
     let rendered = format_message_stream_issues(&[
         MessageStreamIssue::ProviderNativeField {
