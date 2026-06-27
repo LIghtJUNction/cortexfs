@@ -62,10 +62,15 @@ pub fn provider_name_from_base_url(base_url: &str) -> Option<String> {
 #[must_use]
 pub fn provider_host_from_base_url(base_url: &str) -> Option<String> {
     let mut rest = base_url.trim();
+    if rest.bytes().any(|byte| byte.is_ascii_control()) {
+        return None;
+    }
     if let Some(value) = rest.strip_prefix("https://") {
         rest = value;
     } else if let Some(value) = rest.strip_prefix("http://") {
         rest = value;
+    } else {
+        return None;
     }
     let authority = rest
         .split(['/', '?', '#'])
@@ -535,8 +540,8 @@ fn provider_env_label(provider: &str) -> String {
 mod provider_secret_file_tests {
     use super::{
         create_private_provider_secret_dir, is_secret_account_name, open_provider_secret_file,
-        provider_secret_file_exists, read_provider_secret_file, selected_model_provider,
-        set_private_dir_permissions,
+        provider_host_from_base_url, provider_secret_file_exists, read_provider_secret_file,
+        selected_model_provider, set_private_dir_permissions,
     };
     use std::fs;
     use std::os::unix::fs::{PermissionsExt, symlink};
@@ -551,6 +556,24 @@ mod provider_secret_file_tests {
         assert!(!is_secret_account_name("../default"));
         assert!(!is_secret_account_name("bad/name"));
         assert!(!is_secret_account_name("-bad"));
+    }
+
+    #[test]
+    fn provider_base_url_host_requires_http_scheme_and_clean_text() {
+        assert_eq!(
+            provider_host_from_base_url("https://api.openai.com/v1"),
+            Some("api.openai.com".to_owned())
+        );
+        assert_eq!(
+            provider_host_from_base_url("http://127.0.0.1:8317/v1"),
+            Some("127.0.0.1".to_owned())
+        );
+        assert_eq!(provider_host_from_base_url("api.openai.com/v1"), None);
+        assert_eq!(provider_host_from_base_url("https:///v1"), None);
+        assert_eq!(
+            provider_host_from_base_url("https://api.openai.com\noutput=/tmp/leak"),
+            None
+        );
     }
 
     #[test]
