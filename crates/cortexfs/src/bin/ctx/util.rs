@@ -86,6 +86,8 @@ fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
         validate_relative_abi_path(relative)?;
         return Ok(relative.display().to_string());
     }
+    validate_relative_abi_path_text(path)?;
+    validate_relative_abi_path(candidate)?;
     Ok(path.to_owned())
 }
 
@@ -101,22 +103,33 @@ fn resolve_abi_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
         return Ok(root.join(relative));
     }
 
-    if path
-        .split('/')
-        .any(|part| part.is_empty() || matches!(part, "." | ".."))
-    {
-        return Err(CliError::usage("file path must be a relative ABI path"));
-    }
+    validate_relative_abi_path_text(path)?;
 
     Ok(root.join(path))
 }
 
-fn validate_relative_abi_path(path: &Path) -> Result<(), CliError> {
+fn validate_relative_abi_path_text(path: &str) -> Result<(), CliError> {
     if path
-        .components()
-        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        .split('/')
+        .any(|part| part.is_empty() || matches!(part, "." | ".."))
+        || path.bytes().any(|byte| byte.is_ascii_control())
     {
         return Err(CliError::usage("file path must be a relative ABI path"));
+    }
+    Ok(())
+}
+
+fn validate_relative_abi_path(path: &Path) -> Result<(), CliError> {
+    for component in path.components() {
+        let std::path::Component::Normal(part) = component else {
+            return Err(CliError::usage("file path must be a relative ABI path"));
+        };
+        let Some(part) = part.to_str() else {
+            return Err(CliError::usage("file path must be a relative ABI path"));
+        };
+        if part.bytes().any(|byte| byte.is_ascii_control()) {
+            return Err(CliError::usage("file path must be a relative ABI path"));
+        }
     }
 
     Ok(())

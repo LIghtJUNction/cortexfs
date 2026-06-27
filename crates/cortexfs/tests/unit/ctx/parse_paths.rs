@@ -1705,9 +1705,15 @@ fn tool_command_refuses_direct_ctx_path_execution() {
 fn abi_path_resolution_rejects_escape() {
     let root = Path::new("/ctx");
     assert!(resolve_abi_path(root, "agent/coder.d/cwd").is_ok());
+    assert!(classify_input_path(root, "agent/coder.d/cwd").is_ok());
     assert!(resolve_abi_path(root, "../etc/passwd").is_err());
+    assert!(classify_input_path(root, "../etc/passwd").is_err());
+    assert!(classify_input_path(root, "agent//coder").is_err());
+    assert!(resolve_abi_path(root, "agent/coder\u{1b}").is_err());
+    assert!(classify_input_path(root, "agent/coder\u{1b}").is_err());
     assert!(resolve_abi_path(root, "/etc/passwd").is_err());
     assert!(resolve_abi_path(root, "/ctx/../etc/passwd").is_err());
+    assert!(classify_input_path(root, "/ctx/agent/coder\u{1b}").is_err());
     assert_eq!(
         resolve_abi_path(root, "/ctx/agent/coder.d/cwd").map(|path| path.display().to_string()),
         Ok("/ctx/agent/coder.d/cwd".to_owned())
