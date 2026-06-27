@@ -526,6 +526,27 @@ fn agent_ps_reads_parent_status_and_pid_controls() {
 }
 
 #[test]
+fn agent_process_tree_escapes_control_file_values() {
+    let process = AgentProcess {
+        name: "coder".to_owned(),
+        parent: None,
+        status: "idle\u{1b}]52;c;payload\u{7}".to_owned(),
+        pid: Some("123\u{1b}[31m".to_owned()),
+    };
+    let mut rendered = Vec::new();
+
+    render_agent_process_tree(&process, std::slice::from_ref(&process), "", true, true, &mut rendered);
+
+    assert_eq!(
+        rendered,
+        vec!["coder [idle\\u{1b}]52;c;payload\\u{7}] pid=123\\u{1b}[31m".to_owned()]
+    );
+    let line = rendered.first().map_or("", String::as_str);
+    assert!(!line.as_bytes().contains(&0x1b));
+    assert!(!line.as_bytes().contains(&0x07));
+}
+
+#[test]
 fn status_helpers_report_ctx_and_agent_tree() {
     let root = clean_test_dir("ctx-status-tree");
     write_text_file(&root.join("status"), "ready\n");

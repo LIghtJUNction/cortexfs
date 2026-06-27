@@ -848,14 +848,24 @@ fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), 
         }
         let status = read_optional_trimmed(&dir.join("status"))?.unwrap_or_else(|| "unknown".to_owned());
         let agent = read_optional_trimmed(&dir.join("agent"))?.unwrap_or_else(|| "agent?".to_owned());
-        print_line(&format!("{child}\t{status}\t{agent}"))?;
+        print_line(&format!(
+            "{}\t{}\t{}",
+            terminal_safe_text(&child),
+            terminal_safe_text(&status),
+            terminal_safe_text(&agent)
+        ))?;
     }
     Ok(())
 }
 
 fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
     for entry in agent_visible_tool_entries(root, name)? {
-        print_line(&format!("{}\t{}\t{}", entry.name, entry.path.display(), entry.status))?;
+        print_line(&format!(
+            "{}\t{}\t{}",
+            terminal_safe_text(&entry.name),
+            terminal_safe_text(&entry.path.display().to_string()),
+            terminal_safe_text(&entry.status)
+        ))?;
     }
     Ok(())
 }
@@ -1859,12 +1869,12 @@ fn render_agent_process_tree(
     };
     rendered.push(format!(
         "{prefix}{branch}{} [{}]{}",
-        process.name,
-        process.status,
-        process
-            .pid
-            .as_ref()
-            .map_or_else(String::new, |pid| format!(" pid={pid}"))
+        terminal_safe_text(&process.name),
+        terminal_safe_text(&process.status),
+        process.pid.as_ref().map_or_else(String::new, |pid| format!(
+            " pid={}",
+            terminal_safe_text(pid)
+        ))
     ));
 
     let next_prefix = if root {
