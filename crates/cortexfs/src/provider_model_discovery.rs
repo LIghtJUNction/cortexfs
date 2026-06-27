@@ -255,7 +255,7 @@ fn terminate_child(child: &mut Child) {
 fn curl_config_quote(value: &str) -> Result<String, FuseV1Error> {
     let mut quoted = String::from("\"");
     for character in value.chars() {
-        if matches!(character, '\0' | '\n' | '\r') {
+        if character.is_ascii_control() {
             return Err(FuseV1Error::InvalidContent);
         }
         if matches!(character, '"' | '\\') {
@@ -303,6 +303,7 @@ mod provider_model_discovery_tests {
         assert!(curl_config_quote("https://api.openai.com/v1/models").is_ok());
         assert!(curl_config_quote("https://api.openai.com/v1\noutput = /tmp/leak").is_err());
         assert!(curl_config_quote("Authorization: Bearer bad\rheader = injected").is_err());
+        assert!(curl_config_quote("Authorization: Bearer \u{1b}]52;c;payload").is_err());
         assert!(curl_config_quote("abc\0def").is_err());
     }
 
