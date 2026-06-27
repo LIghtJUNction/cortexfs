@@ -397,6 +397,58 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
 }
 
 #[test]
+fn agent_socket_runtime_answers_missing_file_path_without_model() {
+    let root = clean_test_dir("agent-socket-runtime-local-read-path");
+    let session_root = root.join("session");
+    let identity = AgentUnixIdentity::new(1000, 1000, []);
+    let executable = root.join("missing-agent-executable");
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: &identity,
+        env: &[],
+        session_root: &session_root,
+        default_cwd: "/work",
+        model: Some("debug/echo"),
+        agent_name: "coder",
+        agent_executable: &executable,
+    };
+
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+    assert!(
+        client
+            .write_all(
+                "{\"op\":\"send\",\"id\":\"msg-1\",\"session\":\"default\",\"input\":\"可以，尝试读文件\"}\n"
+                    .as_bytes(),
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(&mut socket, None, runtime);
+    let outcome = ok!(outcome);
+    assert_eq!(outcome.frames().len(), 3);
+    assert!(outcome.jsonl().contains("\"type\":\"start\""));
+    assert!(outcome.jsonl().contains("请提供要读取的文件路径。"));
+    assert!(outcome.jsonl().contains("\"status\":\"ok\""));
+    assert!(fs::read_to_string(session_root.join("default").join("events.jsonl"))
+        .unwrap_or_default()
+        .contains("请提供要读取的文件路径。"));
+
+    let mut buffer = [0_u8; 1024];
+    let read = client.read(&mut buffer);
+    let read = ok!(read);
+    let Some(bytes) = buffer.get(..read) else {
+        return;
+    };
+    let response = String::from_utf8_lossy(bytes);
+    assert!(response.contains("\"type\":\"start\""));
+    assert!(response.contains("请提供要读取的文件路径。"));
+    assert!(response.contains("\"status\":\"ok\""));
+}
+
+#[test]
 fn socket_stream_runtime_denies_wrong_peer_before_mutating_session() {
     let root = clean_test_dir("socket-stream-runtime-deny");
     let session_root = root.join("session");
