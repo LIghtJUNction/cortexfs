@@ -53,6 +53,7 @@ mod abi_path;
 mod abi_path_parse;
 mod agent_control;
 mod agent_prompt;
+mod agent_schedule;
 mod context_jsonl;
 mod context_pack;
 mod context_pack_build;
@@ -101,6 +102,11 @@ pub use agent_prompt::{
     collect_history_messages_from_session, collect_skill_metadata, current_time_unix,
     format_history_messages_jsonl, format_skill_metadata_with_budget, render_agent_system_prompt,
     skill_metadata_budget_from_env,
+};
+pub use agent_schedule::{
+    AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNode,
+    AgentScheduleNodeKind, AgentScheduleRecordError, AgentScheduleReport, agent_schedule_nodes,
+    inspect_agent_schedule_json, ready_agent_schedule_child_handoffs, ready_agent_schedule_nodes,
 };
 pub use context_pack::{
     ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,

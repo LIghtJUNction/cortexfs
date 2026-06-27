@@ -65,6 +65,7 @@ pub fn validate_context_pack_source(source: &str) -> Result<(), ContextPackSourc
                 "budget"
                     | "pack.json"
                     | "pack.md"
+                    | "plan.json"
                     | "summary.md"
                     | "todo.md"
                     | "facts.jsonl"

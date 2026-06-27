@@ -73,6 +73,150 @@ fn file_check_validates_context_jsonl_files() {
 }
 
 #[test]
+fn file_check_validates_agent_schedule_plan_files() {
+    let root = clean_test_dir("ctx-agent-schedule-plan-check");
+    let control = fixture_path(&root, &["agent", "planner.d"]);
+    write_text_file(&control.join("label"), "user_u:agent_r:planner_t:s0\n");
+    write_text_file(
+        &control.join("policy"),
+        "allow planner_t tool:fs.read execute\nallow planner_t agent:reviewer create\n",
+    );
+    let plan = fixture_path(
+        &root,
+        &[
+            "home",
+            "1000",
+            "agent",
+            "planner",
+            "session",
+            "default",
+            "context",
+            "plan.json",
+        ],
+    );
+    write_text_file(
+        &plan,
+        r#"{
+  "version": 1,
+  "mode": "dag-react",
+  "nodes": [
+    {
+      "id": "review",
+      "kind": "react",
+      "agent": "reviewer",
+      "child": "review-child",
+      "handoff": "Review the patch.",
+      "max_steps": 3,
+      "requires": [
+        {"class":"tool","name":"fs.read","permission":"execute"},
+        {"class":"agent","name":"reviewer","permission":"create"}
+      ]
+    }
+  ]
+}
+"#,
+    );
+
+    assert!(file_check(
+        &root,
+        "home/1000/agent/planner/session/default/context/plan.json"
+    )
+    .is_ok());
+}
+
+#[test]
+fn file_check_reports_agent_schedule_permission_denial() {
+    let root = clean_test_dir("ctx-agent-schedule-plan-permission-check");
+    let control = fixture_path(&root, &["agent", "planner.d"]);
+    write_text_file(&control.join("label"), "user_u:agent_r:planner_t:s0\n");
+    write_text_file(&control.join("policy"), "allow planner_t agent:reviewer create\n");
+    let plan = fixture_path(
+        &root,
+        &[
+            "home",
+            "1000",
+            "agent",
+            "planner",
+            "session",
+            "default",
+            "context",
+            "plan.json",
+        ],
+    );
+    write_text_file(
+        &plan,
+        r#"{"version":1,"mode":"dag-react","nodes":[{"id":"review","kind":"react","agent":"reviewer","child":"review-child","handoff":"Review.","max_steps":3,"requires":[{"class":"tool","name":"fs.read","permission":"execute"}]}]}"#,
+    );
+
+    assert_file_check_error_contains(
+        &root,
+        "home/1000/agent/planner/session/default/context/plan.json",
+        &["invalid agent schedule", "permission not granted", "tool:fs.read"],
+    );
+}
+
+#[test]
+fn file_check_reports_agent_schedule_shape_errors() {
+    let root = clean_test_dir("ctx-agent-schedule-plan-shape-check");
+    let control = fixture_path(&root, &["agent", "planner.d"]);
+    write_text_file(&control.join("policy"), "allow planner tool:fs.read execute\n");
+    let plan = fixture_path(
+        &root,
+        &[
+            "shared",
+            "project-a",
+            "agent",
+            "planner",
+            "session",
+            "default",
+            "context",
+            "plan.json",
+        ],
+    );
+    write_text_file(
+        &plan,
+        r#"{"version":1,"mode":"dag-react","nodes":[{"id":"a","kind":"react","agent":"reviewer","max_steps":65}]}"#,
+    );
+
+    assert_file_check_error_contains(
+        &root,
+        "shared/project-a/agent/planner/session/default/context/plan.json",
+        &["invalid agent schedule", "invalid react bound node a"],
+    );
+}
+
+#[test]
+fn file_check_rejects_agent_schedule_with_invalid_parent_label() {
+    let root = clean_test_dir("ctx-agent-schedule-plan-label-check");
+    let control = fixture_path(&root, &["agent", "planner.d"]);
+    write_text_file(&control.join("label"), "user_u:agent_r:planner/t:s0\n");
+    write_text_file(&control.join("policy"), "allow planner_t tool:fs.read execute\n");
+    let plan = fixture_path(
+        &root,
+        &[
+            "home",
+            "1000",
+            "agent",
+            "planner",
+            "session",
+            "default",
+            "context",
+            "plan.json",
+        ],
+    );
+    write_text_file(
+        &plan,
+        r#"{"version":1,"mode":"dag-react","nodes":[{"id":"a","kind":"dag","agent":"planner"}]}"#,
+    );
+
+    assert_file_check_error_contains(
+        &root,
+        "home/1000/agent/planner/session/default/context/plan.json",
+        &["invalid parent agent label agent/planner.d/label"],
+    );
+}
+
+#[test]
 fn file_check_validates_shared_and_model_session_layouts() {
     let root = clean_test_dir("ctx-shared-model-session-check");
     let shared_agent = fixture_path(

@@ -358,6 +358,19 @@ impl<'a> AbiPathKind<'a> {
             } if is_object_name(session)
         )
     }
+
+    /// Returns whether this path is `context/plan.json` below a durable agent session.
+    #[must_use]
+    pub fn is_agent_schedule_plan(self) -> bool {
+        matches!(
+            self,
+            Self::SessionContextFile {
+                session,
+                first: "plan.json",
+                second: None,
+            } if is_object_name(session)
+        )
+    }
 }
 
 #[cfg(test)]

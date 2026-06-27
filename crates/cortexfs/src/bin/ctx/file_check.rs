@@ -102,6 +102,18 @@ fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
         });
     }
 
+    if parsed.is_agent_schedule_plan() {
+        let content = read_file_to_string(&resolved)?;
+        let parent_agent = parent_agent_for_session_context_path(&abi_path)
+            .ok_or_else(|| CliError::usage("agent schedule plan must belong to an agent session"))?;
+        let parent_subject = parent_policy_subject(root, parent_agent)?;
+        let parent_policy = parent_agent_policy(root, parent_agent)?;
+        let report = inspect_agent_schedule_json(&content, &parent_subject, &parent_policy);
+        return check_report("agent schedule", report.is_ok(), || {
+            format_agent_schedule_issues(report.issues())
+        });
+    }
+
     if shape == "ctx.session.dir" && parsed.is_session_instance() {
         let report = inspect_session_layout(&resolved);
         return check_report("session layout", report.is_ok(), || {
@@ -211,6 +223,68 @@ fn file_check_model_driver(parsed: AbiPathKind<'_>, resolved: &Path) -> Result<b
             "invalid model driver routes: {}",
             format_model_driver_route_error(&error)
         ))),
+    }
+}
+
+fn parent_agent_for_session_context_path(path: &str) -> Option<&str> {
+    let parts = path.split('/').collect::<Vec<_>>();
+    if parts.len() == 8
+        && matches!(parts.first(), Some(&("home" | "shared")))
+        && parts.get(2) == Some(&"agent")
+        && parts.get(4) == Some(&"session")
+        && parts.get(6) == Some(&"context")
+        && parts.get(7) == Some(&"plan.json")
+    {
+        parts.get(3).copied()
+    } else {
+        None
+    }
+}
+
+fn parent_agent_policy(root: &Path, parent_agent: &str) -> Result<PolicyV0, CliError> {
+    let policy_path = root.join("agent").join(format!("{parent_agent}.d")).join("policy");
+    let content = read_file_to_string(&policy_path)?;
+    PolicyV0::parse(&content).map_err(|error| {
+        CliError::usage(format!(
+            "invalid parent agent policy agent/{parent_agent}.d/policy: {error:?}"
+        ))
+    })
+}
+
+fn parent_policy_subject(root: &Path, parent_agent: &str) -> Result<String, CliError> {
+    let label_path = root.join("agent").join(format!("{parent_agent}.d")).join("label");
+    match fs::symlink_metadata(&label_path) {
+        Ok(_metadata) => {
+            let label = read_file_to_string(&label_path)?;
+            policy_subject_from_label(label.trim_end())
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    CliError::usage(format!(
+                        "invalid parent agent label agent/{parent_agent}.d/label"
+                    ))
+                })
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(parent_agent.to_owned()),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot stat {}: {error}",
+            label_path.display()
+        ))),
+    }
+}
+
+fn policy_subject_from_label(label: &str) -> Option<&str> {
+    if is_object_name(label) {
+        return Some(label);
+    }
+    let mut fields = label.split(':');
+    let _user = fields.next()?;
+    let _role = fields.next()?;
+    let subject = fields.next()?;
+    let _level = fields.next()?;
+    if fields.next().is_none() && is_object_name(subject) {
+        Some(subject)
+    } else {
+        None
     }
 }
 

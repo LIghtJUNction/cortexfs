@@ -128,6 +128,90 @@ fn format_context_pack_issues(issues: &[ContextPackIssue]) -> String {
     })
 }
 
+fn format_agent_schedule_issues(issues: &[AgentScheduleIssue]) -> String {
+    format_issue_list(issues, |output, issue| {
+        let _ignored = match *issue {
+            AgentScheduleIssue::InvalidJson => write!(output, "invalid json"),
+            AgentScheduleIssue::ScheduleNotObject => write!(output, "schedule not object"),
+            AgentScheduleIssue::InvalidVersion => write!(output, "invalid version"),
+            AgentScheduleIssue::InvalidMode => write!(output, "invalid mode"),
+            AgentScheduleIssue::InvalidNodes => write!(output, "invalid nodes"),
+            AgentScheduleIssue::NodeNotObject { index } => {
+                write!(output, "node not object index {index}")
+            }
+            AgentScheduleIssue::InvalidField {
+                ref node,
+                ref field,
+                ref value,
+            } => {
+                if let Some(node) = node.as_ref() {
+                    write!(
+                        output,
+                        "invalid field node {} {}={}",
+                        terminal_safe_text(node),
+                        terminal_safe_text(field),
+                        terminal_safe_text(value)
+                    )
+                } else {
+                    write!(
+                        output,
+                        "invalid field {}={}",
+                        terminal_safe_text(field),
+                        terminal_safe_text(value)
+                    )
+                }
+            }
+            AgentScheduleIssue::DuplicateNode { ref node } => {
+                write!(output, "duplicate node {}", terminal_safe_text(node))
+            }
+            AgentScheduleIssue::DuplicateChild { ref child } => {
+                write!(output, "duplicate child {}", terminal_safe_text(child))
+            }
+            AgentScheduleIssue::UnknownDependency {
+                ref node,
+                ref dependency,
+            } => write!(
+                output,
+                "unknown dependency node {} {}",
+                terminal_safe_text(node),
+                terminal_safe_text(dependency)
+            ),
+            AgentScheduleIssue::UnknownCompletedNode { ref node } => {
+                write!(output, "unknown completed node {}", terminal_safe_text(node))
+            }
+            AgentScheduleIssue::DelegatedCompletionRequiresChildResult { ref node } => write!(
+                output,
+                "delegated completion requires child result node {}",
+                terminal_safe_text(node)
+            ),
+            AgentScheduleIssue::DependencyCycle { ref node } => {
+                write!(output, "dependency cycle node {}", terminal_safe_text(node))
+            }
+            AgentScheduleIssue::InvalidReactBound { ref node } => write!(
+                output,
+                "invalid react bound node {}",
+                terminal_safe_text(node)
+            ),
+            AgentScheduleIssue::MissingHandoff { ref node } => {
+                write!(output, "missing handoff node {}", terminal_safe_text(node))
+            }
+            AgentScheduleIssue::PermissionNotGranted {
+                ref node,
+                ref class,
+                ref name,
+                ref permission,
+            } => write!(
+                output,
+                "permission not granted node {} {}:{} {}",
+                terminal_safe_text(node),
+                terminal_safe_text(class),
+                terminal_safe_text(name),
+                terminal_safe_text(permission)
+            ),
+        };
+    })
+}
+
 fn format_session_index_issues(issues: &[SessionIndexIssue]) -> String {
     format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
