@@ -14,7 +14,7 @@ use cortexfs::{
 use listenfd::ListenFd;
 use nix::errno::Errno;
 use nix::fcntl::{OFlag, open, openat};
-use nix::sys::stat::{Mode, mkdirat};
+use nix::sys::stat::{Mode, fchmod, mkdirat};
 use nix::unistd::{Gid, Uid, chown};
 use nix::unistd::{UnlinkatFlags, fchown, unlinkat};
 
@@ -157,7 +157,7 @@ fn runtime_provider_secret_file(
     secret: &cortexfs::ProviderSystemSecret,
 ) -> Result<RuntimeProviderSecretFile, String> {
     let dir = PathBuf::from(format!("/run/user/{uid}/cortexfs/credentials"));
-    let dir_fd = open_runtime_credential_dir(uid)?;
+    let dir_fd = open_runtime_credential_dir(uid, gid)?;
     let file_name = safe_runtime_credential_name(agent, secret.account())?;
     let path = dir.join(&file_name);
     let mut file = create_runtime_credential_file(&dir_fd, &file_name, uid, gid)?;
@@ -171,13 +171,23 @@ fn runtime_provider_secret_file(
     })
 }
 
-fn open_runtime_credential_dir(uid: u32) -> Result<OwnedFd, String> {
+fn open_runtime_credential_dir(uid: u32, gid: u32) -> Result<OwnedFd, String> {
     let user_dir = PathBuf::from(format!("/run/user/{uid}"));
     let user_fd = open_dir_no_follow(&user_dir)?;
     mkdirat_ignore_exists(&user_fd, "cortexfs", 0o700)?;
     let cortex_fd = open_child_dir_no_follow(&user_fd, "cortexfs")?;
+    repair_runtime_credential_dir(&cortex_fd, uid, gid)?;
     mkdirat_ignore_exists(&cortex_fd, "credentials", 0o700)?;
-    open_child_dir_no_follow(&cortex_fd, "credentials")
+    let credentials_fd = open_child_dir_no_follow(&cortex_fd, "credentials")?;
+    repair_runtime_credential_dir(&credentials_fd, uid, gid)?;
+    Ok(credentials_fd)
+}
+
+fn repair_runtime_credential_dir(dir_fd: &OwnedFd, uid: u32, gid: u32) -> Result<(), String> {
+    fchown(dir_fd, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
+        .map_err(|error| format!("cannot chown runtime credential dir: {error}"))?;
+    fchmod(dir_fd, Mode::from_bits_truncate(0o700))
+        .map_err(|error| format!("cannot chmod runtime credential dir: {error}"))
 }
 
 fn create_runtime_credential_file(

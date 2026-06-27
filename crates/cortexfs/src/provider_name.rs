@@ -176,7 +176,12 @@ pub fn provider_system_secret_exists(
     provider: &str,
     account: &str,
 ) -> Result<bool, ProviderSystemSecretError> {
-    provider_system_secret_path(provider, account).map(|path| path.is_file())
+    let path = provider_system_secret_path(provider, account)?;
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_error) => Err(ProviderSystemSecretError::CannotRead),
+    }
 }
 
 /// Error while reading or writing the `CortexFS` system provider secret store.
