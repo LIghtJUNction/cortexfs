@@ -1159,6 +1159,7 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
         .env("CTX_ROOT", root)
         .env("CTX_AGENT", agent_name_from_env()?)
         .env("CTX_TOOL_MODE", "cli")
+        .env("CTX_AUTHORIZED_OBJECT", format!("/ctx/tool/{name}"))
         .env("PATH", "/usr/bin:/bin")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
@@ -2270,6 +2271,7 @@ window_percent=25
 [ -z "$CORTEXFS_SHOULD_NOT_LEAK" ] || exit 10
 [ "$CTX_TOOL_MODE" = cli ] || exit 11
 [ "$CTX_AGENT" = coder ] || exit 12
+[ "$CTX_AUTHORIZED_OBJECT" = /ctx/tool/probe ] || exit 15
 [ "$PATH" = /usr/bin:/bin ] || exit 13
 [ -n "$CTX_ROOT" ] || exit 14
 exit 0
