@@ -1,7 +1,7 @@
-use super::{runtime_agent_executable, runtime_model_and_secret, RuntimeConfig, DEFAULT_SOURCE};
+use super::{runtime_agent_executable, runtime_model, RuntimeConfig, DEFAULT_SOURCE};
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::path::PathBuf;
@@ -35,34 +35,6 @@ fn runtime_config_accepts_positional_agent() {
 }
 
 #[test]
-fn runtime_credential_name_uses_object_name_components() {
-    assert_eq!(
-        super::safe_runtime_credential_name("../agent", "default"),
-        Err("runtime credential path components must be object names".to_owned())
-    );
-    assert_eq!(
-        super::safe_runtime_credential_name("agent", "../default"),
-        Err("runtime credential path components must be object names".to_owned())
-    );
-    assert_eq!(
-        super::safe_runtime_credential_name(".", "default"),
-        Err("runtime credential path components must be object names".to_owned())
-    );
-    assert_eq!(
-        super::safe_runtime_credential_name("agent", ".."),
-        Err("runtime credential path components must be object names".to_owned())
-    );
-    assert_eq!(
-        super::safe_runtime_credential_name("", "default"),
-        Err("runtime credential path components must be object names".to_owned())
-    );
-    assert_eq!(
-        super::safe_runtime_credential_name("coder", "default"),
-        Ok("coder-provider-default".to_owned())
-    );
-}
-
-#[test]
 fn runtime_agent_executable_uses_ctx_abi_path() {
     assert_eq!(
         runtime_agent_executable(Path::new("/ctx"), "coder"),
@@ -83,34 +55,9 @@ fn runtime_model_keeps_requested_model_without_primary_secret(
     std::os::unix::fs::symlink("/ctx/model/remote/alpha", root.join("model/main"))?;
     fs::write(root.join("model/mirror/alpha"), "#!/bin/sh\n")?;
 
-    let (model, secret) = runtime_model_and_secret(&root, "main");
+    let model = runtime_model(&root, "main");
 
     assert_eq!(model, "main");
-    assert!(secret.is_none());
-    let _ignored = fs::remove_dir_all(root);
-    Ok(())
-}
-
-#[test]
-fn runtime_credential_dir_repair_sets_agent_owner_and_private_mode()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!(
-        "cortexfs-runtime-credential-dir-{}",
-        std::process::id()
-    ));
-    let _ignored = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root)?;
-    fs::set_permissions(&root, fs::Permissions::from_mode(0o755))?;
-    let fd = super::open_dir_no_follow(&root)?;
-    let uid = nix::unistd::Uid::current().as_raw();
-    let gid = nix::unistd::Gid::current().as_raw();
-
-    super::repair_runtime_credential_dir(&fd, uid, gid)?;
-
-    let metadata = fs::metadata(&root)?;
-    assert_eq!(metadata.uid(), uid);
-    assert_eq!(metadata.gid(), gid);
-    assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
     let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
@@ -227,82 +174,6 @@ fn session_permission_repair_recurses_without_chmodding_symlink_targets(
     assert_eq!(fs::metadata(&target)?.permissions().mode() & 0o777, 0o666);
 
     let _ignored = fs::remove_dir_all(root);
-    let _ignored = fs::remove_dir_all(outside);
-    Ok(())
-}
-
-#[test]
-fn runtime_provider_secret_file_is_removed_on_drop() -> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!(
-        "cortexfs-runtime-secret-drop-{}",
-        std::process::id()
-    ));
-    let _ignored = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root)?;
-    let path = root.join("coder-provider-default");
-    fs::write(&path, "secret\n")?;
-
-    {
-        let _secret = super::RuntimeProviderSecretFile {
-            dir_fd: super::open_dir_no_follow(&root)?,
-            file_name: "coder-provider-default".to_owned(),
-            path: path.clone(),
-            provider: "fixture".to_owned(),
-            account: "default".to_owned(),
-        };
-        assert!(path.exists());
-    }
-
-    assert!(!path.exists());
-    let _ignored = fs::remove_dir_all(root);
-    Ok(())
-}
-
-#[test]
-fn runtime_provider_secret_drop_unlinks_original_directory_entry(
-) -> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!(
-        "cortexfs-runtime-secret-drop-fd-{}",
-        std::process::id()
-    ));
-    let moved = std::env::temp_dir().join(format!(
-        "cortexfs-runtime-secret-drop-fd-moved-{}",
-        std::process::id()
-    ));
-    let outside = std::env::temp_dir().join(format!(
-        "cortexfs-runtime-secret-drop-fd-outside-{}",
-        std::process::id()
-    ));
-    let _ignored = fs::remove_dir_all(&root);
-    let _ignored = fs::remove_dir_all(&moved);
-    let _ignored = fs::remove_dir_all(&outside);
-    fs::create_dir_all(&root)?;
-    fs::create_dir_all(&outside)?;
-    let file_name = "coder-provider-default";
-    let original = root.join(file_name);
-    fs::write(&original, "secret\n")?;
-    let dir_fd = super::open_dir_no_follow(&root)?;
-    fs::rename(&root, &moved)?;
-    fs::write(outside.join(file_name), "outside\n")?;
-    std::os::unix::fs::symlink(&outside, &root)?;
-
-    {
-        let _secret = super::RuntimeProviderSecretFile {
-            dir_fd,
-            file_name: file_name.to_owned(),
-            path: original,
-            provider: "fixture".to_owned(),
-            account: "default".to_owned(),
-        };
-    }
-
-    assert!(!moved.join(file_name).exists());
-    assert_eq!(
-        fs::read_to_string(outside.join(file_name)).unwrap_or_default(),
-        "outside\n"
-    );
-    let _ignored = fs::remove_file(&root);
-    let _ignored = fs::remove_dir_all(moved);
     let _ignored = fs::remove_dir_all(outside);
     Ok(())
 }
