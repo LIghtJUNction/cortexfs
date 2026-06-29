@@ -427,8 +427,9 @@ fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliErro
         config.redirect_uri, timeout_secs
     ))?;
 
-    let mut stream = accept_oauth_callback(&listener, timeout_secs)?;
-    let request = read_oauth_callback_request(&mut stream)?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+    let mut stream = accept_oauth_callback(&listener, deadline)?;
+    let request = read_oauth_callback_request(&mut stream, deadline)?;
     let params = parse_oauth_callback_params(&request, &callback.path)?;
     if params.state.as_deref() != Some(state.as_str()) {
         return Err(CliError::usage("oauth callback state mismatch"));
@@ -473,9 +474,8 @@ fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
 
 fn accept_oauth_callback(
     listener: &std::net::TcpListener,
-    timeout_secs: u64,
+    deadline: std::time::Instant,
 ) -> Result<std::net::TcpStream, CliError> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
     loop {
         match listener.accept() {
             Ok((stream, _addr)) => return Ok(stream),
@@ -780,9 +780,16 @@ struct OAuthCallbackParams {
     state: Option<String>,
 }
 
-fn read_oauth_callback_request(stream: &mut std::net::TcpStream) -> Result<String, CliError> {
+fn read_oauth_callback_request(
+    stream: &mut std::net::TcpStream,
+    deadline: std::time::Instant,
+) -> Result<String, CliError> {
+    let read_timeout = deadline
+        .checked_duration_since(std::time::Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| CliError::unavailable("oauth callback timed out"))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(read_timeout))
         .map_err(|error| CliError::unavailable(format!("cannot configure oauth callback: {error}")))?;
     read_oauth_callback_request_from_reader(stream, MAX_OAUTH_CALLBACK_REQUEST_BYTES)
 }
@@ -796,7 +803,12 @@ fn read_oauth_callback_request_from_reader(
     loop {
         let size = reader
             .read(&mut chunk)
-            .map_err(|error| CliError::unavailable(format!("cannot read oauth callback: {error}")))?;
+            .map_err(|error| match error.kind() {
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => {
+                    CliError::unavailable("oauth callback timed out")
+                }
+                _ => CliError::unavailable(format!("cannot read oauth callback: {error}")),
+            })?;
         if size == 0 {
             break;
         }
