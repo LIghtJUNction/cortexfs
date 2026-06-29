@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
@@ -14,7 +14,6 @@ use cortexfs::{
     AgentRuntimeViewError, CTX_ROOT, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
     ToolPath, authorize_tool_execution, derive_agent_runtime_view,
 };
-use cortexfs_tool_sdk::DynamicToolCache;
 use nix::libc;
 use nix::sys::termios::{self, ControlFlags, InputFlags, LocalFlags, OutputFlags, SetArg};
 use serde_json::Value;
@@ -329,6 +328,223 @@ struct ToolContext {
     tools: BTreeMap<String, LoadedTool>,
     max_loaded_tools: usize,
     clock: u64,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct DynamicToolCache {
+    capacity: usize,
+    window_capacity: usize,
+    clock: u64,
+    frequencies: BTreeMap<PathBuf, u64>,
+    pinned: BTreeSet<PathBuf>,
+    entries: BTreeMap<PathBuf, CachedToolPath>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CacheSegment {
+    Window,
+    Main,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CachedToolPath {
+    path: PathBuf,
+    last_used: u64,
+    segment: CacheSegment,
+}
+
+impl DynamicToolCache {
+    fn with_window_percent(capacity: usize, window_percent: usize) -> Self {
+        let capacity = capacity.max(1);
+        let window_percent = window_percent.clamp(1, 100);
+        let window_capacity = capacity
+            .saturating_mul(window_percent)
+            .div_ceil(100)
+            .max(1)
+            .min(capacity);
+        Self {
+            capacity,
+            window_capacity,
+            clock: 0,
+            frequencies: BTreeMap::new(),
+            pinned: BTreeSet::new(),
+            entries: BTreeMap::new(),
+        }
+    }
+
+    fn contains_path(&self, path: &Path) -> bool {
+        self.entries.contains_key(path)
+    }
+
+    fn is_pinned_path(&self, path: &Path) -> bool {
+        self.pinned.contains(path)
+    }
+
+    fn load_path(&mut self, path: &Path) {
+        self.record_frequency(path);
+        if !self.entries.contains_key(path) {
+            let path = path.to_path_buf();
+            let _old = self.entries.insert(
+                path.clone(),
+                CachedToolPath {
+                    path: path.clone(),
+                    last_used: 0,
+                    segment: CacheSegment::Window,
+                },
+            );
+            self.admit_window_candidate(&path);
+        }
+        self.clock = self.clock.saturating_add(1);
+        if let Some(entry) = self.entries.get_mut(path) {
+            entry.last_used = self.clock;
+        }
+    }
+
+    fn pin_path(&mut self, path: &Path) {
+        let path = path.to_path_buf();
+        let _inserted = self.pinned.insert(path.clone());
+        self.load_path(&path);
+    }
+
+    fn unpin_path(&mut self, path: &Path) -> bool {
+        self.pinned.remove(path)
+    }
+
+    fn record_frequency(&mut self, path: &Path) {
+        let count = self.frequencies.entry(path.to_path_buf()).or_insert(0);
+        *count = count.saturating_add(1);
+    }
+
+    fn admit_window_candidate(&mut self, current_path: &Path) {
+        while self.window_len() > self.window_capacity {
+            let Some(candidate) = self.oldest_window_path() else {
+                return;
+            };
+            if self.main_len() < self.main_capacity() {
+                if let Some(entry) = self.entries.get_mut(&candidate) {
+                    entry.segment = CacheSegment::Main;
+                }
+                continue;
+            }
+            let Some(victim) = self.main_victim_path() else {
+                return;
+            };
+            if candidate == current_path {
+                if let Some(entry) = self.entries.get_mut(&candidate) {
+                    entry.segment = CacheSegment::Main;
+                }
+            } else if tiny_lfu_admits(
+                self.frequency(&candidate),
+                self.frequency(&victim),
+                self.last_used(&candidate),
+                self.last_used(&victim),
+            ) {
+                let _dropped = self.entries.remove(&victim);
+                if let Some(entry) = self.entries.get_mut(&candidate) {
+                    entry.segment = CacheSegment::Main;
+                }
+            } else {
+                let _dropped = self.entries.remove(&candidate);
+            }
+        }
+
+        while self.unpinned_len() > self.capacity {
+            let victim = self
+                .main_victim_path()
+                .filter(|path| path != current_path)
+                .or_else(|| {
+                    self.oldest_window_path()
+                        .filter(|path| path != current_path)
+                });
+            let Some(victim) = victim else {
+                return;
+            };
+            let _dropped = self.entries.remove(&victim);
+        }
+    }
+
+    fn unpinned_len(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| !self.is_pinned_path(&entry.path))
+            .count()
+    }
+
+    fn window_len(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| {
+                entry.segment == CacheSegment::Window && !self.is_pinned_path(&entry.path)
+            })
+            .count()
+    }
+
+    fn main_len(&self) -> usize {
+        self.entries
+            .values()
+            .filter(|entry| {
+                entry.segment == CacheSegment::Main && !self.is_pinned_path(&entry.path)
+            })
+            .count()
+    }
+
+    fn main_capacity(&self) -> usize {
+        self.capacity.saturating_sub(self.window_capacity).max(1)
+    }
+
+    fn oldest_window_path(&self) -> Option<PathBuf> {
+        self.entries
+            .values()
+            .filter(|entry| {
+                entry.segment == CacheSegment::Window && !self.is_pinned_path(&entry.path)
+            })
+            .min_by_key(|entry| (entry.last_used, entry.path.clone()))
+            .map(|entry| entry.path.clone())
+    }
+
+    fn main_victim_path(&self) -> Option<PathBuf> {
+        wtinylfu_victim_path(
+            self.entries
+                .values()
+                .filter(|entry| {
+                    entry.segment == CacheSegment::Main && !self.is_pinned_path(&entry.path)
+                })
+                .map(|entry| {
+                    (
+                        entry.path.as_path(),
+                        self.frequency(&entry.path),
+                        entry.last_used,
+                    )
+                }),
+        )
+    }
+
+    fn frequency(&self, path: &Path) -> u64 {
+        self.frequencies.get(path).copied().unwrap_or(0)
+    }
+
+    fn last_used(&self, path: &Path) -> u64 {
+        self.entries.get(path).map_or(0, |entry| entry.last_used)
+    }
+}
+
+fn tiny_lfu_admits(
+    candidate_frequency: u64,
+    victim_frequency: u64,
+    candidate_last_used: u64,
+    victim_last_used: u64,
+) -> bool {
+    candidate_frequency > victim_frequency
+        || (candidate_frequency == victim_frequency && candidate_last_used > victim_last_used)
+}
+
+fn wtinylfu_victim_path<'a>(
+    entries: impl IntoIterator<Item = (&'a Path, u64, u64)>,
+) -> Option<PathBuf> {
+    entries
+        .into_iter()
+        .min_by_key(|&(path, hits, last_used)| (hits, last_used, path.to_path_buf()))
+        .map(|(path, _hits, _last_used)| path.to_path_buf())
 }
 
 impl ToolContext {
@@ -832,7 +1048,7 @@ fn repl_command(root: &Path, words: &[String]) -> Result<(), TshError> {
 
 fn repl_load(
     root: &Path,
-    cache: &DynamicToolCache,
+    cache: &mut DynamicToolCache,
     context: &mut ToolContext,
     words: &[String],
 ) -> Result<(), TshError> {
@@ -842,7 +1058,9 @@ fn repl_load(
     let Some(name) = words.get(1) else {
         return write_stdout("tsh: load requires one tool name\n");
     };
-    let loaded = load_tool_context(root, cache, name, false)?;
+    let mut loaded = load_tool_context(root, name, false)?;
+    cache.load_path(&loaded.path);
+    loaded.dynamic_resident = cache.contains_path(&loaded.path);
     let loaded_name = loaded.name.clone();
     let path = loaded.path.clone();
     let dynamic_resident = loaded.dynamic_resident;
@@ -893,7 +1111,7 @@ fn repl_loads(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
 
 fn repl_pin(
     root: &Path,
-    cache: &DynamicToolCache,
+    cache: &mut DynamicToolCache,
     context: &mut ToolContext,
     words: &[String],
 ) -> Result<(), TshError> {
@@ -903,7 +1121,9 @@ fn repl_pin(
     let Some(name) = words.get(1) else {
         return write_stdout("tsh: pin requires one tool name\n");
     };
-    let loaded = load_tool_context(root, cache, name, true)?;
+    let mut loaded = load_tool_context(root, name, true)?;
+    cache.pin_path(&loaded.path);
+    loaded.dynamic_resident = cache.contains_path(&loaded.path);
     let loaded_name = loaded.name.clone();
     let path = loaded.path.clone();
     let dynamic_resident = loaded.dynamic_resident;
@@ -1224,20 +1444,14 @@ fn resolve_tool_hit(root: &Path, name: &str) -> Result<cortexfs::ToolHit, TshErr
     Ok(hit)
 }
 
-fn load_tool_context(
-    root: &Path,
-    cache: &DynamicToolCache,
-    name: &str,
-    pinned: bool,
-) -> Result<LoadedTool, TshError> {
+fn load_tool_context(root: &Path, name: &str, pinned: bool) -> Result<LoadedTool, TshError> {
     let hit = resolve_tool_hit(root, name)?;
-    let dynamic_resident = cache.contains_path(&hit.path().display().to_string());
     Ok(LoadedTool {
         name: name.to_owned(),
         path: hit.path().to_path_buf(),
         description: tool_description(&hit),
         schema: tool_schema(&hit),
-        dynamic_resident,
+        dynamic_resident: false,
         pinned,
         last_used: 0,
     })
@@ -1621,14 +1835,14 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        LoadedTool, MAX_TSH_REPL_LINE_BYTES, ToolContext, TshCommand, TshConfig,
+        DynamicToolCache, LoadedTool, MAX_TSH_REPL_LINE_BYTES, ToolContext, TshCommand, TshConfig,
         append_schema_help, builtin_words, ctx_tool_path_with_home, get_id_program, help_text,
         id_command, load_tool_context, open_executable_no_follow, parse_args, parse_current_uid,
         parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, read_repl_line_canonical_from,
         read_tsh_config_text, requires_explicit_repl_input, run_repl_tool, run_tool,
-        terminal_safe_text, tshrc_ctx_path, validate_tshrc_ctx_path,
+        terminal_safe_text, tiny_lfu_admits, tshrc_ctx_path, validate_tshrc_ctx_path,
+        wtinylfu_victim_path,
     };
-    use cortexfs_tool_sdk::DynamicToolCache;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -2062,6 +2276,45 @@ window_percent=25
     }
 
     #[test]
+    fn tsh_cache_victim_prefers_lowest_frequency_then_oldest_use() {
+        assert_eq!(
+            wtinylfu_victim_path([
+                (Path::new("/ctx/tool/a"), 4, 10),
+                (Path::new("/ctx/tool/b"), 1, 20),
+                (Path::new("/ctx/tool/c"), 1, 5),
+            ]),
+            Some(PathBuf::from("/ctx/tool/c"))
+        );
+        assert_eq!(wtinylfu_victim_path([]), None);
+    }
+
+    #[test]
+    fn tsh_cache_admission_keeps_frequent_main_entries() {
+        assert!(tiny_lfu_admits(5, 2, 1, 10));
+        assert!(!tiny_lfu_admits(1, 3, 10, 1));
+        assert!(tiny_lfu_admits(2, 2, 20, 10));
+        assert!(!tiny_lfu_admits(2, 2, 10, 20));
+    }
+
+    #[test]
+    fn tsh_cache_keeps_current_load_and_respects_pins() {
+        let a = PathBuf::from("/ctx/tool/a");
+        let b = PathBuf::from("/ctx/tool/b");
+        let c = PathBuf::from("/ctx/tool/c");
+        let mut cache = DynamicToolCache::with_window_percent(1, 1);
+
+        cache.pin_path(&a);
+        cache.load_path(&b);
+        cache.load_path(&c);
+
+        assert!(cache.contains_path(&a));
+        assert!(cache.is_pinned_path(&a));
+        assert!(cache.contains_path(&c));
+        assert!(cache.unpinned_len() <= 1);
+        assert!(cache.unpin_path(&a));
+    }
+
+    #[test]
     fn load_tool_context_reads_metadata_without_dynamic_load() {
         let root =
             std::env::temp_dir().join(format!("cortexfs-tsh-load-context-{}", std::process::id()));
@@ -2073,8 +2326,7 @@ window_percent=25
         assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
         assert!(fs::write(control_dir.join("description"), "metadata only\n").is_ok());
 
-        let cache = DynamicToolCache::new(4);
-        let loaded = load_tool_context(&root, &cache, "meta", true);
+        let loaded = load_tool_context(&root, "meta", true);
         assert!(loaded.is_ok(), "load metadata: {loaded:?}");
         let Ok(loaded) = loaded else {
             return;
@@ -2084,8 +2336,6 @@ window_percent=25
         assert_eq!(loaded.description, "metadata only");
         assert!(loaded.pinned);
         assert!(!loaded.dynamic_resident);
-        assert!(!cache.contains_path(&tool.display().to_string()));
-        assert!(!cache.is_pinned_path(&tool.display().to_string()));
 
         let _ignored = fs::remove_dir_all(root);
     }
@@ -2106,8 +2356,7 @@ window_percent=25
         assert!(fs::write(&outside, "attacker metadata\n").is_ok());
         assert!(symlink(&outside, control_dir.join("description")).is_ok());
 
-        let cache = DynamicToolCache::new(4);
-        let loaded = load_tool_context(&root, &cache, "meta", true);
+        let loaded = load_tool_context(&root, "meta", true);
         assert!(loaded.is_ok(), "load metadata: {loaded:?}");
         let Ok(loaded) = loaded else {
             return;
@@ -2133,8 +2382,7 @@ window_percent=25
         assert!(fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).is_ok());
         assert!(symlink(&outside, tool_dir.join("meta.d")).is_ok());
 
-        let cache = DynamicToolCache::new(4);
-        let loaded = load_tool_context(&root, &cache, "meta", true);
+        let loaded = load_tool_context(&root, "meta", true);
         assert!(loaded.is_ok(), "load metadata: {loaded:?}");
         let Ok(loaded) = loaded else {
             return;
