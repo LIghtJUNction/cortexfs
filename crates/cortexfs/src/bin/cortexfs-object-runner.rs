@@ -41,6 +41,7 @@ const MAX_RUNNER_STDIN_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_RUNNER_CONTROL_BYTES: u64 = 64 * 1024;
 const AGENT_TOOL_TIMEOUT_SECONDS: u64 = 20;
 const MAX_AGENT_TOOL_TIMEOUT_SECONDS: u64 = 120;
+const AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const AGENT_MODEL_TIMEOUT_SECONDS: u64 = 120;
 const MAX_AGENT_MODEL_TIMEOUT_SECONDS: u64 = 600;
 
@@ -1298,18 +1299,19 @@ fn run_agent_tool_process_with_timeout(
         }
         thread::sleep(Duration::from_millis(50));
     };
-    let stdout = stdout.unwrap_or_else(|| {
-        stdout_reader
-            .take()
-            .and_then(|reader| reader.join().ok())
-            .unwrap_or_default()
-    });
-    let stderr = stderr.unwrap_or_else(|| {
-        stderr_reader
-            .take()
-            .and_then(|reader| reader.join().ok())
-            .unwrap_or_default()
-    });
+    terminate_process_group(&mut child);
+    let stdout = match stdout {
+        Some(output) => output,
+        None => {
+            collect_agent_tool_output_reader(stdout_reader.take(), AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT)?
+        }
+    };
+    let stderr = match stderr {
+        Some(output) => output,
+        None => {
+            collect_agent_tool_output_reader(stderr_reader.take(), AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT)?
+        }
+    };
     if stdout.len() > MAX_AGENT_TOOL_OUTPUT_BYTES || stderr.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
         return Err(format!(
             "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
@@ -1320,6 +1322,26 @@ fn run_agent_tool_process_with_timeout(
         stdout,
         stderr,
     })
+}
+
+fn collect_agent_tool_output_reader(
+    reader: Option<thread::JoinHandle<Vec<u8>>>,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    let Some(reader) = reader else {
+        return Ok(Vec::new());
+    };
+    let deadline = Instant::now() + timeout;
+    while !reader.is_finished() {
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "tool output did not close within {}s",
+                timeout.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    Ok(reader.join().unwrap_or_default())
 }
 
 fn agent_tool_timeout_seconds() -> u64 {
