@@ -1444,6 +1444,44 @@ fn buffered_agent_renderer_rejects_too_many_diagnostics() {
 }
 
 #[test]
+fn interruptible_agent_renderer_preserves_partial_frame_across_timeout() {
+    let pair = std::os::unix::net::UnixStream::pair();
+    assert!(pair.is_ok());
+    let Ok((reader, mut writer)) = pair else {
+        return;
+    };
+    assert!(reader
+        .set_read_timeout(Some(std::time::Duration::from_millis(10)))
+        .is_ok());
+    let writer_thread = std::thread::spawn(move || {
+        assert!(std::io::Write::write_all(&mut writer, br#"{"type":"error","#).is_ok());
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(
+            std::io::Write::write_all(
+                &mut writer,
+                br#""code":"EFAIL","message":"slow split frame"}"#,
+            )
+            .is_ok()
+        );
+        assert!(std::io::Write::write_all(&mut writer, b"\n").is_ok());
+    });
+    let interrupted = std::sync::atomic::AtomicBool::new(false);
+
+    let rendered =
+        collect_agent_events_buffered_interruptible(std::io::BufReader::new(reader), &interrupted);
+
+    assert!(writer_thread.join().is_ok());
+    assert!(matches!(
+        rendered,
+        Ok(ref rendered)
+            if rendered.output.is_empty()
+                && rendered.diagnostics == vec!["error EFAIL: slow split frame".to_owned()]
+                && rendered.exit_code == 1
+                && !rendered.interrupted
+    ));
+}
+
+#[test]
 fn interruptible_agent_renderer_returns_on_interrupt_flag() {
     let pair = std::os::unix::net::UnixStream::pair();
     assert!(pair.is_ok());
