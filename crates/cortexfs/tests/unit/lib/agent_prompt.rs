@@ -68,8 +68,7 @@ fn agent_prompt_rules_refuse_oversized_files() {
 }
 
 #[test]
-fn agent_prompt_skill_discovery_rejects_symlinked_skill_root_parent(
-) -> Result<(), Box<dyn std::error::Error>> {
+fn agent_prompt_skill_discovery_rejects_symlinked_skill_root_parent() {
     let root = clean_test_dir("agent-prompt-skills-symlink-parent");
     let outside = root.join("outside").join(".agents");
     let skill = outside.join("skills").join("escape").join("SKILL.md");
@@ -79,13 +78,36 @@ fn agent_prompt_skill_discovery_rejects_symlinked_skill_root_parent(
     );
     assert!(symlink(&outside, root.join(".agents")).is_ok());
 
-    let original_cwd = std::env::current_dir()?;
-    std::env::set_current_dir(&root)?;
-    let skills = collect_skill_metadata(8_000);
-    std::env::set_current_dir(original_cwd)?;
+    let skills = crate::agent_prompt::discover_skill_metadata_from_roots([
+        root.join(".agents").join("skills"),
+        root.join(".codex").join("skills"),
+    ]);
+    let skills = format_skill_metadata_with_budget(&skills, 8_000);
 
     assert!(!skills.contains("escape-skill"));
-    Ok(())
+}
+
+#[test]
+fn agent_prompt_skill_metadata_discovers_project_ancestor_skills() {
+    let root = clean_test_dir("agent-prompt-skills-project-ancestor");
+    let nested = root.join("workspace").join("crates").join("cortexfs");
+    write_text_file(
+        &root
+            .join(".agents")
+            .join("skills")
+            .join("project-skill")
+            .join("SKILL.md"),
+        "---\nname: project-skill\ndescription: project skill from ancestor\n---\n",
+    );
+    assert!(fs::create_dir_all(&nested).is_ok());
+    let mut roots = Vec::new();
+    crate::agent_prompt::push_project_skill_roots(&mut roots, &nested);
+    let skills = crate::agent_prompt::discover_skill_metadata_from_roots(roots);
+    let skills = format_skill_metadata_with_budget(&skills, 8_000);
+
+    assert!(skills.contains("name: project-skill"));
+    assert!(skills.contains("project skill from ancestor"));
+    assert!(skills.contains(".agents/skills/project-skill/SKILL.md"));
 }
 
 #[test]
@@ -103,12 +125,12 @@ fn agent_prompt_skill_metadata_shortens_then_omits_over_budget() {
         },
     ];
 
-    let shortened = format_skill_metadata_with_budget(skills.clone(), 520);
+    let shortened = format_skill_metadata_with_budget(&skills, 520);
     assert!(shortened.contains("WARNING: skill descriptions were shortened"));
     assert!(shortened.contains("name: alpha"));
     assert!(shortened.contains("name: beta"));
 
-    let omitted = format_skill_metadata_with_budget(skills, 340);
+    let omitted = format_skill_metadata_with_budget(&skills, 340);
     assert!(omitted.contains("WARNING: skill metadata exceeded"));
     assert!(omitted.contains("name: alpha"));
     assert!(!omitted.contains("name: beta"));
@@ -122,7 +144,7 @@ fn agent_prompt_skill_metadata_respects_tiny_budget() {
         path: PathBuf::from("/skills/alpha/SKILL.md"),
     }];
 
-    let tiny = format_skill_metadata_with_budget(skills, 1);
+    let tiny = format_skill_metadata_with_budget(&skills, 1);
 
     assert!(tiny.len() <= 1);
 }

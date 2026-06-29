@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::env;
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
 use std::fs::OpenOptions;
@@ -25,6 +26,18 @@ const DEFAULT_SHELL: &str = "/usr/bin/tsh";
 const CLIENT_MODE_LIMIT: usize = 16;
 const CLIENT_MODE_TIMEOUT: Duration = Duration::from_secs(1);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const PRESERVED_PTY_ENV: &[&str] = &[
+    "CTX_ROOT",
+    "CTX_HOME",
+    "CTX_AGENT",
+    "CTX_AGENT_SUBJECT",
+    "CTX_PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+];
 
 type PtyWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type Client = Arc<Mutex<UnixStream>>;
@@ -285,16 +298,33 @@ fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
 }
 
 fn pty_command(config: &RunConfig) -> Result<CommandBuilder, CtxtermError> {
+    pty_command_with_env(config, env::vars_os())
+}
+
+fn pty_command_with_env(
+    config: &RunConfig,
+    envs: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Result<CommandBuilder, CtxtermError> {
     let mut command = CommandBuilder::new(&config.program);
     command.env_clear();
     command.env("PATH", "/usr/bin:/bin");
     command.env("TERM", "xterm-256color");
+    for (key, value) in envs {
+        if preserved_pty_env_key(&key) {
+            command.env(key, value);
+        }
+    }
     let cwd = env::current_dir().map_err(|error| {
         CtxtermError::unavailable(format!("cannot read current directory: {error}"))
     })?;
     command.cwd(cwd.as_os_str());
     command.args(config.args.clone());
     Ok(command)
+}
+
+fn preserved_pty_env_key(key: &OsStr) -> bool {
+    key.to_str()
+        .is_some_and(|key| PRESERVED_PTY_ENV.contains(&key))
 }
 
 fn start_listener(
@@ -777,7 +807,7 @@ fn write_error_to_ctxterm(error: &io::Error) -> CtxtermError {
 mod tests {
     use super::{
         ClientMode, Clients, CtxtermCommand, PtyWriter, RunConfig, env_u16_from_value, open_log,
-        parse_args, pty_command, read_client_mode, read_client_mode_with_timeout_duration,
+        parse_args, pty_command_with_env, read_client_mode, read_client_mode_with_timeout_duration,
         remove_stale_socket, start_listener,
     };
     use std::ffi::OsString;
@@ -824,13 +854,23 @@ mod tests {
 
     #[test]
     fn ctxterm_pty_command_uses_clean_environment() {
-        let command = pty_command(&RunConfig {
+        let config = RunConfig {
             listen: None,
             log: None,
             stdio: false,
             program: OsString::from("/usr/bin/tsh"),
             args: Vec::new(),
-        });
+        };
+        let command = pty_command_with_env(
+            &config,
+            [
+                (
+                    OsString::from("CORTEXFS_SHOULD_NOT_LEAK"),
+                    OsString::from("secret"),
+                ),
+                (OsString::from("PATH"), OsString::from("/tmp/evil")),
+            ],
+        );
         assert!(command.is_ok());
         let Ok(command) = command else { return };
         let mut env = command
@@ -846,6 +886,56 @@ mod tests {
                 ("TERM".to_owned(), "xterm-256color".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn ctxterm_pty_command_preserves_agent_environment() {
+        let config = RunConfig {
+            listen: None,
+            log: None,
+            stdio: false,
+            program: OsString::from("/usr/bin/tsh"),
+            args: Vec::new(),
+        };
+        let command = pty_command_with_env(
+            &config,
+            [
+                (OsString::from("CTX_ROOT"), OsString::from("/ctx")),
+                (OsString::from("CTX_HOME"), OsString::from("/ctx/home/1000")),
+                (OsString::from("CTX_AGENT"), OsString::from("coder")),
+                (
+                    OsString::from("CTX_AGENT_SUBJECT"),
+                    OsString::from("coder_t"),
+                ),
+                (
+                    OsString::from("CTX_PATH"),
+                    OsString::from("/ctx/tool:/ctx/home/1000/tool"),
+                ),
+                (OsString::from("HOME"), OsString::from("/home/agent")),
+                (OsString::from("USER"), OsString::from("coder")),
+                (OsString::from("LOGNAME"), OsString::from("coder")),
+                (OsString::from("SHELL"), OsString::from("/usr/bin/bash")),
+                (OsString::from("LANG"), OsString::from("C.UTF-8")),
+                (OsString::from("LD_PRELOAD"), OsString::from("evil.so")),
+            ],
+        );
+        assert!(command.is_ok());
+        let Ok(command) = command else { return };
+        let env = command
+            .iter_full_env_as_str()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+
+        assert!(env.contains(&("CTX_AGENT".to_owned(), "coder".to_owned())));
+        assert!(env.contains(&("CTX_ROOT".to_owned(), "/ctx".to_owned())));
+        assert!(env.contains(&("CTX_HOME".to_owned(), "/ctx/home/1000".to_owned())));
+        assert!(env.contains(&("CTX_AGENT_SUBJECT".to_owned(), "coder_t".to_owned())));
+        assert!(env.contains(&(
+            "CTX_PATH".to_owned(),
+            "/ctx/tool:/ctx/home/1000/tool".to_owned()
+        )));
+        assert!(env.contains(&("HOME".to_owned(), "/home/agent".to_owned())));
+        assert!(!env.iter().any(|entry| entry.0 == "LD_PRELOAD"));
     }
 
     #[test]
