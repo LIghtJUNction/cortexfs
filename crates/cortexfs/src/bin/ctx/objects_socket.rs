@@ -498,13 +498,24 @@ fn render_agent_event_lines(
     let mut exit = ExitCode::SUCCESS;
     let mut quiet_since = std::time::Instant::now();
     let mut next_waiting_notice = Duration::from_secs(3);
+    let mut response_bytes: usize = 0;
+    let mut events: usize = 0;
     let mut line = String::new();
     let mut pending_frame = Vec::new();
     loop {
         line.clear();
         match read_agent_socket_event_line_limited(&mut reader, &mut pending_frame, &mut line) {
             Ok(None) => break,
-            Ok(Some(_bytes)) => {}
+            Ok(Some(bytes)) => {
+                response_bytes = response_bytes.checked_add(bytes).ok_or_else(|| {
+                    CliError::unavailable("agent response exceeds response limit")
+                })?;
+                if response_bytes > MAX_AGENT_RESPONSE_BYTES {
+                    return Err(CliError::unavailable(format!(
+                        "agent response exceeds {MAX_AGENT_RESPONSE_BYTES} bytes"
+                    )));
+                }
+            }
             Err(error)
                 if matches!(
                     error.kind(),
@@ -532,6 +543,12 @@ fn render_agent_event_lines(
         }
         quiet_since = std::time::Instant::now();
         next_waiting_notice = Duration::from_secs(3);
+        events += 1;
+        if events > MAX_AGENT_EVENTS {
+            return Err(CliError::unavailable(format!(
+                "agent response exceeds {MAX_AGENT_EVENTS} events"
+            )));
+        }
         let line = line.trim_end_matches(['\r', '\n']);
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             print_line(line)?;
@@ -637,12 +654,14 @@ fn exit_code_u8(code: ExitCode) -> u8 {
     u8::from(code != ExitCode::SUCCESS)
 }
 
+const MAX_AGENT_RESPONSE_BYTES: usize = MAX_SOCKET_FRAME_BYTES * 4;
+const MAX_AGENT_EVENTS: usize = 8192;
 #[cfg(test)]
-const MAX_BUFFERED_AGENT_RESPONSE_BYTES: usize = MAX_SOCKET_FRAME_BYTES * 4;
+const MAX_BUFFERED_AGENT_RESPONSE_BYTES: usize = MAX_AGENT_RESPONSE_BYTES;
 #[cfg(test)]
 const MAX_BUFFERED_AGENT_RENDERED_BYTES: usize = MAX_SOCKET_FRAME_BYTES;
 #[cfg(test)]
-const MAX_BUFFERED_AGENT_EVENTS: usize = 8192;
+const MAX_BUFFERED_AGENT_EVENTS: usize = MAX_AGENT_EVENTS;
 #[cfg(test)]
 const MAX_BUFFERED_AGENT_DIAGNOSTICS: usize = 1024;
 
