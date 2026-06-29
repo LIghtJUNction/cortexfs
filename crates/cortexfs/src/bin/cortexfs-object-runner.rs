@@ -189,7 +189,6 @@ fn model_candidates(ctx_root: &Path, model: &str) -> Result<Vec<ModelCandidate>,
             break;
         }
     }
-    push_local_model_fallback(ctx_root, &primary, &mut names, &mut seen);
     Ok(names
         .into_iter()
         .map(|name| ModelCandidate {
@@ -197,27 +196,6 @@ fn model_candidates(ctx_root: &Path, model: &str) -> Result<Vec<ModelCandidate>,
             name,
         })
         .collect())
-}
-
-fn push_local_model_fallback(
-    ctx_root: &Path,
-    primary: &str,
-    names: &mut Vec<String>,
-    seen: &mut std::collections::HashSet<String>,
-) {
-    let Some((provider, model)) = primary.split_once('/') else {
-        return;
-    };
-    if provider == "local" || names.len() >= MAX_MODEL_FALLBACK_CANDIDATES {
-        return;
-    }
-    if !is_regular_file_no_follow(&ctx_root.join("model").join(primary)) {
-        return;
-    }
-    let fallback = format!("local/{model}");
-    if is_regular_file_no_follow(&ctx_root.join("model").join(&fallback)) {
-        push_model_candidate_name(&fallback, names, seen);
-    }
 }
 
 fn push_model_candidate_name(

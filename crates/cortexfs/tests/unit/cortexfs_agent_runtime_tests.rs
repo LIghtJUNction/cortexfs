@@ -71,24 +71,21 @@ fn runtime_agent_executable_uses_ctx_abi_path() {
 }
 
 #[test]
-fn runtime_model_falls_back_to_existing_local_counterpart_without_primary_secret(
+fn runtime_model_keeps_requested_model_without_primary_secret(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::temp_dir().join(format!(
-        "cortexfs-runtime-model-local-fallback-{}",
+        "cortexfs-runtime-model-no-implicit-fallback-{}",
         std::process::id()
     ));
     let _ignored = fs::remove_dir_all(&root);
-    fs::create_dir_all(root.join("model/api.lmm.best"))?;
-    fs::create_dir_all(root.join("model/local"))?;
-    std::os::unix::fs::symlink(
-        "/ctx/model/api.lmm.best/gpt-5.4-mini",
-        root.join("model/main"),
-    )?;
-    fs::write(root.join("model/local/gpt-5.4-mini"), "#!/bin/sh\n")?;
+    fs::create_dir_all(root.join("model/remote"))?;
+    fs::create_dir_all(root.join("model/mirror"))?;
+    std::os::unix::fs::symlink("/ctx/model/remote/alpha", root.join("model/main"))?;
+    fs::write(root.join("model/mirror/alpha"), "#!/bin/sh\n")?;
 
     let (model, secret) = runtime_model_and_secret(&root, "main");
 
-    assert_eq!(model, "local/gpt-5.4-mini");
+    assert_eq!(model, "main");
     assert!(secret.is_none());
     let _ignored = fs::remove_dir_all(root);
     Ok(())
@@ -250,7 +247,7 @@ fn runtime_provider_secret_file_is_removed_on_drop() -> Result<(), Box<dyn std::
             dir_fd: super::open_dir_no_follow(&root)?,
             file_name: "coder-provider-default".to_owned(),
             path: path.clone(),
-            provider: "local".to_owned(),
+            provider: "fixture".to_owned(),
             account: "default".to_owned(),
         };
         assert!(path.exists());
@@ -294,7 +291,7 @@ fn runtime_provider_secret_drop_unlinks_original_directory_entry(
             dir_fd,
             file_name: file_name.to_owned(),
             path: original,
-            provider: "local".to_owned(),
+            provider: "fixture".to_owned(),
             account: "default".to_owned(),
         };
     }

@@ -99,50 +99,10 @@ fn runtime_model_and_secret(
     source: &Path,
     requested_model: &str,
 ) -> (String, Option<cortexfs::ProviderSystemSecret>) {
-    if let Ok(Some(secret)) =
-        cortexfs::read_provider_system_secret_for_model(source, requested_model)
-    {
-        return (requested_model.to_owned(), Some(secret));
-    }
-    let resolved = resolved_runtime_model(source, requested_model);
-    let Some(local) = local_runtime_model_counterpart(&resolved) else {
-        return (requested_model.to_owned(), None);
-    };
-    if !runtime_model_exists(source, &local) {
-        return (requested_model.to_owned(), None);
-    }
-    let local_secret = cortexfs::read_provider_system_secret_for_model(source, &local)
+    let provider_secret = cortexfs::read_provider_system_secret_for_model(source, requested_model)
         .ok()
         .flatten();
-    (local, local_secret)
-}
-
-fn resolved_runtime_model(source: &Path, model: &str) -> String {
-    if !matches!(model, "main" | "helper") {
-        return model.to_owned();
-    }
-    let Ok(target) = fs::read_link(source.join("model").join(model)) else {
-        return model.to_owned();
-    };
-    let target = target.to_string_lossy();
-    target
-        .strip_prefix("/ctx/model/")
-        .or_else(|| target.strip_prefix("model/"))
-        .unwrap_or(&target)
-        .to_owned()
-}
-
-fn local_runtime_model_counterpart(model: &str) -> Option<String> {
-    let (provider, name) = model.split_once('/')?;
-    if provider == "local" || name.is_empty() {
-        None
-    } else {
-        Some(format!("local/{name}"))
-    }
-}
-
-fn runtime_model_exists(source: &Path, model: &str) -> bool {
-    fs::symlink_metadata(source.join("model").join(model)).is_ok_and(|metadata| metadata.is_file())
+    (requested_model.to_owned(), provider_secret)
 }
 
 fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {
