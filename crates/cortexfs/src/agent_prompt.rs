@@ -176,7 +176,8 @@ pub struct SkillMetadata {
 
 #[must_use]
 pub fn collect_skill_metadata(max_chars: usize) -> String {
-    format_skill_metadata_with_budget(discover_skill_metadata(), max_chars)
+    let skills = discover_skill_metadata();
+    format_skill_metadata_with_budget(&skills, max_chars)
 }
 
 #[must_use]
@@ -190,20 +191,12 @@ pub fn skill_metadata_budget_from_env() -> usize {
 }
 
 #[must_use]
-pub fn format_skill_metadata_with_budget(
-    mut skills: Vec<SkillMetadata>,
-    max_chars: usize,
-) -> String {
-    skills.sort_by(|left, right| {
-        left.name
-            .cmp(&right.name)
-            .then_with(|| left.path.cmp(&right.path))
-    });
-    let full = format_skill_metadata(&skills, false);
+pub fn format_skill_metadata_with_budget(skills: &[SkillMetadata], max_chars: usize) -> String {
+    let full = format_skill_metadata(skills, false);
     if full.len() <= max_chars {
         return full;
     }
-    let shortened = format_skill_metadata(&skills, true);
+    let shortened = format_skill_metadata(skills, true);
     if shortened.len() <= max_chars {
         return format!(
             "WARNING: skill descriptions were shortened to fit the {max_chars} character budget.\n\n{shortened}"
@@ -215,7 +208,7 @@ pub fn format_skill_metadata_with_budget(
     );
     let mut output = String::new();
     push_str_byte_limit(&mut output, &warning, max_chars);
-    for skill in &skills {
+    for skill in skills {
         let line = format_skill_metadata_item(skill, true);
         if output.len() + line.len() > max_chars {
             break;
@@ -230,23 +223,51 @@ pub fn format_skill_metadata_with_budget(
 }
 
 fn discover_skill_metadata() -> Vec<SkillMetadata> {
+    discover_skill_metadata_from_roots(default_skill_roots())
+}
+
+fn default_skill_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(cwd) = env::current_dir() {
-        roots.push(cwd.join(".agents").join("skills"));
-        roots.push(cwd.join(".codex").join("skills"));
+        push_project_skill_roots(&mut roots, &cwd);
     }
     if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
         roots.push(home.join(".agents").join("skills"));
         roots.push(home.join(".codex").join("skills"));
         roots.push(home.join(".codex").join("plugins").join("cache"));
     }
+    roots
+}
 
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unit tests exercise private prompt discovery helpers"
+)]
+pub(crate) fn push_project_skill_roots(roots: &mut Vec<PathBuf>, cwd: &Path) {
+    for ancestor in cwd.ancestors() {
+        roots.push(ancestor.join(".agents").join("skills"));
+        roots.push(ancestor.join(".codex").join("skills"));
+    }
+}
+
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "unit tests exercise private prompt discovery helpers"
+)]
+pub(crate) fn discover_skill_metadata_from_roots(
+    roots: impl IntoIterator<Item = PathBuf>,
+) -> Vec<SkillMetadata> {
     let mut paths = Vec::new();
     for root in roots {
-        collect_skill_files(&root, &mut paths, 0);
+        let mut root_paths = Vec::new();
+        collect_skill_files(&root, &mut root_paths, 0);
+        root_paths.sort();
+        for path in root_paths {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
     }
-    paths.sort();
-    paths.dedup();
     paths
         .into_iter()
         .filter_map(|path| read_skill_metadata(&path))

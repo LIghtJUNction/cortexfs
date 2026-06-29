@@ -25,7 +25,7 @@ use super::{
     agent_executable_socket_bwrap_args, append_jsonl_line, atomic_replace_text_with_mode,
     authorize_child_agent, authorize_session_access, authorize_shared_access, BwrapAgentExecutableArgs,
     authorize_tool_execution, claim_next_shared_queue_job, classify_abi_path,
-    collect_agent_rules_from_paths, collect_history_messages_from_session, collect_skill_metadata,
+    collect_agent_rules_from_paths, collect_history_messages_from_session,
     completed_agent_schedule_nodes_from_parent_context, create_private_context_dir,
     derive_agent_runtime_view, ensure_durable_session_layout, ensure_v1_reference_tree,
     finish_shared_queue_job, format_history_messages_jsonl, format_skill_metadata_with_budget,
