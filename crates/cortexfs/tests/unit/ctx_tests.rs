@@ -36,7 +36,7 @@ use super::{
     stream_terminal_socket, terminal_connect_cli_error, AgentArgs, AgentMount,
     AgentStartArgs, AgentStartCommand, Cli, Command, FileCommand, LsTarget, ObjectClass,
     open_executable_no_follow, CliError,
-    ProviderArgs, MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS,
+    ProviderArgs, MAX_AGENT_EVENTS, MAX_AGENT_RESPONSE_BYTES, MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS,
     MAX_BUFFERED_AGENT_RENDERED_BYTES, MAX_SOCKET_FRAME_BYTES, terminal_safe_text,
     systemctl_user_command, temp_file_name, waiting_diagnostic, debug_timing_diagnostic,
     CTX_PROVIDER_CURL_BIN,
