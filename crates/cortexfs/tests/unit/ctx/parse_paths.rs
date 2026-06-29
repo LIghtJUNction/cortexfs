@@ -351,6 +351,39 @@ fn rejects_removed_agent_sh_command() {
 }
 
 #[test]
+fn agent_send_prompt_root_words_do_not_override_selected_root() {
+    let root = Path::new("/tmp/cortexfs-selected-root");
+    let attacker_root = Path::new("/tmp/cortexfs-attacker-root");
+
+    let command = parse_cli_args(&[
+        "--root",
+        root.to_str().unwrap_or_default(),
+        "agent",
+        "send",
+        "coder",
+        "token",
+        "--root",
+        attacker_root.to_str().unwrap_or_default(),
+        "secret",
+    ]);
+
+    assert!(matches!(
+        command,
+        Ok(Cli {
+            root: ref parsed_root,
+            command: Command::Agent(AgentArgs::Send {
+                ref name,
+                session: None,
+                raw: false,
+                ref input,
+            }),
+        }) if parsed_root == root
+            && name == "coder"
+            && input == &format!("token --root {} secret", attacker_root.display())
+    ));
+}
+
+#[test]
 fn object_execution_command_uses_clean_runtime_environment() {
     let root = Path::new("/tmp/cortexfs-clean-exec-root");
     let command = object_execution_command(root, &root.join("tool").join("example"));

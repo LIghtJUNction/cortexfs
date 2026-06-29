@@ -175,6 +175,12 @@ fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
                 };
                 root = PathBuf::from(next);
             }
+            "--" => {
+                for value in values {
+                    rest.push(os_string(value)?);
+                }
+                break;
+            }
             _ => {
                 rest.push(text);
                 for value in values {
