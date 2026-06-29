@@ -128,13 +128,6 @@ fn provider_chat_completion(
                 api_key: key,
                 effort,
             };
-            if provider == "local" {
-                let completion = call_openai_chat(&route.transport, &request)
-                    .map_err(ProviderCompletionError::fallback)?;
-                return write_text_completion(stdout, run, &completion).map_err(|error| {
-                    ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
-                });
-            }
             match call_openai_chat_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
@@ -160,13 +153,6 @@ fn provider_chat_completion(
                 api_key: key,
                 effort,
             };
-            if provider == "local" {
-                let completion = call_openai_responses(&route.transport, &request)
-                    .map_err(ProviderCompletionError::fallback)?;
-                return write_text_completion(stdout, run, &completion).map_err(|error| {
-                    ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
-                });
-            }
             match call_openai_responses_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {

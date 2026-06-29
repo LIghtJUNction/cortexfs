@@ -243,11 +243,11 @@ fn model_alias_rejects_symlink_model_directory() -> Result<(), Box<dyn std::erro
 fn missing_model_message_names_dangling_alias_target() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-missing-model-message")?;
     fs::create_dir_all(root.join("model"))?;
-    symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))?;
+    symlink("/ctx/model/fixture/alpha", root.join("model/main"))?;
 
     assert_eq!(
-        missing_model_message(&root, "main", &root.join("model/localhost/gpt-5.4-mini")),
-        "missing model: main -> /ctx/model/localhost/gpt-5.4-mini"
+        missing_model_message(&root, "main", &root.join("model/fixture/alpha")),
+        "missing model: main -> /ctx/model/fixture/alpha"
     );
 
     let _ignored = fs::remove_dir_all(root);
@@ -283,13 +283,13 @@ fn model_path_rejects_symlink_intermediate_directory(
 #[test]
 fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-model-fallback")?;
-    fs::create_dir_all(root.join("model/openai/gpt-5.5.d"))?;
+    fs::create_dir_all(root.join("model/primary/alpha.d"))?;
     fs::write(
-        root.join("model/openai/gpt-5.5.d/fallback"),
-        "openai/codex-auto-review\nopenai/gpt-5.3-codex-spark\n",
+        root.join("model/primary/alpha.d/fallback"),
+        "primary/beta\nprimary/gamma\n",
     )?;
 
-    let candidates = model_candidates(&root, "openai/gpt-5.5")?;
+    let candidates = model_candidates(&root, "primary/alpha")?;
 
     assert_eq!(
         candidates
@@ -297,9 +297,9 @@ fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::er
             .map(|candidate| candidate.name.as_str())
             .collect::<Vec<_>>(),
         [
-            "openai/gpt-5.5",
-            "openai/codex-auto-review",
-            "openai/gpt-5.3-codex-spark"
+            "primary/alpha",
+            "primary/beta",
+            "primary/gamma"
         ]
     );
     let _ignored = fs::remove_dir_all(root);
@@ -307,22 +307,22 @@ fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::er
 }
 
 #[test]
-fn model_candidates_append_existing_local_counterpart(
+fn model_candidates_do_not_append_existing_local_counterpart(
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let root = unique_temp_dir("runner-model-local-fallback")?;
-    fs::create_dir_all(root.join("model/api.lmm.best/gpt-5.4-mini.d"))?;
-    fs::write(root.join("model/api.lmm.best/gpt-5.4-mini"), "#!/bin/sh\n")?;
-    fs::create_dir_all(root.join("model/local"))?;
-    fs::write(root.join("model/local/gpt-5.4-mini"), "#!/bin/sh\n")?;
+    let root = unique_temp_dir("runner-model-no-implicit-fallback")?;
+    fs::create_dir_all(root.join("model/remote/alpha.d"))?;
+    fs::write(root.join("model/remote/alpha"), "#!/bin/sh\n")?;
+    fs::create_dir_all(root.join("model/mirror"))?;
+    fs::write(root.join("model/mirror/alpha"), "#!/bin/sh\n")?;
 
-    let candidates = model_candidates(&root, "api.lmm.best/gpt-5.4-mini")?;
+    let candidates = model_candidates(&root, "remote/alpha")?;
 
     assert_eq!(
         candidates
             .iter()
             .map(|candidate| candidate.name.as_str())
             .collect::<Vec<_>>(),
-        ["api.lmm.best/gpt-5.4-mini", "local/gpt-5.4-mini"]
+        ["remote/alpha"]
     );
     let _ignored = fs::remove_dir_all(root);
     Ok(())
@@ -332,19 +332,19 @@ fn model_candidates_append_existing_local_counterpart(
 fn model_candidates_ignore_symlinked_fallback_control_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-model-fallback-symlink")?;
-    fs::create_dir_all(root.join("model/openai/gpt-5.5.d"))?;
+    fs::create_dir_all(root.join("model/primary/alpha.d"))?;
     let outside = root.join("outside-fallback");
-    fs::write(&outside, "openai/codex-auto-review\n")?;
-    symlink(&outside, root.join("model/openai/gpt-5.5.d/fallback"))?;
+    fs::write(&outside, "primary/beta\n")?;
+    symlink(&outside, root.join("model/primary/alpha.d/fallback"))?;
 
-    let candidates = model_candidates(&root, "openai/gpt-5.5")?;
+    let candidates = model_candidates(&root, "primary/alpha")?;
 
     assert_eq!(
         candidates
             .iter()
             .map(|candidate| candidate.name.as_str())
             .collect::<Vec<_>>(),
-        ["openai/gpt-5.5"]
+        ["primary/alpha"]
     );
     let _ignored = fs::remove_dir_all(root);
     Ok(())
@@ -1044,7 +1044,7 @@ fn agent_model_process_gets_clean_runtime_environment() -> Result<(), Box<dyn st
             .arg("--nocapture")
             .env("CORTEXFS_ENV_CHILD", "1")
             .env("CORTEXFS_SHOULD_NOT_LEAK", "secret")
-            .env("CTX_PROVIDER_SECRET_PROVIDER", "local")
+            .env("CTX_PROVIDER_SECRET_PROVIDER", "fixture")
             .env("CTX_PROVIDER_SECRET_SLOT", "default")
             .env("CTX_PROVIDER_SECRET_PATH", "/tmp/runtime-secret")
             .output()?;
@@ -1071,7 +1071,7 @@ if [ "$PATH" != "/usr/bin:/bin" ]; then
   printf '{"type":"error","run":"%s","code":"EIO","message":"unexpected path"}\n' "$CTX_RUN_ID"
   exit 2
 fi
-if [ "$CTX_PROVIDER_SECRET_PROVIDER" != "local" ] || [ "$CTX_PROVIDER_SECRET_SLOT" != "default" ] || [ "$CTX_PROVIDER_SECRET_PATH" != "/tmp/runtime-secret" ]; then
+if [ "$CTX_PROVIDER_SECRET_PROVIDER" != "fixture" ] || [ "$CTX_PROVIDER_SECRET_SLOT" != "default" ] || [ "$CTX_PROVIDER_SECRET_PATH" != "/tmp/runtime-secret" ]; then
   printf '{"type":"error","run":"%s","code":"EIO","message":"missing runtime provider secret env"}\n' "$CTX_RUN_ID"
   exit 2
 fi
@@ -1973,7 +1973,7 @@ fn test_agent_run_config() -> AgentModelRunConfig {
 #[test]
 fn provider_runtime_driver_uses_responses_for_openai_agent_calls() {
     let config = test_provider_config_with_formats(
-        "https://api.openai.com/v1",
+        "https://api.example.test/v1",
         &["openai.chat", "openai.responses"],
     );
 
@@ -1990,7 +1990,7 @@ fn provider_runtime_driver_uses_responses_for_openai_agent_calls() {
 #[test]
 fn provider_runtime_driver_uses_responses_when_chat_is_absent() {
     let config = test_provider_config_with_formats(
-        "https://api.openai.com/v1",
+        "https://api.example.test/v1",
         &["openai.responses"],
     );
 
@@ -2057,11 +2057,11 @@ fn provider_curl_output_kills_child_after_oversized_stdout() -> Result<(), Box<d
 fn provider_transport_defaults_to_direct_base_url() {
     assert_eq!(
         provider_transport(
-            &test_provider_config("https://api.openai.com/v1"),
+            &test_provider_config("https://api.example.test/v1"),
             None
         ),
         Ok(ResolvedTransport::Direct {
-            base_url: "https://api.openai.com/v1".to_owned()
+            base_url: "https://api.example.test/v1".to_owned()
         })
     );
 }
@@ -2075,15 +2075,15 @@ fn provider_config_from_dir_ignores_symlink_configs() -> Result<(), Box<dyn std:
     fs::write(
         &outside,
         r#"{
-  "name": "local",
-  "base_url": "http://127.0.0.1:8317/v1",
+  "name": "fixture",
+  "base_url": "http://203.0.113.10:8317/v1",
   "formats": ["openai.chat"]
 }
 "#,
     )?;
-    symlink(&outside, providers.join("local.json"))?;
+    symlink(&outside, providers.join("fixture.json"))?;
 
-    assert!(provider_config_from_dir(&providers, "local").is_none());
+    assert!(provider_config_from_dir(&providers, "fixture").is_none());
 
     let _ignored = fs::remove_dir_all(root);
     Ok(())
@@ -2096,10 +2096,10 @@ fn provider_config_file_reader_refuses_symlink_leaf() -> Result<(), Box<dyn std:
     let outside = root.join("outside.json");
     fs::create_dir_all(&providers)?;
     fs::write(&outside, "{}\n")?;
-    symlink(&outside, providers.join("local.json"))?;
+    symlink(&outside, providers.join("fixture.json"))?;
     let directory = open_runner_provider_config_dir(&providers)?;
 
-    assert!(read_runner_provider_config_file(&directory, "local.json").is_err());
+    assert!(read_runner_provider_config_file(&directory, "fixture.json").is_err());
 
     let _ignored = fs::remove_dir_all(root);
     Ok(())
@@ -2113,17 +2113,17 @@ fn provider_config_from_dir_rejects_symlink_config_directory(
     let outside = root.join("outside-providers.d");
     fs::create_dir_all(&outside)?;
     fs::write(
-        outside.join("local.json"),
+        outside.join("fixture.json"),
         r#"{
-  "name": "local",
-  "base_url": "http://127.0.0.1:8317/v1",
+  "name": "fixture",
+  "base_url": "http://203.0.113.10:8317/v1",
   "formats": ["openai.chat"]
 }
 "#,
     )?;
     symlink(&outside, &providers)?;
 
-    assert!(provider_config_from_dir(&providers, "local").is_none());
+    assert!(provider_config_from_dir(&providers, "fixture").is_none());
 
     let _ignored = fs::remove_dir_all(root);
     Ok(())
@@ -2135,21 +2135,21 @@ fn provider_config_from_dir_reads_plain_json_configs() -> Result<(), Box<dyn std
     let providers = root.join("providers.d");
     fs::create_dir_all(&providers)?;
     fs::write(
-        providers.join("local.json"),
+        providers.join("fixture.json"),
         r#"{
-  "name": "local",
-  "base_url": "http://127.0.0.1:8317/v1",
+  "name": "fixture",
+  "base_url": "http://203.0.113.10:8317/v1",
   "formats": ["openai.responses"]
 }
 "#,
     )?;
 
-    let config = provider_config_from_dir(&providers, "local");
+    let config = provider_config_from_dir(&providers, "fixture");
 
     assert!(matches!(
         config,
         Some(ref config)
-            if config.base_url == "http://127.0.0.1:8317/v1"
+            if config.base_url == "http://203.0.113.10:8317/v1"
                 && config.formats == ["openai.responses"]
     ));
     let _ignored = fs::remove_dir_all(root);
@@ -2163,11 +2163,11 @@ fn provider_config_from_dir_rejects_duplicate_known_fields(
     let providers = root.join("providers.d");
     fs::create_dir_all(&providers)?;
     fs::write(
-        providers.join("local.json"),
-        "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\",\"base_url\":\"http://evil/v1\"}\n",
+        providers.join("fixture.json"),
+        "{\"name\":\"fixture\",\"base_url\":\"http://203.0.113.10:8317/v1\",\"base_url\":\"http://evil/v1\"}\n",
     )?;
 
-    assert!(provider_config_from_dir(&providers, "local").is_none());
+    assert!(provider_config_from_dir(&providers, "fixture").is_none());
     let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
@@ -2225,14 +2225,14 @@ fn provider_secret_from_runtime_file_reads_only_matching_plain_file(
     fs::write(&path, "runtime-secret\n")?;
     let path_text = path.display().to_string();
     let env = |name: &str| match name {
-        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("local".to_owned()),
+        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("fixture".to_owned()),
         "CTX_PROVIDER_SECRET_SLOT" => Ok("default".to_owned()),
         "CTX_PROVIDER_SECRET_PATH" => Ok(path_text.clone()),
         _ => Err(std::env::VarError::NotPresent),
     };
 
     assert_eq!(
-        provider_secret_from_runtime_file_with_env("local", "default", env)?,
+        provider_secret_from_runtime_file_with_env("fixture", "default", env)?,
         Some("runtime-secret".to_owned())
     );
     assert_eq!(
@@ -2248,14 +2248,14 @@ fn provider_secret_from_runtime_file_reads_only_matching_plain_file(
 fn provider_secret_from_runtime_file_ignores_relative_path(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let env = |name: &str| match name {
-        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("local".to_owned()),
+        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("fixture".to_owned()),
         "CTX_PROVIDER_SECRET_SLOT" => Ok("default".to_owned()),
         "CTX_PROVIDER_SECRET_PATH" => Ok("relative-secret".to_owned()),
         _ => Err(std::env::VarError::NotPresent),
     };
 
     assert_eq!(
-        provider_secret_from_runtime_file_with_env("local", "default", env)?,
+        provider_secret_from_runtime_file_with_env("fixture", "default", env)?,
         None
     );
     Ok(())
@@ -2270,13 +2270,13 @@ fn provider_secret_from_inherited_fd_reads_regular_secret_file(
     let file = fs::File::open(&path)?;
     let fd = file.as_raw_fd().to_string();
     let env = |name: &str| match name {
-        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("local".to_owned()),
+        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("fixture".to_owned()),
         "CTX_PROVIDER_SECRET_SLOT" => Ok("default".to_owned()),
         "CTX_PROVIDER_SECRET_FD" => Ok(fd.clone()),
         _ => Err(std::env::VarError::NotPresent),
     };
 
-    let secret = provider_secret_from_inherited_fd_with_env("local", "default", env)?;
+    let secret = provider_secret_from_inherited_fd_with_env("fixture", "default", env)?;
 
     assert_eq!(secret, Some("fd-secret".to_owned()));
     let _ignored = fs::remove_dir_all(root);
@@ -2288,14 +2288,14 @@ fn provider_secret_from_inherited_fd_ignores_standard_fds(
 ) -> Result<(), Box<dyn std::error::Error>> {
     for fd in ["0", "1", "2"] {
         let env = |name: &str| match name {
-            "CTX_PROVIDER_SECRET_PROVIDER" => Ok("local".to_owned()),
+            "CTX_PROVIDER_SECRET_PROVIDER" => Ok("fixture".to_owned()),
             "CTX_PROVIDER_SECRET_SLOT" => Ok("default".to_owned()),
             "CTX_PROVIDER_SECRET_FD" => Ok(fd.to_owned()),
             _ => Err(std::env::VarError::NotPresent),
         };
 
         assert_eq!(
-            provider_secret_from_inherited_fd_with_env("local", "default", env)?,
+            provider_secret_from_inherited_fd_with_env("fixture", "default", env)?,
             None
         );
     }
@@ -2308,13 +2308,13 @@ fn provider_secret_from_inherited_fd_rejects_non_regular_fd(
     let (read_fd, write_fd) = nix::unistd::pipe()?;
     let fd = read_fd.as_raw_fd().to_string();
     let env = |name: &str| match name {
-        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("local".to_owned()),
+        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("fixture".to_owned()),
         "CTX_PROVIDER_SECRET_SLOT" => Ok("default".to_owned()),
         "CTX_PROVIDER_SECRET_FD" => Ok(fd.clone()),
         _ => Err(std::env::VarError::NotPresent),
     };
 
-    let result = provider_secret_from_inherited_fd_with_env("local", "default", env);
+    let result = provider_secret_from_inherited_fd_with_env("fixture", "default", env);
 
     assert!(matches!(result, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));
     drop(read_fd);
@@ -2324,12 +2324,12 @@ fn provider_secret_from_inherited_fd_rejects_non_regular_fd(
 
 #[test]
 fn provider_transport_uses_exact_http_route() {
-    let config = test_provider_config("https://api.openai.com/v1");
+    let config = test_provider_config("https://api.example.test/v1");
 
     assert_eq!(
         provider_transport(
             &config,
-            Some("group(office) -> http(http://127.0.0.1:8080/v1)\ndomain(openai.com) -> office\n")
+            Some("group(office) -> http(http://127.0.0.1:8080/v1)\ndomain(example.test) -> office\n")
         ),
         Ok(ResolvedTransport::Http {
             base_url: "http://127.0.0.1:8080/v1".to_owned()
@@ -2339,57 +2339,57 @@ fn provider_transport_uses_exact_http_route() {
 
 #[test]
 fn provider_transport_uses_wildcard_unix_route() {
-    let config = test_provider_config("https://api.openai.com/v1");
+    let config = test_provider_config("https://api.example.test/v1");
 
     assert_eq!(
         provider_transport(
             &config,
-            Some("group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock)\ndomain(openai.com) -> local-socket\n")
+            Some("group(unix-egress) -> unix(/run/user/1000/cortexfs/proxy/fixture.sock)\ndomain(example.test) -> unix-egress\n")
         ),
         Ok(ResolvedTransport::Unix {
             base_url: "http://localhost/v1".to_owned(),
-            socket_path: "/run/user/1000/cortexfs/proxy/openai.sock".to_owned()
+            socket_path: "/run/user/1000/cortexfs/proxy/fixture.sock".to_owned()
         })
     );
 }
 
 #[test]
 fn provider_transport_rejects_relative_unix_socket_route() {
-    let config = test_provider_config("https://api.openai.com/v1");
+    let config = test_provider_config("https://api.example.test/v1");
 
     assert!(provider_transport(
         &config,
-        Some("group(local-socket) -> unix(relative.sock)\ndomain(openai.com) -> local-socket\n")
+        Some("group(unix-egress) -> unix(relative.sock)\ndomain(example.test) -> unix-egress\n")
     )
     .is_err());
 }
 
 #[test]
 fn provider_transport_rejects_control_character_unix_socket_route() {
-    let config = test_provider_config("https://api.openai.com/v1");
+    let config = test_provider_config("https://api.example.test/v1");
 
     assert!(provider_transport(
         &config,
-        Some("group(local-socket) -> unix(/run/cortexfs/\u{1b}proxy.sock)\ndomain(openai.com) -> local-socket\n")
+        Some("group(unix-egress) -> unix(/run/cortexfs/\u{1b}proxy.sock)\ndomain(example.test) -> unix-egress\n")
     )
     .is_err());
 }
 
 #[test]
 fn provider_transport_rejects_non_url_unix_base_url() {
-    let config = test_provider_config("https://api.openai.com/v1");
+    let config = test_provider_config("https://api.example.test/v1");
 
     assert!(provider_transport(
         &config,
-        Some("group(local-socket) -> unix(/run/cortexfs/proxy.sock, not-a-url)\ndomain(openai.com) -> local-socket\n")
+        Some("group(unix-egress) -> unix(/run/cortexfs/proxy.sock, not-a-url)\ndomain(example.test) -> unix-egress\n")
     )
     .is_err());
 }
 
 #[test]
 fn curl_config_quote_rejects_line_break_injection() {
-    assert!(curl_config_quote("https://api.openai.com/v1").is_ok());
-    assert!(curl_config_quote("https://api.openai.com/v1\noutput = /tmp/leak").is_err());
+    assert!(curl_config_quote("https://api.example.test/v1").is_ok());
+    assert!(curl_config_quote("https://api.example.test/v1\noutput = /tmp/leak").is_err());
     assert!(curl_config_quote("Authorization: Bearer bad\rheader = injected").is_err());
     assert!(curl_config_quote("Authorization: Bearer \u{1b}]52;c;payload").is_err());
     assert!(curl_config_quote("abc\0def").is_err());
@@ -2411,18 +2411,18 @@ fn provider_json_body_escapes_prompt_newlines_before_curl_config() {
 
 #[test]
 fn provider_route_selects_key_slot_by_model() {
-    let config = test_provider_config("https://api.openai.com/v1");
+    let config = test_provider_config("https://api.example.test/v1");
 
     assert_eq!(
         provider_route(
             &config,
-            "api.openai.com",
+            "fixture",
             "gpt-5.4",
             Some("group(paid) -> direct, key(office)\nmodel(gpt-*) -> paid\nfallback: direct\n")
         ),
         Ok(ProviderRoute {
             transport: ResolvedTransport::Direct {
-                base_url: "https://api.openai.com/v1".to_owned()
+                base_url: "https://api.example.test/v1".to_owned()
             },
             key_slot: Some("office".to_owned())
         })
