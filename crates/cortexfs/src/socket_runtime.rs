@@ -269,7 +269,7 @@ fn run_agent_executable_streaming(
                 if line.trim().is_empty() {
                     continue;
                 }
-                if is_socket_debug_timing_frame(&line) {
+                if is_socket_debug_timing_frame(&line, debug) {
                     write_socket_frame(stream, &line)?;
                     continue;
                 }
@@ -691,12 +691,34 @@ fn apply_socket_debug_timing_env(command: &mut Command, timing: Option<SocketDeb
     }
 }
 
-fn is_socket_debug_timing_frame(frame: &str) -> bool {
-    serde_json::from_str::<Value>(frame)
-        .ok()
-        .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_owned))
-        .as_deref()
-        == Some("debug")
+fn is_socket_debug_timing_frame(frame: &str, timing: Option<SocketDebugTiming>) -> bool {
+    if timing.is_none() {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(frame) else {
+        return false;
+    };
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object.len() != 3 {
+        return false;
+    }
+    if value.get("type").and_then(Value::as_str) != Some("debug") {
+        return false;
+    }
+    if value.get("elapsed_ms").and_then(Value::as_u64).is_none() {
+        return false;
+    }
+    matches!(
+        value.get("stage").and_then(Value::as_str),
+        Some(
+            "agent_runner_ready"
+                | "model_spawn_start"
+                | "model_spawned"
+                | "first_model_frame"
+        )
+    )
 }
 
 fn handle_socket_send(
