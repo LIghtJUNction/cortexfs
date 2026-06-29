@@ -49,7 +49,7 @@ use super::{
     serve_unix_socket_listener_once, serve_unix_socket_stream_once, session_index_key_for_cwd,
     set_private_dir_permissions, set_text_file_permissions, socket_runtime_error_response,
     sync_plain_directory, update_session_index, update_session_index_with_keys,
-    validate_context_pack_source, write_text_file_if_absent,
+    validate_context_pack_source, write_text_file_if_absent, MAX_AGENT_SCHEDULE_NODES,
 };
 use std::fs;
 use std::io::{Read, Write};

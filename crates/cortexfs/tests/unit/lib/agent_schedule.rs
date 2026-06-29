@@ -117,6 +117,57 @@ fn agent_schedule_rejects_invalid_shape_and_duplicate_nodes() {
 }
 
 #[test]
+fn agent_schedule_rejects_too_many_nodes_before_dependency_inspection() {
+    let policy = ok!(PolicyV0::parse(""));
+    let nodes = (0..=MAX_AGENT_SCHEDULE_NODES)
+        .map(|index| {
+            format!(
+                r#"{{"id":"n-{index}","kind":"dag","agent":"planner","deps":["missing"]}}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let schedule = format!(
+        r#"{{
+  "version": 1,
+  "mode": "dag-react",
+  "nodes": [{nodes}]
+}}"#
+    );
+
+    let report = inspect_agent_schedule_json(&schedule, "planner_t", &policy);
+    assert_eq!(report.issues(), &[AgentScheduleIssue::InvalidNodes]);
+}
+
+#[test]
+fn agent_schedule_accepts_long_acyclic_dependency_chain_without_recursion() {
+    let policy = ok!(PolicyV0::parse(""));
+    let nodes = (0..MAX_AGENT_SCHEDULE_NODES)
+        .map(|index| {
+            if index + 1 == MAX_AGENT_SCHEDULE_NODES {
+                format!(r#"{{"id":"n-{index}","kind":"dag","agent":"planner"}}"#)
+            } else {
+                format!(
+                    r#"{{"id":"n-{index}","kind":"dag","agent":"planner","deps":["n-{}"]}}"#,
+                    index + 1
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let schedule = format!(
+        r#"{{
+  "version": 1,
+  "mode": "dag-react",
+  "nodes": [{nodes}]
+}}"#
+    );
+
+    let report = inspect_agent_schedule_json(&schedule, "planner_t", &policy);
+    assert_eq!(report.issues(), &[]);
+}
+
+#[test]
 fn agent_schedule_ready_nodes_follow_dag_dependencies_in_plan_order() {
     let policy = ok!(PolicyV0::parse(
         "\
