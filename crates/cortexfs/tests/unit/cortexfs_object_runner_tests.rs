@@ -118,6 +118,50 @@ fn object_args_use_exec_metadata_for_proc_fd_wrappers(
     Ok(())
 }
 
+
+#[test]
+fn object_args_reject_exec_metadata_that_disagrees_with_authorized_object(
+) -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("CORTEXFS_RUNNER_METADATA_MISMATCH_CHILD").is_none() {
+        let output = std::process::Command::new(std::env::current_exe()?)
+            .arg("--exact")
+            .arg("cortexfs_object_runner_tests::object_args_reject_exec_metadata_that_disagrees_with_authorized_object")
+            .arg("--nocapture")
+            .env("CORTEXFS_RUNNER_METADATA_MISMATCH_CHILD", "1")
+            .env("CTX_AUTHORIZED_OBJECT", "/ctx/tool/safe")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "child test failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Ok(());
+    }
+
+    let root = unique_temp_dir("runner-object-path-mismatch")?;
+    let wrapper = root.join("safe");
+    fs::write(
+        &wrapper,
+        "#!/usr/bin/cortexfs-object-runner\n# cortexfs.object=tool\n# cortexfs.name=bash\n",
+    )?;
+    let file = fs::File::open(&wrapper)?;
+    let fd_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+
+    let result = split_object_args(vec![fd_path.into_os_string(), OsString::from("hello")]);
+
+    assert!(matches!(
+        result,
+        Err(error)
+            if error.contains("/ctx/tool/bash")
+                && error.contains("/ctx/tool/safe")
+                && error.contains("does not match authorized object")
+    ));
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
 #[test]
 fn runner_rejects_missing_object_path() {
     assert_eq!(run(Vec::new()), Err("missing object path".to_owned()));
