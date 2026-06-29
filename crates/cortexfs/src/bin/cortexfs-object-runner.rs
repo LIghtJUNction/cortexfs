@@ -315,6 +315,14 @@ where
             continue;
         }
 
+        if outcome.success
+            && last_tool_result.is_some()
+            && !frames_have_visible_assistant_response(&outcome.frames)
+            && let Some(pair) = last_tool_result.as_ref()
+        {
+            return write_tool_result_fallback_response(stdout, &config.run, &pair.0, &pair.1);
+        }
+
         if outcome.streamed {
             write_done_frames(stdout, &outcome.frames)?;
             if outcome.success {
@@ -942,6 +950,39 @@ fn frames_have_error(frames: &[String]) -> bool {
     frames
         .iter()
         .any(|frame| event_type(frame).as_deref() == Some("error"))
+}
+
+fn frames_have_visible_assistant_response(frames: &[String]) -> bool {
+    frames.iter().any(|frame| {
+        let Ok(value) = serde_json::from_str::<Value>(frame) else {
+            return !frame.trim().is_empty();
+        };
+        match value.get("type").and_then(Value::as_str) {
+            Some("delta") => value
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| !text.trim().is_empty()),
+            Some("message") if value.get("role").and_then(Value::as_str) == Some("assistant") => {
+                message_has_visible_text(&value)
+            }
+            _ => false,
+        }
+    })
+}
+
+fn message_has_visible_text(value: &Value) -> bool {
+    value
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some("text")
+                    && item
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| !text.trim().is_empty())
+            })
+        })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
