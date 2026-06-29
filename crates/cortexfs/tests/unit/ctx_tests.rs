@@ -630,6 +630,28 @@ fn oauth_callback_reader_rejects_oversized_headers() {
 }
 
 #[test]
+fn oauth_callback_reader_maps_idle_timeout_to_callback_timeout() {
+    struct TimeoutReader;
+
+    impl std::io::Read for TimeoutReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "idle callback",
+            ))
+        }
+    }
+
+    let read =
+        read_oauth_callback_request_from_reader(TimeoutReader, MAX_OAUTH_CALLBACK_REQUEST_BYTES);
+
+    assert!(matches!(
+        read,
+        Err(ref error) if error.code == 69 && error.message == "oauth callback timed out"
+    ));
+}
+
+#[test]
 fn oauth_callback_parser_requires_http_version() {
     let parsed = parse_oauth_callback_params("GET /callback?code=ok&state=s\n\n", "/callback");
 
