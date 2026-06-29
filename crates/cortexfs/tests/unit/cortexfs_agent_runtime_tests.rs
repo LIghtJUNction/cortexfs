@@ -1,4 +1,4 @@
-use super::{runtime_agent_executable, RuntimeConfig, DEFAULT_SOURCE};
+use super::{runtime_agent_executable, runtime_model_and_secret, RuntimeConfig, DEFAULT_SOURCE};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -68,6 +68,30 @@ fn runtime_agent_executable_uses_ctx_abi_path() {
         runtime_agent_executable(Path::new("/ctx"), "coder"),
         PathBuf::from("/ctx/agent/coder")
     );
+}
+
+#[test]
+fn runtime_model_falls_back_to_existing_local_counterpart_without_primary_secret(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::env::temp_dir().join(format!(
+        "cortexfs-runtime-model-local-fallback-{}",
+        std::process::id()
+    ));
+    let _ignored = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("model/api.lmm.best"))?;
+    fs::create_dir_all(root.join("model/local"))?;
+    std::os::unix::fs::symlink(
+        "/ctx/model/api.lmm.best/gpt-5.4-mini",
+        root.join("model/main"),
+    )?;
+    fs::write(root.join("model/local/gpt-5.4-mini"), "#!/bin/sh\n")?;
+
+    let (model, secret) = runtime_model_and_secret(&root, "main");
+
+    assert_eq!(model, "local/gpt-5.4-mini");
+    assert!(secret.is_none());
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
 }
 
 #[test]

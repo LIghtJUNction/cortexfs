@@ -50,9 +50,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
-    let (runtime_model, provider_secret) =
-        runtime_model_and_secret(&config.source, view.model())
-            .map_err(|_error| format!("provider secret unavailable: {}", view.model()))?;
+    let (runtime_model, provider_secret) = runtime_model_and_secret(&config.source, view.model());
     let mut runtime_env = view.env().to_vec();
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
@@ -100,22 +98,23 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
 fn runtime_model_and_secret(
     source: &Path,
     requested_model: &str,
-) -> Result<(String, Option<cortexfs::ProviderSystemSecret>), cortexfs::ProviderSystemSecretError> {
-    let requested_secret =
-        cortexfs::read_provider_system_secret_for_model(source, requested_model)?;
-    if requested_secret.is_some() {
-        return Ok((requested_model.to_owned(), requested_secret));
+) -> (String, Option<cortexfs::ProviderSystemSecret>) {
+    if let Ok(Some(secret)) =
+        cortexfs::read_provider_system_secret_for_model(source, requested_model)
+    {
+        return (requested_model.to_owned(), Some(secret));
     }
     let resolved = resolved_runtime_model(source, requested_model);
     let Some(local) = local_runtime_model_counterpart(&resolved) else {
-        return Ok((requested_model.to_owned(), None));
+        return (requested_model.to_owned(), None);
     };
-    let local_secret = cortexfs::read_provider_system_secret_for_model(source, &local)?;
-    if local_secret.is_some() {
-        Ok((local, local_secret))
-    } else {
-        Ok((requested_model.to_owned(), None))
+    if !runtime_model_exists(source, &local) {
+        return (requested_model.to_owned(), None);
     }
+    let local_secret = cortexfs::read_provider_system_secret_for_model(source, &local)
+        .ok()
+        .flatten();
+    (local, local_secret)
 }
 
 fn resolved_runtime_model(source: &Path, model: &str) -> String {
@@ -140,6 +139,10 @@ fn local_runtime_model_counterpart(model: &str) -> Option<String> {
     } else {
         Some(format!("local/{name}"))
     }
+}
+
+fn runtime_model_exists(source: &Path, model: &str) -> bool {
+    fs::symlink_metadata(source.join("model").join(model)).is_ok_and(|metadata| metadata.is_file())
 }
 
 fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {

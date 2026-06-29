@@ -922,10 +922,18 @@ fn push_buffered_diagnostic(
 }
 
 fn json_text_field(value: &serde_json::Value) -> Option<&str> {
-    value
-        .get("text")
-        .or_else(|| value.get("content"))
-        .and_then(serde_json::Value::as_str)
+    if let Some(text) = value.get("text").and_then(serde_json::Value::as_str) {
+        return Some(text);
+    }
+    let content = value.get("content")?;
+    if let Some(text) = content.as_str() {
+        return Some(text);
+    }
+    content.as_array()?.iter().find_map(|item| {
+        item.get("text")
+            .or_else(|| item.get("content"))
+            .and_then(serde_json::Value::as_str)
+    })
 }
 
 fn print_terminal_text(text: &str) -> Result<(), CliError> {

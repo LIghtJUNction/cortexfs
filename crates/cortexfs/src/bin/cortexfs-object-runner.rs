@@ -300,6 +300,9 @@ where
         config.suppress_model_error_events = true;
         last_tool_result = Some((tool_call, result));
     }
+    if let Some(pair) = last_tool_result.as_ref() {
+        return write_tool_result_fallback_response(stdout, &config.run, &pair.0, &pair.1);
+    }
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
         let outcome = run_model_once(config, input, stdout)?;
         if frames_have_error(&outcome.frames)
@@ -436,7 +439,13 @@ fn asks_to_discover_tools(input: &str) -> bool {
                 || input.contains("列举")
                 || input.contains("列出")
                 || input.contains("查看")
+                || input.contains("调用")
+                || input.contains("能不能")
+                || input.contains("试试")
                 || lower.contains("discover")
+                || lower.contains("call")
+                || lower.contains("use")
+                || lower.contains("try")
                 || lower.contains("list")
                 || lower.contains("show")))
 }

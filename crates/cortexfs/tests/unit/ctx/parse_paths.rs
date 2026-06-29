@@ -1347,6 +1347,25 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
 }
 
 #[test]
+fn buffered_agent_renderer_prints_assistant_content_array_message() {
+    let input = concat!(
+        "{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"工具已执行\"}]}\n",
+        "{\"type\":\"done\",\"status\":\"ok\"}\n",
+    );
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(
+        rendered,
+        Ok(ref rendered)
+            if rendered.output == "工具已执行\n"
+                && rendered.diagnostics.is_empty()
+                && rendered.exit_code == 0
+                && !rendered.interrupted
+    ));
+}
+
+#[test]
 fn buffered_agent_renderer_reports_token_delta_and_total() {
     let input = concat!(
         "{\"type\":\"usage\",\"input_tokens\":10,\"output_tokens\":2}\n",
