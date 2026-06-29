@@ -444,6 +444,23 @@ pub struct AgentExecutableSocketRuntime<'a> {
     pub agent_name: &'a str,
     /// ABI executable object to invoke for `send`.
     pub agent_executable: &'a Path,
+    /// Process isolation mode for the executable agent.
+    pub execution: AgentExecutableSocketExecution<'a>,
+}
+
+/// Process isolation mode for socket-activated executable agents.
+#[derive(Clone, Copy, Debug)]
+pub enum AgentExecutableSocketExecution<'a> {
+    /// Execute the agent object directly. This is only for unit tests and
+    /// tightly controlled development helpers.
+    Direct,
+    /// Execute the agent object inside the `CortexFS` `bwrap` sandbox.
+    Bwrap {
+        /// Bubblewrap executable.
+        program: &'a Path,
+        /// Agent mount table derived from `agent/<name>.d/mount`.
+        mount_table: &'a MountTable,
+    },
 }
 
 impl SocketPeerPolicy {

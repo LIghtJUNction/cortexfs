@@ -189,6 +189,7 @@ fn model_candidates(ctx_root: &Path, model: &str) -> Result<Vec<ModelCandidate>,
             break;
         }
     }
+    push_local_model_fallback(ctx_root, &primary, &mut names, &mut seen);
     Ok(names
         .into_iter()
         .map(|name| ModelCandidate {
@@ -196,6 +197,27 @@ fn model_candidates(ctx_root: &Path, model: &str) -> Result<Vec<ModelCandidate>,
             name,
         })
         .collect())
+}
+
+fn push_local_model_fallback(
+    ctx_root: &Path,
+    primary: &str,
+    names: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    let Some((provider, model)) = primary.split_once('/') else {
+        return;
+    };
+    if provider == "local" || names.len() >= MAX_MODEL_FALLBACK_CANDIDATES {
+        return;
+    }
+    if !is_regular_file_no_follow(&ctx_root.join("model").join(primary)) {
+        return;
+    }
+    let fallback = format!("local/{model}");
+    if is_regular_file_no_follow(&ctx_root.join("model").join(&fallback)) {
+        push_model_candidate_name(&fallback, names, seen);
+    }
 }
 
 fn push_model_candidate_name(
@@ -263,6 +285,21 @@ where
 {
     let mut seen_tool_calls = BTreeSet::new();
     let mut last_tool_result: Option<(AgentToolCall, String)> = None;
+    for tool_call in initial_user_requested_tsh_calls(input) {
+        seen_tool_calls.insert(tool_call_signature(&tool_call));
+        write_tool_call_event(stdout, &config.run, &tool_call)
+            .and_then(|()| stdout.flush())
+            .map_err(|error| format!("cannot write output: {error}"))?;
+        let result = execute_tool_call(config, &tool_call)
+            .unwrap_or_else(|error| format!("ERROR: {error}\n"));
+        write_tool_result_event(stdout, &config.run, &tool_call, &result)?;
+        stdout
+            .flush()
+            .map_err(|error| format!("cannot write output: {error}"))?;
+        config.push_tool_result(&tool_call, &result);
+        config.suppress_model_error_events = true;
+        last_tool_result = Some((tool_call, result));
+    }
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
         let outcome = run_model_once(config, input, stdout)?;
         if frames_have_error(&outcome.frames)
@@ -346,6 +383,64 @@ where
     Ok(())
 }
 
+fn initial_user_requested_tsh_calls(input: &str) -> Vec<AgentToolCall> {
+    let mut calls = explicit_backtick_tsh_calls(input);
+    if calls.is_empty() && asks_to_discover_tools(input) {
+        calls.push(AgentToolCall {
+            id: "call-1".to_owned(),
+            name: "tsh".to_owned(),
+            args: vec![OsString::from("tools")],
+        });
+    }
+    calls
+}
+
+fn explicit_backtick_tsh_calls(input: &str) -> Vec<AgentToolCall> {
+    input
+        .split('`')
+        .enumerate()
+        .filter_map(|(index, segment)| {
+            if index % 2 == 0 {
+                return None;
+            }
+            explicit_tsh_call_from_text(segment)
+        })
+        .take(MAX_AGENT_TOOL_ITERATIONS)
+        .enumerate()
+        .map(|(index, mut call)| {
+            call.id = format!("call-{}", index + 1);
+            call
+        })
+        .collect()
+}
+
+fn explicit_tsh_call_from_text(text: &str) -> Option<AgentToolCall> {
+    let trimmed = text.trim();
+    let command = trimmed.strip_prefix("tsh ")?;
+    let words = shell_words(command).ok()?;
+    if words.is_empty() || validate_tool_call_arg_limits(&words).is_err() {
+        return None;
+    }
+    Some(AgentToolCall {
+        id: "call-1".to_owned(),
+        name: "tsh".to_owned(),
+        args: words.into_iter().map(OsString::from).collect(),
+    })
+}
+
+fn asks_to_discover_tools(input: &str) -> bool {
+    let lower = input.to_lowercase();
+    lower.contains("tsh tools")
+        || ((input.contains("工具") || lower.contains("tool"))
+            && (input.contains("探索")
+                || input.contains("列举")
+                || input.contains("列出")
+                || input.contains("查看")
+                || lower.contains("discover")
+                || lower.contains("list")
+                || lower.contains("show")))
+}
+
 struct AgentModelRunConfig {
     agent: String,
     source: PathBuf,
@@ -374,14 +469,23 @@ impl AgentModelRunConfig {
             .join("agent")
             .join(format!("{agent}.d"))
             .join("model");
-        let model = read_small_plain_text_file(&model_path).map_or_else(
+        let configured_model = read_small_plain_text_file(&model_path).map_or_else(
             |_error| "main".to_owned(),
             |content| content.trim().to_owned(),
         );
-        let model = if model.is_empty() {
+        let configured_model = if configured_model.is_empty() {
             "main".to_owned()
         } else {
+            configured_model
+        };
+        let model = env::var("CTX_AGENT_MODEL_OVERRIDE")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(configured_model);
+        let model = if is_model_name(&model) || is_model_alias(&model) {
             model
+        } else {
+            return Err(format!("invalid model reference: {model}"));
         };
         let candidates = model_candidates(&ctx_root, &model)?;
         let selected = candidates

@@ -307,6 +307,28 @@ fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::er
 }
 
 #[test]
+fn model_candidates_append_existing_local_counterpart(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-model-local-fallback")?;
+    fs::create_dir_all(root.join("model/api.lmm.best/gpt-5.4-mini.d"))?;
+    fs::write(root.join("model/api.lmm.best/gpt-5.4-mini"), "#!/bin/sh\n")?;
+    fs::create_dir_all(root.join("model/local"))?;
+    fs::write(root.join("model/local/gpt-5.4-mini"), "#!/bin/sh\n")?;
+
+    let candidates = model_candidates(&root, "api.lmm.best/gpt-5.4-mini")?;
+
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.name.as_str())
+            .collect::<Vec<_>>(),
+        ["api.lmm.best/gpt-5.4-mini", "local/gpt-5.4-mini"]
+    );
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn model_candidates_ignore_symlinked_fallback_control_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-model-fallback-symlink")?;
@@ -458,6 +480,8 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
 
     assert!(contract.contains("you must call `tsh` immediately"));
     assert!(contract.contains("Do not ask the user to let you execute `tsh`"));
+    assert!(contract.contains("Do not say that you cannot execute `tsh`"));
+    assert!(contract.contains("hidden platform tools such as `image_gen`"));
     assert!(contract.contains("output exactly one JSON object line and no prose"));
     assert!(contract.contains(r#""name":"tsh""#));
     assert!(contract.contains("If no concrete file path is provided"));
@@ -615,6 +639,96 @@ fn agent_tool_loop_supports_multiple_distinct_tsh_calls() {
         "missing ready frame in output:\n{output}\ncontext:\n{}",
         config.tool_context
     );
+}
+
+#[test]
+fn agent_tool_loop_executes_initial_tool_discovery_request() {
+    let mut config = test_agent_run_config();
+    let mut output = Vec::new();
+    let mut step = 0_u8;
+    let mut executed = Vec::new();
+
+    let result = run_agent_tool_loop(
+        &mut config,
+        "请立刻调用 tsh tools 探索你有哪些工具",
+        &mut output,
+        |config, _input, _stdout| {
+            step = step.saturating_add(1);
+            assert_eq!(step, 1);
+            assert!(config.tool_context.contains("Tool result call-1 from tsh"));
+            assert!(config.tool_context.contains("fs.read"));
+            Ok(AgentModelRunOutcome {
+                frames: vec![r#"{"type":"delta","run":"r1","text":"有 fs.read"}"#.to_owned()],
+                success: true,
+                streamed: false,
+            })
+        },
+        |_config, tool_call| {
+            executed.push(
+                tool_call
+                    .args
+                    .iter()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+            );
+            Ok("fs.read\nfs.write\ntsh\n".to_owned())
+        },
+    );
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(executed, vec![vec!["tools".to_owned()]]);
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""id":"call-1""#));
+    assert!(output.contains(r#""tool_call_id":"call-1""#));
+    assert!(output.contains(r#""text":"有 fs.read""#));
+}
+
+#[test]
+fn agent_tool_loop_executes_explicit_backtick_tsh_sequence() {
+    let mut config = test_agent_run_config();
+    let mut output = Vec::new();
+    let mut executed = Vec::new();
+
+    let result = run_agent_tool_loop(
+        &mut config,
+        "执行 `tsh fs.read /workspace/smoke.txt` 然后 `tsh fs.write /workspace/smoke.txt status=done`",
+        &mut output,
+        |config, _input, _stdout| {
+            assert!(config.tool_context.contains("Tool result call-1 from tsh"));
+            assert!(config.tool_context.contains("Tool result call-2 from tsh"));
+            Ok(AgentModelRunOutcome {
+                frames: vec![r#"{"type":"delta","run":"r1","text":"done"}"#.to_owned()],
+                success: true,
+                streamed: false,
+            })
+        },
+        |_config, tool_call| {
+            let args = tool_call
+                .args
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            executed.push(args.clone());
+            Ok(format!("executed {args:?}\n"))
+        },
+    );
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        executed,
+        vec![
+            vec!["fs.read".to_owned(), "/workspace/smoke.txt".to_owned()],
+            vec![
+                "fs.write".to_owned(),
+                "/workspace/smoke.txt".to_owned(),
+                "status=done".to_owned()
+            ]
+        ]
+    );
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""tool_call_id":"call-1""#));
+    assert!(output.contains(r#""tool_call_id":"call-2""#));
+    assert!(output.contains(r#""text":"done""#));
 }
 
 #[test]
@@ -1784,7 +1898,12 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     assert!(system.contains("tool output"));
     assert!(system.contains("previous message"));
     assert!(system.contains("Do not claim direct access"));
+    assert!(system.contains("Do not say that you cannot execute `tsh`"));
     assert!(system.contains("tsh load TOOL"));
+    assert!(
+        system.find("## Runtime Contract").unwrap_or(usize::MAX)
+            < system.find("## AGENT Instructions").unwrap_or(usize::MAX)
+    );
     assert_eq!(
         messages.pointer("/1/content").and_then(serde_json::Value::as_str),
         Some("what tools?")
@@ -1792,7 +1911,7 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
 
     let prompt = render_agent_system_prompt("coder", "", &test_prompt_context());
     assert!(prompt.contains("CortexFS agent `coder`"));
-    assert!(!prompt.contains("image_gen"));
+    assert!(prompt.contains("Do not mention hidden platform tools such as `image_gen`"));
 }
 
 #[test]

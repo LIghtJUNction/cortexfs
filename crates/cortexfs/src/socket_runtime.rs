@@ -158,8 +158,8 @@ fn handle_agent_executable_socket_request_frame_streaming(
         ref id,
         ref session,
         scope,
+        ref cwd,
         ref input,
-        ..
     } = request
     else {
         let response = handle_socket_request(
@@ -186,7 +186,17 @@ fn handle_agent_executable_socket_request_frame_streaming(
         write_socket_debug_timing_frame(stream, debug, "session_recorded")?;
     }
 
-    let agent_frames = run_agent_executable_streaming(stream, runtime, id, session, input, debug)?;
+    let agent_frames = run_agent_executable_streaming(
+        stream,
+        runtime,
+        AgentExecutableRunRequest {
+            run_id: id,
+            session,
+            cwd: cwd.as_deref(),
+            input,
+            debug,
+        },
+    )?;
     if scope != SocketSessionScope::Temp {
         let session_dir = runtime.session_root.join(session);
         record_tool_results_from_event_frames(&session_dir, id, &agent_frames)
@@ -205,46 +215,22 @@ fn handle_agent_executable_socket_request_frame_streaming(
 fn run_agent_executable_streaming(
     stream: &mut UnixStream,
     runtime: AgentExecutableSocketRuntime<'_>,
-    run_id: &str,
-    session: &str,
-    input: &str,
-    debug: Option<SocketDebugTiming>,
+    request: AgentExecutableRunRequest<'_>,
 ) -> Result<Vec<String>, SocketRuntimeError> {
     let history_messages = collect_history_messages_from_session(
-        &runtime.session_root.join(session),
+        &runtime.session_root.join(request.session),
         MAX_HISTORY_MESSAGES_CHARS,
     );
-    write_optional_socket_debug_timing_frame(stream, debug, "history_collected")?;
+    write_optional_socket_debug_timing_frame(stream, request.debug, "history_collected")?;
     let agent_executable = open_agent_executable_no_follow(runtime.agent_executable)?;
-    let mut command = Command::new(proc_fd_path(&agent_executable));
-    command
-        .arg(input)
-        // The socket-activated service may hold provider credentials in its
-        // own environment. Start executable agents from a clean environment
-        // and then add only the derived agent view plus runtime-owned CTX_*
-        // values so those service credentials cannot be inherited by agent
-        // code or its descendants.
-        .env_clear()
-        .envs(
-            runtime
-                .env
-                .iter()
-                .map(|env| (env.0.as_str(), env.1.as_str())),
-        )
-        .env("CTX_AGENT", runtime.agent_name)
-        .env("CTX_ROOT", runtime.ctx_root)
-        .env("CTX_SOURCE", runtime.source_root)
-        .env("CTX_RUN_ID", run_id)
-        .env("CTX_SESSION", session)
-        .env("CTX_AGENT_HISTORY_MESSAGES", history_messages)
-        .stdout(Stdio::piped())
-        .process_group(0);
-    apply_socket_debug_timing_env(&mut command, debug);
+    let mut command =
+        agent_executable_socket_command(runtime, &agent_executable, request, history_messages);
+    apply_socket_debug_timing_env(&mut command, request.debug);
     apply_agent_identity_to_command(&mut command, runtime.identity);
     let mut child = command
         .spawn()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    write_optional_socket_debug_timing_frame(stream, debug, "agent_spawned")?;
+    write_optional_socket_debug_timing_frame(stream, request.debug, "agent_spawned")?;
     let stdout = child
         .stdout
         .take()
@@ -260,7 +246,7 @@ fn run_agent_executable_streaming(
         Ok::<(), SocketRuntimeError>(())
     });
     let mut frames = Vec::new();
-    let session_dir = runtime.session_root.join(session);
+    let session_dir = runtime.session_root.join(request.session);
     let mut cancelled = false;
     let mut saw_agent_frame = false;
     loop {
@@ -269,12 +255,16 @@ fn run_agent_executable_streaming(
                 if line.trim().is_empty() {
                     continue;
                 }
-                if is_socket_debug_timing_frame(&line, debug) {
+                if is_socket_debug_timing_frame(&line, request.debug) {
                     write_socket_frame(stream, &line)?;
                     continue;
                 }
                 if !saw_agent_frame {
-                    write_optional_socket_debug_timing_frame(stream, debug, "first_agent_frame")?;
+                    write_optional_socket_debug_timing_frame(
+                        stream,
+                        request.debug,
+                        "first_agent_frame",
+                    )?;
                     saw_agent_frame = true;
                 }
                 if !inspect_event_stream_jsonl(&line).is_ok() {
@@ -283,7 +273,7 @@ fn run_agent_executable_streaming(
                         let _ignored = child.wait();
                         return Err(SocketRuntimeError::InvalidAgentOutput);
                     }
-                    let wrapped = agent_plain_text_frame(run_id, &line);
+                    let wrapped = agent_plain_text_frame(request.run_id, &line);
                     write_socket_frame(stream, &wrapped)?;
                     frames.push(wrapped);
                     continue;
@@ -293,23 +283,21 @@ fn run_agent_executable_streaming(
                     frames.push(line);
                 }
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                match reader.join() {
-                    Ok(Ok(())) => break,
-                    Ok(Err(error)) => {
-                        terminate_agent_process_group(&mut child);
-                        let _ignored = child.wait();
-                        return Err(error);
-                    }
-                    Err(_error) => {
-                        terminate_agent_process_group(&mut child);
-                        let _ignored = child.wait();
-                        return Err(SocketRuntimeError::CannotReadFrame);
-                    }
+            Err(mpsc::RecvTimeoutError::Disconnected) => match reader.join() {
+                Ok(Ok(())) => break,
+                Ok(Err(error)) => {
+                    terminate_agent_process_group(&mut child);
+                    let _ignored = child.wait();
+                    return Err(error);
                 }
-            }
+                Err(_error) => {
+                    terminate_agent_process_group(&mut child);
+                    let _ignored = child.wait();
+                    return Err(SocketRuntimeError::CannotReadFrame);
+                }
+            },
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if agent_run_cancelled(&session_dir, run_id) {
+                if agent_run_cancelled(&session_dir, request.run_id) {
                     cancelled = true;
                     terminate_agent_process_group(&mut child);
                     break;
@@ -363,6 +351,230 @@ fn read_agent_executable_frame_line(
     String::from_utf8(bytes)
         .map(Some)
         .map_err(|_error| SocketRuntimeError::InvalidAgentOutput)
+}
+
+#[derive(Clone, Copy)]
+struct AgentExecutableRunRequest<'a> {
+    run_id: &'a str,
+    session: &'a str,
+    cwd: Option<&'a str>,
+    input: &'a str,
+    debug: Option<SocketDebugTiming>,
+}
+
+fn agent_executable_socket_command(
+    runtime: AgentExecutableSocketRuntime<'_>,
+    agent_executable: &fs::File,
+    request: AgentExecutableRunRequest<'_>,
+    history_messages: String,
+) -> Command {
+    match runtime.execution {
+        AgentExecutableSocketExecution::Direct => {
+            let mut command = Command::new(proc_fd_path(agent_executable));
+            apply_agent_executable_socket_env(
+                &mut command,
+                runtime,
+                request.run_id,
+                request.session,
+                history_messages,
+            );
+            command.arg(request.input);
+            command.stdout(Stdio::piped()).process_group(0);
+            command
+        }
+        AgentExecutableSocketExecution::Bwrap {
+            program,
+            mount_table,
+        } => {
+            let mut command = Command::new(program);
+            command.args(agent_executable_socket_bwrap_args(&BwrapAgentExecutableArgs {
+                runtime,
+                mount_table,
+                cwd: request.cwd.unwrap_or(runtime.default_cwd),
+                run_id: request.run_id,
+                session: request.session,
+                history_messages: &history_messages,
+                debug: request.debug,
+                input: request.input,
+            }));
+            apply_agent_executable_socket_env(
+                &mut command,
+                runtime,
+                request.run_id,
+                request.session,
+                history_messages,
+            );
+            command.stdout(Stdio::piped()).process_group(0);
+            command
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct BwrapAgentExecutableArgs<'a> {
+    pub runtime: AgentExecutableSocketRuntime<'a>,
+    pub mount_table: &'a MountTable,
+    pub cwd: &'a str,
+    pub run_id: &'a str,
+    pub session: &'a str,
+    pub history_messages: &'a str,
+    pub debug: Option<SocketDebugTiming>,
+    pub input: &'a str,
+}
+
+fn apply_agent_executable_socket_env(
+    command: &mut Command,
+    runtime: AgentExecutableSocketRuntime<'_>,
+    run_id: &str,
+    session: &str,
+    history_messages: String,
+) {
+    // The socket-activated service may hold provider credentials in its own
+    // environment. Start executable agents from a clean environment and add
+    // only the derived agent view plus runtime-owned CTX_* values.
+    command
+        .env_clear()
+        .envs(
+            runtime
+                .env
+                .iter()
+                .map(|env| (env.0.as_str(), env.1.as_str())),
+        )
+        .env("CTX_AGENT", runtime.agent_name)
+        .env("CTX_ROOT", runtime.ctx_root)
+        .env("CTX_SOURCE", runtime.source_root)
+        .env("CTX_RUN_ID", run_id)
+        .env("CTX_SESSION", session)
+        .env("CTX_AGENT_HISTORY_MESSAGES", history_messages);
+}
+
+pub(crate) fn agent_executable_socket_bwrap_args(
+    request: &BwrapAgentExecutableArgs<'_>,
+) -> Vec<String> {
+    let mut bwrap = vec!["--clearenv".to_owned()];
+    for env in request.runtime.env {
+        bwrap.extend(["--setenv".to_owned(), env.0.clone(), env.1.clone()]);
+    }
+    bwrap.extend([
+        "--setenv".to_owned(),
+        "CTX_AGENT".to_owned(),
+        request.runtime.agent_name.to_owned(),
+        "--setenv".to_owned(),
+        "CTX_ROOT".to_owned(),
+        request.runtime.ctx_root.display().to_string(),
+        "--setenv".to_owned(),
+        "CTX_SOURCE".to_owned(),
+        request.runtime.source_root.display().to_string(),
+        "--setenv".to_owned(),
+        "CTX_RUN_ID".to_owned(),
+        request.run_id.to_owned(),
+        "--setenv".to_owned(),
+        "CTX_SESSION".to_owned(),
+        request.session.to_owned(),
+        "--setenv".to_owned(),
+        "CTX_AGENT_HISTORY_MESSAGES".to_owned(),
+        request.history_messages.to_owned(),
+        "--die-with-parent".to_owned(),
+        "--unshare-pid".to_owned(),
+        "--proc".to_owned(),
+        "/proc".to_owned(),
+        "--dev".to_owned(),
+        "/dev".to_owned(),
+        "--tmpfs".to_owned(),
+        "/tmp".to_owned(),
+        "--dir".to_owned(),
+        "/run".to_owned(),
+        "--dir".to_owned(),
+        "/home".to_owned(),
+        "--ro-bind".to_owned(),
+        "/usr".to_owned(),
+        "/usr".to_owned(),
+        "--ro-bind".to_owned(),
+        "/etc".to_owned(),
+        "/etc".to_owned(),
+        "--tmpfs".to_owned(),
+        "/etc/profile.d".to_owned(),
+        "--symlink".to_owned(),
+        "usr/bin".to_owned(),
+        "/bin".to_owned(),
+        "--symlink".to_owned(),
+        "usr/lib".to_owned(),
+        "/lib".to_owned(),
+        "--symlink".to_owned(),
+        "usr/lib".to_owned(),
+        "/lib64".to_owned(),
+    ]);
+    bwrap.extend(bwrap_provider_secret_bind_args(request.runtime.env));
+    if let Some(timing) = request.debug {
+        bwrap.extend([
+            "--setenv".to_owned(),
+            "CTX_AGENT_DEBUG_TIMING".to_owned(),
+            "1".to_owned(),
+            "--setenv".to_owned(),
+            "CTX_AGENT_DEBUG_START_UNIX_MS".to_owned(),
+            timing.start_unix_ms.to_string(),
+        ]);
+    }
+    for mount in request.mount_table.entries() {
+        bwrap.push(match mount.mode() {
+            MountMode::ReadOnly => "--ro-bind".to_owned(),
+            MountMode::ReadWrite => "--bind".to_owned(),
+        });
+        bwrap.push(mount.source().to_owned());
+        bwrap.push(mount.target().to_owned());
+    }
+    bwrap.extend(bwrap_dir_args_for_chdir(request.cwd));
+    bwrap.extend([
+        "--chdir".to_owned(),
+        request.cwd.to_owned(),
+        request.runtime.agent_executable.display().to_string(),
+        request.input.to_owned(),
+    ]);
+    bwrap
+}
+
+fn bwrap_provider_secret_bind_args(env: &[(String, String)]) -> Vec<String> {
+    let Some(path) = env
+        .iter()
+        .find(|entry| entry.0 == "CTX_PROVIDER_SECRET_PATH")
+        .map(|entry| entry.1.as_str())
+    else {
+        return Vec::new();
+    };
+    if !path.starts_with('/') {
+        return Vec::new();
+    }
+    let mut args = bwrap_dir_args_for_parent(path);
+    args.push("--ro-bind".to_owned());
+    args.push(path.to_owned());
+    args.push(path.to_owned());
+    args
+}
+
+fn bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
+    let Some((parent, _name)) = path.rsplit_once('/') else {
+        return Vec::new();
+    };
+    if parent.is_empty() {
+        Vec::new()
+    } else {
+        bwrap_dir_args_for_chdir(parent)
+    }
+}
+
+fn bwrap_dir_args_for_chdir(cwd: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    if !cwd.starts_with('/') {
+        return args;
+    }
+    let mut path = String::new();
+    for component in cwd.split('/').filter(|component| !component.is_empty()) {
+        path.push('/');
+        path.push_str(component);
+        args.push("--dir".to_owned());
+        args.push(path.clone());
+    }
+    args
 }
 
 fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
@@ -685,9 +897,10 @@ fn write_optional_socket_debug_timing_frame(
 
 fn apply_socket_debug_timing_env(command: &mut Command, timing: Option<SocketDebugTiming>) {
     if let Some(timing) = timing {
-        command
-            .env("CTX_AGENT_DEBUG_TIMING", "1")
-            .env("CTX_AGENT_DEBUG_START_UNIX_MS", timing.start_unix_ms.to_string());
+        command.env("CTX_AGENT_DEBUG_TIMING", "1").env(
+            "CTX_AGENT_DEBUG_START_UNIX_MS",
+            timing.start_unix_ms.to_string(),
+        );
     }
 }
 
@@ -777,7 +990,7 @@ fn handle_socket_resume(
         &session_root.join(session).join("events.jsonl"),
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     )
-        .map_err(|_error| SocketRuntimeError::CannotReadEvents)?;
+    .map_err(|_error| SocketRuntimeError::CannotReadEvents)?;
     Ok(SocketRuntimeResponse::new(resume_event_frames(
         &events, after,
     )))
@@ -861,7 +1074,9 @@ fn open_socket_runtime_plain_file(path: &Path) -> std::io::Result<fs::File> {
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name"))?;
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
+        })?;
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,

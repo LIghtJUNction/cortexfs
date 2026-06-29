@@ -128,6 +128,13 @@ fn provider_chat_completion(
                 api_key: key,
                 effort,
             };
+            if provider == "local" {
+                let completion = call_openai_chat(&route.transport, &request)
+                    .map_err(ProviderCompletionError::fallback)?;
+                return write_text_completion(stdout, run, &completion).map_err(|error| {
+                    ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
+                });
+            }
             match call_openai_chat_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
@@ -153,6 +160,13 @@ fn provider_chat_completion(
                 api_key: key,
                 effort,
             };
+            if provider == "local" {
+                let completion = call_openai_responses(&route.transport, &request)
+                    .map_err(ProviderCompletionError::fallback)?;
+                return write_text_completion(stdout, run, &completion).map_err(|error| {
+                    ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
+                });
+            }
             match call_openai_responses_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
@@ -725,15 +739,19 @@ fn provider_credential(
             }
         }));
     }
-    if let Some(api_key) = cortexfs::read_provider_system_secret(provider, account)
-        .map_err(|_error| format!("system provider secret unavailable: {provider}"))?
-    {
-        return Ok(Some(match driver {
-            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
-            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
-                ProviderCredential::Bearer(api_key)
-            }
-        }));
+    match cortexfs::read_provider_system_secret(provider, account) {
+        Ok(Some(api_key)) => {
+            return Ok(Some(match driver {
+                ProviderRuntimeDriver::AnthropicMessages => {
+                    ProviderCredential::AnthropicApiKey(api_key)
+                }
+                ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
+                    ProviderCredential::Bearer(api_key)
+                }
+            }));
+        }
+        Ok(None) | Err(cortexfs::ProviderSystemSecretError::CannotRead) => {}
+        Err(_error) => return Err(format!("system provider secret unavailable: {provider}")),
     }
     let Some(oauth) = config.oauth.as_ref() else {
         return Ok(None);
@@ -1098,15 +1116,15 @@ fn call_openai_sse_streaming(
                 .map_err(|error| StreamFailure {
                     message: format!("cannot write output: {error}"),
                     can_fallback: false,
-                })?;
+            })?;
             return Err(StreamFailure {
+                can_fallback: stderr.contains("Operation timed out"),
                 message,
-                can_fallback: false,
             });
         }
         return Err(StreamFailure {
             message,
-            can_fallback: !emitted && !stderr.contains("Operation timed out"),
+            can_fallback: stderr.contains("Operation timed out") || !emitted,
         });
     }
     if let Err(error) = text_emitter.finish(stdout).and_then(|()| stdout.flush()) {
