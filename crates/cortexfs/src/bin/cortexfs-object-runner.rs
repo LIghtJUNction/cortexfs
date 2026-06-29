@@ -1765,9 +1765,29 @@ fn split_object_args(args: Vec<OsString>) -> Result<(PathBuf, Vec<OsString>), St
         return Err("missing object path".to_owned());
     };
     let path = PathBuf::from(path);
-    Ok((
-        object_path_from_exec_metadata(&path).unwrap_or(path),
-        values.collect(),
+    let object_path = object_path_from_exec_metadata(&path)
+        .map(|metadata_path| validate_exec_metadata_object_path(&path, metadata_path))
+        .transpose()?
+        .unwrap_or(path);
+    Ok((object_path, values.collect()))
+}
+
+fn validate_exec_metadata_object_path(
+    exec_path: &Path,
+    metadata_path: PathBuf,
+) -> Result<PathBuf, String> {
+    let Some(authorized_path) = env::var_os("CTX_AUTHORIZED_OBJECT") else {
+        return Ok(metadata_path);
+    };
+    let authorized_path = PathBuf::from(authorized_path);
+    if metadata_path == authorized_path {
+        return Ok(metadata_path);
+    }
+    Err(format!(
+        "executable metadata object {} does not match authorized object {} for {}",
+        metadata_path.display(),
+        authorized_path.display(),
+        exec_path.display()
     ))
 }
 
