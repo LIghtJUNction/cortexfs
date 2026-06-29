@@ -642,16 +642,26 @@ fn agent_tool_loop_supports_multiple_distinct_tsh_calls() {
 }
 
 #[test]
-fn agent_tool_loop_executes_initial_tool_discovery_request() {
+fn agent_tool_loop_does_not_execute_initial_tool_discovery_request() {
     let mut config = test_agent_run_config();
     let mut output = Vec::new();
+    let mut step = 0_u8;
     let mut executed = Vec::new();
 
     let result = run_agent_tool_loop(
         &mut config,
         "请立刻调用 tsh tools 探索你有哪些工具",
         &mut output,
-        |_config, _input, _stdout| Err("model should not run after deterministic tsh".to_owned()),
+        |config, _input, _stdout| {
+            step = step.saturating_add(1);
+            assert_eq!(step, 1);
+            assert!(!config.tool_context.contains("Tool result"));
+            Ok(AgentModelRunOutcome {
+                frames: vec![r#"{"type":"delta","run":"r1","text":"model decides"}"#.to_owned()],
+                success: true,
+                streamed: false,
+            })
+        },
         |_config, tool_call| {
             executed.push(
                 tool_call
@@ -665,46 +675,14 @@ fn agent_tool_loop_executes_initial_tool_discovery_request() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(executed, vec![vec!["tools".to_owned()]]);
+    assert!(executed.is_empty());
     let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""id":"call-1""#));
-    assert!(output.contains(r#""tool_call_id":"call-1""#));
-    assert!(output.contains("工具 `tsh` 已执行"));
+    assert!(!output.contains(r#""tool_call_id":"#));
+    assert!(output.contains(r#""text":"model decides""#));
 }
 
 #[test]
-fn agent_tool_loop_executes_can_you_call_tools_request() {
-    let mut config = test_agent_run_config();
-    let mut output = Vec::new();
-    let mut executed = Vec::new();
-
-    let result = run_agent_tool_loop(
-        &mut config,
-        "试试你能不能调用工具",
-        &mut output,
-        |_config, _input, _stdout| Err("model should not run after deterministic tsh".to_owned()),
-        |_config, tool_call| {
-            executed.push(
-                tool_call
-                    .args
-                    .iter()
-                    .map(|arg| arg.to_string_lossy().into_owned())
-                    .collect::<Vec<_>>(),
-            );
-            Ok("fs.read\nfs.write\ntsh\n".to_owned())
-        },
-    );
-
-    assert_eq!(result, Ok(()));
-    assert_eq!(executed, vec![vec!["tools".to_owned()]]);
-    let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""tool_call_id":"call-1""#));
-    assert!(output.contains("fs.write"));
-    assert!(output.contains("工具 `tsh` 已执行"));
-}
-
-#[test]
-fn agent_tool_loop_executes_explicit_backtick_tsh_sequence() {
+fn agent_tool_loop_does_not_execute_backtick_tsh_from_user_prompt() {
     let mut config = test_agent_run_config();
     let mut output = Vec::new();
     let mut executed = Vec::new();
@@ -713,7 +691,14 @@ fn agent_tool_loop_executes_explicit_backtick_tsh_sequence() {
         &mut config,
         "执行 `tsh fs.read /workspace/smoke.txt` 然后 `tsh fs.write /workspace/smoke.txt status=done`",
         &mut output,
-        |_config, _input, _stdout| Err("model should not run after deterministic tsh".to_owned()),
+        |config, _input, _stdout| {
+            assert!(!config.tool_context.contains("Tool result"));
+            Ok(AgentModelRunOutcome {
+                frames: vec![r#"{"type":"delta","run":"r1","text":"done"}"#.to_owned()],
+                success: true,
+                streamed: false,
+            })
+        },
         |_config, tool_call| {
             let args = tool_call
                 .args
@@ -726,22 +711,10 @@ fn agent_tool_loop_executes_explicit_backtick_tsh_sequence() {
     );
 
     assert_eq!(result, Ok(()));
-    assert_eq!(
-        executed,
-        vec![
-            vec!["fs.read".to_owned(), "/workspace/smoke.txt".to_owned()],
-            vec![
-                "fs.write".to_owned(),
-                "/workspace/smoke.txt".to_owned(),
-                "status=done".to_owned()
-            ]
-        ]
-    );
+    assert!(executed.is_empty());
     let output = String::from_utf8(output).unwrap_or_default();
-    assert!(output.contains(r#""tool_call_id":"call-1""#));
-    assert!(output.contains(r#""tool_call_id":"call-2""#));
-    assert!(output.contains("工具 `tsh` 已执行"));
-    assert!(output.contains("status=done"));
+    assert!(!output.contains(r#""tool_call_id":"#));
+    assert!(output.contains(r#""text":"done""#));
 }
 
 #[test]

@@ -263,24 +263,6 @@ where
 {
     let mut seen_tool_calls = BTreeSet::new();
     let mut last_tool_result: Option<(AgentToolCall, String)> = None;
-    for tool_call in initial_user_requested_tsh_calls(input) {
-        seen_tool_calls.insert(tool_call_signature(&tool_call));
-        write_tool_call_event(stdout, &config.run, &tool_call)
-            .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
-        let result = execute_tool_call(config, &tool_call)
-            .unwrap_or_else(|error| format!("ERROR: {error}\n"));
-        write_tool_result_event(stdout, &config.run, &tool_call, &result)?;
-        stdout
-            .flush()
-            .map_err(|error| format!("cannot write output: {error}"))?;
-        config.push_tool_result(&tool_call, &result);
-        config.suppress_model_error_events = true;
-        last_tool_result = Some((tool_call, result));
-    }
-    if let Some(pair) = last_tool_result.as_ref() {
-        return write_tool_result_fallback_response(stdout, &config.run, &pair.0, &pair.1);
-    }
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
         let outcome = run_model_once(config, input, stdout)?;
         if frames_have_error(&outcome.frames)
@@ -362,70 +344,6 @@ where
     }
 
     Ok(())
-}
-
-fn initial_user_requested_tsh_calls(input: &str) -> Vec<AgentToolCall> {
-    let mut calls = explicit_backtick_tsh_calls(input);
-    if calls.is_empty() && asks_to_discover_tools(input) {
-        calls.push(AgentToolCall {
-            id: "call-1".to_owned(),
-            name: "tsh".to_owned(),
-            args: vec![OsString::from("tools")],
-        });
-    }
-    calls
-}
-
-fn explicit_backtick_tsh_calls(input: &str) -> Vec<AgentToolCall> {
-    input
-        .split('`')
-        .enumerate()
-        .filter_map(|(index, segment)| {
-            if index % 2 == 0 {
-                return None;
-            }
-            explicit_tsh_call_from_text(segment)
-        })
-        .take(MAX_AGENT_TOOL_ITERATIONS)
-        .enumerate()
-        .map(|(index, mut call)| {
-            call.id = format!("call-{}", index + 1);
-            call
-        })
-        .collect()
-}
-
-fn explicit_tsh_call_from_text(text: &str) -> Option<AgentToolCall> {
-    let trimmed = text.trim();
-    let command = trimmed.strip_prefix("tsh ")?;
-    let words = shell_words(command).ok()?;
-    if words.is_empty() || validate_tool_call_arg_limits(&words).is_err() {
-        return None;
-    }
-    Some(AgentToolCall {
-        id: "call-1".to_owned(),
-        name: "tsh".to_owned(),
-        args: words.into_iter().map(OsString::from).collect(),
-    })
-}
-
-fn asks_to_discover_tools(input: &str) -> bool {
-    let lower = input.to_lowercase();
-    lower.contains("tsh tools")
-        || ((input.contains("工具") || lower.contains("tool"))
-            && (input.contains("探索")
-                || input.contains("列举")
-                || input.contains("列出")
-                || input.contains("查看")
-                || input.contains("调用")
-                || input.contains("能不能")
-                || input.contains("试试")
-                || lower.contains("discover")
-                || lower.contains("call")
-                || lower.contains("use")
-                || lower.contains("try")
-                || lower.contains("list")
-                || lower.contains("show")))
 }
 
 struct AgentModelRunConfig {
