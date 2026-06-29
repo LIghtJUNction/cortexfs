@@ -77,7 +77,10 @@ fn remove_stale_test_dirs() {
             let Ok(metadata) = entry.metadata() else {
                 continue;
             };
-            if metadata.modified().is_ok_and(|modified| modified < stale_before) {
+            if metadata
+                .modified()
+                .is_ok_and(|modified| modified < stale_before)
+            {
                 let _ignored = fs::remove_dir_all(path);
             }
         }
@@ -157,6 +160,21 @@ fn assert_file_text(path: &Path, expected: &str) {
         "{}",
         path.display()
     );
+}
+
+fn contains_arg_pair(args: &[String], first: &str, second: &str) -> bool {
+    args.windows(2).any(|window| {
+        window.first().is_some_and(|value| value == first)
+            && window.get(1).is_some_and(|value| value == second)
+    })
+}
+
+fn contains_arg_triplet(args: &[String], first: &str, second: &str, third: &str) -> bool {
+    args.windows(3).any(|window| {
+        window.first().is_some_and(|value| value == first)
+            && window.get(1).is_some_and(|value| value == second)
+            && window.get(2).is_some_and(|value| value == third)
+    })
 }
 
 fn fixture_path(root: &Path, parts: &[&str]) -> PathBuf {

@@ -100,6 +100,10 @@ pub const DEFAULT_AGENT_PROMPT_TEMPLATE: &str = r"# CortexFS Agent System Prompt
 Time: {{current_time_unix}}
 Agent: {{agent}}
 
+## Runtime Contract
+
+{{runtime_contract}}
+
 ## AGENT Instructions
 
 {{agent_instructions}}
@@ -119,10 +123,6 @@ Agent: {{agent}}
 ## History Messages
 
 {{history_messages}}
-
-## Runtime Contract
-
-{{runtime_contract}}
 ";
 
 /// Required tool control files.

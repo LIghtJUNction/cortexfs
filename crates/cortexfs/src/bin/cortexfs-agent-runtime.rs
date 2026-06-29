@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cortexfs::{
-    AgentExecutableSocketRuntime, SocketPeerPolicy, derive_agent_runtime_view, is_object_name,
-    serve_agent_executable_socket_listener_once,
+    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, SocketPeerPolicy,
+    derive_agent_runtime_view, is_object_name, serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
 use nix::errno::Errno;
@@ -20,6 +20,7 @@ use nix::unistd::{Gid, Uid};
 use nix::unistd::{UnlinkatFlags, fchown, unlinkat};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
+const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -49,10 +50,13 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
-    let provider_secret =
-        cortexfs::read_provider_system_secret_for_model(&config.source, view.model())
+    let (runtime_model, provider_secret) =
+        runtime_model_and_secret(&config.source, view.model())
             .map_err(|_error| format!("provider secret unavailable: {}", view.model()))?;
     let mut runtime_env = view.env().to_vec();
+    if runtime_model != view.model() {
+        runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
+    }
     let runtime_secret = provider_secret
         .as_ref()
         .map(|secret| {
@@ -78,15 +82,64 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
             env: &runtime_env,
             session_root: &session_root,
             default_cwd: &default_cwd,
-            model: Some(view.model()),
+            model: Some(&runtime_model),
             agent_name: view.agent_name(),
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Bwrap {
+                program: Path::new(BWRAP_PROGRAM),
+                mount_table: view.mount_table(),
+            },
         },
     );
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
     result
         .map(|_response| ())
         .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
+}
+
+fn runtime_model_and_secret(
+    source: &Path,
+    requested_model: &str,
+) -> Result<(String, Option<cortexfs::ProviderSystemSecret>), cortexfs::ProviderSystemSecretError> {
+    let requested_secret =
+        cortexfs::read_provider_system_secret_for_model(source, requested_model)?;
+    if requested_secret.is_some() {
+        return Ok((requested_model.to_owned(), requested_secret));
+    }
+    let resolved = resolved_runtime_model(source, requested_model);
+    let Some(local) = local_runtime_model_counterpart(&resolved) else {
+        return Ok((requested_model.to_owned(), None));
+    };
+    let local_secret = cortexfs::read_provider_system_secret_for_model(source, &local)?;
+    if local_secret.is_some() {
+        Ok((local, local_secret))
+    } else {
+        Ok((requested_model.to_owned(), None))
+    }
+}
+
+fn resolved_runtime_model(source: &Path, model: &str) -> String {
+    if !matches!(model, "main" | "helper") {
+        return model.to_owned();
+    }
+    let Ok(target) = fs::read_link(source.join("model").join(model)) else {
+        return model.to_owned();
+    };
+    let target = target.to_string_lossy();
+    target
+        .strip_prefix("/ctx/model/")
+        .or_else(|| target.strip_prefix("model/"))
+        .unwrap_or(&target)
+        .to_owned()
+}
+
+fn local_runtime_model_counterpart(model: &str) -> Option<String> {
+    let (provider, name) = model.split_once('/')?;
+    if provider == "local" || name.is_empty() {
+        None
+    } else {
+        Some(format!("local/{name}"))
+    }
 }
 
 fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {

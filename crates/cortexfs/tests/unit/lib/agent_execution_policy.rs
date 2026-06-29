@@ -21,12 +21,14 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
 
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -42,6 +44,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
     let outcome = ok!(outcome);
@@ -81,12 +84,14 @@ printf 'plain followup\n'
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -102,6 +107,7 @@ printf 'plain followup\n'
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
     let outcome = ok!(outcome);
@@ -153,6 +159,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
     let outcome = ok!(outcome);
@@ -189,12 +196,14 @@ fn agent_executable_socket_runtime_rejects_symlink_executable_without_running_ta
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -210,6 +219,7 @@ fn agent_executable_socket_runtime_rejects_symlink_executable_without_running_ta
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
 
@@ -234,12 +244,14 @@ printf '\n'
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -255,6 +267,7 @@ printf '\n'
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
 
@@ -279,12 +292,14 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -300,13 +315,15 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
     let outcome = ok!(outcome);
-    assert!(outcome.jsonl().contains(&format!(
-        r#""text":"{}""#,
-        root.to_string_lossy()
-    )));
+    assert!(
+        outcome
+            .jsonl()
+            .contains(&format!(r#""text":"{}""#, root.to_string_lossy()))
+    );
 }
 
 #[test]
@@ -327,12 +344,14 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -348,6 +367,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
     let outcome = ok!(outcome);
@@ -378,12 +398,14 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let cancel_root = session_root.clone();
@@ -417,6 +439,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
 
@@ -455,12 +478,14 @@ exit 1
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
 
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -476,13 +501,16 @@ exit 1
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
     let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("\"code\":\"EHOSTDOWN\""));
-    assert!(outcome
-        .jsonl()
-        .contains("\"message\":\"model unavailable\""));
+    assert!(
+        outcome
+            .jsonl()
+            .contains("\"message\":\"model unavailable\"")
+    );
     assert!(outcome.jsonl().contains("\"status\":\"error\""));
 
     let mut buffer = [0_u8; 512];
@@ -520,12 +548,14 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
-    assert!(client
-        .write_all(
-            br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
 "#,
-        )
-        .is_ok());
+            )
+            .is_ok()
+    );
     assert!(client.shutdown(Shutdown::Write).is_ok());
 
     let outcome = serve_agent_executable_socket_stream_once(
@@ -541,11 +571,71 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             model: Some("debug/echo"),
             agent_name: "coder",
             agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
         },
     );
     let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("secret-not-inherited"));
     assert!(!outcome.jsonl().contains("leaked:"));
+}
+
+#[test]
+fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
+    let root = reference_tree("agent-executable-socket-runtime-bwrap-args");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    let mut env = view.env().to_vec();
+    env.push((
+        "CTX_PROVIDER_SECRET_PATH".to_owned(),
+        "/run/user/1000/cortexfs/credentials/coder-default".to_owned(),
+    ));
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: &env,
+        session_root: &session_root,
+        default_cwd: "/workspace",
+        model: Some("debug/echo"),
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/usr/bin/bwrap"),
+            mount_table: view.mount_table(),
+        },
+    };
+
+    let args = agent_executable_socket_bwrap_args(&BwrapAgentExecutableArgs {
+        runtime,
+        mount_table: view.mount_table(),
+        cwd: "/workspace",
+        run_id: "run-1",
+        session: "default",
+        history_messages: "- user: hi",
+        debug: None,
+        input: "hi",
+    });
+
+    assert!(args.contains(&"--clearenv".to_owned()));
+    assert!(!args.contains(&"--unshare-net".to_owned()));
+    assert!(args.contains(&"--unshare-pid".to_owned()));
+    assert!(contains_arg_pair(&args, "--tmpfs", "/tmp"));
+    assert!(contains_arg_pair(&args, "--ro-bind", "/usr"));
+    assert!(contains_arg_pair(&args, "--dir", "/workspace"));
+    assert!(contains_arg_triplet(
+        &args,
+        "--ro-bind",
+        "/run/user/1000/cortexfs/credentials/coder-default",
+        "/run/user/1000/cortexfs/credentials/coder-default"
+    ));
+    assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
+    assert!(contains_arg_triplet(&args, "--ro-bind", "/ctx", "/ctx"));
+    assert_eq!(
+        args.get(args.len().saturating_sub(2)),
+        Some(&agent_executable.display().to_string())
+    );
+    assert_eq!(args.last().map(String::as_str), Some("hi"));
 }
 
 #[test]
