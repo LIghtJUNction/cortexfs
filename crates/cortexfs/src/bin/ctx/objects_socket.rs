@@ -499,9 +499,10 @@ fn render_agent_event_lines(
     let mut quiet_since = std::time::Instant::now();
     let mut next_waiting_notice = Duration::from_secs(3);
     let mut line = String::new();
+    let mut pending_frame = Vec::new();
     loop {
         line.clear();
-        match read_agent_socket_event_line_limited(&mut reader, &mut line) {
+        match read_agent_socket_event_line_limited(&mut reader, &mut pending_frame, &mut line) {
             Ok(None) => break,
             Ok(Some(_bytes)) => {}
             Err(error)
@@ -598,28 +599,38 @@ fn render_agent_event_lines(
 
 fn read_agent_socket_event_line_limited(
     reader: &mut impl BufRead,
+    pending_frame: &mut Vec<u8>,
     line: &mut String,
 ) -> io::Result<Option<usize>> {
-    let mut bytes = Vec::new();
-    let limit = u64::try_from(MAX_SOCKET_FRAME_BYTES.saturating_add(1)).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("socket frame read limit is invalid: {error}"),
-        )
-    })?;
-    let read = reader.take(limit).read_until(b'\n', &mut bytes)?;
-    if read == 0 {
-        return Ok(None);
-    }
-    if bytes.len() > MAX_SOCKET_FRAME_BYTES {
+    if pending_frame.len() > MAX_SOCKET_FRAME_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "agent socket response frame exceeds limit",
         ));
     }
+    let remaining = MAX_SOCKET_FRAME_BYTES
+        .saturating_add(1)
+        .saturating_sub(pending_frame.len());
+    let limit = u64::try_from(remaining).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("socket frame read limit is invalid: {error}"),
+        )
+    })?;
+    let read = reader.take(limit).read_until(b'\n', pending_frame)?;
+    if read == 0 && pending_frame.is_empty() {
+        return Ok(None);
+    }
+    if pending_frame.len() > MAX_SOCKET_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "agent socket response frame exceeds limit",
+        ));
+    }
+    let bytes = std::mem::take(pending_frame);
     *line = String::from_utf8(bytes)
         .map_err(|_error| io::Error::new(io::ErrorKind::InvalidData, "agent socket response is not UTF-8"))?;
-    Ok(Some(read))
+    Ok(Some(line.len()))
 }
 
 fn exit_code_u8(code: ExitCode) -> u8 {
@@ -670,9 +681,10 @@ fn collect_agent_events_buffered_with(
     let mut response_bytes: usize = 0;
     let mut events = 0;
     let mut line = String::new();
+    let mut pending_frame = Vec::new();
     loop {
         line.clear();
-        match read_agent_socket_event_line_limited(&mut reader, &mut line) {
+        match read_agent_socket_event_line_limited(&mut reader, &mut pending_frame, &mut line) {
             Ok(None) => break,
             Ok(Some(bytes)) => {
                 response_bytes = response_bytes.checked_add(bytes).ok_or_else(|| {
