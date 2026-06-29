@@ -1248,6 +1248,21 @@ fn agent_tool_process_times_out_instead_of_hanging() {
 }
 
 #[test]
+fn agent_tool_process_returns_when_grandchild_keeps_stdout_open() {
+    let mut command = std::process::Command::new("sh");
+    command.arg("-c").arg("printf done; (sleep 5) & exit 0");
+    let started = Instant::now();
+
+    let output = run_agent_tool_process_with_timeout(&mut command, Duration::from_secs(2));
+
+    assert!(output.is_ok());
+    let Ok(output) = output else { return };
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"done");
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
 fn agent_tool_process_kills_child_after_oversized_output() {
     let mut command = std::process::Command::new("sh");
     let oversized = MAX_AGENT_TOOL_OUTPUT_BYTES + 1;
