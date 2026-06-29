@@ -11,7 +11,7 @@ use crate::DEFAULT_AGENT_PROMPT_TEMPLATE;
 use nix::libc;
 use serde_json::Value;
 
-pub const MAX_SKILL_METADATA_CHARS: usize = 8_000;
+pub const MAX_SKILL_METADATA_CHARS: usize = 32_000;
 pub const MAX_HISTORY_MESSAGES_CHARS: usize = 8_000;
 const MAX_AGENT_RULES_CHARS: usize = 64_000;
 const MAX_AGENT_RULE_FILE_BYTES: u64 = 64 * 1024;
