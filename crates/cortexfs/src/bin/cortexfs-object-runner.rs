@@ -283,11 +283,6 @@ where
     }
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
         let outcome = run_model_once(config, input, stdout)?;
-        if frames_have_error(&outcome.frames)
-            && let Some(pair) = last_tool_result.as_ref()
-        {
-            return write_tool_result_fallback_response(stdout, &config.run, &pair.0, &pair.1);
-        }
         if let Some(tool_call) = first_tool_call(&outcome.frames)? {
             if !seen_tool_calls.insert(tool_call_signature(&tool_call)) {
                 if let Some(pair) = last_tool_result.as_ref() {
@@ -319,7 +314,6 @@ where
                 .flush()
                 .map_err(|error| format!("cannot write output: {error}"))?;
             config.push_tool_result(&tool_call, &result);
-            config.suppress_model_error_events = true;
             last_tool_result = Some((tool_call, result));
             if iteration == MAX_AGENT_TOOL_ITERATIONS {
                 return write_tool_error(
