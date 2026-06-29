@@ -294,6 +294,38 @@ fn parses_agent_sh_compat_command() {
 }
 
 #[test]
+fn agent_sh_prompt_root_words_do_not_override_selected_root() {
+    let root = clean_test_dir("ctx-agent-sh-root-word-selected-root");
+    assert!(fs::create_dir_all(root.join("agent")).is_ok());
+    let attacker_root = clean_test_dir("ctx-agent-sh-root-word-attacker-root");
+    let server = spawn_agent_socket_request_capture(&root, "coder");
+
+    let result = run(vec![
+        std::ffi::OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+        std::ffi::OsString::from("agent-sh"),
+        std::ffi::OsString::from("--raw"),
+        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("token"),
+        std::ffi::OsString::from("--root"),
+        attacker_root.as_os_str().to_os_string(),
+        std::ffi::OsString::from("secret"),
+    ]);
+
+    assert!(matches!(result, Ok(code) if code == std::process::ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    let Ok(request) = request else {
+        return;
+    };
+    assert!(request.contains("\"op\":\"send\""));
+    assert!(request.contains(&format!(
+        "\"input\":\"token --root {} secret\"",
+        attacker_root.display()
+    )));
+}
+
+#[test]
 fn parses_agent_sh_compat_router_modes() {
     let send = parse_agent_sh_args_with_session(
         vec!["coder".to_owned(), "hello".to_owned(), "world".to_owned()],
