@@ -385,6 +385,25 @@ fn tool_call_text_parses_tsh_argv() {
 }
 
 #[test]
+fn tool_call_text_parses_json_prefix_before_prose() {
+    let call = tool_call_from_text(
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["fs.read","tmp/agent_edit_smoke.txt"]}}我没有拿到 `tsh` 工具执行结果。"#,
+    );
+
+    assert!(matches!(
+        call,
+        Ok(Some(ref call))
+            if call.id == "call-1"
+                && call.name == "tsh"
+                && call.args
+                    == [
+                        OsString::from("fs.read"),
+                        OsString::from("tmp/agent_edit_smoke.txt")
+                    ]
+    ));
+}
+
+#[test]
 fn tool_call_arguments_accept_command_string() {
     let value = serde_json::json!({
         "type": "tool_call",
@@ -490,6 +509,7 @@ fn passthrough_tool_gets_clean_runtime_environment() {
             .arg("--nocapture")
             .env("CORTEXFS_PASSTHROUGH_ENV_CHILD", "1")
             .env("CORTEXFS_SHOULD_NOT_LEAK", "secret")
+            .env("CTX_AGENT", "coder")
             .output();
         assert!(matches!(output, Ok(ref output) if output.status.success()));
         return;
@@ -500,7 +520,7 @@ fn passthrough_tool_gets_clean_runtime_environment() {
         &[
             OsString::from("-c"),
             OsString::from(
-                r#"[ -z "$CORTEXFS_SHOULD_NOT_LEAK" ] && [ "$PATH" = "/usr/bin:/bin" ]"#,
+                r#"[ -z "$CORTEXFS_SHOULD_NOT_LEAK" ] && [ "$PATH" = "/usr/bin:/bin" ] && [ "$CTX_AGENT" = "coder" ]"#,
             ),
         ],
     );

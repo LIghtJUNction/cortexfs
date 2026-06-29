@@ -1039,7 +1039,8 @@ fn tool_call_from_text(text: &str) -> Result<Option<AgentToolCall>, String> {
     if !trimmed.starts_with('{') {
         return Ok(None);
     }
-    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+    let mut deserializer = serde_json::Deserializer::from_str(trimmed);
+    let Ok(value) = Value::deserialize(&mut deserializer) else {
         return Ok(None);
     };
     if value.get("type").and_then(Value::as_str) != Some("tool_call") {
@@ -1680,10 +1681,14 @@ fn is_passthrough_tool(name: &str) -> bool {
 fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), String> {
     let program = passthrough_tool_program(name)
         .ok_or_else(|| format!("tool is not implemented by cortexfs-object-runner: {name}"))?;
-    let status = Command::new(program)
-        .args(args)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+    let mut command = Command::new(program);
+    command.args(args).env_clear().env("PATH", "/usr/bin:/bin");
+    for key in passthrough_tool_runtime_env_keys() {
+        if let Some(value) = env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let status = command
         .status()
         .map_err(|error| format!("cannot run {name} tool: {error}"))?;
     if status.success() {
@@ -1691,6 +1696,16 @@ fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), String> {
     } else {
         Err(format!("{name} tool exited with {status}"))
     }
+}
+
+fn passthrough_tool_runtime_env_keys() -> &'static [&'static str] {
+    &[
+        "CTX_AGENT",
+        "CTX_ROOT",
+        "CTX_SOURCE",
+        "CTX_TOOL_MODE",
+        "CTX_AUTHORIZED_OBJECT",
+    ]
 }
 
 fn collect_input(args: &[OsString]) -> io::Result<String> {
