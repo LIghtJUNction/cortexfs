@@ -476,6 +476,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.history_messages.to_owned(),
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
+        "--unshare-net".to_owned(),
         "--proc".to_owned(),
         "/proc".to_owned(),
         "--dev".to_owned(),
