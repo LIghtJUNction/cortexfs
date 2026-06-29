@@ -1119,14 +1119,20 @@ fn validate_tool_call_arg_limits(args: &[String]) -> Result<(), String> {
 }
 
 fn validate_agent_tsh_args(args: &[OsString]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("tool_call args for tsh cannot be empty".to_owned());
+    }
     let Some(first) = args.first() else {
-        return Ok(());
+        return Err("tool_call args for tsh cannot be empty".to_owned());
     };
     let Some(first) = first.to_str() else {
         return Err("tool_call args must be valid UTF-8".to_owned());
     };
     if matches!(first, "--root" | "-r") {
         return Err("tool_call args cannot override tsh root".to_owned());
+    }
+    if first == "tsh" {
+        return Err("tool_call args for tsh must not include the tsh program name".to_owned());
     }
     Ok(())
 }

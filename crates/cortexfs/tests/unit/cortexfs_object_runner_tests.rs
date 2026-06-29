@@ -1320,6 +1320,26 @@ fn agent_tsh_args_reject_root_override() {
 }
 
 #[test]
+fn agent_tsh_args_reject_empty_args() {
+    assert_eq!(
+        validate_agent_tsh_args(&[]),
+        Err("tool_call args for tsh cannot be empty".to_owned())
+    );
+}
+
+#[test]
+fn agent_tsh_args_reject_recursive_tsh_program_name() {
+    assert_eq!(
+        validate_agent_tsh_args(&[OsString::from("tsh")]),
+        Err("tool_call args for tsh must not include the tsh program name".to_owned())
+    );
+    assert_eq!(
+        validate_agent_tsh_args(&[OsString::from("tsh"), OsString::from("tools")]),
+        Err("tool_call args for tsh must not include the tsh program name".to_owned())
+    );
+}
+
+#[test]
 fn agent_tsh_args_allow_tool_arguments_after_tool_name() {
     assert_eq!(
         validate_agent_tsh_args(&[
@@ -1329,6 +1349,77 @@ fn agent_tsh_args_allow_tool_arguments_after_tool_name() {
         ]),
         Ok(())
     );
+}
+
+#[test]
+fn execute_agent_tsh_call_rejects_empty_args() -> Result<(), Box<dyn std::error::Error>> {
+    let root = short_unique_temp_path("atl-empty-args");
+    let _ignored = fs::remove_dir_all(&root);
+    let control = root.join("agent").join("coder.d");
+    let tool_control = root.join("tool").join("tsh.d");
+    fs::create_dir_all(&control)?;
+    fs::create_dir_all(&tool_control)?;
+    fs::create_dir_all(root.join("tool"))?;
+    fs::write(control.join("owner"), "1000\n")?;
+    fs::write(control.join("uid"), "1000\n")?;
+    fs::write(control.join("gid"), "1000\n")?;
+    fs::write(control.join("groups"), "1000\n")?;
+    fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n")?;
+    fs::write(control.join("iso"), "shared\n")?;
+    fs::write(control.join("parent"), "\n")?;
+    fs::write(control.join("life"), "owned\n")?;
+    fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n")?;
+    fs::write(control.join("cwd"), "/workspace\n")?;
+    fs::write(control.join("env"), "\n")?;
+    fs::write(control.join("model"), "main\n")?;
+    fs::write(control.join("status"), "idle\n")?;
+    fs::write(control.join("pid"), "\n")?;
+    fs::write(control.join("log"), "\n")?;
+    fs::write(control.join("meta.json"), "{}\n")?;
+    fs::write(control.join("path"), format!("{}\n", root.join("tool").display()))?;
+    fs::write(
+        control.join("mount"),
+        format!(
+            "{}\t{}\tro\trbind,nosuid,nodev\n",
+            root.display(),
+            root.display()
+        ),
+    )?;
+    fs::write(
+        control.join("policy"),
+        "allow coder_t model:main use\nallow coder_t tool:tsh execute\n",
+    )?;
+    fs::write(
+        tool_control.join("policy"),
+        "allow coder_t tool:tsh execute\n",
+    )?;
+
+    let executed = root.join("tsh-called");
+    write_executable_script(
+        &root.join("tool").join("tsh"),
+        format!("#!/bin/sh\ntouch {}\n", executed.display()),
+    )?;
+
+    let config = AgentModelRunConfig {
+        ctx_root: root.clone(),
+        source: root.clone(),
+        ..test_agent_run_config()
+    };
+    let call = AgentToolCall {
+        id: "call-1".to_owned(),
+        name: "tsh".to_owned(),
+        args: Vec::new(),
+    };
+    let result = execute_agent_tool_call(&config, &call);
+
+    assert_eq!(
+        result,
+        Err("tool_call args for tsh cannot be empty".to_owned())
+    );
+    assert!(!executed.exists());
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
 }
 
 #[test]

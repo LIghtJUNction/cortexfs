@@ -6,7 +6,6 @@
 //! implement [`Tool`]. The same value can then be exposed as a normal `CLI`
 //! binary with [`run_cli`] or called directly in-process through [`Registry`].
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::OsString;
 use std::ffi::c_void;
@@ -182,11 +181,30 @@ impl ToolInvocation {
     /// missing fields, and non-string values.
     #[must_use]
     pub fn string_field(&self, field: &str) -> Option<String> {
-        serde_json::from_str::<Value>(&self.input)
-            .ok()?
-            .get(field)?
-            .as_str()
+        self.value_field(field)?.as_str().map(str::to_owned)
+    }
+
+    /// Reads an optional JSON field from input.
+    #[must_use]
+    pub fn value_field(&self, field: &str) -> Option<Value> {
+        self.json().ok()?.get(field).cloned()
+    }
+
+    /// Reads a required string field from JSON input.
+    pub fn required_string_field(&self, field: &str) -> ToolResult<String> {
+        self.json()?
+            .get(field)
+            .and_then(|value| value.as_str())
             .map(str::to_owned)
+            .ok_or_else(|| ToolError::invalid(format!("missing string field: {field}")))
+    }
+
+    /// Reads a required JSON field from input.
+    pub fn required_value_field(&self, field: &str) -> ToolResult<Value> {
+        self.json()?
+            .get(field)
+            .cloned()
+            .ok_or_else(|| ToolError::invalid(format!("missing field: {field}")))
     }
 }
 
@@ -375,269 +393,6 @@ pub struct DynamicTool {
     abi: ToolAbiV1,
 }
 
-/// W-TinyLFU cache for dynamically loaded tool artifacts.
-#[derive(Debug)]
-pub struct DynamicToolCache {
-    capacity: usize,
-    window_capacity: usize,
-    clock: u64,
-    frequencies: BTreeMap<String, u64>,
-    pinned: BTreeSet<String>,
-    entries: BTreeMap<String, CachedDynamicTool>,
-}
-
-#[derive(Debug)]
-struct CachedDynamicTool {
-    path: String,
-    last_used: u64,
-    segment: CacheSegment,
-    tool: DynamicTool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CacheSegment {
-    Window,
-    Main,
-}
-
-impl DynamicToolCache {
-    /// Creates a cache with at least one slot.
-    #[must_use]
-    pub fn new(capacity: usize) -> Self {
-        Self::with_window_percent(capacity, 1)
-    }
-
-    /// Creates a cache with a configurable W-TinyLFU window percentage.
-    #[must_use]
-    pub fn with_window_percent(capacity: usize, window_percent: usize) -> Self {
-        let capacity = capacity.max(1);
-        let window_percent = window_percent.clamp(1, 100);
-        let window_capacity = capacity
-            .saturating_mul(window_percent)
-            .div_ceil(100)
-            .max(1)
-            .min(capacity);
-        Self {
-            capacity,
-            window_capacity,
-            clock: 0,
-            frequencies: BTreeMap::new(),
-            pinned: BTreeSet::new(),
-            entries: BTreeMap::new(),
-        }
-    }
-
-    /// Number of currently loaded dynamic tools.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    /// Returns true when no tools are loaded.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    /// Returns true when a path is currently loaded.
-    #[must_use]
-    pub fn contains_path(&self, path: &str) -> bool {
-        self.entries.contains_key(path)
-    }
-
-    /// Returns true when a path is pinned in memory and excluded from
-    /// W-TinyLFU eviction.
-    #[must_use]
-    pub fn is_pinned_path(&self, path: &str) -> bool {
-        self.pinned.contains(path)
-    }
-
-    /// Lists pinned paths in stable order.
-    #[must_use]
-    pub fn pinned_paths(&self) -> Vec<&str> {
-        self.pinned.iter().map(String::as_str).collect()
-    }
-
-    /// Loads a dynamic tool and pins it in memory. Pinned tools do not count
-    /// against the W-TinyLFU capacity and are not evicted by admission.
-    pub fn pin_path(&mut self, path: impl AsRef<Path>) -> io::Result<()> {
-        let path = path.as_ref().display().to_string();
-        let _inserted = self.pinned.insert(path.clone());
-        match self.get_or_load(&path) {
-            Ok(_tool) => Ok(()),
-            Err(error) => {
-                let _removed = self.pinned.remove(&path);
-                Err(error)
-            }
-        }
-    }
-
-    /// Removes a memory pin. The tool remains loaded until normal W-TinyLFU
-    /// admission later evicts it.
-    pub fn unpin_path(&mut self, path: impl AsRef<Path>) -> bool {
-        let path = path.as_ref().display().to_string();
-        self.pinned.remove(&path)
-    }
-
-    /// Gets a loaded tool or loads it from disk, using W-TinyLFU admission
-    /// when the cache is full.
-    pub fn get_or_load(&mut self, path: impl AsRef<Path>) -> io::Result<&DynamicTool> {
-        let path = path.as_ref().display().to_string();
-        self.record_frequency(&path);
-        if !self.entries.contains_key(&path) {
-            let tool = DynamicTool::open(&path)?;
-            self.entries.insert(
-                path.clone(),
-                CachedDynamicTool {
-                    path: path.clone(),
-                    last_used: 0,
-                    segment: CacheSegment::Window,
-                    tool,
-                },
-            );
-            self.admit_window_candidate(&path);
-        }
-        self.clock = self.clock.saturating_add(1);
-        let Some(entry) = self.entries.get_mut(&path) else {
-            return Err(io::Error::other("dynamic tool cache insert failed"));
-        };
-        entry.last_used = self.clock;
-        Ok(&entry.tool)
-    }
-
-    fn record_frequency(&mut self, path: &str) {
-        let count = self.frequencies.entry(path.to_owned()).or_insert(0);
-        *count = count.saturating_add(1);
-    }
-
-    fn admit_window_candidate(&mut self, current_path: &str) {
-        while self.window_len() > self.window_capacity {
-            let Some(candidate) = self.oldest_window_path() else {
-                return;
-            };
-            if self.main_len() < self.main_capacity() {
-                if let Some(entry) = self.entries.get_mut(&candidate) {
-                    entry.segment = CacheSegment::Main;
-                }
-                continue;
-            }
-            let Some(victim) = self.main_victim_path() else {
-                return;
-            };
-            if tiny_lfu_admits(
-                self.frequency(&candidate),
-                self.frequency(&victim),
-                self.last_used(&candidate),
-                self.last_used(&victim),
-            ) {
-                let _dropped = self.entries.remove(&victim);
-                if let Some(entry) = self.entries.get_mut(&candidate) {
-                    entry.segment = CacheSegment::Main;
-                }
-            } else {
-                let _dropped = self.entries.remove(&candidate);
-                if candidate == current_path {
-                    return;
-                }
-            }
-        }
-
-        while self.unpinned_len() > self.capacity {
-            let victim = self
-                .main_victim_path()
-                .or_else(|| self.oldest_window_path())
-                .filter(|path| path != current_path);
-            let Some(victim) = victim else {
-                return;
-            };
-            let _dropped = self.entries.remove(&victim);
-        }
-    }
-
-    fn unpinned_len(&self) -> usize {
-        self.entries
-            .values()
-            .filter(|entry| !self.is_pinned_path(&entry.path))
-            .count()
-    }
-
-    fn window_len(&self) -> usize {
-        self.entries
-            .values()
-            .filter(|entry| {
-                entry.segment == CacheSegment::Window && !self.is_pinned_path(&entry.path)
-            })
-            .count()
-    }
-
-    fn main_len(&self) -> usize {
-        self.entries
-            .values()
-            .filter(|entry| {
-                entry.segment == CacheSegment::Main && !self.is_pinned_path(&entry.path)
-            })
-            .count()
-    }
-
-    fn main_capacity(&self) -> usize {
-        self.capacity.saturating_sub(self.window_capacity).max(1)
-    }
-
-    fn oldest_window_path(&self) -> Option<String> {
-        self.entries
-            .values()
-            .filter(|entry| {
-                entry.segment == CacheSegment::Window && !self.is_pinned_path(&entry.path)
-            })
-            .min_by_key(|entry| (entry.last_used, entry.path.clone()))
-            .map(|entry| entry.path.clone())
-    }
-
-    fn main_victim_path(&self) -> Option<String> {
-        wtinylfu_victim_path(
-            self.entries
-                .values()
-                .filter(|entry| {
-                    entry.segment == CacheSegment::Main && !self.is_pinned_path(&entry.path)
-                })
-                .map(|entry| {
-                    (
-                        entry.path.as_str(),
-                        self.frequency(&entry.path),
-                        entry.last_used,
-                    )
-                }),
-        )
-    }
-
-    fn frequency(&self, path: &str) -> u64 {
-        self.frequencies.get(path).copied().unwrap_or(0)
-    }
-
-    fn last_used(&self, path: &str) -> u64 {
-        self.entries.get(path).map_or(0, |entry| entry.last_used)
-    }
-}
-
-fn tiny_lfu_admits(
-    candidate_frequency: u64,
-    victim_frequency: u64,
-    candidate_last_used: u64,
-    victim_last_used: u64,
-) -> bool {
-    candidate_frequency > victim_frequency
-        || (candidate_frequency == victim_frequency && candidate_last_used > victim_last_used)
-}
-
-fn wtinylfu_victim_path<'a>(
-    entries: impl IntoIterator<Item = (&'a str, u64, u64)>,
-) -> Option<String> {
-    entries
-        .into_iter()
-        .min_by_key(|(path, hits, last_used)| (*hits, *last_used, (*path).to_owned()))
-        .map(|(path, _hits, _last_used)| path.to_owned())
-}
-
 impl DynamicTool {
     /// Loads a tool artifact from disk.
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
@@ -741,6 +496,15 @@ pub fn run_tool(
             output.done("error")
         }
     }
+}
+
+/// Parses JSONL output into ordered frames.
+pub fn parse_jsonl_frames(content: &str) -> serde_json::Result<Vec<Value>> {
+    content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(serde_json::from_str::<Value>)
+        .collect()
 }
 
 /// Runs a tool as a normal CLI executable.
@@ -872,8 +636,8 @@ macro_rules! cortexfs_tool_artifact {
 mod tests {
     use super::{
         AbiWriter, MAX_CLI_STDIN_INPUT_BYTES, MAX_TOOL_ABI_STRING_BYTES, Registry, RegistryError,
-        Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, ToolStr, abi_write,
-        collect_input_from_reader, run_tool, tiny_lfu_admits, wtinylfu_victim_path,
+        Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, ToolStr, Value,
+        abi_write, collect_input_from_reader, parse_jsonl_frames, run_tool,
     };
     use std::ffi::OsString;
     use std::ffi::c_void;
@@ -908,6 +672,19 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FailWriter;
+
+    impl Write for FailWriter {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("write failed"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn run_tool_emits_canonical_jsonl_frames() {
         let tool = EchoTool;
@@ -915,10 +692,13 @@ mod tests {
         let mut output = Vec::new();
         assert!(run_tool(&tool, &invocation, &mut output).is_ok());
         let output = String::from_utf8(output).unwrap_or_default();
-        assert!(output.contains(r#""type":"start""#));
-        assert!(output.contains(r#""tool":"test.echo""#));
-        assert!(output.contains(r#""text":"hello""#));
-        assert!(output.contains(r#""status":"ok""#));
+        let frames = parse_jsonl_frames(&output).expect("valid jsonl output");
+        assert_eq!(frames[0]["type"], "start");
+        assert_eq!(frames[0]["tool"], "test.echo");
+        assert_eq!(frames[1]["type"], "message");
+        assert_eq!(frames[1]["content"][0]["text"], "hello");
+        assert_eq!(frames[2]["type"], "done");
+        assert_eq!(frames[2]["status"], "ok");
     }
 
     #[test]
@@ -928,8 +708,53 @@ mod tests {
         let mut output = Vec::new();
         assert!(run_tool(&tool, &invocation, &mut output).is_ok());
         let output = String::from_utf8(output).unwrap_or_default();
-        assert!(output.contains(r#""code":"EINVAL""#));
-        assert!(output.contains(r#""status":"error""#));
+        let frames = parse_jsonl_frames(&output).expect("valid jsonl output");
+        assert_eq!(frames[0]["type"], "start");
+        assert_eq!(frames[0]["tool"], "test.echo");
+        assert_eq!(frames[1]["type"], "error");
+        assert_eq!(frames[1]["code"], "EINVAL");
+        assert_eq!(frames[2]["type"], "done");
+        assert_eq!(frames[2]["status"], "error");
+    }
+
+    #[test]
+    fn run_tool_propagates_writer_error() {
+        let tool = EchoTool;
+        let invocation = ToolInvocation::new("r-test", r#"{"text":"hello"}"#);
+        let mut output = FailWriter;
+
+        assert!(matches!(
+            run_tool(&tool, &invocation, &mut output),
+            Err(ref error) if error.to_string().contains("write failed")
+        ));
+    }
+
+    #[test]
+    fn tool_invocation_required_field_accessors() {
+        let invocation = ToolInvocation::new("r-test", r#"{"text":"hello","count":2}"#);
+        assert_eq!(
+            invocation.required_string_field("text"),
+            Ok("hello".to_owned())
+        );
+        assert!(matches!(
+            invocation.required_string_field("missing"),
+            Err(ref error) if error.code() == "EINVAL"
+        ));
+        assert_eq!(
+            invocation.value_field("count"),
+            Some(Value::Number(2u64.into()))
+        );
+        assert_eq!(
+            invocation.required_value_field("count"),
+            Ok(Value::Number(2u64.into()))
+        );
+        assert_eq!(invocation.value_field("missing"), None);
+
+        let invalid = ToolInvocation::new("r-test", "{");
+        assert!(matches!(
+            invalid.required_string_field("text"),
+            Err(ref error) if error.code() == "EINVAL" && error.message() == "invalid json input"
+        ));
     }
 
     #[test]
@@ -1046,22 +871,5 @@ mod tests {
 
         assert_eq!(status, 0);
         assert_eq!(sink, b"ok");
-    }
-
-    #[test]
-    fn wtinylfu_victim_prefers_lowest_frequency_then_oldest_use() {
-        assert_eq!(
-            wtinylfu_victim_path([("/tool/a", 4, 10), ("/tool/b", 1, 20), ("/tool/c", 1, 5),]),
-            Some("/tool/c".to_owned())
-        );
-        assert_eq!(wtinylfu_victim_path([]), None);
-    }
-
-    #[test]
-    fn tiny_lfu_admission_keeps_frequent_main_entries() {
-        assert!(tiny_lfu_admits(5, 2, 1, 10));
-        assert!(!tiny_lfu_admits(1, 3, 10, 1));
-        assert!(tiny_lfu_admits(2, 2, 20, 10));
-        assert!(!tiny_lfu_admits(2, 2, 10, 20));
     }
 }
