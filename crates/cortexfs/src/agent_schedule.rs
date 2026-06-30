@@ -828,9 +828,14 @@ fn inspect_schedule_dependencies(
             let Some(dependent_pending_deps) = pending_deps.get_mut(*dependent_index) else {
                 continue;
             };
-            *dependent_pending_deps = dependent_pending_deps
-                .checked_sub(1)
-                .expect("agent schedule dependency counts stay consistent");
+            debug_assert!(
+                *dependent_pending_deps > 0,
+                "agent schedule dependency counts stay consistent"
+            );
+            if *dependent_pending_deps == 0 {
+                continue;
+            }
+            *dependent_pending_deps -= 1;
             if *dependent_pending_deps == 0 {
                 ready.push_back(*dependent_index);
             }
