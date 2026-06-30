@@ -404,7 +404,6 @@ allow coder_t tool:shell.exec execute
 allow coder_t model:openai/gpt-4o use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
-allow coder_t network:default connect
 allow coder_t agent:reviewer create
 allow coder_t agent:reviewer start
 ```
@@ -455,7 +454,7 @@ The only v1 network object name is `default`:
 allow coder_t network:default connect
 ```
 
-Without `allow coder_t network:default connect`, there is no network access.
+`network:default connect` is a coarse policy capability. It must not by itself remove sandbox network namespace isolation or grant unrestricted host-network egress; runtimes that need provider egress must route it through a constrained implementation.
 
 Permission check order:
 
