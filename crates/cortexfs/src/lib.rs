@@ -105,8 +105,9 @@ pub use agent_prompt::{
 };
 pub use agent_schedule::{
     AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNode,
-    AgentScheduleNodeKind, AgentScheduleRecordError, AgentScheduleReport, agent_schedule_nodes,
-    inspect_agent_schedule_json, ready_agent_schedule_child_handoffs, ready_agent_schedule_nodes,
+    AgentScheduleNodeKind, AgentScheduleRecordError, AgentScheduleReport, MAX_AGENT_SCHEDULE_NODES,
+    agent_schedule_nodes, inspect_agent_schedule_json, ready_agent_schedule_child_handoffs,
+    ready_agent_schedule_nodes,
 };
 pub use context_pack::{
     ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,

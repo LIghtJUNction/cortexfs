@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -6,6 +6,9 @@ use serde_json::Value;
 use crate::{
     PolicyObjectClass, PolicyPermission, PolicyV0, abi_path::is_model_reference, is_object_name,
 };
+
+/// Maximum number of nodes accepted in one parent-session hybrid schedule.
+pub const MAX_AGENT_SCHEDULE_NODES: usize = 1024;
 
 /// Stable issue found in a parent-session hybrid agent schedule.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -345,7 +348,7 @@ pub fn inspect_agent_schedule_json(
         issues.push(AgentScheduleIssue::InvalidNodes);
         return AgentScheduleReport::new(issues);
     };
-    if node_values.is_empty() {
+    if node_values.is_empty() || node_values.len() > MAX_AGENT_SCHEDULE_NODES {
         issues.push(AgentScheduleIssue::InvalidNodes);
         return AgentScheduleReport::new(issues);
     }
@@ -473,7 +476,7 @@ fn parse_valid_agent_schedule_nodes(
         issues.push(AgentScheduleIssue::InvalidNodes);
         return (Vec::new(), issues);
     };
-    if node_values.is_empty() {
+    if node_values.is_empty() || node_values.len() > MAX_AGENT_SCHEDULE_NODES {
         issues.push(AgentScheduleIssue::InvalidNodes);
         return (Vec::new(), issues);
     }
@@ -787,11 +790,21 @@ fn inspect_schedule_dependencies(
 ) {
     let known = nodes
         .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    for node in nodes {
+        .enumerate()
+        .map(|(index, node)| (node.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut dependents = vec![Vec::new(); nodes.len()];
+    let mut pending_deps = vec![0_usize; nodes.len()];
+    for (node_index, node) in nodes.iter().enumerate() {
         for dep in &node.deps {
-            if !known.contains(dep.as_str()) {
+            if let Some(dep_index) = known.get(dep.as_str()).copied() {
+                if let Some(dep_dependents) = dependents.get_mut(dep_index) {
+                    dep_dependents.push(node_index);
+                }
+                if let Some(node_pending_deps) = pending_deps.get_mut(node_index) {
+                    *node_pending_deps += 1;
+                }
+            } else {
                 issues.push(AgentScheduleIssue::UnknownDependency {
                     node: node.id.clone(),
                     dependency: dep.clone(),
@@ -800,36 +813,42 @@ fn inspect_schedule_dependencies(
         }
     }
 
-    let mut visiting = HashSet::new();
-    let mut visited = HashSet::new();
-    for node in nodes {
-        visit_schedule_node(node.id.as_str(), nodes, &mut visiting, &mut visited, issues);
-    }
-}
-
-fn visit_schedule_node(
-    node: &str,
-    nodes: &[AgentScheduleNode],
-    visiting: &mut HashSet<String>,
-    visited: &mut HashSet<String>,
-    issues: &mut Vec<AgentScheduleIssue>,
-) {
-    if visited.contains(node) {
-        return;
-    }
-    if !visiting.insert(node.to_owned()) {
-        issues.push(AgentScheduleIssue::DependencyCycle {
-            node: node.to_owned(),
-        });
-        return;
-    }
-    if let Some(current) = nodes.iter().find(|candidate| candidate.id == node) {
-        for dep in &current.deps {
-            visit_schedule_node(dep, nodes, visiting, visited, issues);
+    let mut ready = pending_deps
+        .iter()
+        .enumerate()
+        .filter_map(|(index, count)| (*count == 0).then_some(index))
+        .collect::<VecDeque<_>>();
+    let mut visited = 0_usize;
+    while let Some(node_index) = ready.pop_front() {
+        visited += 1;
+        let Some(node_dependents) = dependents.get(node_index) else {
+            continue;
+        };
+        for dependent_index in node_dependents {
+            let Some(dependent_pending_deps) = pending_deps.get_mut(*dependent_index) else {
+                continue;
+            };
+            *dependent_pending_deps = dependent_pending_deps
+                .checked_sub(1)
+                .expect("agent schedule dependency counts stay consistent");
+            if *dependent_pending_deps == 0 {
+                ready.push_back(*dependent_index);
+            }
         }
     }
-    visiting.remove(node);
-    visited.insert(node.to_owned());
+
+    if visited != nodes.len()
+        && let Some(node) = nodes.iter().enumerate().find_map(|(index, node)| {
+            pending_deps
+                .get(index)
+                .is_some_and(|pending| *pending > 0)
+                .then_some(node)
+        })
+    {
+        issues.push(AgentScheduleIssue::DependencyCycle {
+            node: node.id.clone(),
+        });
+    }
 }
 
 fn inspect_completed_nodes(
