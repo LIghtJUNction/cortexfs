@@ -657,6 +657,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     let mut env = view.env().to_vec();
+    env.push(("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()));
     env.push((
         "CTX_PROVIDER_SECRET_PATH".to_owned(),
         "/run/user/1000/cortexfs/credentials/coder-default".to_owned(),
@@ -696,8 +697,8 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     assert!(contains_arg_pair(&args, "--dir", "/workspace"));
     assert!(contains_arg_triplet(
         &args,
-        "--ro-bind",
-        "/run/user/1000/cortexfs/credentials/coder-default",
+        "--ro-bind-data",
+        "9",
         "/run/user/1000/cortexfs/credentials/coder-default"
     ));
     assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
