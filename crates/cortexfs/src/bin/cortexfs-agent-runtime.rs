@@ -57,15 +57,9 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         "default",
         PolicyPermission::Connect,
     );
-    let provider_secret =
-        cortexfs::open_provider_system_secret_for_model(&config.source, view.model())
-            .map_err(|_error| format!("provider secret unavailable: {}", view.model()))?;
     let mut runtime_env = view.env().to_vec();
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
-    }
-    if let Some(secret) = provider_secret.as_ref() {
-        runtime_env.extend(secret.env());
     }
     let agent_executable = runtime_agent_executable(Path::new(cortexfs::CTX_ROOT), &config.agent);
     let result = serve_agent_executable_socket_listener_once(

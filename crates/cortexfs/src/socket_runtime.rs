@@ -490,6 +490,7 @@ fn apply_agent_executable_socket_env(
             runtime
                 .env
                 .iter()
+                .filter(|env| !is_provider_secret_env(&env.0))
                 .map(|env| (env.0.as_str(), env.1.as_str())),
         )
         .env("CTX_AGENT", runtime.agent_name)
@@ -504,7 +505,12 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     request: &BwrapAgentExecutableArgs<'_>,
 ) -> Vec<String> {
     let mut bwrap = vec!["--clearenv".to_owned()];
-    for env in request.runtime.env {
+    for env in request
+        .runtime
+        .env
+        .iter()
+        .filter(|env| !is_provider_secret_env(&env.0))
+    {
         bwrap.extend(["--setenv".to_owned(), env.0.clone(), env.1.clone()]);
     }
     bwrap.extend([
@@ -559,7 +565,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
     }
-    bwrap.extend(bwrap_provider_secret_bind_args(request.runtime.env));
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(timing) = request.debug {
         bwrap.extend([
@@ -603,32 +608,14 @@ fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
     args
 }
 
-fn bwrap_provider_secret_bind_args(env: &[(String, String)]) -> Vec<String> {
-    let fd = env
-        .iter()
-        .find(|entry| entry.0 == "CTX_PROVIDER_SECRET_FD")
-        .map(|entry| entry.1.as_str());
-    let Some(path) = env
-        .iter()
-        .find(|entry| entry.0 == "CTX_PROVIDER_SECRET_PATH")
-        .map(|entry| entry.1.as_str())
-    else {
-        return Vec::new();
-    };
-    if !path.starts_with('/') {
-        return Vec::new();
-    }
-    let mut args = bwrap_dir_args_for_parent(path);
-    if let Some(fd) = fd.filter(|fd| !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        args.push("--ro-bind-data".to_owned());
-        args.push(fd.to_owned());
-    } else {
-        args.push("--ro-bind".to_owned());
-        args.push(path.to_owned());
-    }
-    args.push(path.to_owned());
-    args
+fn is_provider_secret_env(name: &str) -> bool {
+    matches!(
+        name,
+        "CTX_PROVIDER_SECRET_FD"
+            | "CTX_PROVIDER_SECRET_PATH"
+            | "CTX_PROVIDER_SECRET_PROVIDER"
+            | "CTX_PROVIDER_SECRET_SLOT"
+    )
 }
 
 fn bwrap_dir_args_for_parent(path: &str) -> Vec<String> {

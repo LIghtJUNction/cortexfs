@@ -160,7 +160,6 @@ pub fn open_provider_system_secret(
     Ok(Some(ProviderSystemSecretHandle {
         provider: provider.to_owned(),
         account: account.to_owned(),
-        path,
         file,
     }))
 }
@@ -198,7 +197,6 @@ pub enum ProviderSystemSecretError {
 pub struct ProviderSystemSecretHandle {
     provider: String,
     account: String,
-    path: PathBuf,
     file: File,
 }
 
@@ -230,18 +228,14 @@ impl ProviderSystemSecret {
 impl ProviderSystemSecretHandle {
     /// Environment metadata for passing this already-open secret fd.
     ///
-    /// These variables contain no secret material; they identify only an fd/path
+    /// These variables contain no secret material; they identify only an fd
     /// and the provider slot it belongs to.
     #[must_use]
-    pub fn env(&self) -> [(String, String); 4] {
+    pub fn env(&self) -> [(String, String); 3] {
         [
             (
                 "CTX_PROVIDER_SECRET_FD".to_owned(),
                 self.file.as_raw_fd().to_string(),
-            ),
-            (
-                "CTX_PROVIDER_SECRET_PATH".to_owned(),
-                self.path.display().to_string(),
             ),
             (
                 "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
