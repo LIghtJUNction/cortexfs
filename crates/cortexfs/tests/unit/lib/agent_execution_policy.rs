@@ -733,7 +733,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
 }
 
 #[test]
-fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
+fn agent_executable_socket_bwrap_args_keep_network_namespace_isolated_even_when_policy_allows() {
     let root = reference_tree("agent-executable-socket-runtime-bwrap-network");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
@@ -766,7 +766,7 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         input: "hi",
     });
 
-    assert!(!args.contains(&"--unshare-net".to_owned()));
+    assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
 }
 
