@@ -1,6 +1,7 @@
 const MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES: u64 = 64 * 1024;
 const MAX_SOCKET_RUNTIME_EVENTS_BYTES: u64 = 1024 * 1024;
 const MAX_AGENT_EXECUTABLE_FRAME_BYTES: usize = 256 * 1024;
+const MAX_AGENT_EXECUTABLE_STDERR_BYTES: u64 = 64 * 1024;
 const SOCKET_REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Handles one JSONL socket request frame against a durable session root.
@@ -227,6 +228,7 @@ fn run_agent_executable_streaming(
         agent_executable_socket_command(runtime, &agent_executable, request, history_messages);
     apply_socket_debug_timing_env(&mut command, request.debug);
     apply_agent_identity_to_command(&mut command, runtime.identity);
+    command.stderr(Stdio::piped());
     let mut child = command
         .spawn()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
@@ -235,6 +237,11 @@ fn run_agent_executable_streaming(
         .stdout
         .take()
         .ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let stderr_reader = thread::spawn(move || read_agent_executable_stderr_limited(stderr));
     let (stdout_sender, stdout_receiver) = mpsc::sync_channel(MAX_AGENT_STDOUT_QUEUE_FRAMES);
     let reader = thread::spawn(move || {
         let mut stdout = BufReader::new(stdout);
@@ -312,9 +319,52 @@ fn run_agent_executable_streaming(
         return Ok(frames);
     }
     if !status.success() && frames.is_empty() {
-        return Err(SocketRuntimeError::CannotRunAgent);
+        let stderr = match stderr_reader.join() {
+            Ok(Ok(stderr)) => stderr,
+            Ok(Err(_error)) => String::new(),
+            Err(_error) => String::new(),
+        };
+        let frames = agent_process_failed_frames(request.run_id, &stderr);
+        for frame in &frames {
+            write_socket_frame(stream, frame)?;
+        }
+        return Ok(frames);
     }
     Ok(frames)
+}
+
+fn read_agent_executable_stderr_limited(stderr: impl Read) -> std::io::Result<String> {
+    let mut bytes = Vec::new();
+    stderr
+        .take(MAX_AGENT_EXECUTABLE_STDERR_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > usize::try_from(MAX_AGENT_EXECUTABLE_STDERR_BYTES).unwrap_or(usize::MAX) {
+        bytes.truncate(usize::try_from(MAX_AGENT_EXECUTABLE_STDERR_BYTES).unwrap_or(usize::MAX));
+    }
+    Ok(String::from_utf8_lossy(&bytes).trim().to_owned())
+}
+
+fn agent_process_failed_frames(run_id: &str, stderr: &str) -> Vec<String> {
+    let message = if stderr.is_empty() {
+        "agent process failed before emitting events"
+    } else {
+        stderr
+    };
+    vec![
+        serde_json::json!({
+            "type": "error",
+            "run": run_id,
+            "code": "EIO",
+            "message": message
+        })
+        .to_string(),
+        serde_json::json!({
+            "type": "done",
+            "run": run_id,
+            "status": "error"
+        })
+        .to_string(),
+    ]
 }
 
 fn agent_plain_text_frame(run_id: &str, text: &str) -> String {
@@ -506,6 +556,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "/lib64".to_owned(),
     ]);
     bwrap.extend(bwrap_provider_secret_bind_args(request.runtime.env));
+    bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(timing) = request.debug {
         bwrap.extend([
             "--setenv".to_owned(),
@@ -532,6 +583,20 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.input.to_owned(),
     ]);
     bwrap
+}
+
+fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
+    let Some(source_root) = source_root.to_str() else {
+        return Vec::new();
+    };
+    if !source_root.starts_with('/') || source_root == "/" {
+        return Vec::new();
+    }
+    let mut args = bwrap_dir_args_for_parent(source_root);
+    args.push("--ro-bind".to_owned());
+    args.push(source_root.to_owned());
+    args.push(source_root.to_owned());
+    args
 }
 
 fn bwrap_provider_secret_bind_args(env: &[(String, String)]) -> Vec<String> {
