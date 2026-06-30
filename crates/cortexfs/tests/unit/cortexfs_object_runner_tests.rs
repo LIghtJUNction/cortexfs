@@ -1101,6 +1101,10 @@ if [ "$CTX_PROVIDER_SECRET_PROVIDER" != "fixture" ] || [ "$CTX_PROVIDER_SECRET_S
   printf '{"type":"error","run":"%s","code":"EIO","message":"missing runtime provider secret env"}\n' "$CTX_RUN_ID"
   exit 2
 fi
+if [ "$CTX_AGENT_HISTORY_MESSAGES" != "previous message" ]; then
+  printf '{"type":"error","run":"%s","code":"EIO","message":"missing history env"}\n' "$CTX_RUN_ID"
+  exit 2
+fi
 printf '{"type":"delta","run":"%s","text":"clean"}\n' "$CTX_RUN_ID"
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
@@ -1991,6 +1995,7 @@ fn test_agent_run_config() -> AgentModelRunConfig {
         skills: String::new(),
         current_time_unix: "123".to_owned(),
         tool_context: String::new(),
+        history_messages: "previous message".to_owned(),
         suppress_model_error_events: false,
         debug_timing_start_unix_ms: None,
     }

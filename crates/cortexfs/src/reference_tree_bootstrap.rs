@@ -199,6 +199,20 @@ if [ -z "$model" ] || [ ! -x "$ctx_root/model/$model" ]; then
   printf '{{"type":"done","run":"%s","status":"error"}}\n' "$run"
   exit 1
 fi
+history="${{CTX_AGENT_HISTORY_MESSAGES:-}}"
+if [ -z "$history" ] || [ "$history" = "(no historical messages injected)" ]; then
+  session="${{CTX_SESSION:-default}}"
+  case "$session" in
+    */*|.*|*..*) session="" ;;
+  esac
+  history_file="$source_root/home/1000/agent/{name}/session/$session/messages.jsonl"
+  if [ -n "$session" ] && [ -r "$history_file" ]; then
+    history="$(/usr/bin/tail -n 40 "$history_file" 2>/dev/null || true)"
+  fi
+fi
+if [ -n "$history" ] && [ "$history" != "(no historical messages injected)" ]; then
+  input="$(/usr/bin/printf '%s\n%s\n\n%s\n%s\n' "Conversation history:" "$history" "Current user input:" "$input")"
+fi
 CTX_AGENT="{name}" \
 CTX_AGENT_SYSTEM="$(/usr/bin/cat "$source_root/agent/{name}.d/system.md" 2>/dev/null || true)" \
 CTX_AGENT_PROMPT_TEMPLATE="$(/usr/bin/cat "$source_root/agent/{name}.d/prompt.template.md" 2>/dev/null || true)" \

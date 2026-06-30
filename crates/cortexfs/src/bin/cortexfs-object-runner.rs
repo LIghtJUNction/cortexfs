@@ -353,6 +353,7 @@ struct AgentModelRunConfig {
     skills: String,
     current_time_unix: String,
     tool_context: String,
+    history_messages: String,
     suppress_model_error_events: bool,
     debug_timing_start_unix_ms: Option<u128>,
 }
@@ -419,6 +420,8 @@ impl AgentModelRunConfig {
             skills: collect_skill_metadata(skill_metadata_budget_from_env()),
             current_time_unix: current_time_unix().to_string(),
             tool_context: env::var("CTX_AGENT_TOOL_CONTEXT").unwrap_or_default(),
+            history_messages: env::var("CTX_AGENT_HISTORY_MESSAGES")
+                .unwrap_or_else(|_error| "(no historical messages injected)".to_owned()),
             suppress_model_error_events: false,
             debug_timing_start_unix_ms: agent_debug_timing_start_unix_ms(),
         })
@@ -568,7 +571,8 @@ fn run_agent_model_once_with_timeout(
         .env("CTX_AGENT_RULES", &config.rules)
         .env("CTX_AGENT_SKILLS", &config.skills)
         .env("CTX_AGENT_CURRENT_TIME_UNIX", &config.current_time_unix)
-        .env("CTX_AGENT_TOOL_CONTEXT", &config.tool_context);
+        .env("CTX_AGENT_TOOL_CONTEXT", &config.tool_context)
+        .env("CTX_AGENT_HISTORY_MESSAGES", &config.history_messages);
     command.process_group(0);
     pass_runtime_provider_secret_env(&mut command);
     let mut child = spawn_with_etxtbsy_retry(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
