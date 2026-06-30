@@ -668,6 +668,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     let mut env = view.env().to_vec();
+    env.push(("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()));
     env.push((
         "CTX_PROVIDER_SECRET_FD".to_owned(),
         "9".to_owned(),

@@ -617,7 +617,8 @@ fn bwrap_provider_secret_bind_args(env: &[(String, String)]) -> Vec<String> {
         return Vec::new();
     }
     let mut args = bwrap_dir_args_for_parent(path);
-    if let Some(fd) = fd.filter(|fd| fd.chars().all(|ch| ch.is_ascii_digit())) {
+    if let Some(fd) = fd.filter(|fd| !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit()))
+    {
         args.push("--ro-bind-data".to_owned());
         args.push(fd.to_owned());
     } else {
