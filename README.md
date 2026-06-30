@@ -1,12 +1,10 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-logo.jpg" alt="CortexFS logo" width="220">
+  <img src="docs/assets/cortexfs-social-card.png" alt="CortexFS: agent runtime as a Unix ABI" width="900">
 </p>
 
-![CortexFS turns AI runtimes into Unix-shaped files](docs/assets/cortexfs-hero.svg)
-
-CortexFS makes AI runtimes feel like Unix.
+**CortexFS makes AI runtimes feel like Unix.**
 
 It mounts a small, scriptable FUSE filesystem at `/ctx`. Models are files you
 can talk to. Agents are files you can inspect, resume, and attach to. Tools are
@@ -57,9 +55,19 @@ That is the intended surface: direct conversation with an agent file, direct
 model calls behind it, and tools that can be discovered, loaded, pinned, and
 invoked through the same filesystem view.
 
-<video src="docs/assets/cortexfs-demo.webm" poster="docs/assets/cortexfs-demo-poster.jpg" controls muted loop playsinline></video>
+<p align="center">
+  <a href="docs/assets/cortexfs-demo.mp4">
+    <img src="docs/assets/cortexfs-demo-poster.jpg" alt="Watch the CortexFS agent REPL demo" width="720">
+  </a>
+</p>
 
-[Open the demo video](docs/assets/cortexfs-demo.webm).
+<p align="center">
+  <a href="docs/assets/cortexfs-demo.mp4">Watch the MP4 demo</a>
+  ·
+  <a href="docs/assets/cortexfs-demo.webm">WebM</a>
+  ·
+  <a href="https://lightjunction.github.io/cortexfs/">Docs site</a>
+</p>
 
 At any time, attach to the agent terminal:
 

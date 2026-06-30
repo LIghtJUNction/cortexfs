@@ -259,7 +259,8 @@ function AgentConsole({copy}: {copy: Copy}): ReactElement {
 }
 
 function ProductDemo(): ReactElement {
-  const videoSrc = useBaseUrl('/video/cortexfs-demo.webm');
+  const mp4Src = useBaseUrl('/video/cortexfs-demo.mp4');
+  const webmSrc = useBaseUrl('/video/cortexfs-demo.webm');
   const posterSrc = useBaseUrl('/video/cortexfs-demo-poster.jpg');
 
   return (
@@ -271,9 +272,12 @@ function ProductDemo(): ReactElement {
         loop
         muted
         playsInline
+        preload="metadata"
         poster={posterSrc}
       >
-        <source src={videoSrc} type="video/webm" />
+        <source src={mp4Src} type="video/mp4" />
+        <source src={webmSrc} type="video/webm" />
+        <a href={mp4Src}>Open the CortexFS demo video</a>
       </video>
       <figcaption>
         <span>ctx agent repl coder</span>
