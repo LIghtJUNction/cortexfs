@@ -768,7 +768,7 @@ fn agent_tool_loop_does_not_execute_backtick_tsh_from_user_prompt() {
 }
 
 #[test]
-fn agent_tool_loop_falls_back_to_tool_result_when_followup_model_fails() {
+fn agent_tool_loop_preserves_followup_model_error_after_tool_result() {
     let mut config = test_agent_run_config();
     let mut output = Vec::new();
     let mut step = 0_u8;
@@ -791,7 +791,7 @@ fn agent_tool_loop_falls_back_to_tool_result_when_followup_model_fails() {
                     })
                 }
                 2 => {
-                    assert!(config.suppress_model_error_events);
+                    assert!(!config.suppress_model_error_events);
                     Ok(AgentModelRunOutcome {
                         frames: vec![
                             r#"{"type":"error","run":"r1","code":"EIO","message":"model failed after tool result"}"#.to_owned(),
@@ -814,9 +814,10 @@ fn agent_tool_loop_falls_back_to_tool_result_when_followup_model_fails() {
     assert!(output.contains(r#""tool_call_id":"call-1""#));
     assert!(output.contains("fs.read"));
     assert!(output.contains("shell.exec"));
-    assert!(output.contains("工具 `tsh` 已执行"));
-    assert!(output.contains(r#""status":"ok""#));
-    assert!(!output.contains(r#""type":"error""#), "{output}");
+    assert!(!output.contains("工具 `tsh` 已执行"), "{output}");
+    assert!(!output.contains(r#""status":"ok""#), "{output}");
+    assert!(output.contains(r#""type":"error""#), "{output}");
+    assert!(output.contains("model failed after tool result"), "{output}");
 }
 
 #[test]
