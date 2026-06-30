@@ -525,6 +525,77 @@ exit 1
 }
 
 #[test]
+fn agent_executable_socket_runtime_reports_pre_event_process_failure() {
+    let root = reference_tree("agent-pre-event-failure");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+"#,
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let failing_program = root.join("failing-bwrap");
+    write_text_file(
+        &failing_program,
+        r"#!/bin/sh
+printf 'bwrap: unable to bind /ctx/agent/coder\n' >&2
+exit 1
+",
+    );
+    set_file_mode(&failing_program, 0o755);
+
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+"#,
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Bwrap {
+                program: &failing_program,
+                mount_table: view.mount_table(),
+            },
+        },
+    );
+    let outcome = ok!(outcome);
+    assert!(outcome.jsonl().contains("\"code\":\"EIO\""));
+    assert!(outcome.jsonl().contains("unable to bind"));
+    assert!(outcome.jsonl().contains("\"status\":\"error\""));
+
+    let mut buffer = [0_u8; 512];
+    let read = client.read(&mut buffer);
+    let read = ok!(read);
+    let Some(bytes) = buffer.get(..read) else {
+        return;
+    };
+    let response = String::from_utf8_lossy(bytes);
+    assert!(response.contains("unable to bind"));
+    assert!(!response.contains(r#""message":"EIO""#));
+}
+
+#[test]
 fn agent_executable_socket_runtime_does_not_inherit_service_secrets() {
     let root = reference_tree("agent-executable-socket-runtime-env-clear");
     let session_root = agent_session_root(&root, "coder");
@@ -631,6 +702,12 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     ));
     assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
     assert!(contains_arg_triplet(&args, "--ro-bind", "/ctx", "/ctx"));
+    assert!(contains_arg_triplet(
+        &args,
+        "--ro-bind",
+        root.to_str().unwrap_or_default(),
+        root.to_str().unwrap_or_default()
+    ));
     assert_eq!(
         args.get(args.len().saturating_sub(2)),
         Some(&agent_executable.display().to_string())
