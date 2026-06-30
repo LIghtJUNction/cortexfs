@@ -1,12 +1,14 @@
 use super::{
-    AgentToolCall, ObjectPath, OpenAiStreamEvent, ProviderRoute, ProviderRuntimeDriver,
-    ResolvedTransport, RunnerProviderConfig, TokenUsage, agent_tool_call_from_value,
+    AgentToolCall, ObjectPath, OpenAiStreamEvent, ProviderCredential, ProviderRoute,
+    ProviderRuntimeDriver, ResolvedTransport, RunnerProviderConfig, TokenUsage,
+    agent_tool_call_from_value,
     execute_agent_tool_call, is_passthrough_tool, open_executable_no_follow,
     passthrough_tool_program,
     run_agent_model_once, run_agent_model_once_with_timeout, missing_model_message,
-    is_regular_file_no_follow, model_candidates, openai_chat_body, openai_responses_body,
-    openai_stream_event, parse_anthropic_message_content, parse_openai_response_content,
-    curl_config_quote, open_runner_provider_config_dir, provider_config_from_dir,
+    is_regular_file_no_follow, model_candidates, openai_api_key, openai_chat_body,
+    openai_responses_body, openai_stream_event, parse_anthropic_message_content,
+    parse_openai_response_content, curl_config_quote, open_runner_provider_config_dir,
+    provider_config_from_dir,
     provider_curl_command, provider_messages_for_agent, provider_request_failure_message,
     provider_route, provider_runtime_driver,
     provider_secret_from_inherited_fd_with_env, provider_secret_from_runtime_file_with_env,
@@ -2021,6 +2023,40 @@ fn provider_runtime_driver_uses_responses_when_chat_is_absent() {
     assert_eq!(
         provider_runtime_driver(&config, false),
         ProviderRuntimeDriver::OpenAiResponses
+    );
+}
+
+#[test]
+fn openai_public_http_provider_requires_credential_before_curl() {
+    let transport = ResolvedTransport::Direct {
+        base_url: "https://api.example.test/v1".to_owned(),
+    };
+
+    assert_eq!(
+        openai_api_key("api.example.test", &transport, None),
+        Err("missing provider credential: api.example.test".to_owned())
+    );
+}
+
+#[test]
+fn openai_local_http_provider_allows_missing_credential() {
+    let transport = ResolvedTransport::Direct {
+        base_url: "http://127.0.0.1:8317/v1".to_owned(),
+    };
+
+    assert_eq!(openai_api_key("local", &transport, None), Ok(None));
+}
+
+#[test]
+fn openai_provider_uses_resolved_credential_when_present() {
+    let transport = ResolvedTransport::Direct {
+        base_url: "https://api.example.test/v1".to_owned(),
+    };
+    let credential = ProviderCredential::Bearer("secret".to_owned());
+
+    assert_eq!(
+        openai_api_key("api.example.test", &transport, Some(&credential)),
+        Ok(Some("secret"))
     );
 }
 
