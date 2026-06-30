@@ -6,11 +6,11 @@ After=local-fs.target
 [Service]
 Type=simple
 StateDirectory=cortexfs
-StateDirectoryMode=0700
+StateDirectoryMode=0755
 EnvironmentFile=-/etc/cortexfs/*.env
 ExecStartPre=/usr/bin/sh -c 'if /usr/bin/findmnt -n /ctx >/dev/null 2>&1; then /usr/bin/umount -l /ctx; fi'
 ExecStartPre=/usr/bin/install -d -m 0755 /ctx
-ExecStartPre=/usr/bin/install -d -m 0700 /var/lib/cortexfs /var/lib/cortexfs/storage /var/lib/cortexfs/storage/v1-root
+ExecStartPre=/usr/bin/install -d -m 0755 /var/lib/cortexfs /var/lib/cortexfs/storage /var/lib/cortexfs/storage/v1-root
 ExecStartPre=/usr/bin/ctx bootstrap /var/lib/cortexfs/storage/v1-root
 ExecStart=/usr/bin/cortexfs-mount --source /var/lib/cortexfs/storage/v1-root /ctx
 ExecStop=/usr/bin/umount -l /ctx
