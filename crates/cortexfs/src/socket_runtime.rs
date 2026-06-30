@@ -611,8 +611,18 @@ fn bwrap_provider_secret_bind_args(env: &[(String, String)]) -> Vec<String> {
         return Vec::new();
     }
     let mut args = bwrap_dir_args_for_parent(path);
-    args.push("--ro-bind".to_owned());
-    args.push(path.to_owned());
+    if let Some(fd) = env
+        .iter()
+        .find(|entry| entry.0 == "CTX_PROVIDER_SECRET_FD")
+        .map(|entry| entry.1.as_str())
+        .filter(|fd| !fd.is_empty() && fd.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        args.push("--ro-bind-data".to_owned());
+        args.push(fd.to_owned());
+    } else {
+        args.push("--ro-bind".to_owned());
+        args.push(path.to_owned());
+    }
     args.push(path.to_owned());
     args
 }

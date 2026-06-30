@@ -4,7 +4,7 @@ use std::io::Read as _;
 use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 
@@ -160,6 +160,7 @@ pub fn open_provider_system_secret(
     Ok(Some(ProviderSystemSecretHandle {
         provider: provider.to_owned(),
         account: account.to_owned(),
+        path,
         file,
     }))
 }
@@ -197,6 +198,7 @@ pub enum ProviderSystemSecretError {
 pub struct ProviderSystemSecretHandle {
     provider: String,
     account: String,
+    path: PathBuf,
     file: File,
 }
 
@@ -228,14 +230,18 @@ impl ProviderSystemSecret {
 impl ProviderSystemSecretHandle {
     /// Environment metadata for passing this already-open secret fd.
     ///
-    /// These variables contain no secret material; they identify only an fd and
-    /// the provider slot it belongs to.
+    /// These variables contain no secret material; they identify only an fd/path
+    /// and the provider slot it belongs to.
     #[must_use]
-    pub fn env(&self) -> [(String, String); 3] {
+    pub fn env(&self) -> [(String, String); 4] {
         [
             (
                 "CTX_PROVIDER_SECRET_FD".to_owned(),
                 self.file.as_raw_fd().to_string(),
+            ),
+            (
+                "CTX_PROVIDER_SECRET_PATH".to_owned(),
+                self.path.display().to_string(),
             ),
             (
                 "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
@@ -318,7 +324,7 @@ fn read_model_alias_target(ctx_root: &Path, alias: &str) -> std::io::Result<Stri
 fn provider_system_secret_path(
     provider: &str,
     account: &str,
-) -> Result<std::path::PathBuf, ProviderSystemSecretError> {
+) -> Result<PathBuf, ProviderSystemSecretError> {
     if !crate::is_object_name(provider) || !is_secret_account_name(account) {
         return Err(ProviderSystemSecretError::InvalidName);
     }
