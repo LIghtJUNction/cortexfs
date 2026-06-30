@@ -841,7 +841,7 @@ fn agent_tool_loop_falls_back_when_followup_has_no_visible_reply() {
                     streamed: false,
                 }),
                 2 => {
-                    assert!(config.suppress_model_error_events);
+                    assert!(!config.suppress_model_error_events);
                     Ok(AgentModelRunOutcome {
                         frames: vec![
                             r#"{"type":"usage","run":"r1","input_tokens":10,"output_tokens":0}"#.to_owned(),
