@@ -218,6 +218,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let base_policy = ok!(base_policy);
     assert!(base_policy.contains("allow base_t tool:tsh execute\n"));
     assert!(base_policy.contains("allow base_t tool:fs.read execute\n"));
+    assert!(base_policy.contains("allow base_t network:default connect\n"));
     assert!(base_policy.contains("allow base_t agent:coder create\n"));
     assert!(base_policy.contains("allow base_t agent:reviewer start\n"));
     assert!(base_policy.contains("allow base_t agent:executor start\n"));
@@ -503,6 +504,9 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(
         matches!(agent_policy, Ok(ref content) if content.contains("model:main use"))
+    );
+    assert!(
+        matches!(agent_policy, Ok(ref content) if content.contains("network:default connect"))
     );
     let model_link = fs::read_link(user_model.join("coder"));
     assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/main")));
