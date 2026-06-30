@@ -175,6 +175,13 @@ fn handle_agent_executable_socket_request_frame_streaming(
     if let Some(debug) = debug {
         write_socket_debug_timing_frame(stream, debug, "socket_send_received")?;
     }
+    let history_messages = collect_history_messages_from_session(
+        &runtime.session_root.join(session),
+        MAX_HISTORY_MESSAGES_CHARS,
+    );
+    if let Some(debug) = debug {
+        write_socket_debug_timing_frame(stream, debug, "history_collected")?;
+    }
 
     let recorder_response = handle_socket_request(
         runtime.session_root,
@@ -195,6 +202,7 @@ fn handle_agent_executable_socket_request_frame_streaming(
             session,
             cwd: cwd.as_deref(),
             input,
+            history_messages: &history_messages,
             debug,
         },
     )?;
@@ -218,14 +226,8 @@ fn run_agent_executable_streaming(
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
 ) -> Result<Vec<String>, SocketRuntimeError> {
-    let history_messages = collect_history_messages_from_session(
-        &runtime.session_root.join(request.session),
-        MAX_HISTORY_MESSAGES_CHARS,
-    );
-    write_optional_socket_debug_timing_frame(stream, request.debug, "history_collected")?;
     let agent_executable = open_agent_executable_no_follow(runtime.agent_executable)?;
-    let mut command =
-        agent_executable_socket_command(runtime, &agent_executable, request, history_messages);
+    let mut command = agent_executable_socket_command(runtime, &agent_executable, request);
     apply_socket_debug_timing_env(&mut command, request.debug);
     apply_agent_identity_to_command(&mut command, runtime.identity);
     command.stderr(Stdio::piped());
@@ -409,6 +411,7 @@ struct AgentExecutableRunRequest<'a> {
     session: &'a str,
     cwd: Option<&'a str>,
     input: &'a str,
+    history_messages: &'a str,
     debug: Option<SocketDebugTiming>,
 }
 
@@ -416,7 +419,6 @@ fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
     agent_executable: &fs::File,
     request: AgentExecutableRunRequest<'_>,
-    history_messages: String,
 ) -> Command {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
@@ -426,7 +428,7 @@ fn agent_executable_socket_command(
                 runtime,
                 request.run_id,
                 request.session,
-                history_messages,
+                request.history_messages,
             );
             command.arg(request.input);
             command.stdout(Stdio::piped()).process_group(0);
@@ -443,7 +445,7 @@ fn agent_executable_socket_command(
                 cwd: request.cwd.unwrap_or(runtime.default_cwd),
                 run_id: request.run_id,
                 session: request.session,
-                history_messages: &history_messages,
+                history_messages: request.history_messages,
                 debug: request.debug,
                 input: request.input,
             }));
@@ -452,7 +454,7 @@ fn agent_executable_socket_command(
                 runtime,
                 request.run_id,
                 request.session,
-                history_messages,
+                request.history_messages,
             );
             command.stdout(Stdio::piped()).process_group(0);
             command
@@ -477,7 +479,7 @@ fn apply_agent_executable_socket_env(
     runtime: AgentExecutableSocketRuntime<'_>,
     run_id: &str,
     session: &str,
-    history_messages: String,
+    history_messages: &str,
 ) {
     // The socket-activated service may hold provider credentials in its own
     // environment. Start executable agents from a clean environment and add
