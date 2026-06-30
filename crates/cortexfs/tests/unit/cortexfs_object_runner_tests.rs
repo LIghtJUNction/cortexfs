@@ -351,6 +351,56 @@ fn model_candidates_ignore_symlinked_fallback_control_file(
 }
 
 #[test]
+fn agent_model_config_allows_primary_selected_through_alias_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-agent-model-policy-primary")?;
+    let agent_dir = root.join("agent/coder.d");
+    fs::create_dir_all(&agent_dir)?;
+    fs::create_dir_all(root.join("model/debug"))?;
+    symlink("/ctx/model/debug/echo", root.join("model/main"))?;
+    write_executable_script(&root.join("model/debug/echo"), "#!/bin/sh\nexit 0\n")?;
+    fs::write(agent_dir.join("model"), "main\n")?;
+    fs::write(agent_dir.join("label"), " user_u:agent_r:coder_t:s0\n")?;
+    fs::write(agent_dir.join("policy"), "allow coder_t model:main use\n")?;
+
+    let config = AgentModelRunConfig::new_with_paths("coder", root.clone(), root.clone());
+
+    assert!(matches!(config, Ok(ref config) if config.model == "debug/echo"));
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn agent_model_config_denies_fallback_without_selected_model_policy(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("runner-agent-model-policy-fallback")?;
+    let agent_dir = root.join("agent/coder.d");
+    fs::create_dir_all(&agent_dir)?;
+    fs::create_dir_all(root.join("model/primary/approved.d"))?;
+    fs::create_dir_all(root.join("model/evil"))?;
+    fs::write(
+        root.join("model/primary/approved.d/fallback"),
+        "evil/leak\n",
+    )?;
+    write_executable_script(&root.join("model/evil/leak"), "#!/bin/sh\nexit 0\n")?;
+    fs::write(agent_dir.join("model"), "primary/approved\n")?;
+    fs::write(agent_dir.join("label"), "user_u:agent_r:coder_t:s0\n")?;
+    fs::write(
+        agent_dir.join("policy"),
+        "allow coder_t model:primary/approved use\n",
+    )?;
+
+    let config = AgentModelRunConfig::new_with_paths("coder", root.clone(), root.clone());
+
+    assert!(matches!(
+        config,
+        Err(ref error) if error.contains("agent policy denies model:evil/leak use")
+    ));
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn runner_control_reader_refuses_symlink() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-control-reader-symlink")?;
     let outside = root.join("outside-control");

@@ -14,11 +14,11 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
-    DEFAULT_AGENT_PROMPT_TEMPLATE, PolicyV0, ToolExecutionAuthority, ToolExecutionDenial,
-    authorize_tool_execution, collect_agent_rules, collect_skill_metadata, current_time_unix,
-    derive_agent_runtime_view, inspect_event_stream_jsonl, is_model_name, is_object_name,
-    parse_model_fallback, run_core_tool, run_core_tool_cli, run_echo_model,
-    skill_metadata_budget_from_env,
+    DEFAULT_AGENT_PROMPT_TEMPLATE, PolicyObjectClass, PolicyPermission, PolicyV0,
+    ToolExecutionAuthority, ToolExecutionDenial, authorize_tool_execution, collect_agent_rules,
+    collect_skill_metadata, current_time_unix, derive_agent_runtime_view,
+    inspect_event_stream_jsonl, is_model_name, is_object_name, parse_model_fallback, run_core_tool,
+    run_core_tool_cli, run_echo_model, skill_metadata_budget_from_env,
 };
 use cortexfs_tool_sdk::ToolInvocation;
 use nix::libc;
@@ -369,6 +369,10 @@ impl AgentModelRunConfig {
             env::var_os("CTX_SOURCE").map_or_else(|| PathBuf::from(DEFAULT_SOURCE), PathBuf::from);
         let ctx_root =
             env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+        Self::new_with_paths(agent, source, ctx_root)
+    }
+
+    fn new_with_paths(agent: &str, source: PathBuf, ctx_root: PathBuf) -> Result<Self, String> {
         let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
         let model_path = source
             .join("agent")
@@ -383,24 +387,27 @@ impl AgentModelRunConfig {
         } else {
             configured_model
         };
-        let model = env::var("CTX_AGENT_MODEL_OVERRIDE")
+        let requested_model = env::var("CTX_AGENT_MODEL_OVERRIDE")
             .ok()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or(configured_model);
-        let model = if is_model_name(&model) || is_model_alias(&model) {
-            model
+        let requested_model = if is_model_name(&requested_model) || is_model_alias(&requested_model)
+        {
+            requested_model
         } else {
-            return Err(format!("invalid model reference: {model}"));
+            return Err(format!("invalid model reference: {requested_model}"));
         };
-        let candidates = model_candidates(&ctx_root, &model)?;
+        let primary_model = resolved_model_name(&ctx_root, &requested_model)?;
+        let candidates = model_candidates(&ctx_root, &requested_model)?;
         let selected = candidates
             .iter()
             .find(|candidate| is_regular_file_no_follow(&candidate.path))
             .or_else(|| candidates.first())
-            .ok_or_else(|| format!("invalid model reference: {model}"))?;
+            .ok_or_else(|| format!("invalid model reference: {requested_model}"))?;
         let model_path = selected.path.clone();
         let model = selected.name.clone();
         let agent_dir = source.join("agent").join(format!("{agent}.d"));
+        authorize_agent_model_use(&agent_dir, &requested_model, &primary_model, &model)?;
         let system_prompt =
             read_small_plain_text_file(&agent_dir.join("system.md")).unwrap_or_default();
         let prompt_template = read_small_plain_text_file(&agent_dir.join("prompt.template.md"))
@@ -434,6 +441,60 @@ impl AgentModelRunConfig {
         self.tool_context.push_str(":\n");
         self.tool_context.push_str(result);
         trim_tool_context_to_limit(&mut self.tool_context);
+    }
+}
+
+fn authorize_agent_model_use(
+    agent_dir: &Path,
+    requested_model: &str,
+    primary_model: &str,
+    selected_model: &str,
+) -> Result<(), String> {
+    let label = read_small_plain_text_file(&agent_dir.join("label"))
+        .map_err(|error| format!("cannot read agent label: {error}"))?;
+    let subject = policy_subject_from_agent_label(label.trim())
+        .ok_or_else(|| "invalid agent label".to_owned())?;
+    let policy_text = read_small_plain_text_file(&agent_dir.join("policy"))
+        .map_err(|error| format!("cannot read agent policy: {error}"))?;
+    let policy =
+        PolicyV0::parse(&policy_text).map_err(|_error| "invalid agent policy".to_owned())?;
+    if policy.allows(
+        subject,
+        PolicyObjectClass::Model,
+        selected_model,
+        PolicyPermission::Use,
+    ) {
+        return Ok(());
+    }
+    if selected_model == primary_model && requested_model != selected_model {
+        if policy.allows(
+            subject,
+            PolicyObjectClass::Model,
+            requested_model,
+            PolicyPermission::Use,
+        ) {
+            return Ok(());
+        }
+        return Err(format!(
+            "agent policy denies requested model:{requested_model} use via selected primary:{selected_model}"
+        ));
+    }
+    Err(format!("agent policy denies model:{selected_model} use"))
+}
+
+fn policy_subject_from_agent_label(label: &str) -> Option<&str> {
+    if is_object_name(label) {
+        return Some(label);
+    }
+    let mut fields = label.split(':');
+    let _user = fields.next()?;
+    let _role = fields.next()?;
+    let subject = fields.next()?;
+    let _level = fields.next()?;
+    if fields.next().is_none() && is_object_name(subject) {
+        Some(subject)
+    } else {
+        None
     }
 }
 
