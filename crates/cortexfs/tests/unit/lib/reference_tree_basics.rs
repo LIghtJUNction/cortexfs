@@ -497,6 +497,13 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
         matches!(agent_script, Ok(ref content) if content.contains("CTX_AGENT_PROMPT_TEMPLATE"))
     );
     assert!(
+        matches!(agent_script, Ok(ref content) if content.contains("CTX_AGENT_HISTORY_MESSAGES")
+            && content.contains("Conversation history:")
+            && content.contains("Current user input:")
+            && content.contains("messages.jsonl")
+            && content.contains("/usr/bin/tail -n 40"))
+    );
+    assert!(
         matches!(agent_script, Ok(ref content) if content.contains("/usr/bin/cat")
             && content.contains("/usr/bin/tr")
             && content.contains("/usr/bin/readlink"))

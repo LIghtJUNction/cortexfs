@@ -336,13 +336,20 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 fn agent_executable_socket_runtime_passes_history_messages() {
     let root = reference_tree("agent-executable-socket-runtime-history");
     let session_root = agent_session_root(&root, "coder");
+    write_text_file(
+        &session_root.join("default").join("messages.jsonl"),
+        r#"{"content":"remember prior","role":"user"}
+{"content":[{"text":"prior answer","type":"text"}],"role":"assistant"}
+"#,
+    );
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
-printf '{"type":"delta","run":"%s","text":"%s"}\n' "$CTX_RUN_ID" "$CTX_AGENT_HISTORY_MESSAGES"
+history="$(/usr/bin/printf '%s' "$CTX_AGENT_HISTORY_MESSAGES" | /usr/bin/tr '\n' '|')"
+printf '{"type":"delta","run":"%s","text":"%s"}\n' "$CTX_RUN_ID" "$history"
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
@@ -378,7 +385,9 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
         },
     );
     let outcome = ok!(outcome);
-    assert!(outcome.jsonl().contains("- user: hi"));
+    assert!(outcome.jsonl().contains("- user: remember prior"));
+    assert!(outcome.jsonl().contains("- assistant: prior answer"));
+    assert!(!outcome.jsonl().contains("- user: hi"));
 }
 
 #[test]
@@ -670,10 +679,6 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     let mut env = view.env().to_vec();
     env.push(("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()));
     env.push((
-        "CTX_PROVIDER_SECRET_FD".to_owned(),
-        "9".to_owned(),
-    ));
-    env.push((
         "CTX_PROVIDER_SECRET_PATH".to_owned(),
         "/run/user/1000/cortexfs/credentials/coder-default".to_owned(),
     ));
@@ -711,6 +716,12 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     assert!(contains_arg_pair(&args, "--tmpfs", "/tmp"));
     assert!(contains_arg_pair(&args, "--ro-bind", "/usr"));
     assert!(contains_arg_pair(&args, "--dir", "/workspace"));
+    assert!(contains_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_AGENT_HISTORY_MESSAGES",
+        "- user: hi"
+    ));
     assert!(contains_arg_triplet(
         &args,
         "--ro-bind-data",
