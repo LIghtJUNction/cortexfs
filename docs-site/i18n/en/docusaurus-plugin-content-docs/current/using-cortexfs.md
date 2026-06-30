@@ -41,6 +41,44 @@ echo "summarize this file" | /ctx/model/main
 
 Change the `/ctx/model/main` alias when you want a different default model.
 Do that by changing the alias instead of adding provider-specific root entries.
+The reference tree provides four initial agents: `coder`, `reviewer`,
+`executor`, and `worker`. `coder` uses `model/main`, `reviewer` uses
+`model/helper`, and both `executor` and `worker` default to
+`api.lmm.best/gpt-5.3-codex-spark`. The reference `worker` is parented by
+`agent:coder` without binding to a fixed session; the default `coder` policy may
+create, start, stop, and read `worker`, so independent implementation work from
+any coder session can be delegated to the spark worker without creating another
+root ABI entry.
+
+The default `coder.d/system.md` treats `coder` as the parent integrator:
+independent implementation work should be a delegated `react` node in
+`context/plan.json`, delegated nodes that omit `agent` use `worker`, and
+delegated nodes that omit `session` use the current parent session name.
+Advance one schedule step with:
+
+```bash
+ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
+ctx agent wait coder work-123 --session default
+```
+
+`status` reads the plan, child table, and delegated worker
+`agent/<name>`, `agent/<name>.d/model`, and `life`; it does not invent
+`main`/`owned` defaults when the delegated backing agent is missing, then prints
+`node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>state`. `advance`
+materializes ready child handoffs, `claim` moves a materialized child from
+`pending` to `active`, and `result` writes the terminal child result under
+`context/child/<child>/`. Command output includes the parent ref plus the child
+`agent`, `session`, `model`, `life`, `handoff.md`, `result.md`, and
+`refs.jsonl` ABI paths so neither parent nor worker has to guess coordination
+state. `agent wait` is a non-blocking waitpid-shaped reader: while the child is
+`pending` or `active` it fails, and once the child is `done`, `error`, or
+`cancelled` it prints
+`child<TAB>status<TAB>agent<TAB>session<TAB>model<TAB>life` followed by
+`result.md`. These commands do not start background listeners, polling loops,
+or a second submission entrance.
 Provider secrets are not written into model files or `.d/` control
 directories; provider adapters resolve API keys from environment variables,
 the system keychain, then the unconfigured state.
@@ -107,9 +145,24 @@ ctx agent ps
 ctx agent stop reviewer
 ```
 
-If `/ctx/tool/agent.create`, `agent.start`, or `agent.stop` is missing, the
-matching lifecycle command fails with service unavailable. `ctx agent status`
-and `ctx agent ps` only read ordinary `agent/<name>.d/*` control files.
+`ctx agent new` prefers `/ctx/tool/agent.create`; if that tool is absent, host
+`ctx` creates the standard `agent/<name>.d/*` control files and
+`home/<uid>/agent/<name>/` skeleton. `ctx agent start` starts the explicit
+runtime; once the terminal socket is reachable it writes
+`agent/<name>.d/status=ready` and appends an `agent.start` event to
+`agent/<name>.d/log`. `ctx agent stop` prefers `/ctx/tool/agent.stop`; if that
+tool is absent it writes `agent/<name>.d/status=dead`, clears `pid`, and
+appends an `agent.stop` event. `ctx agent status` and `ctx agent ps` only read
+ordinary `agent/<name>.d/*` control files. `agent status` keeps the first line
+as the status value, then prints `model=...`, `life=...`, `parent=...`,
+`children=...`, `pid=...`, `uid=...`, `gid=...`, `groups=...`, `root=...`, and
+`cwd=...`. `children=...` counts direct children whose effective state is not
+`dead`; `ready` or `busy` children with stale numeric pids are excluded the
+same way as `ctx agent ps`.
+Non-default models and non-`owned` lifecycles are visible in `ctx agent ps`.
+`ctx agent env NAME` prints the sandbox environment derived by
+`ctx agent start`, and `ctx agent children NAME` shows parent-side child state
+plus the backing worker `parent_session`, `model`, `life`, `status`, and `pid`.
 
 ## Submit Images And Other Files
 
@@ -240,6 +293,33 @@ arguments, `ctx agent-sh` forwards one message to `ctx agent send`. Use
 `agent.sh --watch coder` to observe the agent terminal, and `agent.sh --attach
 coder` only when you want to enter `ctxterm -> tsh`. `agent.sh` does not keep a
 private chat database.
+
+## Installed Multi-Turn Smoke
+
+After installation, the minimal multi-turn smoke should use the existing
+session ABI instead of adding a test entrance:
+
+```bash
+ctx bootstrap
+ctx agent start coder --session default --cwd /workspace
+ctx agent send coder --session default "round one: read the current task"
+ctx agent send coder --session default "round two: continue from the previous turn"
+ctx agent history coder --session default
+ctx agent output coder --session default
+```
+
+This path checks `agent/<agent>.sock`, `messages.jsonl`, `latest.md`, current
+session selection, and prompt-history injection. Durable conversation facts
+stay in `/ctx/home/<uid>/agent/<agent>/session/<session>/messages.jsonl`;
+`ctx agent prompt` is only for inspecting the prompt that would be sent to the
+model, not a substitute for a live socket conversation.
+
+When handing independent implementation work to the spark worker, the parent
+first materializes the handoff with `ctx schedule advance`, then gives the
+worker the emitted `model=`, `life=`, `plan=`, `handoff=`, `result=`, and
+`refs=` fields. The worker writes back through the same
+`ctx schedule claim/result` path; do not add a queue, poller, or second
+coordination file.
 
 ## Customize Agents
 

@@ -202,6 +202,40 @@ fn create_complete_session_layout(session: &Path) {
     }
 }
 
+fn create_complete_agent_control(root: &Path, name: &str) {
+    let control = fixture_path(root, &["agent", &format!("{name}.d")]);
+    assert!(fs::create_dir_all(&control).is_ok());
+    for file in AGENT_CONTROL_FILES {
+        write_text_file(
+            &control.join(file),
+            &format!("{}\n", complete_agent_control_value(file, name)),
+        );
+    }
+}
+
+fn complete_agent_control_value(file: &str, name: &str) -> String {
+    let subject = format!("{name}_t");
+    match file {
+        "owner" | "uid" => "1000".to_owned(),
+        "gid" => "100".to_owned(),
+        "groups" => "10\n20".to_owned(),
+        "label" => format!("user_u:agent_r:{subject}:s0"),
+        "iso" => "shared".to_owned(),
+        "parent" | "pid" | "log" | "system.md" | "prompt.template.md" => String::new(),
+        "life" => "owned".to_owned(),
+        "root" => format!("/ctx/home/1000/agent/{name}/root"),
+        "cwd" => "/workspace".to_owned(),
+        "env" => "LD_PRELOAD=/tmp/ignored".to_owned(),
+        "path" => "/ctx/tool:/ctx/home/1000/tool".to_owned(),
+        "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
+        "model" => "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+        "policy" => format!("allow {subject} model:api.lmm.best/gpt-5.3-codex-spark use"),
+        "status" => "idle".to_owned(),
+        "meta.json" => "{}".to_owned(),
+        _ => "ok".to_owned(),
+    }
+}
+
 fn session_file_fixture_value(file: &str) -> &'static str {
     match file {
         "state" => "idle\n",

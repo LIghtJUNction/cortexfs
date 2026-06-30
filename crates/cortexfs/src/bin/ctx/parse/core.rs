@@ -1,0 +1,422 @@
+#[derive(Debug, Eq, PartialEq)]
+struct CliError {
+    code: u8,
+    message: String,
+}
+
+impl CliError {
+    fn usage(message: impl Into<String>) -> Self {
+        Self {
+            code: 2,
+            message: message.into(),
+        }
+    }
+
+    fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            code: 69,
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Cli {
+    root: PathBuf,
+    command: Command,
+}
+
+#[derive(Debug)]
+enum Command {
+    Help,
+    HelpTopic(String),
+    Abi,
+    Env,
+    Root,
+    Man {
+        topic: Option<String>,
+    },
+    Status,
+    Bootstrap {
+        source: Option<PathBuf>,
+    },
+    Mount {
+        source: Option<PathBuf>,
+        mountpoint: Option<PathBuf>,
+    },
+    Ls(LsTarget),
+    Which(ObjectClass, String),
+    PathShared(String),
+    History {
+        agent: String,
+        session: Option<String>,
+    },
+    Resume {
+        agent: String,
+        session: Option<String>,
+    },
+    Send {
+        agent: String,
+        session: Option<String>,
+        input: String,
+    },
+    Agent(AgentArgs),
+    Provider(ProviderArgs),
+    Ping {
+        path: String,
+    },
+    Cancel {
+        path: String,
+        run: String,
+    },
+    Doctor,
+    Exec {
+        path: String,
+        args: Vec<String>,
+    },
+    Tool {
+        name: String,
+        args: Vec<String>,
+    },
+    Cat {
+        path: String,
+    },
+    Set {
+        path: String,
+        value: String,
+    },
+    Append {
+        path: String,
+        value: String,
+    },
+    File(FileArgs),
+    Schedule(ScheduleArgs),
+    ValidateName(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FileCommand {
+    Info,
+    Type,
+    Check,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum LsTarget {
+    Root,
+    Path(String),
+}
+
+#[derive(Debug)]
+struct FileArgs {
+    command: FileCommand,
+    path: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ScheduleArgs {
+    Status {
+        path: String,
+        done: Vec<String>,
+    },
+    Advance {
+        path: String,
+        done: Vec<String>,
+    },
+    Claim {
+        path: String,
+        child: String,
+    },
+    Result {
+        path: String,
+        child: String,
+        status: ChildContextStatus,
+        result: String,
+        refs_jsonl: String,
+    },
+}
+
+fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
+    let cli = parse(args)?;
+    match cli.command {
+        Command::Help => success(print_help()),
+        Command::HelpTopic(topic) => success(print_help_topic(&topic)),
+        Command::Abi => success(print_abi()),
+        Command::Env => success(print_env(&cli.root)),
+        Command::Root => success(print_line(&cli.root.display().to_string())),
+        Command::Man { topic } => success(print_man(&cli.root, topic.as_deref())),
+        Command::Status => success(print_status(&cli.root)),
+        Command::Bootstrap { source } => success(bootstrap_reference_tree(source.as_deref())),
+        Command::Mount { source, mountpoint } => success(mount_reference_tree(
+            &cli.root,
+            source.as_deref(),
+            mountpoint.as_deref(),
+        )),
+        Command::Ls(target) => success(list_objects(&cli.root, &target)),
+        Command::Which(class, name) => success(which_object(&cli.root, class, &name)),
+        Command::PathShared(name) => success(path_shared(&cli.root, &name)),
+        Command::History { agent, session } => {
+            success(history(&cli.root, &agent, session.as_deref()))
+        }
+        Command::Resume { agent, session } => {
+            agent_resume(&cli.root, &agent, session.as_deref(), false)
+        }
+        Command::Send {
+            agent,
+            session,
+            input,
+        } => agent_send(&cli.root, &agent, session.as_deref(), &input, false, false),
+        Command::Agent(args) => agent_command(&cli.root, &args),
+        Command::Provider(args) => provider_command(&args),
+        Command::Ping { path } => ping(&cli.root, &path),
+        Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
+        Command::Doctor => success(doctor(&cli.root)),
+        Command::Exec { path, args } => exec_object(&cli.root, &path, &args),
+        Command::Tool { name, args } => run_visible_tool(&cli.root, &name, &args),
+        Command::Cat { path } => success(file_cat(&cli.root, &path)),
+        Command::Set { path, value } => success(file_set(&cli.root, &path, &value)),
+        Command::Append { path, value } => success(file_append(&cli.root, &path, &value)),
+        Command::File(args) => success(file_command(&cli.root, &args)),
+        Command::Schedule(args) => success(schedule_command(&cli.root, &args)),
+        Command::ValidateName(name) => success(validate_name(&name)),
+    }
+}
+
+fn success(result: Result<(), CliError>) -> Result<ExitCode, CliError> {
+    result.map(|()| ExitCode::SUCCESS)
+}
+
+fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
+    let mut root = env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(CTX_ROOT), PathBuf::from);
+    let mut values = args.into_iter();
+    let mut rest = Vec::new();
+
+    while let Some(value) = values.next() {
+        let text = os_string(value)?;
+        match text.as_str() {
+            "--root" | "-r" => {
+                let Some(next) = values.next() else {
+                    return Err(CliError::usage("--root requires a path"));
+                };
+                root = PathBuf::from(next);
+            }
+            "--" => {
+                for value in values {
+                    rest.push(os_string(value)?);
+                }
+                break;
+            }
+            _ => {
+                rest.push(text);
+                for value in values {
+                    rest.push(os_string(value)?);
+                }
+                break;
+            }
+        }
+    }
+
+    let command = parse_command(rest)?;
+    Ok(Cli { root, command })
+}
+
+fn os_string(value: OsString) -> Result<String, CliError> {
+    value.into_string().map_err(|value| {
+        CliError::usage(format!(
+            "arguments must be valid UTF-8: {}",
+            value.to_string_lossy()
+        ))
+    })
+}
+
+fn required_arg(
+    values: &mut impl Iterator<Item = String>,
+    message: &str,
+) -> Result<String, CliError> {
+    values.next().ok_or_else(|| CliError::usage(message))
+}
+
+#[expect(clippy::too_many_lines, reason = "flat CLI dispatch keeps subcommand parsing explicit")]
+fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
+    let mut values = args.into_iter();
+    let Some(command) = values.next() else {
+        return Ok(Command::Status);
+    };
+    let rest: Vec<String> = values.collect();
+    if is_help_args(&rest) && is_top_level_help_topic(command.as_str()) {
+        return Ok(Command::HelpTopic(command));
+    }
+    if command == "agent" && matches!(rest.as_slice(), [value] if value == "help") {
+        return Ok(Command::HelpTopic(command));
+    }
+    let mut values = rest.into_iter();
+
+    match command.as_str() {
+        "help" | "--help" | "-h" => Ok(Command::Help),
+        "abi" => {
+            no_extra_args(values)?;
+            Ok(Command::Abi)
+        }
+        "env" => {
+            no_extra_args(values)?;
+            Ok(Command::Env)
+        }
+        "root" => {
+            no_extra_args(values)?;
+            Ok(Command::Root)
+        }
+        "man" => {
+            let topic = values.next();
+            no_extra_args(values)?;
+            Ok(Command::Man { topic })
+        }
+        "status" => {
+            no_extra_args(values)?;
+            Ok(Command::Status)
+        }
+        "bootstrap" | "update" => {
+            let source = values.next().map(PathBuf::from);
+            no_extra_args(values)?;
+            Ok(Command::Bootstrap { source })
+        }
+        "mount" => parse_mount_command(values),
+        "ls" => parse_ls_command(values),
+        "which" => {
+            let class = required_arg(&mut values, "which requires model, agent, or tool")?;
+            let name = required_arg(&mut values, "which requires an object name")?;
+            let class = ObjectClass::parse(&class)
+                .ok_or_else(|| CliError::usage("which expects model, agent, or tool"))?;
+            no_extra_args(values)?;
+            Ok(Command::Which(class, name))
+        }
+        "which-tool" => {
+            let name = required_arg(&mut values, "which-tool requires a tool name")?;
+            no_extra_args(values)?;
+            Ok(Command::Which(ObjectClass::Tool, name))
+        }
+        "path" => {
+            let kind = required_arg(&mut values, "path requires a kind")?;
+            match kind.as_str() {
+                "shared" => {
+                    let name = required_arg(&mut values, "path shared requires a name")?;
+                    no_extra_args(values)?;
+                    Ok(Command::PathShared(name))
+                }
+                _ => Err(CliError::usage("path expects shared")),
+            }
+        }
+        "history" => {
+            let (agent, session) = parse_agent_session(values, "history")?;
+            Ok(Command::History { agent, session })
+        }
+        "resume" => {
+            let (agent, session) = parse_agent_session(values, "resume")?;
+            Ok(Command::Resume { agent, session })
+        }
+        "send" => {
+            let (agent, session, input) = parse_send(values)?;
+            Ok(Command::Send {
+                agent,
+                session,
+                input,
+            })
+        }
+        "agent" => parse_agent_command(values.collect()),
+        "provider" => parse_provider_command(values.collect()),
+        "ping" => {
+            let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
+            no_extra_args(values)?;
+            Ok(Command::Ping { path })
+        }
+        "cancel" => {
+            let path = required_arg(&mut values, "cancel requires model/NAME or agent/NAME")?;
+            let run = required_arg(&mut values, "cancel requires a run id")?;
+            no_extra_args(values)?;
+            Ok(Command::Cancel { path, run })
+        }
+        "doctor" => {
+            no_extra_args(values)?;
+            Ok(Command::Doctor)
+        }
+        "exec" => {
+            let path = required_arg(&mut values, "exec requires an ABI object path")?;
+            Ok(Command::Exec {
+                path,
+                args: values.collect(),
+            })
+        }
+        "tool" => {
+            let name = required_arg(&mut values, "tool requires a tool name")?;
+            Ok(Command::Tool {
+                name,
+                args: values.collect(),
+            })
+        }
+        "cat" => {
+            let path = required_arg(&mut values, "cat requires a path")?;
+            no_extra_args(values)?;
+            Ok(Command::Cat { path })
+        }
+        "set" => {
+            let path = required_arg(&mut values, "set requires a path")?;
+            let value = required_arg(&mut values, "set requires a value")?;
+            no_extra_args(values)?;
+            Ok(Command::Set { path, value })
+        }
+        "append" => {
+            let path = required_arg(&mut values, "append requires a path")?;
+            let value = required_arg(&mut values, "append requires a value")?;
+            no_extra_args(values)?;
+            Ok(Command::Append { path, value })
+        }
+        "file" => {
+            let args = parse_file_args(values.collect())?;
+            Ok(Command::File(args))
+        }
+        "schedule" => {
+            let args = parse_schedule_args(values.collect())?;
+            Ok(Command::Schedule(args))
+        }
+        "validate-name" => {
+            let name = required_arg(&mut values, "validate-name requires a name")?;
+            no_extra_args(values)?;
+            Ok(Command::ValidateName(name))
+        }
+        _ => Err(CliError::usage(format!("unknown command: {command}"))),
+    }
+}
+
+fn is_help_args(args: &[String]) -> bool {
+    matches!(args, [value] if is_help_flag(value))
+}
+
+fn is_top_level_help_topic(command: &str) -> bool {
+    matches!(
+        command,
+        "status"
+            | "abi"
+            | "env"
+            | "root"
+            | "man"
+            | "bootstrap"
+            | "update"
+            | "mount"
+            | "ls"
+            | "which"
+            | "which-tool"
+            | "path"
+            | "history"
+            | "resume"
+            | "send"
+            | "agent"
+            | "provider"
+            | "ping"
+            | "cancel"
+            | "doctor"
+            | "exec"
+            | "tool"
+            | "file"
+            | "schedule"
+            | "validate-name"
+    )
+}

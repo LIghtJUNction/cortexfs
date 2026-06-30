@@ -6,24 +6,7 @@
 //! before the Agent OS rewrite. This crate intentionally exposes only stable
 //! ABI names while the implementation is redesigned around Rig.
 
-use std::collections::HashSet;
-use std::env;
-use std::fs;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
-use nix::libc;
-use nix::sys::socket::{getsockopt, sockopt};
-use serde::Deserialize;
-use serde_json::Value;
+include!("source_imports.rs");
 
 const MAX_AGENT_STDOUT_QUEUE_FRAMES: usize = 16;
 
@@ -48,133 +31,24 @@ macro_rules! impl_issue_report {
     };
 }
 
-mod abi_constants;
-mod abi_path;
-mod abi_path_parse;
-mod agent_control;
-mod agent_prompt;
-mod agent_schedule;
-mod context_jsonl;
-mod context_pack;
-mod context_pack_build;
-mod context_pack_inspect;
-mod context_pack_source;
-mod core_tools;
-mod manuals;
-mod message_stream;
-mod model;
-mod mount_table;
-mod oauth;
-mod policy;
-mod provider_name;
-mod session_index;
-mod session_layout;
-mod shared_queue;
-mod socket_request;
-mod stream;
-mod tool_path;
-mod tool_schema;
+include!("source_modules.rs");
 
-pub use abi_constants::{
-    AGENT_CONTROL_FILES, CHILD_RESULT_REQUIRED_DIRS, CHILD_RESULT_REQUIRED_FILES,
-    CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES, CORTEXFS_OBJECT_RUNNER, CTX_ROOT,
-    DEFAULT_AGENT_PROMPT_TEMPLATE, EXEC_OBJECTS, FORBIDDEN_MODEL_CAPABILITIES, FUSE_V1_ROOT_INODE,
-    MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES,
-    MODEL_CONTROL_FILES, ROOT_ENTRIES, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS,
-    STABLE_MODEL_CAPABILITIES, TOOL_CONTROL_FILES,
-};
 use abi_constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
     DEFAULT_MODEL_ALIAS_TARGET, DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, HELPER_MODEL_ALIAS_TARGET,
     MODEL_ROUTE_FILE, SYSTEM_PROVIDER_CONFIG_DIR, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi_path::is_object_name_for_class;
-pub use abi_path::{
-    AbiPathKind, ObjectClass, classify_abi_path, is_model_name, is_object_name, is_root_entry,
-    parse_abi_path,
-};
-pub use agent_control::{
-    AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
-};
-pub use agent_prompt::{
-    AgentPromptContext, MAX_HISTORY_MESSAGES_CHARS, MAX_SKILL_METADATA_CHARS, SkillMetadata,
-    agent_runtime_contract, collect_agent_rules, collect_agent_rules_from_paths,
-    collect_history_messages_from_session, collect_skill_metadata, current_time_unix,
-    format_history_messages_jsonl, format_skill_metadata_with_budget, render_agent_system_prompt,
-    skill_metadata_budget_from_env,
-};
-pub use agent_schedule::{
-    AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNode,
-    AgentScheduleNodeKind, AgentScheduleRecordError, AgentScheduleReport, MAX_AGENT_SCHEDULE_NODES,
-    agent_schedule_nodes, inspect_agent_schedule_json, ready_agent_schedule_child_handoffs,
-    ready_agent_schedule_nodes,
-};
-pub use context_pack::{
-    ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,
-    ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,
-    validate_context_pack_source,
-};
-pub use core_tools::{
-    FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
-    run_core_tool_cli, run_core_tool_cli_with_root,
-};
-pub use manuals::{
-    CortexfsManual, MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MANUALS,
-    cortexfs_manual,
-};
-pub use model::{
-    Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
-    ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
-    ModelEffort, ModelFallbackIssue, ModelFallbackReport, ModelFallbackTable, ModelRegistryError,
-    inspect_model_capabilities, parse_model_driver_routes, parse_model_fallback,
-};
-pub use mount_table::{MountEntry, MountError, MountMode, MountOption, MountTable};
-pub use oauth::{
-    OAuthError, OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, oauth_authorization_code_form,
-    oauth_authorization_url, oauth_refresh_token_form, parse_oauth_token_response,
-    resolve_oauth_access_token, resolve_oauth_access_token_with,
-};
-pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
-pub use provider_name::{
-    ProviderNameError, ProviderSystemSecret, ProviderSystemSecretError, ProviderSystemSecretHandle,
-    open_provider_system_secret, open_provider_system_secret_for_model,
-    provider_host_from_base_url, provider_keychain_service, provider_name_from_base_url,
-    provider_name_from_config, provider_oauth_access_token_env_name,
-    provider_oauth_refresh_token_env_name, provider_system_secret_exists,
-    read_provider_system_secret, read_provider_system_secret_for_model,
-    store_provider_system_secret,
-};
-pub use session_index::{
-    SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,
-    inspect_session_index, preflight_session_index_update, update_session_index,
-    update_session_index_with_keys,
-};
-pub use session_layout::{
-    SessionControlIssue, SessionControlKind, SessionControlReport, SessionLayoutIssue,
-    SessionLayoutReport, inspect_session_control, inspect_session_layout,
-};
-pub use shared_queue::{
-    SharedQueueClaim, SharedQueueClaimError, SharedQueueFinishError, SharedQueueLayoutIssue,
-    SharedQueueLayoutReport, SharedQueueOutcome, SharedQueueRecoverError,
-    claim_next_shared_queue_job, finish_shared_queue_job, inspect_shared_queue_layout,
-    recover_shared_queue_job,
-};
-pub use socket_request::{
-    SocketRequest, SocketRequestError, SocketSessionScope, parse_socket_request_frame,
-};
-pub use stream::{
-    ContextJsonlIssue, ContextJsonlKind, ContextJsonlReport, EventStreamIssue, EventStreamReport,
-    MessageStreamIssue, MessageStreamReport, inspect_context_jsonl, inspect_event_stream_jsonl,
-    inspect_message_stream_jsonl,
-};
-pub use tool_path::{ToolHit, ToolPath, ToolPathError, is_executable_file};
-pub use tool_schema::{ToolSchemaIssue, ToolSchemaReport, inspect_tool_schema_json};
+
+include!("public_exports.rs");
 
 include!("fuse_v1_types.rs");
 
 include!("core_runtime_types.rs");
 
 include!("agent_runtime_types.rs");
+
+include!("socket_runtime_types.rs");
 
 include!("authority_types.rs");
 

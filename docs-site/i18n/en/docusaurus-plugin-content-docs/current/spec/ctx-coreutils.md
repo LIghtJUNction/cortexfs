@@ -23,6 +23,7 @@ ctx abi
 ctx env
 ctx root
 ctx bootstrap
+ctx update
 ctx mount
 
 ctx ls
@@ -40,12 +41,14 @@ ctx path shared project-a
 ctx agent history coder
 ctx agent output coder
 ctx agent resume coder --session default
+ctx agent wait coder work-123 --session default
 
 ctx agent new reviewer --model openai/gpt-4o --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
 ctx agent start reviewer
 ctx agent stop reviewer
 ctx agent status reviewer
+ctx agent env reviewer
 ctx agent ps
 
 ctx cat agent/coder.d/policy
@@ -54,6 +57,10 @@ ctx append agent/coder.d/path /ctx/tool
 ctx file agent/coder.d/mount
 ctx file type tool/fs.read
 ctx file check agent/coder.d/mount
+ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
 
 ctx validate-name coder
 ctx doctor
@@ -74,6 +81,10 @@ Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
+`ctx update [SOURCE]` is an alias for `ctx bootstrap [SOURCE]`. It updates the
+reference source tree only; it does not remount `/ctx`, start a watcher, or add
+a second refresh boundary.
+
 Top-level agent session shortcuts follow the same current-session default as
 their `ctx agent ...` forms:
 
@@ -87,6 +98,7 @@ ctx resume AGENT SESSION
 ctx send AGENT INPUT
 ctx send AGENT --session SESSION INPUT
 ctx send AGENT SESSION INPUT
+ctx agent wait AGENT CHILD [--session SESSION]
 ```
 
 Omitting the session reads `session/index/current` first and falls back to
@@ -95,24 +107,130 @@ Omitting the session reads `session/index/current` first and falls back to
 `ctx agent send` and `ctx agent resume`; raw socket JSONL is reserved for lower
 level socket commands and explicit raw agent modes.
 
+`ctx agent wait` is a non-blocking waitpid-shaped reader for a parent-owned
+child result channel. It reads `context/child/<child>/status`; `pending` and
+`active` fail with service unavailable, while terminal `done`, `error`, and
+`cancelled` print
+`child<TAB>status<TAB>agent<TAB>session<TAB>model<TAB>life` followed by
+`result.md`. Its process exit status follows the child status: `done` exits 0,
+`error` exits 1, and `cancelled` exits 130. It does not poll, start runtimes,
+reap history, or delete child state.
+
+Hybrid parent schedules use an explicit single-step command:
+
+```text
+ctx schedule status PATH [--done NODE]...
+ctx schedule advance PATH [--done NODE]...
+ctx schedule claim PATH CHILD
+ctx schedule result PATH CHILD done|error|cancelled RESULT [--refs-jsonl JSONL]
+```
+
+`PATH` must be an agent session `context/plan.json`. The command reads the
+parent agent label and policy, derives completed delegated nodes from
+`context/child/<child>/status`, applies any explicit local `--done` node ids,
+and materializes newly ready delegated handoffs under `context/child/<child>/`.
+`ctx schedule status` is a read-only table over the same state. It prints
+`node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>state`, where state is one of
+`blocked`, `ready`, `pending`, `active`, `done`, `error`, or `cancelled`.
+The session, model, and life columns are `-` for local parent nodes. Delegated
+child nodes show the explicit child session, or the inherited parent session
+when the schedule node omits one, plus the selected backing agent model and
+lifecycle.
+For delegated nodes, the backing agent must exist as both `agent/<name>` and
+`agent/<name>.d/`; schedule commands must not invent `main`/`owned` defaults for
+a missing worker object.
+Each emitted `handoff` line includes the child `agent`, `session`, selected
+`model` from `agent/<name>.d/model`, `life` from `agent/<name>.d/life`, a
+shell-quoted `parent='agent:<name> session:<session>'` reference, and the
+stable `handoff`, `result`, and `refs`
+ABI file paths under `context/child/<child>/`. A parent can hand these paths to
+a worker without guessing where the worker should read input, which spark model
+path and lifecycle it should use, or where it should write compact results.
+`ctx schedule claim` marks a materialized child channel `active` when a worker
+has claimed the handoff. It is a single status-file transition from `pending`
+to `active`, idempotent while active, and it does not start a runtime. Its
+output line includes the claimed child `agent`, `session`, backing `model`,
+backing `life`, parent reference, and the same stable `handoff`, `result`, and
+`refs` paths.
+`ctx schedule result` writes a terminal child result back to the same parent
+session child channel: `status`, `result.md`, and `refs.jsonl`. Its output line
+includes the child `agent`, `session`, backing `model`, backing `life`, parent
+reference, and the written `result` and `refs` paths.
+Neither command starts agents, loops in the background, polls, or creates a
+second submission namespace.
+
 Agent lifecycle conveniences exist as thin wrappers:
 
 ```text
-ctx agent new NAME [--temp] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]
+ctx agent new NAME [--temp] [--parent PARENT] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]
 ctx agent start NAME
 ctx agent stop NAME
 ctx agent status NAME
+ctx agent env NAME
 ctx agent ps
+ctx agent children NAME
+ctx agent wait NAME CHILD
 ```
 
-`ctx agent new`, `ctx agent start`, and `ctx agent stop` must call
-`/ctx/tool/agent.create`, `/ctx/tool/agent.start`, and `/ctx/tool/agent.stop`
-respectively. If those tools are absent, the commands fail with service
-unavailable. `ctx agent new --temp` passes `life=temp` to `agent.create`; `ctx`
-must not decide lifecycle policy locally. `ctx agent status`
-may read `agent/<name>.d/status` directly because it is ordinary ABI
-inspection. `ctx agent ps` may read `agent/<name>.d/parent`, `status`, and
-`pid` directly and print the current agent tree.
+`ctx agent new` must call `/ctx/tool/agent.create` when that tool exists. If the
+tool is absent, host-side `ctx` may create a standard agent object directly by
+writing `agent/<name>.d/*` controls and `home/<uid>/agent/<name>/` skeleton
+directories; this fallback is a supervisor operation, not an agent policy
+grant. `ctx agent new --temp` records `life=temp` in either path. `--parent`
+records the ordinary `agent/<name>.d/parent` control value, such as
+`agent:coder session:default run:r1`, so a created worker child has a
+wait/stop-visible parent without adding a separate process table.
+
+`ctx agent start` starts the explicit runtime for an existing agent. After the
+runtime terminal socket is reachable, host-side `ctx` writes
+`agent/<name>.d/status` to `ready` and appends an `agent.start` event to
+`agent/<name>.d/log`. `pid` remains numeric-only; systemd invocation ids are log
+facts, not `pid` values.
+
+`ctx agent stop` calls `/ctx/tool/agent.stop` when that tool exists. If the tool
+is absent, host-side `ctx` may perform a supervisor stop by writing
+`agent/<name>.d/status` to `dead`, clearing `agent/<name>.d/pid`, and appending
+an `agent.stop` event to `agent/<name>.d/log`. The same supervisor fallback also
+marks any existing `owned` or `temp` child agents whose `parent` points at the
+stopped agent as cancelled/dead, recursively, while leaving their history and
+control objects inspectable. When the child agent is the backing runtime for a
+pending or active parent `context/child/<child>/` channel, the fallback records
+that parent-side child result as `cancelled` so `ctx agent wait` observes the
+terminal state. It must not invent a new lifecycle namespace or queue.
+`ctx agent status` reads ordinary `agent/<name>.d/*` controls and prints the
+status value first, followed by `model=`, `life=`, `parent=`, `children=`,
+`pid=`, `uid=`, `gid=`, `groups=`, `root=`, and `cwd=` lines.
+This keeps the first line usable as the process state while exposing the
+backing model, direct child count, parent relationship, Linux identity, and
+chroot/cwd for worker inspection. The `children=` count includes direct child
+agents whose effective state is not `dead`; recorded `ready` or `busy` children
+with stale numeric pids are excluded the same way as `ctx agent ps`. `ctx agent ps` may
+read `agent/<name>.d/parent`,
+`model`, `life`, `status`, and `pid` directly and print the current agent tree.
+Default `main` model selections and `owned` lifecycles may stay implicit;
+non-default worker models and non-owned lifecycles should be visible in the
+tree.
+`ctx agent env` derives the same runtime view as `ctx agent start` and prints
+the sandbox environment as `KEY=value` lines. It is a read-only inspection of
+existing control files, not a way to inherit host variables or mutate runtime
+state.
+`ctx agent children` reads the parent session `context/child/<child>/` table and
+prints tab-separated `child`, child-channel `status`, backing `agent`,
+child-channel `session`, backing agent `parent_session`, backing agent `model`,
+backing agent `life`, backing agent `status`, and backing agent `pid` (`-` when
+absent). The last five backing-agent columns are ordinary
+`agent/<agent>.d/parent`, `model`, `life`, `status`, and `pid` controls, so
+worker task state and its parent-session attachment are
+inspectable without copying runtime state into the parent context.
+`ctx agent wait` reads the same child channel. If a child is still `active` but
+its backing agent's effective state is `dead`, has no live `pid`, and still
+points back to the waiting parent agent/session, `wait` records the child
+channel as `cancelled` and returns the cancellation exit code. A recorded
+`ready` or `busy` state with a numeric `pid` that is absent from `/proc` is
+treated as no live `pid` for this read. Terminal output uses the same
+child-channel `agent`, `session`, backing `model`, and backing `life` fields as
+`ctx agent children`, then prints `result.md`. This is a synchronous reap, not
+a background poller.
 
 ## Installation Boundary
 

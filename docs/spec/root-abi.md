@@ -57,7 +57,7 @@ tree.
 ## v1 Reference Tree
 
 This is the normative v1 shape. Concrete object names such as `debug/echo`,
-`openai/gpt-5.5`, `base`, `coder`, `reviewer`, `executor`, `1000`, and
+`openai/gpt-5.5`, `base`, `coder`, `reviewer`, `executor`, `worker`, `1000`, and
 `project-a` are examples of valid entries.
 
 ```text
@@ -172,6 +172,29 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
     executor
     executor.sock
     executor.d/
+      owner
+      uid
+      gid
+      groups
+      label
+      iso
+      parent
+      life
+      root
+      cwd
+      env
+      path
+      mount
+      model
+      policy
+      status
+      pid
+      log
+      meta.json
+
+    worker
+    worker.sock
+    worker.d/
       owner
       uid
       gid

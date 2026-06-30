@@ -194,9 +194,8 @@ impl SharedAccessDenial {
         match self {
             Self::InvalidSharedName | Self::WrongSharedPath => "EINVAL",
             Self::CannotInspectPath => "EIO",
-            Self::NotMounted | Self::ReadOnlyMount | Self::LinuxPermission | Self::Policy => {
-                "EACCES"
-            }
+            Self::ReadOnlyMount => "EROFS",
+            Self::NotMounted | Self::LinuxPermission | Self::Policy => "EACCES",
         }
     }
 }
@@ -227,11 +226,10 @@ impl SessionAccessDenial {
         match self {
             Self::InvalidSessionPath => "EINVAL",
             Self::CannotInspectPath => "EIO",
-            Self::NotMounted
-            | Self::ReadOnlyMount
-            | Self::LinuxPermission
-            | Self::SharedPolicy
-            | Self::SessionPolicy => "EACCES",
+            Self::ReadOnlyMount => "EROFS",
+            Self::NotMounted | Self::LinuxPermission | Self::SharedPolicy | Self::SessionPolicy => {
+                "EACCES"
+            }
         }
     }
 }

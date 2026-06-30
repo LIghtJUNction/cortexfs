@@ -40,9 +40,36 @@ echo "summarize this file" | /ctx/model/main
 ```
 
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
-默认参考树提供 `coder`、`reviewer`、`executor` 三个初始可用 agent：`coder` 使用
+默认参考树提供 `coder`、`reviewer`、`executor`、`worker` 四个初始可用 agent：`coder` 使用
 `model/main`（默认 `openai/gpt-5.5`），`reviewer` 使用 `model/helper`（默认
-`openai/codex-auto-review`），`executor` 默认使用 `openai/gpt-5.3-codex-spark`。
+`openai/codex-auto-review`），`executor` 和 `worker` 默认使用
+`api.lmm.best/gpt-5.3-codex-spark`。参考树里的 `worker` 是 `coder` 的
+`agent:coder` 子 agent，不绑定某个固定 session；`coder` 的默认 policy 允许创建、启动、停止和读取
+`worker`，用于把任意 coder session 的独立实现任务拆给 spark worker。
+默认 `coder.d/system.md` 也按这个边界写入：`coder` 是父进程式集成者，独立实现工作优先
+写成 delegated `react` node，让省略 `agent` 的 delegated 节点落到 `worker`；`worker`
+只执行 bounded handoff 并返回 compact result，不负责扩展架构范围。
+父 agent 的 `context/plan.json` 可以把独立工作拆给 child agent；delegated 节点省略
+`agent` 时默认使用 `worker`，省略 `session` 时默认使用当前父 session 名。单步推进计划使用：
+
+```bash
+ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "实现完成"
+ctx agent wait coder work-123 --session default
+```
+
+`status` 只读取 plan、child 状态表和 delegated worker 的 `agent/<name>`、`agent/<name>.d/model`、`life`，
+delegated backing agent 缺失时不会伪造 `main`/`owned` 默认值；
+并输出 `node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>state`；`advance` 只物化 ready child handoff，`claim` 只把已物化的 child 从 `pending`
+标记为 `active`，`result` 只把 child 的终态结果写回父 session 的
+`context/child/<child>/`。命令输出会带上 parent ref，以及 child 的
+`agent`、`session`、`model`、`life`、`handoff.md`、`result.md`、`refs.jsonl` ABI 路径，父 agent 和 worker 不需要猜测交接文件位置、模型或生命周期。
+`agent wait` 是非阻塞的父进程式结果读取：child 还在 `pending`/`active` 时失败，进入
+`done`/`error`/`cancelled` 后输出 `child<TAB>status<TAB>agent<TAB>session<TAB>model<TAB>life`
+和 `result.md`，并分别以 0、1、130 作为进程退出码。
+它们都不启动后台监听、轮询或第二套提交入口。
 供应商密钥不写进 model 文件、`.d/` 控制目录或进程环境变量。provider adapter 从
 root-owned CortexFS system secret store 直接读取 API key；用户不需要在 provider JSON
 里手写环境变量名。长期凭据写入：
@@ -126,9 +153,21 @@ ctx agent ps
 ctx agent stop reviewer
 ```
 
-如果 `/ctx/tool/agent.create`、`agent.start` 或 `agent.stop` 不存在，对应生命周期命令会
-以 service unavailable 失败。`ctx agent status` 和 `ctx agent ps` 只读取普通
-`agent/<name>.d/*` 控制文件。
+`ctx agent new` 优先调用 `/ctx/tool/agent.create`；如果该 tool 不存在，host 侧
+`ctx` 会创建标准 `agent/<name>.d/*` 控制文件和 `home/<uid>/agent/<name>/`
+skeleton。`ctx agent start` 直接启动显式 runtime；terminal socket 可达后会把
+`agent/<name>.d/status` 写为 `ready`，并向 `agent/<name>.d/log` 追加
+`agent.start` 事件。`ctx agent stop` 优先调用 `/ctx/tool/agent.stop`，如果该 tool
+不存在则把 `agent/<name>.d/status` 写为 `dead`、清空 `pid`，并追加 `agent.stop`
+事件。`ctx agent status` 和 `ctx agent ps` 只读取普通 `agent/<name>.d/*` 控制文件；
+`agent status` 第一行仍是状态值，后续显示 `model=...`、`life=...`、`parent=...`、
+`children=...` 和 `pid=...`，并继续显示 `uid=...`、`gid=...`、`groups=...`、`root=...`、`cwd=...`
+这些 Linux 身份和路径字段；`children=...` 只统计 effective 状态不是 `dead` 的直接 child，
+记录了 stale 数字 pid 的 `ready`/`busy` child 会和 `ctx agent ps` 一样被排除；非默认模型会在进程树里显示为 `model=...`，非 `owned`
+生命周期会显示为 `life=...`。`ctx agent env NAME` 打印 `ctx agent start` 派生出的沙箱环境，便于检查 worker 实际获得的
+`CTX_AGENT`、`CTX_PATH`、`HOME` 等变量。`ctx agent children NAME` 从父 session 的
+child 表读取任务状态，并同时显示 backing worker 的 `parent_session`、`model`、
+`life`、`status` 和 `pid`，方便按父进程视角检查 worker。
 
 ## 提交图片和其他文件
 
@@ -250,6 +289,29 @@ agent.sh --resume coder
 参数时由脚本转发到 `ctx agent send coder --session default ...` 发送一条消息。需要旁观 agent terminal 时使用 `agent.sh --watch coder`；需要进入
 terminal、看到 `ctxterm -> tsh` 时，才使用 `agent.sh --attach coder`。
 `agent.sh` 不保存私有聊天数据库。
+
+## 安装后多轮 smoke
+
+安装后的最小验证应该走现有 session ABI，而不是另建测试入口：
+
+```bash
+ctx bootstrap
+ctx agent start coder --session default --cwd /workspace
+ctx agent send coder --session default "第一轮：读取当前任务"
+ctx agent send coder --session default "第二轮：基于上一轮继续"
+ctx agent history coder --session default
+ctx agent output coder --session default
+```
+
+这条路径同时验证了 `agent/<agent>.sock`、`messages.jsonl`、`latest.md`、当前
+session 选择和 prompt history 注入。多轮对话的持久事实仍在
+`/ctx/home/<uid>/agent/<agent>/session/<session>/messages.jsonl`；`ctx agent prompt`
+只用于检查将要发送给模型的渲染结果，不替代真实 socket 对话。
+
+需要把独立实现任务交给 spark worker 时，父 agent 先用 `ctx schedule advance` 物化
+handoff，然后把输出里的 `model=`、`life=`、`plan=`、`handoff=`、`result=`、`refs=`
+交给 worker。worker 只用同一套 `ctx schedule claim/result` 写回结果；不要新增队列、轮询器或第二套
+coordination 文件。
 
 ## 自定义 agent
 

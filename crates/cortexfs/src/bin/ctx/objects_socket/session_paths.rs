@@ -1,0 +1,220 @@
+fn request_id() -> Result<String, CliError> {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| CliError::unavailable(format!("system clock before epoch: {error}")))?
+        .as_millis();
+    Ok(format!("ctx-{millis}"))
+}
+
+fn agent_session_dir(root: &Path, agent: &str, session: Option<&str>) -> Result<PathBuf, CliError> {
+    let session = agent_session_name(root, agent, session)?;
+    Ok(ctx_home(root)?
+        .join("agent")
+        .join(agent)
+        .join("session")
+        .join(session))
+}
+
+fn agent_session_name(root: &Path, agent: &str, session: Option<&str>) -> Result<String, CliError> {
+    require_cli_name("agent name", agent)?;
+    if let Some(session) = session {
+        require_cli_name("session name", session)?;
+    }
+
+    let session_root = ctx_home(root)?.join("agent").join(agent).join("session");
+    Ok(match session {
+        Some(name) => name.to_owned(),
+        None => current_session_name(&session_root)?,
+    })
+}
+
+fn agent_socket_path(root: &Path, agent: &str) -> Result<PathBuf, CliError> {
+    require_cli_name("agent name", agent)?;
+    Ok(root.join("agent").join(format!("{agent}.sock")))
+}
+
+fn require_cli_name(label: &str, value: &str) -> Result<(), CliError> {
+    if is_object_name(value) {
+        Ok(())
+    } else {
+        Err(CliError::usage(format!("invalid {label}: {value}")))
+    }
+}
+
+fn object_socket_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
+    let abi_path = classify_input_path(root, path)?;
+    if !matches!(
+        classify_abi_path(&abi_path),
+        "ctx.model.exec" | "ctx.agent.exec"
+    ) {
+        return Err(CliError::usage(format!(
+            "socket command requires model/NAME or agent/NAME: {path}"
+        )));
+    }
+
+    let Some((class, name)) = abi_path.split_once('/') else {
+        return Err(CliError::usage(format!("invalid object path: {path}")));
+    };
+    Ok(root.join(class).join(format!("{name}.sock")))
+}
+
+fn current_session_name(session_root: &Path) -> Result<String, CliError> {
+    let current_path = session_root.join("index").join("current");
+    match read_current_session_file(&current_path) {
+        Ok(value) => {
+            let session = value.trim();
+            if is_object_name(session) {
+                Ok(session.to_owned())
+            } else {
+                Err(CliError::unavailable(format!(
+                    "invalid current session in {}",
+                    current_path.display()
+                )))
+            }
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            Ok("default".to_owned())
+        }
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot read {}: {error}",
+            current_path.display()
+        ))),
+    }
+}
+
+fn read_current_session_file(path: &Path) -> io::Result<String> {
+    let mut file = open_current_session_plain_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > 64 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "current session file is not a bounded regular file",
+        ));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("file is too large to read: {error}"),
+        )
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content)?;
+    String::from_utf8(content)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+fn open_current_session_plain_file(path: &Path) -> io::Result<fs::File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "session file has no parent"))?;
+    let parent_dir = open_read_dir_plain_directory(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid session file name"))?;
+    let file_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    Ok(fs::File::from(file_fd))
+}
+
+fn ctx_home(root: &Path) -> Result<PathBuf, CliError> {
+    if let Some(home) = env::var_os("CTX_HOME") {
+        return Ok(PathBuf::from(home));
+    }
+
+    Ok(root.join("home").join(current_uid()?))
+}
+
+fn current_uid() -> Result<String, CliError> {
+    let output = id_command()
+        .output()
+        .map_err(|error| CliError::unavailable(format!("cannot run id -u: {error}")))?;
+    if !output.status.success() {
+        return Err(CliError::unavailable("id -u failed"));
+    }
+    let uid = String::from_utf8(output.stdout)
+        .map_err(|_error| CliError::unavailable("id -u returned non-UTF-8 output"))?;
+    parse_current_uid(&uid)
+}
+
+fn parse_current_uid(output: &str) -> Result<String, CliError> {
+    let uid = output.trim();
+    if uid.is_empty() {
+        return Err(CliError::unavailable("id -u returned empty output"));
+    }
+    if !uid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(CliError::unavailable("id -u returned invalid uid"));
+    }
+    Ok(uid.to_owned())
+}
+
+const ID_PROGRAM: &str = "/usr/bin/id";
+
+fn get_id_program() -> &'static str {
+    ID_PROGRAM
+}
+
+fn id_command() -> std::process::Command {
+    let mut command = std::process::Command::new(get_id_program());
+    command
+        .arg("-u")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin");
+    command
+}
+
+#[cfg(test)]
+mod objects_socket_id_program_tests {
+    use super::{get_id_program, id_command, parse_current_uid};
+
+    #[test]
+    fn get_id_program_returns_absolute_path() {
+        assert_eq!(get_id_program(), "/usr/bin/id");
+    }
+
+    #[test]
+    fn id_command_uses_clean_runtime_environment() {
+        let command = id_command();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let mut envs = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<Vec<_>>();
+        envs.sort();
+
+        assert_eq!(command.get_program(), "/usr/bin/id");
+        assert_eq!(args, vec!["-u".to_owned()]);
+        assert_eq!(
+            envs,
+            vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
+        );
+    }
+
+    #[test]
+    fn parse_current_uid_accepts_digits_only() {
+        assert_eq!(parse_current_uid("1000\n"), Ok("1000".to_owned()));
+        assert!(parse_current_uid("1000\n1001\n").is_err());
+        assert!(parse_current_uid("user\n").is_err());
+        assert!(parse_current_uid("\n").is_err());
+    }
+}
