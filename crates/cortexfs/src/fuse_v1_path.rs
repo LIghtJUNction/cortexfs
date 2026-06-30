@@ -101,10 +101,10 @@ fn fuse_file_type(file_type: fs::FileType) -> FuseV1FileType {
 }
 
 fn fuse_metadata_error(error: &std::io::Error) -> FuseV1Error {
-    if error.kind() == std::io::ErrorKind::NotFound {
-        FuseV1Error::NotFound
-    } else {
-        FuseV1Error::Io
+    match error.kind() {
+        std::io::ErrorKind::NotFound => FuseV1Error::NotFound,
+        std::io::ErrorKind::PermissionDenied => FuseV1Error::PermissionDenied,
+        _ => FuseV1Error::Io,
     }
 }
 

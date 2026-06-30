@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::env;
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
@@ -21,21 +22,24 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
     AbiPathKind, AgentControlIssue, AgentPromptContext, AgentRuntimeView, AgentScheduleIssue,
-    CTX_ROOT, ContextJsonlIssue, ContextPackIssue, DEFAULT_AGENT_PROMPT_TEMPLATE, EventStreamIssue,
-    MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MAX_SOCKET_FRAME_BYTES,
-    MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError, ModelEffort,
-    ModelFallbackIssue, MountMode, MountTable, ObjectClass, ObjectLayoutIssue, PolicyV0,
-    ROOT_ENTRIES, SessionControlIssue, SessionIndexIssue, SessionIndexKind, SessionLayoutIssue,
-    SharedQueueLayoutIssue, ToolExecutionAuthority, ToolPath, ToolSchemaIssue,
+    AgentScheduleNode, AgentScheduleRecordError, CTX_ROOT, ChildContextRecordError,
+    ChildContextStatus, ContextJsonlIssue, ContextPackIssue, DEFAULT_AGENT_PROMPT_TEMPLATE,
+    DEFAULT_WORKER_MODEL, EventStreamIssue, MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR,
+    MANUAL_SHARED_DIR, MAX_SOCKET_FRAME_BYTES, MessageStreamIssue, ModelCapabilityIssue,
+    ModelDriverRouteError, ModelEffort, ModelFallbackIssue, MountMode, MountTable, ObjectClass,
+    ObjectLayoutIssue, PolicyV0, ROOT_ENTRIES, SessionControlIssue, SessionIndexIssue,
+    SessionIndexKind, SessionLayoutIssue, SharedQueueLayoutIssue, ToolExecutionAuthority, ToolPath,
+    ToolSchemaIssue, advance_agent_schedule_from_parent_context, agent_schedule_nodes,
     authorize_tool_execution, classify_abi_path, collect_agent_rules, collect_skill_metadata,
-    cortexfs_manual, current_time_unix, derive_agent_runtime_view, ensure_v1_reference_tree,
-    inspect_agent_control, inspect_agent_schedule_json, inspect_context_jsonl,
-    inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
-    inspect_model_capabilities, inspect_object_layout, inspect_session_control,
-    inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
-    inspect_tool_schema_json, is_executable_file, is_model_name, is_object_name, parse_abi_path,
-    parse_model_driver_routes, parse_model_fallback, render_agent_system_prompt,
-    run_core_tool_cli_with_root, skill_metadata_budget_from_env,
+    completed_agent_schedule_nodes_from_parent_context, cortexfs_manual, current_time_unix,
+    derive_agent_runtime_view, ensure_v1_reference_tree, inspect_agent_control,
+    inspect_agent_schedule_json, inspect_context_jsonl, inspect_context_pack_json,
+    inspect_event_stream_jsonl, inspect_message_stream_jsonl, inspect_model_capabilities,
+    inspect_object_layout, inspect_session_control, inspect_session_index, inspect_session_layout,
+    inspect_shared_queue_layout, inspect_tool_schema_json, install_executable_object_wrapper,
+    is_executable_file, is_model_name, is_object_name, parse_abi_path, parse_model_driver_routes,
+    parse_model_fallback, ready_agent_schedule_nodes, record_child_result_to_parent_context,
+    render_agent_system_prompt, run_core_tool_cli_with_root, skill_metadata_budget_from_env,
 };
 use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 use serde::Deserialize;
@@ -69,6 +73,8 @@ include!("ctx/provider.rs");
 include!("ctx/file_basic.rs");
 
 include!("ctx/file_check.rs");
+
+include!("ctx/schedule.rs");
 
 include!("ctx/format.rs");
 

@@ -13,6 +13,16 @@ Stable root:
   tool/
   home/
   shared/
+    cortexfs-docs/
+      README.md
+      man/
+        ctx.agent.md
+        ctx.tool.md
+        ctx.model.md
+        ctx.coreutils.md
+        ctx.root-abi.md
+        ctx.session.md
+        ctx.provider.md
 ```
 
 Meaning:
@@ -47,8 +57,8 @@ tree.
 ## v1 Reference Tree
 
 This is the normative v1 shape. Concrete object names such as `debug/echo`,
-`openai/gpt-4o`, `base`, `coder`, `reviewer`, `1000`, and `project-a` are
-examples of valid entries.
+`openai/gpt-5.5`, `base`, `coder`, `reviewer`, `executor`, `worker`, `1000`, and
+`project-a` are examples of valid entries.
 
 ```text
 /ctx/
@@ -60,8 +70,8 @@ examples of valid entries.
     tsh
 
   model/
-    main -> /ctx/model/debug/echo
-    helper -> /ctx/model/debug/echo
+    main -> /ctx/model/openai/gpt-5.5
+    helper -> /ctx/model/openai/codex-auto-review
 
     debug/
       echo
@@ -69,7 +79,9 @@ examples of valid entries.
         id
         driver
         cap
+        effort
         default
+        fallback
         session
         status
         log
@@ -80,7 +92,9 @@ examples of valid entries.
         id
         driver
         cap
+        effort
         default
+        fallback
         session
         status
         log
@@ -135,6 +149,52 @@ examples of valid entries.
     reviewer
     reviewer.sock
     reviewer.d/
+      owner
+      uid
+      gid
+      groups
+      label
+      iso
+      parent
+      life
+      root
+      cwd
+      env
+      path
+      mount
+      model
+      policy
+      status
+      pid
+      log
+      meta.json
+
+    executor
+    executor.sock
+    executor.d/
+      owner
+      uid
+      gid
+      groups
+      label
+      iso
+      parent
+      life
+      root
+      cwd
+      env
+      path
+      mount
+      model
+      policy
+      status
+      pid
+      log
+      meta.json
+
+    worker
+    worker.sock
+    worker.d/
       owner
       uid
       gid
@@ -219,12 +279,16 @@ examples of valid entries.
           session/
             index/
               by-cwd/
+              by-hash/
+              by-uuid/
 
         coder/
           root/
           session/
             index/
               by-cwd/
+              by-hash/
+              by-uuid/
 
           data/
           cache/
@@ -233,7 +297,7 @@ examples of valid entries.
       tool/
 
       model/
-        main -> /ctx/model/openai/gpt-4o
+        main -> /ctx/model/openai/gpt-5.5
         coder -> /ctx/model/main
 
   shared/
@@ -252,6 +316,8 @@ examples of valid entries.
           session/
             index/
               by-cwd/
+              by-hash/
+              by-uuid/
 
       queue/
         inbox/

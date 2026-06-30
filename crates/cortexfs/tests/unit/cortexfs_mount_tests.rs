@@ -5,11 +5,14 @@ use std::os::unix::net::UnixListener;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cortexfs::{ensure_v1_reference_tree, FuseV1Attr, FuseV1FileType, FUSE_V1_ROOT_INODE};
-use fuser::{FileType, INodeNo};
+use cortexfs::{
+    ensure_v1_reference_tree, FuseV1Attr, FuseV1Error, FuseV1FileType, FUSE_V1_ROOT_INODE,
+};
+use fuser::{AccessFlags, Errno, FileType, INodeNo, OpenFlags};
 
 use super::{
-    child_path, estimate_tokens_from_bytes, file_attr, mount_statfs_for_source, parent_inode,
+    access_error, child_path, errno, estimate_tokens_from_bytes, file_attr, fuse_lseek_offset,
+    fuse_open_error, mount_statfs_for_source, parent_inode, readonly_mutation_errno,
     remove_backing_socket_entry, sanitize_mount_statfs, CortexFuse, MountStatfs,
 };
 
@@ -29,6 +32,189 @@ fn file_attr_maps_projection_attributes_to_fuser_attributes() {
     assert_eq!(mapped.kind, FileType::RegularFile);
     assert_eq!(mapped.perm, 0o644);
     assert_eq!(mapped.nlink, 1);
+    assert_eq!(mapped.blksize, 4096);
+}
+
+#[test]
+fn file_attr_uses_directory_link_count() {
+    let attr = FuseV1Attr::new(
+        "agent".to_owned(),
+        FuseV1FileType::Directory,
+        0,
+        0o755,
+    );
+    let mapped = file_attr(78, &attr);
+
+    assert_eq!(mapped.kind, FileType::Directory);
+    assert_eq!(mapped.nlink, 2);
+    assert_eq!(mapped.blksize, 4096);
+}
+
+#[test]
+fn fuse_errno_maps_projection_errors_to_linux_errno() {
+    let cases = [
+        (FuseV1Error::NotFound, Errno::ENOENT),
+        (FuseV1Error::NotDirectory, Errno::ENOTDIR),
+        (FuseV1Error::NotFile, Errno::EISDIR),
+        (FuseV1Error::InvalidPath, Errno::EINVAL),
+        (FuseV1Error::PermissionDenied, Errno::EACCES),
+    ];
+    for (error, expected) in cases {
+        assert_eq!(format!("{:?}", errno(error)), format!("{expected:?}"));
+    }
+}
+
+#[test]
+fn fuse_open_error_enforces_linux_type_and_readonly_semantics() {
+    let regular = FuseV1Attr::new(
+        "tool/fs.read".to_owned(),
+        FuseV1FileType::Regular,
+        0,
+        0o755,
+    );
+    let control = FuseV1Attr::new(
+        "agent/coder.d/cwd".to_owned(),
+        FuseV1FileType::Regular,
+        0,
+        0o644,
+    );
+    let directory = FuseV1Attr::new("agent".to_owned(), FuseV1FileType::Directory, 0, 0o755);
+
+    assert!(fuse_open_error(&regular, OpenFlags(nix::libc::O_RDONLY)).is_none());
+    assert!(fuse_open_error(&control, OpenFlags(nix::libc::O_WRONLY)).is_none());
+    assert_eq!(
+        format!(
+            "{:?}",
+            fuse_open_error(&directory, OpenFlags(nix::libc::O_WRONLY))
+        ),
+        format!("{:?}", Some(Errno::EISDIR))
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            fuse_open_error(&regular, OpenFlags(nix::libc::O_WRONLY))
+        ),
+        format!("{:?}", Some(Errno::EROFS))
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            fuse_open_error(
+                &regular,
+                OpenFlags(nix::libc::O_RDONLY | nix::libc::O_TRUNC)
+            )
+        ),
+        format!("{:?}", Some(Errno::EACCES))
+    );
+}
+
+#[test]
+fn fuse_lseek_offset_uses_proc_like_data_and_hole_semantics() {
+    let attr = FuseV1Attr::new(
+        "status".to_owned(),
+        FuseV1FileType::Regular,
+        12,
+        0o444,
+    );
+
+    assert_eq!(fuse_lseek_offset(&attr, 4, nix::libc::SEEK_SET).ok(), Some(4));
+    assert_eq!(fuse_lseek_offset(&attr, 4, nix::libc::SEEK_CUR).ok(), Some(4));
+    assert_eq!(fuse_lseek_offset(&attr, -2, nix::libc::SEEK_END).ok(), Some(10));
+    assert_eq!(fuse_lseek_offset(&attr, 4, nix::libc::SEEK_DATA).ok(), Some(4));
+    assert_eq!(fuse_lseek_offset(&attr, 4, nix::libc::SEEK_HOLE).ok(), Some(12));
+    assert_eq!(
+        format!("{:?}", fuse_lseek_offset(&attr, 12, nix::libc::SEEK_DATA)),
+        format!("{:?}", Err::<i64, _>(Errno::ENXIO))
+    );
+    assert_eq!(fuse_lseek_offset(&attr, 12, nix::libc::SEEK_HOLE).ok(), Some(12));
+}
+
+#[test]
+fn fuse_lseek_offset_rejects_invalid_offsets_and_whence() {
+    let attr = FuseV1Attr::new(
+        "status".to_owned(),
+        FuseV1FileType::Regular,
+        12,
+        0o444,
+    );
+
+    let einval = format!("{:?}", Err::<i64, _>(Errno::EINVAL));
+    assert_eq!(format!("{:?}", fuse_lseek_offset(&attr, -1, nix::libc::SEEK_SET)), einval);
+    assert_eq!(format!("{:?}", fuse_lseek_offset(&attr, -13, nix::libc::SEEK_END)), einval);
+    assert_eq!(format!("{:?}", fuse_lseek_offset(&attr, -1, nix::libc::SEEK_DATA)), einval);
+    assert_eq!(
+        format!("{:?}", fuse_lseek_offset(&attr, 13, nix::libc::SEEK_HOLE)),
+        format!("{:?}", Err::<i64, _>(Errno::ENXIO))
+    );
+    assert_eq!(
+        format!("{:?}", fuse_lseek_offset(&attr, 0, -1)),
+        format!("{:?}", Err::<i64, _>(Errno::EINVAL))
+    );
+}
+
+#[test]
+fn access_error_uses_linux_mode_bits_and_readonly_semantics() {
+    let regular = FuseV1Attr::with_owner(
+        "tool/fs.read".to_owned(),
+        FuseV1FileType::Regular,
+        0,
+        0o750,
+        1000,
+        100,
+    );
+    let control = FuseV1Attr::with_owner(
+        "agent/coder.d/cwd".to_owned(),
+        FuseV1FileType::Regular,
+        0,
+        0o640,
+        1000,
+        100,
+    );
+    let no_exec = FuseV1Attr::with_owner(
+        "tool/fs.write".to_owned(),
+        FuseV1FileType::Regular,
+        0,
+        0o644,
+        1000,
+        100,
+    );
+
+    assert!(access_error(&regular, 1000, 100, &[], AccessFlags::R_OK).is_none());
+    assert!(access_error(&regular, 2000, 100, &[], AccessFlags::X_OK).is_none());
+    assert_eq!(
+        format!(
+            "{:?}",
+            access_error(&regular, 2000, 200, &[], AccessFlags::R_OK)
+        ),
+        format!("{:?}", Some(Errno::EACCES))
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            access_error(&regular, 1000, 100, &[], AccessFlags::W_OK)
+        ),
+        format!("{:?}", Some(Errno::EROFS))
+    );
+    assert!(access_error(&control, 1000, 100, &[], AccessFlags::W_OK).is_none());
+    assert_eq!(
+        format!("{:?}", access_error(&no_exec, 0, 0, &[], AccessFlags::X_OK)),
+        format!("{:?}", Some(Errno::EACCES))
+    );
+    assert_eq!(
+        format!(
+            "{:?}",
+            access_error(&regular, 1000, 100, &[], AccessFlags::from_bits_retain(0x40))
+        ),
+        format!("{:?}", Some(Errno::EINVAL))
+    );
+}
+
+#[test]
+fn readonly_mutation_errno_uses_linux_readonly_filesystem_error() {
+    assert_eq!(
+        format!("{:?}", readonly_mutation_errno()),
+        format!("{:?}", Errno::EROFS)
+    );
 }
 
 #[test]
@@ -124,12 +310,13 @@ fn unlink_model_path_rejects_symlink_model_parent_without_removing_target() {
     let fs = CortexFuse {
         projection: cortexfs::FuseV1Projection::new(root.to_path_buf()),
         paths: Mutex::new(HashMap::from([(42, "model".to_owned())])),
+        lookup_counts: Mutex::new(HashMap::new()),
         socket_overlays: Mutex::new(HashSet::new()),
     };
 
     assert_eq!(
         fs.unlink_model_path(INodeNo(42), std::ffi::OsStr::new("temp")),
-        Err(cortexfs::FuseV1Error::Io)
+        Err(FuseV1Error::Io)
     );
     assert_eq!(
         fs::read_to_string(outside.join("temp")).unwrap_or_default(),
@@ -162,6 +349,25 @@ fn statfs_sanitizes_zero_totals_to_avoid_false_full_mount() {
 }
 
 #[test]
+fn statfs_sanitizes_available_blocks_to_free_blocks() {
+    let stats = sanitize_mount_statfs(MountStatfs {
+        blocks: 10,
+        blocks_free: 3,
+        blocks_available: 9,
+        files: 10,
+        files_free: 20,
+        block_size: 4096,
+        name_max: 255,
+        fragment_size: 4096,
+    });
+
+    assert_eq!(stats.blocks, 10);
+    assert_eq!(stats.blocks_free, 3);
+    assert_eq!(stats.blocks_available, 3);
+    assert_eq!(stats.files_free, 10);
+}
+
+#[test]
 fn statfs_reports_backing_source_capacity() {
     let root = unique_mount_test_dir("statfs");
     assert!(ensure_v1_reference_tree(&root).is_ok());
@@ -173,7 +379,7 @@ fn statfs_reports_backing_source_capacity() {
     assert!(stats.block_size > 0);
     assert!(stats.name_max > 0);
     assert!(stats.blocks_free <= stats.blocks);
-    assert!(stats.blocks_available <= stats.blocks);
+    assert!(stats.blocks_available <= stats.blocks_free);
     assert!(stats.files_free <= stats.files);
 }
 
@@ -201,7 +407,8 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
         xattr_value(&tool, "user.cortexfs.backing_exists"),
         Some("true")
     );
-    assert_eq!(xattr_value(&tool, "user.cortexfs.backing_path"), None);
+    let tool_path = root.join("tool/tsh").display().to_string();
+    assert_eq!(xattr_value(&tool, "user.cortexfs.backing_path"), Some(tool_path.as_str()));
     let bytes = xattr_value(&tool, "user.cortexfs.bytes")
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or_default();
@@ -225,7 +432,8 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
     assert_eq!(xattr_value(&schema, "user.cortexfs.origin"), Some("disk"));
     assert_eq!(xattr_value(&schema, "user.cortexfs.storage"), Some("disk"));
     assert_eq!(xattr_value(&schema, "user.cortexfs.virtual"), Some("false"));
-    assert_eq!(xattr_value(&schema, "user.cortexfs.backing_path"), None);
+    let schema_path = root.join("tool/tsh.d/schema").display().to_string();
+    assert_eq!(xattr_value(&schema, "user.cortexfs.backing_path"), Some(schema_path.as_str()));
 
     let helper = fs.xattrs_for_path("model/helper");
     assert!(helper.is_ok());

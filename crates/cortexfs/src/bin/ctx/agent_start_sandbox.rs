@@ -1,0 +1,353 @@
+#[derive(Debug, Eq, PartialEq)]
+struct AgentStartCommand {
+    program: String,
+    args: Vec<String>,
+}
+
+fn agent_start_systemd_command(
+    root: &Path,
+    args: &AgentStartArgs,
+    cli_mounts: &[AgentMount],
+    view: &AgentRuntimeView,
+    socket: &Path,
+    unit: &str,
+) -> AgentStartCommand {
+    let home = view.ctx_home();
+    let mut command = AgentStartCommand {
+        program: get_systemd_run_program().to_owned(),
+        args: vec![
+            "--user".to_owned(),
+            "--unit".to_owned(),
+            unit.to_owned(),
+            "--property".to_owned(),
+            "Restart=always".to_owned(),
+            "--property".to_owned(),
+            "RestartSec=250ms".to_owned(),
+            "/usr/bin/env".to_owned(),
+            "-i".to_owned(),
+            "PATH=/usr/bin:/bin".to_owned(),
+            "/usr/bin/bwrap".to_owned(),
+        ],
+    };
+    command
+        .args
+        .extend(agent_bwrap_args(root, args, cli_mounts, view, socket, home));
+    command
+}
+
+fn agent_start_process_command(command: &AgentStartCommand) -> ProcessCommand {
+    let mut process = ProcessCommand::new(&command.program);
+    process.args(&command.args);
+    set_user_systemd_client_env(&mut process);
+    process
+}
+
+fn set_user_systemd_client_env(command: &mut ProcessCommand) {
+    command.env_clear().env("PATH", "/usr/bin:/bin");
+    for key in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
+        if let Some(value) = env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+}
+
+fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, String)> {
+    let sandbox_ctx_home = sandbox_ctx_home(view);
+    let mut env = vec![
+        ("CTX_ROOT".to_owned(), CTX_ROOT.to_owned()),
+        ("CTX_HOME".to_owned(), sandbox_ctx_home),
+        ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
+        (
+            "CTX_AGENT_SUBJECT".to_owned(),
+            view.policy_subject().to_owned(),
+        ),
+        ("HOME".to_owned(), AGENT_SANDBOX_HOME.to_owned()),
+        ("USER".to_owned(), view.agent_name().to_owned()),
+        ("LOGNAME".to_owned(), view.agent_name().to_owned()),
+        ("SHELL".to_owned(), "/usr/bin/bash".to_owned()),
+        ("TERM".to_owned(), "xterm-256color".to_owned()),
+        ("LANG".to_owned(), "C.UTF-8".to_owned()),
+    ];
+    for env_pair in view.env() {
+        let key = &env_pair.0;
+        let value = &env_pair.1;
+        if matches!(
+            key.as_str(),
+            "CTX_ROOT"
+                | "CTX_HOME"
+                | "CTX_AGENT"
+                | "CTX_AGENT_SUBJECT"
+                | "HOME"
+                | "USER"
+                | "LOGNAME"
+                | "SHELL"
+                | "TERM"
+                | "LANG"
+        ) {
+            continue;
+        }
+        env.push((key.clone(), value.clone()));
+    }
+    env
+}
+
+fn agent_bwrap_args(
+    root: &Path,
+    args: &AgentStartArgs,
+    cli_mounts: &[AgentMount],
+    view: &AgentRuntimeView,
+    socket: &Path,
+    _home: &Path,
+) -> Vec<String> {
+    let agent_home = view.home();
+    let mut bwrap = vec!["--clearenv".to_owned()];
+    for (key, value) in agent_sandbox_env(root, view) {
+        bwrap.extend(["--setenv".to_owned(), key, value]);
+    }
+    bwrap.extend([
+        "--die-with-parent".to_owned(),
+        "--unshare-pid".to_owned(),
+        "--unshare-net".to_owned(),
+        "--proc".to_owned(),
+        "/proc".to_owned(),
+        "--dev".to_owned(),
+        "/dev".to_owned(),
+        "--tmpfs".to_owned(),
+        "/tmp".to_owned(),
+        "--dir".to_owned(),
+        "/run".to_owned(),
+        "--dir".to_owned(),
+        "/home".to_owned(),
+        "--ro-bind".to_owned(),
+        "/usr".to_owned(),
+        "/usr".to_owned(),
+        "--ro-bind".to_owned(),
+        "/etc".to_owned(),
+        "/etc".to_owned(),
+        "--tmpfs".to_owned(),
+        "/etc/profile.d".to_owned(),
+        "--symlink".to_owned(),
+        "usr/bin".to_owned(),
+        "/bin".to_owned(),
+        "--symlink".to_owned(),
+        "usr/lib".to_owned(),
+        "/lib".to_owned(),
+        "--symlink".to_owned(),
+        "usr/lib".to_owned(),
+        "/lib64".to_owned(),
+    ]);
+    if let Some(runtime_dir) = socket_runtime_dir(socket) {
+        bwrap.extend([
+            "--bind".to_owned(),
+            runtime_dir.display().to_string(),
+            runtime_dir.display().to_string(),
+        ]);
+    }
+    for mount in view.mount_table().entries() {
+        bwrap.push(match mount.mode() {
+            MountMode::ReadOnly => "--ro-bind".to_owned(),
+            MountMode::ReadWrite => "--bind".to_owned(),
+        });
+        bwrap.push(agent_host_mount_source(root, mount.source()));
+        let target = if mount.target() == agent_home {
+            AGENT_SANDBOX_HOME.to_owned()
+        } else {
+            mount.target().to_owned()
+        };
+        bwrap.push(target);
+    }
+    for mount in cli_mounts {
+        bwrap.push(match mount.mode.as_str() {
+            "ro" => "--ro-bind".to_owned(),
+            _ => "--bind".to_owned(),
+        });
+        bwrap.push(mount.source.clone());
+        bwrap.push(mount.target.clone());
+    }
+    if let Some(startup_stub) = shell_startup_stub_path(socket) {
+        bwrap.extend([
+            "--ro-bind".to_owned(),
+            startup_stub.display().to_string(),
+            "/etc/profile".to_owned(),
+            "--ro-bind".to_owned(),
+            startup_stub.display().to_string(),
+            "/etc/bash.bashrc".to_owned(),
+        ]);
+    }
+    let sandbox_cwd = agent_start_sandbox_cwd(args, cli_mounts);
+    bwrap.extend([
+        "--chdir".to_owned(),
+        sandbox_cwd,
+        "/usr/bin/ctxterm".to_owned(),
+        "--listen".to_owned(),
+        socket.display().to_string(),
+        "--no-stdio".to_owned(),
+        "--".to_owned(),
+        "/ctx/bin/tsh".to_owned(),
+    ]);
+    bwrap
+}
+
+fn sandbox_ctx_home(view: &AgentRuntimeView) -> String {
+    let owner = view
+        .ctx_home()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("1000");
+    Path::new(CTX_ROOT)
+        .join("home")
+        .join(owner)
+        .display()
+        .to_string()
+}
+
+fn agent_host_mount_source(root: &Path, source: &str) -> String {
+    let source = Path::new(source);
+    if source == Path::new(CTX_ROOT) {
+        return root.display().to_string();
+    }
+    if let Ok(relative) = source.strip_prefix(CTX_ROOT) {
+        return root.join(relative).display().to_string();
+    }
+    source.display().to_string()
+}
+
+fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> String {
+    let cwd = Path::new(&args.cwd);
+    for mount in mounts {
+        let source = Path::new(&mount.source);
+        let Ok(relative) = cwd.strip_prefix(source) else {
+            continue;
+        };
+        let mut target = PathBuf::from(&mount.target);
+        if !relative.as_os_str().is_empty() {
+            target.push(relative);
+        }
+        return target.display().to_string();
+    }
+    args.cwd.clone()
+}
+
+const SYSTEMD_RUN_PROGRAM: &str = "/usr/bin/systemd-run";
+
+fn get_systemd_run_program() -> &'static str {
+    SYSTEMD_RUN_PROGRAM
+}
+
+fn agent_start_mounts(args: &AgentStartArgs) -> Result<Vec<AgentMount>, CliError> {
+    let default_source = env::current_dir()
+        .map_err(|error| CliError::unavailable(format!("cannot read current directory: {error}")))?;
+    Ok(agent_start_mounts_with_default_source(args, &default_source))
+}
+
+fn agent_start_mounts_with_default_source(
+    args: &AgentStartArgs,
+    default_source: &Path,
+) -> Vec<AgentMount> {
+    let mut mounts = Vec::new();
+    if args.default_workspace {
+        mounts.push(AgentMount {
+            source: default_source.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        });
+        let git_dir = default_source.join(".git");
+        if let Ok(metadata) = fs::symlink_metadata(&git_dir) {
+            let file_type = metadata.file_type();
+            if file_type.is_dir() || metadata.is_file() {
+                mounts.push(AgentMount {
+                    source: git_dir.display().to_string(),
+                    target: "/workspace/.git".to_owned(),
+                    mode: "ro".to_owned(),
+                });
+            }
+        }
+    }
+    mounts.extend(args.mounts.iter().cloned());
+    mounts
+}
+
+fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
+    if !Path::new(&mount.source).is_absolute() {
+        return Err(CliError::usage("agent mount source must be absolute"));
+    }
+    let Some(target) = normalized_absolute_mount_target(&mount.target) else {
+        return Err(CliError::usage("agent mount target must be absolute"));
+    };
+    if !matches!(mount.mode.as_str(), "ro" | "rw") {
+        return Err(CliError::usage("agent mount mode must be ro or rw"));
+    }
+    if is_protected_agent_mount_target(&target) {
+        return Err(CliError::usage(
+            "agent mount target cannot replace sandbox system paths",
+        ));
+    }
+    Ok(())
+}
+
+fn normalized_absolute_mount_target(target: &str) -> Option<String> {
+    let path = Path::new(target);
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut normalized = PathBuf::from("/");
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::Prefix(_) => return None,
+        }
+    }
+    Some(normalized.display().to_string())
+}
+
+fn is_protected_agent_mount_target(target: &str) -> bool {
+    const PROTECTED_TARGETS: &[&str] = &[
+        "/", "/bin", "/ctx", "/dev", "/etc", "/home", "/lib", "/lib64", "/proc", "/run",
+        "/usr",
+    ];
+
+    PROTECTED_TARGETS
+        .iter()
+        .any(|protected| target == *protected || target.starts_with(&format!("{protected}/")))
+}
+
+fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
+    if Path::new(cwd).is_absolute() {
+        Ok(())
+    } else {
+        Err(CliError::usage("agent cwd must be absolute inside the sandbox"))
+    }
+}
+
+fn ensure_agent_terminal_socket(
+    visible_socket: &Path,
+    runtime_socket: &Path,
+) -> Result<(), CliError> {
+    if let Some(parent) = runtime_socket.parent() {
+        create_agent_terminal_runtime_dir(parent).map_err(|error| {
+            CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
+        })?;
+        write_empty_shell_startup_stub(parent).map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot create {}: {error}",
+                parent.join(".empty-shell-startup").display()
+            ))
+        })?;
+    }
+    ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)?;
+    match remove_stale_agent_terminal_socket(runtime_socket) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot remove stale {}: {error}",
+                runtime_socket.display()
+            )));
+        }
+    }
+    Ok(())
+}

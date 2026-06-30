@@ -194,7 +194,7 @@ pub enum ChildContextRecordError {
     InvalidAgentName,
     /// Child session name is invalid.
     InvalidSessionName,
-    /// Child result status is not a terminal result status.
+    /// Child status is not valid for the requested transition.
     InvalidStatus,
     /// Handoff or result text contains a NUL byte.
     InvalidText,

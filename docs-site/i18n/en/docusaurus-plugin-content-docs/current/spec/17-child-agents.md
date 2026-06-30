@@ -49,6 +49,14 @@ A child is still an ordinary agent object:
 agent:coder session:default run:r123
 ```
 
+The reference tree's default `worker` is parented by `agent:coder` without a
+fixed session, so every coding session has the same inspectable spark worker
+below it in the agent process tree. Host-side
+`ctx agent new --parent 'agent:coder session:default run:r123'`
+can still record a session-specific parent control value when the lifecycle
+tool is absent. This lets a worker child agent be created with inspectable
+parentage through the existing agent object controls.
+
 `life` is one small text value:
 
 ```text
@@ -109,6 +117,20 @@ The parent keeps only child coordination state and results:
 
 The parent context pack should include `result.md`, summarized refs, and
 necessary artifacts. It should not include the child's full `messages.jsonl`.
+CLI inspection may join this coordination table with the backing agent process
+controls. For example, `ctx agent children coder` reports each child channel's
+stable `status` plus the backing `agent/<agent>.d/parent`, `model`, `status`,
+and `pid`, giving a `ps`-like view of worker task state and its parent-session
+attachment without adding fields to `context/child/<child>/`.
+If `ctx agent wait` sees an `active` child whose backing agent's effective
+state is `dead`, has no live `pid`, and still points back to the same parent
+agent/session, it may synchronously reap that child channel as `cancelled`. A
+recorded `ready` or `busy` state with a numeric `pid` that is absent from
+`/proc` is treated as no live `pid` for this read. This mirrors a parent
+observing child process death; it does not introduce a watcher or polling
+runtime.
+When parent stop cancels a child result channel, the compact `result.md` should
+name the backing child agent that was cancelled.
 
 ## Handoff Protocol
 
@@ -130,6 +152,18 @@ artifacts
 refs.jsonl
 status
 ```
+
+The parent may inspect a terminal child result with:
+
+```bash
+ctx agent wait coder work-123 --session default
+```
+
+This is a non-blocking waitpid-shaped read of the parent-owned result channel:
+`pending` and `active` are not terminal, while `done`, `error`, and `cancelled`
+return the child status and compact result. The process exit status is 0 for
+`done`, 1 for `error`, and 130 for `cancelled`. It does not poll, reap history,
+or delete child state.
 
 Example `handoff.md`:
 
@@ -170,6 +204,127 @@ Example child refs:
 {"path":"artifact/patch.diff","kind":"patch","summary":"suggested patch"}
 ```
 
+## Hybrid DAG/ReAct Scheduling
+
+Scheduling is parent agent behavior, recorded as ordinary parent-session
+context. v1 does not add a root `workflow/`, `job/`, `hook/`, `scheduler/`, or
+`react/` namespace, and it does not add a background watcher. A parent may keep
+a bounded hybrid plan in its own session context, for example:
+
+```text
+/ctx/home/1000/agent/coder/session/default/context/plan.json
+```
+
+The stable shape is data:
+
+```json
+{
+  "version": 1,
+  "mode": "dag-react",
+  "nodes": [
+    {
+      "id": "plan",
+      "kind": "dag",
+      "agent": "planner",
+      "requires": [
+        {"class": "tool", "name": "fs.read", "permission": "execute"}
+      ]
+    },
+    {
+      "id": "review",
+      "kind": "react",
+      "agent": "reviewer",
+      "child": "rev-123",
+      "session": "default",
+      "handoff": "Task: review the plan\nScope:\n- Check the accepted refs\nOutput:\n- result.md summary\n",
+      "deps": ["plan"],
+      "max_steps": 8,
+      "requires": [
+        {"class": "agent", "name": "reviewer", "permission": "create"}
+      ]
+    },
+    {
+      "id": "implement",
+      "kind": "react",
+      "child": "work-123",
+      "handoff": "Task: implement the accepted plan\n",
+      "deps": ["review"],
+      "max_steps": 8,
+      "requires": [
+        {"class": "agent", "name": "worker", "permission": "create"}
+      ]
+    }
+  ]
+}
+```
+
+Rules:
+
+```text
+plan.json is parent-owned context, not a submission queue.
+nodes form a directed acyclic graph.
+kind is either dag or react.
+react nodes must declare a bounded max_steps value.
+deps may only name other nodes in the same plan.
+requires only records permissions the parent effective policy already grants.
+child identifies the child result channel when a node is delegated.
+delegated nodes must include handoff text.
+session and handoff are only valid when child is present.
+delegated nodes may omit agent; omitted delegated agent means worker.
+delegated nodes may omit session; omitted delegated session means the parent session name.
+delegated nodes require parent agent:<node.agent-or-worker> create authority.
+ready nodes are incomplete nodes whose deps all have durable parent-visible results.
+ready delegated nodes may be materialized as context/child/<child>/handoff.md.
+delegated nodes are complete when context/child/<child>/status is done.
+local completion inputs only apply to non-delegated parent-owned nodes.
+advance means derive completed nodes from parent context and materialize ready delegated handoffs once.
+advance must not rewrite an already materialized child result channel.
+an already materialized child channel must match the node agent, session, and handoff.
+an already materialized child channel must have valid status and refs files.
+handoff/result/refs still use context/child/<child>/.
+```
+
+The reference `coder` agent's default `system.md` follows this rule: it acts as
+the parent coordinator and should prefer delegated `react` nodes for independent
+implementation work. The reference `worker` agent runs on the spark model path
+and should execute bounded handoffs without making architecture decisions beyond
+the parent-provided scope.
+
+The thin CLI entrypoint for the single transition is:
+
+```bash
+ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
+ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 cancelled "interrupted"
+```
+
+`status` only reads the parent-visible schedule table and child states.
+`advance` only derives completed nodes and materializes ready child handoffs.
+`claim` only marks a materialized handoff `active` when a worker accepts it; it
+is idempotent while active and cannot rewind terminal results.
+`result` writes a terminal child status plus compact result text and optional
+refs JSONL back into `context/child/<child>/`. The command output names the
+parent ref and the exact child `handoff.md`, `result.md`, and `refs.jsonl` ABI
+paths so the parent and worker can treat the handoff as an inspectable file
+boundary. These commands are not a daemon, watcher, queue worker, or hot-reload
+boundary.
+When a worker is launched from this output, the parent should hand over the
+existing `model=`, `life=`, `parent=`, `child_parent=`, `plan=`, `handoff=`,
+`result=`, and `refs=` fields; the
+worker should claim and finish through the same `ctx schedule` commands rather
+than creating another coordination file, queue, or runtime abstraction.
+
+The parent uses DAG edges for known ordering and uses ReAct only inside a node's
+bounded execution loop. ReAct steps may decide tool calls and child handoffs,
+but each action is still checked against the agent's policy, mount view, tool
+visibility, and child attenuation rules.
+
+Git commit remains the development event boundary. A parent may revise
+`context/plan.json` after a commit, but the revision is just session context.
+It must not create a second hot-reload, polling, or hook trigger.
+
 ## Permission Attenuation
 
 Child authority is attenuated from the parent:
@@ -200,6 +355,15 @@ shortcut for reading the parent's entire prompt state.
 
 Runtime must enforce owned child shutdown. It must not rely on the child
 choosing to exit.
+
+When the explicit `/ctx/tool/agent.stop` lifecycle tool is absent, host-side
+`ctx agent stop` acts as a small supervisor fallback: it marks the stopped agent
+and any existing `owned` or `temp` descendants as cancelled/dead through their
+ordinary `agent/<name>.d/status`, `pid`, and `log` controls. This fallback keeps
+child history and control objects readable. If the stopped child agent backs a
+pending or active parent `context/child/<child>/` channel, the fallback records
+that channel as `cancelled`, making the terminal state visible to
+`ctx agent wait`. It is not a second workflow or queue namespace.
 
 Recommended implementation:
 

@@ -107,7 +107,7 @@ line is another stable provider/model reference, for example:
 
 ```text
 openai/codex-auto-review
-openai/gpt-5.3-codex-spark
+api.lmm.best/gpt-5.3-codex-spark
 ```
 
 When the selected model is unavailable or fails before producing a successful

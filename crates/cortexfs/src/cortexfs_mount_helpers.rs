@@ -1,41 +1,8 @@
 const TTL: Duration = Duration::from_secs(1);
 const S_IFMT: u32 = 0o170_000;
 const S_IFSOCK: u32 = 0o140_000;
-const FALLBACK_STATFS_BLOCKS: u64 = 1024 * 1024;
-const FALLBACK_STATFS_USED_BLOCKS: u64 = 1024;
-const FALLBACK_STATFS_FREE_BLOCKS: u64 = FALLBACK_STATFS_BLOCKS - FALLBACK_STATFS_USED_BLOCKS;
-const FALLBACK_STATFS_FILES: u64 = 1024 * 1024;
-const FALLBACK_STATFS_USED_FILES: u64 = 1024;
-const FALLBACK_STATFS_FREE_FILES: u64 = FALLBACK_STATFS_FILES - FALLBACK_STATFS_USED_FILES;
-const FALLBACK_STATFS_BLOCK_SIZE: u32 = 4096;
-const FALLBACK_STATFS_NAME_MAX: u32 = 255;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct MountStatfs {
-    blocks: u64,
-    blocks_free: u64,
-    blocks_available: u64,
-    files: u64,
-    files_free: u64,
-    block_size: u32,
-    name_max: u32,
-    fragment_size: u32,
-}
-
-impl MountStatfs {
-    const fn fallback() -> Self {
-        Self {
-            blocks: FALLBACK_STATFS_BLOCKS,
-            blocks_free: FALLBACK_STATFS_FREE_BLOCKS,
-            blocks_available: FALLBACK_STATFS_FREE_BLOCKS,
-            files: FALLBACK_STATFS_FILES,
-            files_free: FALLBACK_STATFS_FREE_FILES,
-            block_size: FALLBACK_STATFS_BLOCK_SIZE,
-            name_max: FALLBACK_STATFS_NAME_MAX,
-            fragment_size: FALLBACK_STATFS_BLOCK_SIZE,
-        }
-    }
-}
+include!("cortexfs_mount_statfs.rs");
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -69,60 +36,6 @@ fn write_error(line: &str) -> io::Result<()> {
     stderr
         .write_all(line.as_bytes())
         .and_then(|()| stderr.write_all(b"\n"))
-}
-
-fn mount_statfs_for_source(source: &Path) -> MountStatfs {
-    match statvfs::statvfs(source) {
-        Ok(stats) => sanitize_mount_statfs(MountStatfs {
-            blocks: stats.blocks(),
-            blocks_free: stats.blocks_free(),
-            blocks_available: stats.blocks_available(),
-            files: stats.files(),
-            files_free: stats.files_free(),
-            block_size: u32_from_u64(stats.block_size()),
-            name_max: u32_from_u64(stats.name_max()),
-            fragment_size: u32_from_u64(stats.fragment_size()),
-        }),
-        Err(_error) => MountStatfs::fallback(),
-    }
-}
-
-fn sanitize_mount_statfs(stats: MountStatfs) -> MountStatfs {
-    let (blocks, blocks_free, blocks_available) = if stats.blocks == 0 {
-        (
-            FALLBACK_STATFS_BLOCKS,
-            FALLBACK_STATFS_FREE_BLOCKS,
-            FALLBACK_STATFS_FREE_BLOCKS,
-        )
-    } else {
-        (
-            stats.blocks,
-            stats.blocks_free.min(stats.blocks),
-            stats.blocks_available.min(stats.blocks),
-        )
-    };
-    let (files, files_free) = if stats.files == 0 {
-        (FALLBACK_STATFS_FILES, FALLBACK_STATFS_FREE_FILES)
-    } else {
-        (stats.files, stats.files_free.min(stats.files))
-    };
-    let block_size = stats.block_size.max(1);
-    let fragment_size = stats.fragment_size.max(1);
-    let name_max = stats.name_max.max(1);
-    MountStatfs {
-        blocks,
-        blocks_free,
-        blocks_available,
-        files,
-        files_free,
-        block_size,
-        name_max,
-        fragment_size,
-    }
-}
-
-fn u32_from_u64(value: u64) -> u32 {
-    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -269,11 +182,8 @@ impl CortexFuse {
         let Ok(path) = self.model_symlink_child_path(parent, name) else {
             return Ok(false);
         };
-        let (parent, file_name) =
-            open_backing_socket_parent(self.projection.root(), &path).map_err(|_error| FuseV1Error::Io)?;
-        match unlinkat(&parent, file_name.as_str(), UnlinkatFlags::NoRemoveDir) {
-            Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
-            Err(_error) => return Err(FuseV1Error::Io),
+        if !remove_backing_model_alias_symlink(self.projection.root(), &path)? {
+            return Ok(false);
         }
         self.forget_path(&path)?;
         Ok(true)
@@ -308,7 +218,7 @@ impl CortexFuse {
         };
         let byte_len = attr.size();
         let token_estimate = estimate_tokens_from_bytes(byte_len);
-        let attrs = vec![
+        let mut attrs = vec![
             CortexXattr::new("user.cortexfs.abi_path", path),
             CortexXattr::new("user.cortexfs.kind", classify_abi_path(path)),
             CortexXattr::new("user.cortexfs.origin", origin),
@@ -330,6 +240,12 @@ impl CortexFuse {
                 if backing_exists { "true" } else { "false" },
             ),
         ];
+        if backing_exists {
+            attrs.push(CortexXattr::new(
+                "user.cortexfs.backing_path",
+                backing_path.display().to_string(),
+            ));
+        }
         Ok(attrs)
     }
 
@@ -417,7 +333,7 @@ fn file_attr(inode: u64, attr: &FuseV1Attr) -> FileAttr {
         uid: attr.uid(),
         gid: attr.gid(),
         rdev: 0,
-        blksize: 512,
+        blksize: 4096,
         flags: 0,
     }
 }
@@ -441,6 +357,7 @@ fn errno(error: FuseV1Error) -> Errno {
         FuseV1Error::NotDirectory => Errno::ENOTDIR,
         FuseV1Error::NotFile => Errno::EISDIR,
         FuseV1Error::TooLarge => Errno::EMSGSIZE,
+        FuseV1Error::PermissionDenied => Errno::EACCES,
         FuseV1Error::Io => Errno::EIO,
     }
 }
@@ -514,6 +431,23 @@ fn socket_attr(path: &str, mode: u32) -> FuseV1Attr {
 
 fn socket_node(path: &str, mode: u32) -> FuseV1Node {
     FuseV1Node::new(socket_inode(path), path.to_owned(), socket_attr(path, mode))
+}
+
+fn remove_backing_model_alias_symlink(root: &Path, abi_path: &str) -> Result<bool, FuseV1Error> {
+    let (parent, file_name) =
+        open_backing_socket_parent(root, abi_path).map_err(|_error| FuseV1Error::Io)?;
+    let stat = match fstatat(&parent, file_name.as_str(), AtFlags::AT_SYMLINK_NOFOLLOW) {
+        Ok(stat) => stat,
+        Err(nix::errno::Errno::ENOENT) => return Ok(true),
+        Err(_error) => return Err(FuseV1Error::Io),
+    };
+    if !SFlag::from_bits_truncate(stat.st_mode).contains(SFlag::S_IFLNK) {
+        return Ok(false);
+    }
+    match unlinkat(&parent, file_name.as_str(), UnlinkatFlags::NoRemoveDir) {
+        Ok(()) | Err(nix::errno::Errno::ENOENT) => Ok(true),
+        Err(_error) => Err(FuseV1Error::Io),
+    }
 }
 
 fn socket_inode(path: &str) -> u64 {

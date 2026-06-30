@@ -58,6 +58,8 @@ pub enum FuseV1Error {
     InvalidContent,
     /// Write exceeds the v1 small-control-file limit.
     TooLarge,
+    /// Underlying filesystem denied access.
+    PermissionDenied,
     /// Underlying filesystem operation failed.
     Io,
 }
@@ -235,6 +237,7 @@ impl FuseV1Error {
             Self::NotDirectory => "ENOTDIR",
             Self::NotFile => "EISDIR",
             Self::TooLarge => "EMSGSIZE",
+            Self::PermissionDenied => "EACCES",
             Self::Io => "EIO",
         }
     }
