@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cortexfs::{
-    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, SocketPeerPolicy,
-    derive_agent_runtime_view, serve_agent_executable_socket_listener_once,
+    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, PolicyObjectClass,
+    PolicyPermission, SocketPeerPolicy, derive_agent_runtime_view,
+    serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
 use nix::fcntl::{AtFlags, OFlag, open, openat};
@@ -50,6 +51,12 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
     let runtime_model = runtime_model(&config.source, view.model());
+    let network_allowed = view.policy().allows(
+        view.policy_subject(),
+        PolicyObjectClass::Network,
+        "default",
+        PolicyPermission::Connect,
+    );
     let provider_secret =
         cortexfs::open_provider_system_secret_for_model(&config.source, view.model())
             .map_err(|_error| format!("provider secret unavailable: {}", view.model()))?;
@@ -72,6 +79,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
             session_root: &session_root,
             default_cwd: &default_cwd,
             model: Some(&runtime_model),
+            network_allowed,
             agent_name: view.agent_name(),
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Bwrap {

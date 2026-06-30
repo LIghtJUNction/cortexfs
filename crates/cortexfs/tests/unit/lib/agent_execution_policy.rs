@@ -42,6 +42,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -105,6 +106,7 @@ printf 'plain followup\n'
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -157,6 +159,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -217,6 +220,7 @@ fn agent_executable_socket_runtime_rejects_symlink_executable_without_running_ta
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -265,6 +269,7 @@ printf '\n'
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -313,6 +318,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -365,6 +371,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -437,6 +444,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -499,6 +507,7 @@ exit 1
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -571,6 +580,7 @@ exit 1
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Bwrap {
@@ -640,6 +650,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
+            network_allowed: false,
             agent_name: "coder",
             agent_executable: &agent_executable,
             execution: AgentExecutableSocketExecution::Direct,
@@ -658,6 +669,10 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     let agent_executable = root.join("agent").join("coder");
     let mut env = view.env().to_vec();
     env.push((
+        "CTX_PROVIDER_SECRET_FD".to_owned(),
+        "9".to_owned(),
+    ));
+    env.push((
         "CTX_PROVIDER_SECRET_PATH".to_owned(),
         "/run/user/1000/cortexfs/credentials/coder-default".to_owned(),
     ));
@@ -669,6 +684,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         session_root: &session_root,
         default_cwd: "/workspace",
         model: Some("debug/echo"),
+        network_allowed: false,
         agent_name: "coder",
         agent_executable: &agent_executable,
         execution: AgentExecutableSocketExecution::Bwrap {
@@ -696,8 +712,8 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     assert!(contains_arg_pair(&args, "--dir", "/workspace"));
     assert!(contains_arg_triplet(
         &args,
-        "--ro-bind",
-        "/run/user/1000/cortexfs/credentials/coder-default",
+        "--ro-bind-data",
+        "9",
         "/run/user/1000/cortexfs/credentials/coder-default"
     ));
     assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
@@ -713,6 +729,44 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         Some(&agent_executable.display().to_string())
     );
     assert_eq!(args.last().map(String::as_str), Some("hi"));
+}
+
+#[test]
+fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
+    let root = reference_tree("agent-executable-socket-runtime-bwrap-network");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: view.env(),
+        session_root: &session_root,
+        default_cwd: "/workspace",
+        model: Some("debug/echo"),
+        network_allowed: true,
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/usr/bin/bwrap"),
+            mount_table: view.mount_table(),
+        },
+    };
+
+    let args = agent_executable_socket_bwrap_args(&BwrapAgentExecutableArgs {
+        runtime,
+        mount_table: view.mount_table(),
+        cwd: "/workspace",
+        run_id: "run-1",
+        session: "default",
+        history_messages: "- user: hi",
+        debug: None,
+        input: "hi",
+    });
+
+    assert!(!args.contains(&"--unshare-net".to_owned()));
+    assert!(args.contains(&"--unshare-pid".to_owned()));
 }
 
 #[test]

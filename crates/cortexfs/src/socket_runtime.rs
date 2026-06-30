@@ -526,7 +526,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.history_messages.to_owned(),
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
-        "--unshare-net".to_owned(),
         "--proc".to_owned(),
         "/proc".to_owned(),
         "--dev".to_owned(),
@@ -555,6 +554,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "usr/lib".to_owned(),
         "/lib64".to_owned(),
     ]);
+    if !request.runtime.network_allowed {
+        bwrap.push("--unshare-net".to_owned());
+    }
     bwrap.extend(bwrap_provider_secret_bind_args(request.runtime.env));
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(timing) = request.debug {
@@ -600,6 +602,10 @@ fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
 }
 
 fn bwrap_provider_secret_bind_args(env: &[(String, String)]) -> Vec<String> {
+    let fd = env
+        .iter()
+        .find(|entry| entry.0 == "CTX_PROVIDER_SECRET_FD")
+        .map(|entry| entry.1.as_str());
     let Some(path) = env
         .iter()
         .find(|entry| entry.0 == "CTX_PROVIDER_SECRET_PATH")
@@ -611,8 +617,13 @@ fn bwrap_provider_secret_bind_args(env: &[(String, String)]) -> Vec<String> {
         return Vec::new();
     }
     let mut args = bwrap_dir_args_for_parent(path);
-    args.push("--ro-bind".to_owned());
-    args.push(path.to_owned());
+    if let Some(fd) = fd.filter(|fd| fd.chars().all(|ch| ch.is_ascii_digit())) {
+        args.push("--ro-bind-data".to_owned());
+        args.push(fd.to_owned());
+    } else {
+        args.push("--ro-bind".to_owned());
+        args.push(path.to_owned());
+    }
     args.push(path.to_owned());
     args
 }

@@ -440,6 +440,8 @@ pub struct AgentExecutableSocketRuntime<'a> {
     pub default_cwd: &'a str,
     /// Selected model object name from `agent/<name>.d/model`.
     pub model: Option<&'a str>,
+    /// Whether the agent policy permits network egress.
+    pub network_allowed: bool,
     /// Agent object name.
     pub agent_name: &'a str,
     /// ABI executable object to invoke for `send`.
