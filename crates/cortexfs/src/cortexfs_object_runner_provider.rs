@@ -121,7 +121,8 @@ fn provider_chat_completion(
         .map_err(ProviderCompletionError::fallback)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
-            let key = credential.as_ref().map(ProviderCredential::secret);
+            let key = openai_api_key(provider, &route.transport, credential.as_ref())
+                .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
                 input,
@@ -146,7 +147,8 @@ fn provider_chat_completion(
             }
         }
         ProviderRuntimeDriver::OpenAiResponses => {
-            let key = credential.as_ref().map(ProviderCredential::secret);
+            let key = openai_api_key(provider, &route.transport, credential.as_ref())
+                .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
                 input,
@@ -181,6 +183,40 @@ fn provider_chat_completion(
                 })
         }
     }
+}
+
+fn openai_api_key<'a>(
+    provider: &str,
+    transport: &ResolvedTransport,
+    credential: Option<&'a ProviderCredential>,
+) -> Result<Option<&'a str>, String> {
+    if let Some(credential) = credential {
+        return Ok(Some(credential.secret()));
+    }
+    if transport_allows_unauthenticated(transport) {
+        return Ok(None);
+    }
+    Err(format!("missing provider credential: {provider}"))
+}
+
+fn transport_allows_unauthenticated(transport: &ResolvedTransport) -> bool {
+    match *transport {
+        ResolvedTransport::Unix { .. } => true,
+        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
+            base_url_has_local_host(base_url)
+        }
+    }
+}
+
+fn base_url_has_local_host(base_url: &str) -> bool {
+    let Some(host) = cortexfs::provider_host_from_base_url(base_url) else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<IpAddr>()
+        .is_ok_and(|ip| ip_matches("geoip:private", &ip))
 }
 
 fn write_text_completion(
