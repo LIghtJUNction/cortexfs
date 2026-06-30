@@ -618,7 +618,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     });
 
     assert!(args.contains(&"--clearenv".to_owned()));
-    assert!(!args.contains(&"--unshare-net".to_owned()));
+    assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
     assert!(contains_arg_pair(&args, "--tmpfs", "/tmp"));
     assert!(contains_arg_pair(&args, "--ro-bind", "/usr"));
