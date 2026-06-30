@@ -722,7 +722,19 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "CTX_AGENT_HISTORY_MESSAGES",
         "- user: hi"
     ));
-    assert!(contains_arg_triplet(
+    assert!(!contains_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_PROVIDER_SECRET_FD",
+        "9"
+    ));
+    assert!(!contains_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_PROVIDER_SECRET_PATH",
+        "/run/user/1000/cortexfs/credentials/coder-default"
+    ));
+    assert!(!contains_arg_triplet(
         &args,
         "--ro-bind-data",
         "9",
