@@ -90,7 +90,7 @@ fn assert_worker_schedule_status(root: &Path, status: &str) {
         assert_schedule_status_rows(
             root,
             &[&format!(
-                "implement\treact\tworker\twork-123\tdefault\tapi.lmm.best/gpt-5.3-codex-spark\ttemp\t{status}"
+                "implement\treact\tworker\twork-123\tdefault\tapi.lmm.best/gpt-5.3-codex-spark\ttemp\tworker\t{status}"
             )],
         ),
         Ok(())

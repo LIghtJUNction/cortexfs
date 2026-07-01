@@ -69,7 +69,7 @@ fn schedule_status_lines(
     ))? {
         let (model, life) = schedule_node_model_life(root, &node)?;
         lines.push(format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             terminal_safe_text(node.id()),
             node.kind().as_str(),
             terminal_safe_text(node.agent()),
@@ -77,6 +77,7 @@ fn schedule_status_lines(
             terminal_safe_text(&schedule_node_session(&schedule.parent_session_dir, &node)?),
             terminal_safe_text(&model),
             terminal_safe_text(&life),
+            node.child().map_or("-", |_| schedule_handoff_agent_role(node.agent())),
             schedule_node_state(root, schedule, &completed, &ready, &node)?,
         ));
     }
@@ -222,13 +223,14 @@ fn schedule_advance(root: &Path, path: &str, done: &[String]) -> Result<(), CliE
         let (model, life) = schedule_handoff_agent_model_life(root, handoff.agent())?;
         let child_parent = schedule_handoff_agent_parent(root, handoff.agent())?;
         print_line(&format!(
-            "handoff node={} child={} agent={} session={} model={} life={} parent={} child_parent={} plan={} handoff={} result={} refs={}",
+            "handoff node={} child={} agent={} session={} model={} life={} role={} parent={} child_parent={} plan={} handoff={} result={} refs={}",
             handoff.node(),
             handoff.child(),
             handoff.agent(),
             handoff.session(),
             model,
             life,
+            schedule_handoff_agent_role(handoff.agent()),
             shell_quote_arg(&parent_ref),
             shell_quote_arg(&child_parent),
             schedule.abi_path,
@@ -260,6 +262,10 @@ fn schedule_handoff_agent_parent(root: &Path, agent: &str) -> Result<String, Cli
         read_agent_control_trimmed(&root.join("agent").join(format!("{agent}.d")), "parent")?
             .unwrap_or_else(|| "-".to_owned()),
     )
+}
+
+fn schedule_handoff_agent_role(agent: &str) -> &'static str {
+    if is_worker_agent_name(agent) { "worker" } else { "agent" }
 }
 
 fn require_schedule_handoff_agent(root: &Path, agent: &str) -> Result<(), CliError> {
@@ -311,11 +317,12 @@ fn schedule_claim(root: &Path, path: &str, child: &str) -> Result<(), CliError> 
     };
     let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
     print_line(&format!(
-        "claim child={child} status=active agent={} session={} model={} life={} parent={} child_parent={} plan={} handoff={} result={} refs={}",
+        "claim child={child} status=active agent={} session={} model={} life={} role={} parent={} child_parent={} plan={} handoff={} result={} refs={}",
         terminal_safe_text(&agent),
         terminal_safe_text(&session),
         terminal_safe_text(&model),
         terminal_safe_text(&life),
+        schedule_handoff_agent_role(&agent),
         shell_quote_arg(&parent_ref),
         shell_quote_arg(&child_parent),
         abi_path,
@@ -390,12 +397,13 @@ fn schedule_result(
     };
     let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
     print_line(&format!(
-        "result child={child} status={} agent={} session={} model={} life={} parent={} child_parent={} plan={} result={} refs={}",
+        "result child={child} status={} agent={} session={} model={} life={} role={} parent={} child_parent={} plan={} result={} refs={}",
         status.as_str(),
         terminal_safe_text(&agent),
         terminal_safe_text(&session),
         terminal_safe_text(&model),
         terminal_safe_text(&life),
+        schedule_handoff_agent_role(&agent),
         shell_quote_arg(&parent_ref),
         shell_quote_arg(&child_parent),
         abi_path,

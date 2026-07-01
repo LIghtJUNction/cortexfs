@@ -163,6 +163,8 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
         schedule_handoff_agent_parent(&root, "worker"),
         Ok("agent:coder".to_owned())
     );
+    assert_eq!(schedule_handoff_agent_role("worker"), "worker");
+    assert_eq!(schedule_handoff_agent_role("coder"), "agent");
     let child = session.join("context").join("child").join("work-123");
     assert!(matches!(
         fs::read_to_string(child.join("agent")).as_deref(),
@@ -336,7 +338,7 @@ fn schedule_status_uses_dash_model_for_local_nodes() {
     );
 
     assert_eq!(
-        assert_schedule_status_rows(&root, &["plan\tdag\tcoder\t-\t-\t-\t-\tready"]),
+        assert_schedule_status_rows(&root, &["plan\tdag\tcoder\t-\t-\t-\t-\t-\tready"]),
         Ok(())
     );
 }

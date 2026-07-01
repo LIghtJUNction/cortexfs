@@ -53,7 +53,7 @@ fn agent_ps_marks_ready_agent_dead_when_recorded_pid_is_gone() {
 
     assert_eq!(
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
-        vec!["worker [dead] model=api.lmm.best/gpt-5.3-codex-spark".to_owned()]
+        vec!["worker [dead] model=api.lmm.best/gpt-5.3-codex-spark role=worker".to_owned()]
     );
 }
 
@@ -70,8 +70,8 @@ fn agent_ps_defaults_worker_and_executor_prefixes_to_spark_model() {
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
         vec![
             "coder [idle]".to_owned(),
-            "+- executor-fast [ready] model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
-            "`- worker-fast [ready] model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+            "+- executor-fast [ready] model=api.lmm.best/gpt-5.3-codex-spark role=worker".to_owned(),
+            "`- worker-fast [ready] model=api.lmm.best/gpt-5.3-codex-spark role=worker".to_owned(),
         ]
     );
 }
@@ -104,7 +104,7 @@ fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
         render_agent_status_lines(&processes),
         vec![
             "coder [busy] pid=100".to_owned(),
-            "`- worker [ready] model=api.lmm.best/gpt-5.3-codex-spark pid=101".to_owned(),
+            "`- worker [ready] model=api.lmm.best/gpt-5.3-codex-spark role=worker pid=101".to_owned(),
         ]
     );
 }
@@ -157,7 +157,7 @@ fn agent_ps_shows_non_default_worker_model() {
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
         vec![
             "coder [idle]".to_owned(),
-            "`- worker [ready] model=api.lmm.best/gpt-5.3-codex-spark parent_session=default".to_owned(),
+            "`- worker [ready] model=api.lmm.best/gpt-5.3-codex-spark role=worker parent_session=default".to_owned(),
         ]
     );
 }
@@ -173,7 +173,7 @@ fn agent_ps_shows_non_owned_worker_lifecycle() {
         render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
         vec![
             "coder [idle]".to_owned(),
-            "`- worker [ready] model=api.lmm.best/gpt-5.3-codex-spark life=temp parent_session=default".to_owned(),
+            "`- worker [ready] model=api.lmm.best/gpt-5.3-codex-spark life=temp role=worker parent_session=default".to_owned(),
         ]
     );
 }
@@ -204,6 +204,7 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
             "ready".to_owned(),
             "model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             "life=owned".to_owned(),
+            "role=worker".to_owned(),
             "parent=agent:coder session:default".to_owned(),
             "children=3".to_owned(),
             format!("pid={pid}"),
@@ -227,6 +228,7 @@ fn agent_status_marks_ready_agent_dead_when_recorded_pid_is_gone() {
             "dead".to_owned(),
             "model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             "life=owned".to_owned(),
+            "role=worker".to_owned(),
             "parent=agent:coder".to_owned(),
             "children=0".to_owned(),
             "pid=-".to_owned(),
@@ -253,6 +255,7 @@ fn agent_status_child_count_skips_dead_and_stale_pid_children() {
             "ready".to_owned(),
             "model=main".to_owned(),
             "life=owned".to_owned(),
+            "role=agent".to_owned(),
             "parent=agent:base".to_owned(),
             "children=1".to_owned(),
             "pid=-".to_owned(),
@@ -284,6 +287,7 @@ fn agent_status_escapes_control_file_values() {
             "ready\\u{1b}]52;c;x\\u{7}".to_owned(),
             "model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             "life=owned".to_owned(),
+            "role=worker".to_owned(),
             "parent=agent:coder\\u{1b}[31m".to_owned(),
             "children=0".to_owned(),
             "pid=-".to_owned(),
