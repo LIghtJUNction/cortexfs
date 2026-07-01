@@ -40,6 +40,24 @@ pub(super) const DEBUG_ECHO_NAME: &str = "echo";
 pub(crate) const DEFAULT_MODEL_ALIAS: &str = "main";
 pub(crate) const HELPER_MODEL_ALIAS: &str = "helper";
 pub const DEFAULT_WORKER_MODEL: &str = "api.lmm.best/gpt-5.3-codex-spark";
+
+/// Returns the implicit model for an agent that has no explicit `model` control file.
+#[must_use]
+pub fn default_agent_model_for_name(agent_name: &str) -> &'static str {
+    if is_worker_agent_name(agent_name) {
+        DEFAULT_WORKER_MODEL
+    } else {
+        DEFAULT_MODEL_ALIAS
+    }
+}
+
+/// Returns whether an agent name uses the v1 worker/executor role convention.
+#[must_use]
+pub fn is_worker_agent_name(agent_name: &str) -> bool {
+    matches!(agent_name, "executor" | "worker")
+        || agent_name.starts_with("executor-")
+        || agent_name.starts_with("worker-")
+}
 pub(super) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.5";
 pub(super) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto-review";
 pub(super) const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
