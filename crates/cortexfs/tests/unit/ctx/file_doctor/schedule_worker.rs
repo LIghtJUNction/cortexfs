@@ -25,9 +25,11 @@ fn assert_worker_child_row_status(root: &Path, status: &str) {
             agent: "worker".to_owned(),
             session: "default".to_owned(),
             parent_session: None,
+            parent_run: None,
             model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             life: "temp".to_owned(),
             agent_status: "idle".to_owned(),
+            ppid: None,
             pid: None,
         })
     ));
@@ -112,11 +114,13 @@ fn create_pending_worker_handoff(root: &Path, test_name: &str) -> PathBuf {
 }
 
 fn assert_worker_schedule_status(root: &Path, status: &str) {
+    let child_parent = schedule_handoff_agent_details(root, "worker")
+        .map_or_else(|_| "-".to_owned(), |(_, _, parent)| parent);
     assert_eq!(
         assert_schedule_status_rows(
             root,
             &[&format!(
-                "implement\treact\tworker\twork-123\tdefault\tapi.lmm.best/gpt-5.3-codex-spark\ttemp\tworker\t{status}"
+                "implement\treact\tworker\twork-123\tdefault\tapi.lmm.best/gpt-5.3-codex-spark\ttemp\tworker\t{child_parent}\t{status}"
             )],
         ),
         Ok(())

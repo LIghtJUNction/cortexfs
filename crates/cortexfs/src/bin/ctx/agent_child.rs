@@ -1,16 +1,18 @@
 fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
     for row in agent_child_rows(root, name, session)? {
         print_line(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             terminal_safe_text(&row.child),
             terminal_safe_text(&row.status),
             terminal_safe_text(&row.agent),
             terminal_safe_text(&row.session),
             terminal_safe_text(row.parent_session.as_deref().unwrap_or("-")),
+            terminal_safe_text(row.parent_run.as_deref().unwrap_or("-")),
             terminal_safe_text(&row.model),
             terminal_safe_text(&row.life),
-            if is_worker_agent_name(&row.agent) { "worker" } else { "agent" },
+            agent_role_for_display(&row.agent),
             terminal_safe_text(&row.agent_status),
+            terminal_safe_text(row.ppid.as_deref().unwrap_or("-")),
             terminal_safe_text(row.pid.as_deref().unwrap_or("-"))
         ))?;
     }
@@ -38,7 +40,7 @@ fn agent_wait(
         )));
     }
     let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
-    let control = root.join("agent").join(format!("{agent}.d"));
+    let control = agent_control_dir(root, &agent);
     let parent = read_agent_parent_ref(&control)?;
     require_child_backing_parent(name, &parent_session_dir, child, &agent, parent.as_ref())?;
     let model = read_agent_model_for_context(&control, "agent")?;
@@ -59,7 +61,7 @@ fn agent_wait(
         terminal_safe_text(&session),
         terminal_safe_text(&model),
         terminal_safe_text(&life),
-        if is_worker_agent_name(&agent) { "worker" } else { "agent" }
+        agent_role_for_display(&agent)
     ))?;
     print_terminal_text(&result)?;
     Ok(child_wait_exit_code(status))
@@ -79,7 +81,7 @@ fn reconcile_active_child_wait(
         return Ok(Some(status));
     }
     let (child_agent, child_session) = schedule_child_context_agent_session(child_dir)?;
-    let control = root.join("agent").join(format!("{child_agent}.d"));
+    let control = agent_control_dir(root, &child_agent);
     let Some(parent_ref) = read_agent_parent_ref(&control)? else {
         return Ok(Some(status));
     };
@@ -87,12 +89,10 @@ fn reconcile_active_child_wait(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    let parent_session_matches = parent_ref
-        .session
-        .as_deref()
-        .is_none_or(|session| session == parent_session);
     let (agent_status, agent_pid) = live_agent_status_and_pid(&control)?;
-    if parent_ref.agent != parent_agent || !parent_session_matches || agent_status != "dead" {
+    if !agent_parent_ref_matches(&parent_ref, parent_agent, Some(parent_session), None)
+        || agent_status != "dead"
+    {
         return Ok(Some(status));
     }
     if agent_pid.is_some() {
@@ -125,9 +125,11 @@ struct AgentChildRow {
     agent: String,
     session: String,
     parent_session: Option<String>,
+    parent_run: Option<String>,
     model: String,
     life: String,
     agent_status: String,
+    ppid: Option<String>,
     pid: Option<String>,
 }
 
@@ -137,6 +139,7 @@ fn agent_child_rows(
     session: Option<&str>,
 ) -> Result<Vec<AgentChildRow>, CliError> {
     let parent_session_dir = agent_session_dir(root, name, session)?;
+    let parent_pid = agent_live_pid(root, name)?;
     let child_root = parent_session_dir.join("context").join("child");
     if !child_root
         .symlink_metadata()
@@ -156,9 +159,9 @@ fn agent_child_rows(
         let status = reconcile_active_child_wait(root, name, &parent_session_dir, &child, &dir)?
             .unwrap_or_else(|| "unknown".to_owned());
         let (agent, session) = schedule_child_context_agent_session(&dir)?;
-        let control = root.join("agent").join(format!("{agent}.d"));
+        let control = agent_control_dir(root, &agent);
         let parent = read_agent_parent_ref(&control)?;
-        let parent_session =
+        let parent_ref =
             require_child_backing_parent(name, &parent_session_dir, &child, &agent, parent.as_ref())?;
         let (agent_status, pid) = live_agent_status_and_pid(&control)?;
         let model = read_agent_model_for_context(&control, "agent")?;
@@ -168,10 +171,12 @@ fn agent_child_rows(
             status,
             agent,
             session,
-            parent_session,
+            parent_session: parent_ref.as_ref().and_then(|parent| parent.session.clone()),
+            parent_run: parent_ref.and_then(|parent| parent.run),
             model,
             life,
             agent_status,
+            ppid: parent_pid.clone(),
             pid,
         });
     }
@@ -184,7 +189,7 @@ fn require_child_backing_parent(
     child: &str,
     child_agent: &str,
     parent: Option<&AgentParentRef>,
-) -> Result<Option<String>, CliError> {
+) -> Result<Option<AgentParentRef>, CliError> {
     let Some(parent) = parent else {
         return Ok(None);
     };
@@ -192,24 +197,13 @@ fn require_child_backing_parent(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    let session_matches = parent
-        .session
-        .as_deref()
-        .is_none_or(|session| session == parent_session);
-    if parent.agent != parent_agent || !session_matches {
+    if !agent_parent_ref_matches(parent, parent_agent, Some(parent_session), None) {
         return Err(CliError::usage(format!(
             "child {child} backing parent mismatch for {child_agent}: {}",
             agent_parent_ref_display(parent)
         )));
     }
-    Ok(parent.session.clone())
-}
-
-fn agent_parent_ref_display(parent: &AgentParentRef) -> String {
-    parent.session.as_ref().map_or_else(
-        || format!("agent:{}", parent.agent),
-        |session| format!("agent:{} session:{session}", parent.agent),
-    )
+    Ok(Some(parent.clone()))
 }
 
 fn agent_life_for_display(control: &Path) -> Result<String, CliError> {

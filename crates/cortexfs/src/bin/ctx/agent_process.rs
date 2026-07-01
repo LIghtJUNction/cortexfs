@@ -3,7 +3,9 @@ struct AgentProcess {
     name: String,
     parent: Option<String>,
     parent_session: Option<String>,
+    parent_run: Option<String>,
     status: String,
+    ppid: Option<String>,
     pid: Option<String>,
     model: String,
     life: String,
@@ -82,17 +84,15 @@ impl<'a> AgentProcessTreeRenderer<'a> {
             "+- "
         };
         self.rendered.push(format!(
-            "{prefix}{branch}{} [{}]{}{}{}{}{}",
+            "{prefix}{branch}{} [{}]{}{}{}{}{}{}",
             terminal_safe_text(&process.name),
             terminal_safe_text(&process.status),
             process_model_suffix(process),
             process_life_suffix(process),
             process_role_suffix(process),
-            process_parent_session_suffix(process),
-            process.pid.as_ref().map_or_else(String::new, |pid| format!(
-                " pid={}",
-                terminal_safe_text(pid)
-            ))
+            process_parent_suffix(process),
+            process_id_suffix("ppid", process.ppid.as_deref()),
+            process_id_suffix("pid", process.pid.as_deref())
         ));
 
         let next_prefix = if root {
@@ -118,26 +118,70 @@ fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
     let names = list_kind_names(root, ObjectClass::Agent)?;
     let mut processes = Vec::new();
     for name in names {
-        let control = root.join("agent").join(format!("{name}.d"));
+        let control = agent_control_dir(root, &name);
         let parent = read_agent_parent_ref(&control)?;
         let (status, pid) = live_agent_status_and_pid(&control)?;
-        let model = read_agent_model_for_context(&control, "agent")?;
-        let life = read_agent_life_for_context(&control, "agent")?;
+        let (model, life) = read_agent_model_life_for_context(&control, "agent")?;
         processes.push(AgentProcess {
             name,
             parent: parent.as_ref().map(|parent| parent.agent.clone()),
-            parent_session: parent.and_then(|parent| parent.session),
+            parent_session: parent.as_ref().and_then(|parent| parent.session.clone()),
+            parent_run: parent.and_then(|parent| parent.run),
             status,
+            ppid: None,
             pid,
             model,
             life,
         });
+    }
+    let parent_pids = processes
+        .iter()
+        .map(|process| {
+            process.parent.as_ref().and_then(|parent| {
+                processes
+                    .iter()
+                    .find(|candidate| candidate.name == *parent)
+                    .and_then(|candidate| candidate.pid.clone())
+            })
+        })
+        .collect::<Vec<_>>();
+    for (process, ppid) in processes.iter_mut().zip(parent_pids) {
+        process.ppid = ppid;
     }
     Ok(processes)
 }
 
 fn default_agent_process_model(name: &str) -> &'static str {
     default_agent_model_for_name(name)
+}
+
+fn agent_object_path(root: &Path, agent: &str) -> PathBuf {
+    root.join("agent").join(agent)
+}
+
+fn agent_control_dir(root: &Path, agent: &str) -> PathBuf {
+    agent_object_path(root, &format!("{agent}.d"))
+}
+
+fn agent_control_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
+    let agent_root = agent_object_path(root, "");
+    let entries = fs::read_dir(&agent_root).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
+    })?;
+    let mut controls = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
+        })?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str().and_then(|name| name.strip_suffix(".d")) else {
+            continue;
+        };
+        if is_object_name(name) {
+            controls.push((name.to_owned(), entry.path()));
+        }
+    }
+    Ok(controls)
 }
 
 fn live_agent_status_and_pid(control: &Path) -> Result<(String, Option<String>), CliError> {
@@ -182,12 +226,29 @@ fn process_life_suffix(process: &AgentProcess) -> String {
 }
 
 fn process_role_suffix(process: &AgentProcess) -> String {
-    if is_worker_agent_name(&process.name) { " role=worker".to_owned() } else { String::new() }
+    if agent_role_for_display(&process.name) == "worker" {
+        " role=worker".to_owned()
+    } else {
+        String::new()
+    }
 }
 
-fn process_parent_session_suffix(process: &AgentProcess) -> String {
-    process.parent_session.as_ref().map_or_else(String::new, |session| {
-        format!(" parent_session={}", terminal_safe_text(session))
+fn process_parent_suffix(process: &AgentProcess) -> String {
+    let mut suffix = String::new();
+    if let Some(session) = process.parent_session.as_ref() {
+        suffix.push_str(" parent_session=");
+        suffix.push_str(&terminal_safe_text(session));
+    }
+    if let Some(run) = process.parent_run.as_ref() {
+        suffix.push_str(" parent_run=");
+        suffix.push_str(&terminal_safe_text(run));
+    }
+    suffix
+}
+
+fn process_id_suffix(label: &str, pid: Option<&str>) -> String {
+    pid.map_or_else(String::new, |pid| {
+        format!(" {label}={}", terminal_safe_text(pid))
     })
 }
 
@@ -195,6 +256,34 @@ fn process_parent_session_suffix(process: &AgentProcess) -> String {
 struct AgentParentRef {
     agent: String,
     session: Option<String>,
+    run: Option<String>,
+}
+
+fn agent_parent_ref_display(parent: &AgentParentRef) -> String {
+    let mut display = format!("agent:{}", parent.agent);
+    if let Some(session) = parent.session.as_ref() {
+        display.push_str(" session:");
+        display.push_str(session);
+    }
+    if let Some(run) = parent.run.as_ref() {
+        display.push_str(" run:");
+        display.push_str(run);
+    }
+    display
+}
+
+fn agent_parent_ref_matches(
+    parent: &AgentParentRef,
+    agent: &str,
+    session: Option<&str>,
+    run: Option<&str>,
+) -> bool {
+    parent.agent == agent
+        && parent
+            .session
+            .as_deref()
+            .is_none_or(|parent_session| Some(parent_session) == session)
+        && run.is_none_or(|expected| parent.run.as_deref() == Some(expected))
 }
 
 fn read_agent_parent_ref(control: &Path) -> Result<Option<AgentParentRef>, CliError> {
@@ -220,6 +309,16 @@ fn read_agent_life_for_context(control: &Path, context: &str) -> Result<String, 
         )));
     }
     Ok(life)
+}
+
+fn read_agent_model_life_for_context(
+    control: &Path,
+    context: &str,
+) -> Result<(String, String), CliError> {
+    Ok((
+        read_agent_model_for_context(control, context)?,
+        read_agent_life_for_context(control, context)?,
+    ))
 }
 
 fn read_agent_model_for_context(control: &Path, context: &str) -> Result<String, CliError> {
@@ -249,15 +348,15 @@ fn parse_agent_parent_ref(value: &str) -> Option<AgentParentRef> {
         return None;
     }
     let mut session = None;
-    let mut run = false;
+    let mut run = None;
     for word in fields {
         let (kind, name) = word.split_once(':')?;
         match kind {
             "session" if is_object_name(name) && session.is_none() => {
                 session = Some(name.to_owned());
             }
-            "run" if is_object_name(name) && !run => {
-                run = true;
+            "run" if is_object_name(name) && run.is_none() => {
+                run = Some(name.to_owned());
             }
             _ => return None,
         }
@@ -265,6 +364,7 @@ fn parse_agent_parent_ref(value: &str) -> Option<AgentParentRef> {
     Some(AgentParentRef {
         agent: agent.to_owned(),
         session,
+        run,
     })
 }
 

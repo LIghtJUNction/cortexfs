@@ -43,9 +43,11 @@ fn agent_stop_host_fallback_preserves_canonical_temp_worker_after_cancellation(
             agent: "worker".to_owned(),
             session: "default".to_owned(),
             parent_session: Some("default".to_owned()),
+            parent_run: Some("r1".to_owned()),
             model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             life: "temp".to_owned(),
             agent_status: "dead".to_owned(),
+            ppid: None,
             pid: None,
         }));
     assert_eq!(

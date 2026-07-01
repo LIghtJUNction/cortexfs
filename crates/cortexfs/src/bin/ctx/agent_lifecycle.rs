@@ -1,5 +1,5 @@
 fn agent_stop_host_fallback(root: &Path, name: &str) -> Result<ExitCode, CliError> {
-    let control = root.join("agent").join(format!("{name}.d"));
+    let control = agent_control_dir(root, name);
     stop_agent_terminal_units(root, name)?;
     stop_agent_control(&control, name)?;
     stop_owned_child_agents(root, name)?;
@@ -47,33 +47,21 @@ fn stop_agent_control(control: &Path, name: &str) -> Result<(), CliError> {
 }
 
 fn stop_owned_child_agents(root: &Path, parent: &str) -> Result<(), CliError> {
-    let agent_root = root.join("agent");
-    let entries = fs::read_dir(&agent_root).map_err(|error| {
-        CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
-    })?;
     let mut children = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
-        })?;
-        let file_name = entry.file_name();
-        let Some(name) = file_name.to_str().and_then(|name| name.strip_suffix(".d")) else {
-            continue;
-        };
-        if name == parent || !is_object_name(name) {
+    for (name, control) in agent_control_dirs(root)? {
+        if name == parent {
             continue;
         }
-        let control = entry.path();
         let Some(child_parent) = read_agent_parent_ref(&control)? else {
             continue;
         };
         if child_parent.agent == parent && agent_lifecycle_is_parent_owned(&control)? {
-            children.push((name.to_owned(), child_parent, agent_lifecycle_is_temp(&control)?));
+            children.push((name, child_parent, agent_lifecycle_is_temp(&control)?));
         }
     }
     children.sort_by(|left, right| left.0.cmp(&right.0));
     for (child, child_parent, is_temp) in children {
-        let control = agent_root.join(format!("{child}.d"));
+        let control = agent_control_dir(root, &child);
         stop_agent_terminal_units(root, &child)?;
         stop_agent_control(&control, &child)?;
         record_parent_child_cancellation(root, &child, &child_parent)?;
@@ -86,10 +74,9 @@ fn stop_owned_child_agents(root: &Path, parent: &str) -> Result<(), CliError> {
 }
 
 fn remove_temp_agent_object(root: &Path, child: &str) -> Result<(), CliError> {
-    let agent_root = root.join("agent");
-    remove_temp_agent_file(&agent_root.join(child))?;
-    remove_temp_agent_file(&agent_root.join(format!("{child}.sock")))?;
-    let control = agent_root.join(format!("{child}.d"));
+    remove_temp_agent_file(&agent_object_path(root, child))?;
+    remove_temp_agent_file(&agent_socket_path(root, child)?)?;
+    let control = agent_control_dir(root, child);
     match fs::symlink_metadata(&control) {
         Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
             fs::remove_dir_all(&control).map_err(|error| {

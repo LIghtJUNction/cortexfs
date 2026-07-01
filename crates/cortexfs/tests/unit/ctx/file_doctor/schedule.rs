@@ -153,18 +153,22 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
     assert_eq!(schedule_status_worker(&root), Ok(()));
     assert_worker_schedule_status(&root, "pending");
     assert_eq!(
-        schedule_handoff_agent_model_life(&root, "worker"),
+        schedule_handoff_agent_details(&root, "worker"),
         Ok((
             "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
-            "temp".to_owned()
+            "temp".to_owned(),
+            "agent:coder".to_owned()
         ))
     );
-    assert_eq!(
-        schedule_handoff_agent_parent(&root, "worker"),
-        Ok("agent:coder".to_owned())
+    write_text_file(
+        &root.join("agent/worker.d/parent"),
+        "agent:coder run:r1 session:default\n",
     );
-    assert_eq!(schedule_handoff_agent_role("worker"), "worker");
-    assert_eq!(schedule_handoff_agent_role("coder"), "agent");
+    assert_eq!(
+        schedule_handoff_agent_details(&root, "worker").map(|(_, _, parent)| parent),
+        Ok("agent:coder session:default run:r1".to_owned())
+    );
+    write_text_file(&root.join("agent/worker.d/parent"), "agent:coder\n");
     let child = session.join("context").join("child").join("work-123");
     assert!(matches!(
         fs::read_to_string(child.join("agent")).as_deref(),
@@ -294,7 +298,7 @@ fn schedule_result_rejects_invalid_backing_parent_without_recording() {
         }),
         Err(ref error)
             if error.code == 2
-                && error.message == "invalid handoff agent parent for worker: session:default"
+                && error.message == "invalid agent parent for worker: session:default"
     ));
     assert!(matches!(fs::read_to_string(child.join("status")).as_deref(), Ok("pending\n")));
     assert!(matches!(fs::read_to_string(child.join("result.md")).as_deref(), Ok("")));
@@ -343,7 +347,7 @@ fn schedule_handoff_agent_model_rejects_invalid_model_reference() {
     write_text_file(&root.join("agent/worker.d/model"), "../bad\n");
 
     assert!(matches!(
-        schedule_handoff_agent_model_life(&root, "worker"),
+        schedule_handoff_agent_details(&root, "worker"),
         Err(ref error)
             if error.code == 2
                 && error.message == "invalid handoff agent model for worker: ../bad"
@@ -358,10 +362,11 @@ fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
 
     assert_eq!(
-        schedule_handoff_agent_model_life(&root, "worker"),
+        schedule_handoff_agent_details(&root, "worker"),
         Ok((
             "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
-            "temp".to_owned()
+            "temp".to_owned(),
+            "agent:coder".to_owned()
         ))
     );
 }
@@ -373,7 +378,7 @@ fn schedule_handoff_agent_rejects_invalid_lifecycle() {
     write_text_file(&root.join("agent/worker.d/life"), "detached\n");
 
     assert!(matches!(
-        schedule_handoff_agent_model_life(&root, "worker"),
+        schedule_handoff_agent_details(&root, "worker"),
         Err(ref error)
             if error.code == 2
                 && error.message == "invalid handoff agent life for worker: detached"
@@ -387,10 +392,10 @@ fn schedule_handoff_agent_rejects_invalid_parent_ref() {
     write_text_file(&root.join("agent/worker.d/parent"), "session:default\n");
 
     assert!(matches!(
-        schedule_handoff_agent_parent(&root, "worker"),
+        schedule_handoff_agent_details(&root, "worker"),
         Err(ref error)
             if error.code == 2
-                && error.message == "invalid handoff agent parent for worker: session:default"
+                && error.message == "invalid agent parent for worker: session:default"
     ));
 }
 
@@ -399,7 +404,7 @@ fn schedule_handoff_agent_model_requires_backing_agent_object() {
     let root = clean_test_dir("ctx-schedule-missing-worker-object");
 
     assert!(matches!(
-        schedule_handoff_agent_model_life(&root, "worker"),
+        schedule_handoff_agent_details(&root, "worker"),
         Err(ref error)
             if error.code == 2
                 && error.message.contains("missing handoff agent object worker")
@@ -430,7 +435,7 @@ fn schedule_status_uses_dash_model_for_local_nodes() {
     );
 
     assert_eq!(
-        assert_schedule_status_rows(&root, &["plan\tdag\tcoder\t-\t-\t-\t-\t-\tready"]),
+        assert_schedule_status_rows(&root, &["plan\tdag\tcoder\t-\t-\t-\t-\t-\t-\tready"]),
         Ok(())
     );
 }

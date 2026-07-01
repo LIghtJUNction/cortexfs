@@ -36,7 +36,7 @@ fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
 }
 
 fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> Result<String, CliError> {
-    let model = read_agent_model_for_context(&root.join("agent").join(format!("{name}.d")), "agent")?;
+    let model = read_agent_model_for_context(&agent_control_dir(root, name), "agent")?;
     let model_text = styled(color, ANSI_CYAN, &model);
     if !matches!(model.as_str(), "main" | "helper") {
         return Ok(model_text);

@@ -26,8 +26,8 @@ fn agent_new_host_fallback(root: &Path, args: &AgentNewArgs) -> Result<ExitCode,
         .parent
         .clone()
         .unwrap_or_else(|| "agent:base".to_owned());
-    let agent_path = root.join("agent").join(&args.name);
-    let control = root.join("agent").join(format!("{}.d", args.name));
+    let agent_path = agent_object_path(root, &args.name);
+    let control = agent_control_dir(root, &args.name);
     if agent_path.exists() || control.exists() {
         return Err(CliError::unavailable(format!(
             "agent already exists: {}",

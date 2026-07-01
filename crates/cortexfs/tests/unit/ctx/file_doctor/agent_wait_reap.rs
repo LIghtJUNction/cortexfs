@@ -1,8 +1,10 @@
 #[test]
 fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
     let root = clean_test_dir("ctx-agent-wait-reaps-dead-worker");
+    let pid = std::process::id().to_string();
     let ensured = ensure_v1_reference_tree(&root);
     assert!(ensured.is_ok());
+    write_text_file(&root.join("agent/coder.d/pid"), &format!("{pid}\n"));
     let session = fixture_path(
         &root,
         &[
@@ -35,9 +37,11 @@ fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
             agent: "worker".to_owned(),
             session: "default".to_owned(),
             parent_session: Some("default".to_owned()),
+            parent_run: Some("r1".to_owned()),
             model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             life: "temp".to_owned(),
             agent_status: "dead".to_owned(),
+            ppid: Some(pid),
             pid: None,
         })
     ));
@@ -92,9 +96,11 @@ fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
                 agent: agent.to_owned(),
                 session: "default".to_owned(),
                 parent_session: Some("default".to_owned()),
+                parent_run: Some("r1".to_owned()),
                 model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
                 life: "temp".to_owned(),
                 agent_status: "dead".to_owned(),
+                ppid: None,
                 pid: None,
             })
         ));
@@ -143,9 +149,11 @@ fn agent_child_rows_default_missing_worker_model_to_spark() {
             agent: "worker".to_owned(),
             session: "default".to_owned(),
             parent_session: None,
+            parent_run: None,
             model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             life: "temp".to_owned(),
             agent_status: "idle".to_owned(),
+            ppid: None,
             pid: None,
         })
     ));
@@ -256,14 +264,17 @@ fn agent_wait_rejects_mismatched_terminal_backing_parent() {
     write_text_file(&child.join("handoff.md"), "Task: implement.\n");
     write_text_file(&child.join("result.md"), "Done.\n");
     write_text_file(&child.join("refs.jsonl"), "");
-    write_text_file(&root.join("agent/worker.d/parent"), "agent:coder session:other\n");
+    write_text_file(
+        &root.join("agent/worker.d/parent"),
+        "agent:coder session:other run:r1\n",
+    );
 
     assert!(matches!(
         agent_wait(&root, "coder", Some("default"), "work-123"),
         Err(ref error)
             if error.code == 2
                 && error.message
-                    == "child work-123 backing parent mismatch for worker: agent:coder session:other"
+                    == "child work-123 backing parent mismatch for worker: agent:coder session:other run:r1"
     ));
 }
 
@@ -399,9 +410,11 @@ fn agent_wait_reaps_active_child_when_backing_worker_pid_is_stale() {
             agent: "worker".to_owned(),
             session: "default".to_owned(),
             parent_session: Some("default".to_owned()),
+            parent_run: Some("r1".to_owned()),
             model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             life: "temp".to_owned(),
             agent_status: "dead".to_owned(),
+            ppid: None,
             pid: None,
         })
     ));

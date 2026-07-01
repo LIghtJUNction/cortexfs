@@ -7,14 +7,14 @@ fn agent_status(root: &Path, name: &str) -> Result<(), CliError> {
 
 fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
     require_cli_name("agent name", name)?;
-    let control = root.join("agent").join(format!("{name}.d"));
-    let (status, pid) = live_agent_status_and_pid(&control)?;
-    let model = read_agent_model_for_context(&control, "agent")?;
-    let life = read_agent_life_for_context(&control, "agent")?;
-    let parent = read_optional_trimmed(&control.join("parent"))?.unwrap_or_else(|| "-".to_owned());
-    if parent != "-" {
-        read_agent_parent_ref(&control)?;
-    }
+    let control = agent_control_dir(root, name);
+    let (status, live_pid) = live_agent_status_and_pid(&control)?;
+    let (model, life) = read_agent_model_life_for_context(&control, "agent")?;
+    let parent = read_agent_parent_ref(&control)?;
+    let parent_live_pid = agent_parent_live_pid(root, parent.as_ref())?;
+    let parent = parent
+        .as_ref()
+        .map_or_else(|| "-".to_owned(), agent_parent_ref_display);
     Ok(vec![
         terminal_safe_text(&status),
         format!(
@@ -24,13 +24,17 @@ fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> 
         format!("life={}", terminal_safe_text(&life)),
         format!(
             "role={}",
-            if is_worker_agent_name(name) { "worker" } else { "agent" }
+            agent_role_for_display(name)
         ),
         format!("parent={}", terminal_safe_text(&parent)),
         format!("children={}", agent_status_child_count(root, name)?),
         format!(
             "pid={}",
-            terminal_safe_text(&pid.unwrap_or_else(|| "-".to_owned()))
+            terminal_safe_text(&live_pid.unwrap_or_else(|| "-".to_owned()))
+        ),
+        format!(
+            "ppid={}",
+            terminal_safe_text(&parent_live_pid.unwrap_or_else(|| "-".to_owned()))
         ),
         format!(
             "uid={}",
@@ -63,29 +67,30 @@ fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> 
     ])
 }
 
+fn agent_parent_live_pid(
+    root: &Path,
+    parent: Option<&AgentParentRef>,
+) -> Result<Option<String>, CliError> {
+    let Some(parent) = parent else {
+        return Ok(None);
+    };
+    agent_live_pid(root, &parent.agent)
+}
+
+fn agent_live_pid(root: &Path, agent: &str) -> Result<Option<String>, CliError> {
+    Ok(live_agent_status_and_pid(&agent_control_dir(root, agent))?.1)
+}
+
 fn agent_status_child_count(root: &Path, name: &str) -> Result<usize, CliError> {
-    let agent_root = root.join("agent");
-    let entries = fs::read_dir(&agent_root).map_err(|error| {
-        CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
-    })?;
     let mut count = 0usize;
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
-        })?;
-        let file_name = entry.file_name();
-        let Some(child_name) = file_name.to_str().and_then(|name| name.strip_suffix(".d")) else {
-            continue;
-        };
-        if child_name == name || !is_object_name(child_name) {
+    for (child_name, control) in agent_control_dirs(root)? {
+        if child_name == name {
             continue;
         }
-        let control = entry.path();
         if read_agent_parent_ref(&control)?.is_some_and(|parent| parent.agent == name)
             && live_agent_status_and_pid(&control)?.0 != "dead"
         {
-            read_agent_model_for_context(&control, "agent")?;
-            read_agent_life_for_context(&control, "agent")?;
+            read_agent_model_life_for_context(&control, "agent")?;
             count += 1;
         }
     }
@@ -150,7 +155,7 @@ fn build_agent_system_prompt(
     current_time_unix: &str,
 ) -> Result<String, CliError> {
     require_cli_name("agent name", name)?;
-    let control = root.join("agent").join(format!("{name}.d"));
+    let control = agent_control_dir(root, name);
     let agent_system = read_optional_trimmed(&control.join("system.md"))?.unwrap_or_default();
     let template = read_optional_trimmed(&control.join("prompt.template.md"))?
         .unwrap_or_else(|| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());

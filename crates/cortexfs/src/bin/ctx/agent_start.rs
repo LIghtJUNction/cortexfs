@@ -31,7 +31,7 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     wait_for_agent_terminal_socket(&socket)?;
     let invocation = systemd_run_invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
-    let role = agent_role_name(view.agent_name());
+    let role = agent_role_for_display(view.agent_name());
     let uid = view.identity().uid().to_string();
     let gid = view.identity().gid().to_string();
     let groups = view
@@ -79,7 +79,7 @@ fn record_agent_start_state(
     facts: &[(&str, &str)],
     invocation: Option<&str>,
 ) -> Result<(), CliError> {
-    let control = root.join("agent").join(format!("{}.d", args.name));
+    let control = agent_control_dir(root, &args.name);
     let metadata = fs::symlink_metadata(&control).map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", control.display()))
     })?;

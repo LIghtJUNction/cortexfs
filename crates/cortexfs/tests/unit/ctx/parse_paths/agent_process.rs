@@ -2,46 +2,28 @@
 fn agent_ps_reads_parent_status_and_pid_controls() {
     let root = clean_test_dir("ctx-agent-ps");
     let pid = std::process::id().to_string();
-    create_agent_fixture(&root, "coder", "", "idle", "");
+    create_agent_fixture(&root, "coder", "", "idle", &pid);
     create_agent_fixture(&root, "reviewer", "agent:coder session:default run:r1", "busy", &pid);
     create_agent_fixture(&root, "auditor", "agent:reviewer", "ready", "");
 
-    let processes = read_agent_processes(&root);
-    assert!(processes.is_ok());
-    let mut processes = processes.unwrap_or_default();
+    let mut processes = read_agent_processes(&root).unwrap_or_default();
     processes.sort_by(|left, right| left.name.cmp(&right.name));
     assert!(processes.iter().any(|process| {
         process.name == "reviewer"
             && process.parent.as_deref() == Some("coder")
+            && process.parent_session.as_deref() == Some("default")
+            && process.parent_run.as_deref() == Some("r1")
+            && process.ppid.as_deref() == Some(pid.as_str())
             && process.status == "busy"
             && process.pid.as_deref() == Some(pid.as_str())
-            && process.model == "main"
-            && process.life == "owned"
     }));
 
-    let root_process = processes
-        .iter()
-        .find(|process| process.name == "coder")
-        .cloned();
-    assert!(root_process.is_some());
-    let Some(root_process) = root_process else {
-        return;
-    };
-    let mut rendered = Vec::new();
-    render_agent_process_tree(
-        &root_process,
-        &processes,
-        "",
-        true,
-        true,
-        &mut rendered,
-    );
     assert_eq!(
-        rendered,
+        render_agent_status_lines(&processes),
         vec![
-            "coder [idle]".to_owned(),
-            format!("`- reviewer [busy] parent_session=default pid={pid}"),
-            "   `- auditor [ready]".to_owned(),
+            format!("coder [idle] pid={pid}"),
+            format!("`- reviewer [busy] parent_session=default parent_run=r1 ppid={pid} pid={pid}"),
+            format!("   `- auditor [ready] ppid={pid}"),
         ]
     );
 }
@@ -83,7 +65,9 @@ fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
             name: "coder".to_owned(),
             parent: Some("worker".to_owned()),
             parent_session: None,
+            parent_run: None,
             status: "busy".to_owned(),
+            ppid: None,
             pid: Some("100".to_owned()),
             model: "main".to_owned(),
             life: "owned".to_owned(),
@@ -92,7 +76,9 @@ fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
             name: "worker".to_owned(),
             parent: Some("coder".to_owned()),
             parent_session: None,
+            parent_run: None,
             status: "ready".to_owned(),
+            ppid: None,
             pid: Some("101".to_owned()),
             model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             life: "owned".to_owned(),
@@ -115,7 +101,9 @@ fn agent_process_tree_escapes_control_file_values() {
         name: "coder".to_owned(),
         parent: None,
         parent_session: None,
+        parent_run: Some("r1\u{1b}[31m".to_owned()),
         status: "idle\u{1b}]52;c;payload\u{7}".to_owned(),
+        ppid: Some("122\u{1b}[31m".to_owned()),
         pid: Some("123\u{1b}[31m".to_owned()),
         model: "bad\u{1b}[31m".to_owned(),
         life: "temp\u{1b}[31m".to_owned(),
@@ -134,7 +122,7 @@ fn agent_process_tree_escapes_control_file_values() {
     assert_eq!(
         rendered,
         vec![
-            "coder [idle\\u{1b}]52;c;payload\\u{7}] model=bad\\u{1b}[31m life=temp\\u{1b}[31m pid=123\\u{1b}[31m"
+            "coder [idle\\u{1b}]52;c;payload\\u{7}] model=bad\\u{1b}[31m life=temp\\u{1b}[31m parent_run=r1\\u{1b}[31m ppid=122\\u{1b}[31m pid=123\\u{1b}[31m"
                 .to_owned()
         ]
     );
@@ -228,7 +216,8 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
     create_agent_fixture(&root, "nested", "agent:task-a", "ready", "");
     assert!(fs::create_dir_all(root.join("agent/control-only.d")).is_ok());
     write_text_file(&root.join("agent/control-only.d/parent"), "agent:worker\n");
-    create_agent_fixture(&root, "worker", "agent:coder session:default", "ready", &pid);
+    create_agent_fixture(&root, "coder", "", "ready", &pid);
+    create_agent_fixture(&root, "worker", "agent:coder run:r1 session:default", "ready", &pid);
     write_text_file(
         &root.join("agent/worker.d/model"),
         "api.lmm.best/gpt-5.3-codex-spark\n",
@@ -246,9 +235,10 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
             "model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             "life=owned".to_owned(),
             "role=worker".to_owned(),
-            "parent=agent:coder session:default".to_owned(),
+            "parent=agent:coder session:default run:r1".to_owned(),
             "children=3".to_owned(),
             format!("pid={pid}"),
+            format!("ppid={pid}"),
             "uid=1000".to_owned(),
             "gid=100".to_owned(),
             "groups=10 20".to_owned(),
@@ -273,6 +263,7 @@ fn agent_status_marks_ready_agent_dead_when_recorded_pid_is_gone() {
             "parent=agent:coder".to_owned(),
             "children=0".to_owned(),
             "pid=-".to_owned(),
+            "ppid=-".to_owned(),
             "uid=-".to_owned(),
             "gid=-".to_owned(),
             "groups=-".to_owned(),
@@ -300,6 +291,7 @@ fn agent_status_child_count_skips_dead_and_stale_pid_children() {
             "parent=agent:base".to_owned(),
             "children=1".to_owned(),
             "pid=-".to_owned(),
+            "ppid=-".to_owned(),
             "uid=-".to_owned(),
             "gid=-".to_owned(),
             "groups=-".to_owned(),
@@ -333,6 +325,7 @@ fn agent_status_escapes_control_file_values() {
             "parent=agent:coder".to_owned(),
             "children=0".to_owned(),
             "pid=-".to_owned(),
+            "ppid=-".to_owned(),
             "uid=-".to_owned(),
             "gid=-".to_owned(),
             "groups=-".to_owned(),
@@ -430,7 +423,7 @@ fn status_helpers_report_ctx_and_agent_tree() {
     let root = clean_test_dir("ctx-status-tree");
     let pid = std::process::id().to_string();
     write_text_file(&root.join("status"), "ready\n");
-    create_agent_fixture(&root, "coder", "", "idle", "");
+    create_agent_fixture(&root, "coder", "", "idle", &pid);
     create_agent_fixture(&root, "reviewer", "agent:coder session:default run:r1", "busy", &pid);
 
     assert_eq!(ctx_state(true, true, true), "running");
@@ -443,8 +436,8 @@ fn status_helpers_report_ctx_and_agent_tree() {
     assert_eq!(
         rendered,
         vec![
-            "coder [idle]".to_owned(),
-            format!("`- reviewer [busy] parent_session=default pid={pid}"),
+            format!("coder [idle] pid={pid}"),
+            format!("`- reviewer [busy] parent_session=default parent_run=r1 ppid={pid} pid={pid}"),
         ]
     );
 }

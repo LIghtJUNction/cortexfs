@@ -120,8 +120,8 @@ necessary artifacts. It should not include the child's full `messages.jsonl`.
 CLI inspection may join this coordination table with the backing agent process
 controls. For example, `ctx agent children coder` reports each child channel's
 stable `status` plus the backing `agent/<agent>.d/parent`, `model`, `status`,
-and `pid`, giving a `ps`-like view of worker task state and its parent-session
-attachment without adding fields to `context/child/<child>/`.
+and `pid`, giving a `ps`-like view of worker task state and its parent
+session/run attachment without adding fields to `context/child/<child>/`.
 If `ctx agent wait` sees an `active` child whose backing agent's effective
 state is `dead`, has no live `pid`, and still points back to the same parent
 agent/session, it may synchronously reap that child channel as `cancelled`. A
@@ -327,6 +327,8 @@ existing `model=`, `life=`, `role=`, `parent=`, `child_parent=`, `plan=`,
 `handoff=`, `result=`, and `refs=` fields; the
 worker should claim and finish through the same `ctx schedule` commands rather
 than creating another coordination file, queue, or runtime abstraction.
+`ctx schedule status` exposes the same `child_parent` value in its read-only
+table so parent and worker views agree before claim/result transitions.
 
 The parent uses DAG edges for known ordering and uses ReAct only inside a node's
 bounded execution loop. ReAct steps may decide tool calls and child handoffs,

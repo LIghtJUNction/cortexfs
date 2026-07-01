@@ -66,7 +66,7 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
         (
             "CTX_AGENT_ROLE".to_owned(),
-            agent_role_name(view.agent_name()).to_owned(),
+            agent_role_for_display(view.agent_name()).to_owned(),
         ),
         ("CTX_AGENT_MODEL".to_owned(), view.model().to_owned()),
         (
@@ -121,14 +121,6 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
         env.push((key.clone(), value.clone()));
     }
     env
-}
-
-fn agent_role_name(agent_name: &str) -> &'static str {
-    if is_worker_agent_name(agent_name) {
-        "worker"
-    } else {
-        "agent"
-    }
 }
 
 fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {

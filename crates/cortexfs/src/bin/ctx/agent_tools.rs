@@ -59,7 +59,7 @@ fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibl
     require_cli_name("agent name", name)?;
     let mut paths = Vec::new();
     paths.extend(ctx_tool_path(root)?.dirs().iter().map(PathBuf::from));
-    let agent_path = root.join("agent").join(format!("{name}.d")).join("path");
+    let agent_path = agent_control_dir(root, name).join("path");
     if let Ok(content) = read_file_to_string(&agent_path) {
         paths.extend(content.lines().map(PathBuf::from));
     }
@@ -103,7 +103,7 @@ fn is_control_or_socket_name(name: &str) -> bool {
 }
 
 fn agent_cwd(root: &Path, name: &str) -> Result<String, CliError> {
-    let path = root.join("agent").join(format!("{name}.d")).join("cwd");
+    let path = agent_control_dir(root, name).join("cwd");
     Ok(read_optional_trimmed(&path)?.unwrap_or_else(|| "/workspace".to_owned()))
 }
 
@@ -146,4 +146,3 @@ fn read_optional_trimmed(path: &Path) -> Result<Option<String>, CliError> {
         Ok(Some(value.to_owned()))
     }
 }
-
