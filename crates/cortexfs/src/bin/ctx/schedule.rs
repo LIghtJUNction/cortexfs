@@ -245,17 +245,8 @@ fn schedule_advance(root: &Path, path: &str, done: &[String]) -> Result<(), CliE
 fn schedule_handoff_agent_model_life(root: &Path, agent: &str) -> Result<(String, String), CliError> {
     require_schedule_handoff_agent(root, agent)?;
     let control = root.join("agent").join(format!("{agent}.d"));
-    let model = read_agent_control_trimmed(&control, "model")?
-        .unwrap_or_else(|| default_agent_process_model(agent).to_owned());
-    if !(is_model_name(&model) || matches!(model.as_str(), "main" | "helper")) {
-        return Err(CliError::usage(format!(
-            "invalid handoff agent model for {agent}: {model}"
-        )));
-    }
-    let life = read_agent_control_trimmed(&control, "life")?.unwrap_or_else(|| "owned".to_owned());
-    if cortexfs::ChildLifecycle::parse(&life).is_err() {
-        return Err(CliError::usage(format!("invalid handoff agent life for {agent}: {life}")));
-    }
+    let model = read_agent_model_for_context(&control, "handoff agent")?;
+    let life = read_agent_life_for_context(&control, "handoff agent")?;
     Ok((model, life))
 }
 

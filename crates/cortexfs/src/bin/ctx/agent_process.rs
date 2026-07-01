@@ -121,8 +121,8 @@ fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
         let control = root.join("agent").join(format!("{name}.d"));
         let parent = read_agent_parent_ref(&control)?;
         let (status, pid) = live_agent_status_and_pid(&control)?;
-        let model = read_agent_control_trimmed(&control, "model")?
-            .unwrap_or_else(|| default_agent_process_model(&name).to_owned());
+        let model = read_agent_model_for_context(&control, "agent")?;
+        let life = read_agent_life_for_context(&control, "agent")?;
         processes.push(AgentProcess {
             name,
             parent: parent.as_ref().map(|parent| parent.agent.clone()),
@@ -130,7 +130,7 @@ fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
             status,
             pid,
             model,
-            life: read_agent_control_trimmed(&control, "life")?.unwrap_or_else(|| "owned".to_owned()),
+            life,
         });
     }
     Ok(processes)
@@ -201,7 +201,45 @@ fn read_agent_parent_ref(control: &Path) -> Result<Option<AgentParentRef>, CliEr
     let Some(parent) = read_agent_control_trimmed(control, "parent")? else {
         return Ok(None);
     };
-    Ok(parse_agent_parent_ref(&parent))
+    parse_agent_parent_ref(&parent).map(Some).ok_or_else(|| {
+        let agent = control
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".d"))
+            .unwrap_or("agent");
+        CliError::usage(format!("invalid agent parent for {agent}: {parent}"))
+    })
+}
+
+fn read_agent_life_for_context(control: &Path, context: &str) -> Result<String, CliError> {
+    let life = read_agent_control_trimmed(control, "life")?.unwrap_or_else(|| "owned".to_owned());
+    if cortexfs::ChildLifecycle::parse(&life).is_err() {
+        return Err(CliError::usage(format!(
+            "invalid {context} life for {}: {life}",
+            control_agent_name(control)
+        )));
+    }
+    Ok(life)
+}
+
+fn read_agent_model_for_context(control: &Path, context: &str) -> Result<String, CliError> {
+    let model = read_agent_control_trimmed(control, "model")?
+        .unwrap_or_else(|| default_agent_process_model(control_agent_name(control)).to_owned());
+    if !(is_model_name(&model) || matches!(model.as_str(), "main" | "helper")) {
+        return Err(CliError::usage(format!(
+            "invalid {context} model for {}: {model}",
+            control_agent_name(control)
+        )));
+    }
+    Ok(model)
+}
+
+fn control_agent_name(control: &Path) -> &str {
+    control
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".d"))
+        .unwrap_or("agent")
 }
 
 fn parse_agent_parent_ref(value: &str) -> Option<AgentParentRef> {

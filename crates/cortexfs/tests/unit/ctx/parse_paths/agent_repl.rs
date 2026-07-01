@@ -41,7 +41,7 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
     assert_eq!(agent_repl_prompt(false, "coder", "default"), "coder/default ❯ ");
     assert_eq!(
         agent_repl_model_summary(false, &root, "coder"),
-        "main -> /ctx/model/localhost/gpt-5.4-mini (missing)"
+        Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
     );
     assert!(AGENT_REPL_COMMANDS.contains("/clear"));
 }
@@ -53,8 +53,22 @@ fn agent_repl_model_summary_defaults_missing_worker_model_to_spark() {
 
     assert_eq!(
         agent_repl_model_summary(false, &root, "worker"),
-        "api.lmm.best/gpt-5.3-codex-spark"
+        Ok("api.lmm.best/gpt-5.3-codex-spark".to_owned())
     );
+}
+
+#[test]
+fn agent_repl_model_summary_rejects_invalid_model() {
+    let root = clean_test_dir("ctx-agent-repl-invalid-model");
+    assert!(fs::create_dir_all(root.join("agent/worker.d")).is_ok());
+    assert!(fs::write(root.join("agent/worker.d/model"), "bad/model/name\n").is_ok());
+
+    assert!(matches!(
+        agent_repl_model_summary(false, &root, "worker"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent model for worker: bad/model/name"
+    ));
 }
 
 #[test]
@@ -64,7 +78,7 @@ fn agent_repl_model_summary_defaults_worker_prefix_to_spark() {
 
     assert_eq!(
         agent_repl_model_summary(false, &root, "worker-fast"),
-        "api.lmm.best/gpt-5.3-codex-spark"
+        Ok("api.lmm.best/gpt-5.3-codex-spark".to_owned())
     );
 }
 
@@ -83,7 +97,7 @@ fn agent_repl_model_summary_rejects_symlink_model_directory() {
 
     assert_eq!(
         agent_repl_model_summary(false, &root, "coder"),
-        "main (missing alias)"
+        Ok("main (missing alias)".to_owned())
     );
 }
 
@@ -107,7 +121,7 @@ fn agent_repl_model_summary_does_not_follow_symlink_alias_target() {
 
     assert_eq!(
         agent_repl_model_summary(false, &root, "coder"),
-        "main -> /ctx/model/localhost/gpt-5.4-mini (missing)"
+        Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
     );
 }
 

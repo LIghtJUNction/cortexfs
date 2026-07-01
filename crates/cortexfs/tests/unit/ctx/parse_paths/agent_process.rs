@@ -179,6 +179,47 @@ fn agent_ps_shows_non_owned_worker_lifecycle() {
 }
 
 #[test]
+fn agent_ps_rejects_invalid_lifecycle() {
+    let root = clean_test_dir("ctx-agent-ps-invalid-life");
+    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    write_text_file(&root.join("agent/worker.d/life"), "detached\n");
+
+    assert!(matches!(
+        read_agent_processes(&root),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent life for worker: detached"
+    ));
+}
+
+#[test]
+fn agent_ps_rejects_invalid_model() {
+    let root = clean_test_dir("ctx-agent-ps-invalid-model");
+    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    write_text_file(&root.join("agent/worker.d/model"), "bad/model/name\n");
+
+    assert!(matches!(
+        read_agent_processes(&root),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent model for worker: bad/model/name"
+    ));
+}
+
+#[test]
+fn agent_ps_rejects_invalid_parent_ref() {
+    let root = clean_test_dir("ctx-agent-ps-invalid-parent");
+    create_agent_fixture(&root, "worker", "session:default", "ready", "");
+
+    assert!(matches!(
+        read_agent_processes(&root),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent parent for worker: session:default"
+    ));
+}
+
+#[test]
 fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
     let root = clean_test_dir("ctx-agent-status-process-fields");
     let pid = std::process::id().to_string();
@@ -278,7 +319,8 @@ fn agent_status_child_count_skips_dead_and_stale_pid_children() {
 #[test]
 fn agent_status_escapes_control_file_values() {
     let root = clean_test_dir("ctx-agent-status-escape-fields");
-    create_agent_fixture(&root, "worker", "agent:coder\u{1b}[31m", "ready\u{1b}]52;c;x\u{7}", "");
+    create_agent_fixture(&root, "worker", "agent:coder", "ready\u{1b}]52;c;x\u{7}", "");
+    write_text_file(&root.join("agent/worker.d/root"), "/tmp/\u{1b}[31m\n");
 
     let lines = agent_status_lines(&root, "worker").unwrap_or_default();
     assert_eq!(
@@ -288,18 +330,59 @@ fn agent_status_escapes_control_file_values() {
             "model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
             "life=owned".to_owned(),
             "role=worker".to_owned(),
-            "parent=agent:coder\\u{1b}[31m".to_owned(),
+            "parent=agent:coder".to_owned(),
             "children=0".to_owned(),
             "pid=-".to_owned(),
             "uid=-".to_owned(),
             "gid=-".to_owned(),
             "groups=-".to_owned(),
-            "root=-".to_owned(),
+            "root=/tmp/\\u{1b}[31m".to_owned(),
             "cwd=-".to_owned(),
         ]
     );
     assert!(!lines.join("\n").as_bytes().contains(&0x1b));
     assert!(!lines.join("\n").as_bytes().contains(&0x07));
+}
+
+#[test]
+fn agent_status_rejects_invalid_lifecycle() {
+    let root = clean_test_dir("ctx-agent-status-invalid-life");
+    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    write_text_file(&root.join("agent/worker.d/life"), "detached\n");
+
+    assert!(matches!(
+        agent_status_lines(&root, "worker"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent life for worker: detached"
+    ));
+}
+
+#[test]
+fn agent_status_rejects_invalid_model() {
+    let root = clean_test_dir("ctx-agent-status-invalid-model");
+    create_agent_fixture(&root, "worker", "agent:coder", "ready", "");
+    write_text_file(&root.join("agent/worker.d/model"), "bad/model/name\n");
+
+    assert!(matches!(
+        agent_status_lines(&root, "worker"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent model for worker: bad/model/name"
+    ));
+}
+
+#[test]
+fn agent_status_rejects_invalid_parent_ref() {
+    let root = clean_test_dir("ctx-agent-status-invalid-parent");
+    create_agent_fixture(&root, "worker", "session:default", "ready", "");
+
+    assert!(matches!(
+        agent_status_lines(&root, "worker"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent parent for worker: session:default"
+    ));
 }
 
 #[test]
