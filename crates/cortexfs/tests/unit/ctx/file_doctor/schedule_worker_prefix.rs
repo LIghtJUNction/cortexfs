@@ -16,10 +16,11 @@ fn schedule_handoff_agent_model_defaults_worker_prefixes_to_spark() {
         write_text_file(&root.join("agent").join(format!("{agent}.d/life")), "temp\n");
 
         assert_eq!(
-            schedule_handoff_agent_model_life(&root, agent),
+            schedule_handoff_agent_details(&root, agent),
             Ok((
                 "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
-                "temp".to_owned()
+                "temp".to_owned(),
+                "-".to_owned()
             ))
         );
     }
@@ -80,7 +81,7 @@ fn schedule_status_defaults_worker_prefix_to_spark_when_policy_allows_it() {
             assert_schedule_status_rows(
                 &root,
                 &[&format!(
-                    "implement\treact\t{agent}\twork-123\tdefault\tapi.lmm.best/gpt-5.3-codex-spark\ttemp\tworker\tready"
+                    "implement\treact\t{agent}\twork-123\tdefault\tapi.lmm.best/gpt-5.3-codex-spark\ttemp\tworker\t-\tready"
                 )],
             ),
             Ok(())

@@ -130,12 +130,12 @@ parent agent label and policy, derives completed delegated nodes from
 `context/child/<child>/status`, applies any explicit local `--done` node ids,
 and materializes newly ready delegated handoffs under `context/child/<child>/`.
 `ctx schedule status` is a read-only table over the same state. It prints
-`node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>role<TAB>state`, where state is one of
+`node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>role<TAB>child_parent<TAB>state`, where state is one of
 `blocked`, `ready`, `pending`, `active`, `done`, `error`, or `cancelled`.
-The session, model, life, and role columns are `-` for local parent nodes. Delegated
-child nodes show the explicit child session, or the inherited parent session
-when the schedule node omits one, plus the selected backing agent model and
-lifecycle.
+The session, model, life, role, and child_parent columns are `-` for local parent
+nodes. Delegated child nodes show the explicit child session, or the inherited
+parent session when the schedule node omits one, plus the selected backing agent
+model, lifecycle, and backing parent ref.
 For delegated nodes, the backing agent must exist as both `agent/<name>` and
 `agent/<name>.d/`; schedule commands must not invent `main`/`owned` defaults for
 a missing worker object.
@@ -199,14 +199,15 @@ that parent-side child result as `cancelled` so `ctx agent wait` observes the
 terminal state. It must not invent a new lifecycle namespace or queue.
 `ctx agent status` reads ordinary `agent/<name>.d/*` controls and prints the
 status value first, followed by `model=`, `life=`, `role=`, `parent=`, `children=`,
-`pid=`, `uid=`, `gid=`, `groups=`, `root=`, and `cwd=` lines.
+`pid=`, `ppid=`, `uid=`, `gid=`, `groups=`, `root=`, and `cwd=` lines.
 This keeps the first line usable as the process state while exposing the
 backing model, worker role, direct child count, parent relationship, Linux identity, and
-chroot/cwd for worker inspection. The `children=` count includes direct child
+chroot/cwd for worker inspection. The `parent=` line uses the same normalized
+parent ref as `ctx agent ps`, including optional `session` and `run`. The `children=` count includes direct child
 agents whose effective state is not `dead`; recorded `ready` or `busy` children
 with stale numeric pids are excluded the same way as `ctx agent ps`. `ctx agent ps` may
-read `agent/<name>.d/parent`,
-`model`, `life`, `status`, and `pid` directly and print the current agent tree with derived worker roles.
+read `agent/<name>.d/parent`, `model`, `life`, `status`, and `pid` directly and
+print the current agent tree with derived worker roles and live `ppid=` values.
 Default `main` model selections and `owned` lifecycles may stay implicit;
 non-default worker models and non-owned lifecycles should be visible in the
 tree.
@@ -216,12 +217,12 @@ existing control files, not a way to inherit host variables or mutate runtime
 state.
 `ctx agent children` reads the parent session `context/child/<child>/` table and
 prints tab-separated `child`, child-channel `status`, backing `agent`,
-child-channel `session`, backing agent `parent_session`, backing agent `model`,
-backing agent `life`, backing agent `role`, backing agent `status`, and backing
-agent `pid` (`-` when absent). `role` derives from the v1 worker-role name
-convention; the other backing-agent columns are ordinary `agent/<agent>.d/*`
-controls, so
-worker task state and its parent-session attachment are
+child-channel `session`, backing agent `parent_session`, backing agent
+`parent_run`, backing agent `model`, backing agent `life`, backing agent `role`,
+backing agent `status`, live parent `ppid`, and backing agent `pid` (`-` when absent). `role`
+derives from the v1 worker-role name convention; the other backing-agent columns
+are ordinary `agent/<agent>.d/*` controls, so worker task state and its parent
+session/run attachment are
 inspectable without copying runtime state into the parent context.
 `ctx agent wait` reads the same child channel. If a child is still `active` but
 its backing agent's effective state is `dead`, has no live `pid`, and still

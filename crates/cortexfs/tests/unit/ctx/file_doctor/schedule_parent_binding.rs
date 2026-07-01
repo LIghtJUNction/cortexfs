@@ -49,3 +49,26 @@ fn schedule_result_rejects_wrong_backing_session_without_recording() {
         Ok("")
     ));
 }
+
+#[test]
+fn schedule_parent_binding_requires_matching_run_when_parent_run_is_known() {
+    assert!(matches!(
+        schedule_require_handoff_parent(
+            "agent:coder session:default run:r1",
+            "worker",
+            "agent:coder session:default"
+        ),
+        Err(ref error)
+            if error.code == 2
+                && error.message
+                    == "handoff agent parent mismatch for worker: agent:coder session:default"
+    ));
+    assert_eq!(
+        schedule_require_handoff_parent(
+            "agent:coder session:default run:r1",
+            "worker",
+            "agent:coder session:default run:r1"
+        ),
+        Ok(())
+    );
+}

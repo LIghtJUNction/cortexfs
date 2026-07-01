@@ -242,7 +242,7 @@ fn parent_agent_for_session_context_path(path: &str) -> Option<&str> {
 }
 
 fn parent_agent_policy(root: &Path, parent_agent: &str) -> Result<PolicyV0, CliError> {
-    let policy_path = root.join("agent").join(format!("{parent_agent}.d")).join("policy");
+    let policy_path = agent_control_dir(root, parent_agent).join("policy");
     let content = read_file_to_string(&policy_path)?;
     PolicyV0::parse(&content).map_err(|error| {
         CliError::usage(format!(
@@ -252,7 +252,7 @@ fn parent_agent_policy(root: &Path, parent_agent: &str) -> Result<PolicyV0, CliE
 }
 
 fn parent_policy_subject(root: &Path, parent_agent: &str) -> Result<String, CliError> {
-    let label_path = root.join("agent").join(format!("{parent_agent}.d")).join("label");
+    let label_path = agent_control_dir(root, parent_agent).join("label");
     match fs::symlink_metadata(&label_path) {
         Ok(_metadata) => {
             let label = read_file_to_string(&label_path)?;
