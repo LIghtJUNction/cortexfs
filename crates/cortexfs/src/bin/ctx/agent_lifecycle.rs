@@ -78,7 +78,7 @@ fn stop_owned_child_agents(root: &Path, parent: &str) -> Result<(), CliError> {
         stop_agent_control(&control, &child)?;
         record_parent_child_cancellation(root, &child, &child_parent)?;
         stop_owned_child_agents(root, &child)?;
-        if is_temp {
+        if is_temp && is_dedicated_worker_agent_name(&child) {
             remove_temp_agent_object(root, &child)?;
         }
     }

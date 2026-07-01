@@ -54,7 +54,7 @@ fn agent_wait(
     if status == ChildContextStatus::Cancelled
         && life == "temp"
         && is_object_name(&agent)
-        && (agent.starts_with("worker-") || agent.starts_with("executor-"))
+        && is_dedicated_worker_agent_name(&agent)
     {
         remove_temp_agent_object(root, &agent)?;
     }

@@ -168,6 +168,9 @@ history. The parent result channel remains durable. For a dedicated temp
 `agent/<name>`, `agent/<name>.sock`, and `agent/<name>.d/` object after the
 terminal result is recorded; the canonical shared `worker` and `executor`
 objects remain reusable worker entries.
+The same distinction applies when parent stop cancellation reaches children:
+dedicated temp `worker-*` and `executor-*` objects may be removed, while the
+canonical shared worker objects stay present.
 
 Example `handoff.md`:
 

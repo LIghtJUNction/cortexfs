@@ -1,5 +1,6 @@
 #[test]
-fn agent_stop_host_fallback_removes_temp_worker_object_after_cancellation() -> Result<(), CliError> {
+fn agent_stop_host_fallback_preserves_canonical_temp_worker_after_cancellation(
+) -> Result<(), CliError> {
     let root = clean_test_dir("ctx-agent-stop-temp-worker-cleanup");
     create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
     create_agent_fixture(&root, "worker", "agent:coder session:default run:r1", "busy", "101");
@@ -24,9 +25,9 @@ fn agent_stop_host_fallback_removes_temp_worker_object_after_cancellation() -> R
 
     assert_eq!(agent_stop(&root, "coder"), Ok(ExitCode::SUCCESS));
 
-    assert!(!root.join("agent/worker").exists());
-    assert!(!root.join("agent/worker.sock").exists());
-    assert!(!root.join("agent/worker.d").exists());
+    assert!(root.join("agent/worker").exists());
+    assert!(root.join("agent/worker.sock").exists());
+    assert!(root.join("agent/worker.d").exists());
     assert_eq!(
         fs::read_to_string(child.join("status")).unwrap_or_default(),
         "cancelled\n"
@@ -41,10 +42,10 @@ fn agent_stop_host_fallback_removes_temp_worker_object_after_cancellation() -> R
             status: "cancelled".to_owned(),
             agent: "worker".to_owned(),
             session: "default".to_owned(),
-            parent_session: None,
+            parent_session: Some("default".to_owned()),
             model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
-            life: "unknown".to_owned(),
-            agent_status: "unknown".to_owned(),
+            life: "temp".to_owned(),
+            agent_status: "dead".to_owned(),
             pid: None,
         }));
     assert_eq!(
