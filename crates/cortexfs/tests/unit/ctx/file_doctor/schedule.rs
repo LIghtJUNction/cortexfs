@@ -238,6 +238,70 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
 }
 
 #[test]
+fn schedule_claim_rejects_invalid_child_agent_without_claiming() {
+    let root = clean_test_dir("ctx-schedule-claim-invalid-child-agent");
+    let child = create_pending_worker_handoff(&root, "claim invalid child agent");
+    write_text_file(&child.join("agent"), "../bad\n");
+
+    assert!(matches!(
+        schedule_claim_worker(&root),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid child context: invalid agent name"
+    ));
+    assert!(matches!(
+        fs::read_to_string(child.join("status")).as_deref(),
+        Ok("pending\n")
+    ));
+}
+
+#[test]
+fn schedule_result_rejects_invalid_child_session_without_recording() {
+    let root = clean_test_dir("ctx-schedule-result-invalid-child-session");
+    let child = create_pending_worker_handoff(&root, "result invalid child session");
+    write_text_file(&child.join("session"), "../bad\n");
+
+    assert!(matches!(
+        schedule_command(&root, &ScheduleArgs::Result {
+            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+            child: "work-123".to_owned(),
+            status: ChildContextStatus::Done,
+            result: "done\n".to_owned(),
+            refs_jsonl: String::new(),
+        }),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid child context: invalid session name"
+    ));
+    assert!(matches!(fs::read_to_string(child.join("status")).as_deref(), Ok("pending\n")));
+    assert!(matches!(fs::read_to_string(child.join("result.md")).as_deref(), Ok("")));
+    assert!(matches!(fs::read_to_string(child.join("refs.jsonl")).as_deref(), Ok("")));
+}
+
+#[test]
+fn schedule_result_rejects_invalid_backing_parent_without_recording() {
+    let root = clean_test_dir("ctx-schedule-result-invalid-backing-parent");
+    let child = create_pending_worker_handoff(&root, "result invalid backing parent");
+    write_text_file(&root.join("agent/worker.d/parent"), "session:default\n");
+
+    assert!(matches!(
+        schedule_command(&root, &ScheduleArgs::Result {
+            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+            child: "work-123".to_owned(),
+            status: ChildContextStatus::Done,
+            result: "done\n".to_owned(),
+            refs_jsonl: String::new(),
+        }),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid handoff agent parent for worker: session:default"
+    ));
+    assert!(matches!(fs::read_to_string(child.join("status")).as_deref(), Ok("pending\n")));
+    assert!(matches!(fs::read_to_string(child.join("result.md")).as_deref(), Ok("")));
+    assert!(matches!(fs::read_to_string(child.join("refs.jsonl")).as_deref(), Ok("")));
+}
+
+#[test]
 fn schedule_status_reaps_active_child_when_worker_pid_is_stale() {
     let root = clean_test_dir("ctx-schedule-status-reaps-stale-worker");
     assert!(ensure_v1_reference_tree(&root).is_ok());
@@ -300,6 +364,34 @@ fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
             "temp".to_owned()
         ))
     );
+}
+
+#[test]
+fn schedule_handoff_agent_rejects_invalid_lifecycle() {
+    let root = clean_test_dir("ctx-schedule-handoff-invalid-life");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    write_text_file(&root.join("agent/worker.d/life"), "detached\n");
+
+    assert!(matches!(
+        schedule_handoff_agent_model_life(&root, "worker"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid handoff agent life for worker: detached"
+    ));
+}
+
+#[test]
+fn schedule_handoff_agent_rejects_invalid_parent_ref() {
+    let root = clean_test_dir("ctx-schedule-handoff-invalid-parent");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    write_text_file(&root.join("agent/worker.d/parent"), "session:default\n");
+
+    assert!(matches!(
+        schedule_handoff_agent_parent(&root, "worker"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid handoff agent parent for worker: session:default"
+    ));
 }
 
 #[test]
