@@ -249,6 +249,40 @@ fn agent_runtime_view_defaults_missing_worker_model_to_spark() {
 }
 
 #[test]
+fn agent_runtime_view_defaults_missing_worker_prefix_model_to_spark() {
+    let root = clean_test_dir("agent-runtime-worker-prefix-missing-model");
+    create_complete_object_layout(&root, ObjectClass::Agent, "worker-fast", "none");
+    let control = root.join("agent").join("worker-fast.d");
+    write_text_file(&control.join("label"), "user_u:agent_r:worker-fast_t:s0\n");
+    write_text_file(
+        &control.join("policy"),
+        "allow worker-fast_t model:api.lmm.best/gpt-5.3-codex-spark use\n",
+    );
+    assert!(fs::remove_file(control.join("model")).is_ok());
+
+    let view = derive_agent_runtime_view(&root, "worker-fast");
+    let view = ok!(view);
+    assert_eq!(view.model(), "api.lmm.best/gpt-5.3-codex-spark");
+}
+
+#[test]
+fn agent_runtime_view_defaults_missing_executor_prefix_model_to_spark() {
+    let root = clean_test_dir("agent-runtime-executor-prefix-missing-model");
+    create_complete_object_layout(&root, ObjectClass::Agent, "executor-fast", "none");
+    let control = root.join("agent").join("executor-fast.d");
+    write_text_file(&control.join("label"), "user_u:agent_r:executor-fast_t:s0\n");
+    write_text_file(
+        &control.join("policy"),
+        "allow executor-fast_t model:api.lmm.best/gpt-5.3-codex-spark use\n",
+    );
+    assert!(fs::remove_file(control.join("model")).is_ok());
+
+    let view = derive_agent_runtime_view(&root, "executor-fast");
+    let view = ok!(view);
+    assert_eq!(view.model(), "api.lmm.best/gpt-5.3-codex-spark");
+}
+
+#[test]
 fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
     let root = clean_test_dir("agent-runtime-no-text-grant");
     let allowed = root.join("tool");
