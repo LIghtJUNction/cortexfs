@@ -1,4 +1,6 @@
 impl Filesystem for CortexFuse {
+    cortexfs_mount_init!();
+
     fn forget(&self, _req: &Request, ino: INodeNo, nlookup: u64) {
         let _ignored = self.forget_inode(ino, nlookup);
     }

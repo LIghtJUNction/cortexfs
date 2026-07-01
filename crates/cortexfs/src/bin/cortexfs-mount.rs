@@ -13,15 +13,16 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cortexfs::{
     AbiPathKind, FUSE_V1_ROOT_INODE, FuseV1Attr, FuseV1DirEntry, FuseV1Error, FuseV1FileType,
-    FuseV1Node, FuseV1Projection, classify_abi_path, is_object_name, parse_abi_path,
+    FuseV1Node, FuseV1Projection, MAX_FUSE_V1_SMALL_READ_BYTES, MAX_FUSE_V1_SMALL_WRITE_BYTES,
+    classify_abi_path, is_object_name, parse_abi_path,
 };
 use fuser::{
     AccessFlags, BsdFileFlags, Config, CopyFileRangeFlags, Errno, FileAttr, FileHandle, FileType,
-    Filesystem, FopenFlags, Generation, INodeNo, IoctlFlags, LockOwner, MountOption, OpenAccMode,
-    OpenFlags, PollEvents, PollFlags, PollNotifier, RenameFlags, ReplyAttr, ReplyBmap, ReplyCreate,
-    ReplyData, ReplyDirectory, ReplyDirectoryPlus, ReplyEmpty, ReplyEntry, ReplyIoctl, ReplyLseek,
-    ReplyOpen, ReplyPoll, ReplyStatfs, ReplyWrite, ReplyXattr, Request, SessionACL, TimeOrNow,
-    WriteFlags,
+    Filesystem, FopenFlags, Generation, INodeNo, IoctlFlags, KernelConfig, LockOwner, MountOption,
+    OpenAccMode, OpenFlags, PollEvents, PollFlags, PollNotifier, RenameFlags, ReplyAttr, ReplyBmap,
+    ReplyCreate, ReplyData, ReplyDirectory, ReplyDirectoryPlus, ReplyEmpty, ReplyEntry, ReplyIoctl,
+    ReplyLseek, ReplyOpen, ReplyPoll, ReplyStatfs, ReplyWrite, ReplyXattr, Request, SessionACL,
+    TimeOrNow, WriteFlags,
 };
 use nix::fcntl::{AtFlags, OFlag, openat};
 use nix::sys::stat::{Mode, SFlag, fstatat};
@@ -154,6 +155,7 @@ macro_rules! path_for_inode_or_reply {
 }
 
 include!("../cortexfs_mount_permissions.rs");
+include!("../cortexfs_mount_init.rs");
 include!("../cortexfs_mount_readdirplus.rs");
 include!("../cortexfs_mount_socket_alias_methods.rs");
 include!("../cortexfs_mount_filesystem.rs");
@@ -229,6 +231,10 @@ mod tests {
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/unit/cortexfs_mount_tests.rs"
+    ));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/unit/cortexfs_mount_init_tests.rs"
     ));
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
