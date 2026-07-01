@@ -289,6 +289,11 @@ the parent coordinator and should prefer delegated `react` nodes for independent
 implementation work. The reference `worker` agent runs on the spark model path
 and should execute bounded handoffs without making architecture decisions beyond
 the parent-provided scope.
+Agent names `worker`, `worker-*`, `executor`, and `executor-*` are the v1
+worker-role naming convention. If such an agent object omits `agent/<name>.d/model`,
+the runtime and schedule views use the spark worker model by default. Other
+agent names must keep an explicit model control file or use the normal `main`
+default only in non-runtime display contexts.
 
 The thin CLI entrypoint for the single transition is:
 

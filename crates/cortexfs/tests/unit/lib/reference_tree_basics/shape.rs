@@ -237,6 +237,7 @@ fn assert_reference_agents(root: &Path) {
     ));
     assert!(coder_system.contains("prefer a delegated `react` node"));
     assert!(coder_system.contains("the omitted delegated agent is `worker`"));
+    assert!(coder_system.contains("`worker-*`, `executor`, or `executor-*`"));
     assert!(coder_system.contains("`model=`, `life=`, `plan=`, `handoff=`, `result=`, and `refs=`"));
     assert!(coder_system.contains("ctx agent wait"));
     assert_file_text(
@@ -259,6 +260,7 @@ fn assert_reference_agents(root: &Path) {
         root.join("agent").join("worker.d").join("system.md")
     ));
     assert!(worker_system.contains("spark model path"));
+    assert!(worker_system.contains("Worker-role agent names include"));
     assert!(worker_system.contains("preserve its `model=` and `life=` context"));
     assert!(worker_system.contains("bounded delegated implementation tasks"));
     assert!(worker_system.contains("Do not make architecture decisions"));

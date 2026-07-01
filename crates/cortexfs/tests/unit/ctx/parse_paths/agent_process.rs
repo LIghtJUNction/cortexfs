@@ -243,7 +243,7 @@ fn agent_status_marks_ready_agent_dead_when_recorded_pid_is_gone() {
 fn agent_status_child_count_skips_dead_and_stale_pid_children() {
     let root = clean_test_dir("ctx-agent-status-live-child-count");
     create_agent_fixture(&root, "coder", "agent:base", "ready", "");
-    create_agent_fixture(&root, "live", "agent:coder", "ready", "");
+    create_agent_fixture(&root, "worker-fast", "agent:coder", "ready", "");
     create_agent_fixture(&root, "dead", "agent:coder", "dead", "");
     create_agent_fixture(&root, "stale", "agent:coder", "busy", "999999999");
 
@@ -262,6 +262,13 @@ fn agent_status_child_count_skips_dead_and_stale_pid_children() {
             "root=-".to_owned(),
             "cwd=-".to_owned(),
         ])
+    );
+    assert_eq!(
+        agent_status_lines(&root, "worker-fast")
+            .map(|lines| lines.get(1).cloned()),
+        Ok(Some(
+            "model=api.lmm.best/gpt-5.3-codex-spark".to_owned()
+        ))
     );
 }
 
