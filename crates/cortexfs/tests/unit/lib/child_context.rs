@@ -57,6 +57,68 @@ allow reviewer_t shared:project-a read
 }
 
 #[test]
+fn child_agent_authority_attenuates_worker_prefix_model_policy() {
+    let parent_identity = AgentUnixIdentity::new(1000, 100, [10, 20]);
+    let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
+    let parent_policy = PolicyV0::parse(
+        "\
+allow coder_t model:api.lmm.best/gpt-5.3-codex-spark use
+allow coder_t tool:fs.read execute
+",
+    );
+    let parent_policy = ok!(parent_policy);
+    let child_policy = PolicyV0::parse(
+        "\
+allow worker-fast_t model:api.lmm.best/gpt-5.3-codex-spark use
+allow worker-fast_t tool:fs.read execute
+",
+    );
+    let child_policy = ok!(child_policy);
+    let expanded_policy = PolicyV0::parse(
+        "\
+allow worker-fast_t model:openai/gpt-5.5 use
+allow worker-fast_t tool:fs.read execute
+",
+    );
+    let expanded_policy = ok!(expanded_policy);
+    let parent_mounts = MountTable::parse("/work\t/work\trw\trbind,nosuid,nodev\n");
+    let parent_mounts = ok!(parent_mounts);
+    let child_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
+    let child_mounts = ok!(child_mounts);
+    let authority = ChildAgentAuthority::new(
+        "coder",
+        &parent_identity,
+        "coder_t",
+        &parent_policy,
+        &parent_mounts,
+    );
+
+    let worker = ChildAgentRequest::new(
+        "worker-fast",
+        "agent:coder session:default run:r125",
+        ChildLifecycle::Temp,
+        ChildAgentControls::new(&child_identity, "worker-fast_t", &child_policy, &child_mounts),
+    );
+    assert_eq!(authorize_child_agent(worker, authority), Ok(()));
+
+    let expanded = ChildAgentRequest::new(
+        "worker-fast",
+        "agent:coder session:default run:r126",
+        ChildLifecycle::Temp,
+        ChildAgentControls::new(
+            &child_identity,
+            "worker-fast_t",
+            &expanded_policy,
+            &child_mounts,
+        ),
+    );
+    assert_eq!(
+        authorize_child_agent(expanded, authority),
+        Err(ChildAgentDenial::PolicyExpansion)
+    );
+}
+
+#[test]
 fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
     let parent_identity = AgentUnixIdentity::new(1000, 100, [10]);
     let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
