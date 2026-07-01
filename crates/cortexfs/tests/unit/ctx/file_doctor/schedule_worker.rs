@@ -85,6 +85,31 @@ fn write_worker_schedule_plan(session: &Path) {
     );
 }
 
+fn create_pending_worker_handoff(root: &Path, test_name: &str) -> PathBuf {
+    assert!(ensure_v1_reference_tree(root).is_ok());
+    write_text_file(&root.join("agent/worker.d/life"), "temp\n");
+    let session = fixture_path(
+        root,
+        &[
+            "home", "1000", "agent", "coder", "session", "default",
+        ],
+    );
+    create_complete_session_layout(&session);
+    write_worker_schedule_plan(&session);
+    assert!(
+        schedule_command(
+            root,
+            &ScheduleArgs::Advance {
+                path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+                done: Vec::new(),
+            },
+        )
+        .is_ok(),
+        "{test_name}"
+    );
+    session.join("context").join("child").join("work-123")
+}
+
 fn assert_worker_schedule_status(root: &Path, status: &str) {
     assert_eq!(
         assert_schedule_status_rows(

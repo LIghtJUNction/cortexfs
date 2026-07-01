@@ -253,15 +253,20 @@ fn schedule_handoff_agent_model_life(root: &Path, agent: &str) -> Result<(String
         )));
     }
     let life = read_agent_control_trimmed(&control, "life")?.unwrap_or_else(|| "owned".to_owned());
+    if cortexfs::ChildLifecycle::parse(&life).is_err() {
+        return Err(CliError::usage(format!("invalid handoff agent life for {agent}: {life}")));
+    }
     Ok((model, life))
 }
 
 fn schedule_handoff_agent_parent(root: &Path, agent: &str) -> Result<String, CliError> {
     require_schedule_handoff_agent(root, agent)?;
-    Ok(
-        read_agent_control_trimmed(&root.join("agent").join(format!("{agent}.d")), "parent")?
-            .unwrap_or_else(|| "-".to_owned()),
-    )
+    let parent = read_agent_control_trimmed(&root.join("agent").join(format!("{agent}.d")), "parent")?
+        .unwrap_or_else(|| "-".to_owned());
+    if parent != "-" && parse_agent_parent_ref(&parent).is_none() {
+        return Err(CliError::usage(format!("invalid handoff agent parent for {agent}: {parent}")));
+    }
+    Ok(parent)
 }
 
 fn schedule_handoff_agent_role(agent: &str) -> &'static str {
@@ -296,25 +301,14 @@ fn schedule_claim(root: &Path, path: &str, child: &str) -> Result<(), CliError> 
     let parent_session_dir = schedule_parent_session_dir(root, path, "claim")?;
     let context_abi_path = schedule_context_abi_path(&abi_path, "claim")?;
     let child_paths = schedule_child_context_abi_paths(&context_abi_path, child)?;
-    schedule_claim_child_active(root, &child_paths.status)?;
     let child_dir = resolve_abi_path(root, &child_paths.status)?
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| CliError::usage(format!("invalid child status path for {child}")))?;
-    let agent =
-        read_optional_trimmed(&child_dir.join("agent"))?.unwrap_or_else(|| "agent?".to_owned());
-    let session =
-        read_optional_trimmed(&child_dir.join("session"))?.unwrap_or_else(|| "default".to_owned());
-    let (model, life) = if is_object_name(&agent) {
-        schedule_handoff_agent_model_life(root, &agent)?
-    } else {
-        ("unknown".to_owned(), "unknown".to_owned())
-    };
-    let child_parent = if is_object_name(&agent) {
-        schedule_handoff_agent_parent(root, &agent)?
-    } else {
-        "unknown".to_owned()
-    };
+    let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
+    let (model, life) = schedule_handoff_agent_model_life(root, &agent)?;
+    let child_parent = schedule_handoff_agent_parent(root, &agent)?;
+    schedule_claim_child_active(root, &child_paths.status)?;
     let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
     print_line(&format!(
         "claim child={child} status=active agent={} session={} model={} life={} role={} parent={} child_parent={} plan={} handoff={} result={} refs={}",
@@ -342,6 +336,20 @@ fn schedule_claim_child_active(root: &Path, status_abi_path: &str) -> Result<(),
             "invalid child context: invalid status transition",
         )),
     }
+}
+
+fn schedule_child_context_agent_session(child_dir: &Path) -> Result<(String, String), CliError> {
+    let agent = read_optional_trimmed(&child_dir.join("agent"))?
+        .ok_or_else(|| CliError::usage("invalid child context: invalid agent name"))?;
+    let session = read_optional_trimmed(&child_dir.join("session"))?
+        .ok_or_else(|| CliError::usage("invalid child context: invalid session name"))?;
+    if !is_object_name(&agent) {
+        return Err(CliError::usage("invalid child context: invalid agent name"));
+    }
+    if !is_object_name(&session) {
+        return Err(CliError::usage("invalid child context: invalid session name"));
+    }
+    Ok((agent, session))
 }
 
 fn schedule_parent_ref_for_output(
@@ -373,28 +381,17 @@ fn schedule_result(
     let parent_agent = parent_agent_for_session_context_path(&abi_path)
         .ok_or_else(|| CliError::usage("schedule result plan must belong to an agent session"))?;
     let parent_session_dir = schedule_parent_session_dir(root, path, "result")?;
-    record_child_result_to_parent_context(&parent_session_dir, child, status, result, refs_jsonl)
-        .map_err(schedule_child_context_cli_error)?;
     let context_abi_path = schedule_context_abi_path(&abi_path, "result")?;
     let child_paths = schedule_child_context_abi_paths(&context_abi_path, child)?;
     let child_dir = resolve_abi_path(root, &child_paths.status)?
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| CliError::usage(format!("invalid child status path for {child}")))?;
-    let agent =
-        read_optional_trimmed(&child_dir.join("agent"))?.unwrap_or_else(|| "agent?".to_owned());
-    let session =
-        read_optional_trimmed(&child_dir.join("session"))?.unwrap_or_else(|| "default".to_owned());
-    let (model, life) = if is_object_name(&agent) {
-        schedule_handoff_agent_model_life(root, &agent)?
-    } else {
-        ("unknown".to_owned(), "unknown".to_owned())
-    };
-    let child_parent = if is_object_name(&agent) {
-        schedule_handoff_agent_parent(root, &agent)?
-    } else {
-        "unknown".to_owned()
-    };
+    let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
+    let (model, life) = schedule_handoff_agent_model_life(root, &agent)?;
+    let child_parent = schedule_handoff_agent_parent(root, &agent)?;
+    record_child_result_to_parent_context(&parent_session_dir, child, status, result, refs_jsonl)
+        .map_err(schedule_child_context_cli_error)?;
     let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
     print_line(&format!(
         "result child={child} status={} agent={} session={} model={} life={} role={} parent={} child_parent={} plan={} result={} refs={}",
@@ -464,27 +461,13 @@ fn schedule_record_cli_error(command: &str, error: AgentScheduleRecordError) -> 
 
 fn schedule_child_context_cli_error(error: ChildContextRecordError) -> CliError {
     match error {
-        ChildContextRecordError::InvalidChildName => {
-            CliError::usage("invalid child context: invalid child name")
-        }
-        ChildContextRecordError::InvalidAgentName => {
-            CliError::usage("invalid child context: invalid agent name")
-        }
-        ChildContextRecordError::InvalidSessionName => {
-            CliError::usage("invalid child context: invalid session name")
-        }
-        ChildContextRecordError::InvalidStatus => {
-            CliError::usage("invalid child context: invalid status transition")
-        }
-        ChildContextRecordError::InvalidText => {
-            CliError::usage("invalid child context: contains NUL byte")
-        }
-        ChildContextRecordError::InvalidRefs => {
-            CliError::usage("invalid child context: refs-jsonl is invalid")
-        }
-        ChildContextRecordError::MissingParentSession => {
-            CliError::unavailable("cannot record child context: missing parent session")
-        }
+        ChildContextRecordError::InvalidChildName => CliError::usage("invalid child context: invalid child name"),
+        ChildContextRecordError::InvalidAgentName => CliError::usage("invalid child context: invalid agent name"),
+        ChildContextRecordError::InvalidSessionName => CliError::usage("invalid child context: invalid session name"),
+        ChildContextRecordError::InvalidStatus => CliError::usage("invalid child context: invalid status transition"),
+        ChildContextRecordError::InvalidText => CliError::usage("invalid child context: contains NUL byte"),
+        ChildContextRecordError::InvalidRefs => CliError::usage("invalid child context: refs-jsonl is invalid"),
+        ChildContextRecordError::MissingParentSession => CliError::unavailable("cannot record child context: missing parent session"),
         ChildContextRecordError::CannotRecord => CliError::unavailable(format!(
             "cannot record child context: {}",
             ChildContextRecordError::CannotRecord.errno()

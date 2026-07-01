@@ -37,20 +37,11 @@ fn agent_wait(
             status.as_str()
         )));
     }
-    let agent =
-        read_optional_trimmed(&child_dir.join("agent"))?.unwrap_or_else(|| "agent?".to_owned());
-    let session =
-        read_optional_trimmed(&child_dir.join("session"))?.unwrap_or_else(|| "default".to_owned());
+    let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
     let control = root.join("agent").join(format!("{agent}.d"));
-    let (model, life) = if is_object_name(&agent) {
-        (
-            read_agent_control_trimmed(&control, "model")?
-                .unwrap_or_else(|| default_agent_process_model(&agent).to_owned()),
-            agent_life_for_display(&control)?,
-        )
-    } else {
-        ("unknown".to_owned(), "unknown".to_owned())
-    };
+    let model = read_agent_control_trimmed(&control, "model")?
+        .unwrap_or_else(|| default_agent_process_model(&agent).to_owned());
+    let life = agent_life_for_display(&control)?;
     let result = read_file_to_string(&child_dir.join("result.md"))?;
     if status == ChildContextStatus::Cancelled
         && life == "temp"
@@ -86,14 +77,7 @@ fn reconcile_active_child_wait(
     if ChildContextStatus::parse(&status) != Some(ChildContextStatus::Active) {
         return Ok(Some(status));
     }
-    let child_agent = read_optional_trimmed(&child_dir.join("agent"))?;
-    let child_session = read_optional_trimmed(&child_dir.join("session"))?;
-    let Some(child_agent) = child_agent.as_deref() else {
-        return Ok(Some(status));
-    };
-    let Some(child_session) = child_session.as_deref() else {
-        return Ok(Some(status));
-    };
+    let (child_agent, child_session) = schedule_child_context_agent_session(child_dir)?;
     let control = root.join("agent").join(format!("{child_agent}.d"));
     let Some(parent_ref) = read_agent_parent_ref(&control)? else {
         return Ok(Some(status));
@@ -170,29 +154,14 @@ fn agent_child_rows(
         }
         let status = reconcile_active_child_wait(root, name, &parent_session_dir, &child, &dir)?
             .unwrap_or_else(|| "unknown".to_owned());
-        let agent = read_optional_trimmed(&dir.join("agent"))?.unwrap_or_else(|| "agent?".to_owned());
-        let session = read_optional_trimmed(&dir.join("session"))?.unwrap_or_else(|| "default".to_owned());
+        let (agent, session) = schedule_child_context_agent_session(&dir)?;
         let control = root.join("agent").join(format!("{agent}.d"));
-        let (agent_status, pid, model, life, parent_session) = if is_object_name(&agent) {
-            let parent = read_agent_parent_ref(&control)?;
-            let (agent_status, pid) = live_agent_status_and_pid(&control)?;
-            (
-                agent_status,
-                pid,
-                read_agent_control_trimmed(&control, "model")?
-                    .unwrap_or_else(|| default_agent_process_model(&agent).to_owned()),
-                agent_life_for_display(&control)?,
-                parent.and_then(|parent| parent.session),
-            )
-        } else {
-            (
-                "unknown".to_owned(),
-                None,
-                "unknown".to_owned(),
-                "unknown".to_owned(),
-                None,
-            )
-        };
+        let parent = read_agent_parent_ref(&control)?;
+        let (agent_status, pid) = live_agent_status_and_pid(&control)?;
+        let model = read_agent_control_trimmed(&control, "model")?
+            .unwrap_or_else(|| default_agent_process_model(&agent).to_owned());
+        let life = agent_life_for_display(&control)?;
+        let parent_session = parent.and_then(|parent| parent.session);
         rows.push(AgentChildRow {
             child,
             status,
