@@ -86,7 +86,8 @@ fn write_worker_schedule_plan(session: &Path) {
 }
 
 fn create_pending_worker_handoff(root: &Path, test_name: &str) -> PathBuf {
-    assert!(ensure_v1_reference_tree(root).is_ok());
+    let ensured = ensure_v1_reference_tree(root);
+    assert!(ensured.is_ok(), "{ensured:?}");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
         root,

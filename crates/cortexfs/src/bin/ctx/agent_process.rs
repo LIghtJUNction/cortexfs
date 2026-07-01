@@ -243,21 +243,27 @@ fn control_agent_name(control: &Path) -> &str {
 }
 
 fn parse_agent_parent_ref(value: &str) -> Option<AgentParentRef> {
-    let mut agent = None;
+    let mut fields = value.split_whitespace();
+    let agent = fields.next()?.strip_prefix("agent:")?;
+    if !is_object_name(agent) {
+        return None;
+    }
     let mut session = None;
-    for word in value.split_whitespace() {
-        if let Some(name) = word.strip_prefix("agent:") {
-            if is_object_name(name) {
-                agent = Some(name.to_owned());
+    let mut run = false;
+    for word in fields {
+        let (kind, name) = word.split_once(':')?;
+        match kind {
+            "session" if is_object_name(name) && session.is_none() => {
+                session = Some(name.to_owned());
             }
-        } else if let Some(name) = word.strip_prefix("session:")
-            && is_object_name(name)
-        {
-            session = Some(name.to_owned());
+            "run" if is_object_name(name) && !run => {
+                run = true;
+            }
+            _ => return None,
         }
     }
     Some(AgentParentRef {
-        agent: agent?,
+        agent: agent.to_owned(),
         session,
     })
 }

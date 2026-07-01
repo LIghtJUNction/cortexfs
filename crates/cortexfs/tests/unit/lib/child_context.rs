@@ -249,6 +249,17 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
         Err(ChildAgentDenial::InvalidParentRef)
     );
 
+    let duplicate_run = ChildAgentRequest::new(
+        "reviewer",
+        "agent:coder session:default run:r1 run:r2",
+        ChildLifecycle::Owned,
+        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+    );
+    assert_eq!(
+        authorize_child_agent(duplicate_run, authority),
+        Err(ChildAgentDenial::InvalidParentRef)
+    );
+
     assert_eq!(
         ChildLifecycle::parse("temp"),
         Ok(ChildLifecycle::Temp)

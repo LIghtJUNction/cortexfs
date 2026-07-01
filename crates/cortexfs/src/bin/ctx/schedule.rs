@@ -260,6 +260,29 @@ fn schedule_handoff_agent_parent(root: &Path, agent: &str) -> Result<String, Cli
     Ok(parent)
 }
 
+fn schedule_require_handoff_parent(
+    parent_ref: &str,
+    agent: &str,
+    child_parent: &str,
+) -> Result<(), CliError> {
+    let parent = parse_agent_parent_ref(parent_ref)
+        .ok_or_else(|| CliError::unavailable("cannot derive schedule parent"))?;
+    let child = parse_agent_parent_ref(child_parent).ok_or_else(|| {
+        CliError::usage(format!("invalid handoff agent parent for {agent}: {child_parent}"))
+    })?;
+    if child.agent != parent.agent
+        || child
+            .session
+            .as_deref()
+            .is_some_and(|session| Some(session) != parent.session.as_deref())
+    {
+        return Err(CliError::usage(format!(
+            "handoff agent parent mismatch for {agent}: {child_parent}"
+        )));
+    }
+    Ok(())
+}
+
 fn schedule_handoff_agent_role(agent: &str) -> &'static str {
     if is_worker_agent_name(agent) { "worker" } else { "agent" }
 }
@@ -299,8 +322,9 @@ fn schedule_claim(root: &Path, path: &str, child: &str) -> Result<(), CliError> 
     let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
     let (model, life) = schedule_handoff_agent_model_life(root, &agent)?;
     let child_parent = schedule_handoff_agent_parent(root, &agent)?;
-    schedule_claim_child_active(root, &child_paths.status)?;
     let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
+    schedule_require_handoff_parent(&parent_ref, &agent, &child_parent)?;
+    schedule_claim_child_active(root, &child_paths.status)?;
     print_line(&format!(
         "claim child={child} status=active agent={} session={} model={} life={} role={} parent={} child_parent={} plan={} handoff={} result={} refs={}",
         terminal_safe_text(&agent),
@@ -381,9 +405,10 @@ fn schedule_result(
     let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
     let (model, life) = schedule_handoff_agent_model_life(root, &agent)?;
     let child_parent = schedule_handoff_agent_parent(root, &agent)?;
+    let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
+    schedule_require_handoff_parent(&parent_ref, &agent, &child_parent)?;
     record_child_result_to_parent_context(&parent_session_dir, child, status, result, refs_jsonl)
         .map_err(schedule_child_context_cli_error)?;
-    let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
     print_line(&format!(
         "result child={child} status={} agent={} session={} model={} life={} role={} parent={} child_parent={} plan={} result={} refs={}",
         status.as_str(),

@@ -280,7 +280,7 @@ fn schedule_result_rejects_invalid_child_session_without_recording() {
 
 #[test]
 fn schedule_result_rejects_invalid_backing_parent_without_recording() {
-    let root = clean_test_dir("ctx-schedule-result-invalid-backing-parent");
+    let root = clean_test_dir("ctx-schedule-bad-parent");
     let child = create_pending_worker_handoff(&root, "result invalid backing parent");
     write_text_file(&root.join("agent/worker.d/parent"), "session:default\n");
 

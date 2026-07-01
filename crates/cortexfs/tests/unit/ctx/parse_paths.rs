@@ -4,6 +4,7 @@ include!("parse_paths/agent_lifecycle.rs");
 include!("parse_paths/agent_lifecycle_worker_model.rs");
 include!("parse_paths/agent_lifecycle_owned_default.rs");
 include!("parse_paths/agent_lifecycle_temp_cleanup.rs");
+include!("parse_paths/agent_parent_validation.rs");
 include!("parse_paths/agent_process.rs");
 include!("parse_paths/agent_status_validation.rs");
 include!("parse_paths/agent_start.rs");
