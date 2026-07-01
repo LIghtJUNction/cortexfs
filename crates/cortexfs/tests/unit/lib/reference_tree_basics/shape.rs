@@ -238,6 +238,8 @@ fn assert_reference_agents(root: &Path) {
     assert!(coder_system.contains("prefer a delegated `react` node"));
     assert!(coder_system.contains("the omitted delegated agent is `worker`"));
     assert!(coder_system.contains("`worker-*`, `executor`, or `executor-*`"));
+    assert!(coder_system.contains("shared reusable entries"));
+    assert!(coder_system.contains("dedicated temp workers"));
     assert!(coder_system.contains("`model=`, `life=`, `plan=`, `handoff=`, `result=`, and `refs=`"));
     assert!(coder_system.contains("ctx agent wait"));
     assert_file_text(

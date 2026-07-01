@@ -7,6 +7,16 @@ fn worker_role_names_default_to_spark_model() {
 }
 
 #[test]
+fn dedicated_worker_role_names_exclude_shared_entries() {
+    for name in ["worker", "executor"] {
+        assert!(!is_dedicated_worker_agent_name(name), "{name}");
+    }
+    for name in ["worker-fast", "executor-fast"] {
+        assert!(is_dedicated_worker_agent_name(name), "{name}");
+    }
+}
+
+#[test]
 fn non_worker_role_names_keep_main_default() {
     for name in ["coder", "reviewer", "work", "task-worker"] {
         assert!(!is_worker_agent_name(name), "{name}");
