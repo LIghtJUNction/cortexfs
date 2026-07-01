@@ -45,7 +45,7 @@ fn agent_wait(
         (
             read_agent_control_trimmed(&control, "model")?
                 .unwrap_or_else(|| default_agent_process_model(&agent).to_owned()),
-            read_agent_control_trimmed(&control, "life")?.unwrap_or_else(|| "owned".to_owned()),
+            agent_life_for_display(&control)?,
         )
     } else {
         ("unknown".to_owned(), "unknown".to_owned())
@@ -172,7 +172,7 @@ fn agent_child_rows(
                 pid,
                 read_agent_control_trimmed(&control, "model")?
                     .unwrap_or_else(|| default_agent_process_model(&agent).to_owned()),
-                read_agent_control_trimmed(&control, "life")?.unwrap_or_else(|| "owned".to_owned()),
+                agent_life_for_display(&control)?,
                 parent.and_then(|parent| parent.session),
             )
         } else {
@@ -197,4 +197,17 @@ fn agent_child_rows(
         });
     }
     Ok(rows)
+}
+
+fn agent_life_for_display(control: &Path) -> Result<String, CliError> {
+    match fs::symlink_metadata(control) {
+        Ok(_metadata) => {
+            Ok(read_agent_control_trimmed(control, "life")?.unwrap_or_else(|| "owned".to_owned()))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok("unknown".to_owned()),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot stat {}: {error}",
+            control.display()
+        ))),
+    }
 }

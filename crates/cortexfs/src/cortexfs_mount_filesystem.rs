@@ -1,5 +1,6 @@
 impl Filesystem for CortexFuse {
     cortexfs_mount_init!();
+    cortexfs_mount_lifecycle!();
 
     fn forget(&self, _req: &Request, ino: INodeNo, nlookup: u64) {
         let _ignored = self.forget_inode(ino, nlookup);
@@ -182,21 +183,7 @@ impl Filesystem for CortexFuse {
 
     cortexfs_mount_readdirplus!();
 
-    fn mkdir(
-        &self,
-        _req: &Request,
-        _parent: INodeNo,
-        _name: &OsStr,
-        _mode: u32,
-        _umask: u32,
-        reply: ReplyEntry,
-    ) {
-        reply.error(readonly_mutation_errno());
-    }
-
-    fn rmdir(&self, _req: &Request, _parent: INodeNo, _name: &OsStr, reply: ReplyEmpty) {
-        reply.error(readonly_mutation_errno());
-    }
+    cortexfs_mount_readonly_mutations!();
 
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {
         let stats = mount_statfs_for_source(self.projection.root());
@@ -226,17 +213,6 @@ impl Filesystem for CortexFuse {
             return;
         }
         reply.opened(FileHandle(0), FopenFlags::empty());
-    }
-
-    fn link(
-        &self,
-        _req: &Request,
-        _ino: INodeNo,
-        _newparent: INodeNo,
-        _newname: &OsStr,
-        reply: ReplyEntry,
-    ) {
-        reply.error(readonly_mutation_errno());
     }
 
     fn opendir(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
@@ -482,18 +458,5 @@ impl Filesystem for CortexFuse {
 
     fn removexattr(&self, _req: &Request, _ino: INodeNo, _name: &OsStr, reply: ReplyEmpty) {
         reply.error(Errno::EROFS);
-    }
-
-    fn create(
-        &self,
-        _req: &Request,
-        _parent: INodeNo,
-        _name: &OsStr,
-        _mode: u32,
-        _umask: u32,
-        _flags: i32,
-        reply: ReplyCreate,
-    ) {
-        reply.error(readonly_mutation_errno());
     }
 }
