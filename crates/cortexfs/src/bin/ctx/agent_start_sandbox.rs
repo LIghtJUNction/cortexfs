@@ -53,14 +53,38 @@ fn set_user_systemd_client_env(command: &mut ProcessCommand) {
 
 fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, String)> {
     let sandbox_ctx_home = sandbox_ctx_home(view);
+    let groups = view
+        .identity()
+        .groups()
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut env = vec![
         ("CTX_ROOT".to_owned(), CTX_ROOT.to_owned()),
         ("CTX_HOME".to_owned(), sandbox_ctx_home),
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
         (
+            "CTX_AGENT_ROLE".to_owned(),
+            agent_role_name(view.agent_name()).to_owned(),
+        ),
+        ("CTX_AGENT_MODEL".to_owned(), view.model().to_owned()),
+        (
+            "CTX_AGENT_LIFE".to_owned(),
+            agent_lifecycle_name(view.lifecycle()).to_owned(),
+        ),
+        (
+            "CTX_AGENT_ROOT_PATH".to_owned(),
+            view.root().display().to_string(),
+        ),
+        ("CTX_AGENT_CWD".to_owned(), view.cwd().display().to_string()),
+        (
             "CTX_AGENT_SUBJECT".to_owned(),
             view.policy_subject().to_owned(),
         ),
+        ("CTX_AGENT_UID".to_owned(), view.identity().uid().to_string()),
+        ("CTX_AGENT_GID".to_owned(), view.identity().gid().to_string()),
+        ("CTX_AGENT_GROUPS".to_owned(), groups),
         ("HOME".to_owned(), AGENT_SANDBOX_HOME.to_owned()),
         ("USER".to_owned(), view.agent_name().to_owned()),
         ("LOGNAME".to_owned(), view.agent_name().to_owned()),
@@ -76,7 +100,15 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
             "CTX_ROOT"
                 | "CTX_HOME"
                 | "CTX_AGENT"
+                | "CTX_AGENT_ROLE"
+                | "CTX_AGENT_MODEL"
+                | "CTX_AGENT_LIFE"
+                | "CTX_AGENT_ROOT_PATH"
+                | "CTX_AGENT_CWD"
                 | "CTX_AGENT_SUBJECT"
+                | "CTX_AGENT_UID"
+                | "CTX_AGENT_GID"
+                | "CTX_AGENT_GROUPS"
                 | "HOME"
                 | "USER"
                 | "LOGNAME"
@@ -89,6 +121,21 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
         env.push((key.clone(), value.clone()));
     }
     env
+}
+
+fn agent_role_name(agent_name: &str) -> &'static str {
+    if is_worker_agent_name(agent_name) {
+        "worker"
+    } else {
+        "agent"
+    }
+}
+
+fn agent_lifecycle_name(lifecycle: cortexfs::ChildLifecycle) -> &'static str {
+    match lifecycle {
+        cortexfs::ChildLifecycle::Owned => "owned",
+        cortexfs::ChildLifecycle::Temp => "temp",
+    }
 }
 
 fn agent_bwrap_args(

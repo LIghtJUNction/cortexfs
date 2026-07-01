@@ -73,6 +73,9 @@ fn agent_start_builds_sandboxed_terminal_command() {
             .to_string(),
         "/home/agent"
     ));
+    assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_ROLE", "agent"));
+    assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_MODEL", "main"));
+    assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_LIFE", "owned"));
     assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
     assert!(bwrap.contains(&"--unshare-net".to_owned()));
     assert!(contains_arg_pair(&bwrap, "--dir", "/home"));
@@ -172,8 +175,9 @@ fn agent_start_maps_host_cwd_to_sandbox_mount_target() {
 #[test]
 fn agent_start_records_ready_status_and_start_event() {
     let root = clean_test_dir("ctx-agent-start-record-state");
+    let control = root.join("agent/scratch.d");
     create_agent_fixture(&root, "scratch", "agent:base", "start", "");
-    write_text_file(&root.join("agent/scratch.d/log"), "");
+    write_text_file(&control.join("log"), "");
     let args = AgentStartArgs {
         name: "scratch".to_owned(),
         session: "default".to_owned(),
@@ -182,21 +186,16 @@ fn agent_start_records_ready_status_and_start_event() {
         mounts: Vec::new(),
     };
 
+    let facts = [("model", "main"), ("life", "owned"), ("role", "agent"), ("uid", "1000"), ("gid", "100"), ("groups", "10 20")];
     assert_eq!(
-        record_agent_start_state(&root, &args, "cortexfs-agent-scratch-default", Some("abc123")),
+        record_agent_start_state(&root, &args, "cortexfs-agent-scratch-default", &facts, Some("abc123")),
         Ok(())
     );
+    assert_eq!(fs::read_to_string(control.join("status")).unwrap_or_default(), "ready\n");
+    assert_eq!(fs::read_to_string(control.join("pid")).unwrap_or_default(), "\n");
     assert_eq!(
-        fs::read_to_string(root.join("agent/scratch.d/status")).unwrap_or_default(),
-        "ready\n"
-    );
-    assert_eq!(
-        fs::read_to_string(root.join("agent/scratch.d/pid")).unwrap_or_default(),
-        "\n"
-    );
-    assert_eq!(
-        fs::read_to_string(root.join("agent/scratch.d/log")).unwrap_or_default(),
-        "{\"type\":\"agent.start\",\"agent\":\"scratch\",\"session\":\"default\",\"unit\":\"cortexfs-agent-scratch-default\",\"status\":\"ready\",\"invocation\":\"abc123\"}\n"
+        fs::read_to_string(control.join("log")).unwrap_or_default(),
+        "{\"type\":\"agent.start\",\"agent\":\"scratch\",\"session\":\"default\",\"unit\":\"cortexfs-agent-scratch-default\",\"model\":\"main\",\"life\":\"owned\",\"role\":\"agent\",\"uid\":\"1000\",\"gid\":\"100\",\"groups\":\"10 20\",\"status\":\"ready\",\"invocation\":\"abc123\"}\n"
     );
 }
 
@@ -328,6 +327,9 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
                 && contains_arg_triplet(&command.args, "--setenv", "CTX_ROOT", "/ctx")
                 && contains_arg_triplet(&command.args, "--setenv", "CTX_HOME", "/ctx/home/1000")
                 && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT", "coder")
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_ROLE", "agent")
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_MODEL", "main")
+                && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_LIFE", "owned")
                 && contains_arg_triplet(&command.args, "--setenv", "CTX_AGENT_SUBJECT", "coder_t")
                 && contains_arg_triplet(&command.args, "--setenv", "HOME", "/home/agent")
                 && contains_arg_triplet(&command.args, "--setenv", "PATH", "/usr/bin:/bin")
@@ -423,6 +425,10 @@ fn agent_start_status_lines_follow_systemctl_shape() {
     let lines = agent_start_status_lines(
         false,
         "coder",
+        "main",
+        "owned",
+        "agent",
+        &[("UID", "1000"), ("GID", "100"), ("Groups", "10 20")],
         "default",
         "cortexfs-agent-coder-default-terminal",
         Some("abc123"),
@@ -432,20 +438,16 @@ fn agent_start_status_lines_follow_systemctl_shape() {
         "1000",
     );
 
-    assert_eq!(
-        lines,
-        vec![
-            "● cortexfs-agent-coder-default-terminal.service - CortexFS agent terminal",
-            "     Loaded: loaded (/run/user/1000/systemd/transient/cortexfs-agent-coder-default-terminal.service; transient)",
-            "     Active: active (running)",
-            " Invocation: abc123",
-            "      Agent: coder",
-            "    Session: default",
-            "        CWD: /workspace",
-            "     Socket: /ctx/home/1000/agent/coder/session/default/terminal/main.sock",
-            " Runtime Socket: /run/user/1000/cortexfs/terminal/coder/default/main.sock",
-        ]
-    );
+    let expected = [
+        "● cortexfs-agent-coder-default-terminal.service - CortexFS agent terminal",
+        "     Loaded: loaded (/run/user/1000/systemd/transient/cortexfs-agent-coder-default-terminal.service; transient)",
+        "     Active: active (running)", " Invocation: abc123", "      Agent: coder",
+        "      Model: main", "       Life: owned", "       Role: agent", "     UID: 1000",
+        "     GID: 100", "     Groups: 10 20", "    Session: default", "        CWD: /workspace",
+        "     Socket: /ctx/home/1000/agent/coder/session/default/terminal/main.sock",
+        " Runtime Socket: /run/user/1000/cortexfs/terminal/coder/default/main.sock",
+    ];
+    assert_eq!(lines, expected.map(str::to_owned));
 }
 
 #[test]
@@ -456,12 +458,8 @@ fn visible_terminal_socket_treats_readonly_fuse_errors_as_best_effort() {
     assert!(visible_terminal_write_error_is_best_effort(
         &std::io::Error::from_raw_os_error(nix::libc::EROFS)
     ));
-    assert!(visible_terminal_errno_is_best_effort(
-        nix::errno::Errno::ENOSYS
-    ));
-    assert!(visible_terminal_errno_is_best_effort(
-        nix::errno::Errno::EROFS
-    ));
+    assert!(visible_terminal_errno_is_best_effort(nix::errno::Errno::ENOSYS));
+    assert!(visible_terminal_errno_is_best_effort(nix::errno::Errno::EROFS));
 }
 
 #[test]

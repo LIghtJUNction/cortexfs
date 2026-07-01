@@ -184,8 +184,8 @@ wait/stop-visible parent without adding a separate process table.
 `ctx agent start` starts the explicit runtime for an existing agent. After the
 runtime terminal socket is reachable, host-side `ctx` writes
 `agent/<name>.d/status` to `ready` and appends an `agent.start` event to
-`agent/<name>.d/log`. `pid` remains numeric-only; systemd invocation ids are log
-facts, not `pid` values.
+`agent/<name>.d/log`. Start output and the `agent.start` event echo `model`,
+`life`, and `role`; `pid` remains numeric-only, and systemd invocation ids are log facts.
 
 `ctx agent stop` calls `/ctx/tool/agent.stop` when that tool exists. If the tool
 is absent, host-side `ctx` may perform a supervisor stop by writing
