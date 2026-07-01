@@ -107,7 +107,7 @@ impl CortexFuse {
                 counts.remove(&inode.0);
                 true
             }
-            None => true,
+            None => false,
         };
         drop(counts);
         if remove_path {
@@ -156,6 +156,8 @@ macro_rules! path_for_inode_or_reply {
 
 include!("../cortexfs_mount_permissions.rs");
 include!("../cortexfs_mount_init.rs");
+include!("../cortexfs_mount_lifecycle.rs");
+include!("../cortexfs_mount_readonly_mutations.rs");
 include!("../cortexfs_mount_readdirplus.rs");
 include!("../cortexfs_mount_socket_alias_methods.rs");
 include!("../cortexfs_mount_filesystem.rs");

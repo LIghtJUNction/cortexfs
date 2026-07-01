@@ -6,7 +6,7 @@ mod model_alias_tests {
     use std::sync::Mutex;
 
     use cortexfs::{ensure_v1_reference_tree, FuseV1Error, FuseV1Projection};
-    use fuser::INodeNo;
+    use fuser::{Filesystem, INodeNo};
 
     use super::super::{CortexFuse, FUSE_V1_ROOT_INODE};
 
@@ -49,6 +49,43 @@ mod model_alias_tests {
         assert_eq!(fs.path_for_inode(inode), Ok("status".to_owned()));
         assert_eq!(fs.forget_inode(inode, 1), Ok(()));
         assert_eq!(fs.path_for_inode(inode), Err(FuseV1Error::NotFound));
+        Ok(())
+    }
+
+    #[test]
+    fn forget_inode_preserves_path_without_lookup_reference() -> Result<(), FuseV1Error> {
+        let root = super::unique_mount_test_dir("forget-inode-without-lookup-count");
+        assert!(ensure_v1_reference_tree(&root).is_ok());
+        let fs = mount_with_model_inode(&root);
+        let node = fs.projection.node_for_path("status")?;
+        let inode = INodeNo(node.inode());
+
+        assert_eq!(fs.remember(&node), Ok(()));
+        assert_eq!(fs.forget_inode(inode, 1), Ok(()));
+        assert_eq!(fs.path_for_inode(inode), Ok("status".to_owned()));
+        Ok(())
+    }
+
+    #[test]
+    fn destroy_drops_fuse_lifecycle_caches() -> Result<(), FuseV1Error> {
+        let root = super::unique_mount_test_dir("destroy-fuse-caches");
+        assert!(ensure_v1_reference_tree(&root).is_ok());
+        let mut fs = mount_with_model_inode(&root);
+        let node = fs.projection.node_for_path("status")?;
+        let inode = INodeNo(node.inode());
+
+        assert_eq!(fs.remember_lookup(&node), Ok(()));
+        assert_eq!(fs.path_for_inode(inode), Ok("status".to_owned()));
+        assert!(fs
+            .socket_overlays
+            .lock()
+            .is_ok_and(|mut sockets| sockets.insert("agent/coder.sock".to_owned())));
+        fs.destroy();
+
+        assert_eq!(fs.path_for_inode(inode), Err(FuseV1Error::NotFound));
+        assert_eq!(fs.path_for_inode(INodeNo(FUSE_V1_ROOT_INODE)), Err(FuseV1Error::NotFound));
+        assert!(fs.lookup_counts.lock().is_ok_and(|counts| counts.is_empty()));
+        assert!(fs.socket_overlays.lock().is_ok_and(|sockets| sockets.is_empty()));
         Ok(())
     }
 

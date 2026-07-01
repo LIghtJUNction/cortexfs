@@ -68,18 +68,63 @@ fn stop_owned_child_agents(root: &Path, parent: &str) -> Result<(), CliError> {
             continue;
         };
         if child_parent.agent == parent && agent_lifecycle_is_parent_owned(&control)? {
-            children.push((name.to_owned(), child_parent));
+            children.push((name.to_owned(), child_parent, agent_lifecycle_is_temp(&control)?));
         }
     }
     children.sort_by(|left, right| left.0.cmp(&right.0));
-    for (child, child_parent) in children {
+    for (child, child_parent, is_temp) in children {
         let control = agent_root.join(format!("{child}.d"));
         stop_agent_terminal_units(root, &child)?;
         stop_agent_control(&control, &child)?;
         record_parent_child_cancellation(root, &child, &child_parent)?;
         stop_owned_child_agents(root, &child)?;
+        if is_temp {
+            remove_temp_agent_object(root, &child)?;
+        }
     }
     Ok(())
+}
+
+fn remove_temp_agent_object(root: &Path, child: &str) -> Result<(), CliError> {
+    let agent_root = root.join("agent");
+    remove_temp_agent_file(&agent_root.join(child))?;
+    remove_temp_agent_file(&agent_root.join(format!("{child}.sock")))?;
+    let control = agent_root.join(format!("{child}.d"));
+    match fs::symlink_metadata(&control) {
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            fs::remove_dir_all(&control).map_err(|error| {
+                CliError::unavailable(format!("cannot remove {}: {error}", control.display()))
+            })
+        }
+        Ok(_metadata) => Err(CliError::unavailable(format!(
+            "temp agent control is not a plain directory: {}",
+            control.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot stat {}: {error}",
+            control.display()
+        ))),
+    }
+}
+
+fn remove_temp_agent_file(path: &Path) -> Result<(), CliError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_dir() => {
+            fs::remove_file(path).map_err(|error| {
+                CliError::unavailable(format!("cannot remove {}: {error}", path.display()))
+            })
+        }
+        Ok(_metadata) => Err(CliError::unavailable(format!(
+            "temp agent path is not a file or socket: {}",
+            path.display()
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot stat {}: {error}",
+            path.display()
+        ))),
+    }
 }
 
 fn record_parent_child_cancellation(
@@ -147,6 +192,13 @@ fn agent_lifecycle_is_parent_owned(control: &Path) -> Result<bool, CliError> {
     Ok(matches!(
         read_agent_control_trimmed(control, "life")?.as_deref(),
         Some("owned" | "temp")
+    ))
+}
+
+fn agent_lifecycle_is_temp(control: &Path) -> Result<bool, CliError> {
+    Ok(matches!(
+        read_agent_control_trimmed(control, "life")?.as_deref(),
+        Some("temp")
     ))
 }
 
