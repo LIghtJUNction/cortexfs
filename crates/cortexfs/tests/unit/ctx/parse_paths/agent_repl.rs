@@ -58,6 +58,17 @@ fn agent_repl_model_summary_defaults_missing_worker_model_to_spark() {
 }
 
 #[test]
+fn agent_repl_model_summary_defaults_worker_prefix_to_spark() {
+    let root = clean_test_dir("ctx-agent-repl-worker-prefix-default-model");
+    assert!(fs::create_dir_all(root.join("agent/worker-fast.d")).is_ok());
+
+    assert_eq!(
+        agent_repl_model_summary(false, &root, "worker-fast"),
+        "api.lmm.best/gpt-5.3-codex-spark"
+    );
+}
+
+#[test]
 fn agent_repl_model_summary_rejects_symlink_model_directory() {
     let root = clean_test_dir("ctx-agent-repl-model-summary-symlink-model");
     let outside = clean_test_dir("ctx-agent-repl-model-summary-symlink-model-outside");

@@ -236,6 +236,10 @@ mod tests {
     ));
     include!(concat!(
         env!("CARGO_MANIFEST_DIR"),
+        "/tests/unit/cortexfs_mount_statfs_tests.rs"
+    ));
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
         "/tests/unit/cortexfs_mount_init_tests.rs"
     ));
     include!(concat!(

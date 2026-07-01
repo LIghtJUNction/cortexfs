@@ -191,7 +191,7 @@ fn record_parent_child_cancellation(
 fn agent_lifecycle_is_parent_owned(control: &Path) -> Result<bool, CliError> {
     Ok(matches!(
         read_agent_control_trimmed(control, "life")?.as_deref(),
-        Some("owned" | "temp")
+        None | Some("owned" | "temp")
     ))
 }
 

@@ -249,6 +249,18 @@ fn agent_runtime_view_defaults_missing_worker_model_to_spark() {
 }
 
 #[test]
+fn agent_runtime_view_defaults_missing_life_to_owned() {
+    let root = clean_test_dir("agent-runtime-missing-life");
+    create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
+    let control = root.join("agent").join("worker.d");
+    assert!(fs::remove_file(control.join("life")).is_ok());
+
+    let view = derive_agent_runtime_view(&root, "worker");
+    let view = ok!(view);
+    assert_eq!(view.lifecycle(), ChildLifecycle::Owned);
+}
+
+#[test]
 fn agent_runtime_view_defaults_missing_worker_prefix_model_to_spark() {
     let root = clean_test_dir("agent-runtime-worker-prefix-missing-model");
     create_complete_object_layout(&root, ObjectClass::Agent, "worker-fast", "none");

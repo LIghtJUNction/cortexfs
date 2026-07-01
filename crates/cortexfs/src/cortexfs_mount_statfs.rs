@@ -70,9 +70,21 @@ fn sanitize_mount_statfs(stats: MountStatfs) -> MountStatfs {
     } else {
         (stats.files, stats.files_free.min(stats.files))
     };
-    let block_size = stats.block_size.max(1);
-    let fragment_size = stats.fragment_size.max(1);
-    let name_max = stats.name_max.max(1);
+    let block_size = if stats.block_size == 0 {
+        FALLBACK_STATFS_BLOCK_SIZE
+    } else {
+        stats.block_size
+    };
+    let fragment_size = if stats.fragment_size == 0 {
+        FALLBACK_STATFS_BLOCK_SIZE
+    } else {
+        stats.fragment_size
+    };
+    let name_max = if stats.name_max == 0 {
+        FALLBACK_STATFS_NAME_MAX
+    } else {
+        stats.name_max
+    };
     MountStatfs {
         blocks,
         blocks_free,
