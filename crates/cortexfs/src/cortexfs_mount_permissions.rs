@@ -23,7 +23,7 @@ fn access_error(
     }
     if mask.contains(AccessFlags::W_OK)
         && attr.file_type() != FuseV1FileType::Socket
-        && !parse_abi_path(attr.abi_path()).is_writable_control_path()
+        && !fuse_writable_projection_path(attr.abi_path())
     {
         return Some(Errno::EROFS);
     }
@@ -80,7 +80,7 @@ fn fuse_open_error(attr: &FuseV1Attr, flags: OpenFlags) -> Option<Errno> {
     if flags.acc_mode() == OpenAccMode::O_RDONLY && wants_truncate {
         return Some(Errno::EACCES);
     }
-    if wants_write && !parse_abi_path(attr.abi_path()).is_writable_control_path() {
+    if wants_write && !fuse_writable_projection_path(attr.abi_path()) {
         return Some(Errno::EROFS);
     }
     None
@@ -90,9 +90,12 @@ fn fuse_write_error(attr: &FuseV1Attr) -> Option<Errno> {
     if attr.file_type() == FuseV1FileType::Directory {
         return Some(Errno::EISDIR);
     }
-    let path = parse_abi_path(attr.abi_path());
-    (!matches!(path, AbiPathKind::ModelRoute) && !path.is_writable_control_path())
-        .then_some(Errno::EROFS)
+    (!fuse_writable_projection_path(attr.abi_path())).then_some(Errno::EROFS)
+}
+
+fn fuse_writable_projection_path(path: &str) -> bool {
+    let path = parse_abi_path(path);
+    matches!(path, AbiPathKind::ModelRoute) || path.is_writable_control_path()
 }
 
 fn fuse_setattr_metadata_error(changes_metadata: bool) -> Option<Errno> {

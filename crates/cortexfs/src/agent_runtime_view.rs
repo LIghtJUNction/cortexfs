@@ -218,7 +218,9 @@ fn read_agent_model_control_value(
     match read_required_agent_control_value(control_dir, "model") {
         Ok(model) => Ok(model),
         Err(AgentRuntimeViewError::MissingControlFile(_))
-            if matches!(agent_name, "executor" | "worker") =>
+            if matches!(agent_name, "executor" | "worker")
+                || agent_name.starts_with("executor-")
+                || agent_name.starts_with("worker-") =>
         {
             Ok(DEFAULT_WORKER_MODEL.to_owned())
         }

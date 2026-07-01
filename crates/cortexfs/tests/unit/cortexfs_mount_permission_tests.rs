@@ -38,6 +38,20 @@ mod permission_tests {
     }
 
     #[test]
+    fn access_error_allows_model_route_write_access_to_projection() {
+        let attr = FuseV1Attr::with_owner(
+            "model/route".to_owned(),
+            FuseV1FileType::Regular,
+            0,
+            0o644,
+            1000,
+            1000,
+        );
+
+        assert!(access_error(&attr, 1000, 1000, &[], AccessFlags::W_OK).is_none());
+    }
+
+    #[test]
     fn fuse_open_error_maps_readonly_truncate_on_directory_to_is_directory() {
         let attr = FuseV1Attr::new("agent".to_owned(), FuseV1FileType::Directory, 0, 0o755);
         let flags = OpenFlags(nix::libc::O_RDONLY | nix::libc::O_TRUNC);
@@ -56,6 +70,13 @@ mod permission_tests {
             format!("{:?}", fuse_open_error(&attr, OpenFlags(nix::libc::O_RDONLY))),
             format!("{:?}", Some(Errno::ENXIO))
         );
+    }
+
+    #[test]
+    fn fuse_open_error_allows_model_route_write_open_to_projection() {
+        let attr = FuseV1Attr::new("model/route".to_owned(), FuseV1FileType::Regular, 0, 0o644);
+
+        assert!(fuse_open_error(&attr, OpenFlags(nix::libc::O_WRONLY)).is_none());
     }
 
     #[test]
