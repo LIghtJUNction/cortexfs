@@ -162,8 +162,12 @@ ctx agent wait coder work-123 --session default
 This is a non-blocking waitpid-shaped read of the parent-owned result channel:
 `pending` and `active` are not terminal, while `done`, `error`, and `cancelled`
 return the child status and compact result. The process exit status is 0 for
-`done`, 1 for `error`, and 130 for `cancelled`. It does not poll, reap history,
-or delete child state.
+`done`, 1 for `error`, and 130 for `cancelled`. It does not poll or reap
+history. The parent result channel remains durable. For a dedicated temp
+`worker-*` or `executor-*` backing agent, `wait` may also reap the temp
+`agent/<name>`, `agent/<name>.sock`, and `agent/<name>.d/` object after the
+terminal result is recorded; the canonical shared `worker` and `executor`
+objects remain reusable worker entries.
 
 Example `handoff.md`:
 
