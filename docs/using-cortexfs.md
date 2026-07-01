@@ -157,7 +157,7 @@ ctx agent stop reviewer
 `ctx` 会创建标准 `agent/<name>.d/*` 控制文件和 `home/<uid>/agent/<name>/`
 skeleton。`ctx agent start` 直接启动显式 runtime；terminal socket 可达后会把
 `agent/<name>.d/status` 写为 `ready`，并向 `agent/<name>.d/log` 追加
-`agent.start` 事件。`ctx agent stop` 优先调用 `/ctx/tool/agent.stop`，如果该 tool
+`agent.start` 事件，启动输出会显示 `model`、`life` 和 `role`。`ctx agent stop` 优先调用 `/ctx/tool/agent.stop`，如果该 tool
 不存在则把 `agent/<name>.d/status` 写为 `dead`、清空 `pid`，并追加 `agent.stop`
 事件。`ctx agent status` 和 `ctx agent ps` 只读取普通 `agent/<name>.d/*` 控制文件；
 `agent status` 第一行仍是状态值，后续显示 `model=...`、`life=...`、`role=...`、`parent=...`、
@@ -165,7 +165,7 @@ skeleton。`ctx agent start` 直接启动显式 runtime；terminal socket 可达
 这些 Linux 身份和路径字段；`children=...` 只统计 effective 状态不是 `dead` 的直接 child，
 记录了 stale 数字 pid 的 `ready`/`busy` child 会和 `ctx agent ps` 一样被排除；非默认模型会在进程树里显示为 `model=...`，非 `owned`
 生命周期会显示为 `life=...`，worker-role agent 会显示为 `role=worker`。`ctx agent env NAME` 打印 `ctx agent start` 派生出的沙箱环境，便于检查 worker 实际获得的
-`CTX_AGENT`、`CTX_PATH`、`HOME` 等变量。`ctx agent children NAME` 从父 session 的
+`CTX_AGENT`、`CTX_AGENT_ROLE`、`CTX_AGENT_MODEL`、`CTX_AGENT_LIFE`、`CTX_AGENT_ROOT_PATH/CWD`、`CTX_AGENT_UID/GID/GROUPS`、`CTX_PATH`、`HOME` 等变量。`ctx agent children NAME` 从父 session 的
 child 表读取任务状态，并同时显示 backing worker 的 `parent_session`、`model`、
 `life`、`role`、`status` 和 `pid`，方便按父进程视角检查 worker。
 

@@ -30,18 +30,42 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     }
     wait_for_agent_terminal_socket(&socket)?;
     let invocation = systemd_run_invocation_id(&output);
-    record_agent_start_state(root, args, &unit, invocation.as_deref())?;
-    let uid = current_uid_for_ctx(root)?;
+    let life = agent_lifecycle_name(view.lifecycle());
+    let role = agent_role_name(view.agent_name());
+    let uid = view.identity().uid().to_string();
+    let gid = view.identity().gid().to_string();
+    let groups = view
+        .identity()
+        .groups()
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let start_facts = [
+        ("model", view.model()),
+        ("life", life),
+        ("role", role),
+        ("uid", uid.as_str()),
+        ("gid", gid.as_str()),
+        ("groups", groups.as_str()),
+    ];
+    let identity_lines = [("UID", uid.as_str()), ("GID", gid.as_str()), ("Groups", groups.as_str())];
+    record_agent_start_state(root, args, &unit, &start_facts, invocation.as_deref())?;
+    let current_uid = current_uid_for_ctx(root)?;
     for line in agent_start_status_lines(
         color_enabled(),
         &args.name,
+        view.model(),
+        life,
+        role,
+        &identity_lines,
         &args.session,
         &unit,
         invocation.as_deref(),
         &args.cwd,
         &visible_socket,
         &socket,
-        &uid,
+        &current_uid,
     ) {
         print_line(&line)?;
     }
@@ -52,6 +76,7 @@ fn record_agent_start_state(
     root: &Path,
     args: &AgentStartArgs,
     unit: &str,
+    facts: &[(&str, &str)],
     invocation: Option<&str>,
 ) -> Result<(), CliError> {
     let control = root.join("agent").join(format!("{}.d", args.name));
@@ -69,7 +94,7 @@ fn record_agent_start_state(
     write_agent_control_plain(&control.join("pid"), &format!("{pid}\n"))?;
     append_agent_log_event(
         &control.join("log"),
-        &agent_start_log_event(&args.name, &args.session, unit, invocation),
+        &agent_start_log_event(&args.name, &args.session, unit, facts, invocation),
     )
 }
 
@@ -77,6 +102,7 @@ fn agent_start_log_event(
     agent: &str,
     session: &str,
     unit: &str,
+    facts: &[(&str, &str)],
     invocation: Option<&str>,
 ) -> String {
     let mut fields = vec![
@@ -86,6 +112,12 @@ fn agent_start_log_event(
         format!(r#""unit":{}"#, json_string(unit)),
         r#""status":"ready""#.to_owned(),
     ];
+    for &(key, value) in facts {
+        fields.insert(
+            fields.len().saturating_sub(1),
+            format!(r#""{key}":{}"#, json_string(value)),
+        );
+    }
     if let Some(invocation) = invocation {
         fields.push(format!(r#""invocation":{}"#, json_string(invocation)));
     }
@@ -99,6 +131,10 @@ fn agent_start_log_event(
 fn agent_start_status_lines(
     color: bool,
     agent: &str,
+    model: &str,
+    life: &str,
+    role: &str,
+    identity_lines: &[(&str, &str)],
     session: &str,
     unit: &str,
     invocation: Option<&str>,
@@ -141,6 +177,30 @@ fn agent_start_status_lines(
             styled(color, ANSI_BOLD_BLUE, "Agent:"),
             styled(color, ANSI_CYAN, agent)
         ),
+        format!(
+            "      {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Model:"),
+            styled(color, ANSI_CYAN, model)
+        ),
+        format!(
+            "       {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Life:"),
+            styled(color, ANSI_CYAN, life)
+        ),
+        format!(
+            "       {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Role:"),
+            styled(color, ANSI_CYAN, role)
+        ),
+    ]);
+    for &(label, value) in identity_lines {
+        lines.push(format!(
+            "     {} {}",
+            styled(color, ANSI_BOLD_BLUE, &format!("{label}:")),
+            styled(color, ANSI_CYAN, value)
+        ));
+    }
+    lines.extend([
         format!(
             "    {} {}",
             styled(color, ANSI_BOLD_BLUE, "Session:"),

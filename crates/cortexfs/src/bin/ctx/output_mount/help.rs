@@ -216,6 +216,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "default:",
             "  binds the caller current directory to /workspace rw",
             "  starts ctxterm -> tsh inside a bwrap sandbox at /workspace",
+            "  status output includes agent model, life, and role",
         ]),
         "agent stop" => print_help_lines(&["usage:", "  ctx [--root PATH] agent stop NAME"]),
         "agent status" => print_help_lines(&[
@@ -243,7 +244,7 @@ fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "  KEY=value",
             "",
             "notes:",
-            "  prints the derived sandbox environment used by agent start",
+            "  prints derived sandbox env, including CTX_AGENT role/model/life/root/cwd/ids",
         ]),
         "agent ps" => print_help_lines(&[
             "usage:",
