@@ -124,7 +124,10 @@ impl FuseV1Projection {
     fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
         if abi_path == format!("model/{MODEL_ROUTE_FILE}") {
             let path = self.resolve(abi_path)?;
-            return match read_fuse_v1_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
+            return match read_fuse_v1_small_text_file(
+                &path,
+                MAX_FUSE_V1_SMALL_READ_BYTES,
+            ) {
                 Ok(content) => Ok(Some(content)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     Ok(Some(DEFAULT_MODEL_ROUTE.to_owned()))

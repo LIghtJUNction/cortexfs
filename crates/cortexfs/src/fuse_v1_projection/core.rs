@@ -1,5 +1,3 @@
-const MAX_FUSE_V1_SMALL_READ_BYTES: u64 = 1024 * 1024;
-
 impl FuseV1Projection {
     /// Creates a local projection over a `/ctx`-shaped root.
     #[must_use]

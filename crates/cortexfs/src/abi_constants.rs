@@ -187,5 +187,8 @@ pub const MAX_SOCKET_FRAME_BYTES: usize = 1024 * 1024;
 /// Maximum payload accepted by the v1 local FUSE projection for one small write.
 pub const MAX_FUSE_V1_SMALL_WRITE_BYTES: usize = 64 * 1024;
 
+/// Maximum payload returned by the v1 local FUSE projection for one small read.
+pub const MAX_FUSE_V1_SMALL_READ_BYTES: u64 = 1024 * 1024;
+
 /// Stable inode id for the v1 `/ctx` root in a FUSE adapter.
 pub const FUSE_V1_ROOT_INODE: u64 = 1;
