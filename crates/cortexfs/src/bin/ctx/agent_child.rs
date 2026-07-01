@@ -1,7 +1,7 @@
 fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
     for row in agent_child_rows(root, name, session)? {
         print_line(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             terminal_safe_text(&row.child),
             terminal_safe_text(&row.status),
             terminal_safe_text(&row.agent),
@@ -9,6 +9,7 @@ fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), 
             terminal_safe_text(row.parent_session.as_deref().unwrap_or("-")),
             terminal_safe_text(&row.model),
             terminal_safe_text(&row.life),
+            if is_worker_agent_name(&row.agent) { "worker" } else { "agent" },
             terminal_safe_text(&row.agent_status),
             terminal_safe_text(row.pid.as_deref().unwrap_or("-"))
         ))?;
@@ -59,13 +60,14 @@ fn agent_wait(
         remove_temp_agent_object(root, &agent)?;
     }
     print_line(&format!(
-        "{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
         terminal_safe_text(child),
         status.as_str(),
         terminal_safe_text(&agent),
         terminal_safe_text(&session),
         terminal_safe_text(&model),
-        terminal_safe_text(&life)
+        terminal_safe_text(&life),
+        if is_worker_agent_name(&agent) { "worker" } else { "agent" }
     ))?;
     print_terminal_text(&result)?;
     Ok(child_wait_exit_code(status))

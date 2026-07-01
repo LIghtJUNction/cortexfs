@@ -240,7 +240,10 @@ fn assert_reference_agents(root: &Path) {
     assert!(coder_system.contains("`worker-*`, `executor`, or `executor-*`"));
     assert!(coder_system.contains("shared reusable entries"));
     assert!(coder_system.contains("dedicated temp workers"));
-    assert!(coder_system.contains("`model=`, `life=`, `plan=`, `handoff=`, `result=`, and `refs=`"));
+    assert!(
+        coder_system
+            .contains("`model=`, `life=`, `role=`, `plan=`, `handoff=`, `result=`, and `refs=`")
+    );
     assert!(coder_system.contains("ctx agent wait"));
     assert_file_text(
         &root.join("agent").join("executor.d").join("model"),
@@ -249,6 +252,14 @@ fn assert_reference_agents(root: &Path) {
     assert_file_text(
         &root.join("agent").join("executor.d").join("parent"),
         "agent:base\n",
+    );
+    let executor_system = ok!(fs::read_to_string(
+        root.join("agent").join("executor.d").join("system.md")
+    ));
+    assert!(executor_system.contains("spark model path"));
+    assert!(executor_system.contains("Shared `worker` and `executor` entries stay reusable"));
+    assert!(
+        executor_system.contains("`role=`, `plan=`, `handoff=`, `result=`, and `refs=`")
     );
     assert_file_text(
         &root.join("agent").join("worker.d").join("model"),
@@ -263,7 +274,7 @@ fn assert_reference_agents(root: &Path) {
     ));
     assert!(worker_system.contains("spark model path"));
     assert!(worker_system.contains("Worker-role agent names include"));
-    assert!(worker_system.contains("preserve its `model=` and `life=` context"));
+    assert!(worker_system.contains("preserve its `model=`, `life=`, and `role=` context"));
     assert!(worker_system.contains("bounded delegated implementation tasks"));
     assert!(worker_system.contains("Do not make architecture decisions"));
     for agent in ["coder", "reviewer"] {

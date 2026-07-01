@@ -323,8 +323,8 @@ paths so the parent and worker can treat the handoff as an inspectable file
 boundary. These commands are not a daemon, watcher, queue worker, or hot-reload
 boundary.
 When a worker is launched from this output, the parent should hand over the
-existing `model=`, `life=`, `parent=`, `child_parent=`, `plan=`, `handoff=`,
-`result=`, and `refs=` fields; the
+existing `model=`, `life=`, `role=`, `parent=`, `child_parent=`, `plan=`,
+`handoff=`, `result=`, and `refs=` fields; the
 worker should claim and finish through the same `ctx schedule` commands rather
 than creating another coordination file, queue, or runtime abstraction.
 

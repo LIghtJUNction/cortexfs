@@ -82,11 +82,12 @@ impl<'a> AgentProcessTreeRenderer<'a> {
             "+- "
         };
         self.rendered.push(format!(
-            "{prefix}{branch}{} [{}]{}{}{}{}",
+            "{prefix}{branch}{} [{}]{}{}{}{}{}",
             terminal_safe_text(&process.name),
             terminal_safe_text(&process.status),
             process_model_suffix(process),
             process_life_suffix(process),
+            process_role_suffix(process),
             process_parent_session_suffix(process),
             process.pid.as_ref().map_or_else(String::new, |pid| format!(
                 " pid={}",
@@ -178,6 +179,10 @@ fn process_life_suffix(process: &AgentProcess) -> String {
     } else {
         format!(" life={}", terminal_safe_text(&process.life))
     }
+}
+
+fn process_role_suffix(process: &AgentProcess) -> String {
+    if is_worker_agent_name(&process.name) { " role=worker".to_owned() } else { String::new() }
 }
 
 fn process_parent_session_suffix(process: &AgentProcess) -> String {

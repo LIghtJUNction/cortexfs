@@ -20,7 +20,7 @@ use super::{
     read_oauth_callback_request_from_reader, read_optional_trimmed, read_provider_config_file, read_provider_config_from_dir,
     read_provider_secret_stdin_limited,
     remove_stale_agent_terminal_socket, run, load_schedule_context, schedule_command,
-    schedule_handoff_agent_model_life, schedule_handoff_agent_parent,
+    schedule_handoff_agent_model_life, schedule_handoff_agent_parent, schedule_handoff_agent_role,
     schedule_parent_ref_for_output, schedule_status_lines, AGENT_REPL_COMMANDS,
     agent_env_lines, agent_repl_should_exit_on_readline_error, read_file_to_string,
     agent_start_mounts_with_default_source, agent_start_process_command,

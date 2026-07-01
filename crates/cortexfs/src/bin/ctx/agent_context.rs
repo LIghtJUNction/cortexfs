@@ -25,6 +25,10 @@ fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> 
             )
         ),
         format!(
+            "role={}",
+            if is_worker_agent_name(name) { "worker" } else { "agent" }
+        ),
+        format!(
             "parent={}",
             terminal_safe_text(
                 &read_optional_trimmed(&control.join("parent"))?.unwrap_or_else(|| "-".to_owned())

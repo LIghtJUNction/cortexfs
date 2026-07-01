@@ -62,12 +62,12 @@ ctx agent wait coder work-123 --session default
 
 `status` 只读取 plan、child 状态表和 delegated worker 的 `agent/<name>`、`agent/<name>.d/model`、`life`，
 delegated backing agent 缺失时不会伪造 `main`/`owned` 默认值；
-并输出 `node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>state`；`advance` 只物化 ready child handoff，`claim` 只把已物化的 child 从 `pending`
+并输出 `node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>role<TAB>state`；`advance` 只物化 ready child handoff，`claim` 只把已物化的 child 从 `pending`
 标记为 `active`，`result` 只把 child 的终态结果写回父 session 的
 `context/child/<child>/`。命令输出会带上 parent ref，以及 child 的
-`agent`、`session`、`model`、`life`、`handoff.md`、`result.md`、`refs.jsonl` ABI 路径，父 agent 和 worker 不需要猜测交接文件位置、模型或生命周期。
+`agent`、`session`、`model`、`life`、`role`、`handoff.md`、`result.md`、`refs.jsonl` ABI 路径，父 agent 和 worker 不需要猜测交接文件位置、模型、角色或生命周期。
 `agent wait` 是非阻塞的父进程式结果读取：child 还在 `pending`/`active` 时失败，进入
-`done`/`error`/`cancelled` 后输出 `child<TAB>status<TAB>agent<TAB>session<TAB>model<TAB>life`
+`done`/`error`/`cancelled` 后输出 `child<TAB>status<TAB>agent<TAB>session<TAB>model<TAB>life<TAB>role`
 和 `result.md`，并分别以 0、1、130 作为进程退出码。
 它们都不启动后台监听、轮询或第二套提交入口。
 供应商密钥不写进 model 文件、`.d/` 控制目录或进程环境变量。provider adapter 从
@@ -160,14 +160,14 @@ skeleton。`ctx agent start` 直接启动显式 runtime；terminal socket 可达
 `agent.start` 事件。`ctx agent stop` 优先调用 `/ctx/tool/agent.stop`，如果该 tool
 不存在则把 `agent/<name>.d/status` 写为 `dead`、清空 `pid`，并追加 `agent.stop`
 事件。`ctx agent status` 和 `ctx agent ps` 只读取普通 `agent/<name>.d/*` 控制文件；
-`agent status` 第一行仍是状态值，后续显示 `model=...`、`life=...`、`parent=...`、
+`agent status` 第一行仍是状态值，后续显示 `model=...`、`life=...`、`role=...`、`parent=...`、
 `children=...` 和 `pid=...`，并继续显示 `uid=...`、`gid=...`、`groups=...`、`root=...`、`cwd=...`
 这些 Linux 身份和路径字段；`children=...` 只统计 effective 状态不是 `dead` 的直接 child，
 记录了 stale 数字 pid 的 `ready`/`busy` child 会和 `ctx agent ps` 一样被排除；非默认模型会在进程树里显示为 `model=...`，非 `owned`
-生命周期会显示为 `life=...`。`ctx agent env NAME` 打印 `ctx agent start` 派生出的沙箱环境，便于检查 worker 实际获得的
+生命周期会显示为 `life=...`，worker-role agent 会显示为 `role=worker`。`ctx agent env NAME` 打印 `ctx agent start` 派生出的沙箱环境，便于检查 worker 实际获得的
 `CTX_AGENT`、`CTX_PATH`、`HOME` 等变量。`ctx agent children NAME` 从父 session 的
 child 表读取任务状态，并同时显示 backing worker 的 `parent_session`、`model`、
-`life`、`status` 和 `pid`，方便按父进程视角检查 worker。
+`life`、`role`、`status` 和 `pid`，方便按父进程视角检查 worker。
 
 ## 提交图片和其他文件
 
@@ -309,7 +309,7 @@ session 选择和 prompt history 注入。多轮对话的持久事实仍在
 只用于检查将要发送给模型的渲染结果，不替代真实 socket 对话。
 
 需要把独立实现任务交给 spark worker 时，父 agent 先用 `ctx schedule advance` 物化
-handoff，然后把输出里的 `model=`、`life=`、`plan=`、`handoff=`、`result=`、`refs=`
+handoff，然后把输出里的 `model=`、`life=`、`role=`、`plan=`、`handoff=`、`result=`、`refs=`
 交给 worker。worker 只用同一套 `ctx schedule claim/result` 写回结果；不要新增队列、轮询器或第二套
 coordination 文件。
 
