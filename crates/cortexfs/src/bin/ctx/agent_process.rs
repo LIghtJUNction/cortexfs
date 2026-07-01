@@ -136,14 +136,7 @@ fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
 }
 
 fn default_agent_process_model(name: &str) -> &'static str {
-    if matches!(name, "executor" | "worker")
-        || name.starts_with("executor-")
-        || name.starts_with("worker-")
-    {
-        DEFAULT_WORKER_MODEL
-    } else {
-        "main"
-    }
+    default_agent_model_for_name(name)
 }
 
 fn live_agent_status_and_pid(control: &Path) -> Result<(String, Option<String>), CliError> {
