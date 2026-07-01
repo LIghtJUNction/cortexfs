@@ -58,6 +58,25 @@ fn agent_ps_marks_ready_agent_dead_when_recorded_pid_is_gone() {
 }
 
 #[test]
+fn agent_ps_defaults_worker_and_executor_prefixes_to_spark_model() {
+    let root = clean_test_dir("ctx-agent-ps-worker-prefix-model");
+    create_agent_fixture(&root, "coder", "", "idle", "");
+    create_agent_fixture(&root, "worker-fast", "agent:coder", "ready", "");
+    create_agent_fixture(&root, "executor-fast", "agent:coder", "ready", "");
+    assert!(!root.join("agent/worker-fast.d/model").exists());
+    assert!(!root.join("agent/executor-fast.d/model").exists());
+
+    assert_eq!(
+        render_agent_status_lines(&read_agent_processes(&root).unwrap_or_default()),
+        vec![
+            "coder [idle]".to_owned(),
+            "+- executor-fast [ready] model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+            "`- worker-fast [ready] model=api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+        ]
+    );
+}
+
+#[test]
 fn agent_process_tree_reports_parent_cycles_as_visible_roots() {
     let mut processes = vec![
         AgentProcess {

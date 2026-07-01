@@ -343,9 +343,9 @@ fn statfs_sanitizes_zero_totals_to_avoid_false_full_mount() {
     assert_eq!(stats.files, 1024 * 1024);
     assert_eq!(stats.files_free, (1024 * 1024) - 1024);
     assert!(stats.files_free > stats.files * 99 / 100);
-    assert_eq!(stats.block_size, 1);
-    assert_eq!(stats.name_max, 1);
-    assert_eq!(stats.fragment_size, 1);
+    assert_eq!(stats.block_size, 4096);
+    assert_eq!(stats.name_max, 255);
+    assert_eq!(stats.fragment_size, 4096);
 }
 
 #[test]

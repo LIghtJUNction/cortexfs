@@ -35,12 +35,7 @@ pub fn derive_agent_runtime_view(
 
     let iso = parse_agent_vocab_value(&control_dir, AgentControlKind::Iso, "iso")?;
     let parent = parse_agent_parent_control(&control_dir)?;
-    let lifecycle = ChildLifecycle::parse(&parse_agent_vocab_value(
-        &control_dir,
-        AgentControlKind::Life,
-        "life",
-    )?)
-    .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("life".to_owned()))?;
+    let lifecycle = read_agent_lifecycle_control_value(&control_dir)?;
 
     let root = parse_agent_absolute_path_control(&control_dir, "root")?;
     let cwd = parse_agent_absolute_path_control(&control_dir, "cwd")?;
@@ -132,6 +127,17 @@ fn parse_agent_vocab_value(
         return Err(AgentRuntimeViewError::InvalidControlFile(file.to_owned()));
     }
     required_single_agent_control_value(file, &content)
+}
+
+fn read_agent_lifecycle_control_value(
+    control_dir: &Path,
+) -> Result<ChildLifecycle, AgentRuntimeViewError> {
+    match parse_agent_vocab_value(control_dir, AgentControlKind::Life, "life") {
+        Ok(lifecycle) => ChildLifecycle::parse(&lifecycle)
+            .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("life".to_owned())),
+        Err(AgentRuntimeViewError::MissingControlFile(_)) => Ok(ChildLifecycle::Owned),
+        Err(error) => Err(error),
+    }
 }
 
 fn parse_agent_parent_control(control_dir: &Path) -> Result<Option<String>, AgentRuntimeViewError> {
