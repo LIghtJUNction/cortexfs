@@ -51,6 +51,13 @@ fn agent_wait(
         ("unknown".to_owned(), "unknown".to_owned())
     };
     let result = read_file_to_string(&child_dir.join("result.md"))?;
+    if status == ChildContextStatus::Cancelled
+        && life == "temp"
+        && is_object_name(&agent)
+        && (agent.starts_with("worker-") || agent.starts_with("executor-"))
+    {
+        remove_temp_agent_object(root, &agent)?;
+    }
     print_line(&format!(
         "{}\t{}\t{}\t{}\t{}\t{}",
         terminal_safe_text(child),
