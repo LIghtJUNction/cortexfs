@@ -85,12 +85,9 @@ fn reconcile_active_child_wait(
     let Some(parent_ref) = read_agent_parent_ref(&control)? else {
         return Ok(Some(status));
     };
-    let parent_session = parent_session_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
+    let parent_session = schedule_parent_session_for_output(parent_session_dir)?;
     let (agent_status, agent_pid) = live_agent_status_and_pid(&control)?;
-    if !agent_parent_ref_matches(&parent_ref, parent_agent, Some(parent_session), None)
+    if !agent_parent_ref_matches(&parent_ref, parent_agent, Some(&parent_session), None)
         || agent_status != "dead"
     {
         return Ok(Some(status));
@@ -193,11 +190,8 @@ fn require_child_backing_parent(
     let Some(parent) = parent else {
         return Ok(None);
     };
-    let parent_session = parent_session_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    if !agent_parent_ref_matches(parent, parent_agent, Some(parent_session), None) {
+    let parent_session = schedule_parent_session_for_output(parent_session_dir)?;
+    if !agent_parent_ref_matches(parent, parent_agent, Some(&parent_session), None) {
         return Err(CliError::usage(format!(
             "child {child} backing parent mismatch for {child_agent}: {}",
             agent_parent_ref_display(parent)
