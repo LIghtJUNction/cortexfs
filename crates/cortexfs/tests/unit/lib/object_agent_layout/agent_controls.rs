@@ -51,6 +51,17 @@ fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
         }]
     );
     assert_eq!(
+        inspect_agent_control(
+            AgentControlKind::Parent,
+            "agent:coder session:default run:r1 run:r2\n"
+        )
+        .issues(),
+        &[AgentControlIssue::InvalidValue {
+            line: 1,
+            value: "agent:coder session:default run:r1 run:r2".to_owned()
+        }]
+    );
+    assert_eq!(
         inspect_agent_control(AgentControlKind::Status, "running\nextra\n").issues(),
         &[
             AgentControlIssue::InvalidValue {

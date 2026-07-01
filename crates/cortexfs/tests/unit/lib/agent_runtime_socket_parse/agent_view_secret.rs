@@ -261,6 +261,36 @@ fn agent_runtime_view_defaults_missing_life_to_owned() {
 }
 
 #[test]
+fn agent_runtime_view_accepts_parent_run_field() {
+    let root = clean_test_dir("agent-runtime-parent-run");
+    create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
+    let control = root.join("agent").join("worker.d");
+    write_text_file(&control.join("parent"), "agent:coder session:default run:r123\n");
+
+    let view = derive_agent_runtime_view(&root, "worker");
+    let view = ok!(view);
+    assert_eq!(
+        view.parent(),
+        Some("agent:coder session:default run:r123")
+    );
+}
+
+#[test]
+fn agent_runtime_view_rejects_unknown_parent_field() {
+    let root = clean_test_dir("agent-runtime-parent-unknown-field");
+    create_complete_object_layout(&root, ObjectClass::Agent, "worker", "none");
+    let control = root.join("agent").join("worker.d");
+    write_text_file(&control.join("parent"), "agent:coder task:work\n");
+
+    assert_eq!(
+        derive_agent_runtime_view(&root, "worker"),
+        Err(AgentRuntimeViewError::InvalidControlFile(
+            "parent".to_owned()
+        ))
+    );
+}
+
+#[test]
 fn agent_runtime_view_defaults_missing_worker_prefix_model_to_spark() {
     let root = clean_test_dir("agent-runtime-worker-prefix-missing-model");
     create_complete_object_layout(&root, ObjectClass::Agent, "worker-fast", "none");

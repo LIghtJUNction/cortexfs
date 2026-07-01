@@ -301,12 +301,16 @@ pub(crate) fn parent_ref_agent_name(value: &str) -> Result<&str, ChildAgentDenia
         return Err(ChildAgentDenial::InvalidParentRef);
     }
 
+    let mut session = false;
+    let mut run = false;
     for field in fields {
         let Some((kind, value)) = field.split_once(':') else {
             return Err(ChildAgentDenial::InvalidParentRef);
         };
-        if !matches!(kind, "session" | "run") || !is_object_name(value) {
-            return Err(ChildAgentDenial::InvalidParentRef);
+        match kind {
+            "session" if is_object_name(value) && !session => session = true,
+            "run" if is_object_name(value) && !run => run = true,
+            _ => return Err(ChildAgentDenial::InvalidParentRef),
         }
     }
 
