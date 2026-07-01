@@ -39,6 +39,8 @@ fn agent_wait(
     }
     let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
     let control = root.join("agent").join(format!("{agent}.d"));
+    let parent = read_agent_parent_ref(&control)?;
+    require_child_backing_parent(name, &parent_session_dir, child, &agent, parent.as_ref())?;
     let model = read_agent_model_for_context(&control, "agent")?;
     let life = agent_life_for_display(&control)?;
     let result = read_file_to_string(&child_dir.join("result.md"))?;
@@ -156,10 +158,11 @@ fn agent_child_rows(
         let (agent, session) = schedule_child_context_agent_session(&dir)?;
         let control = root.join("agent").join(format!("{agent}.d"));
         let parent = read_agent_parent_ref(&control)?;
+        let parent_session =
+            require_child_backing_parent(name, &parent_session_dir, &child, &agent, parent.as_ref())?;
         let (agent_status, pid) = live_agent_status_and_pid(&control)?;
         let model = read_agent_model_for_context(&control, "agent")?;
         let life = agent_life_for_display(&control)?;
-        let parent_session = parent.and_then(|parent| parent.session);
         rows.push(AgentChildRow {
             child,
             status,
@@ -173,6 +176,40 @@ fn agent_child_rows(
         });
     }
     Ok(rows)
+}
+
+fn require_child_backing_parent(
+    parent_agent: &str,
+    parent_session_dir: &Path,
+    child: &str,
+    child_agent: &str,
+    parent: Option<&AgentParentRef>,
+) -> Result<Option<String>, CliError> {
+    let Some(parent) = parent else {
+        return Ok(None);
+    };
+    let parent_session = parent_session_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    let session_matches = parent
+        .session
+        .as_deref()
+        .is_none_or(|session| session == parent_session);
+    if parent.agent != parent_agent || !session_matches {
+        return Err(CliError::usage(format!(
+            "child {child} backing parent mismatch for {child_agent}: {}",
+            agent_parent_ref_display(parent)
+        )));
+    }
+    Ok(parent.session.clone())
+}
+
+fn agent_parent_ref_display(parent: &AgentParentRef) -> String {
+    parent.session.as_ref().map_or_else(
+        || format!("agent:{}", parent.agent),
+        |session| format!("agent:{} session:{session}", parent.agent),
+    )
 }
 
 fn agent_life_for_display(control: &Path) -> Result<String, CliError> {

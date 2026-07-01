@@ -180,6 +180,36 @@ fn agent_child_rows_rejects_invalid_child_agent_metadata() {
 }
 
 #[test]
+fn agent_child_rows_rejects_mismatched_backing_parent() {
+    let root = clean_test_dir("ctx-child-row-bad-parent");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let session = fixture_path(
+        &root,
+        &[
+            "home", "1000", "agent", "coder", "session", "default",
+        ],
+    );
+    create_complete_session_layout(&session);
+    let child = session.join("context").join("child").join("work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("session"), "default\n");
+    write_text_file(&child.join("status"), "done\n");
+    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
+    write_text_file(&child.join("result.md"), "Done.\n");
+    write_text_file(&child.join("refs.jsonl"), "");
+    write_text_file(&root.join("agent/worker.d/parent"), "agent:planner\n");
+
+    assert!(matches!(
+        agent_child_rows(&root, "coder", Some("default")),
+        Err(ref error)
+            if error.code == 2
+                && error.message
+                    == "child work-123 backing parent mismatch for worker: agent:planner"
+    ));
+}
+
+#[test]
 fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
     let root = clean_test_dir("ctx-agent-wait-invalid-child-session");
     assert!(ensure_v1_reference_tree(&root).is_ok());
@@ -204,6 +234,36 @@ fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
         Err(ref error)
             if error.code == 2
                 && error.message == "invalid child context: invalid session name"
+    ));
+}
+
+#[test]
+fn agent_wait_rejects_mismatched_terminal_backing_parent() {
+    let root = clean_test_dir("ctx-agent-wait-bad-parent");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let session = fixture_path(
+        &root,
+        &[
+            "home", "1000", "agent", "coder", "session", "default",
+        ],
+    );
+    create_complete_session_layout(&session);
+    let child = session.join("context").join("child").join("work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("session"), "default\n");
+    write_text_file(&child.join("status"), "done\n");
+    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
+    write_text_file(&child.join("result.md"), "Done.\n");
+    write_text_file(&child.join("refs.jsonl"), "");
+    write_text_file(&root.join("agent/worker.d/parent"), "agent:coder session:other\n");
+
+    assert!(matches!(
+        agent_wait(&root, "coder", Some("default"), "work-123"),
+        Err(ref error)
+            if error.code == 2
+                && error.message
+                    == "child work-123 backing parent mismatch for worker: agent:coder session:other"
     ));
 }
 

@@ -1,4 +1,5 @@
 fn agent_new_host_fallback(root: &Path, args: &AgentNewArgs) -> Result<ExitCode, CliError> {
+    agent_new_request_json(args)?;
     if args.models.len() > 1 {
         return Err(CliError::usage(
             "host agent creation fallback accepts at most one --model",
