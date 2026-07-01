@@ -1,5 +1,6 @@
 fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(), CliError> {
     let color = color_enabled();
+    let model_summary = agent_repl_model_summary(color, root, name)?;
     let lines = [
         format!(
             "{} {}/{} - {}",
@@ -11,7 +12,7 @@ fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(),
         format!(
             "    {} {}",
             styled(color, ANSI_BOLD_BLUE, "Model:"),
-            agent_repl_model_summary(color, root, name)
+            model_summary
         ),
         format!(
             " {} {}",
@@ -34,16 +35,13 @@ fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
     )
 }
 
-fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> String {
-    let model = read_optional_trimmed(&root.join("agent").join(format!("{name}.d")).join("model"))
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| default_agent_process_model(name).to_owned());
+fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> Result<String, CliError> {
+    let model = read_agent_model_for_context(&root.join("agent").join(format!("{name}.d")), "agent")?;
     let model_text = styled(color, ANSI_CYAN, &model);
     if !matches!(model.as_str(), "main" | "helper") {
-        return model_text;
+        return Ok(model_text);
     }
-    match read_model_alias_target(root, &model) {
+    Ok(match read_model_alias_target(root, &model) {
         Ok(target) => {
             let missing = if model_alias_target_exists(root, &target) {
                 ""
@@ -66,7 +64,7 @@ fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> String {
             )
         }
         Err(_error) => format!("{} {}", model_text, styled(color, ANSI_RED, "(missing alias)")),
-    }
+    })
 }
 
 fn model_alias_target_exists(root: &Path, target: &str) -> bool {

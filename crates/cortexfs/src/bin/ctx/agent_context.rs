@@ -9,31 +9,24 @@ fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> 
     require_cli_name("agent name", name)?;
     let control = root.join("agent").join(format!("{name}.d"));
     let (status, pid) = live_agent_status_and_pid(&control)?;
+    let model = read_agent_model_for_context(&control, "agent")?;
+    let life = read_agent_life_for_context(&control, "agent")?;
+    let parent = read_optional_trimmed(&control.join("parent"))?.unwrap_or_else(|| "-".to_owned());
+    if parent != "-" {
+        read_agent_parent_ref(&control)?;
+    }
     Ok(vec![
         terminal_safe_text(&status),
         format!(
             "model={}",
-            terminal_safe_text(
-                &read_optional_trimmed(&control.join("model"))?
-                    .unwrap_or_else(|| default_agent_process_model(name).to_owned())
-            )
+            terminal_safe_text(&model)
         ),
-        format!(
-            "life={}",
-            terminal_safe_text(
-                &read_optional_trimmed(&control.join("life"))?.unwrap_or_else(|| "owned".to_owned())
-            )
-        ),
+        format!("life={}", terminal_safe_text(&life)),
         format!(
             "role={}",
             if is_worker_agent_name(name) { "worker" } else { "agent" }
         ),
-        format!(
-            "parent={}",
-            terminal_safe_text(
-                &read_optional_trimmed(&control.join("parent"))?.unwrap_or_else(|| "-".to_owned())
-            )
-        ),
+        format!("parent={}", terminal_safe_text(&parent)),
         format!("children={}", agent_status_child_count(root, name)?),
         format!(
             "pid={}",
@@ -91,6 +84,8 @@ fn agent_status_child_count(root: &Path, name: &str) -> Result<usize, CliError> 
         if read_agent_parent_ref(&control)?.is_some_and(|parent| parent.agent == name)
             && live_agent_status_and_pid(&control)?.0 != "dead"
         {
+            read_agent_model_for_context(&control, "agent")?;
+            read_agent_life_for_context(&control, "agent")?;
             count += 1;
         }
     }

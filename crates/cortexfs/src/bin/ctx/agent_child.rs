@@ -39,8 +39,7 @@ fn agent_wait(
     }
     let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
     let control = root.join("agent").join(format!("{agent}.d"));
-    let model = read_agent_control_trimmed(&control, "model")?
-        .unwrap_or_else(|| default_agent_process_model(&agent).to_owned());
+    let model = read_agent_model_for_context(&control, "agent")?;
     let life = agent_life_for_display(&control)?;
     let result = read_file_to_string(&child_dir.join("result.md"))?;
     if status == ChildContextStatus::Cancelled
@@ -158,8 +157,7 @@ fn agent_child_rows(
         let control = root.join("agent").join(format!("{agent}.d"));
         let parent = read_agent_parent_ref(&control)?;
         let (agent_status, pid) = live_agent_status_and_pid(&control)?;
-        let model = read_agent_control_trimmed(&control, "model")?
-            .unwrap_or_else(|| default_agent_process_model(&agent).to_owned());
+        let model = read_agent_model_for_context(&control, "agent")?;
         let life = agent_life_for_display(&control)?;
         let parent_session = parent.and_then(|parent| parent.session);
         rows.push(AgentChildRow {
@@ -179,9 +177,7 @@ fn agent_child_rows(
 
 fn agent_life_for_display(control: &Path) -> Result<String, CliError> {
     match fs::symlink_metadata(control) {
-        Ok(_metadata) => {
-            Ok(read_agent_control_trimmed(control, "life")?.unwrap_or_else(|| "owned".to_owned()))
-        }
+        Ok(_metadata) => read_agent_life_for_context(control, "agent"),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok("unknown".to_owned()),
         Err(error) => Err(CliError::unavailable(format!(
             "cannot stat {}: {error}",

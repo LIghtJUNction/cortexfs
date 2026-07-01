@@ -152,6 +152,120 @@ fn agent_child_rows_default_missing_worker_model_to_spark() {
 }
 
 #[test]
+fn agent_child_rows_rejects_invalid_child_agent_metadata() {
+    let root = clean_test_dir("ctx-child-row-invalid-child-agent");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let session = fixture_path(
+        &root,
+        &[
+            "home", "1000", "agent", "coder", "session", "default",
+        ],
+    );
+    create_complete_session_layout(&session);
+    let child = session.join("context").join("child").join("work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "../worker\n");
+    write_text_file(&child.join("session"), "default\n");
+    write_text_file(&child.join("status"), "done\n");
+    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
+    write_text_file(&child.join("result.md"), "Done.\n");
+    write_text_file(&child.join("refs.jsonl"), "");
+
+    assert!(matches!(
+        agent_child_rows(&root, "coder", Some("default")),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid child context: invalid agent name"
+    ));
+}
+
+#[test]
+fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
+    let root = clean_test_dir("ctx-agent-wait-invalid-child-session");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let session = fixture_path(
+        &root,
+        &[
+            "home", "1000", "agent", "coder", "session", "default",
+        ],
+    );
+    create_complete_session_layout(&session);
+    let child = session.join("context").join("child").join("work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("session"), "../default\n");
+    write_text_file(&child.join("status"), "done\n");
+    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
+    write_text_file(&child.join("result.md"), "Done.\n");
+    write_text_file(&child.join("refs.jsonl"), "");
+
+    assert!(matches!(
+        agent_wait(&root, "coder", Some("default"), "work-123"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid child context: invalid session name"
+    ));
+}
+
+#[test]
+fn agent_wait_rejects_invalid_backing_lifecycle() {
+    let root = clean_test_dir("ctx-agent-wait-invalid-backing-life");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let session = fixture_path(
+        &root,
+        &[
+            "home", "1000", "agent", "coder", "session", "default",
+        ],
+    );
+    create_complete_session_layout(&session);
+    let child = session.join("context").join("child").join("work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("session"), "default\n");
+    write_text_file(&child.join("status"), "done\n");
+    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
+    write_text_file(&child.join("result.md"), "Done.\n");
+    write_text_file(&child.join("refs.jsonl"), "");
+    write_text_file(&root.join("agent/worker.d/life"), "detached\n");
+
+    assert!(matches!(
+        agent_wait(&root, "coder", Some("default"), "work-123"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent life for worker: detached"
+    ));
+}
+
+#[test]
+fn agent_wait_rejects_invalid_backing_model() {
+    let root = clean_test_dir("ctx-agent-wait-invalid-backing-model");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let session = fixture_path(
+        &root,
+        &[
+            "home", "1000", "agent", "coder", "session", "default",
+        ],
+    );
+    create_complete_session_layout(&session);
+    let child = session.join("context").join("child").join("work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("session"), "default\n");
+    write_text_file(&child.join("status"), "done\n");
+    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
+    write_text_file(&child.join("result.md"), "Done.\n");
+    write_text_file(&child.join("refs.jsonl"), "");
+    write_text_file(&root.join("agent/worker.d/model"), "bad/model/name\n");
+
+    assert!(matches!(
+        agent_wait(&root, "coder", Some("default"), "work-123"),
+        Err(ref error)
+            if error.code == 2
+                && error.message == "invalid agent model for worker: bad/model/name"
+    ));
+}
+
+#[test]
 fn agent_wait_reaps_active_child_when_parent_session_is_omitted() {
     let root = clean_test_dir("ctx-wait-reaps-dead-no-session");
     assert!(ensure_v1_reference_tree(&root).is_ok());
