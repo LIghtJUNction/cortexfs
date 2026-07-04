@@ -66,9 +66,20 @@ if command -v bwrap >/dev/null 2>&1; then
         "$source_test_bin" >/dev/null
         grep -q 'self-bootstrap dirty note' "$user_dirty_file"
         if [ -d "$workspace/.git" ]; then
+            subject=$(git -C "$workspace" log -1 --format=%s)
+            if [ "$subject" != "test: add self bootstrap smoke proof" ]; then
+                printf 'unexpected workspace git commit subject: %s\n' "$subject" >&2
+                exit 1
+            fi
+            committed_files=$(git -C "$workspace" show --format= --name-only --stat HEAD)
+            if [[ "$committed_files" != *"crates/cortexfs/tests/self_bootstrap_smoke.rs"* ||
+                "$committed_files" == *"README.md"* ]]; then
+                printf 'unexpected workspace git commit files:\n%s\n' "$committed_files" >&2
+                exit 1
+            fi
             status=$(git -C "$workspace" status --short)
             if [[ "$status" != *" M README.md"* ||
-                "$status" != *"?? crates/cortexfs/tests/self_bootstrap_smoke.rs"* ]]; then
+                "$status" == *"?? crates/cortexfs/tests/self_bootstrap_smoke.rs"* ]]; then
                 printf 'unexpected workspace git status after source improvement:\n%s\n' "$status" >&2
                 exit 1
             fi
@@ -89,9 +100,18 @@ if command -v bwrap >/dev/null 2>&1; then
     }
     assert_codex_style_final_output() {
         local output=$1
-        grep -q 'changed: crates/cortexfs/tests/self_bootstrap_smoke.rs' <<<"$output"
-        grep -q "verified: $agent_verify_command" <<<"$output"
-        grep -q 'diff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs' <<<"$output"
+        assert_output_contains() {
+            local needle=$1
+            if ! grep -Fq "$needle" <<<"$output"; then
+                printf 'missing final output evidence: %s\nfull output:\n%s\n' "$needle" "$output" >&2
+                exit 1
+            fi
+        }
+        assert_output_contains 'changed: crates/cortexfs/tests/self_bootstrap_smoke.rs'
+        assert_output_contains "verified: $agent_verify_command"
+        assert_output_contains 'diff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs'
+        assert_output_contains 'commit: git -C /workspace add crates/cortexfs/tests/self_bootstrap_smoke.rs && git -C /workspace commit -m'
+        assert_output_contains 'committed: test: add self bootstrap smoke proof'
     }
 
     host_runner="$repo_root/target/debug/cortexfs-object-runner"
@@ -122,9 +142,12 @@ if command -v bwrap >/dev/null 2>&1; then
 cat >"$root/model/debug/selfedit" <<'EOF'
 #!/bin/sh
 case "${CTX_AGENT_TOOL_CONTEXT:-}" in
-    *"call-4"*)
-    printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete\nchanged: crates/cortexfs/tests/self_bootstrap_smoke.rs\nverified: test -f /workspace/Cargo.toml && test -f /workspace/crates/cortexfs/Cargo.toml && rustc --test /workspace/crates/cortexfs/tests/self_bootstrap_smoke.rs -o /tmp/self_bootstrap_smoke && /tmp/self_bootstrap_smoke\ndiff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs"}\n' "$CTX_RUN_ID"
+    *"call-5"*)
+    printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete\nchanged: crates/cortexfs/tests/self_bootstrap_smoke.rs\nverified: test -f /workspace/Cargo.toml && test -f /workspace/crates/cortexfs/Cargo.toml && rustc --test /workspace/crates/cortexfs/tests/self_bootstrap_smoke.rs -o /tmp/self_bootstrap_smoke && /tmp/self_bootstrap_smoke\ndiff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs\ncommit: git -C /workspace add crates/cortexfs/tests/self_bootstrap_smoke.rs && git -C /workspace commit -m \"test: add self bootstrap smoke proof\"\ncommitted: test: add self bootstrap smoke proof"}\n' "$CTX_RUN_ID"
     printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+    ;;
+  *"call-4"*)
+    printf '{"type":"tool_call","run":"%s","id":"call-5","name":"tsh","arguments":{"args":["shell.exec","git -C /workspace add crates/cortexfs/tests/self_bootstrap_smoke.rs && git -C /workspace commit -m \\"test: add self bootstrap smoke proof\\""]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-3"*)
     printf '{"type":"tool_call","run":"%s","id":"call-4","name":"tsh","arguments":{"args":["shell.exec","git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs"]}}\n' "$CTX_RUN_ID"
