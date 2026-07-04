@@ -58,33 +58,78 @@ if command -v bwrap >/dev/null 2>&1; then
         fi
         printf '\nself-bootstrap dirty note\n' >>"$user_dirty_file"
     }
-    assert_source_improved() {
-        grep -q 'self_bootstrap_agent_updates_cortexfs_source' "$source_file"
-        test -f "$workspace/Cargo.toml"
-        test -f "$workspace/crates/cortexfs/Cargo.toml"
-        rustc --test "$source_file" -o "$source_test_bin"
-        "$source_test_bin" >/dev/null
-        grep -q 'self-bootstrap dirty note' "$user_dirty_file"
-        if [ -d "$workspace/.git" ]; then
-            subject=$(git -C "$workspace" log -1 --format=%s)
-            if [ "$subject" != "test: add self bootstrap smoke proof" ]; then
-                printf 'unexpected workspace git commit subject: %s\n' "$subject" >&2
-                exit 1
-            fi
-            committed_files=$(git -C "$workspace" show --format= --name-only --stat HEAD)
-            if [[ "$committed_files" != *"crates/cortexfs/tests/self_bootstrap_smoke.rs"* ||
-                "$committed_files" == *"README.md"* ]]; then
-                printf 'unexpected workspace git commit files:\n%s\n' "$committed_files" >&2
-                exit 1
-            fi
-            status=$(git -C "$workspace" status --short)
-            if [[ "$status" != *" M README.md"* ||
-                "$status" == *"?? crates/cortexfs/tests/self_bootstrap_smoke.rs"* ]]; then
-                printf 'unexpected workspace git status after source improvement:\n%s\n' "$status" >&2
-                exit 1
-            fi
-        fi
-    }
+assert_source_improved() {
+  grep -q 'self-bootstrap dirty note' "$user_dirty_file"
+  local uid overlay_root overlay upper work
+  uid=$(id -u)
+  overlay_root="$root/home/$uid/agent/coder/session/smoke/workspace-overlay"
+  overlay=$(find "$overlay_root" -mindepth 1 -maxdepth 1 -type d | head -n 1 || true)
+  if [ -z "$overlay" ]; then
+    printf 'missing workspace overlay under %s\n' "$overlay_root" >&2
+    exit 1
+  fi
+  upper="$overlay/upper"
+  work="$overlay/work"
+  test -f "$upper/crates/cortexfs/tests/self_bootstrap_smoke.rs"
+  local rustup_home cargo_home rustup_toolchain
+  rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+  cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+  rustup_toolchain=$(rustup show active-toolchain | awk '{print $1}')
+  bwrap \
+    --clearenv \
+    --die-with-parent \
+    --unshare-pid \
+    --unshare-net \
+    --proc /proc \
+    --dev /dev \
+    --tmpfs /tmp \
+    --ro-bind /usr /usr \
+    --ro-bind /etc /etc \
+    --dir /home \
+    --dir "$HOME" \
+    --ro-bind "$rustup_home" "$rustup_home" \
+    --ro-bind "$cargo_home" "$cargo_home" \
+    --symlink usr/bin /bin \
+    --symlink usr/lib /lib \
+    --symlink usr/lib /lib64 \
+    --dir /workspace \
+    --overlay-src "$workspace" \
+    --overlay "$upper" "$work" /workspace \
+    --chdir /workspace \
+    --setenv PATH /usr/bin:/bin \
+    --setenv RUSTUP_HOME "$rustup_home" \
+    --setenv CARGO_HOME "$cargo_home" \
+    --setenv RUSTUP_TOOLCHAIN "$rustup_toolchain" \
+    -- /bin/sh -eu -c '
+      grep -q self_bootstrap_agent_updates_cortexfs_source crates/cortexfs/tests/self_bootstrap_smoke.rs
+      test -f Cargo.toml
+      test -f crates/cortexfs/Cargo.toml
+      rustc --test crates/cortexfs/tests/self_bootstrap_smoke.rs -o /tmp/self_bootstrap_smoke
+      /tmp/self_bootstrap_smoke >/dev/null
+      grep -q "self-bootstrap dirty note" README.md
+      subject=$(git log -1 --format=%s)
+      if [ "$subject" != "test: add self bootstrap smoke proof" ]; then
+        printf "unexpected workspace git commit subject: %s\n" "$subject" >&2
+        exit 1
+      fi
+      committed_files=$(git show --format= --name-only --stat HEAD)
+      case "$committed_files" in
+        *crates/cortexfs/tests/self_bootstrap_smoke.rs*) ;;
+        *) printf "unexpected workspace git commit files:\n%s\n" "$committed_files" >&2; exit 1 ;;
+      esac
+      case "$committed_files" in
+        *README.md*) printf "unexpected README commit:\n%s\n" "$committed_files" >&2; exit 1 ;;
+      esac
+      status=$(git status --short)
+      case "$status" in
+        *" M README.md"*) ;;
+        *) printf "unexpected workspace git status after source improvement:\n%s\n" "$status" >&2; exit 1 ;;
+      esac
+      case "$status" in
+        *"?? crates/cortexfs/tests/self_bootstrap_smoke.rs"*) printf "unexpected untracked smoke proof:\n%s\n" "$status" >&2; exit 1 ;;
+      esac
+    '
+}
     assert_session_recorded() {
         local session=$1
         local expected=$2
@@ -162,10 +207,10 @@ case "${CTX_AGENT_TOOL_CONTEXT:-}" in
     printf '{"type":"error","run":"%s","code":"EIO","message":"missing nearest source AGENTS.md evidence"}\n' "$CTX_RUN_ID"
     ;;
   *"Current request context:"*"Host workspace mounted at \`/workspace\`"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","find /workspace -name AGENTS.md -print; cat /workspace/AGENTS.md /workspace/crates/cortexfs/src/AGENTS.md; git -C /workspace status --short"]}}\n' "$CTX_RUN_ID"
+            printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","find /workspace -name AGENTS.md -print; cat /workspace/AGENTS.md; if test -f /workspace/crates/cortexfs/src/AGENTS.md; then cat /workspace/crates/cortexfs/src/AGENTS.md; fi; cat /workspace/docs/DESIGN.md; git -C /workspace status --short"]}}\n' "$CTX_RUN_ID"
     ;;
   "")
-    printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","find /workspace -name AGENTS.md -print; cat /workspace/AGENTS.md /workspace/crates/cortexfs/src/AGENTS.md; git -C /workspace status --short"]}}\n' "$CTX_RUN_ID"
+            printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","find /workspace -name AGENTS.md -print; cat /workspace/AGENTS.md; if test -f /workspace/crates/cortexfs/src/AGENTS.md; then cat /workspace/crates/cortexfs/src/AGENTS.md; fi; cat /workspace/docs/DESIGN.md; git -C /workspace status --short"]}}\n' "$CTX_RUN_ID"
     ;;
   *)
     printf '{"type":"error","run":"%s","code":"EIO","message":"unexpected context"}\n' "$CTX_RUN_ID"
@@ -219,8 +264,9 @@ EOF
             --chdir /workspace \
             --setenv PATH /usr/bin:/bin \
             --setenv CTX_ROOT /ctx \
-            --setenv CTX_SOURCE /ctx \
-            --setenv CTX_RUN_ID smoke \
+  --setenv CTX_SOURCE /ctx \
+  --setenv CTX_WORKSPACE /workspace \
+  --setenv CTX_RUN_ID smoke \
             --setenv CTX_SESSION smoke \
             --setenv CTX_AGENT_HISTORY_MESSAGES '' \
     "$runner" /ctx/agent/coder 'improve the CortexFS source tree itself and verify it'
@@ -236,9 +282,11 @@ EOF
     assert_source_improved
     printf 'source self-improvement smoke passed\n' >&2
 
-    if command -v systemd-run >/dev/null 2>&1 &&
-        systemctl --user is-system-running >/dev/null 2>&1 &&
-        [ -x /usr/bin/ctxterm ]; then
+  if command -v systemd-run >/dev/null 2>&1 &&
+    systemctl --user is-system-running >/dev/null 2>&1 &&
+    [ -x /usr/bin/ctxterm ] &&
+    [ -x /usr/bin/cortexfs-agent-runtime ] &&
+    [ ! "$repo_root/target/debug/cortexfs-agent-runtime" -nt /usr/bin/cortexfs-agent-runtime ]; then
         write_self_bootstrap_workspace
         "$repo_root/target/debug/ctx" \
             --root "$root" \
@@ -271,9 +319,9 @@ EOF
         assert_session_recorded smoke 'source self-improvement smoke complete'
         assert_session_recorded smoke 'changed: crates/cortexfs/tests/self_bootstrap_smoke.rs'
         printf 'ctx agent start/send source self-improvement smoke passed\n' >&2
-    else
-        printf 'skipping ctx agent start/send source self-improvement smoke: user systemd or /usr/bin/ctxterm unavailable\n' >&2
-    fi
+  else
+    printf 'skipping ctx agent start/send source self-improvement smoke: user systemd unavailable or installed runtime older than target/debug\n' >&2
+  fi
 else
     printf 'skipping bwrap source self-improvement smoke: bwrap not found\n' >&2
 fi

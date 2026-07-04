@@ -9,10 +9,7 @@ fn agent_executable_socket_command(
             apply_agent_executable_socket_env(
                 &mut command,
                 runtime,
-                request.run_id,
-                request.session,
-                request.history_messages,
-                request.tool_context,
+                request,
             );
             command.arg(request.input);
             command.stdout(Stdio::piped()).process_group(0);
@@ -38,10 +35,7 @@ fn agent_executable_socket_command(
             apply_agent_executable_socket_env(
                 &mut command,
                 runtime,
-                request.run_id,
-                request.session,
-                request.history_messages,
-                request.tool_context,
+                request,
             );
             command.stdout(Stdio::piped()).process_group(0);
             command
@@ -66,10 +60,7 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
 fn apply_agent_executable_socket_env(
     command: &mut Command,
     runtime: AgentExecutableSocketRuntime<'_>,
-    run_id: &str,
-    session: &str,
-    history_messages: &str,
-    tool_context: &str,
+    request: AgentExecutableRunRequest<'_>,
 ) {
     command
         .env_clear()
@@ -77,16 +68,19 @@ fn apply_agent_executable_socket_env(
             runtime
                 .env
                 .iter()
-                .filter(|env| env.0 != "CTX_PROVIDER_SECRET_PATH")
+                .filter(|env| !is_provider_secret_env(&env.0))
                 .map(|env| (env.0.as_str(), env.1.as_str())),
         )
         .env("CTX_AGENT", runtime.agent_name)
         .env("CTX_ROOT", runtime.ctx_root)
         .env("CTX_SOURCE", runtime.source_root)
-        .env("CTX_RUN_ID", run_id)
-        .env("CTX_SESSION", session)
-        .env("CTX_AGENT_HISTORY_MESSAGES", history_messages)
-        .env("CTX_AGENT_TOOL_CONTEXT", tool_context);
+        .env("CTX_RUN_ID", request.run_id)
+        .env("CTX_SESSION", request.session)
+        .env("CTX_AGENT_HISTORY_MESSAGES", request.history_messages)
+        .env("CTX_AGENT_TOOL_CONTEXT", request.tool_context);
+    if let Some(workspace) = request.workspace {
+        command.env("CTX_WORKSPACE", workspace);
+    }
 }
 
 pub(crate) fn agent_executable_socket_bwrap_args(
@@ -94,7 +88,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
 ) -> Vec<String> {
     let mut bwrap = vec!["--clearenv".to_owned()];
     for env in request.runtime.env {
-        if env.0 == "CTX_PROVIDER_CONFIG_DIR" || env.0 == "CTX_PROVIDER_SECRET_PATH" {
+        if env.0 == "CTX_PROVIDER_CONFIG_DIR" || is_provider_secret_env(&env.0) {
             continue;
         }
         bwrap.extend(["--setenv".to_owned(), env.0.clone(), env.1.clone()]);
@@ -129,6 +123,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--setenv".to_owned(),
         "CTX_AGENT_TOOL_CONTEXT".to_owned(),
         request.tool_context.to_owned(),
+        "--setenv".to_owned(),
+        "CTX_WORKSPACE".to_owned(),
+        request.workspace.unwrap_or("").to_owned(),
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
         "--proc".to_owned(),
@@ -195,6 +192,10 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.input.to_owned(),
     ]);
     bwrap
+}
+
+fn is_provider_secret_env(name: &str) -> bool {
+    name.starts_with("CTX_PROVIDER_SECRET_")
 }
 
 fn bwrap_workspace_bind_args(
