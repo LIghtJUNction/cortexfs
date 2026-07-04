@@ -30,10 +30,11 @@ fn provider_chat_completion(
     let (provider, model) = name
         .split_once('/')
         .ok_or_else(|| ProviderCompletionError::fallback(format!("invalid provider model: {name}")))?;
-    let config =
-        provider_config(provider).ok_or_else(|| ProviderCompletionError::fallback(format!("missing provider: {provider}")))?;
     let ctx_root =
         env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(DEFAULT_CTX_ROOT), PathBuf::from);
+    let config = provider_config(provider)
+        .or_else(|| provider_config_from_model_control(&ctx_root, provider, model))
+        .ok_or_else(|| ProviderCompletionError::fallback(format!("missing provider: {provider}")))?;
     let route = read_small_plain_text_file(&ctx_root.join("model").join("route")).ok();
     let route = provider_route(&config, provider, model, route.as_deref())
         .map_err(ProviderCompletionError::fallback)?;
