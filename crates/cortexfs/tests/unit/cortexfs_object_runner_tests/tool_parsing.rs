@@ -129,6 +129,8 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     assert!(contract.contains("do not stop at a plan"));
     assert!(contract.contains("Ask for clarification only when the target path or scope is missing"));
     assert!(contract.contains("git status --short"));
+    assert!(contract.contains("find /workspace -name AGENTS.md -print"));
+    assert!(!contract.contains("find .. -name AGENTS.md -print"));
     assert!(contract.contains("nearest `AGENTS.md` files"));
     assert!(contract.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#));
     assert!(contract.contains("prefer `fs.replace` for small surgical edits"));

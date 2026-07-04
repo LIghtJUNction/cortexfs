@@ -35,6 +35,7 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
     assert!(coder_prompt.contains("implement the requested change directly through `tsh`"));
     assert!(coder_prompt.contains("formatter, static check, lint, and focused tests"));
     assert!(coder_prompt.contains("git status --short"));
+    assert!(coder_prompt.contains("find /workspace -name AGENTS.md -print"));
     assert!(coder_prompt.contains("never overwrite, revert, delete, or reformat unrelated user changes"));
     assert!(coder_prompt.contains("Never run destructive git commands"));
 }
@@ -69,6 +70,7 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
                 && prompt.contains("Tool results include the original `arguments.args`")
                 && prompt.contains("For clear coding requests")
                 && prompt.contains("do not stop at a plan")
+                && prompt.contains("find /workspace -name AGENTS.md -print")
                 && prompt.contains("inspect current files before editing")
                 && prompt.contains("prefer `fs.replace` for small surgical edits")
                 && prompt.contains("format, static check, lint, and test commands")

@@ -127,6 +127,7 @@ EOF
     grep -Fq 'formatter, static check, lint, and focused tests' "$root/agent/coder.d/system.md"
     grep -Fq 'git status --short' "$root/agent/coder.d/system.md"
     grep -Fq 'nearest applicable `AGENTS.md`' "$root/agent/coder.d/system.md"
+    grep -Fq 'find /workspace -name AGENTS.md -print' "$root/agent/coder.d/system.md"
     grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
     grep -Fq 'Never run destructive git commands' "$root/agent/coder.d/system.md"
     write_source_fixture
