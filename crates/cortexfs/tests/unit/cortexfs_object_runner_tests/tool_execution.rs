@@ -94,6 +94,152 @@ esac
 }
 
 #[test]
+fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("tool-overlay-args")?;
+    let workspace = root.join("workspace");
+    let upper = root.join("overlay-upper");
+    let work = root.join("overlay-work");
+    fs::create_dir_all(&workspace)?;
+    fs::create_dir_all(&upper)?;
+    fs::create_dir_all(&work)?;
+    let config = AgentModelRunConfig {
+        ctx_root: root.join("ctx"),
+        source: root.join("source"),
+        ..test_agent_run_config()
+    };
+    let mount_table = cortexfs::MountTable::parse(&format!(
+        "{}\t/ctx\tro\trbind,nosuid,nodev\n{}\t/workspace\trw\trbind,nosuid,nodev\n",
+        config.source.display(),
+        workspace.display()
+    ))
+    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let sandbox = AgentToolSandbox {
+        workspace: workspace.clone(),
+        upper: upper.clone(),
+        work: work.clone(),
+    };
+    let env = vec![
+        ("SAFE_ENV".to_owned(), "ok".to_owned()),
+        ("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()),
+        (
+            "CTX_PROVIDER_SECRET_PATH".to_owned(),
+            "/run/secret".to_owned(),
+        ),
+        (
+            "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+            "api.test".to_owned(),
+        ),
+        ("CTX_PROVIDER_SECRET_SLOT".to_owned(), "default".to_owned()),
+    ];
+
+    let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
+        config: &config,
+        tool_executable: Path::new("/proc/self/fd/9"),
+        tool_args: &[OsString::from("tools")],
+        env: &env,
+        mount_table: &mount_table,
+        cwd: Path::new("/workspace"),
+        sandbox: Some(&sandbox),
+    });
+
+    assert!(contains_os_arg_triplet(
+        &args,
+        "--overlay",
+        &upper.display().to_string(),
+        &work.display().to_string()
+    ));
+    assert!(contains_os_arg_pair(
+        &args,
+        "--overlay-src",
+        &workspace.display().to_string()
+    ));
+    assert!(!contains_os_arg_triplet(
+        &args,
+        "--bind",
+        &workspace.display().to_string(),
+        "/workspace"
+    ));
+    assert!(contains_os_arg_triplet(&args, "--setenv", "SAFE_ENV", "ok"));
+    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_FD"));
+    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PATH"));
+    assert!(!args
+        .iter()
+        .any(|arg| arg == "CTX_PROVIDER_SECRET_PROVIDER"));
+    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_SLOT"));
+    assert!(contains_os_arg_pair(&args, "--chdir", "/workspace"));
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = short_unique_temp_path("atl-overlay-write");
+    let _ignored = fs::remove_dir_all(&root);
+    let workspace = root.join("workspace-lower");
+    let source = root.join("source");
+    let upper = root.join("upper");
+    let work = root.join("work");
+    fs::create_dir_all(&source)?;
+    fs::create_dir_all(&workspace)?;
+    fs::create_dir_all(&upper)?;
+    fs::create_dir_all(&work)?;
+    fs::write(workspace.join("README.md"), "lower\n")?;
+    let tool = root.join("write-workspace");
+    write_executable_script(
+        &tool,
+        "#!/bin/sh\nprintf upper-write > /workspace/generated.txt\nprintf ok\n",
+    )?;
+    let tool_executable = open_executable_no_follow(&tool)?;
+    let config = AgentModelRunConfig {
+        ctx_root: root.clone(),
+        source: source.clone(),
+        ..test_agent_run_config()
+    };
+    let mount_table = cortexfs::MountTable::parse(&format!(
+        "{}\t/ctx\tro\trbind,nosuid,nodev\n",
+        source.display()
+    ))
+    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let sandbox = AgentToolSandbox {
+        workspace: workspace.clone(),
+        upper: upper.clone(),
+        work,
+    };
+    let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
+        config: &config,
+        tool_executable: &proc_fd_path(&tool_executable),
+        tool_args: &[],
+        env: &[],
+        mount_table: &mount_table,
+        cwd: Path::new("/workspace"),
+        sandbox: Some(&sandbox),
+    });
+    let mut command = std::process::Command::new(BWRAP_PROGRAM);
+    command.args(args);
+    let output = run_agent_tool_process_with_timeout(&mut command, Duration::from_secs(5))?;
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "ok");
+    assert!(!workspace.join("generated.txt").exists());
+    let upper_file = find_overlay_generated_file(&upper)?;
+    assert_eq!(fs::read_to_string(upper_file)?, "upper-write");
+    assert_eq!(fs::read_to_string(workspace.join("README.md"))?, "lower\n");
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn visible_workspace_source_falls_back_to_current_namespace_workspace() {
+    let missing = PathBuf::from("/tmp/cortexfs-missing-workspace-for-test");
+    if Path::new("/workspace").exists() {
+        assert_eq!(visible_workspace_source(missing), PathBuf::from("/workspace"));
+    }
+}
+
+#[test]
 fn agent_tool_call_refuses_symlinked_tsh_policy() -> Result<(), Box<dyn std::error::Error>> {
     let root = short_unique_temp_path("atl-policy-symlink");
     let _ignored = fs::remove_dir_all(&root);
@@ -461,4 +607,39 @@ fn execute_agent_tsh_call_rejects_empty_args() -> Result<(), Box<dyn std::error:
 
     let _ignored = fs::remove_dir_all(root);
     Ok(())
+}
+
+fn contains_os_arg_pair(args: &[OsString], first: &str, second: &str) -> bool {
+    args.windows(2).any(|window| {
+        window.first().is_some_and(|arg| arg == first)
+            && window.get(1).is_some_and(|arg| arg == second)
+    })
+}
+
+fn contains_os_arg_triplet(args: &[OsString], first: &str, second: &str, third: &str) -> bool {
+    args.windows(3).any(|window| {
+        window.first().is_some_and(|arg| arg == first)
+            && window.get(1).is_some_and(|arg| arg == second)
+            && window.get(2).is_some_and(|arg| arg == third)
+    })
+}
+
+fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.file_name().and_then(|name| name.to_str()) == Some("generated.txt") {
+                return Ok(path);
+            }
+            if entry.file_type()?.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "generated.txt not found in overlay upper",
+    ))
 }

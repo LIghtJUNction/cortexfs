@@ -22,6 +22,7 @@ use cortexfs::{
 use cortexfs_tool_sdk::ToolInvocation;
 use nix::libc;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 const DEFAULT_CTX_ROOT: &str = "/ctx";
@@ -43,6 +44,7 @@ const MAX_AGENT_TOOL_TIMEOUT_SECONDS: u64 = 120;
 const AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const AGENT_MODEL_TIMEOUT_SECONDS: u64 = 120;
 const MAX_AGENT_MODEL_TIMEOUT_SECONDS: u64 = 600;
+const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
 
 include!("../object/runner_provider.rs");
 include!("object_runner/model.rs");

@@ -122,8 +122,8 @@ pub struct AgentExecutableSocketRuntime<'a> {
 /// Process isolation mode for socket-activated executable agents.
 #[derive(Clone, Copy, Debug)]
 pub enum AgentExecutableSocketExecution<'a> {
-    /// Execute the agent object directly. This is only for unit tests and
-    /// tightly controlled development helpers.
+    /// Execute the agent object directly on the host. The agent runtime owns
+    /// model/provider/session work; shell/tool calls apply their own sandbox.
     Direct,
     /// Execute the agent object inside the `CortexFS` `bwrap` sandbox.
     Bwrap {

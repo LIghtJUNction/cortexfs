@@ -188,6 +188,13 @@ fn agent_bwrap_args(
     for (key, value) in agent_sandbox_env(root, view) {
         bwrap.extend(["--setenv".to_owned(), key, value]);
     }
+    if let Some(workspace) = agent_start_workspace_source(cli_mounts) {
+        bwrap.extend([
+            "--setenv".to_owned(),
+            "CTX_WORKSPACE".to_owned(),
+            workspace,
+        ]);
+    }
     bwrap.extend([
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
