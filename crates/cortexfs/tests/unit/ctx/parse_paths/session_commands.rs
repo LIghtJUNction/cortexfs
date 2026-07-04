@@ -135,6 +135,12 @@ fn parses_subcommand_help_before_required_args() {
         agent_watch,
         Ok(Command::HelpTopic(ref topic)) if topic == "agent watch"
     ));
+
+    let agent_chat = cmd!("agent", "chat", "--help");
+    assert!(matches!(
+        agent_chat,
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent chat"
+    ));
 }
 
 #[test]
@@ -198,6 +204,16 @@ fn parses_agent_session_client_commands() {
             session: None,
             raw: true,
         })) if name == "coder"
+    ));
+
+    let chat = cmd!("agent", "chat", "coder", "--session", "focus");
+    assert!(matches!(
+        chat,
+        Ok(Command::Agent(AgentArgs::Repl {
+            ref name,
+            session: Some(ref session),
+            raw: false,
+        })) if name == "coder" && session == "focus"
     ));
 
     let cancel = cmd!("agent", "cancel", "coder", "--session", "test", "run-1");

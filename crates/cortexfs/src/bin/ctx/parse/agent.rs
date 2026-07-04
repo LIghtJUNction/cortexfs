@@ -46,7 +46,7 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
-        "agent requires new, start, stop, status, env, ps, send, repl, resume, history, output, pack, prompt, tools, children, wait, cancel, watch, or attach",
+        "agent requires new, start, stop, status, env, ps, send, chat, repl, resume, history, output, pack, prompt, tools, children, wait, cancel, watch, or attach",
     )?;
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) {
@@ -87,8 +87,9 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
                 raw: parsed.raw,
             }))
         }
-        "repl" => {
-            let (name, session, raw) = parse_agent_session_raw_args(values, "agent repl")?;
+        "chat" | "repl" => {
+            let command = format!("agent {command}");
+            let (name, session, raw) = parse_agent_session_raw_args(values, &command)?;
             Ok(Command::Agent(AgentArgs::Repl { name, session, raw }))
         }
         "resume" => {

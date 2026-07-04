@@ -76,7 +76,7 @@ agent.sh --raw coder "prompt"
 ```
 
 With no prompt, `agent.sh AGENT` opens the agent chat REPL through
-`ctx agent repl AGENT --session default`. With a prompt, it dispatches to
+`ctx agent chat AGENT --session default`. With a prompt, it dispatches to
 `ctx agent send AGENT --session default`.
 
 Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
@@ -85,7 +85,7 @@ Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 
 ## Chat And Terminal
 
-`ctx agent repl` owns line editing, interrupt handling, socket requests, and
+`ctx agent chat` and `ctx agent repl` own line editing, interrupt handling, socket requests, and
 assistant response rendering. Interactive REPL responses are buffered before
 printing so model output does not corrupt the user's current input buffer.
 `Ctrl+C` exits an idle REPL. While a run is active it asks CortexFS to cancel
