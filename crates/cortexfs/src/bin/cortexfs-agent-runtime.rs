@@ -197,6 +197,9 @@ fn repair_child_path_permissions(
     uid: u32,
     gid: u32,
 ) -> Result<(), String> {
+    if name == "workspace-overlay" {
+        return Ok(());
+    }
     let stat = fstatat(parent_fd, name, AtFlags::AT_SYMLINK_NOFOLLOW)
         .map_err(|error| format!("cannot inspect session path {parent_label}/{name}: {error}"))?;
     let file_type = stat.st_mode & nix::libc::S_IFMT;
