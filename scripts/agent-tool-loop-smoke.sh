@@ -39,50 +39,36 @@ if command -v bwrap >/dev/null 2>&1; then
         rm -rf "$root" "$workspace"
     }
     trap cleanup EXIT
-    source_file="$workspace/crates/cortexfs/src/self_improve_smoke.rs"
-    source_test_bin="$workspace/self_improve_smoke_test"
+    source_file="$workspace/crates/cortexfs/tests/self_bootstrap_smoke.rs"
+    source_test_bin="$workspace/self_bootstrap_smoke_test"
+    agent_verify_command="test -f /workspace/Cargo.toml && test -f /workspace/crates/cortexfs/Cargo.toml && rustc --test /workspace/crates/cortexfs/tests/self_bootstrap_smoke.rs -o /tmp/self_bootstrap_smoke && /tmp/self_bootstrap_smoke"
     user_dirty_file="$workspace/README.md"
-    write_source_fixture() {
-        rm -rf "$workspace/.git"
+    write_self_bootstrap_workspace() {
+        find "$workspace" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        git -C "$repo_root" archive --format=tar HEAD | tar -C "$workspace" -xf -
         rm -f "$source_test_bin"
-        mkdir -p "$(dirname "$source_file")"
-        cat >"$workspace/AGENTS.md" <<'EOF'
-Read the current source before editing.
-Do not overwrite unrelated user changes.
-Run verification before reporting success.
-EOF
-    cat >"$(dirname "$source_file")/AGENTS.md" <<'EOF'
-source-nearest-rule: use fs.replace for small source edits.
-EOF
-    cat >"$source_file" <<'EOF'
-pub fn agent_quality_label() -> &'static str {
-    "todo"
-}
-
-#[test]
-fn programming_agent_improves_source() {
-    assert_eq!(agent_quality_label(), "cortexfs-agent-source");
-}
-EOF
-        printf 'baseline project note\n' >"$user_dirty_file"
+        test -f "$workspace/AGENTS.md"
+        test ! -e "$source_file"
         if command -v git >/dev/null 2>&1; then
             git -C "$workspace" init -q
             git -C "$workspace" config user.email cortexfs-smoke@example.invalid
             git -C "$workspace" config user.name "CortexFS Smoke"
-            git -C "$workspace" add AGENTS.md README.md crates/cortexfs/src/AGENTS.md crates/cortexfs/src/self_improve_smoke.rs
+            git -C "$workspace" add .
             git -C "$workspace" commit -qm baseline
         fi
-        printf 'baseline project note\nuser dirty change\n' >"$user_dirty_file"
+        printf '\nself-bootstrap dirty note\n' >>"$user_dirty_file"
     }
     assert_source_improved() {
-        grep -q '"cortexfs-agent-source"' "$source_file"
+        grep -q 'self_bootstrap_agent_updates_cortexfs_source' "$source_file"
+        test -f "$workspace/Cargo.toml"
+        test -f "$workspace/crates/cortexfs/Cargo.toml"
         rustc --test "$source_file" -o "$source_test_bin"
         "$source_test_bin" >/dev/null
-        grep -q 'user dirty change' "$user_dirty_file"
+        grep -q 'self-bootstrap dirty note' "$user_dirty_file"
         if [ -d "$workspace/.git" ]; then
             status=$(git -C "$workspace" status --short)
             if [[ "$status" != *" M README.md"* ||
-                "$status" != *" M crates/cortexfs/src/self_improve_smoke.rs"* ]]; then
+                "$status" != *"?? crates/cortexfs/tests/self_bootstrap_smoke.rs"* ]]; then
                 printf 'unexpected workspace git status after source improvement:\n%s\n' "$status" >&2
                 exit 1
             fi
@@ -103,9 +89,9 @@ EOF
     }
     assert_codex_style_final_output() {
         local output=$1
-        grep -q 'changed: crates/cortexfs/src/self_improve_smoke.rs' <<<"$output"
-        grep -q 'verified: rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke' <<<"$output"
-        grep -q 'diff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/src/self_improve_smoke.rs' <<<"$output"
+        grep -q 'changed: crates/cortexfs/tests/self_bootstrap_smoke.rs' <<<"$output"
+        grep -q "verified: $agent_verify_command" <<<"$output"
+        grep -q 'diff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs' <<<"$output"
     }
 
     host_runner="$repo_root/target/debug/cortexfs-object-runner"
@@ -130,30 +116,24 @@ EOF
     grep -Fq 'find /workspace -name AGENTS.md -print' "$root/agent/coder.d/system.md"
     grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
     grep -Fq 'Never run destructive git commands' "$root/agent/coder.d/system.md"
-    write_source_fixture
+    write_self_bootstrap_workspace
 
     mkdir -p "$root/model/debug" "$root/model/debug/selfedit.d"
 cat >"$root/model/debug/selfedit" <<'EOF'
 #!/bin/sh
 case "${CTX_AGENT_TOOL_CONTEXT:-}" in
-  *"call-6"*)
-    printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete\nchanged: crates/cortexfs/src/self_improve_smoke.rs\nverified: rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke\ndiff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/src/self_improve_smoke.rs"}\n' "$CTX_RUN_ID"
+    *"call-4"*)
+    printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete\nchanged: crates/cortexfs/tests/self_bootstrap_smoke.rs\nverified: test -f /workspace/Cargo.toml && test -f /workspace/crates/cortexfs/Cargo.toml && rustc --test /workspace/crates/cortexfs/tests/self_bootstrap_smoke.rs -o /tmp/self_bootstrap_smoke && /tmp/self_bootstrap_smoke\ndiff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs"}\n' "$CTX_RUN_ID"
     printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     ;;
-  *"call-5"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-6","name":"tsh","arguments":{"args":["shell.exec","git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/src/self_improve_smoke.rs"]}}\n' "$CTX_RUN_ID"
-    ;;
-  *"call-4"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-5","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
-    ;;
-  *"Tool result call-3 from tsh args [\"shell.exec\""*"ERROR:"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-4","name":"tsh","arguments":{"args":["fs.replace","/workspace/crates/cortexfs/src/self_improve_smoke.rs","    \\"todo\\"","    \\"cortexfs-agent-source\\""]}}\n' "$CTX_RUN_ID"
+  *"call-3"*)
+    printf '{"type":"tool_call","run":"%s","id":"call-4","name":"tsh","arguments":{"args":["shell.exec","git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/tests/self_bootstrap_smoke.rs"]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-2"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-3","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
+    printf '{"type":"tool_call","run":"%s","id":"call-3","name":"tsh","arguments":{"args":["shell.exec","test -f /workspace/Cargo.toml && test -f /workspace/crates/cortexfs/Cargo.toml && rustc --test /workspace/crates/cortexfs/tests/self_bootstrap_smoke.rs -o /tmp/self_bootstrap_smoke && /tmp/self_bootstrap_smoke"]}}\n' "$CTX_RUN_ID"
     ;;
-  *"call-1"*"source-nearest-rule"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-2","name":"tsh","arguments":{"args":["fs.read","/workspace/crates/cortexfs/src/self_improve_smoke.rs"]}}\n' "$CTX_RUN_ID"
+  *"call-1"*"docs/DESIGN.md"*)
+    printf '{"type":"tool_call","run":"%s","id":"call-2","name":"tsh","arguments":{"args":["fs.write","/workspace/crates/cortexfs/tests/self_bootstrap_smoke.rs","#[test]\\nfn self_bootstrap_agent_updates_cortexfs_source() {\\n    assert_eq!(\\"cortexfs-self-bootstrap\\", \\"cortexfs-self-bootstrap\\");\\n}\\n"]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-1"*)
     printf '{"type":"error","run":"%s","code":"EIO","message":"missing nearest source AGENTS.md evidence"}\n' "$CTX_RUN_ID"
@@ -220,7 +200,7 @@ EOF
             --setenv CTX_RUN_ID smoke \
             --setenv CTX_SESSION smoke \
             --setenv CTX_AGENT_HISTORY_MESSAGES '' \
-            "$runner" /ctx/agent/coder 'improve CortexFS source fixture and verify it'
+    "$runner" /ctx/agent/coder 'improve the CortexFS source tree itself and verify it'
     )
     case "$output" in
     *"source self-improvement smoke complete"*'"status":"ok"'*) ;;
@@ -236,7 +216,7 @@ EOF
     if command -v systemd-run >/dev/null 2>&1 &&
         systemctl --user is-system-running >/dev/null 2>&1 &&
         [ -x /usr/bin/ctxterm ]; then
-        write_source_fixture
+        write_self_bootstrap_workspace
         "$repo_root/target/debug/ctx" \
             --root "$root" \
             agent start coder \
@@ -253,7 +233,7 @@ EOF
                 agent send coder \
                 --session smoke \
                 --raw \
-                'improve the CortexFS source fixture and verify it'
+                'improve the CortexFS source tree itself and verify it'
         )
         "$repo_root/target/debug/ctx" --root "$root" agent stop coder >/dev/null 2>&1 || true
         case "$output" in
@@ -266,7 +246,7 @@ EOF
         assert_codex_style_final_output "$output"
         assert_source_improved
         assert_session_recorded smoke 'source self-improvement smoke complete'
-        assert_session_recorded smoke 'changed: crates/cortexfs/src/self_improve_smoke.rs'
+        assert_session_recorded smoke 'changed: crates/cortexfs/tests/self_bootstrap_smoke.rs'
         printf 'ctx agent start/send source self-improvement smoke passed\n' >&2
     else
         printf 'skipping ctx agent start/send source self-improvement smoke: user systemd or /usr/bin/ctxterm unavailable\n' >&2
