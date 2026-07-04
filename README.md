@@ -167,8 +167,9 @@ npm run bootstrap-coder:smoke
 The smoke test bootstraps a temporary tree, starts `coder`, mounts a writable
 temporary CortexFS checkout at `/workspace`, requires real `AGENTS.md` evidence,
 writes a Rust test into the CortexFS source tree, reruns verification, inspects
-`git diff`, and checks that the final answer records changed files and exact
-verification commands.
+`git diff`, commits the generated CortexFS source file without staging unrelated
+dirty worktree changes, and checks that the final answer records changed files,
+exact verification commands, and commit evidence.
 
 ## A First Walk Through `/ctx`
 
