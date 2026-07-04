@@ -1,7 +1,6 @@
 [Unit]
 Description=CortexFS v1 FUSE mount
 Documentation=file:/usr/share/doc/cortexfs-git/README.md
-Wants=cortexfs-agent@base.socket cortexfs-agent@coder.socket cortexfs-agent@executor.socket cortexfs-agent@reviewer.socket cortexfs-agent@worker.socket
 After=local-fs.target
 
 [Service]
