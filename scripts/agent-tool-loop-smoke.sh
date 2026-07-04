@@ -158,6 +158,9 @@ case "${CTX_AGENT_TOOL_CONTEXT:-}" in
   *"call-1"*)
     printf '{"type":"error","run":"%s","code":"EIO","message":"missing nearest source AGENTS.md evidence"}\n' "$CTX_RUN_ID"
     ;;
+  *"Current request context:"*"Host workspace mounted at \`/workspace\`"*)
+    printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","find /workspace -name AGENTS.md -print; cat /workspace/AGENTS.md /workspace/crates/cortexfs/src/AGENTS.md; git -C /workspace status --short"]}}\n' "$CTX_RUN_ID"
+    ;;
   "")
     printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","find /workspace -name AGENTS.md -print; cat /workspace/AGENTS.md /workspace/crates/cortexfs/src/AGENTS.md; git -C /workspace status --short"]}}\n' "$CTX_RUN_ID"
     ;;
