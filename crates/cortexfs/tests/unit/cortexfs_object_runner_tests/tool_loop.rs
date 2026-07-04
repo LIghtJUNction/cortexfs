@@ -26,6 +26,7 @@ fn agent_tool_loop_supports_multiple_distinct_tsh_calls() {
                 }
                 2 => {
                     assert!(config.tool_context.contains("Tool result call-1 from tsh"));
+                    assert!(config.tool_context.contains(r#"args ["tools"]"#));
                     assert!(config.tool_context.contains("fs.read"));
                     Ok(AgentModelRunOutcome {
                         frames: vec![
@@ -78,6 +79,7 @@ fn agent_tool_loop_supports_multiple_distinct_tsh_calls() {
     let output = String::from_utf8(output).unwrap_or_default();
     assert!(output.contains(r#""id":"call-1""#));
     assert!(output.contains(r#""tool_call_id":"call-1""#));
+    assert!(output.contains(r#""arguments":{"args":["tools"]}"#));
     assert!(output.contains(r#""id":"call-2""#));
     assert!(output.contains(r#""tool_call_id":"call-2""#));
     assert!(
@@ -214,6 +216,97 @@ fn agent_tool_loop_preserves_followup_model_error_after_tool_result() {
     assert!(!output.contains(r#""status":"ok""#), "{output}");
     assert!(output.contains(r#""type":"error""#), "{output}");
     assert!(output.contains("model failed after tool result"), "{output}");
+}
+
+#[test]
+fn agent_tool_loop_feeds_failed_verification_args_back_for_repair() {
+    let mut config = test_agent_run_config();
+    let mut output = Vec::new();
+    let mut step = 0_u8;
+    let mut executed = Vec::new();
+
+    let result = run_agent_tool_loop(
+        &mut config,
+        "repair and verify",
+        &mut output,
+        |config, _input, _stdout| {
+            step = step.saturating_add(1);
+            match step {
+                1 => Ok(AgentModelRunOutcome {
+                    frames: vec![
+                        r#"{"type":"tool_call","run":"r1","id":"verify-1","name":"tsh","arguments":{"args":["shell.exec","cargo test -p cortexfs"]}}"#.to_owned(),
+                    ],
+                    success: true,
+                    streamed: false,
+                }),
+                2 => {
+                    assert!(config.tool_context.contains("Tool result verify-1 from tsh"));
+                    assert!(
+                        config
+                            .tool_context
+                            .contains(r#"args ["shell.exec","cargo test -p cortexfs"]"#)
+                    );
+                    assert!(config.tool_context.contains("ERROR: compile failed"));
+                    Ok(AgentModelRunOutcome {
+                        frames: vec![
+                            r#"{"type":"tool_call","run":"r1","id":"repair-1","name":"tsh","arguments":{"args":["fs.replace","/workspace/src/lib.rs","bad","good"]}}"#.to_owned(),
+                        ],
+                        success: true,
+                        streamed: false,
+                    })
+                }
+                3 => {
+                    assert!(config.tool_context.contains("Tool result repair-1 from tsh"));
+                    assert!(
+                        config
+                            .tool_context
+                            .contains(r#"args ["fs.replace","/workspace/src/lib.rs","bad","good"]"#)
+                    );
+                    Ok(AgentModelRunOutcome {
+                        frames: vec![r#"{"type":"delta","run":"r1","text":"fixed"}"#.to_owned()],
+                        success: true,
+                        streamed: false,
+                    })
+                }
+                _ => Err(format!("unexpected model iteration {step}")),
+            }
+        },
+        |_config, tool_call| {
+            let args = tool_call
+                .args
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            executed.push(args.clone());
+            if args.first().is_some_and(|tool| tool == "shell.exec") && args.len() == 2 {
+                return Err("compile failed\n".to_owned());
+            }
+            if args.first().is_some_and(|tool| tool == "fs.replace") && args.len() == 4 {
+                return Ok("replaced\n".to_owned());
+            }
+            Err(format!("unexpected args: {args:?}"))
+        },
+    );
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        executed,
+        vec![
+            vec!["shell.exec".to_owned(), "cargo test -p cortexfs".to_owned()],
+            vec![
+                "fs.replace".to_owned(),
+                "/workspace/src/lib.rs".to_owned(),
+                "bad".to_owned(),
+                "good".to_owned()
+            ],
+        ]
+    );
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""tool_call_id":"verify-1""#));
+    assert!(output.contains(r#""arguments":{"args":["shell.exec","cargo test -p cortexfs"]}"#));
+    assert!(output.contains("ERROR: compile failed"));
+    assert!(output.contains(r#""tool_call_id":"repair-1""#));
+    assert!(output.contains(r#""text":"fixed""#));
 }
 
 #[test]
@@ -436,6 +529,7 @@ fn agent_tool_context_keeps_recent_results_under_limit() {
     assert!(config.tool_context.len() <= MAX_AGENT_TOOL_CONTEXT_BYTES);
     assert!(config.tool_context.contains("[earlier tool context truncated]"));
     assert!(config.tool_context.contains("Tool result call-11 from tsh"));
+    assert!(config.tool_context.contains("args []"));
     assert!(!config.tool_context.contains("Tool result call-0 from tsh"));
 }
 
