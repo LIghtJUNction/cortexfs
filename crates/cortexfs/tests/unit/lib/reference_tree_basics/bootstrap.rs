@@ -220,7 +220,7 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
         matches!(agent_policy, Ok(ref content) if content.contains("model:main use"))
     );
     assert!(
-        matches!(agent_policy, Ok(ref content) if content.contains("network:default connect"))
+        matches!(agent_policy, Ok(ref content) if !content.contains("network:default connect"))
     );
     let model_link = fs::read_link(user_model.join("coder"));
     assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/main")));

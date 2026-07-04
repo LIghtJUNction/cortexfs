@@ -284,7 +284,6 @@ fn assert_reference_agents(root: &Path) {
     assert!(architect_policy.contains("allow architect_t agent:coder start"));
     assert!(architect_policy.contains("allow architect_t agent:reviewer read"));
     assert!(architect_policy.contains("allow architect_t tool:fs.read execute"));
-    assert!(architect_policy.contains("allow architect_t network:default connect"));
 
     let coder_policy = ok!(fs::read_to_string(root.join("agent/coder.d/policy")));
     assert!(coder_policy.contains("allow coder_t tool:fs.write execute"));
