@@ -12,14 +12,14 @@ objects and files.
 There are three separate surfaces:
 
 ```text
-human chat       ctx agent repl/send/resume/cancel
+human chat       ctx agent chat/repl/send/resume/cancel
 human terminal   ctx agent watch/attach
 agent tool use   tsh inside ctxterm
 ```
 
 They must not collapse into one interface.
 
-`ctx agent repl` is a human chat UI. It owns line editing, `Ctrl+C`, socket
+`ctx agent chat` and `ctx agent repl` are the same human chat UI. They own line editing, `Ctrl+C`, socket
 requests, assistant response rendering, and prompt re-display. Interactive REPL
 responses are buffered before printing so assistant output cannot corrupt the
 user's input buffer. `Ctrl+C` exits an idle REPL; while a run is active it first
@@ -42,7 +42,7 @@ host `PATH`.
 commands:
 
 ```text
-agent.sh AGENT           -> ctx agent repl AGENT --session default
+agent.sh AGENT           -> ctx agent chat AGENT --session default
 agent.sh AGENT INPUT...  -> ctx agent send AGENT --session default INPUT...
 agent.sh --watch AGENT   -> ctx agent watch AGENT --session default
 agent.sh --attach AGENT  -> ctx agent attach AGENT --session default
@@ -58,7 +58,7 @@ The stable request flow is:
 
 ```text
 human
-  -> ctx agent repl/send
+  -> ctx agent chat/repl/send
   -> agent/<name>.sock
   -> socket runtime
   -> durable session files
@@ -286,7 +286,7 @@ The runtime design is healthy when all of these are true:
 
 ```text
 agent.sh contains no protocol implementation beyond resolving ctx and execing ctx agent
-ctx agent repl is the default human chat UI
+ctx agent chat/repl is the default human chat UI
 ctx agent watch is the read-only human path into ctxterm -> tsh
 ctx agent attach is the writable human path into ctxterm -> tsh
 tsh never falls back to host PATH
