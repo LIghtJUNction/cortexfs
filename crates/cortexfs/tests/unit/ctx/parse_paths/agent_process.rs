@@ -227,6 +227,14 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
     write_text_file(&root.join("agent/worker.d/groups"), "10\n20\n");
     write_text_file(&root.join("agent/worker.d/root"), "/ctx/home/1000/agent/worker/root\n");
     write_text_file(&root.join("agent/worker.d/cwd"), "/workspace\n");
+    let home = ctx_home(&root);
+    assert!(home.is_ok());
+    let Ok(home) = home else {
+        return;
+    };
+    let session = home.join("agent/worker/session/default");
+    assert!(fs::create_dir_all(&session).is_ok());
+    write_text_file(&session.join("workspace"), "/repo\n");
 
     assert_eq!(
         agent_status_lines(&root, "worker"),
@@ -243,6 +251,7 @@ fn agent_status_reports_model_lifecycle_parent_pid_identity_and_paths() {
             "gid=100".to_owned(),
             "groups=10 20".to_owned(),
             "root=/ctx/home/1000/agent/worker/root".to_owned(),
+            "workspace=/repo".to_owned(),
             "cwd=/workspace".to_owned(),
         ])
     );
@@ -268,6 +277,7 @@ fn agent_status_marks_ready_agent_dead_when_recorded_pid_is_gone() {
             "gid=-".to_owned(),
             "groups=-".to_owned(),
             "root=-".to_owned(),
+            "workspace=-".to_owned(),
             "cwd=-".to_owned(),
         ])
     );
@@ -296,6 +306,7 @@ fn agent_status_child_count_skips_dead_and_stale_pid_children() {
             "gid=-".to_owned(),
             "groups=-".to_owned(),
             "root=-".to_owned(),
+            "workspace=-".to_owned(),
             "cwd=-".to_owned(),
         ])
     );
@@ -330,6 +341,7 @@ fn agent_status_escapes_control_file_values() {
             "gid=-".to_owned(),
             "groups=-".to_owned(),
             "root=/tmp/\\u{1b}[31m".to_owned(),
+            "workspace=-".to_owned(),
             "cwd=-".to_owned(),
         ]
     );
