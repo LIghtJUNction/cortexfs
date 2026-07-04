@@ -117,9 +117,12 @@ EOF
 cat >"$root/model/debug/selfedit" <<'EOF'
 #!/bin/sh
 case "${CTX_AGENT_TOOL_CONTEXT:-}" in
-  *"call-5"*)
+  *"call-6"*)
     printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete"}\n' "$CTX_RUN_ID"
     printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+    ;;
+  *"call-5"*)
+    printf '{"type":"tool_call","run":"%s","id":"call-6","name":"tsh","arguments":{"args":["shell.exec","git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/src/self_improve_smoke.rs"]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-4"*)
     printf '{"type":"tool_call","run":"%s","id":"call-5","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
