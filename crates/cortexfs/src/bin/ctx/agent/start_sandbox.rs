@@ -239,6 +239,7 @@ fn agent_bwrap_args(
         bwrap.push(target);
     }
     for mount in cli_mounts {
+        bwrap.extend(agent_bwrap_dir_args_for_parent(&mount.target));
         bwrap.push(match mount.mode.as_str() {
             "ro" => "--ro-bind".to_owned(),
             _ => "--bind".to_owned(),
@@ -333,20 +334,136 @@ fn agent_start_mounts_with_default_source(
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         });
-        let git_dir = default_source.join(".git");
-        if let Ok(metadata) = fs::symlink_metadata(&git_dir) {
-            let file_type = metadata.file_type();
-            if file_type.is_dir() || metadata.is_file() {
-                mounts.push(AgentMount {
-                    source: git_dir.display().to_string(),
-                    target: "/workspace/.git".to_owned(),
-                    mode: "ro".to_owned(),
-                });
-            }
-        }
+        mounts.extend(agent_start_git_mounts(default_source));
     }
     mounts.extend(args.mounts.iter().cloned());
     mounts
+}
+
+fn agent_start_git_mounts(default_source: &Path) -> Vec<AgentMount> {
+    let git = default_source.join(".git");
+    let Ok(metadata) = fs::symlink_metadata(&git) else {
+        return Vec::new();
+    };
+    let file_type = metadata.file_type();
+    if !file_type.is_dir() && !metadata.is_file() {
+        return Vec::new();
+    }
+    let mut mounts = vec![AgentMount {
+        source: git.display().to_string(),
+        target: "/workspace/.git".to_owned(),
+        mode: "ro".to_owned(),
+    }];
+    if metadata.is_file() {
+        extend_git_file_mounts(default_source, &git, &mut mounts);
+    }
+    mounts
+}
+
+fn extend_git_file_mounts(default_source: &Path, git_file: &Path, mounts: &mut Vec<AgentMount>) {
+    let Ok(content) = fs::read_to_string(git_file) else {
+        return;
+    };
+    let Some(gitdir) = parse_gitdir_file(default_source, &content) else {
+        return;
+    };
+    push_readonly_host_path_mount(mounts, &gitdir);
+    if let Some(commondir) = git_common_dir(&gitdir) {
+        push_readonly_host_path_mount(mounts, &commondir);
+    }
+}
+
+fn parse_gitdir_file(default_source: &Path, content: &str) -> Option<PathBuf> {
+    let line = content.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
+    let path = line.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let path = Path::new(path);
+    let gitdir = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        default_source.join(path)
+    };
+    let gitdir = normalized_absolute_path(&gitdir)?;
+    plain_directory(&gitdir).then_some(gitdir)
+}
+
+fn git_common_dir(gitdir: &Path) -> Option<PathBuf> {
+    let content = fs::read_to_string(gitdir.join("commondir")).ok()?;
+    let path = content.lines().next()?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    let path = Path::new(path);
+    let common = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        gitdir.join(path)
+    };
+    let common = normalized_absolute_path(&common)?;
+    plain_directory(&common).then_some(common)
+}
+
+fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return None;
+    }
+    let mut normalized = PathBuf::from("/");
+    for component in path.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::Prefix(_prefix) => return None,
+        }
+    }
+    Some(normalized)
+}
+
+fn plain_directory(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+}
+
+fn push_readonly_host_path_mount(mounts: &mut Vec<AgentMount>, path: &Path) {
+    let value = path.display().to_string();
+    if mounts.iter().any(|mount| mount.source == value && mount.target == value) {
+        return;
+    }
+    mounts.push(AgentMount {
+        source: value.clone(),
+        target: value,
+        mode: "ro".to_owned(),
+    });
+}
+
+fn agent_bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
+    let Some((parent, _name)) = path.rsplit_once('/') else {
+        return Vec::new();
+    };
+    if parent.is_empty() {
+        Vec::new()
+    } else {
+        agent_bwrap_dir_args_for_path(parent)
+    }
+}
+
+fn agent_bwrap_dir_args_for_path(path: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    if !path.starts_with('/') {
+        return args;
+    }
+    let mut current = String::new();
+    for component in path.split('/').filter(|component| !component.is_empty()) {
+        current.push('/');
+        current.push_str(component);
+        args.push("--dir".to_owned());
+        args.push(current.clone());
+    }
+    args
 }
 
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {

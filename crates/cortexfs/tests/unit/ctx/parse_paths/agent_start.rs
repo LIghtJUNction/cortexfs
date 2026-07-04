@@ -149,6 +149,88 @@ fn agent_start_default_workspace_remounts_git_read_only() {
 }
 
 #[test]
+fn agent_start_default_workspace_mounts_worktree_gitdir_read_only() {
+    let source = clean_test_dir("ctx-agent-start-worktree-git-file");
+    let git_store = clean_test_dir("ctx-agent-start-worktree-git-store");
+    let common_dir = git_store.join("repo.git");
+    let git_dir = common_dir.join("worktrees").join("coder");
+    assert!(fs::create_dir_all(&git_dir).is_ok());
+    write_text_file(&git_dir.join("commondir"), "../..\n");
+    write_text_file(
+        &source.join(".git"),
+        &format!("gitdir: {}\n", git_dir.display()),
+    );
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+
+    assert_eq!(
+        mounts,
+        vec![
+            AgentMount {
+                source: source.display().to_string(),
+                target: "/workspace".to_owned(),
+                mode: "rw".to_owned(),
+            },
+            AgentMount {
+                source: source.join(".git").display().to_string(),
+                target: "/workspace/.git".to_owned(),
+                mode: "ro".to_owned(),
+            },
+            AgentMount {
+                source: git_dir.display().to_string(),
+                target: git_dir.display().to_string(),
+                mode: "ro".to_owned(),
+            },
+            AgentMount {
+                source: common_dir.display().to_string(),
+                target: common_dir.display().to_string(),
+                mode: "ro".to_owned(),
+            },
+        ]
+    );
+
+    let root = clean_test_dir("ctx-agent-start-worktree-git-bwrap-view");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let view = derive_agent_runtime_view(&root, "coder");
+    assert!(view.is_ok(), "reference coder view: {view:?}");
+    let Ok(view) = view else {
+        return;
+    };
+    let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
+    let home = PathBuf::from("/ctx/home/1000");
+    let bwrap = agent_bwrap_args(&root, &args, &mounts, &view, &socket, &home);
+    assert!(contains_arg_pair(
+        &bwrap,
+        "--dir",
+        git_dir.parent().and_then(Path::to_str).unwrap_or_default()
+    ));
+    assert!(contains_arg_pair(
+        &bwrap,
+        "--dir",
+        common_dir.parent().and_then(Path::to_str).unwrap_or_default()
+    ));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        git_dir.to_str().unwrap_or_default(),
+        git_dir.to_str().unwrap_or_default()
+    ));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        common_dir.to_str().unwrap_or_default(),
+        common_dir.to_str().unwrap_or_default()
+    ));
+}
+
+#[test]
 fn agent_start_maps_ctx_mount_sources_to_selected_root() {
     let root = clean_test_dir("ctx-agent-start-alt-root-mount-source");
 
