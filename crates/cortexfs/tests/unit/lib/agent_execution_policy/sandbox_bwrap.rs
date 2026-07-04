@@ -70,6 +70,8 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "CTX_PROVIDER_SECRET_PATH".to_owned(),
         "/run/user/1000/cortexfs/credentials/coder-default".to_owned(),
     ));
+    env.push(("CTX_PROVIDER_SECRET_PROVIDER".to_owned(), "openai".to_owned()));
+    env.push(("CTX_PROVIDER_SECRET_SLOT".to_owned(), "default".to_owned()));
     let runtime = AgentExecutableSocketRuntime {
         ctx_root: &root,
         source_root: &root,
@@ -118,12 +120,14 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         &root.join("shared/providers.d").display().to_string()
     ));
     assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
-    assert!(contains_arg_triplet(
-        &args,
-        "--ro-bind-data",
-        "9",
-        "/run/user/1000/cortexfs/credentials/coder-default"
-    ));
+    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_FD"));
+    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PATH"));
+    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PROVIDER"));
+    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_SLOT"));
+    assert!(!args.iter().any(|arg| arg == "9"));
+    assert!(!args
+        .iter()
+        .any(|arg| arg == "/run/user/1000/cortexfs/credentials/coder-default"));
     assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
     assert!(contains_arg_triplet(&args, "--bind", "/repo", "/workspace"));
     assert!(contains_arg_triplet(
