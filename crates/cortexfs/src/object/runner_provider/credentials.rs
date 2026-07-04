@@ -5,6 +5,14 @@ fn provider_credential(
     driver: ProviderRuntimeDriver,
 ) -> Result<Option<ProviderCredential>, String> {
     let account = key_slot.unwrap_or("default");
+    if let Some(api_key) = provider_secret_from_runtime_value(provider, account) {
+        return Ok(Some(match driver {
+            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
+            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
+                ProviderCredential::Bearer(api_key)
+            }
+        }));
+    }
     if let Some(api_key) = provider_secret_from_runtime_file(provider, account)
         .map_err(|_error| format!("runtime provider secret unavailable: {provider}"))?
     {
@@ -48,6 +56,29 @@ fn provider_credential(
             .map_err(|_error| format!("oauth credential unavailable: {provider}"));
     }
     Ok(None)
+}
+
+fn provider_secret_from_runtime_value(provider: &str, account: &str) -> Option<String> {
+    provider_secret_from_runtime_value_with_env(provider, account, |name| env::var(name))
+}
+
+fn provider_secret_from_runtime_value_with_env(
+    provider: &str,
+    account: &str,
+    get_env: impl Fn(&str) -> Result<String, env::VarError>,
+) -> Option<String> {
+    if get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
+        || get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
+    {
+        return None;
+    }
+    let secret = get_env("CTX_PROVIDER_SECRET_VALUE").ok()?;
+    let secret = secret.trim_end_matches(['\r', '\n']);
+    if secret.is_empty() {
+        None
+    } else {
+        Some(secret.to_owned())
+    }
 }
 
 fn provider_secret_from_runtime_file(

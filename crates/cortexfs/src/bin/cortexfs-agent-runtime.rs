@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use cortexfs::{
     AgentExecutableSocketExecution, AgentExecutableSocketRuntime, PolicyObjectClass,
     PolicyPermission, SocketPeerPolicy, derive_agent_runtime_view,
-    open_provider_system_secret_for_model, serve_agent_executable_socket_listener_once,
+    read_provider_system_secret_for_model, serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
 use nix::fcntl::{AtFlags, OFlag, open, openat};
@@ -61,15 +61,23 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
     }
     let provider_secret =
-        open_provider_system_secret_for_model(Path::new(cortexfs::CTX_ROOT), &runtime_model)
+        read_provider_system_secret_for_model(Path::new(cortexfs::CTX_ROOT), &runtime_model)
             .map_err(|_error| format!("provider secret unavailable for model: {runtime_model}"))?;
     if let Some(secret) = provider_secret.as_ref() {
-        runtime_env.extend(
-            secret
-                .env()
-                .into_iter()
-                .filter(|env| env.0 != "CTX_PROVIDER_SECRET_PATH"),
-        );
+        runtime_env.extend([
+            (
+                "CTX_PROVIDER_SECRET_VALUE".to_owned(),
+                secret.secret().to_owned(),
+            ),
+            (
+                "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+                secret.provider().to_owned(),
+            ),
+            (
+                "CTX_PROVIDER_SECRET_SLOT".to_owned(),
+                secret.account().to_owned(),
+            ),
+        ]);
     }
     let agent_executable = runtime_agent_executable(Path::new(cortexfs::CTX_ROOT), &config.agent);
     let result = serve_agent_executable_socket_listener_once(
