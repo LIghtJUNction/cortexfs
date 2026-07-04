@@ -101,6 +101,12 @@ EOF
         grep -q "$expected" <<<"$history"
         grep -q '^done$' "$root/home/$uid/agent/coder/session/$session/state"
     }
+    assert_codex_style_final_output() {
+        local output=$1
+        grep -q 'changed: crates/cortexfs/src/self_improve_smoke.rs' <<<"$output"
+        grep -q 'verified: rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke' <<<"$output"
+        grep -q 'diff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/src/self_improve_smoke.rs' <<<"$output"
+    }
 
     host_runner="$repo_root/target/debug/cortexfs-object-runner"
     host_tsh="$repo_root/target/debug/tsh"
@@ -128,7 +134,7 @@ cat >"$root/model/debug/selfedit" <<'EOF'
 #!/bin/sh
 case "${CTX_AGENT_TOOL_CONTEXT:-}" in
   *"call-6"*)
-    printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete"}\n' "$CTX_RUN_ID"
+    printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete\nchanged: crates/cortexfs/src/self_improve_smoke.rs\nverified: rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke\ndiff: git -C /workspace diff --stat && git -C /workspace diff -- crates/cortexfs/src/self_improve_smoke.rs"}\n' "$CTX_RUN_ID"
     printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     ;;
   *"call-5"*)
@@ -217,6 +223,7 @@ EOF
         exit 1
         ;;
     esac
+    assert_codex_style_final_output "$output"
     assert_source_improved
     printf 'source self-improvement smoke passed\n' >&2
 
@@ -250,8 +257,10 @@ EOF
             exit 1
             ;;
         esac
+        assert_codex_style_final_output "$output"
         assert_source_improved
         assert_session_recorded smoke 'source self-improvement smoke complete'
+        assert_session_recorded smoke 'changed: crates/cortexfs/src/self_improve_smoke.rs'
         printf 'ctx agent start/send source self-improvement smoke passed\n' >&2
     else
         printf 'skipping ctx agent start/send source self-improvement smoke: user systemd or /usr/bin/ctxterm unavailable\n' >&2
