@@ -59,12 +59,26 @@ fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> 
             )
         ),
         format!(
+            "workspace={}",
+            terminal_safe_text(&agent_status_workspace(root, name)?)
+        ),
+        format!(
             "cwd={}",
             terminal_safe_text(
                 &read_optional_trimmed(&control.join("cwd"))?.unwrap_or_else(|| "-".to_owned())
             )
         ),
     ])
+}
+
+fn agent_status_workspace(root: &Path, name: &str) -> Result<String, CliError> {
+    let session = agent_session_name(root, name, None)?;
+    let session_root = ctx_home(root)?
+        .join("agent")
+        .join(name)
+        .join("session")
+        .join(session);
+    Ok(read_optional_trimmed(&session_root.join("workspace"))?.unwrap_or_else(|| "-".to_owned()))
 }
 
 fn agent_parent_live_pid(
