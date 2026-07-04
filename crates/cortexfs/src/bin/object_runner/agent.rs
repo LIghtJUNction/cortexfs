@@ -31,12 +31,13 @@ where
     M: FnMut(&AgentModelRunConfig, &str, &mut W) -> Result<AgentModelRunOutcome, String>,
     T: FnMut(&AgentModelRunConfig, &AgentToolCall) -> Result<String, String>,
 {
-    let mut seen_tool_calls = BTreeSet::new();
+    let mut last_tool_signature = None;
     let mut last_tool_result: Option<(AgentToolCall, String)> = None;
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
         let outcome = run_model_once(config, input, stdout)?;
         if let Some(tool_call) = first_tool_call(&outcome.frames)? {
-            if !seen_tool_calls.insert(tool_call_signature(&tool_call)) {
+            let signature = tool_call_signature(&tool_call);
+            if last_tool_signature.as_deref() == Some(signature.as_str()) {
                 if let Some(pair) = last_tool_result.as_ref() {
                     return write_tool_result_fallback_response(
                         stdout,
@@ -66,6 +67,7 @@ where
                 .flush()
                 .map_err(|error| format!("cannot write output: {error}"))?;
             config.push_tool_result(&tool_call, &result);
+            last_tool_signature = Some(signature);
             last_tool_result = Some((tool_call, result));
             if iteration == MAX_AGENT_TOOL_ITERATIONS {
                 return write_tool_error(

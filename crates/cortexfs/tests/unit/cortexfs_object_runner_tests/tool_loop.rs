@@ -310,6 +310,81 @@ fn agent_tool_loop_feeds_failed_verification_args_back_for_repair() {
 }
 
 #[test]
+fn agent_tool_loop_allows_verification_rerun_after_edit() {
+    let mut config = test_agent_run_config();
+    let mut output = Vec::new();
+    let mut step = 0_u8;
+    let mut executed = Vec::new();
+
+    let result = run_agent_tool_loop(
+        &mut config,
+        "repair then rerun verification",
+        &mut output,
+        |_config, _input, _stdout| {
+            step = step.saturating_add(1);
+            match step {
+                1 => Ok(AgentModelRunOutcome {
+                    frames: vec![
+                        r#"{"type":"tool_call","run":"r1","id":"verify-1","name":"tsh","arguments":{"args":["shell.exec","cargo test -p cortexfs"]}}"#.to_owned(),
+                    ],
+                    success: true,
+                    streamed: false,
+                }),
+                2 => Ok(AgentModelRunOutcome {
+                    frames: vec![
+                        r#"{"type":"tool_call","run":"r1","id":"edit-1","name":"tsh","arguments":{"args":["fs.replace","/workspace/src/lib.rs","bad","good"]}}"#.to_owned(),
+                    ],
+                    success: true,
+                    streamed: false,
+                }),
+                3 => Ok(AgentModelRunOutcome {
+                    frames: vec![
+                        r#"{"type":"tool_call","run":"r1","id":"verify-2","name":"tsh","arguments":{"args":["shell.exec","cargo test -p cortexfs"]}}"#.to_owned(),
+                    ],
+                    success: true,
+                    streamed: false,
+                }),
+                4 => Ok(AgentModelRunOutcome {
+                    frames: vec![r#"{"type":"delta","run":"r1","text":"verified"}"#.to_owned()],
+                    success: true,
+                    streamed: false,
+                }),
+                _ => Err(format!("unexpected model iteration {step}")),
+            }
+        },
+        |_config, tool_call| {
+            let args = tool_call
+                .args
+                .iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            executed.push(args.clone());
+            Ok(format!("executed {args:?}\n"))
+        },
+    );
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        executed,
+        vec![
+            vec!["shell.exec".to_owned(), "cargo test -p cortexfs".to_owned()],
+            vec![
+                "fs.replace".to_owned(),
+                "/workspace/src/lib.rs".to_owned(),
+                "bad".to_owned(),
+                "good".to_owned(),
+            ],
+            vec!["shell.exec".to_owned(), "cargo test -p cortexfs".to_owned()],
+        ]
+    );
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains(r#""tool_call_id":"verify-1""#));
+    assert!(output.contains(r#""tool_call_id":"edit-1""#));
+    assert!(output.contains(r#""tool_call_id":"verify-2""#));
+    assert!(output.contains(r#""text":"verified""#));
+}
+
+#[test]
 fn agent_tool_loop_falls_back_when_followup_has_no_visible_reply() {
     let mut config = test_agent_run_config();
     let mut output = Vec::new();

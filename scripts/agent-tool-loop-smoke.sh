@@ -117,15 +117,18 @@ EOF
 cat >"$root/model/debug/selfedit" <<'EOF'
 #!/bin/sh
 case "${CTX_AGENT_TOOL_CONTEXT:-}" in
-  *"call-4"*)
+  *"call-5"*)
     printf '{"type":"delta","run":"%s","text":"source self-improvement smoke complete"}\n' "$CTX_RUN_ID"
     printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     ;;
-  *"call-3"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-4","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
+  *"call-4"*)
+    printf '{"type":"tool_call","run":"%s","id":"call-5","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
+    ;;
+  *"Tool result call-3 from tsh args [\"shell.exec\""*"ERROR:"*)
+    printf '{"type":"tool_call","run":"%s","id":"call-4","name":"tsh","arguments":{"args":["fs.replace","/workspace/crates/cortexfs/src/self_improve_smoke.rs","    \\"todo\\"","    \\"cortexfs-agent-source\\""]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-2"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-3","name":"tsh","arguments":{"args":["fs.replace","/workspace/crates/cortexfs/src/self_improve_smoke.rs","    \\"todo\\"","    \\"cortexfs-agent-source\\""]}}\n' "$CTX_RUN_ID"
+    printf '{"type":"tool_call","run":"%s","id":"call-3","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-1"*)
     printf '{"type":"tool_call","run":"%s","id":"call-2","name":"tsh","arguments":{"args":["fs.read","/workspace/crates/cortexfs/src/self_improve_smoke.rs"]}}\n' "$CTX_RUN_ID"

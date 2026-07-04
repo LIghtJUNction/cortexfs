@@ -65,6 +65,7 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
                 && prompt.contains("Tool results include the original `arguments.args`")
                 && prompt.contains("inspect current files before editing")
                 && prompt.contains("prefer `fs.replace` for small surgical edits")
+                && prompt.contains("keep repairing within scope")
                 && !prompt.contains("{{agent}}")
     ));
 }
