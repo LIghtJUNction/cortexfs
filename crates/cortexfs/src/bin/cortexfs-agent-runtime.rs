@@ -127,6 +127,12 @@ fn repair_agent_session_permissions(session_root: &Path, uid: u32, gid: u32) -> 
 }
 
 fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
+    if path
+        .file_name()
+        .is_some_and(|name| name == "workspace-overlay")
+    {
+        return Ok(());
+    }
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect session path {}: {error}", path.display()))?;
     if metadata.file_type().is_symlink() {
