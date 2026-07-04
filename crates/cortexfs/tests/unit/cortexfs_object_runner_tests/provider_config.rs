@@ -190,6 +190,25 @@ fn provider_secret_from_runtime_file_reads_only_matching_plain_file(
 }
 
 #[test]
+fn provider_secret_from_runtime_value_reads_only_matching_slot() {
+    let env = |name: &str| match name {
+        "CTX_PROVIDER_SECRET_PROVIDER" => Ok("fixture".to_owned()),
+        "CTX_PROVIDER_SECRET_SLOT" => Ok("default".to_owned()),
+        "CTX_PROVIDER_SECRET_VALUE" => Ok("runtime-secret\n".to_owned()),
+        _ => Err(std::env::VarError::NotPresent),
+    };
+
+    assert_eq!(
+        provider_secret_from_runtime_value_with_env("fixture", "default", env),
+        Some("runtime-secret".to_owned())
+    );
+    assert_eq!(
+        provider_secret_from_runtime_value_with_env("other", "default", env),
+        None
+    );
+}
+
+#[test]
 fn provider_secret_from_runtime_file_ignores_relative_path(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let env = |name: &str| match name {

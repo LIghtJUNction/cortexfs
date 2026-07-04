@@ -14,6 +14,7 @@ use super::{
     provider_curl_command, provider_messages_for_agent, provider_request_failure_message,
     provider_route, provider_runtime_driver,
     provider_secret_from_inherited_fd_with_env, provider_secret_from_runtime_file_with_env,
+    provider_secret_from_runtime_value_with_env,
     provider_transport, read_provider_stream_line, read_runner_provider_config_file,
     read_runtime_provider_secret_file, read_small_plain_text_file, resolve_model_alias,
     resolved_model_path, run, read_runner_stdin_limited, run_agent_tool_loop,
