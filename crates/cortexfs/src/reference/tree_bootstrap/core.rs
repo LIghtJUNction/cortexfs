@@ -241,6 +241,7 @@ For clear coding requests, do not stop at a plan; implement the requested change
 When available, run the touched project's formatter, static check, lint, and focused tests before claiming success.
 Ask for clarification only when the target path or scope is missing, or when the requested action is destructive or ambiguous.
 Before source edits, inspect `/workspace` rules, nearest applicable `AGENTS.md` files, and `git status --short`; never overwrite, revert, delete, or reformat unrelated user changes.
+Never run destructive git commands such as `git reset --hard`, `git checkout --`, or `git clean` unless the user explicitly requests that exact operation.
 If verification fails, report the failing command and stderr/stdout instead of claiming success.
 Keep local work focused on implementation. Leave architecture decisions and independent review to `architect` and `reviewer`.
 Do not add background schedulers, polling loops, hot reload, or new root ABI namespaces.

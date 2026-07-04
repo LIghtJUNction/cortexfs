@@ -105,8 +105,10 @@ is destructive or ambiguous.
 For coding work, first inspect `/workspace` rules and state with `shell.exec` commands such as \
 `find .. -name AGENTS.md -print` from the target area and `git status --short`; obey the nearest \
 `AGENTS.md` files that apply to each file you edit.
-Never overwrite, revert, delete, or reformat unrelated user changes; work with the current \
-workspace state.
+    Never overwrite, revert, delete, or reformat unrelated user changes; work with the current \
+    workspace state.
+    Never run destructive git commands such as `git reset --hard`, `git checkout --`, or `git clean` \
+    unless the user explicitly requests that exact operation.
 For coding work, inspect current files before editing, prefer `fs.replace` for small surgical edits, \
 use `fs.write` only when replacing a whole small file is clearer, keep diffs small, write only files needed for the task, \
 run focused verification through `shell.exec`, including format, static check, lint, and test commands \

@@ -136,6 +136,8 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     assert!(contract.contains("keep repairing within scope"));
     assert!(contract.contains("inspect `git diff --stat` and the relevant diff"));
     assert!(contract.contains("Never overwrite, revert, delete, or reformat unrelated user changes"));
+    assert!(contract.contains("Never run destructive git commands"));
+    assert!(contract.contains("git reset --hard"));
     assert!(contract.contains("If verification fails"));
 }
 
