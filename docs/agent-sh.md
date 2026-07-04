@@ -91,6 +91,10 @@ printing so model output does not corrupt the user's current input buffer.
 `Ctrl+C` exits an idle REPL. While a run is active it asks CortexFS to cancel
 that run and returns to the prompt.
 
+Inside the chat shell, `/workspace` prints the host checkout mounted at
+`/workspace`; `/status` prints agent model, lifecycle, role, and workspace;
+`/tools` lists visible CortexFS tools.
+
 `ctx agent send` is the non-interactive path and may stream assistant deltas as
 they arrive.
 
