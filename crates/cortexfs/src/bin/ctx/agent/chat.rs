@@ -7,9 +7,15 @@ fn agent_send(
     debug: bool,
 ) -> Result<ExitCode, CliError> {
     let session = agent_session_name(root, name, session)?;
-    let request =
-        agent_send_request_json(&request_id()?, &session, &agent_cwd(root, name)?, input, debug);
-    stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
+    let request = agent_send_request_json(
+        &request_id()?,
+        &session,
+        &agent_cwd(root, name)?,
+        current_workspace_source().as_deref(),
+        input,
+        debug,
+    );
+    stream_agent_socket_request(&agent_chat_request_socket(root, name)?, &request, raw)
 }
 
 #[derive(Clone, Copy)]
@@ -23,7 +29,7 @@ struct AgentInteractiveSend<'a> {
 }
 
 const AGENT_REPL_COMMANDS: &str =
-    "/resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
+    "/help /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
 
 fn agent_send_interactive_with_run_id(
     root: &Path,
@@ -35,12 +41,13 @@ fn agent_send_interactive_with_run_id(
         send.run_id,
         &session,
         &agent_cwd(root, name)?,
+        current_workspace_source().as_deref(),
         send.input,
         send.debug,
     );
     let cancel_request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(send.run_id));
     stream_agent_socket_request_streaming_interruptible(
-        &agent_socket_path(root, name)?,
+        &agent_chat_request_socket(root, name)?,
         &request,
         send.raw,
         send.interrupt
@@ -52,25 +59,38 @@ fn agent_send_request_json(
     run_id: &str,
     session: &str,
     cwd: &str,
+    workspace: Option<&str>,
     input: &str,
     debug: bool,
 ) -> String {
+    let workspace = workspace.map_or_else(String::new, |workspace| {
+        format!(",\"workspace\":{}", json_string(workspace))
+    });
     if debug {
         return format!(
-            "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{},\"debug\":true}}\n",
+            "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{}{},\"input\":{},\"debug\":true}}\n",
             json_string(run_id),
             json_string(session),
             json_string(cwd),
+            workspace,
             json_string(input)
         );
     }
     format!(
-        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
+        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{}{},\"input\":{}}}\n",
         json_string(run_id),
         json_string(session),
         json_string(cwd),
+        workspace,
         json_string(input)
     )
+}
+
+fn current_workspace_source() -> Option<String> {
+    env::current_dir()
+        .ok()
+        .filter(|path| path.is_absolute())
+        .map(|path| path.display().to_string())
 }
 
 fn agent_resume(
@@ -84,7 +104,7 @@ fn agent_resume(
         "{{\"op\":\"resume\",\"session\":{}}}\n",
         json_string(&session)
     );
-    stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
+    stream_agent_socket_request(&agent_chat_request_socket(root, name)?, &request, raw)
 }
 
 fn agent_cancel(
@@ -101,7 +121,16 @@ fn agent_cancel(
     };
     require_cli_name("run id", &run)?;
     let request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(&run));
-    stream_agent_socket_request(&agent_socket_path(root, name)?, &request, raw)
+    stream_agent_socket_request(&agent_chat_request_socket(root, name)?, &request, raw)
+}
+
+fn agent_chat_request_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
+    let visible_socket = agent_socket_path(root, name)?;
+    let runtime_socket = agent_chat_runtime_socket(root, name)?;
+    if terminal_socket_exists(&runtime_socket) {
+        return Ok(runtime_socket);
+    }
+    Ok(visible_socket)
 }
 
 fn agent_repl(
@@ -209,4 +238,3 @@ fn read_agent_repl_stdin_limited(
     }
     Ok(input)
 }
-

@@ -10,6 +10,7 @@ fn handle_agent_executable_socket_request_frame_streaming(
         ref session,
         scope,
         ref cwd,
+        ref workspace,
         ref input,
     } = request
     else {
@@ -51,6 +52,7 @@ fn handle_agent_executable_socket_request_frame_streaming(
             run_id: id,
             session,
             cwd: cwd.as_deref(),
+            workspace: workspace.as_deref(),
             input,
             history_messages: &history_messages,
             debug,
@@ -260,6 +262,7 @@ struct AgentExecutableRunRequest<'a> {
     run_id: &'a str,
     session: &'a str,
     cwd: Option<&'a str>,
+    workspace: Option<&'a str>,
     input: &'a str,
     history_messages: &'a str,
     debug: Option<SocketDebugTiming>,

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde_json::Value;
+use std::path::Path;
 
 use crate::{MAX_SOCKET_FRAME_BYTES, is_stable_chroot_absolute_path, validate_socket_object_field};
 
@@ -50,6 +51,8 @@ pub enum SocketRequest {
         scope: SocketSessionScope,
         /// Optional cwd inside the agent chroot.
         cwd: Option<String>,
+        /// Optional host workspace directory bound at `/workspace` for this run.
+        workspace: Option<String>,
         /// User input text.
         input: String,
     },
@@ -144,6 +147,7 @@ enum SocketRequestFrame {
         #[serde(default)]
         scope: SocketSessionScopeFrame,
         cwd: Option<String>,
+        workspace: Option<String>,
         input: String,
     },
     #[serde(rename = "resume")]
@@ -187,8 +191,9 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
                 session,
                 scope,
                 cwd,
+                workspace,
                 input,
-            } => parse_socket_send_request(id, session, scope.into(), cwd, input),
+            } => parse_socket_send_request(id, session, scope.into(), cwd, workspace, input),
             SocketRequestFrame::Resume { session, after } => {
                 parse_socket_resume_request(session, after)
             }
@@ -203,11 +208,13 @@ fn parse_socket_send_request(
     session: String,
     scope: SocketSessionScope,
     cwd: Option<String>,
+    workspace: Option<String>,
     input: String,
 ) -> Result<SocketRequest, SocketRequestError> {
     validate_socket_object_field("id", &id)?;
     validate_socket_object_field("session", &session)?;
     validate_optional_socket_cwd(cwd.as_deref())?;
+    validate_optional_socket_workspace(workspace.as_deref())?;
     if input.contains('\0') {
         return Err(SocketRequestError::InvalidField {
             field: "input",
@@ -220,6 +227,7 @@ fn parse_socket_send_request(
         session,
         scope,
         cwd,
+        workspace,
         input,
     })
 }
@@ -252,6 +260,31 @@ fn validate_optional_socket_cwd(cwd: Option<&str>) -> Result<(), SocketRequestEr
         });
     }
     Ok(())
+}
+
+fn validate_optional_socket_workspace(workspace: Option<&str>) -> Result<(), SocketRequestError> {
+    let Some(workspace) = workspace else {
+        return Ok(());
+    };
+    if is_absolute_host_workspace_path(workspace) {
+        Ok(())
+    } else {
+        Err(SocketRequestError::InvalidField {
+            field: "workspace",
+            value: workspace.to_owned(),
+        })
+    }
+}
+
+fn is_absolute_host_workspace_path(value: &str) -> bool {
+    !value.bytes().any(|byte| byte.is_ascii_control())
+        && Path::new(value).is_absolute()
+        && Path::new(value).components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::RootDir | std::path::Component::Normal(_)
+            )
+        })
 }
 
 fn validate_optional_socket_object_field(

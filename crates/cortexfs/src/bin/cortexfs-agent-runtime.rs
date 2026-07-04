@@ -57,9 +57,11 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         "default",
         PolicyPermission::Connect,
     );
-    let provider_secret =
-        cortexfs::open_provider_system_secret_for_model(&config.source, view.model())
-            .map_err(|_error| format!("provider secret unavailable: {}", view.model()))?;
+    let provider_secret = if provider_secret_required_for_model(&config.source, view.model()) {
+        open_optional_provider_system_secret_for_model(&config.source, view.model())?
+    } else {
+        None
+    };
     let mut runtime_env = view.env().to_vec();
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
@@ -89,13 +91,68 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         },
     );
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
-    result
-        .map(|_response| ())
-        .map_err(|error| format!("socket runtime {}: {}", error.errno(), config.agent))
+    result.map(|_response| ()).map_err(|error| {
+        format!(
+            "socket runtime {} {error:?}: {}",
+            error.errno(),
+            config.agent
+        )
+    })
 }
 
 fn runtime_model(_source: &Path, requested_model: &str) -> String {
     requested_model.to_owned()
+}
+
+fn open_optional_provider_system_secret_for_model(
+    source: &Path,
+    model: &str,
+) -> Result<Option<cortexfs::ProviderSystemSecretHandle>, String> {
+    match cortexfs::open_provider_system_secret_for_model(source, model) {
+        Ok(secret) => Ok(secret),
+        Err(cortexfs::ProviderSystemSecretError::CannotRead) => Ok(None),
+        Err(_error) => Err(format!("provider secret unavailable: {model}")),
+    }
+}
+
+fn provider_secret_required_for_model(source: &Path, model: &str) -> bool {
+    read_model_driver(source, model).map_or_else(
+        || !matches!(model.split_once('/'), Some(("debug", _name))),
+        |driver| model_driver_requires_provider_secret(&driver),
+    )
+}
+
+fn read_model_driver(source: &Path, model: &str) -> Option<String> {
+    fs::read_to_string(
+        source
+            .join("model")
+            .join(format!("{model}.d"))
+            .join("driver"),
+    )
+    .ok()
+}
+
+fn model_driver_requires_provider_secret(driver: &str) -> bool {
+    let mut saw_driver = false;
+    for line in driver.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let values = line
+            .split_once('=')
+            .map_or(line, |(_route, values)| values)
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        for value in values {
+            saw_driver = true;
+            if !matches!(value, "debug" | "shell") {
+                return true;
+            }
+        }
+    }
+    !saw_driver
 }
 
 fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {
@@ -139,11 +196,19 @@ fn repair_open_path_permissions(
     uid: u32,
     gid: u32,
 ) -> Result<(), String> {
-    fchown(fd, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid)))
-        .map_err(|error| format!("cannot chown session path {label}: {error}"))?;
+    if let Err(error) = fchown(fd, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid))) {
+        if is_read_only_permission_repair_error(error) {
+            return Ok(());
+        }
+        return Err(format!("cannot chown session path {label}: {error}"));
+    }
     let mode = if is_dir { 0o700 } else { 0o600 };
-    fchmod(fd, Mode::from_bits_truncate(mode))
-        .map_err(|error| format!("cannot chmod session path {label}: {error}"))?;
+    if let Err(error) = fchmod(fd, Mode::from_bits_truncate(mode)) {
+        if is_read_only_permission_repair_error(error) {
+            return Ok(());
+        }
+        return Err(format!("cannot chmod session path {label}: {error}"));
+    }
     if is_dir {
         for entry in fs::read_dir(proc_fd_path(fd))
             .map_err(|error| format!("cannot read session dir {label}: {error}"))?
@@ -157,6 +222,10 @@ fn repair_open_path_permissions(
         }
     }
     Ok(())
+}
+
+fn is_read_only_permission_repair_error(error: nix::errno::Errno) -> bool {
+    error == nix::errno::Errno::EROFS
 }
 
 fn repair_child_path_permissions(

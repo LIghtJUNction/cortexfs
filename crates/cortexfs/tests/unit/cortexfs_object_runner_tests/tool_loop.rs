@@ -300,6 +300,7 @@ fn agent_tool_loop_wraps_followup_plain_text_as_event() {
     let output = String::from_utf8(output).unwrap_or_default();
     assert!(output.contains(r#""type":"delta""#), "{output}");
     assert!(output.contains("工具已经列出。"), "{output}");
+    assert!(output.contains(r#""status":"ok""#), "{output}");
 }
 
 #[test]

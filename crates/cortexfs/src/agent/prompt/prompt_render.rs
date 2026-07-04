@@ -90,9 +90,19 @@ For a request to list, discover, inspect, or show available tools, output this e
 {{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"tools\"]}}}}
 When you need to call a tool, output exactly one JSON object line and no prose before it:
 {{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"COMMAND\"]}}}}
-Use `arguments.args` for the `tsh` argv, for example [\"fs.read\",\"PATH_FROM_USER\"].
+Use `arguments.args` as exact `tsh` argv.
+Read a file: [\"fs.read\",\"/workspace/PATH\"].
+Write a file atomically: [\"fs.write\",\"/workspace/PATH\",\"FULL UTF-8 FILE CONTENT\"].
+Run verification: [\"shell.exec\",\"cargo test -p cortexfs\"].
 If no concrete file path is provided for a file read/write request, ask the user for the path; do \
 not invent a project file path.
+For coding work, first inspect `/workspace` rules and state with `shell.exec` commands such as \
+`test -f AGENTS.md && cat AGENTS.md || true` and `git status --short`.
+Never overwrite, revert, delete, or reformat unrelated user changes; work with the current \
+workspace state.
+For coding work, inspect current files before editing, keep diffs small, write only files needed for the task, \
+run focused verification through `shell.exec`, and report changed files plus exact commands run.
+If verification fails, report the failing command and error output instead of claiming success.
 After the tool result is returned, continue answering the user normally.
 Interactive shells and multiplexers such as bash, tmux, and zellij are ordinary CortexFS tools \
 that must be invoked through `tsh` when visible."

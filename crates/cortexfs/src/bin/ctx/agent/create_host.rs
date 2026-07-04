@@ -25,7 +25,7 @@ fn agent_new_host_fallback(root: &Path, args: &AgentNewArgs) -> Result<ExitCode,
     let parent = args
         .parent
         .clone()
-        .unwrap_or_else(|| "agent:base".to_owned());
+        .unwrap_or_else(|| "agent:architect".to_owned());
     let agent_path = agent_object_path(root, &args.name);
     let control = agent_control_dir(root, &args.name);
     if agent_path.exists() || control.exists() {

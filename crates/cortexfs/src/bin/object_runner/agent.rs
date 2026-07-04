@@ -90,12 +90,18 @@ where
         if outcome.streamed {
             write_done_frames(stdout, &outcome.frames)?;
             if outcome.success || frames_have_error(&outcome.frames) {
+                if outcome.success && !frames_have_error(&outcome.frames) {
+                    write_success_done_if_missing(stdout, &config.run, &outcome.frames)?;
+                }
                 return Ok(());
             }
             return Err("agent model failed".to_owned());
         }
         write_agent_frames(stdout, &config.run, &outcome.frames)?;
         if outcome.success || frames_have_error(&outcome.frames) {
+            if outcome.success && !frames_have_error(&outcome.frames) {
+                write_success_done_if_missing(stdout, &config.run, &outcome.frames)?;
+            }
             return Ok(());
         }
         return Err("agent model failed".to_owned());

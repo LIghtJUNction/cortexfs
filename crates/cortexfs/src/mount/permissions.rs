@@ -94,8 +94,103 @@ fn fuse_write_error(attr: &FuseV1Attr) -> Option<Errno> {
 }
 
 fn fuse_writable_projection_path(path: &str) -> bool {
+    if fuse_session_writable_projection_path(path) {
+        return true;
+    }
     let path = parse_abi_path(path);
-    matches!(path, AbiPathKind::ModelRoute) || path.is_writable_control_path()
+    matches!(path, AbiPathKind::ModelRoute)
+        || path.is_writable_control_path()
+}
+
+fn fuse_session_writable_projection_path(path: &str) -> bool {
+    fuse_session_append_projection_path(path)
+        || fuse_session_replace_projection_path(path)
+        || fuse_session_atomic_temp_projection_path(path)
+}
+
+fn fuse_session_append_projection_path(path: &str) -> bool {
+    let parts = path.split('/').collect::<Vec<_>>();
+    matches!(
+        *parts.as_slice(),
+        ["home", uid, "agent", agent, "session", session, file]
+            if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && is_object_name(session)
+                && matches!(file, "messages.jsonl" | "events.jsonl")
+    )
+}
+
+fn fuse_session_replace_projection_path(path: &str) -> bool {
+    let parts = path.split('/').collect::<Vec<_>>();
+    match *parts.as_slice() {
+        ["home", uid, "agent", agent, "session", "index", file]
+            if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && matches!(file, "list" | "current") =>
+        {
+            true
+        }
+        ["home", uid, "agent", agent, "session", "index", index_kind, key]
+            if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && matches!(index_kind, "by-cwd" | "by-hash" | "by-uuid")
+                && is_object_name(key) =>
+        {
+            true
+        }
+        ["home", uid, "agent", agent, "session", session, file]
+            if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && is_object_name(session)
+                && matches!(
+                    file,
+                    "latest.md" | "state" | "cwd" | "created_at" | "updated_at" | "meta.json"
+                ) =>
+        {
+            true
+        }
+        ["home", uid, "agent", agent, "session", session, "context", file]
+            if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && is_object_name(session)
+                && matches!(
+                    file,
+                    "budget"
+                        | "pack.json"
+                        | "pack.md"
+                        | "summary.md"
+                        | "facts.jsonl"
+                        | "decisions.jsonl"
+                        | "todo.md"
+                        | "refs.jsonl"
+                ) =>
+        {
+            true
+        }
+        ["home", uid, "agent", agent, "session", session, "context", cache, "index.jsonl"]
+            if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && is_object_name(session)
+                && matches!(cache, "swap" | "dedup") =>
+        {
+            true
+        }
+        _ => false,
+    }
+}
+
+fn fuse_session_atomic_temp_projection_path(path: &str) -> bool {
+    let Some((parent, file_name)) = path.rsplit_once('/') else {
+        return false;
+    };
+    let Some(rest) = file_name.strip_prefix('.') else {
+        return false;
+    };
+    let Some((target_name, _suffix)) = rest.split_once(".tmp-") else {
+        return false;
+    };
+    let target = format!("{parent}/{target_name}");
+    fuse_session_append_projection_path(&target) || fuse_session_replace_projection_path(&target)
 }
 
 fn fuse_setattr_metadata_error(changes_metadata: bool) -> Option<Errno> {

@@ -24,6 +24,28 @@ fn write_done_frames(stdout: &mut impl Write, frames: &[String]) -> Result<(), S
     Ok(())
 }
 
+fn write_success_done_if_missing(
+    stdout: &mut impl Write,
+    run: &str,
+    frames: &[String],
+) -> Result<(), String> {
+    if frames
+        .iter()
+        .any(|frame| event_type(frame).as_deref() == Some("done"))
+    {
+        return Ok(());
+    }
+    let done = serde_json::json!({
+        "type": "done",
+        "run": run,
+        "status": "ok"
+    })
+    .to_string();
+    writeln!(stdout, "{done}")
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("cannot write output: {error}"))
+}
+
 fn write_agent_frames_for_tool_iteration(
     stdout: &mut impl Write,
     run: &str,

@@ -61,6 +61,10 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     let mut env = view.env().to_vec();
+    env.push((
+        "CTX_PROVIDER_CONFIG_DIR".to_owned(),
+        "/host/providers.d".to_owned(),
+    ));
     env.push(("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()));
     env.push((
         "CTX_PROVIDER_SECRET_PATH".to_owned(),
@@ -87,6 +91,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
+        workspace: Some("/repo"),
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
@@ -108,12 +113,25 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     ));
     assert!(contains_arg_triplet(
         &args,
+        "--setenv",
+        "CTX_PROVIDER_CONFIG_DIR",
+        &root.join("shared/providers.d").display().to_string()
+    ));
+    assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
+    assert!(contains_arg_triplet(
+        &args,
         "--ro-bind-data",
         "9",
         "/run/user/1000/cortexfs/credentials/coder-default"
     ));
     assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
-    assert!(contains_arg_triplet(&args, "--ro-bind", "/ctx", "/ctx"));
+    assert!(contains_arg_triplet(&args, "--bind", "/repo", "/workspace"));
+    assert!(contains_arg_triplet(
+        &args,
+        "--ro-bind",
+        root.to_str().unwrap_or_default(),
+        "/ctx"
+    ));
     assert!(contains_arg_triplet(
         &args,
         "--ro-bind",
@@ -129,7 +147,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
 
 #[test]
 fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
-    let root = reference_tree("agent-executable-socket-runtime-bwrap-network");
+    let root = reference_tree("bwrap-network");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
@@ -154,6 +172,7 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
+        workspace: None,
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
@@ -165,3 +184,56 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
     assert!(args.contains(&"--unshare-pid".to_owned()));
 }
 
+#[test]
+fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
+    let root = reference_tree("agent-bwrap-explicit-workspace");
+    let session_root = agent_session_root(&root, "coder");
+    let control = root.join("agent").join("coder.d");
+    write_text_file(
+        &control.join("mount"),
+        "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/repo-explicit\t/workspace\trw\trbind,nosuid,nodev\n",
+    );
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: view.env(),
+        session_root: &session_root,
+        default_cwd: "/workspace",
+        model: Some("debug/echo"),
+        network_allowed: false,
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/usr/bin/bwrap"),
+            mount_table: view.mount_table(),
+        },
+    };
+
+    let args = agent_executable_socket_bwrap_args(&BwrapAgentExecutableArgs {
+        runtime,
+        mount_table: view.mount_table(),
+        cwd: "/workspace",
+        workspace: Some("/repo-default"),
+        run_id: "run-1",
+        session: "default",
+        history_messages: "- user: hi",
+        debug: None,
+        input: "hi",
+    });
+
+    assert!(contains_arg_triplet(
+        &args,
+        "--bind",
+        "/repo-explicit",
+        "/workspace"
+    ));
+    assert!(!contains_arg_triplet(
+        &args,
+        "--bind",
+        "/repo-default",
+        "/workspace"
+    ));
+}

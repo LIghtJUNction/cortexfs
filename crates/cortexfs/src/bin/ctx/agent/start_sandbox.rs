@@ -35,6 +35,44 @@ fn agent_start_systemd_command(
     command
 }
 
+fn agent_chat_socket_systemd_command(
+    root: &Path,
+    name: &str,
+    socket: &Path,
+    unit: &str,
+) -> AgentStartCommand {
+    AgentStartCommand {
+        program: get_systemd_run_program().to_owned(),
+        args: vec![
+            "--user".to_owned(),
+            "--unit".to_owned(),
+            unit.to_owned(),
+            "--collect".to_owned(),
+            "--socket-property".to_owned(),
+            format!("ListenStream={}", socket.display()),
+            "--socket-property".to_owned(),
+            "SocketMode=0666".to_owned(),
+            agent_runtime_program(),
+            "--source".to_owned(),
+            root.display().to_string(),
+            "--agent".to_owned(),
+            name.to_owned(),
+        ],
+    }
+}
+
+fn agent_runtime_program() -> String {
+    if let Ok(current) = env::current_exe()
+        && let Some(parent) = current.parent()
+    {
+        let sibling = parent.join("cortexfs-agent-runtime");
+        if sibling.is_file() {
+            return sibling.display().to_string();
+        }
+    }
+    "/usr/bin/cortexfs-agent-runtime".to_owned()
+}
+
 fn agent_start_process_command(command: &AgentStartCommand) -> ProcessCommand {
     let mut process = ProcessCommand::new(&command.program);
     process.args(&command.args);
@@ -62,6 +100,10 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
         .join(" ");
     let mut env = vec![
         ("CTX_ROOT".to_owned(), CTX_ROOT.to_owned()),
+        (
+            "CTX_PROVIDER_CONFIG_DIR".to_owned(),
+            format!("{CTX_ROOT}/shared/providers.d"),
+        ),
         ("CTX_HOME".to_owned(), sandbox_ctx_home),
         ("CTX_AGENT".to_owned(), view.agent_name().to_owned()),
         (
@@ -98,6 +140,7 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
         if matches!(
             key.as_str(),
             "CTX_ROOT"
+                | "CTX_PROVIDER_CONFIG_DIR"
                 | "CTX_HOME"
                 | "CTX_AGENT"
                 | "CTX_AGENT_ROLE"
@@ -389,4 +432,111 @@ fn ensure_agent_terminal_socket(
         }
     }
     Ok(())
+}
+
+fn agent_chat_unit(root: &Path, name: &str) -> String {
+    format!("cortexfs-agent-{name}-{}-chat", stable_path_hash(root))
+}
+
+fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
+    require_cli_name("agent name", name)?;
+    let runtime_root = match env::var_os("XDG_RUNTIME_DIR") {
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from("/run")
+            .join("user")
+            .join(current_uid_for_ctx(root)?),
+    };
+    Ok(runtime_root
+        .join("cortexfs")
+        .join("agent")
+        .join(stable_path_hash(root))
+        .join(format!("{name}.sock")))
+}
+
+fn ensure_agent_chat_socket(visible_socket: &Path, runtime_socket: &Path) -> Result<(), CliError> {
+    if let Some(parent) = runtime_socket.parent() {
+        create_agent_terminal_runtime_dir(parent).map_err(|error| {
+            CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
+        })?;
+    }
+    match remove_stale_agent_terminal_socket(runtime_socket) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot remove stale {}: {error}",
+                runtime_socket.display()
+            )));
+        }
+    }
+    if let Err(error) = remove_socket_or_symlink(visible_socket) {
+        if is_read_only_filesystem_error(&error) {
+            return Ok(());
+        }
+        return Err(CliError::unavailable(format!(
+            "cannot replace {} with runtime socket link: {error}",
+            visible_socket.display()
+        )));
+    }
+    match std::os::unix::fs::symlink(runtime_socket, visible_socket) {
+        Ok(()) => Ok(()),
+        Err(error) if is_read_only_filesystem_error(&error) => Ok(()),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot link {} -> {}: {error}",
+            visible_socket.display(),
+            runtime_socket.display()
+        ))),
+    }
+}
+
+fn is_read_only_filesystem_error(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(nix::libc::EROFS)
+}
+
+fn remove_socket_or_symlink(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || metadata.file_type().is_socket() => {
+            fs::remove_file(path)
+        }
+        Ok(_metadata) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to replace non-socket path",
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn wait_for_agent_chat_socket(socket: &Path) -> Result<(), CliError> {
+    for _ in 0..50 {
+        if terminal_socket_exists(socket) {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Err(CliError::unavailable(format!(
+        "agent chat socket service started, but socket did not appear: {}",
+        socket.display()
+    )))
+}
+
+fn reset_agent_chat_unit(unit: &str) {
+    let service = format!("{unit}.service");
+    let socket = format!("{unit}.socket");
+    for target in [service.as_str(), socket.as_str()] {
+        let _ignored = systemctl_user_command(["stop", target])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ignored = systemctl_user_command(["reset-failed", target])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+fn stable_path_hash(path: &Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    path.display().to_string().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }

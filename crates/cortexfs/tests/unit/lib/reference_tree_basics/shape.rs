@@ -78,11 +78,17 @@ fn abi_paths_classify_by_stable_shape() {
         ("model/debug/echo", "ctx.model.exec"),
         ("model/debug/echo.sock", "ctx.model.socket"),
         ("model/debug/echo.d/id", "ctx.model.control"),
+        ("model/debug/echo.d/hooks/pre.d", "ctx.model.control"),
+        ("model/debug/echo.d/hooks/post.d", "ctx.model.control"),
         ("agent/coder", "ctx.agent.exec"),
         ("agent/coder.sock", "ctx.agent.socket"),
         ("agent/coder.d/policy", "ctx.agent.control"),
+        ("agent/coder.d/hooks/pre.d", "ctx.agent.control"),
+        ("agent/coder.d/hooks/post.d", "ctx.agent.control"),
         ("tool/fs.read", "ctx.tool.exec"),
         ("tool/fs.read.d/schema", "ctx.tool.control"),
+        ("tool/fs.read.d/hooks/pre.d", "ctx.tool.control"),
+        ("tool/fs.read.d/hooks/post.d", "ctx.tool.control"),
         ("home/1000", "ctx.home.dir"),
         ("home/1000/agent/coder/session/default", "ctx.session.dir"),
         (
@@ -173,6 +179,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(!root.join("bin").join("te").exists());
     assert!(root.join("bin").join("tsh").is_file());
     assert_reference_bin_placeholders(&root);
+    assert_file_text(
+        &root.join("agent").join("coder"),
+        "#!/bin/sh\n# CortexFS generated object wrapper.\n# cortexfs.object=agent\n# cortexfs.name=coder\nexec '/ctx/bin/cortexfs-object-runner' \"$0\" \"$@\"\n",
+    );
     assert!(!root.join("model").join("debug").join("echo").exists());
     let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))
         .map(|metadata| metadata.permissions().mode() & 0o777);
@@ -188,7 +198,20 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(inspect_object_layout(&root, ObjectClass::Model, "debug/echo").is_ok());
     assert_reference_agents(&root);
     assert!(inspect_object_layout(&root, ObjectClass::Tool, "tsh").is_ok());
-    for tool in ["bash", "tmux", "zellij", "fs.read", "fs.write", "shell.exec"] {
+    assert_object_hook_dirs(&root.join("tool").join("tsh.d"));
+    assert_file_text(
+        &root.join("tool").join("tsh"),
+        "#!/bin/sh\n# CortexFS reference-tree tsh tool.\nexec /ctx/bin/tsh \"$@\"\n",
+    );
+    for tool in ["fs.read", "fs.write", "shell.exec", "tsh.config"] {
+        assert!(root.join("tool").join(tool).is_file());
+        assert!(root.join("tool").join(format!("{tool}.d")).is_dir());
+        assert!(inspect_object_layout(&root, ObjectClass::Tool, tool).is_ok());
+        assert_object_hook_dirs(&root.join("tool").join(format!("{tool}.d")));
+        let wrapper = fs::read_to_string(root.join("tool").join(tool)).unwrap_or_default();
+        assert!(wrapper.contains("exec '/ctx/bin/cortexfs-object-runner' \"$0\" \"$@\""));
+    }
+    for tool in ["bash", "tmux", "zellij"] {
         assert!(!root.join("tool").join(tool).exists());
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }
@@ -224,92 +247,61 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
 }
 
 fn assert_reference_agents(root: &Path) {
-    for agent in ["base", "coder", "reviewer", "executor", "worker"] {
+    for agent in ["architect", "coder", "reviewer"] {
         assert!(inspect_object_layout(root, ObjectClass::Agent, agent).is_ok());
+        assert_object_hook_dirs(&root.join("agent").join(format!("{agent}.d")));
     }
-    assert_file_text(&root.join("agent").join("base.d").join("parent"), "\n");
-    assert_file_text(&root.join("agent").join("base.d").join("cwd"), "/workspace\n");
-    assert_file_text(&root.join("agent").join("coder.d").join("cwd"), "/workspace\n");
-    assert_file_text(&root.join("agent").join("coder.d").join("model"), "main\n");
-    assert_file_text(&root.join("agent").join("reviewer.d").join("model"), "helper\n");
-    let coder_system = ok!(fs::read_to_string(
-        root.join("agent").join("coder.d").join("system.md")
-    ));
-    assert!(coder_system.contains("prefer a delegated `react` node"));
-    assert!(coder_system.contains("the omitted delegated agent is `worker`"));
-    assert!(coder_system.contains("`worker-*`, `executor`, or `executor-*`"));
-    assert!(coder_system.contains("shared reusable entries"));
-    assert!(coder_system.contains("dedicated temp workers"));
-    assert!(
-        coder_system
-            .contains("`model=`, `life=`, `role=`, `plan=`, `handoff=`, `result=`, and `refs=`")
-    );
-    assert!(coder_system.contains("ctx agent wait"));
-    assert_file_text(
-        &root.join("agent").join("executor.d").join("model"),
-        "api.lmm.best/gpt-5.3-codex-spark\n",
-    );
-    assert_file_text(
-        &root.join("agent").join("executor.d").join("parent"),
-        "agent:base\n",
-    );
-    let executor_system = ok!(fs::read_to_string(
-        root.join("agent").join("executor.d").join("system.md")
-    ));
-    assert!(executor_system.contains("spark model path"));
-    assert!(executor_system.contains("Shared `worker` and `executor` entries stay reusable"));
-    assert!(
-        executor_system.contains("`role=`, `plan=`, `handoff=`, `result=`, and `refs=`")
-    );
-    assert_file_text(
-        &root.join("agent").join("worker.d").join("model"),
-        "api.lmm.best/gpt-5.3-codex-spark\n",
-    );
-    assert_file_text(
-        &root.join("agent").join("worker.d").join("parent"),
-        "agent:coder\n",
-    );
-    let worker_system = ok!(fs::read_to_string(
-        root.join("agent").join("worker.d").join("system.md")
-    ));
-    assert!(worker_system.contains("spark model path"));
-    assert!(worker_system.contains("Worker-role agent names include"));
-    assert!(worker_system.contains("preserve its `model=`, `life=`, and `role=` context"));
-    assert!(worker_system.contains("bounded delegated implementation tasks"));
-    assert!(worker_system.contains("Do not make architecture decisions"));
-    for agent in ["coder", "reviewer"] {
-        assert_file_text(
-            &root.join("agent").join(format!("{agent}.d")).join("parent"),
-            "agent:base\n",
-        );
+    for old_agent in ["base", "executor", "worker"] {
+        assert!(!root.join("agent").join(old_agent).exists());
+        assert!(!root.join("agent").join(format!("{old_agent}.d")).exists());
     }
 
-    let base_policy = ok!(fs::read_to_string(
-        root.join("agent").join("base.d").join("policy")
-    ));
-    assert!(base_policy.contains("allow base_t tool:tsh execute\n"));
-    assert!(base_policy.contains("allow base_t tool:fs.read execute\n"));
-    assert!(base_policy.contains("allow base_t network:default connect\n"));
-    for child in ["coder", "reviewer", "executor"] {
-        assert!(base_policy.contains(&format!("allow base_t agent:{child} create\n")));
-        assert!(base_policy.contains(&format!("allow base_t agent:{child} start\n")));
-    }
-    let coder_policy = ok!(fs::read_to_string(
-        root.join("agent").join("coder.d").join("policy")
-    ));
-    for permission in ["create", "start", "stop", "read"] {
-        assert!(coder_policy.contains(&format!("allow coder_t agent:worker {permission}\n")));
-    }
-    for agent in ["base", "executor", "worker"] {
-        for index in ["by-cwd", "by-hash", "by-uuid"] {
-            assert!(agent_session_root(root, agent)
-                .join("index")
-                .join(index)
-                .is_dir());
-        }
+    assert_file_text(&root.join("agent/architect.d/parent"), "\n");
+    assert_file_text(&root.join("agent/architect.d/cwd"), "/workspace\n");
+    assert_file_text(&root.join("agent/coder.d/parent"), "agent:architect\n");
+    assert_file_text(&root.join("agent/coder.d/cwd"), "/workspace\n");
+    assert_file_text(&root.join("agent/coder.d/model"), "main\n");
+    assert_file_text(&root.join("agent/reviewer.d/parent"), "agent:architect\n");
+    assert_file_text(&root.join("agent/reviewer.d/model"), "helper\n");
+
+    let architect_system = ok!(fs::read_to_string(root.join("agent/architect.d/system.md")));
+    assert!(architect_system.contains("human role name is Architect"));
+    assert!(architect_system.contains("delegate implementation to `coder`"));
+    assert!(architect_system.contains("verification to `reviewer`"));
+
+    let coder_system = ok!(fs::read_to_string(root.join("agent/coder.d/system.md")));
+    assert!(coder_system.contains("default Architect -> coder/reviewer flow"));
+    assert!(coder_system.contains("fs.write"));
+    assert!(coder_system.contains("shell.exec"));
+    assert!(coder_system.contains("Leave architecture decisions"));
+
+    let reviewer_system = ok!(fs::read_to_string(root.join("agent/reviewer.d/system.md")));
+    assert!(reviewer_system.contains("independent review agent"));
+    assert!(reviewer_system.contains("correctness, ABI drift"));
+
+    let architect_policy = ok!(fs::read_to_string(root.join("agent/architect.d/policy")));
+    assert!(architect_policy.contains("allow architect_t agent:coder create"));
+    assert!(architect_policy.contains("allow architect_t agent:coder start"));
+    assert!(architect_policy.contains("allow architect_t agent:reviewer read"));
+    assert!(architect_policy.contains("allow architect_t tool:fs.read execute"));
+    assert!(architect_policy.contains("allow architect_t network:default connect"));
+
+    let coder_policy = ok!(fs::read_to_string(root.join("agent/coder.d/policy")));
+    assert!(coder_policy.contains("allow coder_t tool:fs.write execute"));
+    assert!(coder_policy.contains("allow coder_t tool:shell.exec execute"));
+
+    for index in ["by-cwd", "by-hash", "by-uuid"] {
+        assert!(agent_session_root(root, "coder").join("index").join(index).is_dir());
     }
 }
 
+fn assert_object_hook_dirs(control_dir: &Path) {
+    let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
+    assert!(hook_dir.is_dir());
+    for phase in OBJECT_HOOK_PHASE_DIRS {
+        assert!(hook_dir.join(phase).is_dir());
+    }
+}
 #[test]
 fn reference_tree_bootstrap_does_not_chmod_socket_symlink_target() {
     let root = clean_test_dir("reference-tree-socket-symlink-mode");

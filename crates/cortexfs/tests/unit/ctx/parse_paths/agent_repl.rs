@@ -38,11 +38,15 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
             .is_ok()
     );
 
-    assert_eq!(agent_repl_prompt(false, "coder", "default"), "coder/default ❯ ");
+    assert_eq!(
+        agent_repl_prompt(false, "coder", "default"),
+        "ctx agent coder/default ❯ "
+    );
     assert_eq!(
         agent_repl_model_summary(false, &root, "coder"),
         Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
     );
+    assert!(AGENT_REPL_COMMANDS.contains("/help"));
     assert!(AGENT_REPL_COMMANDS.contains("/clear"));
 }
 
@@ -330,16 +334,25 @@ fn debug_tool_line_reports_current_names_and_changes() {
 
 #[test]
 fn debug_agent_send_request_marks_socket_frame() {
-    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", true);
+    let request = agent_send_request_json(
+        "run-1",
+        "default",
+        "/workspace",
+        Some("/repo"),
+        "hello",
+        true,
+    );
 
     assert!(request.contains(r#""debug":true"#));
+    assert!(request.contains(r#""workspace":"/repo""#));
     assert!(request.ends_with('\n'));
 }
 
 #[test]
 fn normal_agent_send_request_does_not_mark_socket_frame() {
-    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", false);
+    let request = agent_send_request_json("run-1", "default", "/workspace", None, "hello", false);
 
     assert!(!request.contains(r#""debug""#));
+    assert!(!request.contains(r#""workspace""#));
     assert!(request.ends_with('\n'));
 }

@@ -199,17 +199,32 @@ impl FuseV1Projection {
         offset: u64,
         content: &[u8],
     ) -> Result<(), FuseV1Error> {
-        if offset != 0 {
-            return Err(FuseV1Error::InvalidOffset);
-        }
         if content.len() > MAX_FUSE_V1_SMALL_WRITE_BYTES {
             return Err(FuseV1Error::TooLarge);
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if normalized == format!("model/{MODEL_ROUTE_FILE}") {
-            let path = self.resolve(&normalized)?;
-            let content =
-                std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+        if offset != 0 {
+            if Self::is_agent_log_control_path(&normalized) {
+                return self.append_plain_file_at_end(&normalized, offset, content);
+            }
+            if Self::is_session_append_path(&normalized) {
+                return self.append_plain_file_at_end(&normalized, offset, content);
+            }
+            return Err(FuseV1Error::InvalidOffset);
+        }
+        if Self::is_session_replace_path(&normalized) {
+            return self.replace_session_plain_file(&normalized, content);
+        }
+        if Self::is_session_append_path(&normalized) {
+            return self.replace_session_plain_file(&normalized, content);
+        }
+        if Self::session_atomic_temp_target(&normalized).is_some() {
+            return self.replace_session_plain_file(&normalized, content);
+        }
+    if normalized == format!("model/{MODEL_ROUTE_FILE}") {
+        let path = self.resolve(&normalized)?;
+        let content =
+            std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
             return atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io);
         }
         if !is_fuse_v1_writable_control_path(&normalized) {
@@ -227,8 +242,242 @@ impl FuseV1Projection {
             && let Some(parent) = path.parent()
         {
             create_fuse_v1_plain_dir(parent)?;
-        }
+    }
+    atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
+}
+
+fn append_plain_file_at_end(
+    &self,
+    normalized: &str,
+    offset: u64,
+    content: &[u8],
+) -> Result<(), FuseV1Error> {
+    std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+    let path = self.resolve(normalized)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|_error| FuseV1Error::Io)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(FuseV1Error::Io);
+    }
+    if offset != metadata.len() {
+        return Err(FuseV1Error::InvalidOffset);
+    }
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(&path)
+        .map_err(|_error| FuseV1Error::Io)?;
+    file.write_all(content).map_err(|_error| FuseV1Error::Io)?;
+    file.sync_all().map_err(|_error| FuseV1Error::Io)
+}
+
+    fn replace_session_plain_file(&self, normalized: &str, content: &[u8]) -> Result<(), FuseV1Error> {
+        let content = std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+        let path = self.resolve(normalized)?;
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => return Err(FuseV1Error::Io),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_error) => return Err(FuseV1Error::Io),
+    }
         atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
+    }
+
+    /// Creates one directory in the durable session layout.
+    ///
+    /// This is intentionally narrower than general filesystem `mkdir`: only the
+    /// documented session skeleton below `home/<uid>/agent/<agent>/session` is
+    /// writable through the v1 FUSE projection.
+    pub fn create_session_layout_dir(&self, abi_path: &str) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if !Self::is_session_layout_dir_path(&normalized) {
+            return Err(FuseV1Error::NotControlFile);
+        }
+        let path = self.resolve(&normalized)?;
+        create_fuse_v1_plain_dir(&path)
+    }
+
+    /// Creates an initially empty durable session file.
+    pub fn create_session_layout_file(&self, abi_path: &str) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if !Self::is_session_replace_path(&normalized)
+            && !Self::is_session_append_path(&normalized)
+            && Self::session_atomic_temp_target(&normalized).is_none()
+        {
+            return Err(FuseV1Error::NotControlFile);
+        }
+        self.replace_session_plain_file(&normalized, b"")
+    }
+
+    /// Renames a same-directory durable session atomic temp file to its final file.
+    pub fn rename_session_atomic_temp(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
+        let from = normalize_fuse_abi_path(from)?;
+        let to = normalize_fuse_abi_path(to)?;
+        if Self::session_atomic_temp_target(&from).as_deref() != Some(to.as_str()) {
+            return Err(FuseV1Error::NotControlFile);
+        }
+        let from_path = self.resolve(&from)?;
+        let to_path = self.resolve(&to)?;
+        let parent = from_path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        if to_path.parent() != Some(parent) {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        let parent_dir = open_fuse_v1_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let from_name = fuse_v1_plain_file_name(&from_path).map_err(|_error| FuseV1Error::Io)?;
+        let to_name = fuse_v1_plain_file_name(&to_path).map_err(|_error| FuseV1Error::Io)?;
+        nix::fcntl::renameat(&parent_dir, from_name, &parent_dir, to_name)
+            .map_err(|_error| FuseV1Error::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+    }
+
+    /// Applies mode bits to a durable session layout path.
+    pub fn set_session_layout_mode(&self, abi_path: &str, mode: u32) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        let path = self.resolve(&normalized)?;
+        if Self::is_session_layout_dir_path(&normalized) {
+            let directory = open_fuse_v1_plain_directory(&path).map_err(|_error| FuseV1Error::Io)?;
+            directory
+                .set_permissions(fs::Permissions::from_mode(mode & 0o7777))
+                .and_then(|()| directory.sync_all())
+                .map_err(|_error| FuseV1Error::Io)?;
+            return Ok(());
+        }
+        if Self::is_session_replace_path(&normalized) || Self::is_session_append_path(&normalized)
+            || Self::session_atomic_temp_target(&normalized).is_some()
+        {
+            let file = open_fuse_v1_plain_file(&path).map_err(|_error| FuseV1Error::Io)?;
+            if !file.metadata().map_err(|_error| FuseV1Error::Io)?.is_file() {
+                return Err(FuseV1Error::Io);
+            }
+            file.set_permissions(fs::Permissions::from_mode(mode & 0o7777))
+                .and_then(|()| file.sync_all())
+                .map_err(|_error| FuseV1Error::Io)?;
+            return Ok(());
+        }
+        Err(FuseV1Error::NotControlFile)
+    }
+
+    fn session_atomic_temp_target(normalized: &str) -> Option<String> {
+        let (parent, file_name) = normalized.rsplit_once('/')?;
+        let rest = file_name.strip_prefix('.')?;
+        let (target_name, _suffix) = rest.split_once(".tmp-")?;
+        let target = format!("{parent}/{target_name}");
+        (Self::is_session_replace_path(&target) || Self::is_session_append_path(&target))
+            .then_some(target)
+    }
+
+    fn is_agent_log_control_path(normalized: &str) -> bool {
+        let mut parts = normalized.split('/');
+        let (Some("agent"), Some(control_dir), Some("log"), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return false;
+        };
+        let Some(agent) = control_dir.strip_suffix(".d") else {
+            return false;
+        };
+        is_object_name(agent)
+    }
+
+    fn is_session_append_path(normalized: &str) -> bool {
+        let parts = normalized.split('/').collect::<Vec<_>>();
+        matches!(
+            *parts.as_slice(),
+            ["home", uid, "agent", agent, "session", session, file]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && is_object_name(session)
+                    && matches!(file, "messages.jsonl" | "events.jsonl")
+        )
+    }
+
+    fn is_session_replace_path(normalized: &str) -> bool {
+        let parts = normalized.split('/').collect::<Vec<_>>();
+        match *parts.as_slice() {
+            ["home", uid, "agent", agent, "session", "index", file]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && matches!(file, "list" | "current") =>
+            {
+                true
+            }
+            ["home", uid, "agent", agent, "session", "index", index_kind, key]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && matches!(index_kind, "by-cwd" | "by-hash" | "by-uuid")
+                    && is_object_name(key) =>
+            {
+                true
+            }
+            ["home", uid, "agent", agent, "session", session, file]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && is_object_name(session)
+                    && matches!(
+                        file,
+                        "latest.md" | "state" | "cwd" | "created_at" | "updated_at" | "meta.json"
+                    ) =>
+            {
+                true
+            }
+            ["home", uid, "agent", agent, "session", session, "context", file]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && is_object_name(session)
+                    && matches!(
+                        file,
+                        "budget"
+                            | "pack.json"
+                            | "pack.md"
+                            | "summary.md"
+                            | "facts.jsonl"
+                            | "decisions.jsonl"
+                            | "todo.md"
+                            | "refs.jsonl"
+                    ) =>
+            {
+                true
+            }
+            ["home", uid, "agent", agent, "session", session, "context", cache, "index.jsonl"]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && is_object_name(session)
+                    && matches!(cache, "swap" | "dedup") =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn is_session_layout_dir_path(normalized: &str) -> bool {
+        let parts = normalized.split('/').collect::<Vec<_>>();
+        match *parts.as_slice() {
+            ["home", uid, "agent", agent, "session"]
+                if uid.parse::<u32>().is_ok() && is_object_name(agent) =>
+            {
+                true
+            }
+            ["home", uid, "agent", agent, "session", "index", ref tail @ ..]
+                if uid.parse::<u32>().is_ok() && is_object_name(agent) =>
+            {
+                matches!(tail, [] | ["by-cwd" | "by-hash" | "by-uuid"])
+            }
+            ["home", uid, "agent", agent, "session", session, ref tail @ ..]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && is_object_name(session) =>
+            {
+                matches!(
+                    tail,
+                    []
+                        | ["context"]
+                        | ["context", "pinned" | "swap" | "dedup" | "child"]
+                        | ["context", "swap", "chunk"]
+                        | ["context", "dedup", "blob"]
+                )
+            }
+            _ => false,
+        }
     }
 
     fn resolve(&self, abi_path: &str) -> Result<PathBuf, FuseV1Error> {

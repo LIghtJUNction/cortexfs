@@ -29,6 +29,25 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
         )));
     }
     wait_for_agent_terminal_socket(&socket)?;
+    let chat_visible_socket = agent_socket_path(root, &args.name)?;
+    let chat_socket = agent_chat_runtime_socket(root, &args.name)?;
+    ensure_agent_chat_socket(&chat_visible_socket, &chat_socket)?;
+    let chat_unit = agent_chat_unit(root, &args.name);
+    reset_agent_chat_unit(&chat_unit);
+    let chat_command = agent_chat_socket_systemd_command(root, &args.name, &chat_socket, &chat_unit);
+    let chat_output = agent_start_process_command(&chat_command)
+        .output()
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot start agent chat socket: {error}"))
+        })?;
+    if !chat_output.status.success() {
+        let diagnostics = systemd_run_diagnostics(&chat_output);
+        return Err(CliError::unavailable(format!(
+            "agent chat socket failed to start with {}{diagnostics}",
+            chat_output.status
+        )));
+    }
+    wait_for_agent_chat_socket(&chat_socket)?;
     let invocation = systemd_run_invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
     let role = agent_role_for_display(view.agent_name());
