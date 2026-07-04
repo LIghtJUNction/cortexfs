@@ -148,6 +148,18 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         &upper.display().to_string(),
         &work.display().to_string()
     ));
+    assert!(contains_os_arg_triplet(
+        &args,
+        "--bind",
+        &upper.display().to_string(),
+        &upper.display().to_string()
+    ));
+    assert!(contains_os_arg_triplet(
+        &args,
+        "--bind",
+        &work.display().to_string(),
+        &work.display().to_string()
+    ));
     assert!(contains_os_arg_pair(
         &args,
         "--overlay-src",

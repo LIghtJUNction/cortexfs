@@ -13,9 +13,7 @@ fn stream_socket_request(socket: &Path, request: &str) -> Result<ExitCode, CliEr
         .and_then(|()| stream.shutdown(Shutdown::Write))
         .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
 
-    let mut stdout = io::stdout().lock();
-    io::copy(&mut stream, &mut stdout)
-        .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))?;
+    copy_socket_response_raw(stream)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -59,9 +57,14 @@ fn copy_socket_response_interruptible(
                 let Some(bytes) = buffer.get(..read) else {
                     return Err(CliError::unavailable("socket response read exceeded buffer"));
                 };
-                stdout
-                    .write_all(bytes)
-                    .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))?;
+                if let Err(error) = stdout.write_all(bytes) {
+                    if is_stdout_disconnect(&error) {
+                        return Ok(false);
+                    }
+                    return Err(CliError::unavailable(format!(
+                        "stdout write failed: {error}"
+                    )));
+                }
             }
             Err(error)
                 if matches!(
@@ -80,6 +83,34 @@ fn copy_socket_response_interruptible(
             }
         }
     }
+}
+
+fn copy_socket_response_raw(mut stream: UnixStream) -> Result<(), CliError> {
+    let mut stdout = io::stdout().lock();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = stream
+            .read(&mut buffer)
+            .map_err(|error| CliError::unavailable(format!("cannot read socket response: {error}")))?;
+        if read == 0 {
+            return Ok(());
+        }
+        let Some(bytes) = buffer.get(..read) else {
+            return Err(CliError::unavailable("socket response read exceeded buffer"));
+        };
+        if let Err(error) = stdout.write_all(bytes) {
+            if is_stdout_disconnect(&error) {
+                return Ok(());
+            }
+            return Err(CliError::unavailable(format!(
+                "stdout write failed: {error}"
+            )));
+        }
+    }
+}
+
+fn is_stdout_disconnect(error: &io::Error) -> bool {
+    matches!(error.kind(), io::ErrorKind::BrokenPipe)
 }
 
 fn stream_agent_socket_request(
@@ -230,4 +261,3 @@ fn send_socket_request_best_effort(socket: &Path, request: &str) -> Result<(), C
         .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
     Ok(())
 }
-

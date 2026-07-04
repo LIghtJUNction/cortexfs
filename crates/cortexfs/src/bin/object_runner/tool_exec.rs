@@ -236,15 +236,7 @@ fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> {
         args.push(OsString::from(mount.target()));
     }
     if let Some(sandbox) = request.sandbox {
-        args.extend(bwrap_dir_args_for_chdir("/workspace"));
-        args.extend([
-            OsString::from("--overlay-src"),
-            sandbox.workspace.as_os_str().to_owned(),
-            OsString::from("--overlay"),
-            sandbox.upper.as_os_str().to_owned(),
-            sandbox.work.as_os_str().to_owned(),
-            OsString::from("/workspace"),
-        ]);
+        args.extend(overlay_workspace_bwrap_args(sandbox));
     }
     args.extend(bwrap_dir_args_for_chdir(cwd));
     args.extend([
@@ -254,6 +246,25 @@ fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> {
         request.tool_executable.as_os_str().to_owned(),
     ]);
     args.extend(request.tool_args.iter().cloned());
+    args
+}
+
+fn overlay_workspace_bwrap_args(sandbox: &AgentToolSandbox) -> Vec<OsString> {
+    let mut args = bwrap_dir_args_for_chdir("/workspace");
+    args.extend([
+        OsString::from("--bind"),
+        sandbox.upper.as_os_str().to_owned(),
+        sandbox.upper.as_os_str().to_owned(),
+        OsString::from("--bind"),
+        sandbox.work.as_os_str().to_owned(),
+        sandbox.work.as_os_str().to_owned(),
+        OsString::from("--overlay-src"),
+        sandbox.workspace.as_os_str().to_owned(),
+        OsString::from("--overlay"),
+        sandbox.upper.as_os_str().to_owned(),
+        sandbox.work.as_os_str().to_owned(),
+        OsString::from("/workspace"),
+    ]);
     args
 }
 
