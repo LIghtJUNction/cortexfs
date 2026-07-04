@@ -41,6 +41,26 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
 }
 
 #[test]
+fn bootstrap_output_reports_default_programming_agent_surface() {
+    let source = Path::new("/tmp/cortexfs-source");
+
+    let lines = bootstrap_reference_tree_lines(source);
+
+    assert_eq!(
+        lines,
+        vec![
+            "source=/tmp/cortexfs-source".to_owned(),
+            "agents=architect,coder,reviewer".to_owned(),
+            "agent.coder.parent=agent:architect".to_owned(),
+            "agent.coder.model=main".to_owned(),
+            "agent.coder.workspace=/workspace".to_owned(),
+            "agent.coder.tools=tsh,fs.read,fs.write,fs.replace,shell.exec".to_owned(),
+            "agent.coder.chat=ctx agent start coder && ctx agent chat coder".to_owned(),
+        ]
+    );
+}
+
+#[test]
 fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
     assert!(ensure_v1_reference_tree(&root).is_ok());
