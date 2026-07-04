@@ -124,6 +124,32 @@ cargo run -p cortexfs --bin ctx -- bootstrap
 cargo run -p cortexfs --bin ctx -- doctor
 ```
 
+## Bootstrap A Programming Coder
+
+`ctx bootstrap` creates the default `architect`, `coder`, and `reviewer`
+agents. Start `coder` from the project checkout, then open the chat UI:
+
+```bash
+ctx bootstrap
+ctx agent start coder --session default
+ctx agent chat coder
+```
+
+Inside chat, `/workspace` shows the host checkout mounted for the agent and
+`/tools` lists visible CortexFS tools. `ctx agent chat` is the human chat
+surface; `tsh` remains the agent-facing tool shell inside `ctxterm`.
+
+Ask clear coding tasks directly:
+
+```text
+fix the failing CortexFS test, edit the source, run focused verification, and report changed files
+```
+
+The bootstrapped `coder` prompt requires it to inspect `AGENTS.md`, check
+`git status --short`, use `fs.replace` for surgical edits, run available
+format/static-check/lint/test commands, inspect the diff, and finish with exact
+verification evidence.
+
 ## A First Walk Through `/ctx`
 
 The root ABI is deliberately short:
