@@ -10,6 +10,13 @@ fn bootstrap_reference_tree(source: Option<&Path>) -> Result<(), CliError> {
             error.errno(),
         ))
     })?;
+    ensure_v1_runtime_models(&source).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot materialize runtime models {}: {} ({error:?})",
+            source.display(),
+            error.errno(),
+        ))
+    })?;
     for line in bootstrap_reference_tree_lines(&source) {
         print_line(&line)?;
     }
@@ -42,6 +49,13 @@ fn mount_reference_tree(
     ensure_v1_reference_tree(&source).map_err(|error| {
         CliError::unavailable(format!(
             "cannot bootstrap {}: {} ({error:?})",
+            source.display(),
+            error.errno(),
+        ))
+    })?;
+    ensure_v1_runtime_models(&source).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot materialize runtime models {}: {} ({error:?})",
             source.display(),
             error.errno(),
         ))
