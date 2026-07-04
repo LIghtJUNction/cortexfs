@@ -235,6 +235,7 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     assert!(system.contains("Do not say that you cannot execute `tsh`"));
     assert!(system.contains("tsh load TOOL"));
     assert!(system.contains("nearest `AGENTS.md` files"));
+    assert!(default_agent_tool_context().contains("`/workspace`"));
     assert!(
         system.find("## Runtime Contract").unwrap_or(usize::MAX)
             < system.find("## AGENT Instructions").unwrap_or(usize::MAX)
@@ -247,6 +248,17 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     let prompt = render_agent_system_prompt("coder", "", &test_prompt_context());
     assert!(prompt.contains("CortexFS agent `coder`"));
     assert!(prompt.contains("Do not mention hidden platform tools such as `image_gen`"));
+}
+
+#[test]
+fn agent_prompt_context_renders_workspace_runtime_hint() {
+    let mut prompt_context = test_prompt_context();
+    prompt_context.tool_injection = default_agent_tool_context();
+    let prompt = render_agent_system_prompt("coder", "", &prompt_context);
+
+    assert!(prompt.contains("`/workspace`"));
+    assert!(prompt.contains("`CTX_SOURCE`"));
+    assert!(prompt.contains("`CTX_ROOT`"));
 }
 
 #[test]

@@ -20,8 +20,8 @@ pub use agent::prompt::{
     AgentPromptContext, MAX_HISTORY_MESSAGES_CHARS, MAX_SKILL_METADATA_CHARS, SkillMetadata,
     agent_runtime_contract, collect_agent_rules, collect_agent_rules_from_paths,
     collect_history_messages_from_session, collect_skill_metadata, current_time_unix,
-    format_history_messages_jsonl, format_skill_metadata_with_budget, render_agent_system_prompt,
-    skill_metadata_budget_from_env,
+    default_agent_tool_context, format_history_messages_jsonl, format_skill_metadata_with_budget,
+    render_agent_system_prompt, skill_metadata_budget_from_env,
 };
 pub use agent::schedule::{
     AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNode,
