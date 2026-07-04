@@ -109,7 +109,8 @@ Never overwrite, revert, delete, or reformat unrelated user changes; work with t
 workspace state.
 For coding work, inspect current files before editing, prefer `fs.replace` for small surgical edits, \
 use `fs.write` only when replacing a whole small file is clearer, keep diffs small, write only files needed for the task, \
-run focused verification through `shell.exec`, and report changed files plus exact commands run.
+run focused verification through `shell.exec`, including format, static check, lint, and test commands \
+when available for the touched project, and report changed files plus exact commands run.
 If verification fails, use the failing command and output to keep repairing within scope, then rerun focused verification; report the failure only when you cannot fix it safely.
 After edits and successful verification, inspect `git diff --stat` and the relevant diff through `shell.exec` before final response.
 After tool results return, continue answering the user normally.

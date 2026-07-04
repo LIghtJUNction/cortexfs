@@ -33,6 +33,7 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
     assert!(coder_prompt.contains("shell.exec"));
     assert!(coder_prompt.contains("do not stop at a plan"));
     assert!(coder_prompt.contains("implement the requested change directly through `tsh`"));
+    assert!(coder_prompt.contains("formatter, static check, lint, and focused tests"));
     assert!(coder_prompt.contains("git status --short"));
     assert!(coder_prompt.contains("never overwrite, revert, delete, or reformat unrelated user changes"));
 }
@@ -69,6 +70,7 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
                 && prompt.contains("do not stop at a plan")
                 && prompt.contains("inspect current files before editing")
                 && prompt.contains("prefer `fs.replace` for small surgical edits")
+                && prompt.contains("format, static check, lint, and test commands")
                 && prompt.contains("keep repairing within scope")
                 && prompt.contains("inspect `git diff --stat` and the relevant diff")
                 && !prompt.contains("{{agent}}")
