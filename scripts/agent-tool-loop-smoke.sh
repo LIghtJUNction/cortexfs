@@ -116,6 +116,8 @@ EOF
     grep -Fq 'exec /ctx/bin/tsh "$@"' "$root/tool/tsh"
     grep -Fq 'writable project checkout mounted at `/workspace`' "$root/agent/coder.d/system.md"
     grep -Fq 'fs.replace' "$root/agent/coder.d/system.md"
+    grep -Fq 'do not stop at a plan' "$root/agent/coder.d/system.md"
+    grep -Fq 'implement the requested change directly through `tsh`' "$root/agent/coder.d/system.md"
     grep -Fq 'git status --short' "$root/agent/coder.d/system.md"
     grep -Fq 'nearest applicable `AGENTS.md`' "$root/agent/coder.d/system.md"
     grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
