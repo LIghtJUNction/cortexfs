@@ -33,15 +33,15 @@ For the normative ABI, start with [docs/DESIGN.md](docs/DESIGN.md).
 
 ## What It Feels Like
 
-Start an agent, open its chat REPL, and ask it to review a file in the mounted
+Start an agent, open its chat UI, and ask it to review a file in the mounted
 workspace:
 
 ```text
 ctx
 /ctx/agent/coder
-live repl
+live chat
 
-$ ctx agent repl coder
+$ ctx agent chat coder
 coder/default ❯ review /workspace/docs/DESIGN.md
 
 tool
@@ -224,14 +224,14 @@ unit `cortexfs-agent@.socket` listens on the runtime socket and projects it back
 into the CortexFS tree. A client connection can wake the agent runtime on
 demand, instead of keeping every agent hot in the background.
 
-Start an agent and open the chat REPL:
+Start an agent and open chat:
 
 ```bash
 ctx agent start coder --session default
-ctx agent repl coder
+ctx agent chat coder
 ```
 
-Agents are executable files too. Use the REPL for live conversation, or call an
+Agents are executable files too. Use chat for live conversation, or call an
 agent path directly for a one-shot task:
 
 ```bash
@@ -265,7 +265,7 @@ omitted:
 ctx send coder "summarize the current failure"
 ctx history coder
 ctx resume coder
-ctx agent repl coder
+ctx agent chat coder
 ctx agent history coder
 ctx agent output coder
 ctx agent resume coder
@@ -468,7 +468,7 @@ ctx file type tool/fs.read
 ctx file check agent/coder.d/policy
 ctx agent ps
 ctx agent start coder
-ctx agent repl coder
+ctx agent chat coder
 ctx agent watch coder
 ctx agent attach coder
 ctx agent history coder

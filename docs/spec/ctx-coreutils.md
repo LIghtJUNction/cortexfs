@@ -108,8 +108,8 @@ Omitting the session reads `session/index/current` first and falls back to
 `ctx agent send` and `ctx agent resume`; raw socket JSONL is reserved for lower
 level socket commands and explicit raw agent modes.
 
-`ctx agent chat` is an explicit human-chat spelling for `ctx agent repl`. It
-uses the same socket UI and session defaults. It is not the agent terminal and
+`ctx agent chat` is the preferred human-chat spelling. `ctx agent repl` is a
+compatibility alias for the same socket UI and session defaults. It is not the agent terminal and
 does not enter `tsh`; humans use `ctx agent watch` or `ctx agent attach` for the
 persistent terminal.
 
