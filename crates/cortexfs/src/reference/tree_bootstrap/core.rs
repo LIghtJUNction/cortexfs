@@ -167,8 +167,7 @@ fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
     let mut policy = format!(
         "allow {policy_subject} model:{model} use\n\
          allow {policy_subject} tool:tsh execute\n\
-         allow {policy_subject} tool:fs.read execute\n\
-         allow {policy_subject} network:default connect\n"
+         allow {policy_subject} tool:fs.read execute\n"
     );
     if reference_agent_can_write_source(name) {
         let _ignored = std::fmt::Write::write_fmt(

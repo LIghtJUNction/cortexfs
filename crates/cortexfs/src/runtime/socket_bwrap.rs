@@ -150,9 +150,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "usr/lib".to_owned(),
         "/lib64".to_owned(),
     ]);
-    if !request.runtime.network_allowed {
-        bwrap.push("--unshare-net".to_owned());
-    }
+    bwrap.push("--unshare-net".to_owned());
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(timing) = request.debug {
         bwrap.extend([
