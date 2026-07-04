@@ -128,6 +128,7 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     assert!(contract.contains("git status --short"));
     assert!(contract.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#));
     assert!(contract.contains("prefer `fs.replace` for small surgical edits"));
+    assert!(contract.contains("keep repairing within scope"));
     assert!(contract.contains("Never overwrite, revert, delete, or reformat unrelated user changes"));
     assert!(contract.contains("If verification fails"));
 }
