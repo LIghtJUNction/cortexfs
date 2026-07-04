@@ -132,6 +132,7 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     assert!(contract.contains("nearest `AGENTS.md` files"));
     assert!(contract.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#));
     assert!(contract.contains("prefer `fs.replace` for small surgical edits"));
+    assert!(contract.contains("format, static check, lint, and test commands"));
     assert!(contract.contains("keep repairing within scope"));
     assert!(contract.contains("inspect `git diff --stat` and the relevant diff"));
     assert!(contract.contains("Never overwrite, revert, delete, or reformat unrelated user changes"));

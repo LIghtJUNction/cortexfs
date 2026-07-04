@@ -124,6 +124,7 @@ EOF
     grep -Fq 'fs.replace' "$root/agent/coder.d/system.md"
     grep -Fq 'do not stop at a plan' "$root/agent/coder.d/system.md"
     grep -Fq 'implement the requested change directly through `tsh`' "$root/agent/coder.d/system.md"
+    grep -Fq 'formatter, static check, lint, and focused tests' "$root/agent/coder.d/system.md"
     grep -Fq 'git status --short' "$root/agent/coder.d/system.md"
     grep -Fq 'nearest applicable `AGENTS.md`' "$root/agent/coder.d/system.md"
     grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
