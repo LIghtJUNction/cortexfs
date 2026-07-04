@@ -97,6 +97,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
+        tool_context: "workspace context",
         debug: None,
         input: "hi",
     });
@@ -112,6 +113,12 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "--setenv",
         "CTX_AGENT_HISTORY_MESSAGES",
         "- user: hi"
+    ));
+    assert!(contains_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_AGENT_TOOL_CONTEXT",
+        "workspace context"
     ));
     assert!(contains_arg_triplet(
         &args,
@@ -180,6 +187,7 @@ fn agent_executable_socket_bwrap_args_keep_network_namespace_isolated_even_when_
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
+        tool_context: "workspace context",
         debug: None,
         input: "hi",
     });
@@ -224,6 +232,7 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
+        tool_context: "workspace context",
         debug: None,
         input: "hi",
     });

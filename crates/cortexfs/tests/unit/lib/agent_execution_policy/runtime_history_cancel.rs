@@ -15,7 +15,11 @@ fn agent_executable_socket_runtime_passes_history_messages() {
         r#"#!/bin/sh
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 history="$(/usr/bin/printf '%s' "$CTX_AGENT_HISTORY_MESSAGES" | /usr/bin/tr '\n' '|')"
-printf '{"type":"delta","run":"%s","text":"%s"}\n' "$CTX_RUN_ID" "$history"
+case "$CTX_AGENT_TOOL_CONTEXT" in
+  *'Host workspace mounted at `/workspace`: "/repo"'*) context="workspace-context-ok" ;;
+  *) context="missing-workspace-context" ;;
+esac
+printf '{"type":"delta","run":"%s","text":"%s %s"}\n' "$CTX_RUN_ID" "$history" "$context"
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
@@ -26,7 +30,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     assert!(
         client
             .write_all(
-                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+                br#"{"op":"send","id":"msg-1","session":"default","cwd":"/workspace","workspace":"/repo","input":"hi"}
 "#,
             )
             .is_ok()
@@ -53,6 +57,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("- user: remember prior"));
     assert!(outcome.jsonl().contains("- assistant: prior answer"));
+    assert!(outcome.jsonl().contains("workspace-context-ok"));
     assert!(!outcome.jsonl().contains("- user: hi"));
 }
 
@@ -279,4 +284,3 @@ exit 1
     assert!(response.contains("unable to bind"));
     assert!(!response.contains(r#""message":"EIO""#));
 }
-

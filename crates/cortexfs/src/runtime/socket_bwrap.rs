@@ -12,6 +12,7 @@ fn agent_executable_socket_command(
                 request.run_id,
                 request.session,
                 request.history_messages,
+                request.tool_context,
             );
             command.arg(request.input);
             command.stdout(Stdio::piped()).process_group(0);
@@ -30,6 +31,7 @@ fn agent_executable_socket_command(
                 run_id: request.run_id,
                 session: request.session,
                 history_messages: request.history_messages,
+                tool_context: request.tool_context,
                 debug: request.debug,
                 input: request.input,
             }));
@@ -39,6 +41,7 @@ fn agent_executable_socket_command(
                 request.run_id,
                 request.session,
                 request.history_messages,
+                request.tool_context,
             );
             command.stdout(Stdio::piped()).process_group(0);
             command
@@ -55,6 +58,7 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub run_id: &'a str,
     pub session: &'a str,
     pub history_messages: &'a str,
+    pub tool_context: &'a str,
     pub debug: Option<SocketDebugTiming>,
     pub input: &'a str,
 }
@@ -65,6 +69,7 @@ fn apply_agent_executable_socket_env(
     run_id: &str,
     session: &str,
     history_messages: &str,
+    tool_context: &str,
 ) {
     command
         .env_clear()
@@ -80,7 +85,8 @@ fn apply_agent_executable_socket_env(
         .env("CTX_SOURCE", runtime.source_root)
         .env("CTX_RUN_ID", run_id)
         .env("CTX_SESSION", session)
-        .env("CTX_AGENT_HISTORY_MESSAGES", history_messages);
+        .env("CTX_AGENT_HISTORY_MESSAGES", history_messages)
+        .env("CTX_AGENT_TOOL_CONTEXT", tool_context);
 }
 
 pub(crate) fn agent_executable_socket_bwrap_args(
@@ -120,6 +126,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--setenv".to_owned(),
         "CTX_AGENT_HISTORY_MESSAGES".to_owned(),
         request.history_messages.to_owned(),
+        "--setenv".to_owned(),
+        "CTX_AGENT_TOOL_CONTEXT".to_owned(),
+        request.tool_context.to_owned(),
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
         "--proc".to_owned(),

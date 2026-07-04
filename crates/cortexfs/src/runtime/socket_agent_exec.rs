@@ -30,6 +30,7 @@ fn handle_agent_executable_socket_request_frame_streaming(
         &runtime.session_root.join(session),
         MAX_HISTORY_MESSAGES_CHARS,
     );
+    let tool_context = agent_tool_context_for_request(cwd.as_deref(), workspace.as_deref());
     if let Some(debug) = debug {
         write_socket_debug_timing_frame(stream, debug, "history_collected")?;
     }
@@ -55,6 +56,7 @@ fn handle_agent_executable_socket_request_frame_streaming(
             workspace: workspace.as_deref(),
             input,
             history_messages: &history_messages,
+            tool_context: &tool_context,
             debug,
         },
     )?;
@@ -265,5 +267,29 @@ struct AgentExecutableRunRequest<'a> {
     workspace: Option<&'a str>,
     input: &'a str,
     history_messages: &'a str,
+    tool_context: &'a str,
     debug: Option<SocketDebugTiming>,
+}
+
+fn agent_tool_context_for_request(cwd: Option<&str>, workspace: Option<&str>) -> String {
+    let mut context = default_agent_tool_context();
+    context.push_str("\n\nCurrent request context:\n");
+    context.push_str("- Sandbox cwd: ");
+    context.push_str(&prompt_quoted(cwd.unwrap_or("/workspace")));
+    context.push('\n');
+    match workspace.filter(|value| is_absolute_host_workspace_path(value)) {
+        Some(workspace) => {
+            context.push_str("- Host workspace mounted at `/workspace`: ");
+            context.push_str(&prompt_quoted(workspace));
+            context.push('\n');
+        }
+        None => {
+            context.push_str("- Host workspace mounted at `/workspace`: unknown\n");
+        }
+    }
+    context
+}
+
+fn prompt_quoted(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_error| "\"\"".to_owned())
 }
