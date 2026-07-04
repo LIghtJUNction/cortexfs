@@ -51,7 +51,10 @@ Read the current source before editing.
 Do not overwrite unrelated user changes.
 Run verification before reporting success.
 EOF
-        cat >"$source_file" <<'EOF'
+    cat >"$(dirname "$source_file")/AGENTS.md" <<'EOF'
+source-nearest-rule: use fs.replace for small source edits.
+EOF
+    cat >"$source_file" <<'EOF'
 pub fn agent_quality_label() -> &'static str {
     "todo"
 }
@@ -66,7 +69,7 @@ EOF
             git -C "$workspace" init -q
             git -C "$workspace" config user.email cortexfs-smoke@example.invalid
             git -C "$workspace" config user.name "CortexFS Smoke"
-            git -C "$workspace" add AGENTS.md README.md crates/cortexfs/src/self_improve_smoke.rs
+            git -C "$workspace" add AGENTS.md README.md crates/cortexfs/src/AGENTS.md crates/cortexfs/src/self_improve_smoke.rs
             git -C "$workspace" commit -qm baseline
         fi
         printf 'baseline project note\nuser dirty change\n' >"$user_dirty_file"
@@ -114,6 +117,7 @@ EOF
     grep -Fq 'writable project checkout mounted at `/workspace`' "$root/agent/coder.d/system.md"
     grep -Fq 'fs.replace' "$root/agent/coder.d/system.md"
     grep -Fq 'git status --short' "$root/agent/coder.d/system.md"
+    grep -Fq 'nearest applicable `AGENTS.md`' "$root/agent/coder.d/system.md"
     grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
     write_source_fixture
 
@@ -137,11 +141,14 @@ case "${CTX_AGENT_TOOL_CONTEXT:-}" in
   *"call-2"*)
     printf '{"type":"tool_call","run":"%s","id":"call-3","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
     ;;
-  *"call-1"*)
+  *"call-1"*"source-nearest-rule"*)
     printf '{"type":"tool_call","run":"%s","id":"call-2","name":"tsh","arguments":{"args":["fs.read","/workspace/crates/cortexfs/src/self_improve_smoke.rs"]}}\n' "$CTX_RUN_ID"
     ;;
+  *"call-1"*)
+    printf '{"type":"error","run":"%s","code":"EIO","message":"missing nearest source AGENTS.md evidence"}\n' "$CTX_RUN_ID"
+    ;;
   "")
-    printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","test -f /workspace/AGENTS.md && cat /workspace/AGENTS.md; git -C /workspace status --short 2>/dev/null || true"]}}\n' "$CTX_RUN_ID"
+    printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","find /workspace -name AGENTS.md -print; cat /workspace/AGENTS.md /workspace/crates/cortexfs/src/AGENTS.md; git -C /workspace status --short"]}}\n' "$CTX_RUN_ID"
     ;;
   *)
     printf '{"type":"error","run":"%s","code":"EIO","message":"unexpected context"}\n' "$CTX_RUN_ID"
