@@ -67,6 +67,7 @@ fn pass_runtime_provider_secret_env(command: &mut Command) {
     for name in [
         "CTX_PROVIDER_SECRET_FD",
         "CTX_PROVIDER_SECRET_PATH",
+        "CTX_PROVIDER_SECRET_VALUE",
         "CTX_PROVIDER_SECRET_PROVIDER",
         "CTX_PROVIDER_SECRET_SLOT",
         "CTX_PROVIDER_CONFIG_DIR",
