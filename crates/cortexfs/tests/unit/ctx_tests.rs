@@ -1,7 +1,7 @@
 use super::{
     agent_lifecycle_tool_command, atomic_write_provider_config, cat_path,
     create_agent_terminal_runtime_dir, create_plain_mountpoint_dir, ctx_provider_curl_command, curl_config_quote,
-    detached_mount_command, direct_mount_command, doctor, doctor_report_line, doctor_root_line,
+    bootstrap_reference_tree_lines, detached_mount_command, direct_mount_command, doctor, doctor_report_line, doctor_root_line,
     doctor_unexpected_entry_line, ensure_agent_terminal_socket,
     ensure_plain_mountpoint_dir, file_append, file_check, file_set, file_type_name,
     format_agent_control_issues, format_agent_schedule_issues, format_context_jsonl_issues,

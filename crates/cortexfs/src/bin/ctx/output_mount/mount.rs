@@ -10,7 +10,22 @@ fn bootstrap_reference_tree(source: Option<&Path>) -> Result<(), CliError> {
             error.errno(),
         ))
     })?;
-    print_line(&format!("source={}", source.display()))
+    for line in bootstrap_reference_tree_lines(&source) {
+        print_line(&line)?;
+    }
+    Ok(())
+}
+
+fn bootstrap_reference_tree_lines(source: &Path) -> Vec<String> {
+    vec![
+        format!("source={}", source.display()),
+        "agents=architect,coder,reviewer".to_owned(),
+        "agent.coder.parent=agent:architect".to_owned(),
+        "agent.coder.model=main".to_owned(),
+        "agent.coder.workspace=/workspace".to_owned(),
+        "agent.coder.tools=tsh,fs.read,fs.write,fs.replace,shell.exec".to_owned(),
+        "agent.coder.chat=ctx agent start coder && ctx agent chat coder".to_owned(),
+    ]
 }
 
 fn mount_reference_tree(
