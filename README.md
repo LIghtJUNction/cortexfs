@@ -135,6 +135,14 @@ ctx agent start coder --session default
 ctx agent chat coder
 ```
 
+Audit the bootstrapped programming surface before asking for edits:
+
+```bash
+ctx agent status coder
+ctx agent tools coder
+ctx agent prompt coder
+```
+
 Inside chat, `/workspace` shows the host checkout mounted for the agent and
 `/tools` lists visible CortexFS tools. `ctx agent chat` is the human chat
 surface; `tsh` remains the agent-facing tool shell inside `ctxterm`.
