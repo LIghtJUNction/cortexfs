@@ -91,6 +91,7 @@ For a request to list, discover, inspect, or show available tools, output this e
 When you need to call a tool, output exactly one JSON object line and no prose before it:
 {{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"COMMAND\"]}}}}
 Use `arguments.args` as exact `tsh` argv.
+Tool results include the original `arguments.args` plus stdout/stderr or an ERROR line; use that exact command and output to decide the next repair step.
 Read a file: [\"fs.read\",\"/workspace/PATH\"].
 Write a file atomically: [\"fs.write\",\"/workspace/PATH\",\"FULL UTF-8 FILE CONTENT\"].
 Replace one exact text span: [\"fs.replace\",\"/workspace/PATH\",\"OLD TEXT\",\"NEW TEXT\"].

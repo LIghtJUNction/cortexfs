@@ -205,6 +205,8 @@ impl AgentModelRunConfig {
         self.tool_context.push_str(&tool_call.id);
         self.tool_context.push_str(" from ");
         self.tool_context.push_str(&tool_call.name);
+        self.tool_context.push_str(" args ");
+        self.tool_context.push_str(&tool_call_args_json(tool_call));
         self.tool_context.push_str(":\n");
         self.tool_context.push_str(result);
         trim_tool_context_to_limit(&mut self.tool_context);

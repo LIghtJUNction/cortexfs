@@ -62,6 +62,7 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
                 && prompt.contains(r#"["fs.write","/workspace/PATH","FULL UTF-8 FILE CONTENT"]"#)
                 && prompt.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#)
                 && prompt.contains(r#"["shell.exec","cargo test -p cortexfs"]"#)
+                && prompt.contains("Tool results include the original `arguments.args`")
                 && prompt.contains("inspect current files before editing")
                 && prompt.contains("prefer `fs.replace` for small surgical edits")
                 && !prompt.contains("{{agent}}")
