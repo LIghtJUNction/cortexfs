@@ -153,7 +153,6 @@ fn write_terminal_diagnostic(line: &str) -> Result<(), CliError> {
 }
 
 fn write_terminal_status(line: &str) -> Result<(), CliError> {
-    let line = terminal_safe_text(line);
     let mut stderr = io::stderr().lock();
     stderr
         .write_all(b"\r\x1b[2K")
