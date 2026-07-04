@@ -256,6 +256,41 @@ fn top_level_send_uses_session_workspace_hint() {
 }
 
 #[test]
+fn top_level_send_ignores_invalid_session_workspace_hint() {
+    let root = clean_test_dir("ctx-top-level-send-invalid-session-workspace");
+    let agent_dir = root.join("agent").join("coder.d");
+    let session = root
+        .join("home")
+        .join(current_uid_for_test())
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("default");
+    assert!(fs::create_dir_all(&agent_dir).is_ok());
+    assert!(fs::create_dir_all(&session).is_ok());
+    assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
+    assert!(fs::write(session.join("workspace"), "/repo/../wrong\n").is_ok());
+    let server = spawn_agent_socket_request_capture(&root, "coder");
+
+    let result = run(vec![
+        std::ffi::OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+        std::ffi::OsString::from("send"),
+        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("hello"),
+    ]);
+
+    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    let Ok(request) = request else {
+        return;
+    };
+    assert!(request.contains("\"cwd\":\"/workspace\""));
+    assert!(!request.contains("/repo/../wrong"));
+}
+
+#[test]
 fn top_level_resume_uses_agent_resume_request_shape() {
     let root = clean_test_dir("ctx-top-level-resume-agent-shape");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
