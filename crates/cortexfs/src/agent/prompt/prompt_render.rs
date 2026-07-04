@@ -18,15 +18,26 @@ impl AgentPromptContext {
                 .unwrap_or_else(|_error| "(no AGENTS.md rules injected)".to_owned()),
             skills: env::var("CTX_AGENT_SKILLS")
                 .unwrap_or_else(|_error| "(no skill metadata injected)".to_owned()),
-            tool_injection: env::var("CTX_AGENT_TOOL_CONTEXT").unwrap_or_else(|_error| {
-                "(no repo structure, search result, or file content injected)".to_owned()
-            }),
+            tool_injection: env::var("CTX_AGENT_TOOL_CONTEXT")
+                .unwrap_or_else(|_error| default_agent_tool_context()),
             history_messages: env::var("CTX_AGENT_HISTORY_MESSAGES")
                 .unwrap_or_else(|_error| "(no historical messages injected)".to_owned()),
             current_time_unix: env::var("CTX_AGENT_CURRENT_TIME_UNIX")
                 .unwrap_or_else(|_error| "0".to_owned()),
         }
     }
+}
+
+#[must_use]
+pub fn default_agent_tool_context() -> String {
+    "\
+Runtime workspace context:
+- `/workspace` is the agent's project workspace when mounted.
+- `CTX_SOURCE` points at the CortexFS source view that defines visible agents, tools, models, sessions, and policy.
+- `CTX_ROOT` points at the mounted CortexFS ABI root.
+- Use `tsh` tools for workspace inspection and edits; do not assume file contents until you inspect them.
+- No repo structure, search result, file content, or tool result has been injected yet."
+        .to_owned()
 }
 
 #[must_use]

@@ -180,8 +180,7 @@ fn build_agent_system_prompt(
             template,
             rules: collect_agent_rules(),
             skills: collect_skill_metadata(skill_metadata_budget_from_env()),
-            tool_injection: "(no repo structure, search result, or file content injected)"
-                .to_owned(),
+            tool_injection: default_agent_tool_context(),
             history_messages: "(no historical messages injected)".to_owned(),
             current_time_unix: current_time_unix.to_owned(),
         },
