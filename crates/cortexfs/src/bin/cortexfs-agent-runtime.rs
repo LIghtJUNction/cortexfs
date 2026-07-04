@@ -83,7 +83,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         &listener,
         Some(peer_policy),
         AgentExecutableSocketRuntime {
-            ctx_root: Path::new(cortexfs::CTX_ROOT),
+            ctx_root: &config.source,
             source_root: &config.source,
             identity: view.identity(),
             env: &runtime_env,
