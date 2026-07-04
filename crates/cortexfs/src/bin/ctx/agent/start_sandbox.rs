@@ -133,6 +133,7 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
         ("SHELL".to_owned(), "/usr/bin/bash".to_owned()),
         ("TERM".to_owned(), "xterm-256color".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
+        ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned()),
     ];
     for env_pair in view.env() {
         let key = &env_pair.0;
@@ -158,6 +159,7 @@ fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, Stri
                 | "SHELL"
                 | "TERM"
                 | "LANG"
+                | "GIT_OPTIONAL_LOCKS"
         ) {
             continue;
         }

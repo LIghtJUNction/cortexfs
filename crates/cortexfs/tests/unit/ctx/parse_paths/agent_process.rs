@@ -425,6 +425,7 @@ fn agent_env_reports_derived_sandbox_environment() {
             "SHELL=/usr/bin/bash".to_owned(),
             "TERM=xterm-256color".to_owned(),
             "LANG=C.UTF-8".to_owned(),
+            "GIT_OPTIONAL_LOCKS=0".to_owned(),
             "PATH=/usr/bin:/bin".to_owned(),
             "CTX_PATH=/ctx/tool:/ctx/home/1000/tool".to_owned(),
         ])

@@ -482,6 +482,7 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
                 && contains_arg_triplet(&command.args, "--setenv", "SHELL", "/usr/bin/bash")
                 && contains_arg_triplet(&command.args, "--setenv", "TERM", "xterm-256color")
                 && contains_arg_triplet(&command.args, "--setenv", "LANG", "C.UTF-8")
+                && contains_arg_triplet(&command.args, "--setenv", "GIT_OPTIONAL_LOCKS", "0")
                 && contains_arg_triplet(&command.args, "--setenv", "CTX_PATH", "/ctx/tool:/ctx/home/1000/tool")
     );
     let bwrap_index = command.args.iter().position(|arg| arg == "/usr/bin/bwrap");
