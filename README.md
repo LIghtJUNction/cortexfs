@@ -153,7 +153,7 @@ verification evidence.
 To verify the full bootstrapped programming path locally:
 
 ```bash
-npm run agent-bootstrap-coder:smoke
+npm run bootstrap-coder:smoke
 ```
 
 The smoke test bootstraps a temporary tree, starts `coder`, mounts a writable
