@@ -19,6 +19,17 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
     Ok(ReferenceTreeBootstrap::new(root.to_path_buf()))
 }
 
+/// Materializes runtime-visible model wrappers for models projected from
+/// provider configuration and cache files.
+///
+/// The FUSE projection can expose provider models virtually, but agent
+/// sandboxes bind the backing source tree at `/ctx`. This helper keeps the
+/// backing source tree aligned for runtime execution without making the pure
+/// reference-tree bootstrap depend on host provider state.
+pub fn ensure_v1_runtime_models(root: &Path) -> Result<(), ReferenceTreeError> {
+    ensure_reference_models(root)
+}
+
 struct ReferenceAgentSpec {
     name: &'static str,
     parent: Option<&'static str>,
@@ -43,6 +54,74 @@ const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
     },
 ];
 const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
+
+fn ensure_reference_models(root: &Path) -> Result<(), ReferenceTreeError> {
+    ensure_reference_debug_model(root)?;
+    ensure_reference_provider_models_from(
+        root,
+        Path::new(SYSTEM_PROVIDER_CONFIG_DIR),
+        Path::new(SYSTEM_PROVIDER_MODEL_CACHE_DIR),
+    )
+}
+
+fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceTreeError> {
+    install_executable_object_wrapper(
+        root,
+        ObjectClass::Model,
+        DEBUG_ECHO_MODEL,
+        REFERENCE_OBJECT_RUNNER,
+        &[
+            ("id", DEBUG_ECHO_MODEL),
+            ("driver", "default=debug\nexec=debug\nagent=debug"),
+            ("cap", "chat\nstream"),
+            ("effort", "auto"),
+            ("default", ""),
+            ("fallback", ""),
+            ("session", "none"),
+            ("status", "idle"),
+            ("log", ""),
+        ],
+    )
+    .map(|_object| ())
+    .map_err(ReferenceTreeError::Object)
+}
+
+fn ensure_reference_provider_models_from(
+    root: &Path,
+    config_dir: &Path,
+    cache_dir: &Path,
+) -> Result<(), ReferenceTreeError> {
+    let models =
+        projected_provider_models(config_dir, cache_dir).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    for model in models {
+        ensure_reference_provider_model(root, &model)?;
+    }
+    Ok(())
+}
+
+fn ensure_reference_provider_model(
+    root: &Path,
+    model: &ProjectedProviderModel,
+) -> Result<(), ReferenceTreeError> {
+    let name = format!("{}/{}", model.provider, model.model);
+    let controls = MODEL_CONTROL_FILES
+        .iter()
+        .filter_map(|file| provider_model_control_content(model, file).map(|content| (*file, content)))
+        .collect::<Vec<_>>();
+    let overrides = controls
+        .iter()
+        .map(|entry| (entry.0, entry.1.as_str()))
+        .collect::<Vec<_>>();
+    install_executable_object_wrapper(
+        root,
+        ObjectClass::Model,
+        &name,
+        REFERENCE_OBJECT_RUNNER,
+        &overrides,
+    )
+    .map(|_object| ())
+    .map_err(ReferenceTreeError::Object)
+}
 
 fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeError> {
     let docs = root.join("shared").join(MANUAL_SHARED_DIR);
@@ -577,4 +656,51 @@ fn read_reference_tree_small_text(path: &Path) -> std::io::Result<String> {
     file.read_exact(&mut content)?;
     String::from_utf8(content)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
+}
+
+#[cfg(test)]
+mod reference_model_tests {
+    use super::*;
+
+    #[test]
+    fn provider_models_are_materialized_into_reference_tree(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let config_dir = tempfile::tempdir()?;
+        let cache_dir = tempfile::tempdir()?;
+        fs::write(
+            config_dir.path().join("api.test.json"),
+            r#"{
+  "name": "api.test",
+  "base_url": "https://api.test/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat", "openai.responses"]
+}
+"#,
+        )?;
+        fs::write(
+            cache_dir.path().join("api.test.models.json"),
+            r#"{"models":["gpt-5.4-mini"]}"#,
+        )?;
+
+        create_reference_root(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_bin(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_provider_models_from(root.path(), config_dir.path(), cache_dir.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+
+        assert!(root.path().join("model/api.test/gpt-5.4-mini").is_file());
+        assert!(
+            root.path()
+                .join("model/api.test/gpt-5.4-mini.d/hooks/pre.d")
+                .is_dir()
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join("model/api.test/gpt-5.4-mini.d/id"))?,
+            "api.test/gpt-5.4-mini\n"
+        );
+        Ok(())
+    }
 }
