@@ -127,11 +127,25 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         &root.join("shared/providers.d").display().to_string()
     ));
     assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
-    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_FD"));
+    assert!(contains_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_PROVIDER_SECRET_FD",
+        "9"
+    ));
     assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PATH"));
-    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PROVIDER"));
-    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_SLOT"));
-    assert!(!args.iter().any(|arg| arg == "9"));
+    assert!(contains_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_PROVIDER_SECRET_PROVIDER",
+        "openai"
+    ));
+    assert!(contains_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_PROVIDER_SECRET_SLOT",
+        "default"
+    ));
     assert!(!args
         .iter()
         .any(|arg| arg == "/run/user/1000/cortexfs/credentials/coder-default"));

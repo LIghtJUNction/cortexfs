@@ -77,7 +77,7 @@ fn apply_agent_executable_socket_env(
             runtime
                 .env
                 .iter()
-                .filter(|env| !is_provider_secret_env(&env.0))
+                .filter(|env| env.0 != "CTX_PROVIDER_SECRET_PATH")
                 .map(|env| (env.0.as_str(), env.1.as_str())),
         )
         .env("CTX_AGENT", runtime.agent_name)
@@ -94,7 +94,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
 ) -> Vec<String> {
     let mut bwrap = vec!["--clearenv".to_owned()];
     for env in request.runtime.env {
-        if env.0 == "CTX_PROVIDER_CONFIG_DIR" || is_provider_secret_env(&env.0) {
+        if env.0 == "CTX_PROVIDER_CONFIG_DIR" || env.0 == "CTX_PROVIDER_SECRET_PATH" {
             continue;
         }
         bwrap.extend(["--setenv".to_owned(), env.0.clone(), env.1.clone()]);
@@ -263,16 +263,6 @@ fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
     args.push(source_root.to_owned());
     args.push(source_root.to_owned());
     args
-}
-
-fn is_provider_secret_env(name: &str) -> bool {
-    matches!(
-        name,
-        "CTX_PROVIDER_SECRET_FD"
-            | "CTX_PROVIDER_SECRET_PATH"
-            | "CTX_PROVIDER_SECRET_PROVIDER"
-            | "CTX_PROVIDER_SECRET_SLOT"
-    )
 }
 
 fn bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
