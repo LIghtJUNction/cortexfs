@@ -32,6 +32,29 @@ const FS_WRITE_SCHEMA: &str = r#"{
   }
 }"#;
 
+const FS_REPLACE_SCHEMA: &str = r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fs.replace input",
+  "description": "Replace exactly one UTF-8 text span in one visible file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "old", "new"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Path to edit."
+    },
+    "old": {
+      "type": "string",
+      "description": "Existing UTF-8 text span. It must occur exactly once."
+    },
+    "new": {
+      "type": "string",
+      "description": "Replacement UTF-8 text."
+    }
+  }
+}"#;
+
 const SHELL_EXEC_SCHEMA: &str = r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "shell.exec input",

@@ -48,6 +48,31 @@ fn object_layout_accepts_model_agent_and_tool_triples() {
 }
 
 #[test]
+fn fuse_projection_exposes_object_hook_directories() {
+    let root = clean_test_dir("fuse-projection-object-hooks");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let projection = FuseV1Projection::new(root.as_path());
+
+    for path in [
+        "model/debug/echo.d",
+        "agent/coder.d",
+        "tool/fs.read.d",
+    ] {
+        let entries = ok!(projection.readdir(path));
+        assert!(entries.iter().any(|entry| entry.name() == OBJECT_HOOK_DIR));
+
+        let hook_entries = ok!(projection.readdir(&format!("{path}/{OBJECT_HOOK_DIR}")));
+        for phase in OBJECT_HOOK_PHASE_DIRS {
+            assert!(hook_entries.iter().any(|entry| entry.name() == *phase));
+            let phase_entries = ok!(projection.readdir(&format!(
+                "{path}/{OBJECT_HOOK_DIR}/{phase}"
+            )));
+            assert!(phase_entries.is_empty());
+        }
+    }
+}
+
+#[test]
 fn executable_object_bootstrap_installs_model_and_tool_wrappers() {
     let root = clean_test_dir("object-bootstrap");
     let target = root.join("runtime").join("echo-jsonl");

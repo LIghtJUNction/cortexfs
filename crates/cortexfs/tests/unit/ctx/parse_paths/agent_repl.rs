@@ -31,19 +31,48 @@ fn agent_repl_editor_enables_terminal_signals() {
 fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
     let root = clean_test_dir("ctx-agent-repl-model-summary");
     assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
+    let session = root
+        .join("home")
+        .join(std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|uid| uid.trim().to_owned())
+            .filter(|uid| !uid.is_empty())
+            .unwrap_or_else(|| "1000".to_owned()))
+        .join("agent/coder/session/default");
+    assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::create_dir_all(root.join("model")).is_ok());
     assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
+    assert!(fs::write(session.join("workspace"), "/repo\n").is_ok());
     assert!(
         std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))
             .is_ok()
     );
 
-    assert_eq!(agent_repl_prompt(false, "coder", "default"), "coder/default ❯ ");
+    assert_eq!(
+        agent_repl_prompt(false, "coder", "default"),
+        "ctx agent coder/default ❯ "
+    );
     assert_eq!(
         agent_repl_model_summary(false, &root, "coder"),
         Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
     );
+    let banner = agent_repl_banner_lines(false, &root, "coder", "default");
+    assert!(matches!(banner, Ok(ref lines) if lines.iter().any(|line| line == " Workspace: /repo")));
+    assert_eq!(
+        agent_repl_workspace_line(false, &root, "coder", "default"),
+        Ok(" Workspace: /repo".to_owned())
+    );
+    assert!(AGENT_REPL_COMMANDS.contains("/help"));
+    assert!(AGENT_REPL_COMMANDS.contains("/workspace"));
     assert!(AGENT_REPL_COMMANDS.contains("/clear"));
+    let mut debug = AgentDebugState::default();
+    assert_eq!(
+        agent_repl_command(&root, "coder", "default", "/workspace", false, &mut debug),
+        Ok(Some(ExitCode::SUCCESS))
+    );
 }
 
 #[test]
@@ -191,6 +220,77 @@ fn top_level_send_defaults_cwd_to_workspace() {
 }
 
 #[test]
+fn top_level_send_uses_session_workspace_hint() {
+    let root = clean_test_dir("ctx-top-level-send-session-workspace");
+    let workspace = clean_test_dir("ctx-top-level-send-session-workspace-source");
+    let agent_dir = root.join("agent").join("coder.d");
+    let session = root
+        .join("home")
+        .join(current_uid_for_test())
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("default");
+    assert!(fs::create_dir_all(&agent_dir).is_ok());
+    assert!(fs::create_dir_all(&session).is_ok());
+    assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
+    assert!(fs::write(session.join("workspace"), format!("{}\n", workspace.display())).is_ok());
+    let server = spawn_agent_socket_request_capture(&root, "coder");
+
+    let result = run(vec![
+        std::ffi::OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+        std::ffi::OsString::from("send"),
+        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("hello"),
+    ]);
+
+    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    let Ok(request) = request else {
+        return;
+    };
+    assert!(request.contains("\"cwd\":\"/workspace\""));
+    assert!(request.contains(&format!(r#""workspace":"{}""#, workspace.display())));
+}
+
+#[test]
+fn top_level_send_ignores_invalid_session_workspace_hint() {
+    let root = clean_test_dir("ctx-top-level-send-invalid-session-workspace");
+    let agent_dir = root.join("agent").join("coder.d");
+    let session = root
+        .join("home")
+        .join(current_uid_for_test())
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("default");
+    assert!(fs::create_dir_all(&agent_dir).is_ok());
+    assert!(fs::create_dir_all(&session).is_ok());
+    assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
+    assert!(fs::write(session.join("workspace"), "/repo/../wrong\n").is_ok());
+    let server = spawn_agent_socket_request_capture(&root, "coder");
+
+    let result = run(vec![
+        std::ffi::OsString::from("--root"),
+        root.as_os_str().to_os_string(),
+        std::ffi::OsString::from("send"),
+        std::ffi::OsString::from("coder"),
+        std::ffi::OsString::from("hello"),
+    ]);
+
+    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
+    let request = server.join();
+    assert!(request.is_ok());
+    let Ok(request) = request else {
+        return;
+    };
+    assert!(request.contains("\"cwd\":\"/workspace\""));
+    assert!(!request.contains("/repo/../wrong"));
+}
+
+#[test]
 fn top_level_resume_uses_agent_resume_request_shape() {
     let root = clean_test_dir("ctx-top-level-resume-agent-shape");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
@@ -330,16 +430,25 @@ fn debug_tool_line_reports_current_names_and_changes() {
 
 #[test]
 fn debug_agent_send_request_marks_socket_frame() {
-    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", true);
+    let request = agent_send_request_json(
+        "run-1",
+        "default",
+        "/workspace",
+        Some("/repo"),
+        "hello",
+        true,
+    );
 
     assert!(request.contains(r#""debug":true"#));
+    assert!(request.contains(r#""workspace":"/repo""#));
     assert!(request.ends_with('\n'));
 }
 
 #[test]
 fn normal_agent_send_request_does_not_mark_socket_frame() {
-    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", false);
+    let request = agent_send_request_json("run-1", "default", "/workspace", None, "hello", false);
 
     assert!(!request.contains(r#""debug""#));
+    assert!(!request.contains(r#""workspace""#));
     assert!(request.ends_with('\n'));
 }

@@ -189,7 +189,13 @@ fn reference_tree_bootstrap_installs_tsh_tools() {
     assert!(root.join("tool").join("tsh.d").join("config").is_file());
     assert!(root.join("tool").join("tsh.config").is_file());
     assert!(root.join("tool").join("tsh.config.d").is_dir());
-    for tool in ["fs.read", "fs.write", "shell.exec", "bash", "tmux", "zellij"] {
+    for tool in ["fs.read", "fs.write", "shell.exec"] {
+        assert!(root.join("tool").join(tool).is_file());
+        assert!(root.join("tool").join(format!("{tool}.d")).is_dir());
+        assert!(root.join("tool").join(format!("{tool}.d/schema")).is_file());
+        assert!(root.join("tool").join(format!("{tool}.d/policy")).is_file());
+    }
+    for tool in ["bash", "tmux", "zellij"] {
         assert!(!root.join("tool").join(tool).exists());
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }

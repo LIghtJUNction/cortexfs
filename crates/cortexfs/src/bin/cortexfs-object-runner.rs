@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
 use std::fs;

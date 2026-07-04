@@ -27,6 +27,9 @@ pub struct FsReadTool;
 pub struct FsWriteTool;
 
 #[derive(Debug)]
+pub struct FsReplaceTool;
+
+#[derive(Debug)]
 pub struct ShellExecTool;
 
 #[derive(Debug)]
@@ -42,6 +45,7 @@ pub fn core_tool_specs() -> Vec<ToolSpec> {
     vec![
         FsReadTool.spec(),
         FsWriteTool.spec(),
+        FsReplaceTool.spec(),
         ShellExecTool.spec(),
         TshConfigTool.spec(),
     ]
@@ -55,6 +59,7 @@ pub fn run_core_tool(
     match name {
         "fs.read" => run_tool(&FsReadTool, invocation, writer).map(|()| true),
         "fs.write" => run_tool(&FsWriteTool, invocation, writer).map(|()| true),
+        "fs.replace" => run_tool(&FsReplaceTool, invocation, writer).map(|()| true),
         "shell.exec" => run_tool(&ShellExecTool, invocation, writer).map(|()| true),
         "tsh.config" => run_tool(&TshConfigTool, invocation, writer).map(|()| true),
         _ => Ok(false),
@@ -78,6 +83,7 @@ pub fn run_core_tool_cli_with_root(
     match name {
         "fs.read" => run_fs_read_cli(args, writer).map(Some),
         "fs.write" => run_fs_write_cli(args, writer).map(Some),
+        "fs.replace" => run_fs_replace_cli(args, writer).map(Some),
         "shell.exec" => run_shell_exec_cli(args, writer).map(Some),
         "tsh.config" => run_tsh_config_cli(root, args, writer).map(Some),
         _ => Ok(None),

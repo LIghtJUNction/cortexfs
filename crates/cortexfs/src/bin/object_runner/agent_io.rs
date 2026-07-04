@@ -69,6 +69,7 @@ fn pass_runtime_provider_secret_env(command: &mut Command) {
         "CTX_PROVIDER_SECRET_PATH",
         "CTX_PROVIDER_SECRET_PROVIDER",
         "CTX_PROVIDER_SECRET_SLOT",
+        "CTX_PROVIDER_CONFIG_DIR",
     ] {
         if let Some(value) = env::var_os(name) {
             command.env(name, value);

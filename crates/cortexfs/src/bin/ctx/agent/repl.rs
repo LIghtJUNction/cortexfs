@@ -1,35 +1,73 @@
 fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(), CliError> {
     let color = color_enabled();
-    let model_summary = agent_repl_model_summary(color, root, name)?;
-    let lines = [
-        format!(
-            "{} {}/{} - {}",
-            styled(color, ANSI_BOLD_CYAN, "●"),
-            styled(color, ANSI_BOLD_CYAN, name),
-            styled(color, ANSI_CYAN, session),
-            styled(color, ANSI_CYAN, "CortexFS agent chat")
-        ),
-        format!(
-            "    {} {}",
-            styled(color, ANSI_BOLD_BLUE, "Model:"),
-            model_summary
-        ),
-        format!(
-            " {} {}",
-            styled(color, ANSI_BOLD_BLUE, "Commands:"),
-            styled(color, ANSI_DIM, AGENT_REPL_COMMANDS)
-        ),
-    ];
-    for line in lines {
+    for line in agent_repl_banner_lines(color, root, name, session)? {
         write_error(&line)
             .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
     }
     Ok(())
 }
 
+fn agent_repl_banner_lines(
+    color: bool,
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<Vec<String>, CliError> {
+    let model_summary = agent_repl_model_summary(color, root, name)?;
+    let workspace = agent_repl_workspace_line(color, root, name, session)?;
+    let mut lines = vec![
+        format!(
+            "{} ctx agent {}/{} - {}",
+            styled(color, ANSI_BOLD_CYAN, "●"),
+            styled(color, ANSI_BOLD_CYAN, name),
+            styled(color, ANSI_CYAN, session),
+            styled(color, ANSI_CYAN, "chat shell")
+        ),
+        format!(
+            "    {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Mode:"),
+            styled(
+                color,
+                ANSI_DIM,
+                "messages go to the agent; tools run inside tsh"
+            )
+        ),
+        format!(
+            "    {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Model:"),
+            model_summary
+        ),
+    ];
+    lines.push(workspace);
+    lines.push(
+        format!(
+            " {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Commands:"),
+            styled(color, ANSI_DIM, AGENT_REPL_COMMANDS)
+        )
+    );
+    Ok(lines)
+}
+
+fn agent_repl_workspace_line(
+    color: bool,
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<String, CliError> {
+    let workspace = preferred_workspace_source(root, name, session)?
+        .unwrap_or_else(|| "(unknown)".to_owned());
+    Ok(format!(
+        " {} {}",
+        styled(color, ANSI_BOLD_BLUE, "Workspace:"),
+        styled(color, ANSI_CYAN, &workspace)
+    ))
+}
+
 fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
     format!(
-        "{}{} ",
+        "{} {}{} ",
+        styled(color, ANSI_DIM, "ctx agent"),
         styled(color, ANSI_BOLD_CYAN, &format!("{name}/{session}")),
         styled(color, ANSI_GREEN, " ❯")
     )
@@ -139,6 +177,10 @@ fn agent_repl_command(
     debug: &mut AgentDebugState,
 ) -> Result<Option<ExitCode>, CliError> {
     let code = match line {
+        "/help" => {
+            print_agent_repl_banner(root, name, session)?;
+            ExitCode::SUCCESS
+        }
         "/resume" => agent_resume(root, name, Some(session), raw)?,
         "/history" => {
             history(root, name, Some(session))?;
@@ -154,6 +196,15 @@ fn agent_repl_command(
         }
         "/tools" => {
             agent_tools(root, name)?;
+            ExitCode::SUCCESS
+        }
+        "/workspace" => {
+            print_terminal_line(&agent_repl_workspace_line(
+                color_enabled(),
+                root,
+                name,
+                session,
+            )?)?;
             ExitCode::SUCCESS
         }
         "/children" => {

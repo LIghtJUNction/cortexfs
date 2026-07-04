@@ -15,6 +15,7 @@ use super::{
     provider_transport, read_provider_stream_line, read_runner_provider_config_file,
     read_runtime_provider_secret_file, read_small_plain_text_file, resolve_model_alias,
     resolved_model_path, run, read_runner_stdin_limited, run_agent_tool_loop,
+    normalize_agent_model_frame,
     run_agent_tool_process_with_timeout, run_cli_tool_to_writer, run_passthrough_tool,
     token_usage_from_value, tool_call_from_text, trim_tool_result, validate_agent_tsh_args,
     write_model_text_or_tool_call, AgentModelRunConfig, AgentModelRunOutcome,

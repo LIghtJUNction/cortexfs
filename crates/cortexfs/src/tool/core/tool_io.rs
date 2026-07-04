@@ -57,6 +57,34 @@ impl Tool for FsWriteTool {
     }
 }
 
+impl Tool for FsReplaceTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "fs.replace",
+            description: "Replace exactly one UTF-8 text span in a visible file.",
+            input_schema: FS_REPLACE_SCHEMA,
+        }
+    }
+
+    fn call(
+        &self,
+        invocation: &ToolInvocation,
+        output: &mut ToolEmitter<&mut dyn Write>,
+    ) -> ToolResult<()> {
+        let path = invocation.string_field("path").unwrap_or_default();
+        let old = invocation.string_field("old").unwrap_or_default();
+        let new = invocation.string_field("new").unwrap_or_default();
+        if path.is_empty() {
+            return Err(ToolError::invalid("missing path"));
+        }
+        replace_exactly_once(Path::new(&path), &old, &new)
+            .map_err(|error| fs_replace_tool_error(&error))?;
+        output
+            .message("replaced")
+            .map_err(|error| ToolError::new("EIO", error.to_string()))
+    }
+}
+
 fn run_fs_read_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
     let Some(path) = args.first() else {
         writeln!(io::stderr(), "fs.read: missing path")?;
@@ -134,6 +162,28 @@ fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<Exi
     Ok(ExitCode::SUCCESS)
 }
 
+fn run_fs_replace_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
+    let Some(path) = args.first() else {
+        writeln!(io::stderr(), "fs.replace: missing path")?;
+        return Ok(ExitCode::from(2));
+    };
+    let Some(old) = args.get(1) else {
+        writeln!(io::stderr(), "fs.replace: missing old text")?;
+        return Ok(ExitCode::from(2));
+    };
+    let Some(new) = args.get(2) else {
+        writeln!(io::stderr(), "fs.replace: missing new text")?;
+        return Ok(ExitCode::from(2));
+    };
+    replace_exactly_once(
+        Path::new(path),
+        old.to_string_lossy().as_ref(),
+        new.to_string_lossy().as_ref(),
+    )?;
+    writeln!(writer, "replaced")?;
+    Ok(ExitCode::SUCCESS)
+}
+
 fn read_text_from_stdin_limited(reader: impl Read, max_bytes: usize) -> io::Result<String> {
     let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
         io::Error::new(
@@ -150,6 +200,39 @@ fn read_text_from_stdin_limited(reader: impl Read, max_bytes: usize) -> io::Resu
         ));
     }
     Ok(content)
+}
+
+fn replace_exactly_once(path: &Path, old: &str, new: &str) -> io::Result<()> {
+    if old.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "old text must not be empty",
+        ));
+    }
+    let content = read_regular_utf8_file(path, MAX_FS_READ_BYTES)?;
+    let mut matches = content.match_indices(old);
+    let Some((_start, _matched)) = matches.next() else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "old text not found",
+        ));
+    };
+    if matches.next().is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "old text occurs more than once",
+        ));
+    }
+    let updated = content.replacen(old, new, 1);
+    write_text_file_atomic(path, &updated)
+}
+
+fn fs_replace_tool_error(error: &io::Error) -> ToolError {
+    match error.kind() {
+        io::ErrorKind::NotFound => ToolError::not_found(error.to_string()),
+        io::ErrorKind::InvalidInput => ToolError::invalid(error.to_string()),
+        _ => ToolError::denied("replace failed"),
+    }
 }
 
 fn write_text_file_atomic(path: &Path, content: &str) -> io::Result<()> {

@@ -1,8 +1,9 @@
 use super::{
-    FsReadTool, FsWriteTool, MAX_SHELL_EXEC_OUTPUT_BYTES, SHELL_EXEC_SHELL, ShellExecTool,
-    TshConfigTool, TshRuntimeConfig, parse_tsh_runtime_config, read_text_from_stdin_limited,
-    read_tsh_runtime_config, run_core_tool_cli, run_shell_exec_command_with_timeout,
-    shell_exec_command, tsh_tool_count, write_tsh_runtime_config,
+    FsReadTool, FsReplaceTool, FsWriteTool, MAX_SHELL_EXEC_OUTPUT_BYTES, SHELL_EXEC_SHELL,
+    ShellExecTool, TshConfigTool, TshRuntimeConfig, parse_tsh_runtime_config,
+    read_text_from_stdin_limited, read_tsh_runtime_config, run_core_tool_cli,
+    run_shell_exec_command_with_timeout, shell_exec_command, tsh_tool_count,
+    write_tsh_runtime_config,
 };
 use cortexfs_tool_sdk::{ToolInvocation, run_tool};
 use std::ffi::OsString;

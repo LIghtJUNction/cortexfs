@@ -1,4 +1,44 @@
 #[test]
+fn reference_bootstrap_gives_coder_source_editing_tools() {
+    let root = clean_test_dir("ctx-reference-coder-source-tools");
+
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    for tool in ["fs.read", "fs.write", "fs.replace", "shell.exec"] {
+        let path = root.join("tool").join(tool);
+        assert!(path.exists(), "{tool} executable missing");
+        assert!(
+            fs::metadata(&path)
+                .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0),
+            "{tool} is not executable"
+        );
+    }
+
+    let coder_policy = fs::read_to_string(root.join("agent/coder.d/policy")).unwrap_or_default();
+    assert!(coder_policy.contains("allow coder_t tool:fs.read execute"));
+    assert!(coder_policy.contains("allow coder_t tool:fs.write execute"));
+    assert!(coder_policy.contains("allow coder_t tool:fs.replace execute"));
+    assert!(coder_policy.contains("allow coder_t tool:shell.exec execute"));
+
+    let reviewer_policy =
+        fs::read_to_string(root.join("agent/reviewer.d/policy")).unwrap_or_default();
+    assert!(!reviewer_policy.contains("tool:fs.write execute"));
+    assert!(!reviewer_policy.contains("tool:fs.replace execute"));
+    assert!(!reviewer_policy.contains("tool:shell.exec execute"));
+
+    let coder_prompt = fs::read_to_string(root.join("agent/coder.d/system.md")).unwrap_or_default();
+    assert!(coder_prompt.contains("writable project checkout mounted at `/workspace`"));
+    assert!(coder_prompt.contains("fs.write"));
+    assert!(coder_prompt.contains("fs.replace"));
+    assert!(coder_prompt.contains("shell.exec"));
+    assert!(coder_prompt.contains("do not stop at a plan"));
+    assert!(coder_prompt.contains("implement the requested change directly through `tsh`"));
+    assert!(coder_prompt.contains("formatter, static check, lint, and focused tests"));
+    assert!(coder_prompt.contains("git status --short"));
+    assert!(coder_prompt.contains("never overwrite, revert, delete, or reformat unrelated user changes"));
+}
+
+#[test]
 fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
     assert!(ensure_v1_reference_tree(&root).is_ok());
@@ -21,6 +61,18 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
                 && prompt.contains("time=123")
                 && prompt.contains("inst=Be precise.")
                 && prompt.contains("Your only native callable tool is `tsh`")
+                && prompt.contains(r#"["fs.read","/workspace/PATH"]"#)
+                && prompt.contains(r#"["fs.write","/workspace/PATH","FULL UTF-8 FILE CONTENT"]"#)
+                && prompt.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#)
+                && prompt.contains(r#"["shell.exec","cargo test -p cortexfs"]"#)
+                && prompt.contains("Tool results include the original `arguments.args`")
+                && prompt.contains("For clear coding requests")
+                && prompt.contains("do not stop at a plan")
+                && prompt.contains("inspect current files before editing")
+                && prompt.contains("prefer `fs.replace` for small surgical edits")
+                && prompt.contains("format, static check, lint, and test commands")
+                && prompt.contains("keep repairing within scope")
+                && prompt.contains("inspect `git diff --stat` and the relevant diff")
                 && !prompt.contains("{{agent}}")
     ));
 }

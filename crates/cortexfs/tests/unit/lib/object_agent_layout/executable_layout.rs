@@ -63,6 +63,51 @@ fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
 }
 
 #[test]
+fn executable_object_bootstrap_creates_hook_phase_directories() {
+    let root = clean_test_dir("object-bootstrap-hooks");
+    let target = root.join("runtime").join("object");
+    write_fixture_file(&target, 0o755);
+
+    assert!(install_executable_object_wrapper(
+        &root,
+        ObjectClass::Model,
+        "debug/echo",
+        &target.display().to_string(),
+        &[("session", "none")],
+    )
+    .is_ok());
+    assert!(install_executable_object_wrapper(
+        &root,
+        ObjectClass::Agent,
+        "coder",
+        &target.display().to_string(),
+        &[("uid", "1000"), ("gid", "1000"), ("owner", "1000")],
+    )
+    .is_ok());
+    assert!(install_executable_object_wrapper(
+        &root,
+        ObjectClass::Tool,
+        "fs.read",
+        &target.display().to_string(),
+        &[],
+    )
+    .is_ok());
+
+    for (class, name) in [
+        (ObjectClass::Model, "debug/echo"),
+        (ObjectClass::Agent, "coder"),
+        (ObjectClass::Tool, "fs.read"),
+    ] {
+        let control_dir = root.join(class.as_str()).join(format!("{name}.d"));
+        let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
+        assert!(hook_dir.is_dir());
+        for phase in OBJECT_HOOK_PHASE_DIRS {
+            assert!(hook_dir.join(phase).is_dir());
+        }
+    }
+}
+
+#[test]
 fn executable_object_bootstrap_rejects_symlink_class_directory() {
     let root = clean_test_dir("object-bootstrap-symlink-class");
     let outside = clean_test_dir("object-bootstrap-symlink-class-outside");

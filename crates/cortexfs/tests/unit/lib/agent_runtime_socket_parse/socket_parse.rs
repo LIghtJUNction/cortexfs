@@ -29,7 +29,7 @@ fn socket_peer_policy_rejects_mismatched_identity() {
 fn socket_request_parser_accepts_stable_request_frames() {
     assert_eq!(
         parse_socket_request_frame(
-            r#"{"op":"send","id":"msg-1","session":"default","scope":"shared","cwd":"/work","input":"hello","thread_id":"ignored"}
+            r#"{"op":"send","id":"msg-1","session":"default","scope":"shared","cwd":"/work","workspace":"/repo","input":"hello","thread_id":"ignored"}
 "#
         ),
         Ok(SocketRequest::Send {
@@ -37,6 +37,7 @@ fn socket_request_parser_accepts_stable_request_frames() {
             session: "default".to_owned(),
             scope: SocketSessionScope::Shared,
             cwd: Some("/work".to_owned()),
+            workspace: Some("/repo".to_owned()),
             input: "hello".to_owned()
         })
     );
@@ -68,6 +69,7 @@ fn socket_request_parser_defaults_session_and_scope() {
             session: "default".to_owned(),
             scope: SocketSessionScope::Private,
             cwd: None,
+            workspace: None,
             input: "hello".to_owned()
         })
     );

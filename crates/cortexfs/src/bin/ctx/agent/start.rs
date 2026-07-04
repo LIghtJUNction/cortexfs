@@ -12,6 +12,9 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
             args.name
         ))
     })?;
+    let session_cwd = agent_start_sandbox_cwd(args, &cli_mounts);
+    let session_workspace = agent_start_workspace_source(&cli_mounts);
+    ensure_agent_start_session(root, args, &view, &session_cwd, session_workspace.as_deref())?;
     let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
     let socket = agent_runtime_socket(root, &args.name, &args.session)?;
     ensure_agent_terminal_socket(&visible_socket, &socket)?;
@@ -29,6 +32,25 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
         )));
     }
     wait_for_agent_terminal_socket(&socket)?;
+    let chat_visible_socket = agent_socket_path(root, &args.name)?;
+    let chat_socket = agent_chat_runtime_socket(root, &args.name)?;
+    ensure_agent_chat_socket(&chat_visible_socket, &chat_socket)?;
+    let chat_unit = agent_chat_unit(root, &args.name);
+    reset_agent_chat_unit(&chat_unit);
+    let chat_command = agent_chat_socket_systemd_command(root, &args.name, &chat_socket, &chat_unit);
+    let chat_output = agent_start_process_command(&chat_command)
+        .output()
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot start agent chat socket: {error}"))
+        })?;
+    if !chat_output.status.success() {
+        let diagnostics = systemd_run_diagnostics(&chat_output);
+        return Err(CliError::unavailable(format!(
+            "agent chat socket failed to start with {}{diagnostics}",
+            chat_output.status
+        )));
+    }
+    wait_for_agent_chat_socket(&chat_socket)?;
     let invocation = systemd_run_invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
     let role = agent_role_for_display(view.agent_name());
@@ -63,6 +85,7 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
         &unit,
         invocation.as_deref(),
         &args.cwd,
+        session_workspace.as_deref(),
         &visible_socket,
         &socket,
         &current_uid,
@@ -70,6 +93,36 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
         print_line(&line)?;
     }
     Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn ensure_agent_start_session(
+    root: &Path,
+    args: &AgentStartArgs,
+    view: &AgentRuntimeView,
+    cwd: &str,
+    workspace: Option<&str>,
+) -> Result<(), CliError> {
+    let session_root = ctx_home(root)?
+        .join("agent")
+        .join(&args.name)
+        .join("session");
+    ensure_durable_session_layout(
+        &session_root,
+        &args.session,
+        cwd,
+        Some(view.model()),
+        SocketSessionScope::Private,
+    )
+    .map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot prepare agent session {}: {error:?}",
+            args.session
+        ))
+    })?;
+    if let Some(workspace) = workspace {
+        write_agent_control_plain(&session_root.join(&args.session).join("workspace"), &format!("{workspace}\n"))?;
+    }
+    Ok(())
 }
 
 fn record_agent_start_state(
@@ -139,6 +192,7 @@ fn agent_start_status_lines(
     unit: &str,
     invocation: Option<&str>,
     cwd: &str,
+    workspace: Option<&str>,
     visible_socket: &Path,
     runtime_socket: &Path,
     uid: &str,
@@ -211,6 +265,15 @@ fn agent_start_status_lines(
             styled(color, ANSI_BOLD_BLUE, "CWD:"),
             styled(color, ANSI_CYAN, cwd)
         ),
+    ]);
+    if let Some(workspace) = workspace {
+        lines.push(format!(
+            "  {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Workspace:"),
+            styled(color, ANSI_CYAN, workspace)
+        ));
+    }
+    lines.extend([
         format!(
             "     {} {}",
             styled(color, ANSI_BOLD_BLUE, "Socket:"),

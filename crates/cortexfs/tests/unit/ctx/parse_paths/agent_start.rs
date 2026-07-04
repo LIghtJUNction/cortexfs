@@ -1,3 +1,5 @@
+use crate::{agent_start_workspace_source, ensure_agent_start_session};
+
 fn current_uid_for_test() -> String {
     std::process::Command::new("id")
         .arg("-u")
@@ -31,6 +33,10 @@ fn agent_terminal_socket_uses_session_terminal_main_socket() {
 fn agent_start_builds_sandboxed_terminal_command() {
     let root = clean_test_dir("ctx-agent-start-bwrap-view");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    write_text_file(
+        &root.join("agent").join("coder.d").join("env"),
+        "CTX_ROOT=/bad\nCTX_PROVIDER_CONFIG_DIR=/bad/providers.d\n",
+    );
     let view = derive_agent_runtime_view(&root, "coder");
     assert!(view.is_ok(), "reference coder view: {view:?}");
     let Ok(view) = view else {
@@ -74,6 +80,13 @@ fn agent_start_builds_sandboxed_terminal_command() {
         "/home/agent"
     ));
     assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_ROLE", "agent"));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--setenv",
+        "CTX_PROVIDER_CONFIG_DIR",
+        "/ctx/shared/providers.d"
+    ));
+    assert!(!bwrap.iter().any(|arg| arg == "/bad/providers.d"));
     assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_MODEL", "main"));
     assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_LIFE", "owned"));
     assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
@@ -196,6 +209,55 @@ fn agent_start_records_ready_status_and_start_event() {
     assert_eq!(
         fs::read_to_string(control.join("log")).unwrap_or_default(),
         "{\"type\":\"agent.start\",\"agent\":\"scratch\",\"session\":\"default\",\"unit\":\"cortexfs-agent-scratch-default\",\"model\":\"main\",\"life\":\"owned\",\"role\":\"agent\",\"uid\":\"1000\",\"gid\":\"100\",\"groups\":\"10 20\",\"status\":\"ready\",\"invocation\":\"abc123\"}\n"
+    );
+}
+
+#[test]
+fn agent_start_prepares_session_workspace_hint() {
+    let root = clean_test_dir("ctx-agent-start-session-workspace");
+    let workspace = clean_test_dir("ctx-agent-start-session-workspace-source");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let view = derive_agent_runtime_view(&root, "coder");
+    assert!(view.is_ok(), "reference coder view: {view:?}");
+    let Ok(view) = view else {
+        return;
+    };
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "selfedit".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: false,
+        mounts: vec![AgentMount {
+            source: workspace.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }],
+    };
+    let mounts = agent_start_mounts_with_default_source(&args, &root);
+    let cwd = agent_start_sandbox_cwd(&args, &mounts);
+    let workspace_hint = agent_start_workspace_source(&mounts);
+
+    assert_eq!(workspace_hint.as_deref(), Some(workspace.to_str().unwrap_or_default()));
+    assert_eq!(
+        ensure_agent_start_session(&root, &args, &view, &cwd, workspace_hint.as_deref()),
+        Ok(())
+    );
+
+    let session = root
+        .join("home")
+        .join(current_uid_for_test())
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("selfedit");
+    assert_eq!(fs::read_to_string(session.join("cwd")).unwrap_or_default(), "/workspace\n");
+    assert_eq!(
+        fs::read_to_string(session.join("workspace")).unwrap_or_default(),
+        format!("{}\n", workspace.display())
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("state")).unwrap_or_default(),
+        "idle\n"
     );
 }
 
@@ -433,6 +495,7 @@ fn agent_start_status_lines_follow_systemctl_shape() {
         "cortexfs-agent-coder-default-terminal",
         Some("abc123"),
         "/workspace",
+        Some("/repo"),
         Path::new("/ctx/home/1000/agent/coder/session/default/terminal/main.sock"),
         Path::new("/run/user/1000/cortexfs/terminal/coder/default/main.sock"),
         "1000",
@@ -444,6 +507,7 @@ fn agent_start_status_lines_follow_systemctl_shape() {
         "     Active: active (running)", " Invocation: abc123", "      Agent: coder",
         "      Model: main", "       Life: owned", "       Role: agent", "     UID: 1000",
         "     GID: 100", "     Groups: 10 20", "    Session: default", "        CWD: /workspace",
+        "  Workspace: /repo",
         "     Socket: /ctx/home/1000/agent/coder/session/default/terminal/main.sock",
         " Runtime Socket: /run/user/1000/cortexfs/terminal/coder/default/main.sock",
     ];
@@ -484,6 +548,48 @@ fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
             if error.message.contains("terminal is not running")
                 && error.message.contains(
                     "ctx agent start coder --session 'safe; touch CORTEXFS_HINT_PWNED #'"
-                )
+            )
     ));
+}
+
+#[test]
+fn agent_start_chat_socket_command_uses_socket_activation() {
+    let root = clean_test_dir("ctx-agent-start-chat-socket-command");
+    let socket = root.join("runtime").join("coder.sock");
+    let unit = agent_chat_unit(&root, "coder");
+    let command = agent_chat_socket_systemd_command(&root, "coder", &socket, &unit);
+
+    assert_eq!(command.program, "/usr/bin/systemd-run");
+    assert!(command.args.contains(&"--user".to_owned()));
+    assert!(contains_arg_pair(&command.args, "--unit", &unit));
+    assert!(command.args.contains(&"--collect".to_owned()));
+    assert!(contains_arg_pair(
+        &command.args,
+        "--socket-property",
+        &format!("ListenStream={}", socket.display())
+    ));
+    assert!(contains_arg_pair(
+        &command.args,
+        "--socket-property",
+        "SocketMode=0666"
+    ));
+    assert!(contains_arg_pair(&command.args, "--agent", "coder"));
+    assert!(command
+        .args
+        .iter()
+        .any(|arg| arg.ends_with("cortexfs-agent-runtime")));
+}
+
+#[test]
+fn agent_start_chat_socket_path_is_root_scoped() {
+    let left = clean_test_dir("ctx-agent-chat-socket-left");
+    let right = clean_test_dir("ctx-agent-chat-socket-right");
+
+    let left_socket = agent_chat_runtime_socket(&left, "coder");
+    let right_socket = agent_chat_runtime_socket(&right, "coder");
+
+    assert!(matches!(left_socket, Ok(ref socket) if socket.ends_with("coder.sock")));
+    assert!(matches!((&left_socket, &right_socket), (Ok(left), Ok(right)) if left != right));
+    assert_eq!(agent_chat_unit(&left, "coder"), agent_chat_unit(&left, "coder"));
+    assert_ne!(agent_chat_unit(&left, "coder"), agent_chat_unit(&right, "coder"));
 }
