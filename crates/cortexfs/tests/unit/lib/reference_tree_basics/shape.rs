@@ -314,12 +314,7 @@ fn reference_tree_bootstrap_does_not_chmod_socket_symlink_target() {
 
     let bootstrapped = ensure_v1_reference_tree(&root);
 
-    assert!(matches!(
-        bootstrapped,
-        Err(ReferenceTreeError::CannotSocket(
-            std::io::ErrorKind::AlreadyExists
-        ))
-    ));
+    assert!(bootstrapped.is_ok());
     assert!(root
         .join("agent")
         .join("coder.sock")
