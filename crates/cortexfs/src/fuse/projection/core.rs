@@ -412,10 +412,16 @@ fn append_plain_file_at_end(
                 if uid.parse::<u32>().is_ok()
                     && is_object_name(agent)
                     && is_object_name(session)
-                    && matches!(
-                        file,
-                        "latest.md" | "state" | "cwd" | "created_at" | "updated_at" | "meta.json"
-                    ) =>
+            && matches!(
+                file,
+                "latest.md"
+                    | "state"
+                    | "cwd"
+                    | "workspace"
+                    | "created_at"
+                    | "updated_at"
+                    | "meta.json"
+            ) =>
             {
                 true
             }

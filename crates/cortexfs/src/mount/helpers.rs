@@ -1,5 +1,6 @@
 const TTL: Duration = Duration::from_secs(1);
 const S_IFMT: u32 = 0o170_000;
+const S_IFREG: u32 = 0o100_000;
 const S_IFSOCK: u32 = 0o140_000;
 
 include!("statfs.rs");

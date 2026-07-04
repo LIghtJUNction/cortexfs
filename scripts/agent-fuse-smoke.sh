@@ -284,7 +284,7 @@ CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent start coder \
     exit 1
 }
 
-output=$(cd "$workspace" && CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent send coder \
+output=$(CTX_ROOT="$mountpoint" "$repo_root/target/debug/ctx" agent send coder \
     --session fuse \
     --raw \
     'improve the mounted CortexFS source fixture and verify it')

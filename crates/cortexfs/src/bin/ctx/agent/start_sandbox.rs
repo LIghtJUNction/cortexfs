@@ -349,6 +349,14 @@ fn agent_start_mounts_with_default_source(
     mounts
 }
 
+pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
+    mounts
+        .iter()
+        .rev()
+        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")
+        .map(|mount| mount.source.clone())
+}
+
 fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if !Path::new(&mount.source).is_absolute() {
         return Err(CliError::usage("agent mount source must be absolute"));

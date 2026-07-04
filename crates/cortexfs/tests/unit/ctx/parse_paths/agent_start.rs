@@ -1,3 +1,5 @@
+use crate::{agent_start_workspace_source, ensure_agent_start_session};
+
 fn current_uid_for_test() -> String {
     std::process::Command::new("id")
         .arg("-u")
@@ -207,6 +209,55 @@ fn agent_start_records_ready_status_and_start_event() {
     assert_eq!(
         fs::read_to_string(control.join("log")).unwrap_or_default(),
         "{\"type\":\"agent.start\",\"agent\":\"scratch\",\"session\":\"default\",\"unit\":\"cortexfs-agent-scratch-default\",\"model\":\"main\",\"life\":\"owned\",\"role\":\"agent\",\"uid\":\"1000\",\"gid\":\"100\",\"groups\":\"10 20\",\"status\":\"ready\",\"invocation\":\"abc123\"}\n"
+    );
+}
+
+#[test]
+fn agent_start_prepares_session_workspace_hint() {
+    let root = clean_test_dir("ctx-agent-start-session-workspace");
+    let workspace = clean_test_dir("ctx-agent-start-session-workspace-source");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let view = derive_agent_runtime_view(&root, "coder");
+    assert!(view.is_ok(), "reference coder view: {view:?}");
+    let Ok(view) = view else {
+        return;
+    };
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "selfedit".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: false,
+        mounts: vec![AgentMount {
+            source: workspace.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }],
+    };
+    let mounts = agent_start_mounts_with_default_source(&args, &root);
+    let cwd = agent_start_sandbox_cwd(&args, &mounts);
+    let workspace_hint = agent_start_workspace_source(&mounts);
+
+    assert_eq!(workspace_hint.as_deref(), Some(workspace.to_str().unwrap_or_default()));
+    assert_eq!(
+        ensure_agent_start_session(&root, &args, &view, &cwd, workspace_hint.as_deref()),
+        Ok(())
+    );
+
+    let session = root
+        .join("home")
+        .join(current_uid_for_test())
+        .join("agent")
+        .join("coder")
+        .join("session")
+        .join("selfedit");
+    assert_eq!(fs::read_to_string(session.join("cwd")).unwrap_or_default(), "/workspace\n");
+    assert_eq!(
+        fs::read_to_string(session.join("workspace")).unwrap_or_default(),
+        format!("{}\n", workspace.display())
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("state")).unwrap_or_default(),
+        "idle\n"
     );
 }
 
