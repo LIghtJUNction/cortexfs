@@ -40,15 +40,30 @@ echo "summarize this file" | /ctx/model/main
 ```
 
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
-默认参考树提供 `coder`、`reviewer`、`executor`、`worker` 四个初始可用 agent：`coder` 使用
-`model/main`（默认 `openai/gpt-5.5`），`reviewer` 使用 `model/helper`（默认
-`openai/codex-auto-review`），`executor` 和 `worker` 默认使用
-`api.lmm.best/gpt-5.3-codex-spark`。参考树里的 `worker` 是 `coder` 的
-`agent:coder` 子 agent，不绑定某个固定 session；`coder` 的默认 policy 允许创建、启动、停止和读取
-`worker`，用于把任意 coder session 的独立实现任务拆给 spark worker。
-默认 `coder.d/system.md` 也按这个边界写入：`coder` 是父进程式集成者，独立实现工作优先
-写成 delegated `react` node，让省略 `agent` 的 delegated 节点落到 `worker`；`worker`
-只执行 bounded handoff 并返回 compact result，不负责扩展架构范围。
+默认参考树提供 `architect`、`coder`、`reviewer` 三个 agent：`architect` 负责规划和协调，
+`coder` 是可修改 `/workspace` 源码的实现 agent，`reviewer` 负责独立审查。
+
+启动默认编程 `coder`：
+
+```bash
+ctx bootstrap
+ctx agent start coder --session default
+ctx agent chat coder
+```
+
+改源码前可以先审计它看到的状态、工具和 prompt：
+
+```bash
+ctx agent status coder
+ctx agent tools coder
+ctx agent prompt coder
+```
+
+`ctx agent chat` 是人类聊天界面；`tsh` 是 agent terminal 里的工具 shell，不是同一个界面。
+默认 `coder.d/system.md` 要求它读取最近的 `AGENTS.md`、检查 `git status --short`、用
+`fs.replace` 做小范围源码修改、运行可用的 format/static-check/lint/test 命令、检查 diff，
+最后汇报改动文件和真实验证命令。完整路径可以用 `npm run bootstrap-coder:smoke` 复测。
+
 父 agent 的 `context/plan.json` 可以把独立工作拆给 child agent；delegated 节点省略
 `agent` 时默认使用 `worker`，省略 `session` 时默认使用当前父 session 名。单步推进计划使用：
 
