@@ -62,7 +62,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     }
     let provider_secret =
         read_provider_system_secret_for_model(Path::new(cortexfs::CTX_ROOT), &runtime_model)
-            .map_err(|_error| format!("provider secret unavailable for model: {runtime_model}"))?;
+            .unwrap_or(None);
     if let Some(secret) = provider_secret.as_ref() {
         runtime_env.extend([
             (
