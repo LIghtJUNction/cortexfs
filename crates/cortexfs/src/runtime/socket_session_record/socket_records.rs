@@ -18,6 +18,7 @@ pub fn record_socket_request_to_session(
             scope,
             ref cwd,
             ref input,
+            ..
         } => record_socket_send_to_session(session_dir, id, session, scope, cwd.as_deref(), input),
         SocketRequest::Cancel { ref id } => record_socket_cancel_to_session(session_dir, id),
         SocketRequest::Resume { .. } | SocketRequest::Ping => {

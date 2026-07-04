@@ -85,6 +85,34 @@ impl Filesystem for CortexFuse {
             || status_change_time.is_some()
             || backup_time.is_some()
             || flags.is_some();
+        let mode_only = mode.is_some()
+            && uid.is_none()
+            && gid.is_none()
+            && size.is_none()
+            && atime.is_none()
+            && mtime.is_none()
+            && change_time.is_none()
+            && creation_time.is_none()
+            && status_change_time.is_none()
+            && backup_time.is_none()
+            && flags.is_none();
+        if mode_only {
+            let path = path_for_inode_or_reply!(self, ino, reply);
+            let mode = mode.unwrap_or_default();
+            if let Err(error) = self.projection.set_session_layout_mode(&path, mode) {
+                reply.error(if matches!(error, FuseV1Error::NotControlFile) {
+                    readonly_mutation_errno()
+                } else {
+                    errno(error)
+                });
+                return;
+            }
+            match self.projection.getattr(&path) {
+                Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
+                Err(error) => reply.error(errno(error)),
+            }
+            return;
+        }
         if let Some(error) = fuse_setattr_metadata_error(changes_metadata) {
             reply.error(error);
             return;
@@ -182,6 +210,89 @@ impl Filesystem for CortexFuse {
     }
 
     cortexfs_mount_readdirplus!();
+
+    fn mkdir(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        reply: ReplyEntry,
+    ) {
+        let Some(name) = name.to_str() else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        let parent_path = path_for_inode_or_reply!(self, parent, reply);
+        let Some(path) = child_path(&parent_path, name) else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        if let Err(error) = self.projection.create_session_layout_dir(&path) {
+            reply.error(if matches!(error, FuseV1Error::NotControlFile) {
+                readonly_mutation_errno()
+            } else {
+                errno(error)
+            });
+            return;
+        }
+        match self.projected_node_for_path(&path) {
+            Ok(node) => {
+                if let Err(error) = self.remember(&node) {
+                    reply.error(errno(error));
+                    return;
+                }
+                self.reply_entry(&node, reply);
+            }
+            Err(error) => reply.error(errno(error)),
+        }
+    }
+
+    fn create(
+        &self,
+        _req: &Request,
+        parent: INodeNo,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        _flags: i32,
+        reply: ReplyCreate,
+    ) {
+        let Some(name) = name.to_str() else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        let parent_path = path_for_inode_or_reply!(self, parent, reply);
+        let Some(path) = child_path(&parent_path, name) else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        if let Err(error) = self.projection.create_session_layout_file(&path) {
+            reply.error(if matches!(error, FuseV1Error::NotControlFile) {
+                readonly_mutation_errno()
+            } else {
+                errno(error)
+            });
+            return;
+        }
+        match self.projected_node_for_path(&path) {
+            Ok(node) => {
+                if let Err(error) = self.remember(&node) {
+                    reply.error(errno(error));
+                    return;
+                }
+                reply.created(
+                    &TTL,
+                    &file_attr(node.inode(), node.attr()),
+                    Generation(0),
+                    FileHandle(0),
+                    FopenFlags::empty(),
+                );
+            }
+            Err(error) => reply.error(errno(error)),
+        }
+    }
 
     cortexfs_mount_readonly_mutations!();
 

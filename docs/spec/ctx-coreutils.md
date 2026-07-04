@@ -50,6 +50,7 @@ ctx agent stop reviewer
 ctx agent status reviewer
 ctx agent env reviewer
 ctx agent ps
+ctx agent chat reviewer
 
 ctx cat agent/coder.d/policy
 ctx set agent/coder.d/cwd /work
@@ -106,6 +107,11 @@ Omitting the session reads `session/index/current` first and falls back to
 `ctx send` and `ctx resume` render assistant events the same way as
 `ctx agent send` and `ctx agent resume`; raw socket JSONL is reserved for lower
 level socket commands and explicit raw agent modes.
+
+`ctx agent chat` is the preferred human-chat spelling. `ctx agent repl` is a
+compatibility alias for the same socket UI and session defaults. It is not the agent terminal and
+does not enter `tsh`; humans use `ctx agent watch` or `ctx agent attach` for the
+persistent terminal.
 
 `ctx agent wait` is a non-blocking waitpid-shaped reader for a parent-owned
 child result channel. It reads `context/child/<child>/status`; `pending` and

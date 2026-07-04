@@ -42,6 +42,7 @@ fn socket_session_recorder_revalidates_public_request_values() {
         session: "default".to_owned(),
         scope: SocketSessionScope::Private,
         cwd: Some("/work".to_owned()),
+        workspace: Some("/repo".to_owned()),
         input: "hello".to_owned(),
     };
     assert_eq!(

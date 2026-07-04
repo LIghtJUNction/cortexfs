@@ -204,6 +204,74 @@ fn fs_write_tool_rejects_symlink_intermediate_parent() {
 }
 
 #[test]
+fn fs_replace_tool_replaces_unique_text_span() {
+    let path = std::env::temp_dir().join(format!("cortexfs-fs-replace-{}", std::process::id()));
+    assert!(fs::write(&path, "before old after").is_ok());
+    let tool = FsReplaceTool;
+    let invocation = ToolInvocation::new(
+        "r1",
+        format!(
+            r#"{{"path":"{}","old":"old","new":"new"}}"#,
+            path.display()
+        ),
+    );
+    let mut output = Vec::new();
+    assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+
+    assert_eq!(fs::read_to_string(&path).unwrap_or_default(), "before new after");
+    assert!(String::from_utf8(output).unwrap_or_default().contains("replaced"));
+    let _ignored = fs::remove_file(path);
+}
+
+#[test]
+fn fs_replace_tool_rejects_ambiguous_text_span() {
+    let path = std::env::temp_dir().join(format!(
+        "cortexfs-fs-replace-ambiguous-{}",
+        std::process::id()
+    ));
+    assert!(fs::write(&path, "old old").is_ok());
+    let tool = FsReplaceTool;
+    let invocation = ToolInvocation::new(
+        "r1",
+        format!(
+            r#"{{"path":"{}","old":"old","new":"new"}}"#,
+            path.display()
+        ),
+    );
+    let mut output = Vec::new();
+    assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+
+    let text = String::from_utf8(output).unwrap_or_default();
+    assert!(text.contains(r#""code":"EINVAL""#));
+    assert_eq!(fs::read_to_string(&path).unwrap_or_default(), "old old");
+    let _ignored = fs::remove_file(path);
+}
+
+#[test]
+fn fs_replace_cli_replaces_unique_text_span() {
+    let path = std::env::temp_dir().join(format!(
+        "cortexfs-fs-replace-cli-{}",
+        std::process::id()
+    ));
+    assert!(fs::write(&path, "alpha beta gamma").is_ok());
+    let mut output = Vec::new();
+    let result = run_core_tool_cli(
+        "fs.replace",
+        &[
+            OsString::from(&path),
+            OsString::from("beta"),
+            OsString::from("delta"),
+        ],
+        &mut output,
+    );
+
+    assert!(matches!(result, Ok(Some(code)) if code == std::process::ExitCode::SUCCESS));
+    assert_eq!(String::from_utf8(output).unwrap_or_default(), "replaced\n");
+    assert_eq!(fs::read_to_string(&path).unwrap_or_default(), "alpha delta gamma");
+    let _ignored = fs::remove_file(path);
+}
+
+#[test]
 fn fs_write_cli_uses_atomic_writer() {
     let path = std::env::temp_dir().join(format!("cortexfs-fs-write-cli-{}", std::process::id()));
     let mut output = Vec::new();

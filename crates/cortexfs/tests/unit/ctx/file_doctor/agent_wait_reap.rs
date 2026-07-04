@@ -121,6 +121,7 @@ fn agent_child_rows_default_missing_worker_model_to_spark() {
     let root = clean_test_dir("ctx-child-row-missing-worker-model");
     let ensured = ensure_v1_reference_tree(&root);
     assert!(ensured.is_ok());
+    enable_dynamic_worker_fixture(&root);
     assert!(fs::remove_file(root.join("agent/worker.d/model")).is_ok());
     write_text_file(&root.join("agent/worker.d/status"), "idle\n");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");

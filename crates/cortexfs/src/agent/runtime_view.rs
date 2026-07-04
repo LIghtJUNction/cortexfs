@@ -2,7 +2,8 @@
 /// `ctx_root/agent/<agent_name>.d/`.
 ///
 /// The returned environment always contains the runtime-owned `CTX_ROOT`,
-/// `CTX_HOME`, `HOME`, and `CTX_PATH` values derived from the ABI controls.
+/// `CTX_PROVIDER_CONFIG_DIR`, `CTX_HOME`, `HOME`, and `CTX_PATH` values derived
+/// from the ABI controls.
 /// The `env` control is validated as data, but v1 does not let it add process
 /// variables. Runtime environment authority is fixed here and by the sandbox
 /// launcher so text config cannot expand the authority established by `path`,
@@ -172,6 +173,10 @@ fn derive_agent_runtime_env(
     let env_content = read_required_agent_control(control_dir, "env")?;
     let env = vec![
         ("CTX_ROOT".to_owned(), ctx_root.display().to_string()),
+        (
+            "CTX_PROVIDER_CONFIG_DIR".to_owned(),
+            ctx_root.join("shared/providers.d").display().to_string(),
+        ),
         ("CTX_HOME".to_owned(), ctx_home.display().to_string()),
         ("HOME".to_owned(), home.display().to_string()),
         ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),

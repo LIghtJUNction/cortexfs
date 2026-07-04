@@ -11,6 +11,10 @@ fn assert_reference_bin_placeholders(root: &Path) {
         &root.join("bin").join("tsh"),
         "#!/bin/sh\n# CortexFS reference-tree tsh placeholder.\nexec /usr/bin/tsh \"$@\"\n",
     );
+    assert_file_text(
+        &root.join("bin").join("cortexfs-object-runner"),
+        "#!/bin/sh\n# CortexFS reference-tree cortexfs-object-runner placeholder.\nexec /usr/bin/cortexfs-object-runner \"$@\"\n",
+    );
 }
 
 #[test]
@@ -184,16 +188,19 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     let coder_system = ok!(fs::read_to_string(
         root.join("agent").join("coder.d").join("system.md")
     ));
-    assert!(coder_system.contains("prefer a delegated `react` node"));
-    assert!(coder_system.contains("ctx schedule status"));
-    assert!(coder_system.contains("ctx schedule advance"));
-    assert!(coder_system.contains("Pass the schedule output fields"));
-    let worker_system = ok!(fs::read_to_string(
-        root.join("agent").join("worker.d").join("system.md")
+    assert!(coder_system.contains("default Architect -> coder/reviewer flow"));
+    assert!(coder_system.contains("fs.write"));
+    assert!(coder_system.contains("shell.exec"));
+    let architect_system = ok!(fs::read_to_string(
+        root.join("agent").join("architect.d").join("system.md")
     ));
-    assert!(worker_system.contains("spark model path"));
-    assert!(worker_system.contains("ctx schedule claim <plan> <child>"));
-    assert!(worker_system.contains("ctx schedule result <plan> <child>"));
+    assert!(architect_system.contains("human role name is Architect"));
+    assert!(architect_system.contains("delegate implementation to `coder`"));
+    let reviewer_system = ok!(fs::read_to_string(
+        root.join("agent").join("reviewer.d").join("system.md")
+    ));
+    assert!(reviewer_system.contains("independent review agent"));
+    assert!(!root.join("agent").join("worker.d").exists());
     let prompt_template = fs::read_to_string(
         root.join("agent")
             .join("coder.d")
@@ -204,19 +211,9 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     );
     let agent_script = fs::read_to_string(root.join("agent").join("coder"));
     assert!(
-        matches!(agent_script, Ok(ref content) if content.contains("CTX_AGENT_PROMPT_TEMPLATE"))
-    );
-    assert!(
-        matches!(agent_script, Ok(ref content) if content.contains("CTX_AGENT_HISTORY_MESSAGES")
-            && content.contains("Conversation history:")
-            && content.contains("Current user input:")
-            && content.contains("messages.jsonl")
-            && content.contains("/usr/bin/tail -n 40"))
-    );
-    assert!(
-        matches!(agent_script, Ok(ref content) if content.contains("/usr/bin/cat")
-            && content.contains("/usr/bin/tr")
-            && content.contains("/usr/bin/readlink"))
+        matches!(agent_script, Ok(ref content) if content.contains("# cortexfs.object=agent\n")
+            && content.contains("# cortexfs.name=coder\n")
+            && content.contains("cortexfs-object-runner"))
     );
     let agent_policy = fs::read_to_string(root.join("agent").join("coder.d").join("policy"));
     assert!(

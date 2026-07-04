@@ -10,6 +10,7 @@ fn handle_socket_send(
         scope,
         ref cwd,
         ref input,
+        ..
     } = request
     else {
         return Err(SocketRuntimeError::Record(
@@ -35,6 +36,7 @@ fn handle_socket_send(
         session: session.to_owned(),
         scope,
         cwd: Some(effective_cwd.to_owned()),
+        workspace: None,
         input: input.to_owned(),
     };
     let record = record_indexed_socket_send_to_session(session_root, &durable_request)

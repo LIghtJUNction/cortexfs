@@ -21,6 +21,7 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
         let label = format!("{control_label}/{file}");
         require_object_control_file(&control_dir.join(file), &label, &mut issues);
     }
+    require_object_hook_dirs(&control_dir, &control_label, &mut issues);
 
     inspect_object_socket(root, class, name, &control_dir, &mut issues);
     inspect_model_capability_control(class, name, &control_dir, &mut issues);
@@ -284,6 +285,16 @@ fn require_object_control_file(path: &Path, label: &str, issues: &mut Vec<Object
         Ok(metadata) if metadata.is_file() => {}
         Ok(_metadata) => issues.push(ObjectLayoutIssue::NotControlFile(label.to_owned())),
         Err(_error) => issues.push(ObjectLayoutIssue::MissingControlFile(label.to_owned())),
+    }
+}
+
+fn require_object_hook_dirs(control_dir: &Path, label: &str, issues: &mut Vec<ObjectLayoutIssue>) {
+    let hook_label = format!("{label}/{OBJECT_HOOK_DIR}");
+    let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
+    require_object_control_dir(&hook_dir, &hook_label, issues);
+    for phase in OBJECT_HOOK_PHASE_DIRS {
+        let phase_label = format!("{hook_label}/{phase}");
+        require_object_control_dir(&hook_dir.join(phase), &phase_label, issues);
     }
 }
 

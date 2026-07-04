@@ -24,6 +24,28 @@ fn write_done_frames(stdout: &mut impl Write, frames: &[String]) -> Result<(), S
     Ok(())
 }
 
+fn write_success_done_if_missing(
+    stdout: &mut impl Write,
+    run: &str,
+    frames: &[String],
+) -> Result<(), String> {
+    if frames
+        .iter()
+        .any(|frame| event_type(frame).as_deref() == Some("done"))
+    {
+        return Ok(());
+    }
+    let done = serde_json::json!({
+        "type": "done",
+        "run": run,
+        "status": "ok"
+    })
+    .to_string();
+    writeln!(stdout, "{done}")
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("cannot write output: {error}"))
+}
+
 fn write_agent_frames_for_tool_iteration(
     stdout: &mut impl Write,
     run: &str,
@@ -56,11 +78,15 @@ fn write_tool_result_event(
     tool_call: &AgentToolCall,
     result: &str,
 ) -> Result<(), String> {
+    let args = tool_call_args_strings(tool_call);
     let event = serde_json::json!({
         "type": "message",
         "run": run,
         "role": "tool",
         "name": tool_call.name,
+        "arguments": {
+            "args": args
+        },
         "content": [{
             "type": "tool_result",
             "tool_call_id": tool_call.id,
@@ -80,7 +106,12 @@ fn write_tool_result_fallback_response(
     tool_call: &AgentToolCall,
     result: &str,
 ) -> Result<(), String> {
-    let text = format!("工具 `{}` 已执行，输出：\n\n{}", tool_call.name, result);
+    let text = format!(
+        "工具 `{}` 已执行，参数：{}\n\n输出：\n\n{}",
+        tool_call.name,
+        tool_call_args_json(tool_call),
+        result
+    );
     let message = serde_json::json!({
         "type": "message",
         "run": run,
@@ -152,11 +183,7 @@ fn write_tool_call_event(
     run: &str,
     tool_call: &AgentToolCall,
 ) -> io::Result<()> {
-    let args = tool_call
-        .args
-        .iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
+    let args = tool_call_args_strings(tool_call);
     let event = serde_json::json!({
         "type": "tool_call",
         "run": run,

@@ -17,6 +17,9 @@ placement separate from agent identity and mount setup.
     policy
     status
     log
+    hooks/
+      pre.d/
+      post.d/
   fs.write
   fs.write.d/
     name
@@ -26,6 +29,9 @@ placement separate from agent identity and mount setup.
     policy
     status
     log
+    hooks/
+      pre.d/
+      post.d/
   shell.exec
   shell.exec.d/
     name
@@ -35,6 +41,9 @@ placement separate from agent identity and mount setup.
     policy
     status
     log
+    hooks/
+      pre.d/
+      post.d/
 ```
 
 MCP servers are tool sources, not CortexFS root objects. Do not expose:

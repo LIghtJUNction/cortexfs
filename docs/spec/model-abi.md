@@ -73,6 +73,9 @@ Example:
       session
       status
       log
+      hooks/
+        pre.d/
+        post.d/
   openai/
     gpt-4o
     gpt-4o.d/
@@ -85,6 +88,9 @@ Example:
       session
       status
       log
+      hooks/
+        pre.d/
+        post.d/
 ```
 
 Control files:

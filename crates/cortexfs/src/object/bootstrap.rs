@@ -24,7 +24,7 @@ pub fn install_executable_object_wrapper(
     create_object_bootstrap_dir(&control_dir)?;
 
     let executable = class_dir.join(name);
-    let wrapper = executable_wrapper_script(wrapper_target);
+    let wrapper = executable_wrapper_script(class, name, wrapper_target);
     atomic_replace_text(&executable, &wrapper)
         .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
     set_executable_mode(&executable)?;
@@ -34,8 +34,18 @@ pub fn install_executable_object_wrapper(
         atomic_replace_text_with_mode(&control_dir.join(file), &content, 0o644)
             .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
     }
+    ensure_object_hook_dirs(&control_dir)?;
 
     Ok(ObjectBootstrap::new(executable, control_dir))
+}
+
+fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapError> {
+    let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
+    create_object_bootstrap_dir(&hook_dir)?;
+    for phase in OBJECT_HOOK_PHASE_DIRS {
+        create_object_bootstrap_dir(&hook_dir.join(phase))?;
+    }
+    Ok(())
 }
 
 fn create_object_bootstrap_dir(path: &Path) -> Result<(), ObjectBootstrapError> {
@@ -294,9 +304,11 @@ fn is_valid_wrapper_target(value: &str) -> bool {
     !value.trim().is_empty() && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
-fn executable_wrapper_script(wrapper_target: &str) -> String {
+fn executable_wrapper_script(class: ObjectClass, name: &str, wrapper_target: &str) -> String {
     format!(
-        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec {} \"$0\" \"$@\"\n",
+        "#!/bin/sh\n# CortexFS generated object wrapper.\n# cortexfs.object={}\n# cortexfs.name={}\nexec {} \"$0\" \"$@\"\n",
+        class.as_str(),
+        name,
         shell_single_quote(wrapper_target)
     )
 }

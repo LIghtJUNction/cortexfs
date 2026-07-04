@@ -7,7 +7,7 @@
 pub const CTX_ROOT: &str = "/ctx";
 
 /// Rust object runner used by executable object metadata files.
-pub const CORTEXFS_OBJECT_RUNNER: &str = "/usr/bin/cortexfs-object-runner";
+pub const CORTEXFS_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
 
 /// Root entries reserved by the new Agent OS ABI.
 pub const ROOT_ENTRIES: &[&str] = &["status", "bin", "model", "agent", "tool", "home", "shared"];
@@ -22,6 +22,10 @@ pub const MAX_OBJECT_NAME_LEN: usize = 64;
 pub const MODEL_CONTROL_FILES: &[&str] = &[
     "id", "driver", "cap", "effort", "default", "fallback", "session", "status", "log",
 ];
+/// Required hook directory inside every executable object's `.d/` control tree.
+pub const OBJECT_HOOK_DIR: &str = "hooks";
+/// Required hook phase directories inside `hooks/`.
+pub const OBJECT_HOOK_PHASE_DIRS: &[&str] = &["pre.d", "post.d"];
 pub(crate) const MODEL_ROUTE_FILE: &str = "route";
 pub(crate) const DEFAULT_MODEL_ROUTE: &str = "\
 # Global CortexFS model egress route.
