@@ -29,7 +29,7 @@ struct AgentInteractiveSend<'a> {
 }
 
 const AGENT_REPL_COMMANDS: &str =
-    "/help /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
+    "/help /workspace /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
 
 fn agent_send_interactive_with_run_id(
     root: &Path,
