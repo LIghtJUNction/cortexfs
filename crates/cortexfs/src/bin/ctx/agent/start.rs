@@ -85,6 +85,7 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
         &unit,
         invocation.as_deref(),
         &args.cwd,
+        session_workspace.as_deref(),
         &visible_socket,
         &socket,
         &current_uid,
@@ -191,6 +192,7 @@ fn agent_start_status_lines(
     unit: &str,
     invocation: Option<&str>,
     cwd: &str,
+    workspace: Option<&str>,
     visible_socket: &Path,
     runtime_socket: &Path,
     uid: &str,
@@ -263,6 +265,15 @@ fn agent_start_status_lines(
             styled(color, ANSI_BOLD_BLUE, "CWD:"),
             styled(color, ANSI_CYAN, cwd)
         ),
+    ]);
+    if let Some(workspace) = workspace {
+        lines.push(format!(
+            "  {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Workspace:"),
+            styled(color, ANSI_CYAN, workspace)
+        ));
+    }
+    lines.extend([
         format!(
             "     {} {}",
             styled(color, ANSI_BOLD_BLUE, "Socket:"),
