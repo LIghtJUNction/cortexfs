@@ -295,6 +295,7 @@ EOF
             agent start coder \
             --session smoke \
             --cwd /workspace \
+            --mount "$workspace" /workspace rw \
             --no-default-workspace >/tmp/cortexfs-agent-start-smoke.log 2>&1 || {
             printf 'ctx agent start source self-improvement smoke failed:\n' >&2
             cat /tmp/cortexfs-agent-start-smoke.log >&2
