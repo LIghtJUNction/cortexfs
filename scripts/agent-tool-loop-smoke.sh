@@ -286,7 +286,9 @@ EOF
     systemctl --user is-system-running >/dev/null 2>&1 &&
     [ -x /usr/bin/ctxterm ] &&
     [ -x /usr/bin/cortexfs-agent-runtime ] &&
-    [ ! "$repo_root/target/debug/cortexfs-agent-runtime" -nt /usr/bin/cortexfs-agent-runtime ]; then
+    [ -x /usr/bin/cortexfs-object-runner ] &&
+    [ ! "$repo_root/target/debug/cortexfs-agent-runtime" -nt /usr/bin/cortexfs-agent-runtime ] &&
+    [ ! "$repo_root/target/debug/cortexfs-object-runner" -nt /usr/bin/cortexfs-object-runner ]; then
         write_self_bootstrap_workspace
         "$repo_root/target/debug/ctx" \
             --root "$root" \
