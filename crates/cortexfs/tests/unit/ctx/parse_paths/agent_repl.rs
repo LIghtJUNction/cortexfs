@@ -31,8 +31,21 @@ fn agent_repl_editor_enables_terminal_signals() {
 fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
     let root = clean_test_dir("ctx-agent-repl-model-summary");
     assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
+    let session = root
+        .join("home")
+        .join(std::process::Command::new("id")
+            .arg("-u")
+            .output()
+            .ok()
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|uid| uid.trim().to_owned())
+            .filter(|uid| !uid.is_empty())
+            .unwrap_or_else(|| "1000".to_owned()))
+        .join("agent/coder/session/default");
+    assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::create_dir_all(root.join("model")).is_ok());
     assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
+    assert!(fs::write(session.join("workspace"), "/repo\n").is_ok());
     assert!(
         std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))
             .is_ok()
@@ -46,6 +59,8 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
         agent_repl_model_summary(false, &root, "coder"),
         Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
     );
+    let banner = agent_repl_banner_lines(false, &root, "coder", "default");
+    assert!(matches!(banner, Ok(ref lines) if lines.iter().any(|line| line == " Workspace: /repo")));
     assert!(AGENT_REPL_COMMANDS.contains("/help"));
     assert!(AGENT_REPL_COMMANDS.contains("/clear"));
 }

@@ -14,7 +14,7 @@ use super::{
     agent_bwrap_args, agent_chat_runtime_socket, agent_chat_socket_systemd_command,
     agent_chat_unit, agent_host_mount_source, agent_native_tool_names, agent_new,
     agent_new_request_json, agent_send_request_json,
-    agent_repl_model_summary, agent_repl_prompt, agent_repl_editor_config,
+    agent_repl_banner_lines, agent_repl_model_summary, agent_repl_prompt, agent_repl_editor_config,
     agent_repl_unknown_command_line,
     read_agent_repl_stdin_limited, current_session_name,
     latest_run_id, object_execution_command, parse_oauth_callback_params,

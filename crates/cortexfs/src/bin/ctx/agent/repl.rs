@@ -1,7 +1,21 @@
 fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(), CliError> {
     let color = color_enabled();
+    for line in agent_repl_banner_lines(color, root, name, session)? {
+        write_error(&line)
+            .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
+    }
+    Ok(())
+}
+
+fn agent_repl_banner_lines(
+    color: bool,
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<Vec<String>, CliError> {
     let model_summary = agent_repl_model_summary(color, root, name)?;
-    let lines = [
+    let workspace = preferred_workspace_source(root, name, session)?;
+    let mut lines = vec![
         format!(
             "{} ctx agent {}/{} - {}",
             styled(color, ANSI_BOLD_CYAN, "●"),
@@ -23,17 +37,22 @@ fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(),
             styled(color, ANSI_BOLD_BLUE, "Model:"),
             model_summary
         ),
+    ];
+    if let Some(workspace) = workspace {
+        lines.push(format!(
+            " {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Workspace:"),
+            styled(color, ANSI_CYAN, &workspace)
+        ));
+    }
+    lines.push(
         format!(
             " {} {}",
             styled(color, ANSI_BOLD_BLUE, "Commands:"),
             styled(color, ANSI_DIM, AGENT_REPL_COMMANDS)
-        ),
-    ];
-    for line in lines {
-        write_error(&line)
-            .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))?;
-    }
-    Ok(())
+        )
+    );
+    Ok(lines)
 }
 
 fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
