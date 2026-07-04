@@ -142,10 +142,16 @@ fn fuse_session_replace_projection_path(path: &str) -> bool {
             if uid.parse::<u32>().is_ok()
                 && is_object_name(agent)
                 && is_object_name(session)
-                && matches!(
-                    file,
-                    "latest.md" | "state" | "cwd" | "created_at" | "updated_at" | "meta.json"
-                ) =>
+            && matches!(
+                file,
+                "latest.md"
+                    | "state"
+                    | "cwd"
+                    | "workspace"
+                    | "created_at"
+                    | "updated_at"
+                    | "meta.json"
+            ) =>
         {
             true
         }

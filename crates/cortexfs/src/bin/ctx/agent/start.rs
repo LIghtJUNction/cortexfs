@@ -12,6 +12,9 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
             args.name
         ))
     })?;
+    let session_cwd = agent_start_sandbox_cwd(args, &cli_mounts);
+    let session_workspace = agent_start_workspace_source(&cli_mounts);
+    ensure_agent_start_session(root, args, &view, &session_cwd, session_workspace.as_deref())?;
     let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
     let socket = agent_runtime_socket(root, &args.name, &args.session)?;
     ensure_agent_terminal_socket(&visible_socket, &socket)?;
@@ -89,6 +92,36 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
         print_line(&line)?;
     }
     Ok(ExitCode::SUCCESS)
+}
+
+pub(crate) fn ensure_agent_start_session(
+    root: &Path,
+    args: &AgentStartArgs,
+    view: &AgentRuntimeView,
+    cwd: &str,
+    workspace: Option<&str>,
+) -> Result<(), CliError> {
+    let session_root = ctx_home(root)?
+        .join("agent")
+        .join(&args.name)
+        .join("session");
+    ensure_durable_session_layout(
+        &session_root,
+        &args.session,
+        cwd,
+        Some(view.model()),
+        SocketSessionScope::Private,
+    )
+    .map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot prepare agent session {}: {error:?}",
+            args.session
+        ))
+    })?;
+    if let Some(workspace) = workspace {
+        write_agent_control_plain(&session_root.join(&args.session).join("workspace"), &format!("{workspace}\n"))?;
+    }
+    Ok(())
 }
 
 fn record_agent_start_state(

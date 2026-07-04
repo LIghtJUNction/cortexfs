@@ -120,6 +120,7 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
         &format!("{session}/latest.md"),
         &format!("{session}/state"),
         &format!("{session}/cwd"),
+        &format!("{session}/workspace"),
         &format!("{session}/created_at"),
         &format!("{session}/updated_at"),
         &format!("{session}/meta.json"),

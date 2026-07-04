@@ -11,7 +11,7 @@ fn agent_send(
         &request_id()?,
         &session,
         &agent_cwd(root, name)?,
-        current_workspace_source().as_deref(),
+        preferred_workspace_source(root, name, &session)?.as_deref(),
         input,
         debug,
     );
@@ -41,7 +41,7 @@ fn agent_send_interactive_with_run_id(
         send.run_id,
         &session,
         &agent_cwd(root, name)?,
-        current_workspace_source().as_deref(),
+        preferred_workspace_source(root, name, &session)?.as_deref(),
         send.input,
         send.debug,
     );
@@ -91,6 +91,42 @@ fn current_workspace_source() -> Option<String> {
         .ok()
         .filter(|path| path.is_absolute())
         .map(|path| path.display().to_string())
+}
+
+fn preferred_workspace_source(
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<Option<String>, CliError> {
+    let workspace = agent_session_workspace_source(root, name, session)?;
+    Ok(workspace.or_else(current_workspace_source))
+}
+
+fn agent_session_workspace_source(
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<Option<String>, CliError> {
+    let path = agent_session_dir(root, name, Some(session))?.join("workspace");
+    let Some(workspace) = read_optional_trimmed(&path)? else {
+        return Ok(None);
+    };
+    if is_absolute_host_workspace_path(&workspace) {
+        Ok(Some(workspace))
+    } else {
+        Ok(None)
+    }
+}
+
+fn is_absolute_host_workspace_path(value: &str) -> bool {
+    !value.bytes().any(|byte| byte.is_ascii_control())
+        && Path::new(value).is_absolute()
+        && Path::new(value).components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::RootDir | std::path::Component::Normal(_)
+            )
+        })
 }
 
 fn agent_resume(

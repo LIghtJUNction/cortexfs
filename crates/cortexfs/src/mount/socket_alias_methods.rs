@@ -10,10 +10,35 @@ fn mknod(
     rdev: u32,
     reply: ReplyEntry,
 ) {
-    if mode & S_IFMT != S_IFSOCK {
-        reply.error(readonly_mutation_errno());
-        return;
-    }
+            let file_type = mode & S_IFMT;
+            if file_type == S_IFREG || file_type == 0 {
+                let Some(name) = name.to_str() else {
+                    reply.error(Errno::EINVAL);
+                    return;
+                };
+                let parent_path = path_for_inode_or_reply!(self, parent, reply);
+                let Some(path) = child_path(&parent_path, name) else {
+                    reply.error(Errno::EINVAL);
+                    return;
+                };
+                if let Err(error) = self.projection.create_session_layout_file(&path) {
+                    reply.error(if matches!(error, FuseV1Error::NotControlFile) {
+                        readonly_mutation_errno()
+                    } else {
+                        errno(error)
+                    });
+                    return;
+                }
+                match self.projected_node_for_path(&path) {
+                    Ok(node) => self.reply_entry(&node, reply),
+                    Err(error) => reply.error(errno(error)),
+                }
+                return;
+            }
+            if file_type != S_IFSOCK {
+                reply.error(readonly_mutation_errno());
+                return;
+            }
     if rdev != 0 {
         reply.error(Errno::EINVAL);
         return;
