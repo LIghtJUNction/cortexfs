@@ -61,8 +61,18 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
     );
     let banner = agent_repl_banner_lines(false, &root, "coder", "default");
     assert!(matches!(banner, Ok(ref lines) if lines.iter().any(|line| line == " Workspace: /repo")));
+    assert_eq!(
+        agent_repl_workspace_line(false, &root, "coder", "default"),
+        Ok(" Workspace: /repo".to_owned())
+    );
     assert!(AGENT_REPL_COMMANDS.contains("/help"));
+    assert!(AGENT_REPL_COMMANDS.contains("/workspace"));
     assert!(AGENT_REPL_COMMANDS.contains("/clear"));
+    let mut debug = AgentDebugState::default();
+    assert_eq!(
+        agent_repl_command(&root, "coder", "default", "/workspace", false, &mut debug),
+        Ok(Some(ExitCode::SUCCESS))
+    );
 }
 
 #[test]
