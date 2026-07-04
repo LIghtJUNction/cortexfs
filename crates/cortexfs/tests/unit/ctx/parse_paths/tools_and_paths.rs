@@ -66,6 +66,7 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
                 && prompt.contains("inspect current files before editing")
                 && prompt.contains("prefer `fs.replace` for small surgical edits")
                 && prompt.contains("keep repairing within scope")
+                && prompt.contains("inspect `git diff --stat` and the relevant diff")
                 && !prompt.contains("{{agent}}")
     ));
 }
