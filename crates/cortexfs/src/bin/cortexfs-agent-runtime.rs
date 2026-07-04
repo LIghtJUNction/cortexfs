@@ -61,8 +61,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
     }
     let provider_secret =
-        read_provider_system_secret_for_model(Path::new(cortexfs::CTX_ROOT), &runtime_model)
-            .unwrap_or(None);
+        read_provider_system_secret_for_model(&config.source, &runtime_model).unwrap_or(None);
     if let Some(secret) = provider_secret.as_ref() {
         runtime_env.extend([
             (
@@ -79,7 +78,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
             ),
         ]);
     }
-    let agent_executable = runtime_agent_executable(Path::new(cortexfs::CTX_ROOT), &config.agent);
+    let agent_executable = runtime_agent_executable(&config.source, &config.agent);
     let result = serve_agent_executable_socket_listener_once(
         &listener,
         Some(peer_policy),
