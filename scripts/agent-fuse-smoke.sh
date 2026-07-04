@@ -118,9 +118,10 @@ def provider_text(body):
         ])
     if "call-2" in text:
         return tool_call("call-3", [
-            "fs.write",
+            "fs.replace",
             "/workspace/src/lib.rs",
-            "pub fn improved() -> bool {\n    true\n}\n\n#[test]\nfn programming_agent_improves_source() {\n    assert!(improved());\n}\n",
+            "    false",
+            "    true",
         ])
     if "call-1" in text:
         return tool_call("call-2", ["fs.read", "/workspace/src/lib.rs"])
@@ -203,6 +204,7 @@ allow coder_t model:smoke/fuse-selfedit use
 allow coder_t tool:tsh execute
 allow coder_t tool:fs.read execute
 allow coder_t tool:fs.write execute
+allow coder_t tool:fs.replace execute
 allow coder_t tool:shell.exec execute
 allow coder_t network:default connect
 POLICY

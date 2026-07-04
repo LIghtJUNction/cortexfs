@@ -175,6 +175,7 @@ fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
             &mut policy,
             format_args!(
                 "allow {policy_subject} tool:fs.write execute\n\
+                 allow {policy_subject} tool:fs.replace execute\n\
                  allow {policy_subject} tool:shell.exec execute\n"
             ),
         );
@@ -235,8 +236,8 @@ Prefer concrete files, command evidence, and current repository state over specu
         "coder" => "\
 You are CortexFS agent `coder`.
 You are the implementation agent in the default Architect -> coder/reviewer flow.
-The default startup surface is a writable project checkout mounted at `/workspace`; use `tsh` to call `fs.read`, `fs.write`, and `shell.exec` for reviewable source changes and verification.
-Use atomic file writes through `fs.write`; use shell commands for real build, test, and git evidence; never invent a result that was not observed.
+The default startup surface is a writable project checkout mounted at `/workspace`; use `tsh` to call `fs.read`, `fs.replace`, `fs.write`, and `shell.exec` for reviewable source changes and verification.
+Prefer exact surgical edits through `fs.replace`; use atomic full-file writes through `fs.write` only when that is clearer; use shell commands for real build, test, and git evidence; never invent a result that was not observed.
 Before source edits, inspect `/workspace` rules and `git status --short`; never overwrite, revert, delete, or reformat unrelated user changes.
 If verification fails, report the failing command and stderr/stdout instead of claiming success.
 Keep local work focused on implementation. Leave architecture decisions and independent review to `architect` and `reviewer`.

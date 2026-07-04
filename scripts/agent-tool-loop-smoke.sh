@@ -107,7 +107,7 @@ EOF
     cp "$host_tsh" "$root/bin/tsh"
     chmod 755 "$root/bin/cortexfs-object-runner" "$root/bin/tsh"
     grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/agent/coder"
-    for tool in fs.read fs.write shell.exec tsh.config; do
+    for tool in fs.read fs.write fs.replace shell.exec tsh.config; do
         grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/tool/$tool"
     done
     grep -Fq 'exec /ctx/bin/tsh "$@"' "$root/tool/tsh"
@@ -125,7 +125,7 @@ case "${CTX_AGENT_TOOL_CONTEXT:-}" in
     printf '{"type":"tool_call","run":"%s","id":"call-4","name":"tsh","arguments":{"args":["shell.exec","rustc --test /workspace/crates/cortexfs/src/self_improve_smoke.rs -o /tmp/self_improve_smoke && /tmp/self_improve_smoke"]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-2"*)
-    printf '{"type":"tool_call","run":"%s","id":"call-3","name":"tsh","arguments":{"args":["fs.write","/workspace/crates/cortexfs/src/self_improve_smoke.rs","pub fn agent_quality_label() -> &'\''static str {\\n    \\"cortexfs-agent-source\\"\\n}\\n\\n#[test]\\nfn programming_agent_improves_source() {\\n    assert_eq!(agent_quality_label(), \\"cortexfs-agent-source\\");\\n}\\n"]}}\n' "$CTX_RUN_ID"
+    printf '{"type":"tool_call","run":"%s","id":"call-3","name":"tsh","arguments":{"args":["fs.replace","/workspace/crates/cortexfs/src/self_improve_smoke.rs","    \\"todo\\"","    \\"cortexfs-agent-source\\""]}}\n' "$CTX_RUN_ID"
     ;;
   *"call-1"*)
     printf '{"type":"tool_call","run":"%s","id":"call-2","name":"tsh","arguments":{"args":["fs.read","/workspace/crates/cortexfs/src/self_improve_smoke.rs"]}}\n' "$CTX_RUN_ID"
@@ -147,6 +147,7 @@ allow coder_t model:debug/selfedit use
 allow coder_t tool:tsh execute
 allow coder_t tool:fs.read execute
 allow coder_t tool:fs.write execute
+allow coder_t tool:fs.replace execute
 allow coder_t tool:shell.exec execute
 allow coder_t network:default connect
 EOF

@@ -60,6 +60,26 @@ const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
         policy: "allow coder_t tool:fs.write execute",
     },
     ReferenceToolSpec {
+        name: "fs.replace",
+        wrapper_target: REFERENCE_OBJECT_RUNNER,
+        description: "Replace exactly one UTF-8 text span in a visible file.",
+        schema: r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "fs.replace input",
+  "description": "Replace exactly one UTF-8 text span in a visible file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "old", "new"],
+  "properties": {
+    "path": { "type": "string" },
+    "old": { "type": "string" },
+    "new": { "type": "string" }
+  }
+}"#,
+        cap: "fs.replace",
+        policy: "allow coder_t tool:fs.replace execute",
+    },
+    ReferenceToolSpec {
         name: "shell.exec",
         wrapper_target: REFERENCE_OBJECT_RUNNER,
         description: "Run one bounded shell command in the visible workspace.",
