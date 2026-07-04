@@ -31,6 +31,10 @@ fn agent_terminal_socket_uses_session_terminal_main_socket() {
 fn agent_start_builds_sandboxed_terminal_command() {
     let root = clean_test_dir("ctx-agent-start-bwrap-view");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    write_text_file(
+        &root.join("agent").join("coder.d").join("env"),
+        "CTX_ROOT=/bad\nCTX_PROVIDER_CONFIG_DIR=/bad/providers.d\n",
+    );
     let view = derive_agent_runtime_view(&root, "coder");
     assert!(view.is_ok(), "reference coder view: {view:?}");
     let Ok(view) = view else {
@@ -74,6 +78,13 @@ fn agent_start_builds_sandboxed_terminal_command() {
         "/home/agent"
     ));
     assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_ROLE", "agent"));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--setenv",
+        "CTX_PROVIDER_CONFIG_DIR",
+        "/ctx/shared/providers.d"
+    ));
+    assert!(!bwrap.iter().any(|arg| arg == "/bad/providers.d"));
     assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_MODEL", "main"));
     assert!(contains_arg_triplet(&bwrap, "--setenv", "CTX_AGENT_LIFE", "owned"));
     assert!(contains_arg_triplet(&bwrap, "--bind", "/repo", "/workspace"));
@@ -484,6 +495,48 @@ fn agent_attach_missing_terminal_quotes_unsafe_session_in_start_hint() {
             if error.message.contains("terminal is not running")
                 && error.message.contains(
                     "ctx agent start coder --session 'safe; touch CORTEXFS_HINT_PWNED #'"
-                )
+            )
     ));
+}
+
+#[test]
+fn agent_start_chat_socket_command_uses_socket_activation() {
+    let root = clean_test_dir("ctx-agent-start-chat-socket-command");
+    let socket = root.join("runtime").join("coder.sock");
+    let unit = agent_chat_unit(&root, "coder");
+    let command = agent_chat_socket_systemd_command(&root, "coder", &socket, &unit);
+
+    assert_eq!(command.program, "/usr/bin/systemd-run");
+    assert!(command.args.contains(&"--user".to_owned()));
+    assert!(contains_arg_pair(&command.args, "--unit", &unit));
+    assert!(command.args.contains(&"--collect".to_owned()));
+    assert!(contains_arg_pair(
+        &command.args,
+        "--socket-property",
+        &format!("ListenStream={}", socket.display())
+    ));
+    assert!(contains_arg_pair(
+        &command.args,
+        "--socket-property",
+        "SocketMode=0666"
+    ));
+    assert!(contains_arg_pair(&command.args, "--agent", "coder"));
+    assert!(command
+        .args
+        .iter()
+        .any(|arg| arg.ends_with("cortexfs-agent-runtime")));
+}
+
+#[test]
+fn agent_start_chat_socket_path_is_root_scoped() {
+    let left = clean_test_dir("ctx-agent-chat-socket-left");
+    let right = clean_test_dir("ctx-agent-chat-socket-right");
+
+    let left_socket = agent_chat_runtime_socket(&left, "coder");
+    let right_socket = agent_chat_runtime_socket(&right, "coder");
+
+    assert!(matches!(left_socket, Ok(ref socket) if socket.ends_with("coder.sock")));
+    assert!(matches!((&left_socket, &right_socket), (Ok(left), Ok(right)) if left != right));
+    assert_eq!(agent_chat_unit(&left, "coder"), agent_chat_unit(&left, "coder"));
+    assert_ne!(agent_chat_unit(&left, "coder"), agent_chat_unit(&right, "coder"));
 }

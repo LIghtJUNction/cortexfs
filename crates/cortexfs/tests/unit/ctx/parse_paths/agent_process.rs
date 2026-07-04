@@ -393,9 +393,10 @@ fn agent_env_reports_derived_sandbox_environment() {
 
     assert_eq!(
         agent_env_lines(&root, "worker"),
-        Ok(vec![
-            "CTX_ROOT=/ctx".to_owned(),
-            "CTX_HOME=/ctx/home/1000".to_owned(),
+            Ok(vec![
+                "CTX_ROOT=/ctx".to_owned(),
+                "CTX_PROVIDER_CONFIG_DIR=/ctx/shared/providers.d".to_owned(),
+                "CTX_HOME=/ctx/home/1000".to_owned(),
             "CTX_AGENT=worker".to_owned(),
             "CTX_AGENT_ROLE=worker".to_owned(),
             "CTX_AGENT_MODEL=api.lmm.best/gpt-5.3-codex-spark".to_owned(),

@@ -27,31 +27,22 @@ struct ReferenceAgentSpec {
 
 const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
     ReferenceAgentSpec {
-        name: "base",
+        name: "architect",
         parent: None,
         model: DEFAULT_MODEL_ALIAS,
     },
     ReferenceAgentSpec {
         name: "coder",
-        parent: Some("agent:base"),
+        parent: Some("agent:architect"),
         model: DEFAULT_MODEL_ALIAS,
     },
     ReferenceAgentSpec {
         name: "reviewer",
-        parent: Some("agent:base"),
+        parent: Some("agent:architect"),
         model: HELPER_MODEL_ALIAS,
     },
-    ReferenceAgentSpec {
-        name: "executor",
-        parent: Some("agent:base"),
-        model: DEFAULT_WORKER_MODEL,
-    },
-    ReferenceAgentSpec {
-        name: "worker",
-        parent: Some("agent:coder"),
-        model: DEFAULT_WORKER_MODEL,
-    },
 ];
+const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
 
 fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeError> {
     let docs = root.join("shared").join(MANUAL_SHARED_DIR);
@@ -82,7 +73,7 @@ fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
         "#!/bin/sh\n# CortexFS reference-tree ctx placeholder.\nexec /usr/bin/ctx \"$@\"\n",
     )?;
     set_reference_executable(&ctx)?;
-    for name in ["ctxterm", "tsh"] {
+    for name in ["ctxterm", "tsh", "cortexfs-object-runner"] {
         let path = root.join("bin").join(name);
         write_reference_text(
             &path,
@@ -153,10 +144,22 @@ fn ensure_reference_agent(
     }
     write_reference_text(
         &root.join("agent").join(name),
-        &reference_agent_stub_script(name),
+        &reference_agent_wrapper_script(name),
     )?;
     set_reference_executable(&root.join("agent").join(name))?;
     ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")))
+}
+
+fn reference_agent_wrapper_script(name: &str) -> String {
+    let runner = REFERENCE_OBJECT_RUNNER;
+    format!(
+        r#"#!/bin/sh
+# CortexFS generated object wrapper.
+# cortexfs.object=agent
+# cortexfs.name={name}
+exec '{runner}' "$0" "$@"
+"#
+    )
 }
 
 fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
@@ -167,6 +170,20 @@ fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
          allow {policy_subject} tool:fs.read execute\n\
          allow {policy_subject} network:default connect\n"
     );
+    if reference_agent_can_write_source(name) {
+        let _ignored = std::fmt::Write::write_fmt(
+            &mut policy,
+            format_args!(
+                "allow {policy_subject} tool:fs.write execute\n\
+                 allow {policy_subject} tool:shell.exec execute\n"
+            ),
+        );
+    } else if name == "executor" {
+        let _ignored = std::fmt::Write::write_fmt(
+            &mut policy,
+            format_args!("allow {policy_subject} tool:shell.exec execute\n"),
+        );
+    }
     for child in reference_agent_children(name) {
         let _ignored = std::fmt::Write::write_fmt(
             &mut policy,
@@ -182,17 +199,18 @@ fn reference_agent_policy(policy_subject: &str, name: &str) -> String {
 }
 
 fn reference_agent_children(name: &str) -> Vec<&'static str> {
-    if name == "base" {
+    if name == "architect" {
         return REFERENCE_AGENTS
             .iter()
-            .filter(|agent| agent.parent == Some("agent:base"))
+            .filter(|agent| agent.parent == Some("agent:architect"))
             .map(|agent| agent.name)
             .collect();
     }
-    if name == "coder" {
-        return vec!["worker"];
-    }
     Vec::new()
+}
+
+fn reference_agent_can_write_source(name: &str) -> bool {
+    name == "coder"
 }
 
 fn reference_agent_model(name: &str) -> &'static str {
@@ -204,29 +222,32 @@ fn reference_agent_model(name: &str) -> &'static str {
 
 fn reference_agent_system_prompt(name: &str) -> String {
     match name {
-        "base" => "\
-You are CortexFS agent `base`.
-Act as the parent coordinator for the reference agent tree.
-Keep orchestration explicit in session files and use child agents for independent work.
-Do not create background schedulers, watchers, or hidden queues.
+        "architect" => "\
+You are CortexFS agent `architect`.
+Your human role name is Architect.
+Act as the parent planner and architecture coordinator for the default agent tree.
+Keep task decomposition explicit in session files; delegate implementation to `coder` and verification to `reviewer`.
+Minimize coordination cost: merge small work, split only when implementation and review responsibilities are genuinely distinct.
+Preserve the CortexFS v1 ABI shape; do not add root namespaces, background schedulers, polling loops, watchers, or hot reload paths.
+Prefer concrete files, command evidence, and current repository state over speculative architecture.
 "
         .to_owned(),
         "coder" => "\
 You are CortexFS agent `coder`.
-You are the parent coding agent, not the default implementation worker.
-For independent implementation work, prefer a delegated `react` node in your session `context/plan.json` with a `child` channel and no `agent` field; the omitted delegated agent is `worker`.
-Agents named `worker`, `worker-*`, `executor`, or `executor-*` are worker-role agents and use the spark worker model when they do not declare an explicit model.
-Treat `worker` and `executor` as shared reusable entries; use `worker-*` or `executor-*` names for dedicated temp workers that may be reaped after terminal results.
-Omit the child `session` field to inherit your current parent session; set it only when a deliberately separate child session is required.
-Use `ctx schedule status` to inspect node state, `ctx schedule advance` to materialize worker handoffs, `ctx schedule claim` when a worker accepts a handoff, `ctx schedule result` to record terminal child results, and `ctx agent wait` to inspect completed child results.
-Pass the schedule output fields `model=`, `life=`, `role=`, `plan=`, `handoff=`, `result=`, and `refs=` to the worker instead of inventing a second coordination surface.
-Keep local work for planning, integration, review of worker output, and small edits that do not justify a child.
+You are the implementation agent in the default Architect -> coder/reviewer flow.
+The default startup surface is a writable project checkout mounted at `/workspace`; use `tsh` to call `fs.read`, `fs.write`, and `shell.exec` for reviewable source changes and verification.
+Use atomic file writes through `fs.write`; use shell commands for real build, test, and git evidence; never invent a result that was not observed.
+Before source edits, inspect `/workspace` rules and `git status --short`; never overwrite, revert, delete, or reformat unrelated user changes.
+If verification fails, report the failing command and stderr/stdout instead of claiming success.
+Keep local work focused on implementation. Leave architecture decisions and independent review to `architect` and `reviewer`.
 Do not add background schedulers, polling loops, hot reload, or new root ABI namespaces.
 "
         .to_owned(),
         "worker" => "\
 You are CortexFS agent `worker`.
 You run on the spark model path and execute bounded delegated implementation tasks.
+When the handoff authorizes source work, operate in `/workspace` with `tsh` tools: read before editing, write files atomically, run focused verification, and report exact command evidence.
+Before editing, inspect authorized rules and `git status --short`; do not overwrite unrelated user changes.
 Worker-role agent names include `worker`, `worker-*`, `executor`, and `executor-*`; they inherit the spark worker model when no explicit model control file is present.
 Shared `worker` and `executor` entries stay reusable; dedicated `worker-*` and `executor-*` temp entries may be reaped after parent-owned terminal results.
 Read only the handoff context and authorized refs you are given.
@@ -238,8 +259,10 @@ Do not create further child agents unless the handoff explicitly grants and requ
         .to_owned(),
         "reviewer" => "\
 You are CortexFS agent `reviewer`.
-Review parent or worker output for correctness, ABI drift, policy violations, and missing tests.
-Return concrete findings first and keep summaries secondary.
+You are the independent review agent in the default Architect -> coder/reviewer flow.
+Review implementation output for correctness, ABI drift, policy violations, missing tests, and unnecessary complexity.
+Return concrete findings first, ordered by severity, with file and command evidence when available.
+Do not edit source unless a later explicit policy grants write authority.
 "
         .to_owned(),
         "executor" => "\
@@ -254,6 +277,10 @@ Report commands, outputs, status, and failures without expanding scope.
     }
 }
 
+#[expect(
+    dead_code,
+    reason = "legacy reference stub retained while object-runner wrapper rollout settles"
+)]
 fn reference_agent_stub_script(name: &str) -> String {
     format!(
         r#"#!/bin/sh
@@ -383,6 +410,7 @@ fn remove_deprecated_reference_placeholder_control_dir(
         )
         .map_err(|_error| ReferenceTreeError::CannotRemove)?;
     }
+    remove_deprecated_reference_placeholder_hook_dir(&control_dir_file)?;
     let Some(parent) = control_dir.parent() else {
         return Err(ReferenceTreeError::CannotRemove);
     };
@@ -393,6 +421,33 @@ fn remove_deprecated_reference_placeholder_control_dir(
         .ok_or(ReferenceTreeError::CannotRemove)?;
     nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::RemoveDir)
         .map_err(|_error| ReferenceTreeError::CannotRemove)
+}
+
+fn remove_deprecated_reference_placeholder_hook_dir(
+    control_dir_file: &fs::File,
+) -> Result<(), ReferenceTreeError> {
+    let Ok(hook_dir_fd) = nix::fcntl::openat(
+        control_dir_file,
+        OBJECT_HOOK_DIR,
+        nix::fcntl::OFlag::O_DIRECTORY
+            | nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    ) else {
+        return Ok(());
+    };
+    let hook_dir = fs::File::from(hook_dir_fd);
+    for phase in OBJECT_HOOK_PHASE_DIRS {
+        nix::unistd::unlinkat(&hook_dir, *phase, nix::unistd::UnlinkatFlags::RemoveDir)
+            .map_err(|_error| ReferenceTreeError::CannotRemove)?;
+    }
+    nix::unistd::unlinkat(
+        control_dir_file,
+        OBJECT_HOOK_DIR,
+        nix::unistd::UnlinkatFlags::RemoveDir,
+    )
+    .map_err(|_error| ReferenceTreeError::CannotRemove)
 }
 
 fn is_deprecated_reference_placeholder_tool(executable: &Path, control_dir: &Path) -> bool {
@@ -408,7 +463,9 @@ fn is_deprecated_reference_placeholder_tool(executable: &Path, control_dir: &Pat
     let Ok(description) = read_reference_tree_small_text(&control_dir.join("description")) else {
         return false;
     };
-    wrapper == executable_wrapper_script("/bin/false")
+    ((wrapper.contains("# CortexFS generated object wrapper.\n")
+        && wrapper.contains("exec '/bin/false' \"$0\" \"$@\"\n"))
+        || wrapper == "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n")
         && description.trim_end_matches('\n') == "CortexFS reference-tree tool"
         && deprecated_placeholder_tool_control_dir_is_exact(control_dir)
 }
@@ -427,6 +484,10 @@ fn deprecated_placeholder_tool_control_dir_is_exact(control_dir: &Path) -> bool 
             return false;
         };
         if !TOOL_CONTROL_FILES.contains(&file_name) {
+            if file_name == OBJECT_HOOK_DIR && deprecated_placeholder_hook_dir_is_exact(control_dir)
+            {
+                continue;
+            }
             return false;
         }
         let Ok(stat) = nix::sys::stat::fstatat(
@@ -442,6 +503,46 @@ fn deprecated_placeholder_tool_control_dir_is_exact(control_dir: &Path) -> bool 
         seen.push(file_name.to_owned());
     }
     TOOL_CONTROL_FILES
+        .iter()
+        .all(|required| seen.iter().any(|file| file == required))
+}
+
+fn deprecated_placeholder_hook_dir_is_exact(control_dir: &Path) -> bool {
+    let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
+    if !hook_dir
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+    {
+        return false;
+    }
+    let Ok(hook_dir_file) = open_reference_dir(&hook_dir) else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(reference_tree_proc_fd_path(&hook_dir_file)) else {
+        return false;
+    };
+    let mut seen = Vec::new();
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            return false;
+        };
+        if !OBJECT_HOOK_PHASE_DIRS.contains(&file_name) {
+            return false;
+        }
+        let Ok(stat) = nix::sys::stat::fstatat(
+            &hook_dir_file,
+            file_name,
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        ) else {
+            return false;
+        };
+        if stat.st_mode & libc::S_IFMT != libc::S_IFDIR {
+            return false;
+        }
+        seen.push(file_name.to_owned());
+    }
+    OBJECT_HOOK_PHASE_DIRS
         .iter()
         .all(|required| seen.iter().any(|file| file == required))
 }

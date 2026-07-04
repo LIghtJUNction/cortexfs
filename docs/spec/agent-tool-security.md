@@ -62,6 +62,9 @@ agent policy decides whether execution is allowed
     pid
     log
     meta.json
+    hooks/
+      pre.d/
+      post.d/
 ```
 
 Control files:

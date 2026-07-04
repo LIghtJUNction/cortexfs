@@ -129,6 +129,7 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
     let root = clean_test_dir("ctx-schedule-advance-coder-worker");
     let ensured = ensure_v1_reference_tree(&root);
     assert!(ensured.is_ok());
+    enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
         &root,
@@ -309,6 +310,7 @@ fn schedule_result_rejects_invalid_backing_parent_without_recording() {
 fn schedule_status_reaps_active_child_when_worker_pid_is_stale() {
     let root = clean_test_dir("ctx-schedule-status-reaps-stale-worker");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
         &root,
@@ -344,6 +346,7 @@ fn schedule_status_reaps_active_child_when_worker_pid_is_stale() {
 fn schedule_handoff_agent_model_rejects_invalid_model_reference() {
     let root = clean_test_dir("ctx-schedule-invalid-worker-model");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/model"), "../bad\n");
 
     assert!(matches!(
@@ -358,6 +361,7 @@ fn schedule_handoff_agent_model_rejects_invalid_model_reference() {
 fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
     let root = clean_test_dir("ctx-schedule-missing-worker-model");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    enable_dynamic_worker_fixture(&root);
     assert!(fs::remove_file(root.join("agent/worker.d/model")).is_ok());
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
 
@@ -375,6 +379,7 @@ fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
 fn schedule_handoff_agent_rejects_invalid_lifecycle() {
     let root = clean_test_dir("ctx-schedule-handoff-invalid-life");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/life"), "detached\n");
 
     assert!(matches!(
@@ -389,6 +394,7 @@ fn schedule_handoff_agent_rejects_invalid_lifecycle() {
 fn schedule_handoff_agent_rejects_invalid_parent_ref() {
     let root = clean_test_dir("ctx-schedule-handoff-invalid-parent");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/parent"), "session:default\n");
 
     assert!(matches!(

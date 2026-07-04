@@ -1,4 +1,7 @@
-use super::{runtime_agent_executable, runtime_model, RuntimeConfig, DEFAULT_SOURCE};
+use super::{
+    provider_secret_required_for_model, runtime_agent_executable, runtime_model, RuntimeConfig,
+    DEFAULT_SOURCE,
+};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -40,6 +43,72 @@ fn runtime_agent_executable_uses_ctx_abi_path() {
         runtime_agent_executable(Path::new("/ctx"), "coder"),
         PathBuf::from("/ctx/agent/coder")
     );
+}
+
+#[test]
+fn runtime_does_not_require_provider_secret_for_debug_models() {
+    let root = std::env::temp_dir();
+    assert!(!provider_secret_required_for_model(&root, "debug/echo"));
+    assert!(!provider_secret_required_for_model(&root, "debug/selfedit"));
+}
+
+#[test]
+fn runtime_requires_provider_secret_for_non_debug_models() {
+    let root = std::env::temp_dir();
+    assert!(provider_secret_required_for_model(&root, "openai/gpt-5.5"));
+    assert!(provider_secret_required_for_model(
+        &root,
+        "api.lmm.best/gpt-5.3-codex-spark"
+    ));
+    assert!(provider_secret_required_for_model(&root, "main"));
+}
+
+#[test]
+fn runtime_does_not_require_provider_secret_for_local_model_drivers(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::env::temp_dir().join(format!(
+        "cortexfs-runtime-local-model-driver-{}",
+        std::process::id()
+    ));
+    let control = root.join("model/smoke/fuse-selfedit.d");
+    let _ignored = fs::remove_dir_all(&root);
+    fs::create_dir_all(&control)?;
+
+    fs::write(control.join("driver"), "shell\n")?;
+    assert!(!provider_secret_required_for_model(
+        &root,
+        "smoke/fuse-selfedit"
+    ));
+
+    fs::write(control.join("driver"), "agent=debug,shell\n")?;
+    assert!(!provider_secret_required_for_model(
+        &root,
+        "smoke/fuse-selfedit"
+    ));
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn runtime_requires_provider_secret_for_provider_model_drivers(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::env::temp_dir().join(format!(
+        "cortexfs-runtime-provider-model-driver-{}",
+        std::process::id()
+    ));
+    let control = root.join("model/openai/gpt-5.5.d");
+    let _ignored = fs::remove_dir_all(&root);
+    fs::create_dir_all(&control)?;
+
+    fs::write(control.join("driver"), "agent=openai-responses,openai-chat\n")?;
+    assert!(provider_secret_required_for_model(&root, "openai/gpt-5.5"));
+
+    fs::write(control.join("driver"), "# empty\n\n")?;
+    assert!(provider_secret_required_for_model(&root, "openai/gpt-5.5"));
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
 }
 
 #[test]

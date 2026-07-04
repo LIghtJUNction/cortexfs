@@ -11,7 +11,8 @@ use super::{
     format_shared_queue_layout_issues, format_tool_schema_issues, format_debug_tool_line,
     json_string, list_names, newline_terminated, parse, parse_command, absolute_existing_path,
     ctx_home,
-    agent_bwrap_args, agent_host_mount_source, agent_native_tool_names, agent_new,
+    agent_bwrap_args, agent_chat_runtime_socket, agent_chat_socket_systemd_command,
+    agent_chat_unit, agent_host_mount_source, agent_native_tool_names, agent_new,
     agent_new_request_json, agent_send_request_json,
     agent_repl_model_summary, agent_repl_prompt, agent_repl_editor_config,
     agent_repl_unknown_command_line,
@@ -54,7 +55,8 @@ use super::{
 };
 use cortexfs::{
     AGENT_CONTROL_FILES,
-    derive_agent_runtime_view, ensure_v1_reference_tree, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,
+    DEFAULT_WORKER_MODEL, derive_agent_runtime_view, ensure_v1_reference_tree,
+    install_executable_object_wrapper, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,
     AgentScheduleIssue,
     ContextJsonlIssue, ContextJsonlKind, ContextPackIssue, ContextPackSourceError, EventStreamIssue,
     MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError, ObjectLayoutIssue,

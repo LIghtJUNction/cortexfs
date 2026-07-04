@@ -23,6 +23,29 @@ fn tool_call_text_parses_tsh_argv() {
 }
 
 #[test]
+fn model_event_frame_without_run_is_normalized_for_socket_runtime() {
+    let frame = normalize_agent_model_frame(
+        r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
+        "run-1",
+    );
+
+    assert!(frame.contains(r#""run":"run-1""#), "{frame}");
+    assert!(frame.contains(r#""type":"tool_call""#), "{frame}");
+}
+
+#[test]
+fn model_event_frame_with_run_is_left_unchanged() {
+    let frame = r#"{"type":"tool_call","run":"existing","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#;
+
+    assert_eq!(normalize_agent_model_frame(frame, "run-1"), frame);
+}
+
+#[test]
+fn non_json_model_frame_is_left_unchanged() {
+    assert_eq!(normalize_agent_model_frame("plain text", "run-1"), "plain text");
+}
+
+#[test]
 fn tool_call_text_parses_json_prefix_before_prose() {
     let call = tool_call_from_text(
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["fs.read","tmp/agent_edit_smoke.txt"]}}我没有拿到 `tsh` 工具执行结果。"#,
@@ -101,6 +124,9 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     assert!(contract.contains("output exactly one JSON object line and no prose"));
     assert!(contract.contains(r#""name":"tsh""#));
     assert!(contract.contains("If no concrete file path is provided"));
+    assert!(contract.contains("git status --short"));
+    assert!(contract.contains("Never overwrite, revert, delete, or reformat unrelated user changes"));
+    assert!(contract.contains("If verification fails"));
 }
 
 #[test]

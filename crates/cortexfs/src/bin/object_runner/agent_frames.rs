@@ -2,10 +2,10 @@ fn normalize_agent_model_frame(frame: &str, run: &str) -> String {
     let Ok(mut value) = serde_json::from_str::<Value>(frame) else {
         return frame.to_owned();
     };
-    if value.get("type").and_then(Value::as_str) == Some("error")
-        && value.get("run").is_none()
-        && let Some(object) = value.as_object_mut()
-    {
+    if value.get("type").and_then(Value::as_str).is_some() && value.get("run").is_none() {
+        let Some(object) = value.as_object_mut() else {
+            return frame.to_owned();
+        };
         object.insert("run".to_owned(), Value::String(run.to_owned()));
         return value.to_string();
     }

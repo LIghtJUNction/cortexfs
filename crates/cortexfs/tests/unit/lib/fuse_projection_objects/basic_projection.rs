@@ -18,6 +18,155 @@ fn fuse_v1_projection_root_is_traversable_when_backing_root_is_private() {
 }
 
 #[test]
+fn fuse_v1_projection_allows_durable_session_record_writes() {
+    let root = reference_tree("fuse-v1-session-record-writes");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let session = "home/1234/agent/coder/session/fuse";
+    let index = "home/1234/agent/coder/session/index";
+    let session_dir = root.join(session);
+    let index_dir = root.join(index);
+    assert!(fs::create_dir_all(&session_dir).is_ok());
+    assert!(fs::create_dir_all(index_dir.join("by-cwd")).is_ok());
+    assert!(fs::write(session_dir.join("messages.jsonl"), "").is_ok());
+    assert!(fs::write(session_dir.join("events.jsonl"), "").is_ok());
+    assert!(fs::write(session_dir.join("state"), "idle\n").is_ok());
+    assert!(fs::write(index_dir.join("list"), "").is_ok());
+    assert!(fs::write(index_dir.join("current"), "old\n").is_ok());
+
+    assert!(projection
+        .write_control_file_at(
+            &format!("{session}/messages.jsonl"),
+            0,
+            b"{\"role\":\"user\"}\n",
+        )
+        .is_ok());
+    let message_len = fs::metadata(session_dir.join("messages.jsonl"))
+        .map_or(0, |metadata| metadata.len());
+    assert!(projection
+        .write_control_file_at(
+            &format!("{session}/messages.jsonl"),
+            message_len,
+            b"{\"role\":\"assistant\"}\n",
+        )
+        .is_ok());
+    assert!(projection
+        .write_control_file_at(&format!("{session}/state"), 0, b"active\n")
+        .is_ok());
+    assert!(projection
+        .write_control_file_at(&format!("{index}/current"), 0, b"fuse\n")
+        .is_ok());
+    assert!(projection
+        .write_control_file_at(&format!("{index}/by-cwd/cwd-test"), 0, b"fuse\n")
+        .is_ok());
+
+    assert_eq!(
+        projection.write_control_file_at(&format!("{session}/state"), 1, b"done\n"),
+        Err(FuseV1Error::InvalidOffset)
+    );
+    assert_eq!(
+        projection.write_control_file_at(&format!("{session}/messages.jsonl"), 1, b"bad\n"),
+        Err(FuseV1Error::InvalidOffset)
+    );
+    assert_eq!(
+        projection.write_control_file_at(
+            "home/1234/agent/coder/session/fuse/not-a-session-control",
+            0,
+            b"bad\n",
+        ),
+        Err(FuseV1Error::NotControlFile)
+    );
+
+    assert_eq!(
+        fs::read_to_string(session_dir.join("messages.jsonl")).unwrap_or_default(),
+        "{\"role\":\"user\"}\n{\"role\":\"assistant\"}\n"
+    );
+    assert_eq!(
+        fs::read_to_string(session_dir.join("state")).unwrap_or_default(),
+        "active\n"
+    );
+    assert_eq!(
+        fs::read_to_string(index_dir.join("current")).unwrap_or_default(),
+        "fuse\n"
+    );
+}
+
+#[test]
+fn fuse_v1_projection_allows_durable_session_layout_creation() {
+    let root = reference_tree("fuse-v1-session-layout-create");
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let session = "home/1000/agent/coder/session/fuse";
+
+    for dir in [
+        session,
+        &format!("{session}/context"),
+        &format!("{session}/context/pinned"),
+        &format!("{session}/context/swap"),
+        &format!("{session}/context/swap/chunk"),
+        &format!("{session}/context/dedup"),
+        &format!("{session}/context/dedup/blob"),
+        &format!("{session}/context/child"),
+        "home/1000/agent/coder/session/index",
+        "home/1000/agent/coder/session/index/by-cwd",
+        "home/1000/agent/coder/session/index/by-hash",
+        "home/1000/agent/coder/session/index/by-uuid",
+    ] {
+        assert_eq!(projection.create_session_layout_dir(dir), Ok(()));
+    }
+
+    for file in [
+        &format!("{session}/messages.jsonl"),
+        &format!("{session}/events.jsonl"),
+        &format!("{session}/latest.md"),
+        &format!("{session}/state"),
+        &format!("{session}/cwd"),
+        &format!("{session}/created_at"),
+        &format!("{session}/updated_at"),
+        &format!("{session}/meta.json"),
+        &format!("{session}/context/budget"),
+        &format!("{session}/context/pack.json"),
+        &format!("{session}/context/pack.md"),
+        &format!("{session}/context/summary.md"),
+        &format!("{session}/context/facts.jsonl"),
+        &format!("{session}/context/decisions.jsonl"),
+        &format!("{session}/context/todo.md"),
+        &format!("{session}/context/refs.jsonl"),
+        &format!("{session}/context/swap/index.jsonl"),
+        &format!("{session}/context/dedup/index.jsonl"),
+        "home/1000/agent/coder/session/index/list",
+        "home/1000/agent/coder/session/index/current",
+        "home/1000/agent/coder/session/index/by-cwd/workspace",
+    ] {
+        assert_eq!(projection.create_session_layout_file(file), Ok(()));
+    }
+
+    assert!(root.join(session).join("messages.jsonl").is_file());
+    assert!(root.join(session).join("context/swap/chunk").is_dir());
+    assert_eq!(projection.set_session_layout_mode(session, 0o700), Ok(()));
+    assert_eq!(
+        projection.set_session_layout_mode(&format!("{session}/messages.jsonl"), 0o600),
+        Ok(())
+    );
+    assert!(matches!(
+        fs::metadata(root.join(session)).map(|metadata| metadata.permissions().mode() & 0o777),
+        Ok(0o700)
+    ));
+    assert!(matches!(
+        fs::metadata(root.join(session).join("messages.jsonl"))
+            .map(|metadata| metadata.permissions().mode() & 0o777),
+        Ok(0o600)
+    ));
+    assert_eq!(
+        projection.create_session_layout_dir("home/1000/tool/not-session"),
+        Err(FuseV1Error::NotControlFile)
+    );
+    assert_eq!(
+        projection.create_session_layout_file("home/1000/agent/coder/session/fuse/bad"),
+        Err(FuseV1Error::NotControlFile)
+    );
+}
+
+#[test]
 fn fuse_v1_paths_reject_control_characters() {
     let root = Path::new("/ctx");
 
@@ -347,5 +496,30 @@ fn fuse_v1_projection_write_control_file_at_enforces_whole_text_control_writes()
     assert!(matches!(
         projection.read_to_string("agent/coder.d/label"),
         Ok(ref content) if content == "worker"
+    ));
+}
+
+#[test]
+fn fuse_v1_projection_allows_agent_log_append_at_file_end_only() {
+    let root = reference_tree("fuse-v1-agent-log-append");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let log = root.join("agent").join("coder.d").join("log");
+    let offset = fs::metadata(&log).map_or(0, |metadata| metadata.len());
+
+    assert!(projection
+        .write_control_file_at("agent/coder.d/log", offset, b"{\"type\":\"agent.start\"}\n")
+        .is_ok());
+    assert_eq!(
+        projection.write_control_file_at("agent/coder.d/log", offset, b"stale\n"),
+        Err(FuseV1Error::InvalidOffset)
+    );
+    assert_eq!(
+        projection.write_control_file_at("agent/coder.d/status", 1, b"ready\n"),
+        Err(FuseV1Error::InvalidOffset)
+    );
+    assert!(matches!(
+        projection.read_to_string("agent/coder.d/log"),
+        Ok(ref content) if content.contains("\"type\":\"agent.start\"")
     ));
 }

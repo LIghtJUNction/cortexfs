@@ -10,6 +10,7 @@ fn agent_model_process_gets_clean_runtime_environment() -> Result<(), Box<dyn st
             .env("CTX_PROVIDER_SECRET_PROVIDER", "fixture")
             .env("CTX_PROVIDER_SECRET_SLOT", "default")
             .env("CTX_PROVIDER_SECRET_PATH", "/tmp/runtime-secret")
+            .env("CTX_PROVIDER_CONFIG_DIR", "/tmp/providers.d")
             .output()?;
         assert!(
             output.status.success(),
@@ -35,8 +36,12 @@ if [ "$PATH" != "/usr/bin:/bin" ]; then
   exit 2
 fi
 if [ "$CTX_PROVIDER_SECRET_PROVIDER" != "fixture" ] || [ "$CTX_PROVIDER_SECRET_SLOT" != "default" ] || [ "$CTX_PROVIDER_SECRET_PATH" != "/tmp/runtime-secret" ]; then
-  printf '{"type":"error","run":"%s","code":"EIO","message":"missing runtime provider secret env"}\n' "$CTX_RUN_ID"
-  exit 2
+    printf '{"type":"error","run":"%s","code":"EIO","message":"missing runtime provider secret env"}\n' "$CTX_RUN_ID"
+    exit 2
+fi
+if [ "$CTX_PROVIDER_CONFIG_DIR" != "/tmp/providers.d" ]; then
+    printf '{"type":"error","run":"%s","code":"EIO","message":"missing provider config env"}\n' "$CTX_RUN_ID"
+    exit 2
 fi
 if [ "$CTX_AGENT_HISTORY_MESSAGES" != "previous message" ]; then
   printf '{"type":"error","run":"%s","code":"EIO","message":"missing history env"}\n' "$CTX_RUN_ID"

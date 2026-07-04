@@ -68,7 +68,31 @@ impl FuseV1Projection {
                 FuseV1DirEntry::new(format!("{DEBUG_ECHO_NAME}.d"), FuseV1FileType::Directory),
             ],
             "model/debug/echo.d" => model_control_dir_entries(),
+            "model/debug/echo.d/hooks" => model_control_hook_dir_entries(),
+            "model/debug/echo.d/hooks/pre.d" | "model/debug/echo.d/hooks/post.d" => Vec::new(),
             _ => {
+                if let Some(model_control_dir) = abi_path.strip_suffix("/hooks")
+                    && projected_provider_model_control_dir(
+                        &self.provider_config_dir,
+                        &self.provider_model_cache_dir,
+                        model_control_dir,
+                    )?
+                    .is_some()
+                {
+                    return Ok(Some(model_control_hook_dir_entries()));
+                }
+                if let Some(model_control_dir) = abi_path
+                    .strip_suffix("/hooks/pre.d")
+                    .or_else(|| abi_path.strip_suffix("/hooks/post.d"))
+                    && projected_provider_model_control_dir(
+                        &self.provider_config_dir,
+                        &self.provider_model_cache_dir,
+                        model_control_dir,
+                    )?
+                    .is_some()
+                {
+                    return Ok(Some(Vec::new()));
+                }
                 if let Some(model) =
                     projected_provider_model_control_dir(
                         &self.provider_config_dir,
@@ -196,7 +220,11 @@ impl FuseV1Projection {
                 .map_err(|_error| FuseV1Error::Io)?,
                 0o777,
             ))),
-            "model/debug" | "model/debug/echo.d" => {
+            "model/debug"
+            | "model/debug/echo.d"
+            | "model/debug/echo.d/hooks"
+            | "model/debug/echo.d/hooks/pre.d"
+            | "model/debug/echo.d/hooks/post.d" => {
                 Ok(Some((FuseV1FileType::Directory, 0, 0o755)))
             }
             "model/debug/echo" => virtual_regular_entry(&debug_echo_model_metadata(), 0o555),
@@ -207,18 +235,40 @@ impl FuseV1Projection {
                     };
                     return virtual_regular_entry(&content, 0o644);
                 }
-                if projected_provider_models_for_provider_path(
+            if projected_provider_models_for_provider_path(
+                &self.provider_config_dir,
+                &self.provider_model_cache_dir,
+                path,
+            )?
+            .is_some()
+            {
+                return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
+            }
+            if let Some(model_control_dir) = path.strip_suffix("/hooks")
+                && projected_provider_model_control_dir(
                     &self.provider_config_dir,
                     &self.provider_model_cache_dir,
-                    path,
+                    model_control_dir,
                 )?
                 .is_some()
-                {
-                    return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
-                }
-                if let Some(model) = projected_provider_model_for_exec(
+            {
+                return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
+            }
+            if let Some(model_control_dir) = path
+                .strip_suffix("/hooks/pre.d")
+                .or_else(|| path.strip_suffix("/hooks/post.d"))
+                && projected_provider_model_control_dir(
                     &self.provider_config_dir,
                     &self.provider_model_cache_dir,
+                    model_control_dir,
+                )?
+                .is_some()
+            {
+                return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
+            }
+            if let Some(model) = projected_provider_model_for_exec(
+                &self.provider_config_dir,
+                &self.provider_model_cache_dir,
                     path,
                 )?
                 {

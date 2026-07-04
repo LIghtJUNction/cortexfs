@@ -8,6 +8,7 @@ fn agent_stop_host_fallback(root: &Path, name: &str) -> Result<ExitCode, CliErro
 }
 
 fn stop_agent_terminal_units(root: &Path, name: &str) -> Result<(), CliError> {
+    reset_agent_chat_unit(&agent_chat_unit(root, name));
     for unit in agent_terminal_units(root, name)? {
         reset_agent_terminal_unit(&unit);
     }

@@ -1,5 +1,8 @@
 fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
-    provider_config_from_dir(Path::new(RUNNER_PROVIDER_CONFIG_DIR), provider)
+    let config_dir = env::var_os("CTX_PROVIDER_CONFIG_DIR")
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| PathBuf::from(RUNNER_PROVIDER_CONFIG_DIR), PathBuf::from);
+    provider_config_from_dir(&config_dir, provider)
 }
 
 fn provider_config_from_dir(config_dir: &Path, provider: &str) -> Option<RunnerProviderConfig> {

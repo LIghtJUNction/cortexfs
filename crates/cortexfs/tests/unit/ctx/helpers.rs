@@ -2,8 +2,9 @@ fn unique_test_dir(name: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
+    let short_name = name.chars().take(24).collect::<String>();
     std::env::temp_dir().join(format!(
-        "cortexfs-ctx-{name}-{}-{nanos}",
+        "cortexfs-ctx-{short_name}-{}-{nanos}",
         std::process::id()
     ))
 }
@@ -211,6 +212,52 @@ fn create_complete_agent_control(root: &Path, name: &str) {
             &format!("{}\n", complete_agent_control_value(file, name)),
         );
     }
+}
+
+fn enable_dynamic_worker_fixture(root: &Path) {
+    let installed = install_executable_object_wrapper(
+        root,
+        ObjectClass::Agent,
+        "worker",
+        "/bin/false",
+        &[
+            ("owner", "1000"),
+            ("uid", "1000"),
+            ("gid", "1000"),
+            ("groups", "1000"),
+            ("label", "user_u:agent_r:worker_t:s0"),
+            ("iso", "shared"),
+            ("parent", "agent:coder"),
+            ("life", "temp"),
+            ("root", "/ctx/home/1000/agent/worker/root"),
+            ("cwd", "/workspace"),
+            ("env", "CTX_ROOT=/ctx"),
+            ("path", "/ctx/tool:/ctx/home/1000/tool"),
+            (
+                "mount",
+                "/ctx\t/ctx\tro\trbind,nosuid,nodev\n/ctx/home/1000/agent/worker\t/home/agent\trw\trbind,nosuid,nodev\n",
+            ),
+            ("model", DEFAULT_WORKER_MODEL),
+            ("system.md", "You are CortexFS agent `worker`."),
+            ("prompt.template.md", "{{agent_instructions}}\n"),
+            (
+                "policy",
+                "allow worker_t model:api.lmm.best/gpt-5.3-codex-spark use\nallow worker_t tool:tsh execute\nallow worker_t tool:fs.read execute\nallow worker_t tool:fs.write execute\nallow worker_t tool:shell.exec execute\n",
+            ),
+            ("status", "idle"),
+            ("pid", ""),
+            ("log", ""),
+            ("meta.json", "{}"),
+        ],
+    );
+    assert!(installed.is_ok(), "{installed:?}");
+
+    let coder_policy = root.join("agent/coder.d/policy");
+    let mut policy = fs::read_to_string(&coder_policy).unwrap_or_default();
+    policy.push_str(
+        "allow coder_t agent:worker create\nallow coder_t agent:worker start\nallow coder_t agent:worker stop\nallow coder_t agent:worker read\n",
+    );
+    write_text_file(&coder_policy, &policy);
 }
 
 fn complete_agent_control_value(file: &str, name: &str) -> String {

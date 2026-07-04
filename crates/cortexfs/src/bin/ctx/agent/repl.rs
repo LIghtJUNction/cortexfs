@@ -3,11 +3,20 @@ fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(),
     let model_summary = agent_repl_model_summary(color, root, name)?;
     let lines = [
         format!(
-            "{} {}/{} - {}",
+            "{} ctx agent {}/{} - {}",
             styled(color, ANSI_BOLD_CYAN, "●"),
             styled(color, ANSI_BOLD_CYAN, name),
             styled(color, ANSI_CYAN, session),
-            styled(color, ANSI_CYAN, "CortexFS agent chat")
+            styled(color, ANSI_CYAN, "chat shell")
+        ),
+        format!(
+            "    {} {}",
+            styled(color, ANSI_BOLD_BLUE, "Mode:"),
+            styled(
+                color,
+                ANSI_DIM,
+                "messages go to the agent; tools run inside tsh"
+            )
         ),
         format!(
             "    {} {}",
@@ -29,7 +38,8 @@ fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(),
 
 fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
     format!(
-        "{}{} ",
+        "{} {}{} ",
+        styled(color, ANSI_DIM, "ctx agent"),
         styled(color, ANSI_BOLD_CYAN, &format!("{name}/{session}")),
         styled(color, ANSI_GREEN, " ❯")
     )
@@ -139,6 +149,10 @@ fn agent_repl_command(
     debug: &mut AgentDebugState,
 ) -> Result<Option<ExitCode>, CliError> {
     let code = match line {
+        "/help" => {
+            print_agent_repl_banner(root, name, session)?;
+            ExitCode::SUCCESS
+        }
         "/resume" => agent_resume(root, name, Some(session), raw)?,
         "/history" => {
             history(root, name, Some(session))?;

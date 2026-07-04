@@ -2,11 +2,13 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::fs::OpenOptions;
+use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::Shutdown;
 use std::os::fd::{AsFd, AsRawFd};
