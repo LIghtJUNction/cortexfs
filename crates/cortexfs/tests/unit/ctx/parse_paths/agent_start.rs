@@ -495,6 +495,7 @@ fn agent_start_status_lines_follow_systemctl_shape() {
         "cortexfs-agent-coder-default-terminal",
         Some("abc123"),
         "/workspace",
+        Some("/repo"),
         Path::new("/ctx/home/1000/agent/coder/session/default/terminal/main.sock"),
         Path::new("/run/user/1000/cortexfs/terminal/coder/default/main.sock"),
         "1000",
@@ -506,6 +507,7 @@ fn agent_start_status_lines_follow_systemctl_shape() {
         "     Active: active (running)", " Invocation: abc123", "      Agent: coder",
         "      Model: main", "       Life: owned", "       Role: agent", "     UID: 1000",
         "     GID: 100", "     Groups: 10 20", "    Session: default", "        CWD: /workspace",
+        "  Workspace: /repo",
         "     Socket: /ctx/home/1000/agent/coder/session/default/terminal/main.sock",
         " Runtime Socket: /run/user/1000/cortexfs/terminal/coder/default/main.sock",
     ];
