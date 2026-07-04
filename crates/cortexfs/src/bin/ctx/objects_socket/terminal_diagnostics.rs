@@ -1,9 +1,10 @@
 fn waiting_diagnostic(seconds: u64) -> String {
     let color = color_enabled();
     format!(
-        "{} {}",
-        styled(color, ANSI_DIM, "waiting"),
-        styled(color, ANSI_CYAN, &format!("{seconds}s for agent event"))
+        "{} {} {}",
+        styled(color, ANSI_DIM, "agent"),
+        styled(color, ANSI_CYAN, &format!("waiting {seconds}s")),
+        styled(color, ANSI_DIM, "for first event...")
     )
 }
 
@@ -149,6 +150,24 @@ fn write_terminal_error(line: &str) -> Result<(), CliError> {
 
 fn write_terminal_diagnostic(line: &str) -> Result<(), CliError> {
     write_error(line).map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
+}
+
+fn write_terminal_status(line: &str) -> Result<(), CliError> {
+    let line = terminal_safe_text(line);
+    let mut stderr = io::stderr().lock();
+    stderr
+        .write_all(b"\r\x1b[2K")
+        .and_then(|()| stderr.write_all(line.as_bytes()))
+        .and_then(|()| stderr.flush())
+        .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
+}
+
+fn clear_terminal_status() -> Result<(), CliError> {
+    let mut stderr = io::stderr().lock();
+    stderr
+        .write_all(b"\r\x1b[2K")
+        .and_then(|()| stderr.flush())
+        .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
 }
 
 fn terminal_safe_text(text: &str) -> String {

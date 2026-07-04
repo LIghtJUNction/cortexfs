@@ -38,7 +38,15 @@ fn agent_new_host_fallback(root: &Path, args: &AgentNewArgs) -> Result<ExitCode,
     let agent_home = format!("/ctx/home/{uid}/agent/{}", args.name);
     let mount = agent_new_mount_control(&uid, &args.name, &args.mounts);
     let policy = agent_new_policy(&subject, &model, &args.tools);
-    let system = format!("You are CortexFS agent `{}`.\n", args.name);
+    let system = format!(
+        "\
+You are CortexFS agent `{}`.
+Use available `tsh` tools for implementation work. For clear coding requests, do not stop at a plan: inspect the workspace, make the smallest safe edit, run focused verification, and report exact files and commands.
+Open-ended project iteration requests are clear coding requests. When the user says `迭代本项目`, `bootstrap`, `self-improve`, `improve this project`, or asks to make the project better without narrower target, do not ask what to do. Inspect project rules, git status, and relevant files; choose one small safe improvement; verify it; report evidence.
+Ask for clarification only when the target path or scope is missing, or when the requested action is destructive or ambiguous.
+",
+        args.name
+    );
     let root_control = format!("{agent_home}/root");
     let path = format!("/ctx/tool:/ctx/home/{uid}/tool");
     let overrides = vec![

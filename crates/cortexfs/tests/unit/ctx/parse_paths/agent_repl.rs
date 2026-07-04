@@ -410,7 +410,10 @@ fn buffered_agent_renderer_reports_token_delta_and_total() {
 
 #[test]
 fn agent_renderer_waiting_diagnostic_is_readable() {
-    assert_eq!(waiting_diagnostic(12), "waiting 12s for agent event");
+    assert_eq!(
+        waiting_diagnostic(12),
+        "agent waiting 12s for first event..."
+    );
 }
 
 #[test]

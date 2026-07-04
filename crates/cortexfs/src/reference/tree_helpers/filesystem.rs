@@ -199,6 +199,12 @@ fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
                         ReferenceTreeError::CannotSocket(std::io::Error::from(error).kind())
                     })?;
                 }
+                Ok(target)
+                    if nix::sys::stat::SFlag::from_bits_truncate(target.st_mode)
+                        .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
+                {
+                    return Ok(());
+                }
                 Ok(_target) => {
                     return Err(ReferenceTreeError::CannotSocket(
                         std::io::ErrorKind::AlreadyExists,

@@ -31,6 +31,7 @@ fn render_agent_event_lines(
     let mut exit = ExitCode::SUCCESS;
     let mut quiet_since = std::time::Instant::now();
     let mut next_waiting_notice = Duration::from_secs(3);
+    let mut waiting_status_active = false;
     let mut response_bytes: usize = 0;
     let mut events: usize = 0;
     let mut line = String::new();
@@ -56,24 +57,24 @@ fn render_agent_event_lines(
                 ) =>
             {
                 if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
-                    return Ok(AgentEventRender {
-                        exit_code: exit_code_u8(exit),
-                        interrupted: true,
-                    });
+                    clear_waiting_status_if_active(&mut waiting_status_active)?;
+                    return Ok(AgentEventRender { exit_code: exit_code_u8(exit), interrupted: true });
                 }
-                let elapsed = quiet_since.elapsed();
-                if elapsed >= next_waiting_notice {
-                    write_terminal_diagnostic(&waiting_diagnostic(elapsed.as_secs()))?;
-                    next_waiting_notice += Duration::from_secs(3);
-                }
+                update_waiting_status(
+                    quiet_since.elapsed(),
+                    &mut next_waiting_notice,
+                    &mut waiting_status_active,
+                )?;
                 continue;
             }
             Err(error) => {
+                clear_waiting_status_if_active(&mut waiting_status_active)?;
                 return Err(CliError::unavailable(format!(
                     "cannot read socket response: {error}"
                 )));
             }
         }
+        clear_waiting_status_if_active(&mut waiting_status_active)?;
         quiet_since = std::time::Instant::now();
         next_waiting_notice = Duration::from_secs(3);
         events += 1;
@@ -145,6 +146,28 @@ fn render_agent_event_lines(
         exit_code: exit_code_u8(exit),
         interrupted: false,
     })
+}
+
+fn clear_waiting_status_if_active(active: &mut bool) -> Result<(), CliError> {
+    if *active {
+        clear_terminal_status()?;
+        *active = false;
+    }
+    Ok(())
+}
+
+fn update_waiting_status(
+    elapsed: Duration,
+    next_notice: &mut Duration,
+    active: &mut bool,
+) -> Result<(), CliError> {
+    if elapsed < *next_notice {
+        return Ok(());
+    }
+    write_terminal_status(&waiting_diagnostic(elapsed.as_secs()))?;
+    *active = true;
+    *next_notice += Duration::from_secs(3);
+    Ok(())
 }
 
 fn read_agent_socket_event_line_limited(
