@@ -5,6 +5,45 @@ fn provider_config(provider: &str) -> Option<RunnerProviderConfig> {
     provider_config_from_dir(&config_dir, provider)
 }
 
+fn provider_config_from_model_control(
+    ctx_root: &Path,
+    provider: &str,
+    model: &str,
+) -> Option<RunnerProviderConfig> {
+    let control = ctx_root.join("model").join(provider).join(format!("{model}.d"));
+    let default = read_small_plain_text_file(&control.join("default")).ok()?;
+    let base_url = model_default_base_url(&default)?;
+    let driver = read_small_plain_text_file(&control.join("driver")).unwrap_or_default();
+    Some(RunnerProviderConfig {
+        name: Some(provider.to_owned()),
+        base_url,
+        oauth: None,
+        formats: model_driver_formats(&driver),
+    })
+}
+
+fn model_default_base_url(content: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let line = line.split_once('#').map_or(line, |(value, _comment)| value).trim();
+        let value = line.strip_prefix("base_url=")?.trim();
+        (!value.is_empty()).then_some(value.to_owned())
+    })
+}
+
+fn model_driver_formats(content: &str) -> Vec<String> {
+    let mut formats = Vec::new();
+    if content.contains("openai.chat") || content.contains("openai-chat") {
+        formats.push("openai.chat".to_owned());
+    }
+    if content.contains("openai.responses") || content.contains("openai-responses") {
+        formats.push("openai.responses".to_owned());
+    }
+    if formats.is_empty() {
+        formats.push("openai.chat".to_owned());
+    }
+    formats
+}
+
 fn provider_config_from_dir(config_dir: &Path, provider: &str) -> Option<RunnerProviderConfig> {
     let directory = open_runner_provider_config_dir(config_dir).ok()?;
     let entries = fs::read_dir(runner_provider_proc_fd_path(&directory)).ok()?;
@@ -98,4 +137,30 @@ fn open_runner_provider_config_dir_leaf(path: &Path) -> io::Result<fs::File> {
         ));
     }
     Ok(directory)
+}
+
+#[cfg(test)]
+mod runner_provider_config_tests {
+    use super::*;
+
+    #[test]
+    fn provider_config_can_fall_back_to_model_control_files(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/api.test/gpt-5.4-mini.d");
+        fs::create_dir_all(&control)?;
+        fs::write(control.join("default"), "base_url=https://api.test/v1\n")?;
+        fs::write(
+            control.join("driver"),
+            "default=openai-chat\nagent=openai-responses,openai-chat\n",
+        )?;
+
+        let config = provider_config_from_model_control(root.path(), "api.test", "gpt-5.4-mini")
+            .ok_or_else(|| io::Error::other("missing fallback provider config"))?;
+
+        assert_eq!(config.name.as_deref(), Some("api.test"));
+        assert_eq!(config.base_url, "https://api.test/v1");
+        assert_eq!(config.formats, ["openai.chat", "openai.responses"]);
+        Ok(())
+    }
 }
