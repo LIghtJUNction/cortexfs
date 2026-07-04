@@ -89,10 +89,9 @@ fn shell_exec_command_uses_clean_runtime_environment() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(
-        envs,
-        vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
-    );
+    assert_eq!(envs.len(), 2);
+    assert!(envs.contains(&("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))));
+    assert!(envs.contains(&("GIT_OPTIONAL_LOCKS".to_owned(), Some("0".to_owned()))));
 }
 
 #[test]
