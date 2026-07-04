@@ -111,6 +111,10 @@ EOF
         grep -Fq "exec '/ctx/bin/cortexfs-object-runner' \"\$0\" \"\$@\"" "$root/tool/$tool"
     done
     grep -Fq 'exec /ctx/bin/tsh "$@"' "$root/tool/tsh"
+    grep -Fq 'writable project checkout mounted at `/workspace`' "$root/agent/coder.d/system.md"
+    grep -Fq 'fs.replace' "$root/agent/coder.d/system.md"
+    grep -Fq 'git status --short' "$root/agent/coder.d/system.md"
+    grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
     write_source_fixture
 
     mkdir -p "$root/model/debug" "$root/model/debug/selfedit.d"
