@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-pub use crate::context_jsonl::{
+pub use crate::context::jsonl::{
     ContextJsonlIssue, ContextJsonlKind, ContextJsonlReport, inspect_context_jsonl,
 };
 pub use crate::message_stream::{

@@ -1,4 +1,4 @@
-pub use abi_constants::{
+pub use abi::constants::{
     AGENT_CONTROL_FILES, CHILD_RESULT_REQUIRED_DIRS, CHILD_RESULT_REQUIRED_FILES,
     CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES, CORTEXFS_OBJECT_RUNNER, CTX_ROOT,
     DEFAULT_AGENT_PROMPT_TEMPLATE, DEFAULT_WORKER_MODEL, EXEC_OBJECTS, default_agent_model_for_name,
@@ -8,32 +8,32 @@ pub use abi_constants::{
     MODEL_CONTROL_FILES, ROOT_ENTRIES, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS,
     STABLE_MODEL_CAPABILITIES, TOOL_CONTROL_FILES,
 };
-pub use abi_path::{
+pub use abi::path::{
     AbiPathKind, ObjectClass, classify_abi_path, is_model_name, is_object_name, is_root_entry,
     parse_abi_path,
 };
-pub use agent_control::{
+pub use agent::control::{
     AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
 };
-pub use agent_prompt::{
+pub use agent::prompt::{
     AgentPromptContext, MAX_HISTORY_MESSAGES_CHARS, MAX_SKILL_METADATA_CHARS, SkillMetadata,
     agent_runtime_contract, collect_agent_rules, collect_agent_rules_from_paths,
     collect_history_messages_from_session, collect_skill_metadata, current_time_unix,
     format_history_messages_jsonl, format_skill_metadata_with_budget, render_agent_system_prompt,
     skill_metadata_budget_from_env,
 };
-pub use agent_schedule::{
+pub use agent::schedule::{
     AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNode,
     AgentScheduleNodeKind, AgentScheduleRecordError, AgentScheduleReport, MAX_AGENT_SCHEDULE_NODES,
     agent_schedule_nodes, inspect_agent_schedule_json, ready_agent_schedule_child_handoffs,
     ready_agent_schedule_nodes,
 };
-pub use context_pack::{
+pub use context::pack::{
     ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,
     ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,
     validate_context_pack_source,
 };
-pub use core_tools::{
+pub use tool::core::tools::{
     FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
     run_core_tool_cli, run_core_tool_cli_with_root,
 };
@@ -41,20 +41,20 @@ pub use manuals::{
     CortexfsManual, MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MANUALS,
     cortexfs_manual,
 };
-pub use model::{
+pub use provider::model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
     ModelEffort, ModelFallbackIssue, ModelFallbackReport, ModelFallbackTable, ModelRegistryError,
     inspect_model_capabilities, parse_model_driver_routes, parse_model_fallback,
 };
-pub use mount_table::{MountEntry, MountError, MountMode, MountOption, MountTable};
-pub use oauth::{
+pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTable};
+pub use provider::oauth::{
     OAuthError, OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, oauth_authorization_code_form,
     oauth_authorization_url, oauth_refresh_token_form, parse_oauth_token_response,
     resolve_oauth_access_token, resolve_oauth_access_token_with,
 };
 pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
-pub use provider_name::{
+pub use provider::name::{
     ProviderNameError, ProviderSystemSecret, ProviderSystemSecretError, ProviderSystemSecretHandle,
     open_provider_system_secret, open_provider_system_secret_for_model,
     provider_host_from_base_url, provider_keychain_service, provider_name_from_base_url,

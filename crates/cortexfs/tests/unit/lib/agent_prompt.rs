@@ -78,7 +78,7 @@ fn agent_prompt_skill_discovery_rejects_symlinked_skill_root_parent() {
     );
     assert!(symlink(&outside, root.join(".agents")).is_ok());
 
-    let skills = crate::agent_prompt::discover_skill_metadata_from_roots([
+    let skills = crate::agent::prompt::discover_skill_metadata_from_roots([
         root.join(".agents").join("skills"),
         root.join(".codex").join("skills"),
     ]);
@@ -101,8 +101,8 @@ fn agent_prompt_skill_metadata_discovers_project_ancestor_skills() {
     );
     assert!(fs::create_dir_all(&nested).is_ok());
     let mut roots = Vec::new();
-    crate::agent_prompt::push_project_skill_roots(&mut roots, &nested);
-    let skills = crate::agent_prompt::discover_skill_metadata_from_roots(roots);
+    crate::agent::prompt::push_project_skill_roots(&mut roots, &nested);
+    let skills = crate::agent::prompt::discover_skill_metadata_from_roots(roots);
     let skills = format_skill_metadata_with_budget(&skills, 8_000);
 
     assert!(skills.contains("name: project-skill"));

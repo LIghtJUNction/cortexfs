@@ -45,21 +45,21 @@ const AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const AGENT_MODEL_TIMEOUT_SECONDS: u64 = 120;
 const MAX_AGENT_MODEL_TIMEOUT_SECONDS: u64 = 600;
 
-include!("../cortexfs_object_runner_provider.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_model.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_agent.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_agent_policy.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_agent_model.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_agent_io.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_agent_frames.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_tool_call.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_tool_args.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_tool_exec.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_timeout.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_tool.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_output.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_fs.rs");
-include!("cortexfs_object_runner/cortexfs_object_runner_exec_path.rs");
+include!("../object/runner_provider.rs");
+include!("object_runner/model.rs");
+include!("object_runner/agent.rs");
+include!("object_runner/agent_policy.rs");
+include!("object_runner/agent_model.rs");
+include!("object_runner/agent_io.rs");
+include!("object_runner/agent_frames.rs");
+include!("object_runner/tool_call.rs");
+include!("object_runner/tool_args.rs");
+include!("object_runner/tool_exec.rs");
+include!("object_runner/timeout.rs");
+include!("object_runner/tool.rs");
+include!("object_runner/output.rs");
+include!("object_runner/fs.rs");
+include!("object_runner/exec_path.rs");
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {

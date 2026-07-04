@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use crate::{
     CHILD_RESULT_REQUIRED_DIRS, CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_DIRS,
-    CONTEXT_REQUIRED_FILES, JsonStringField, SESSION_REQUIRED_FILES, abi_path,
+    CONTEXT_REQUIRED_FILES, JsonStringField, SESSION_REQUIRED_FILES, abi::path as abi_path,
     is_stable_chroot_absolute_path,
 };
 

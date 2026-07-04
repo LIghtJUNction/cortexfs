@@ -72,9 +72,9 @@ include!("ctx/doctor.rs");
 
 include!("ctx/provider.rs");
 
-include!("ctx/file_basic.rs");
+include!("ctx/file/basic.rs");
 
-include!("ctx/file_check.rs");
+include!("ctx/file/check.rs");
 
 include!("ctx/schedule.rs");
 
