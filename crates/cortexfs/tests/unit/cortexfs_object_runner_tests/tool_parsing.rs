@@ -126,6 +126,7 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     assert!(contract.contains("Tool results include the original `arguments.args`"));
     assert!(contract.contains("If no concrete file path is provided"));
     assert!(contract.contains("git status --short"));
+    assert!(contract.contains("nearest `AGENTS.md` files"));
     assert!(contract.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#));
     assert!(contract.contains("prefer `fs.replace` for small surgical edits"));
     assert!(contract.contains("keep repairing within scope"));

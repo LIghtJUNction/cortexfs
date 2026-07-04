@@ -234,6 +234,7 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     assert!(system.contains("Do not claim direct access"));
     assert!(system.contains("Do not say that you cannot execute `tsh`"));
     assert!(system.contains("tsh load TOOL"));
+    assert!(system.contains("nearest `AGENTS.md` files"));
     assert!(
         system.find("## Runtime Contract").unwrap_or(usize::MAX)
             < system.find("## AGENT Instructions").unwrap_or(usize::MAX)
@@ -259,4 +260,3 @@ fn agent_prompt_template_controls_rendered_system_message() {
     assert!(prompt.contains("contract=You are CortexFS agent `coder`."));
     assert!(!prompt.contains("## Rules"));
 }
-
