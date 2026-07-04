@@ -154,13 +154,13 @@ macro_rules! path_for_inode_or_reply {
     };
 }
 
-include!("../cortexfs_mount_permissions.rs");
-include!("../cortexfs_mount_init.rs");
-include!("../cortexfs_mount_lifecycle.rs");
-include!("../cortexfs_mount_readonly_mutations.rs");
-include!("../cortexfs_mount_readdirplus.rs");
-include!("../cortexfs_mount_socket_alias_methods.rs");
-include!("../cortexfs_mount_filesystem.rs");
+include!("../mount/permissions.rs");
+include!("../mount/init.rs");
+include!("../mount/lifecycle.rs");
+include!("../mount/readonly_mutations.rs");
+include!("../mount/readdirplus.rs");
+include!("../mount/socket_alias_methods.rs");
+include!("../mount/filesystem.rs");
 
 fn remove_backing_socket_entry(root: &Path, abi_path: &str) -> io::Result<()> {
     let (parent, file_name) = open_backing_socket_parent(root, abi_path)?;
@@ -226,7 +226,7 @@ fn open_single_backing_socket_dir(path: &Path) -> io::Result<fs::File> {
     Ok(fs::File::from(fd))
 }
 
-include!("../cortexfs_mount_helpers.rs");
+include!("../mount/helpers.rs");
 
 #[cfg(test)]
 mod tests {

@@ -33,26 +33,26 @@ macro_rules! impl_issue_report {
 
 include!("source_modules.rs");
 
-use abi_constants::{
+use abi::constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
     DEFAULT_MODEL_ALIAS_TARGET, DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, HELPER_MODEL_ALIAS_TARGET,
     MODEL_ROUTE_FILE, SYSTEM_PROVIDER_CONFIG_DIR, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
-use abi_path::is_object_name_for_class;
+use abi::path::is_object_name_for_class;
 
 include!("public_exports.rs");
 
-include!("fuse_v1_types.rs");
+include!("fuse/v1_types.rs");
 
-include!("core_runtime_types.rs");
+include!("tool/core/runtime_types.rs");
 
-include!("agent_runtime_types.rs");
+include!("agent/runtime_types.rs");
 
-include!("socket_runtime_types.rs");
+include!("runtime/socket_types.rs");
 
 include!("authority_types.rs");
 
-include!("child_agent_types.rs");
+include!("agent/child_types.rs");
 
 impl_issue_report!(ObjectLayoutReport, ObjectLayoutIssue);
 
@@ -79,9 +79,9 @@ impl ObjectBootstrap {
     }
 }
 
-include!("fuse_v1_projection.rs");
+include!("fuse/v1_projection.rs");
 
-include!("fuse_v1_model_alias.rs");
+include!("fuse/v1_model_alias.rs");
 
 impl ReferenceTreeBootstrap {
     /// Creates a reference-tree bootstrap result.
@@ -97,9 +97,9 @@ impl ReferenceTreeBootstrap {
     }
 }
 
-include!("fuse_v1_provider.rs");
+include!("fuse/v1_provider.rs");
 
-include!("provider_model_discovery.rs");
+include!("provider/model_discovery.rs");
 
 impl ObjectBootstrapError {
     /// Returns a stable errno name for this object bootstrap failure.
@@ -147,7 +147,7 @@ pub fn ensure_durable_session_layout(
         return Err(DurableSessionLayoutError::InvalidCwd);
     }
     if let Some(model) = model
-        && !abi_path::is_model_reference(model)
+        && !abi::path::is_model_reference(model)
     {
         return Err(DurableSessionLayoutError::InvalidModelName);
     }
@@ -431,21 +431,21 @@ fn path_file_name(path: &Path) -> Option<&str> {
     path.file_name()?.to_str()
 }
 
-include!("socket_runtime.rs");
+include!("runtime/socket.rs");
 
-include!("socket_session_record.rs");
+include!("runtime/socket_session_record.rs");
 
-include!("agent_runtime_view.rs");
+include!("agent/runtime_view.rs");
 
-include!("object_metadata.rs");
+include!("object/metadata.rs");
 
-include!("object_bootstrap.rs");
+include!("object/bootstrap.rs");
 
-include!("reference_tree_bootstrap.rs");
+include!("reference/tree_bootstrap.rs");
 
-include!("reference_tree_helpers.rs");
+include!("reference/tree_helpers.rs");
 
-include!("fuse_v1_path.rs");
+include!("fuse/v1_path.rs");
 
 fn shell_single_quote(value: &str) -> String {
     let mut quoted = String::from("'");
@@ -479,7 +479,7 @@ fn set_executable_mode(path: &Path) -> Result<(), ObjectBootstrapError> {
         .map_err(|_error| ObjectBootstrapError::CannotChmod)
 }
 
-include!("object_layout.rs");
+include!("object/layout.rs");
 
 include!("authority.rs");
 

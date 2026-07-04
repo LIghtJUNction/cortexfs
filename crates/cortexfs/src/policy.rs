@@ -1,4 +1,4 @@
-use crate::{abi_path, is_object_name};
+use crate::{abi::path as abi_path, is_object_name};
 
 /// Policy syntax error for the fixed v0 allowlist.
 #[derive(Clone, Debug, Eq, PartialEq)]

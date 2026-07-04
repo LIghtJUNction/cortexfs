@@ -1,26 +1,22 @@
-mod abi_constants;
-mod abi_path;
-mod abi_path_parse;
-mod agent_control;
-mod agent_prompt;
-mod agent_schedule;
-mod context_jsonl;
-mod context_pack;
-mod context_pack_build;
-mod context_pack_inspect;
-mod context_pack_source;
-mod core_tools;
+#[path = "abi/source.rs"]
+pub mod abi;
+#[path = "agent/source.rs"]
+pub mod agent;
+#[path = "context/source.rs"]
+pub mod context;
 mod manuals;
 mod message_stream;
-mod model;
-mod mount_table;
-mod oauth;
+#[path = "mount/source.rs"]
+pub mod mount;
 mod policy;
-mod provider_name;
+#[path = "provider/source.rs"]
+pub mod provider;
 mod session_index;
 mod session_layout;
 mod shared_queue;
 mod socket_request;
 mod stream;
+#[path = "tool/source.rs"]
+pub mod tool;
 mod tool_path;
 mod tool_schema;
