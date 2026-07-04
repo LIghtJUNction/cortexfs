@@ -165,10 +165,10 @@ npm run bootstrap-coder:smoke
 ```
 
 The smoke test bootstraps a temporary tree, starts `coder`, mounts a writable
-source fixture at `/workspace`, requires nearest `AGENTS.md` evidence, edits the
-fixture through `fs.replace`, reruns verification, inspects `git diff`, and
-checks that the final answer records changed files and exact verification
-commands.
+temporary CortexFS checkout at `/workspace`, requires real `AGENTS.md` evidence,
+writes a Rust test into the CortexFS source tree, reruns verification, inspects
+`git diff`, and checks that the final answer records changed files and exact
+verification commands.
 
 ## A First Walk Through `/ctx`
 
