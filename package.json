@@ -4,6 +4,7 @@
     "aimock": "llmock -p 4010 -f tests/fixtures/aimock --strict --validate-on-load",
     "aimock:smoke": "scripts/aimock-smoke.sh",
     "agent-fuse:smoke": "scripts/agent-fuse-smoke.sh",
+    "bootstrap-coder:smoke": "scripts/agent-tool-loop-smoke.sh",
     "agent-bootstrap-coder:smoke": "scripts/agent-tool-loop-smoke.sh",
     "agent-tool-loop:smoke": "scripts/agent-tool-loop-smoke.sh",
     "agent-live-model:smoke": "scripts/agent-live-model-smoke.sh"
