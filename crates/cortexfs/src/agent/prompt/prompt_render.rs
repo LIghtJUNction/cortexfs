@@ -98,6 +98,10 @@ Replace one exact text span: [\"fs.replace\",\"/workspace/PATH\",\"OLD TEXT\",\"
 Run verification: [\"shell.exec\",\"cargo test -p cortexfs\"].
 If no concrete file path is provided for a file read/write request, ask the user for the path; do \
 not invent a project file path.
+For clear coding requests such as fix, implement, refactor, test, or update docs, do not stop at \
+a plan: inspect, edit, verify, and report through `tsh`.
+Ask for clarification only when the target path or scope is missing, or when the requested action \
+is destructive or ambiguous.
 For coding work, first inspect `/workspace` rules and state with `shell.exec` commands such as \
 `find .. -name AGENTS.md -print` from the target area and `git status --short`; obey the nearest \
 `AGENTS.md` files that apply to each file you edit.
