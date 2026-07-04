@@ -57,17 +57,9 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         "default",
         PolicyPermission::Connect,
     );
-    let provider_secret = if provider_secret_required_for_model(&config.source, view.model()) {
-        open_optional_provider_system_secret_for_model(&config.source, view.model())?
-    } else {
-        None
-    };
     let mut runtime_env = view.env().to_vec();
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
-    }
-    if let Some(secret) = provider_secret.as_ref() {
-        runtime_env.extend(secret.env());
     }
     let agent_executable = runtime_agent_executable(Path::new(cortexfs::CTX_ROOT), &config.agent);
     let result = serve_agent_executable_socket_listener_once(
@@ -102,57 +94,6 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
 
 fn runtime_model(_source: &Path, requested_model: &str) -> String {
     requested_model.to_owned()
-}
-
-fn open_optional_provider_system_secret_for_model(
-    source: &Path,
-    model: &str,
-) -> Result<Option<cortexfs::ProviderSystemSecretHandle>, String> {
-    match cortexfs::open_provider_system_secret_for_model(source, model) {
-        Ok(secret) => Ok(secret),
-        Err(cortexfs::ProviderSystemSecretError::CannotRead) => Ok(None),
-        Err(_error) => Err(format!("provider secret unavailable: {model}")),
-    }
-}
-
-fn provider_secret_required_for_model(source: &Path, model: &str) -> bool {
-    read_model_driver(source, model).map_or_else(
-        || !matches!(model.split_once('/'), Some(("debug", _name))),
-        |driver| model_driver_requires_provider_secret(&driver),
-    )
-}
-
-fn read_model_driver(source: &Path, model: &str) -> Option<String> {
-    fs::read_to_string(
-        source
-            .join("model")
-            .join(format!("{model}.d"))
-            .join("driver"),
-    )
-    .ok()
-}
-
-fn model_driver_requires_provider_secret(driver: &str) -> bool {
-    let mut saw_driver = false;
-    for line in driver.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let values = line
-            .split_once('=')
-            .map_or(line, |(_route, values)| values)
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        for value in values {
-            saw_driver = true;
-            if !matches!(value, "debug" | "shell") {
-                return true;
-            }
-        }
-    }
-    !saw_driver
 }
 
 fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {
