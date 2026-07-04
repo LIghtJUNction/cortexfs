@@ -128,6 +128,7 @@ EOF
     grep -Fq 'git status --short' "$root/agent/coder.d/system.md"
     grep -Fq 'nearest applicable `AGENTS.md`' "$root/agent/coder.d/system.md"
     grep -Fq 'real build, test, and git evidence' "$root/agent/coder.d/system.md"
+    grep -Fq 'Never run destructive git commands' "$root/agent/coder.d/system.md"
     write_source_fixture
 
     mkdir -p "$root/model/debug" "$root/model/debug/selfedit.d"
