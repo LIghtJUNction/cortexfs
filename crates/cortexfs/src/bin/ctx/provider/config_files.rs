@@ -72,7 +72,11 @@ fn atomic_write_provider_config(path: &Path, content: &str) -> Result<(), CliErr
 fn create_provider_config_dir(path: &Path) -> Result<(), CliError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-            sync_provider_config_dir(path)
+            open_provider_config_dir(path)?
+                .sync_all()
+                .map_err(|error| {
+                    CliError::unavailable(format!("cannot sync provider config dir: {error}"))
+                })
         } else {
             Err(CliError::unavailable(
                 "provider config directory is not a plain directory",
@@ -108,7 +112,10 @@ fn create_provider_config_dir(path: &Path) -> Result<(), CliError> {
         .ok_or_else(|| CliError::unavailable("invalid provider config dir"))?;
     let mut parent_dir = open_provider_config_dir(existing_parent)?;
     for directory in missing.iter().rev() {
-        let name = provider_config_file_name(directory)?;
+        let name = directory
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| CliError::unavailable("invalid provider config path"))?;
         nix::sys::stat::mkdirat(
             &parent_dir,
             name,
@@ -140,86 +147,13 @@ fn create_provider_config_dir(path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn sync_provider_config_dir(path: &Path) -> Result<(), CliError> {
-    let directory = open_provider_config_dir(path)?;
-    directory
-        .sync_all()
-        .map_err(|error| CliError::unavailable(format!("cannot sync provider config dir: {error}")))
-}
-
 fn open_provider_config_dir(path: &Path) -> Result<fs::File, CliError> {
-    let mut directory = if path.is_absolute() {
-        open_single_provider_config_dir(Path::new("/"))?
-    } else {
-        open_single_provider_config_dir(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    CliError::unavailable(format!(
-                        "cannot open provider config dir {}: invalid directory name",
-                        path.display()
-                    ))
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(|error| {
-                    CliError::unavailable(format!(
-                        "cannot open provider config dir {}: {error}",
-                        path.display()
-                    ))
-                })?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(CliError::unavailable(format!(
-                    "cannot open provider config dir {}: unsupported path component",
-                    path.display()
-                )));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_single_provider_config_dir(path: &Path) -> Result<fs::File, CliError> {
-    let directory = OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot open provider config dir: {error}"))
-        })?;
-    if !directory
-        .metadata()
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot inspect provider config dir: {error}"))
-        })?
-        .is_dir()
-    {
-        return Err(CliError::unavailable(
-            "provider config path is not a directory",
-        ));
-    }
-    Ok(directory)
-}
-
-fn provider_config_file_name(path: &Path) -> Result<&str, CliError> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| CliError::unavailable("invalid provider config path"))
-}
-fn read_provider_config(provider: &str) -> Result<CtxProviderConfig, CliError> {
-    read_provider_config_from_dir(provider, Path::new(PROVIDER_CONFIG_DIR))
+    open_plain_directory(path).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot open provider config dir {}: {error}",
+            path.display()
+        ))
+    })
 }
 
 fn read_provider_config_from_dir(
@@ -227,7 +161,7 @@ fn read_provider_config_from_dir(
     dir: &Path,
 ) -> Result<CtxProviderConfig, CliError> {
     let directory = open_provider_config_dir(dir)?;
-    let entries = fs::read_dir(provider_config_proc_fd_path(&directory)).map_err(|error| {
+    let entries = fs::read_dir(proc_fd_path(&directory)).map_err(|error| {
         CliError::unavailable(format!("cannot read provider config dir: {error}"))
     })?;
     for entry in entries {
@@ -255,10 +189,6 @@ fn read_provider_config_from_dir(
         }
     }
     Err(CliError::usage(format!("missing provider: {provider}")))
-}
-
-fn provider_config_proc_fd_path(directory: &fs::File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
 }
 
 fn read_provider_config_file_at(parent_dir: &fs::File, file_name: &str) -> Result<String, CliError> {

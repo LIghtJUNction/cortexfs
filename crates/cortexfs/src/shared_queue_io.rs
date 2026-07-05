@@ -12,12 +12,12 @@ fn require_shared_queue_directory(
 
 fn queue_child_dir(queue_dir: &Path, name: &str) -> io::Result<PathBuf> {
     let path = queue_dir.join(name);
-    open_directory_no_symlink_components(&path)?;
+    crate::plain_fs::open_plain_directory(&path)?;
     Ok(path)
 }
 
 fn queue_child_dir_fd(queue_dir: &Path, name: &str) -> io::Result<fs::File> {
-    open_directory_no_symlink_components(&queue_dir.join(name))
+    crate::plain_fs::open_plain_directory(&queue_dir.join(name))
 }
 
 fn queue_job_plain_dir_fd(queue_dir: &Path, parent: &str, job_name: &str) -> io::Result<fs::File> {
@@ -54,10 +54,6 @@ fn path_exists_no_follow(path: &Path) -> bool {
 
 fn is_regular_mode(mode: nix::libc::mode_t) -> bool {
     mode & nix::libc::S_IFMT == nix::libc::S_IFREG
-}
-
-fn proc_fd_path(directory: &fs::File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
 }
 
 fn is_queue_job_name(name: &str) -> bool {
@@ -115,7 +111,7 @@ fn write_queue_result_atomic(
                     );
                     return Err(error);
                 }
-                if let Err(error) = sync_directory(output_dir) {
+                if let Err(error) = crate::plain_fs::sync_plain_dir(output_dir) {
                     let _ignored = nix::unistd::unlinkat(
                         output_dir_fd,
                         result_name,
@@ -133,61 +129,6 @@ fn write_queue_result_atomic(
         io::ErrorKind::AlreadyExists,
         "cannot create unique queue result temp file",
     ))
-}
-
-fn sync_directory(path: &Path) -> io::Result<()> {
-    let directory = open_directory_no_symlink_components(path)?;
-    directory.sync_all()
-}
-
-fn open_directory_no_symlink_components(path: &Path) -> io::Result<fs::File> {
-    let mut directory = if path.is_absolute() {
-        open_directory_no_follow(Path::new("/"))?
-    } else {
-        open_directory_no_follow(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            Component::RootDir | Component::CurDir => {}
-            Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(io::Error::from)?;
-                directory = fs::File::from(next);
-            }
-            Component::ParentDir | Component::Prefix(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "directory path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_directory_no_follow(path: &Path) -> io::Result<fs::File> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path is not a plain directory",
-        ));
-    }
-    Ok(directory)
 }
 
 fn write_new_file_synced_at(parent_dir: &fs::File, name: &str, content: &[u8]) -> io::Result<()> {
@@ -219,12 +160,4 @@ fn write_new_file_synced_at(parent_dir: &fs::File, name: &str, content: &[u8]) -
         return Err(error);
     }
     Ok(())
-}
-
-fn newline_terminated(value: &str) -> String {
-    if value.ends_with('\n') {
-        value.to_owned()
-    } else {
-        format!("{value}\n")
-    }
 }

@@ -34,30 +34,12 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
     assert!(coder_prompt.contains("do not stop at a plan"));
     assert!(coder_prompt.contains("implement the requested change directly through `tsh`"));
     assert!(coder_prompt.contains("formatter, static check, lint, and focused tests"));
-    assert!(coder_prompt.contains("git status --short"));
-    assert!(coder_prompt.contains("find /workspace -name AGENTS.md -print"));
+    assert!(coder_prompt.contains("inspect the applicable project rules"));
+    assert!(coder_prompt.contains("current workspace state"));
+    assert!(!coder_prompt.contains("git status --short"));
+    assert!(!coder_prompt.contains("find /workspace -name AGENTS.md -print"));
     assert!(coder_prompt.contains("never overwrite, revert, delete, or reformat unrelated user changes"));
     assert!(coder_prompt.contains("Never run destructive git commands"));
-}
-
-#[test]
-fn bootstrap_output_reports_default_programming_agent_surface() {
-    let source = Path::new("/tmp/cortexfs-source");
-
-    let lines = bootstrap_reference_tree_lines(source);
-
-    assert_eq!(
-        lines,
-        vec![
-            "source=/tmp/cortexfs-source".to_owned(),
-            "agents=architect,coder,reviewer".to_owned(),
-            "agent.coder.parent=agent:architect".to_owned(),
-            "agent.coder.model=main".to_owned(),
-            "agent.coder.workspace=/workspace".to_owned(),
-            "agent.coder.tools=tsh,fs.read,fs.write,fs.replace,shell.exec".to_owned(),
-            "agent.coder.chat=ctx agent start coder && ctx agent chat coder".to_owned(),
-        ]
-    );
 }
 
 #[test]
@@ -90,7 +72,7 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
                 && prompt.contains("Tool results include the original `arguments.args`")
                 && prompt.contains("For clear coding requests")
                 && prompt.contains("do not stop at a plan")
-                && prompt.contains("find /workspace -name AGENTS.md -print")
+                && prompt.contains("inspect applicable `/workspace` rules and current workspace state")
                 && prompt.contains("inspect current files before editing")
                 && prompt.contains("prefer `fs.replace` for small surgical edits")
                 && prompt.contains("format, static check, lint, and test commands")
@@ -157,10 +139,10 @@ fn create_agent_fixture(root: &Path, name: &str, parent: &str, status: &str, pid
         assert!(fs::set_permissions(&agent, permissions).is_ok());
     }
     let control = fixture_path(root, &["agent", &format!("{name}.d")]);
-    write_text_file(&control.join("parent"), &newline_terminated(parent));
+    write_text_file(&control.join("parent"), &format!("{parent}\n"));
     write_text_file(&control.join("life"), "owned\n");
-    write_text_file(&control.join("status"), &newline_terminated(status));
-    write_text_file(&control.join("pid"), &newline_terminated(pid));
+    write_text_file(&control.join("status"), &format!("{status}\n"));
+    write_text_file(&control.join("pid"), &format!("{pid}\n"));
 }
 
 #[test]

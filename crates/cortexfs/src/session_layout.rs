@@ -1,8 +1,5 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::Read;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Component, Path};
+use std::fs;
+use std::path::Path;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -11,6 +8,12 @@ use crate::{
     CHILD_RESULT_REQUIRED_DIRS, CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_DIRS,
     CONTEXT_REQUIRED_FILES, JsonStringField, SESSION_REQUIRED_FILES, abi::path as abi_path,
     is_stable_chroot_absolute_path,
+    plain_fs::{
+        open_plain_directory as open_session_layout_plain_directory,
+        path_metadata_no_follow as plain_path_metadata,
+        proc_fd_path as plain_proc_fd_path,
+        read_small_text_file,
+    },
 };
 
 const MAX_SESSION_LAYOUT_CONTROL_BYTES: u64 = 64 * 1024;
@@ -280,7 +283,7 @@ fn inspect_child_result_dirs(child_root: &Path, issues: &mut Vec<SessionLayoutIs
     let Ok(child_root_dir) = open_session_layout_plain_directory(child_root) else {
         return;
     };
-    let Ok(entries) = fs::read_dir(session_layout_proc_fd_path(&child_root_dir)) else {
+    let Ok(entries) = fs::read_dir(plain_proc_fd_path(&child_root_dir)) else {
         return;
     };
 
@@ -333,110 +336,5 @@ fn require_directory(path: &Path, label: &str, issues: &mut Vec<SessionLayoutIss
 }
 
 fn read_session_layout_control_file(path: &Path) -> std::io::Result<String> {
-    let mut file = open_session_layout_plain_file(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_SESSION_LAYOUT_CONTROL_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "session layout control file is too large or not a plain file",
-        ));
-    }
-    let len = usize::try_from(metadata.len())
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content)?;
-    String::from_utf8(content)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
-}
-
-fn plain_path_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_session_layout_plain_directory(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
-        })?;
-    let file_fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map_err(std::io::Error::from)?;
-    File::from(file_fd).metadata()
-}
-
-fn open_session_layout_plain_file(path: &Path) -> std::io::Result<File> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_session_layout_plain_directory(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
-        })?;
-    let file_fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map_err(std::io::Error::from)?;
-    Ok(File::from(file_fd))
-}
-
-fn open_session_layout_plain_directory(path: &Path) -> std::io::Result<File> {
-    let mut directory = if path.is_absolute() {
-        open_session_layout_single_plain_directory(Path::new("/"))?
-    } else {
-        open_session_layout_single_plain_directory(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            Component::RootDir | Component::CurDir => {}
-            Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(std::io::Error::from)?;
-                directory = File::from(next);
-            }
-            Component::ParentDir | Component::Prefix(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "directory path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_session_layout_single_plain_directory(path: &Path) -> std::io::Result<File> {
-    let directory = OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "path is not a plain directory",
-        ));
-    }
-    Ok(directory)
-}
-
-fn session_layout_proc_fd_path(directory: &File) -> std::path::PathBuf {
-    std::path::PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+    read_small_text_file(path, MAX_SESSION_LAYOUT_CONTROL_BYTES)
 }

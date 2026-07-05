@@ -219,7 +219,7 @@ fn append_agent_log_event(path: &Path, event: &str) -> Result<(), CliError> {
             path.display()
         )));
     }
-    let mut file = OpenOptions::new()
+    let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)

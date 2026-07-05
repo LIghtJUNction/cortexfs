@@ -326,7 +326,7 @@ fn runner_control_reader_refuses_symlink() -> Result<(), Box<dyn std::error::Err
     fs::write(&outside, "secret\n")?;
     symlink(&outside, &link)?;
 
-    let result = read_small_plain_text_file(&link);
+    let result = read_small_plain_text_file(&link, super::MAX_RUNNER_CONTROL_BYTES, "runner");
 
     assert!(result.is_err());
     let _ignored = fs::remove_dir_all(root);
@@ -342,7 +342,11 @@ fn runner_control_reader_refuses_symlink_intermediate_dir(
     fs::write(outside.join("control.d/policy"), "secret\n")?;
     symlink(&outside, root.join("model"))?;
 
-    let result = read_small_plain_text_file(&root.join("model/control.d/policy"));
+    let result = read_small_plain_text_file(
+        &root.join("model/control.d/policy"),
+        super::MAX_RUNNER_CONTROL_BYTES,
+        "runner",
+    );
 
     assert!(result.is_err());
     let _ignored = fs::remove_dir_all(root);

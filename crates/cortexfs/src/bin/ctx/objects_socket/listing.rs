@@ -73,7 +73,7 @@ fn normalized_ls_path(path: &str) -> String {
 }
 
 fn read_dir_names(dir: &Path) -> Result<Vec<String>, CliError> {
-    let directory = open_read_dir_plain_directory(dir).map_err(|error| {
+    let directory = open_plain_directory(dir).map_err(|error| {
         CliError::unavailable(format!("cannot read {}: {error}", dir.display()))
     })?;
     let fd_path = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()));
@@ -91,56 +91,6 @@ fn read_dir_names(dir: &Path) -> Result<Vec<String>, CliError> {
 
     names.sort();
     Ok(names)
-}
-
-fn open_read_dir_plain_directory(path: &Path) -> io::Result<fs::File> {
-    let mut directory = if path.is_absolute() {
-        open_single_read_dir_plain_directory(Path::new("/"))?
-    } else {
-        open_single_read_dir_plain_directory(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "directory path is not utf-8")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(io::Error::from)?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "directory path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_single_read_dir_plain_directory(path: &Path) -> io::Result<fs::File> {
-    let directory = OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "path is not a directory",
-        ));
-    }
-    Ok(directory)
 }
 
 fn which_object(root: &Path, class: ObjectClass, name: &str) -> Result<(), CliError> {
@@ -231,4 +181,3 @@ fn cancel(root: &Path, path: &str, run: &str) -> Result<ExitCode, CliError> {
     let request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(run));
     stream_socket_request(&object_socket_path(root, path)?, &request)
 }
-

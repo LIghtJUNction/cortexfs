@@ -222,9 +222,21 @@ fn formats_object_layout_issues_for_file_check() {
 }
 
 #[test]
-fn control_file_values_end_in_newline() {
-    assert_eq!(newline_terminated("cwd=/work"), "cwd=/work\n");
-    assert_eq!(newline_terminated("cwd=/work\n"), "cwd=/work\n");
+fn file_writes_end_in_newline() {
+    let root = clean_test_dir("file-writes-newline");
+    assert!(fs::create_dir_all(root.join("shared")).is_ok());
+
+    assert!(file_set(&root, "shared/note", "cwd=/work").is_ok());
+    assert_eq!(
+        fs::read_to_string(root.join("shared/note")).ok().as_deref(),
+        Some("cwd=/work\n")
+    );
+
+    assert!(file_append(&root, "shared/note", "status=idle").is_ok());
+    assert_eq!(
+        fs::read_to_string(root.join("shared/note")).ok().as_deref(),
+        Some("cwd=/work\nstatus=idle\n")
+    );
 }
 
 #[test]

@@ -14,6 +14,7 @@ use super::{
     ModelDriverUseCase, MountEntry, MountError, MountMode, MountOption, MountTable,
     OBJECT_HOOK_DIR, OBJECT_HOOK_PHASE_DIRS, OAuthError, OAuthPkce, OAuthProviderConfig,
     ObjectBootstrapError, ObjectClass, ObjectLayoutIssue, OwnedChildCancellationError,
+    plain_fs,
     PeerCredentials, PolicyError, PolicyObjectClass, PolicyPermission,
     PolicyRule, PolicyV0, ReferenceTreeError, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS,
     SessionAccess, SessionAccessAuthority, SessionAccessDenial, SessionControlIssue,
@@ -52,7 +53,7 @@ use super::{
     resolve_oauth_access_token_with, run_echo_model, serve_agent_executable_socket_stream_once,
     serve_unix_socket_listener_once, serve_unix_socket_stream_once, session_index_key_for_cwd,
     set_private_dir_permissions, set_text_file_permissions, socket_runtime_error_response,
-    sync_plain_directory, update_session_index, update_session_index_with_keys,
+    update_session_index, update_session_index_with_keys,
     validate_context_pack_source, write_text_file_if_absent, MAX_AGENT_SCHEDULE_NODES,
 };
 use std::fs;

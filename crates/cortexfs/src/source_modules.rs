@@ -5,10 +5,14 @@ pub mod agent;
 #[path = "context/source.rs"]
 pub mod context;
 mod manuals;
+pub(crate) mod host_path;
 mod message_stream;
+#[doc(hidden)]
+pub mod plain_fs;
 #[path = "mount/source.rs"]
 pub mod mount;
 mod policy;
+pub(crate) mod process_helpers;
 #[path = "provider/source.rs"]
 pub mod provider;
 mod session_index;

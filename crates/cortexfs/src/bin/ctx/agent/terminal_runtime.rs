@@ -1,171 +1,25 @@
 fn create_agent_terminal_runtime_dir(path: &Path) -> io::Result<()> {
-    create_agent_terminal_plain_dir(path, 0o700)
-}
-
-fn create_agent_terminal_plain_dir(path: &Path, mode: u32) -> io::Result<()> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-            sync_agent_terminal_runtime_dir(path)
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "agent terminal runtime path is not a plain directory",
-            ))
-        };
-    }
-
-    let mut missing = Vec::new();
-    let mut cursor = Some(path);
-    while let Some(current) = cursor {
-        match fs::symlink_metadata(current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
-                return Err(io::Error::new(
-                    io::ErrorKind::AlreadyExists,
-                    "agent terminal runtime path contains a non-directory entry",
-                ));
-            }
-            Ok(_metadata) => break,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                missing.push(current.to_path_buf());
-                cursor = current.parent();
-            }
-            Err(error) => return Err(error),
-        }
-    }
-
-    let mut parent_dir = if let Some(existing_parent) = missing.last().and_then(|path| path.parent())
-    {
-        open_agent_terminal_runtime_dir(existing_parent)?
-    } else {
-        return Ok(());
-    };
-
-    for directory in missing.iter().rev() {
-        let name = directory.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "invalid agent terminal runtime directory name",
-            )
-        })?;
-        nix::sys::stat::mkdirat(
-            &parent_dir,
-            name,
-            nix::sys::stat::Mode::from_bits_truncate(mode),
-        )?;
-        parent_dir.sync_all()?;
-        let child = nix::fcntl::openat(
-            &parent_dir,
-            name,
-            nix::fcntl::OFlag::O_DIRECTORY
-                | nix::fcntl::OFlag::O_RDONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::empty(),
-        )?;
-        parent_dir = fs::File::from(child);
-        parent_dir.sync_all()?;
-    }
-    Ok(())
-}
-
-fn sync_agent_terminal_runtime_dir(path: &Path) -> io::Result<()> {
-    let directory = open_agent_terminal_runtime_dir(path)?;
-    directory.sync_all()
-}
-
-fn open_agent_terminal_runtime_dir(path: &Path) -> io::Result<fs::File> {
-    let mut directory = if path.is_absolute() {
-        open_single_agent_terminal_runtime_dir(Path::new("/"))?
-    } else {
-        open_single_agent_terminal_runtime_dir(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "agent terminal runtime path is not utf-8",
-                    )
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(io::Error::from)?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "agent terminal runtime path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_single_agent_terminal_runtime_dir(path: &Path) -> io::Result<fs::File> {
-    let directory = OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "agent terminal runtime path is not a directory",
-        ));
-    }
-    Ok(directory)
+    create_plain_directory(
+        path,
+        0o700,
+        "agent terminal runtime path is not a plain directory",
+        "agent terminal runtime path contains a non-directory entry",
+        "invalid agent terminal runtime directory name",
+    )
 }
 
 fn write_empty_shell_startup_stub(parent: &Path) -> io::Result<()> {
     let path = parent.join(".empty-shell-startup");
-    let mut file = OpenOptions::new()
+    let mut file = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
         .mode(0o600)
-        .custom_flags(nix::libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW)
         .open(&path)?;
     file.write_all(b"")?;
     file.sync_all()?;
-    sync_agent_terminal_runtime_dir(parent)
-}
-
-fn remove_stale_agent_terminal_socket(socket: &Path) -> io::Result<()> {
-    let parent = socket.parent().unwrap_or_else(|| Path::new("."));
-    let parent = open_agent_terminal_runtime_dir(parent)?;
-    let file_name = socket
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid terminal socket name"))?;
-    match nix::sys::stat::fstatat(
-        &parent,
-        file_name,
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    ) {
-        Ok(stat)
-            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
-        {
-            nix::unistd::unlinkat(&parent, file_name, nix::unistd::UnlinkatFlags::NoRemoveDir)
-                .map_err(io::Error::from)
-        }
-        Ok(_metadata) => Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "refusing to remove non-socket terminal path",
-        )),
-        Err(nix::errno::Errno::ENOENT) => Ok(()),
-        Err(error) => Err(io::Error::from(error)),
-    }
+    open_plain_directory(parent)?.sync_all()
 }
 
 fn wait_for_agent_terminal_socket(socket: &Path) -> Result<(), CliError> {
@@ -213,7 +67,13 @@ fn ensure_best_effort_visible_terminal_socket(
     let Some(parent) = visible_socket.parent() else {
         return Err(CliError::unavailable("terminal socket path has no parent"));
     };
-    if let Err(error) = create_agent_terminal_plain_dir(parent, 0o755) {
+    if let Err(error) = create_plain_directory(
+        parent,
+        0o755,
+        "agent terminal runtime path is not a plain directory",
+        "agent terminal runtime path contains a non-directory entry",
+        "invalid agent terminal runtime directory name",
+    ) {
         if visible_terminal_write_error_is_best_effort(&error) {
             return Ok(());
         }
@@ -222,7 +82,7 @@ fn ensure_best_effort_visible_terminal_socket(
             parent.display()
         )));
     }
-    let parent_dir = open_agent_terminal_runtime_dir(parent).map_err(|error| {
+    let parent_dir = open_plain_directory(parent).map_err(|error| {
         CliError::unavailable(format!("cannot open {}: {error}", parent.display()))
     })?;
     let file_name = visible_socket
@@ -261,10 +121,10 @@ fn visible_terminal_write_error_is_best_effort(error: &io::Error) -> bool {
     ) || matches!(
         error.raw_os_error(),
         Some(code)
-            if code == nix::libc::EACCES
-                || code == nix::libc::EPERM
-                || code == nix::libc::ENOSYS
-                || code == nix::libc::EROFS
+            if code == libc::EACCES
+                || code == libc::EPERM
+                || code == libc::ENOSYS
+                || code == libc::EROFS
     )
 }
 
@@ -295,7 +155,7 @@ fn socket_bind_path(socket: &Path) -> PathBuf {
     let Some(parent) = socket.parent() else {
         return socket.to_path_buf();
     };
-    let Ok(parent_dir) = open_agent_terminal_runtime_dir(parent) else {
+    let Ok(parent_dir) = open_plain_directory(parent) else {
         return socket.to_path_buf();
     };
     let Some(file_name) = socket.file_name().and_then(|name| name.to_str()) else {

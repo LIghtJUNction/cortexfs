@@ -57,6 +57,22 @@ fn openai_chat_body(
     stream: bool,
     effort: cortexfs::ModelEffort,
 ) -> String {
+    openai_chat_body_with_agent_tools(
+        model,
+        input,
+        stream,
+        effort,
+        env::var_os("CTX_AGENT").is_some(),
+    )
+}
+
+fn openai_chat_body_with_agent_tools(
+    model: &str,
+    input: &str,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+    agent_tools: bool,
+) -> String {
     let mut body = json!({
         "model": model,
         "messages": provider_messages(input),
@@ -71,6 +87,9 @@ fn openai_chat_body(
                 "include_usage": true
             }),
         );
+    }
+    if agent_tools {
+        apply_openai_agent_tools(&mut body);
     }
     apply_openai_effort(&mut body, effort);
     body.to_string()
@@ -103,6 +122,35 @@ fn apply_openai_effort(body: &mut Value, effort: cortexfs::ModelEffort) {
             }),
         );
     }
+}
+
+fn apply_openai_agent_tools(body: &mut Value) {
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
+    object.insert(
+        "tools".to_owned(),
+        json!([{
+            "type": "function",
+            "function": {
+                "name": "tsh",
+                "description": "Invoke the CortexFS tool shell. Pass exact tsh argv in args.",
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "args": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "minItems": 1
+                        }
+                    },
+                    "required": ["args"]
+                }
+            }
+        }]),
+    );
+    object.insert("tool_choice".to_owned(), json!("auto"));
 }
 fn provider_messages(input: &str) -> Value {
     let agent = env::var("CTX_AGENT")

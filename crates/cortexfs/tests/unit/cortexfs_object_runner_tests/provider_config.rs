@@ -42,9 +42,17 @@ fn provider_config_file_reader_refuses_symlink_leaf() -> Result<(), Box<dyn std:
     fs::create_dir_all(&providers)?;
     fs::write(&outside, "{}\n")?;
     symlink(&outside, providers.join("fixture.json"))?;
-    let directory = open_runner_provider_config_dir(&providers)?;
+    let directory = open_plain_directory(&providers)?;
 
-    assert!(read_runner_provider_config_file(&directory, "fixture.json").is_err());
+    assert!(
+        cortexfs::plain_fs::read_small_text_file_at(
+            &directory,
+            "fixture.json",
+            MAX_RUNNER_PROVIDER_CONFIG_BYTES,
+            "provider config file is invalid"
+        )
+        .is_err()
+    );
 
     let _ignored = fs::remove_dir_all(root);
     Ok(())

@@ -1,13 +1,4 @@
 #[test]
-fn runner_recognizes_interactive_tool_passthroughs() {
-    assert!(is_passthrough_tool("bash"));
-    assert!(is_passthrough_tool("tmux"));
-    assert!(is_passthrough_tool("zellij"));
-    assert!(is_passthrough_tool("tsh"));
-    assert!(!is_passthrough_tool("shell.exec"));
-    assert!(!is_passthrough_tool("fs.read"));
-}
-#[test]
 fn tool_call_text_parses_tsh_argv() {
     let call = tool_call_from_text(
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
@@ -23,7 +14,7 @@ fn tool_call_text_parses_tsh_argv() {
 }
 
 #[test]
-fn model_event_frame_without_run_is_normalized_for_socket_runtime() {
+fn model_event_frame_run_field_is_normalized_for_socket_runtime() {
     let frame = normalize_agent_model_frame(
         r#"{"type":"tool_call","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#,
         "run-1",
@@ -31,17 +22,9 @@ fn model_event_frame_without_run_is_normalized_for_socket_runtime() {
 
     assert!(frame.contains(r#""run":"run-1""#), "{frame}");
     assert!(frame.contains(r#""type":"tool_call""#), "{frame}");
-}
-
-#[test]
-fn model_event_frame_with_run_is_left_unchanged() {
     let frame = r#"{"type":"tool_call","run":"existing","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}"#;
 
     assert_eq!(normalize_agent_model_frame(frame, "run-1"), frame);
-}
-
-#[test]
-fn non_json_model_frame_is_left_unchanged() {
     assert_eq!(normalize_agent_model_frame("plain text", "run-1"), "plain text");
 }
 
@@ -84,7 +67,7 @@ fn tool_call_arguments_accept_command_string() {
 }
 
 #[test]
-fn tool_call_arguments_reject_excessive_arg_count() {
+fn tool_call_arguments_reject_excessive_limits() {
     let value = serde_json::json!({
         "type": "tool_call",
         "id": "call-1",
@@ -96,10 +79,6 @@ fn tool_call_arguments_reject_excessive_arg_count() {
     let call = agent_tool_call_from_value(&value);
 
     assert!(matches!(call, Err(ref error) if error.contains("argument count limit")));
-}
-
-#[test]
-fn tool_call_arguments_reject_excessive_arg_bytes() {
     let value = serde_json::json!({
         "type": "tool_call",
         "id": "call-1",
@@ -128,10 +107,11 @@ fn runtime_contract_requires_immediate_tsh_tool_calls() {
     assert!(contract.contains("For clear coding requests"));
     assert!(contract.contains("do not stop at a plan"));
     assert!(contract.contains("Ask for clarification only when the target path or scope is missing"));
-    assert!(contract.contains("git status --short"));
-    assert!(contract.contains("find /workspace -name AGENTS.md -print"));
+    assert!(contract.contains("inspect applicable `/workspace` rules and current workspace state"));
+    assert!(!contract.contains("git status --short"));
+    assert!(!contract.contains("find /workspace -name AGENTS.md -print"));
     assert!(!contract.contains("find .. -name AGENTS.md -print"));
-    assert!(contract.contains("nearest `AGENTS.md` files"));
+    assert!(contract.contains("project rules that apply to each file you edit"));
     assert!(contract.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#));
     assert!(contract.contains("prefer `fs.replace` for small surgical edits"));
     assert!(contract.contains("format, static check, lint, and test commands"));
@@ -148,10 +128,7 @@ fn deferred_tool_text_is_not_treated_as_a_tool_call() {
     let frames = [r#"{"type":"delta","text":"我先通过 `tsh` 查看可用工具，再测试 lazy load 机制。"}"#.to_owned()];
 
     assert!(matches!(first_tool_call(&frames), Ok(None)));
-}
 
-#[test]
-fn reasoning_delta_text_is_not_treated_as_a_tool_call() {
     let frames = [
         r#"{"type":"reasoning_delta","text":"{\"type\":\"tool_call\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{\"args\":[\"tools\"]}}"}"#.to_owned(),
         r#"{"type":"delta","text":"done"}"#.to_owned(),
@@ -167,6 +144,9 @@ fn passthrough_tools_use_absolute_program_paths() {
     assert_eq!(passthrough_tool_program("zellij"), Some("/usr/bin/zellij"));
     assert_eq!(passthrough_tool_program("tsh"), Some("/usr/bin/tsh"));
     assert_eq!(passthrough_tool_program("shell.exec"), None);
+    assert_eq!(passthrough_tool_program("fs.read"), None);
+    assert!(!is_passthrough_tool("shell.exec"));
+    assert!(!is_passthrough_tool("fs.read"));
 
     for (name, program) in [
         ("bash", "/usr/bin/bash"),

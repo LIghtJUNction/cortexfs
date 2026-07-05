@@ -1,3 +1,8 @@
+use crate::plain_fs::{
+    open_plain_file as open_object_metadata_plain_file,
+    path_metadata_no_follow as object_metadata_plain_path_metadata,
+};
+
 const MAX_OBJECT_METADATA_CONTROL_BYTES: u64 = 64 * 1024;
 const MAX_ECHO_MODEL_STDIN_BYTES: usize = 1024 * 1024;
 
@@ -214,110 +219,6 @@ fn read_object_control_for_metadata(control_dir: &Path, file: &str) -> Result<St
     String::from_utf8(content)
         .map(|content| content.trim_end_matches('\n').to_owned())
         .map_err(|_error| FuseV1Error::InvalidContent)
-}
-
-fn object_metadata_plain_path_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_object_metadata_plain_directory(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
-        })?;
-    let file_fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map_err(std::io::Error::from)?;
-    fs::File::from(file_fd).metadata()
-}
-
-fn open_object_metadata_plain_file(path: &Path) -> std::io::Result<fs::File> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_object_metadata_plain_directory(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid file name")
-        })?;
-    let file_fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map_err(std::io::Error::from)?;
-    Ok(fs::File::from(file_fd))
-}
-
-fn open_object_metadata_plain_directory(path: &Path) -> std::io::Result<fs::File> {
-    let mut directory = if path.is_absolute() {
-        open_object_metadata_single_plain_directory(Path::new("/"))?
-    } else {
-        open_object_metadata_single_plain_directory(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(std::io::Error::from)?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "directory path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_object_metadata_single_plain_directory(path: &Path) -> std::io::Result<fs::File> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "path is not a plain directory",
-        ));
-    }
-    Ok(directory)
-}
-
-fn policy_subject_from_label(label: &str) -> Option<&str> {
-    if is_object_name(label) {
-        return Some(label);
-    }
-    let mut fields = label.split(':');
-    let _user = fields.next()?;
-    let _role = fields.next()?;
-    let subject = fields.next()?;
-    let _level = fields.next()?;
-    if fields.next().is_none() && is_object_name(subject) {
-        Some(subject)
-    } else {
-        None
-    }
 }
 
 fn is_valid_env_key(value: &str) -> bool {

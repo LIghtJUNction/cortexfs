@@ -120,18 +120,18 @@ fn ensure_agent_terminal_socket_rejects_symlink_visible_parent_without_writing_t
 }
 
 #[test]
-fn remove_stale_agent_terminal_socket_refuses_plain_file() {
+fn remove_stale_socket_refuses_plain_file() {
     let root = clean_test_dir("ctx-agent-terminal-remove-plain-file");
     assert!(fs::create_dir_all(&root).is_ok());
     let socket = root.join("main.sock");
     write_text_file(&socket, "keep\n");
 
-    assert!(remove_stale_agent_terminal_socket(&socket).is_err());
+    assert!(remove_stale_socket(&socket).is_err());
     assert_eq!(fs::read_to_string(&socket).unwrap_or_default(), "keep\n");
 }
 
 #[test]
-fn remove_stale_agent_terminal_socket_rejects_symlink_parent_without_removing_target_socket()
+fn remove_stale_socket_rejects_symlink_parent_without_removing_target_socket()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = clean_test_dir("ctx-agent-terminal-remove-parent-symlink");
     let outside = clean_test_dir("ctx-agent-terminal-remove-parent-symlink-outside");
@@ -141,7 +141,7 @@ fn remove_stale_agent_terminal_socket_rejects_symlink_parent_without_removing_ta
     let listener = std::os::unix::net::UnixListener::bind(&outside_socket)?;
     assert!(std::os::unix::fs::symlink(&outside, root.join("runtime")).is_ok());
 
-    let Err(error) = remove_stale_agent_terminal_socket(&root.join("runtime").join("main.sock"))
+    let Err(error) = remove_stale_socket(&root.join("runtime").join("main.sock"))
     else {
         return Err("symlink parent must fail".into());
     };

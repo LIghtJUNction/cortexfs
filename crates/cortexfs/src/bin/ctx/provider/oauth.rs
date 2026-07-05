@@ -105,7 +105,7 @@ fn provider_oauth_config(provider: &str) -> Result<cortexfs::OAuthProviderConfig
     if !is_provider_name(provider) {
         return Err(CliError::usage("invalid provider name"));
     }
-    let config = read_provider_config(provider)?
+    let config = read_provider_config_from_dir(provider, Path::new(PROVIDER_CONFIG_DIR))?
         .oauth
         .ok_or_else(|| CliError::usage(format!("provider has no oauth config: {provider}")))?;
     Ok(config)

@@ -11,53 +11,8 @@ pub fn inspect_agent_schedule_json(
     parent_subject: &str,
     parent_policy: &PolicyV0,
 ) -> AgentScheduleReport {
-    let mut issues = Vec::new();
-    if !is_object_name(parent_subject) {
-        issues.push(AgentScheduleIssue::InvalidField {
-            node: None,
-            field: "parent_subject".to_owned(),
-            value: parent_subject.to_owned(),
-        });
-        return AgentScheduleReport::new(issues);
-    }
-
-    let Ok(value) = serde_json::from_str::<Value>(content) else {
-        issues.push(AgentScheduleIssue::InvalidJson);
-        return AgentScheduleReport::new(issues);
-    };
-    if !value.is_object() {
-        issues.push(AgentScheduleIssue::ScheduleNotObject);
-        return AgentScheduleReport::new(issues);
-    }
-    let Ok(schedule) = serde_json::from_value::<ScheduleJson>(value) else {
-        issues.push(AgentScheduleIssue::InvalidJson);
-        return AgentScheduleReport::new(issues);
-    };
-    if !matches!(schedule.version.as_ref().and_then(Value::as_u64), Some(1)) {
-        issues.push(AgentScheduleIssue::InvalidVersion);
-    }
-    if !matches!(
-        schedule.mode.as_ref().and_then(Value::as_str),
-        Some("dag-react")
-    ) {
-        issues.push(AgentScheduleIssue::InvalidMode);
-    }
-
-    let Some(nodes_value) = schedule.nodes else {
-        issues.push(AgentScheduleIssue::InvalidNodes);
-        return AgentScheduleReport::new(issues);
-    };
-    let Some(node_values) = nodes_value.as_array() else {
-        issues.push(AgentScheduleIssue::InvalidNodes);
-        return AgentScheduleReport::new(issues);
-    };
-    if node_values.is_empty() || node_values.len() > MAX_AGENT_SCHEDULE_NODES {
-        issues.push(AgentScheduleIssue::InvalidNodes);
-        return AgentScheduleReport::new(issues);
-    }
-
-    inspect_schedule_nodes(node_values, parent_subject, parent_policy, &mut issues);
-
+    let (_nodes, issues) =
+        parse_valid_agent_schedule_nodes(content, parent_subject, parent_policy);
     AgentScheduleReport::new(issues)
 }
 

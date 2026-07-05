@@ -361,7 +361,11 @@ fn stream_tool_call_buffer_rejects_oversized_json_prefix() {
 fn runner_stdin_reader_accepts_input_at_limit() {
     let input = "x".repeat(MAX_RUNNER_STDIN_INPUT_BYTES);
 
-    let read = read_runner_stdin_limited(Cursor::new(input.as_bytes()), MAX_RUNNER_STDIN_INPUT_BYTES);
+    let read = read_limited_input_text(
+        Cursor::new(input.as_bytes()),
+        MAX_RUNNER_STDIN_INPUT_BYTES,
+        "stdin exceeds runner input limit",
+    );
 
     assert_eq!(read.unwrap_or_default().len(), MAX_RUNNER_STDIN_INPUT_BYTES);
 }
@@ -370,7 +374,11 @@ fn runner_stdin_reader_accepts_input_at_limit() {
 fn runner_stdin_reader_rejects_input_over_limit() {
     let input = "x".repeat(MAX_RUNNER_STDIN_INPUT_BYTES + 1);
 
-    let read = read_runner_stdin_limited(Cursor::new(input.as_bytes()), MAX_RUNNER_STDIN_INPUT_BYTES);
+    let read = read_limited_input_text(
+        Cursor::new(input.as_bytes()),
+        MAX_RUNNER_STDIN_INPUT_BYTES,
+        "stdin exceeds runner input limit",
+    );
 
     assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));
 }

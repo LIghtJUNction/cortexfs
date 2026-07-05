@@ -18,7 +18,7 @@ fn execute_agent_tool_call(
         return Err(format!("tool not found: {}", tool_call.name));
     };
     let policy_path = hit.control_dir().join("policy");
-    let policy_text = read_small_plain_text_file(&policy_path)
+    let policy_text = read_small_plain_text_file(&policy_path, MAX_RUNNER_CONTROL_BYTES, "runner")
         .map_err(|error| format!("cannot read {}: {error}", policy_path.display()))?;
     let tool_policy = PolicyV0::parse(&policy_text)
         .map_err(|_error| format!("invalid policy for tool:{}", tool_call.name))?;
@@ -423,10 +423,12 @@ fn run_agent_tool_process_with_timeout(
         .stderr
         .take()
         .ok_or_else(|| "cannot read tool stderr".to_owned())?;
-    let stdout_reader =
-        thread::spawn(move || read_limited_bytes(stdout, MAX_AGENT_TOOL_OUTPUT_BYTES + 1));
-    let stderr_reader =
-        thread::spawn(move || read_limited_bytes(stderr, MAX_AGENT_TOOL_OUTPUT_BYTES + 1));
+    let stdout_reader = thread::spawn(move || {
+        read_limited_bytes(stdout, MAX_AGENT_TOOL_OUTPUT_BYTES + 1)
+    });
+    let stderr_reader = thread::spawn(move || {
+        read_limited_bytes(stderr, MAX_AGENT_TOOL_OUTPUT_BYTES + 1)
+    });
     let mut stdout_reader = Some(stdout_reader);
     let mut stderr_reader = Some(stderr_reader);
     let mut stdout = None;
@@ -443,7 +445,7 @@ fn run_agent_tool_process_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
-                terminate_process_group(&mut child);
+                process_helpers::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 if let Some(reader) = stderr_reader.take() {
                     let _ignored = reader.join();
@@ -464,7 +466,7 @@ fn run_agent_tool_process_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
-                terminate_process_group(&mut child);
+                process_helpers::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 if let Some(reader) = stdout_reader.take() {
                     let _ignored = reader.join();
@@ -479,13 +481,13 @@ fn run_agent_tool_process_with_timeout(
             break status;
         }
         if Instant::now() >= deadline {
-            terminate_process_group(&mut child);
+            process_helpers::terminate_process_group(&mut child);
             let _ignored = child.wait();
             return Err(format!("tool timed out after {}s", timeout.as_secs()));
         }
         thread::sleep(Duration::from_millis(50));
     };
-    terminate_process_group(&mut child);
+    process_helpers::terminate_process_group(&mut child);
     let stdout = match stdout {
         Some(output) => output,
         None => {

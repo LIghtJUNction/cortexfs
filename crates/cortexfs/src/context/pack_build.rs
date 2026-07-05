@@ -1,16 +1,13 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::io::Read as _;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
-use nix::libc;
 use serde_json::Value;
 
 use crate::{
     CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES, ContextJsonlKind, ContextPackBuild,
     ContextPackBuiltItem, SESSION_REQUIRED_FILES, atomic_replace_text, inspect_context_jsonl,
-    inspect_message_stream_jsonl, is_object_name,
+    inspect_message_stream_jsonl, is_object_name, plain_fs,
 };
 
 const MAX_CONTEXT_PACK_SOURCE_BYTES: u64 = 1024 * 1024;

@@ -43,27 +43,11 @@ type PtyWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type Client = Arc<Mutex<UnixStream>>;
 type Clients = Arc<Mutex<Vec<Client>>>;
 
-#[derive(Debug, Eq, PartialEq)]
-struct CtxtermError {
-    code: u8,
-    message: String,
-}
+include!("shared/stderr.rs");
+include!("shared/terminal_io.rs");
+include!("shared/simple_cli_error.rs");
 
-impl CtxtermError {
-    fn usage(message: impl Into<String>) -> Self {
-        Self {
-            code: 2,
-            message: message.into(),
-        }
-    }
-
-    fn unavailable(message: impl Into<String>) -> Self {
-        Self {
-            code: 69,
-            message: message.into(),
-        }
-    }
-}
+define_simple_cli_error!(CtxtermError);
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -122,6 +106,9 @@ struct RunConfig {
 
 include!("ctxterm/cli.rs");
 include!("ctxterm/pty.rs");
+include!("shared/plain_dir.rs");
+include!("shared/create_plain_dir.rs");
+include!("shared/stale_socket.rs");
 include!("ctxterm/socket.rs");
 include!("ctxterm/fs.rs");
 include!("ctxterm/client_io.rs");

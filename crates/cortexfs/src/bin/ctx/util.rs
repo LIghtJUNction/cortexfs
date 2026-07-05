@@ -71,10 +71,6 @@ fn open_executable_no_follow(path: &Path) -> Result<fs::File, CliError> {
     Ok(file)
 }
 
-fn proc_fd_path(file: &fs::File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
-}
-
 fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
@@ -133,64 +129,6 @@ fn validate_relative_abi_path(path: &Path) -> Result<(), CliError> {
     }
 
     Ok(())
-}
-
-fn newline_terminated(value: &str) -> String {
-    if value.ends_with('\n') {
-        value.to_owned()
-    } else {
-        format!("{value}\n")
-    }
-}
-
-fn json_string(value: &str) -> String {
-    let mut escaped = String::from("\"");
-    for character in value.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control() => {
-                push_json_unicode_escape(&mut escaped, character);
-            }
-            character => escaped.push(character),
-        }
-    }
-    escaped.push('"');
-    escaped
-}
-
-fn push_json_unicode_escape(output: &mut String, character: char) {
-    let value = u32::from(character);
-    output.push_str("\\u");
-    output.push(hex_digit((value >> 12) & 0x0f));
-    output.push(hex_digit((value >> 8) & 0x0f));
-    output.push(hex_digit((value >> 4) & 0x0f));
-    output.push(hex_digit(value & 0x0f));
-}
-
-fn hex_digit(value: u32) -> char {
-    match value {
-        0 => '0',
-        1 => '1',
-        2 => '2',
-        3 => '3',
-        4 => '4',
-        5 => '5',
-        6 => '6',
-        7 => '7',
-        8 => '8',
-        9 => '9',
-        10 => 'a',
-        11 => 'b',
-        12 => 'c',
-        13 => 'd',
-        14 => 'e',
-        15 => 'f',
-        _ => '?',
-    }
 }
 
 fn temp_file_name(attempt: u8) -> String {
@@ -355,11 +293,4 @@ fn print_line(line: &str) -> Result<(), CliError> {
         .write_all(line.as_bytes())
         .and_then(|()| stdout.write_all(b"\n"))
         .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))
-}
-
-fn write_error(line: &str) -> io::Result<()> {
-    let mut stderr = io::stderr().lock();
-    stderr
-        .write_all(line.as_bytes())
-        .and_then(|()| stderr.write_all(b"\n"))
 }

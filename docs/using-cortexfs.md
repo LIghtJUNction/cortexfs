@@ -60,7 +60,7 @@ ctx agent prompt coder
 ```
 
 `ctx agent chat` 是人类聊天界面；`tsh` 是 agent terminal 里的工具 shell，不是同一个界面。
-默认 `coder.d/system.md` 要求它读取最近的 `AGENTS.md`、检查 `git status --short`、用
+默认 `coder.d/system.md` 要求它先确认适用的项目规则和当前工作区状态，用
 `fs.replace` 做小范围源码修改、运行可用的 format/static-check/lint/test 命令、检查 diff，
 最后汇报改动文件和真实验证命令。完整路径可以用 `npm run bootstrap-coder:smoke` 复测。
 

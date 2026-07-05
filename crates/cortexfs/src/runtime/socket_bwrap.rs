@@ -5,7 +5,7 @@ fn agent_executable_socket_command(
 ) -> Command {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
-            let mut command = Command::new(proc_fd_path(agent_executable));
+            let mut command = Command::new(plain_fs::proc_fd_path(agent_executable));
             apply_agent_executable_socket_env(
                 &mut command,
                 runtime,
@@ -212,7 +212,7 @@ fn bwrap_workspace_bind_args(
     if !cwd_uses_default_workspace(cwd) || mount_table_targets_workspace(mount_table) {
         return Vec::new();
     }
-    if !is_absolute_host_workspace_path(workspace) {
+    if !host_path::is_absolute_host_workspace_path(workspace) {
         return Vec::new();
     }
     vec![
@@ -231,17 +231,6 @@ fn mount_table_targets_workspace(mount_table: &MountTable) -> bool {
         .entries()
         .iter()
         .any(|mount| cwd_uses_default_workspace(mount.target()))
-}
-
-fn is_absolute_host_workspace_path(value: &str) -> bool {
-    !value.bytes().any(|byte| byte.is_ascii_control())
-        && Path::new(value).is_absolute()
-        && Path::new(value).components().all(|component| {
-            matches!(
-                component,
-                std::path::Component::RootDir | std::path::Component::Normal(_)
-            )
-        })
 }
 
 fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {

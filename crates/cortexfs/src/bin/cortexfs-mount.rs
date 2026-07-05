@@ -29,6 +29,8 @@ use nix::sys::stat::{Mode, SFlag, fstatat};
 use nix::sys::statvfs;
 use nix::unistd::{UnlinkatFlags, unlinkat};
 
+include!("shared/stderr.rs");
+
 #[derive(Debug)]
 struct CortexFuse {
     projection: FuseV1Projection,
@@ -152,6 +154,29 @@ macro_rules! path_for_inode_or_reply {
             }
         }
     };
+}
+
+macro_rules! create_session_layout_child_or_reply {
+    ($fuse:expr, $req:expr, $parent:expr, $name:expr, $reply:expr, $method:ident) => {{
+        let Some(name) = $name.to_str() else {
+            $reply.error(Errno::EINVAL);
+            return;
+        };
+        let parent_path = path_for_inode_or_reply!($fuse, $parent, $reply);
+        let Some(path) = child_path(&parent_path, name) else {
+            $reply.error(Errno::EINVAL);
+            return;
+        };
+        if let Err(error) = $fuse.projection.$method(&path, $req.uid(), $req.gid()) {
+            $reply.error(if matches!(error, FuseV1Error::NotControlFile) {
+                readonly_mutation_errno()
+            } else {
+                errno(error)
+            });
+            return;
+        }
+        path
+    }};
 }
 
 include!("../mount/permissions.rs");

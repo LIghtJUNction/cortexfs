@@ -1,0 +1,4 @@
+interface:
+  display_name: "CortexFS Dry Refactor"
+  short_description: "Resume CortexFS deduplication and prevent duplicate logic."
+  default_prompt: "Use $cortexfs-dry-refactor to reduce duplicate CortexFS logic safely."

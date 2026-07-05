@@ -1,18 +1,26 @@
+macro_rules! open_socket_request {
+    ($socket:expr, $request:expr) => {{
+        if $request.len() > MAX_SOCKET_FRAME_BYTES {
+            Err(CliError::usage(format!(
+                "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
+            )))
+        } else {
+            let mut stream = UnixStream::connect($socket).map_err(|error| {
+                CliError::unavailable(format!("cannot connect {}: {error}", $socket.display()))
+            })?;
+            stream
+                .write_all($request.as_bytes())
+                .and_then(|()| stream.shutdown(Shutdown::Write))
+                .map_err(|error| {
+                    CliError::unavailable(format!("cannot write socket request: {error}"))
+                })?;
+            Ok(stream)
+        }
+    }};
+}
+
 fn stream_socket_request(socket: &Path, request: &str) -> Result<ExitCode, CliError> {
-    if request.len() > MAX_SOCKET_FRAME_BYTES {
-        return Err(CliError::usage(format!(
-            "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
-        )));
-    }
-
-    let mut stream = UnixStream::connect(socket).map_err(|error| {
-        CliError::unavailable(format!("cannot connect {}: {error}", socket.display()))
-    })?;
-    stream
-        .write_all(request.as_bytes())
-        .and_then(|()| stream.shutdown(Shutdown::Write))
-        .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
-
+    let stream = open_socket_request!(socket, request)?;
     copy_socket_response_raw(stream)?;
     Ok(ExitCode::SUCCESS)
 }
@@ -121,20 +129,7 @@ fn stream_agent_socket_request(
     if raw {
         return stream_socket_request(socket, request);
     }
-    if request.len() > MAX_SOCKET_FRAME_BYTES {
-        return Err(CliError::usage(format!(
-            "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
-        )));
-    }
-
-    let mut stream = UnixStream::connect(socket).map_err(|error| {
-        CliError::unavailable(format!("cannot connect {}: {error}", socket.display()))
-    })?;
-    stream
-        .write_all(request.as_bytes())
-        .and_then(|()| stream.shutdown(Shutdown::Write))
-        .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
-
+    let stream = open_socket_request!(socket, request)?;
     render_agent_events(stream)
 }
 
@@ -186,59 +181,6 @@ fn stream_agent_socket_request_streaming_interruptible(
         send_socket_request_best_effort(socket, cancel_request)?;
     }
     Ok(ExitCode::from(rendered.exit_code))
-}
-
-#[cfg(test)]
-fn stream_agent_socket_request_buffered_interruptible(
-    socket: &Path,
-    request: &str,
-    raw: bool,
-    interrupt: Option<(&AgentInterruptGuard, &str, &str)>,
-) -> Result<ExitCode, CliError> {
-    if raw {
-        if let Some((guard, cancel_request, run_id)) = interrupt {
-            let interrupted =
-                stream_socket_request_interruptible(socket, request, guard.interrupted_flag())?;
-            if interrupted {
-                write_terminal_error(&format!(
-                    "ctx: interrupt requested; cancelling run {run_id}"
-                ))?;
-                send_socket_request_best_effort(socket, cancel_request)?;
-                return Ok(ExitCode::SUCCESS);
-            }
-            return Ok(ExitCode::SUCCESS);
-        }
-        return stream_socket_request(socket, request);
-    }
-    if request.len() > MAX_SOCKET_FRAME_BYTES {
-        return Err(CliError::usage(format!(
-            "socket request exceeds {MAX_SOCKET_FRAME_BYTES} bytes: EMSGSIZE"
-        )));
-    }
-
-    let mut stream = UnixStream::connect(socket).map_err(|error| {
-        CliError::unavailable(format!("cannot connect {}: {error}", socket.display()))
-    })?;
-    stream
-        .write_all(request.as_bytes())
-        .and_then(|()| stream.shutdown(Shutdown::Write))
-        .map_err(|error| CliError::unavailable(format!("cannot write socket request: {error}")))?;
-
-    if let Some((guard, cancel_request, run_id)) = interrupt {
-        stream
-            .set_read_timeout(Some(Duration::from_millis(100)))
-            .map_err(|error| {
-                CliError::unavailable(format!("cannot configure interruptible socket: {error}"))
-            })?;
-        let rendered = render_agent_events_interruptible(stream, guard.interrupted_flag())?;
-        if rendered.interrupted {
-            write_terminal_error(&format!("ctx: interrupt requested; cancelling run {run_id}"))?;
-            send_socket_request_best_effort(socket, cancel_request)?;
-        }
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    render_agent_events(stream)
 }
 
 fn send_socket_request_best_effort(socket: &Path, request: &str) -> Result<(), CliError> {

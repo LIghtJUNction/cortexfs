@@ -93,7 +93,7 @@ impl FuseV1Projection {
         }
         let directory =
             open_fuse_v1_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
-        let entries = fs::read_dir(fuse_v1_proc_fd_path(&directory))
+        let entries = fs::read_dir(plain_fs::proc_fd_path(&directory))
             .map_err(|error| fuse_metadata_error(&error))?;
         let mut output = Vec::new();
         for entry in entries {
@@ -241,9 +241,35 @@ impl FuseV1Projection {
         .is_some()
             && let Some(parent) = path.parent()
         {
-            create_fuse_v1_plain_dir(parent)?;
-    }
+            create_fuse_v1_plain_dir(parent).map_err(|_error| FuseV1Error::Io)?;
+        }
     atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
+}
+
+/// Projects a FUSE write, preserving request ownership for session files.
+pub fn write_fuse_file_at_for_owner(
+    &self,
+    abi_path: &str,
+    offset: u64,
+    content: &[u8],
+    uid: u32,
+    gid: u32,
+) -> Result<(), FuseV1Error> {
+    if content.len() > MAX_FUSE_V1_SMALL_WRITE_BYTES {
+        return Err(FuseV1Error::TooLarge);
+    }
+    let normalized = normalize_fuse_abi_path(abi_path)?;
+    if offset != 0 {
+        return self.write_control_file_at(&normalized, offset, content);
+    }
+    if Self::is_session_replace_path(&normalized)
+        || Self::is_session_append_path(&normalized)
+        || Self::session_atomic_temp_target(&normalized).is_some()
+    {
+        return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
+    }
+    self.write_control_file_at(&normalized, 0, content)?;
+    Self::chown_fuse_v1_plain_path(&self.resolve(&normalized)?, uid, gid)
 }
 
 fn append_plain_file_at_end(
@@ -270,7 +296,7 @@ fn append_plain_file_at_end(
     file.sync_all().map_err(|_error| FuseV1Error::Io)
 }
 
-    fn replace_session_plain_file(&self, normalized: &str, content: &[u8]) -> Result<(), FuseV1Error> {
+fn replace_session_plain_file(&self, normalized: &str, content: &[u8]) -> Result<(), FuseV1Error> {
         let content = std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
         let path = self.resolve(normalized)?;
     match fs::symlink_metadata(&path) {
@@ -279,25 +305,58 @@ fn append_plain_file_at_end(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_error) => return Err(FuseV1Error::Io),
     }
-        atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
-    }
+    atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
+}
+
+fn replace_session_plain_file_for_owner(
+    &self,
+    normalized: &str,
+    content: &[u8],
+    uid: u32,
+    gid: u32,
+) -> Result<(), FuseV1Error> {
+    self.replace_session_plain_file(normalized, content)?;
+    Self::chown_fuse_v1_plain_path(&self.resolve(normalized)?, uid, gid)
+}
+
+fn chown_fuse_v1_plain_path(path: &Path, uid: u32, gid: u32) -> Result<(), FuseV1Error> {
+    nix::unistd::fchownat(
+        nix::fcntl::AT_FDCWD,
+        path,
+        Some(nix::unistd::Uid::from_raw(uid)),
+        Some(nix::unistd::Gid::from_raw(gid)),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| FuseV1Error::Io)
+}
 
     /// Creates one directory in the durable session layout.
     ///
     /// This is intentionally narrower than general filesystem `mkdir`: only the
     /// documented session skeleton below `home/<uid>/agent/<agent>/session` is
     /// writable through the v1 FUSE projection.
-    pub fn create_session_layout_dir(&self, abi_path: &str) -> Result<(), FuseV1Error> {
+pub fn create_session_layout_dir(
+    &self,
+    abi_path: &str,
+    uid: u32,
+    gid: u32,
+) -> Result<(), FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if !Self::is_session_layout_dir_path(&normalized) {
             return Err(FuseV1Error::NotControlFile);
         }
-        let path = self.resolve(&normalized)?;
-        create_fuse_v1_plain_dir(&path)
-    }
+    let path = self.resolve(&normalized)?;
+    create_fuse_v1_plain_dir(&path).map_err(|_error| FuseV1Error::Io)?;
+    Self::chown_fuse_v1_plain_path(&path, uid, gid)
+}
 
     /// Creates an initially empty durable session file.
-    pub fn create_session_layout_file(&self, abi_path: &str) -> Result<(), FuseV1Error> {
+pub fn create_session_layout_file(
+    &self,
+    abi_path: &str,
+    uid: u32,
+    gid: u32,
+) -> Result<(), FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if !Self::is_session_replace_path(&normalized)
             && !Self::is_session_append_path(&normalized)
@@ -305,8 +364,8 @@ fn append_plain_file_at_end(
         {
             return Err(FuseV1Error::NotControlFile);
         }
-        self.replace_session_plain_file(&normalized, b"")
-    }
+    self.replace_session_plain_file_for_owner(&normalized, b"", uid, gid)
+}
 
     /// Renames a same-directory durable session atomic temp file to its final file.
     pub fn rename_session_atomic_temp(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
@@ -356,7 +415,9 @@ fn append_plain_file_at_end(
         Err(FuseV1Error::NotControlFile)
     }
 
-    fn session_atomic_temp_target(normalized: &str) -> Option<String> {
+    #[doc(hidden)]
+    #[must_use]
+    pub fn session_atomic_temp_target(normalized: &str) -> Option<String> {
         let (parent, file_name) = normalized.rsplit_once('/')?;
         let rest = file_name.strip_prefix('.')?;
         let (target_name, _suffix) = rest.split_once(".tmp-")?;
@@ -378,7 +439,9 @@ fn append_plain_file_at_end(
         is_object_name(agent)
     }
 
-    fn is_session_append_path(normalized: &str) -> bool {
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_session_append_path(normalized: &str) -> bool {
         let parts = normalized.split('/').collect::<Vec<_>>();
         matches!(
             *parts.as_slice(),
@@ -390,7 +453,9 @@ fn append_plain_file_at_end(
         )
     }
 
-    fn is_session_replace_path(normalized: &str) -> bool {
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_session_replace_path(normalized: &str) -> bool {
         let parts = normalized.split('/').collect::<Vec<_>>();
         match *parts.as_slice() {
             ["home", uid, "agent", agent, "session", "index", file]

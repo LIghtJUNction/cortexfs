@@ -100,7 +100,7 @@ fn read_provider_configs(config_dir: &Path) -> Result<Vec<ProviderConfigEntry>, 
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_error) => return Err(FuseV1Error::Io),
     };
-    let entries = match fs::read_dir(fuse_v1_proc_fd_path(&directory)) {
+    let entries = match fs::read_dir(plain_fs::proc_fd_path(&directory)) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_error) => return Err(FuseV1Error::Io),
@@ -118,7 +118,12 @@ fn read_provider_configs(config_dir: &Path) -> Result<Vec<ProviderConfigEntry>, 
         if extension != "json" {
             continue;
         }
-        let Ok(content) = read_provider_config_file_at(&directory, &name) else {
+        let Ok(content) = plain_fs::read_small_text_file_at(
+            &directory,
+            &name,
+            MAX_PROVIDER_CONFIG_BYTES,
+            "provider config file is invalid",
+        ) else {
             continue;
         };
         let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
@@ -127,31 +132,6 @@ fn read_provider_configs(config_dir: &Path) -> Result<Vec<ProviderConfigEntry>, 
         configs.push(ProviderConfigEntry { config });
     }
     Ok(configs)
-}
-
-fn read_provider_config_file_at(directory: &fs::File, name: &str) -> std::io::Result<String> {
-    let file_fd = nix::fcntl::openat(
-        directory,
-        name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map_err(std::io::Error::from)?;
-    let mut file = fs::File::from(file_fd);
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_PROVIDER_CONFIG_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "provider config file is invalid",
-        ));
-    }
-    let len = usize::try_from(metadata.len()).map_err(|error| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
-    })?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content)?;
-    String::from_utf8(content)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
 }
 
 fn projected_provider_models_for_provider(
@@ -384,7 +364,8 @@ fn default_provider_model_fallback(provider: &str, default_model: Option<&str>) 
 
 fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {
     let directory = open_fuse_v1_plain_directory(model_root).map_err(|_error| FuseV1Error::Io)?;
-    let entries = fs::read_dir(fuse_v1_proc_fd_path(&directory)).map_err(|_error| FuseV1Error::Io)?;
+    let entries = fs::read_dir(plain_fs::proc_fd_path(&directory))
+        .map_err(|_error| FuseV1Error::Io)?;
     let mut names = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_error| FuseV1Error::Io)?;
@@ -407,8 +388,4 @@ fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Erro
     }
     names.sort();
     Ok(names)
-}
-
-fn fuse_v1_proc_fd_path(directory: &fs::File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
 }

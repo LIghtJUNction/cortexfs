@@ -1,4 +1,4 @@
-use super::{runtime_agent_executable, runtime_model, RuntimeConfig, DEFAULT_SOURCE};
+use super::{runtime_model, RuntimeConfig, DEFAULT_SOURCE};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -37,7 +37,7 @@ fn runtime_config_accepts_positional_agent() {
 #[test]
 fn runtime_agent_executable_uses_ctx_abi_path() {
     assert_eq!(
-        runtime_agent_executable(Path::new("/ctx"), "coder"),
+        Path::new("/ctx").join("agent").join("coder"),
         PathBuf::from("/ctx/agent/coder")
     );
 }

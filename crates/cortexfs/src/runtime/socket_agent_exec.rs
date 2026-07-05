@@ -277,7 +277,7 @@ fn agent_tool_context_for_request(cwd: Option<&str>, workspace: Option<&str>) ->
     context.push_str("- Sandbox cwd: ");
     context.push_str(&prompt_quoted(cwd.unwrap_or("/workspace")));
     context.push('\n');
-    match workspace.filter(|value| is_absolute_host_workspace_path(value)) {
+    match workspace.filter(|value| host_path::is_absolute_host_workspace_path(value)) {
         Some(workspace) => {
             context.push_str("- Host workspace mounted at `/workspace`: ");
             context.push_str(&prompt_quoted(workspace));

@@ -1,3 +1,9 @@
+use crate::plain_fs::{
+    open_plain_directory as open_tool_io_plain_directory,
+    plain_file_name as tool_io_plain_file_name,
+    read_small_text_file as read_tool_io_small_text_file,
+};
+
 impl Tool for FsReadTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -96,51 +102,7 @@ fn run_fs_read_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<Exit
 }
 
 fn read_regular_utf8_file(path: &Path, max_bytes: u64) -> io::Result<String> {
-    let Some(parent) = path.parent() else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path must have a parent directory",
-        ));
-    };
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
-    let parent_dir = open_plain_directory(parent)?;
-    let fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )?;
-    let mut file = fs::File::from(fd);
-    let metadata = file.metadata()?;
-    let len = regular_file_len(&metadata, max_bytes)?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content)?;
-    String::from_utf8(content)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
-}
-
-fn regular_file_len(metadata: &fs::Metadata, max_bytes: u64) -> io::Result<usize> {
-    if !metadata.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "path is not a regular file",
-        ));
-    }
-    if metadata.len() > max_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "file exceeds read limit",
-        ));
-    }
-    usize::try_from(metadata.len()).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("file is too large to read: {error}"),
-        )
-    })
+    read_tool_io_small_text_file(path, max_bytes)
 }
 
 fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
@@ -242,11 +204,8 @@ fn write_text_file_atomic(path: &Path, content: &str) -> io::Result<()> {
             "path must have a parent directory",
         ));
     };
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
-    let parent_dir = open_plain_directory(parent)?;
+    let file_name = tool_io_plain_file_name(path)?;
+    let parent_dir = open_tool_io_plain_directory(parent)?;
     for attempt in 0..16 {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -301,53 +260,4 @@ fn write_text_file_atomic(path: &Path, content: &str) -> io::Result<()> {
         io::ErrorKind::AlreadyExists,
         "cannot create unique temp file",
     ))
-}
-
-fn open_plain_directory(path: &Path) -> io::Result<fs::File> {
-    let mut directory = if path.is_absolute() {
-        open_single_plain_directory(Path::new("/"))?
-    } else {
-        open_single_plain_directory(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "directory path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_single_plain_directory(path: &Path) -> io::Result<fs::File> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path is not a plain directory",
-        ));
-    }
-    Ok(directory)
 }

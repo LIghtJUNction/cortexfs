@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use serde_json::Value;
-use std::path::Path;
 
 use crate::{MAX_SOCKET_FRAME_BYTES, is_stable_chroot_absolute_path, validate_socket_object_field};
 
@@ -266,7 +265,7 @@ fn validate_optional_socket_workspace(workspace: Option<&str>) -> Result<(), Soc
     let Some(workspace) = workspace else {
         return Ok(());
     };
-    if is_absolute_host_workspace_path(workspace) {
+    if crate::host_path::is_absolute_host_workspace_path(workspace) {
         Ok(())
     } else {
         Err(SocketRequestError::InvalidField {
@@ -276,16 +275,6 @@ fn validate_optional_socket_workspace(workspace: Option<&str>) -> Result<(), Soc
     }
 }
 
-fn is_absolute_host_workspace_path(value: &str) -> bool {
-    !value.bytes().any(|byte| byte.is_ascii_control())
-        && Path::new(value).is_absolute()
-        && Path::new(value).components().all(|component| {
-            matches!(
-                component,
-                std::path::Component::RootDir | std::path::Component::Normal(_)
-            )
-        })
-}
 
 fn validate_optional_socket_object_field(
     field: &'static str,

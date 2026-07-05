@@ -1,8 +1,7 @@
 use std::fs;
 use std::io::{self, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::{Component, Path, PathBuf};
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 use crate::{SHARED_QUEUE_REQUIRED_DIRS, is_object_name};
 
@@ -273,7 +272,8 @@ pub fn finish_shared_queue_job(
 
     nix::fcntl::renameat(&claim_dir_fd, job_name, &output_dir_fd, job_name)
         .map_err(|_error| SharedQueueFinishError::CannotMoveClaimedJob)?;
-    sync_directory(&output_dir).map_err(|_error| SharedQueueFinishError::CannotMoveClaimedJob)?;
+    crate::plain_fs::sync_plain_dir(&output_dir)
+        .map_err(|_error| SharedQueueFinishError::CannotMoveClaimedJob)?;
     claim_dir_fd
         .sync_all()
         .map_err(|_error| SharedQueueFinishError::CannotMoveClaimedJob)?;
@@ -322,7 +322,8 @@ pub fn recover_shared_queue_job(
     }
     nix::fcntl::renameat(&claim_dir_fd, job_name, &pending_root_fd, job_name)
         .map_err(|_error| SharedQueueRecoverError::CannotRequeue)?;
-    sync_directory(&pending_root).map_err(|_error| SharedQueueRecoverError::CannotRequeue)?;
+    crate::plain_fs::sync_plain_dir(&pending_root)
+        .map_err(|_error| SharedQueueRecoverError::CannotRequeue)?;
     claim_dir_fd
         .sync_all()
         .map_err(|_error| SharedQueueRecoverError::CannotRequeue)?;
@@ -336,7 +337,7 @@ fn pending_queue_jobs(
     pending_dir: &Path,
     pending_dir_fd: &fs::File,
 ) -> Result<Vec<(String, PathBuf)>, SharedQueueClaimError> {
-    let entries = fs::read_dir(proc_fd_path(pending_dir_fd))
+    let entries = fs::read_dir(crate::plain_fs::proc_fd_path(pending_dir_fd))
         .map_err(|_error| SharedQueueClaimError::CannotReadPending)?;
     let mut jobs = Vec::new();
     for entry in entries {
@@ -379,12 +380,13 @@ fn record_shared_queue_lease(
     lease_root_fd
         .sync_all()
         .map_err(|_error| SharedQueueClaimError::CannotRecordLease)?;
-    write_new_file_synced_at(
-        &lease_dir_fd,
-        "worker",
-        newline_terminated(worker_name).as_bytes(),
-    )
-    .map_err(|_error| SharedQueueClaimError::CannotRecordLease)?;
+    let worker = if worker_name.ends_with('\n') {
+        worker_name.to_owned()
+    } else {
+        format!("{worker_name}\n")
+    };
+    write_new_file_synced_at(&lease_dir_fd, "worker", worker.as_bytes())
+        .map_err(|_error| SharedQueueClaimError::CannotRecordLease)?;
     lease_dir_fd
         .sync_all()
         .map_err(|_error| SharedQueueClaimError::CannotRecordLease)?;
@@ -396,9 +398,9 @@ fn sync_claimed_queue_job(
     claim_dir: &Path,
     claimed_root: &Path,
 ) -> io::Result<()> {
-    sync_directory(pending_dir)?;
-    sync_directory(claim_dir)?;
-    sync_directory(claimed_root)
+    crate::plain_fs::sync_plain_dir(pending_dir)?;
+    crate::plain_fs::sync_plain_dir(claim_dir)?;
+    crate::plain_fs::sync_plain_dir(claimed_root)
 }
 
 fn rollback_shared_queue_claim(
@@ -414,7 +416,7 @@ fn rollback_shared_queue_claim(
         let _ignored = nix::fcntl::renameat(&claim_dir_fd, job_name, &pending_dir_fd, job_name);
     }
     if let Some(parent) = pending_path.parent() {
-        let _ignored = sync_directory(parent);
+        let _ignored = crate::plain_fs::sync_plain_dir(parent);
     }
     if let Ok(claimed_root_fd) = queue_child_dir_fd(queue_dir, "claimed") {
         let _ignored = nix::unistd::unlinkat(
@@ -424,7 +426,7 @@ fn rollback_shared_queue_claim(
         );
     }
     if let Some(parent) = claim_dir.parent() {
-        let _ignored = sync_directory(parent);
+        let _ignored = crate::plain_fs::sync_plain_dir(parent);
     }
     let _ignored = remove_shared_queue_lease(queue_dir, job_name);
 }
@@ -440,7 +442,7 @@ fn cleanup_shared_queue_claim(queue_dir: &Path, job_name: &str) -> io::Result<()
         Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
         Err(error) => return Err(io::Error::from(error)),
     }
-    sync_directory(&claimed_root)?;
+    crate::plain_fs::sync_plain_dir(&claimed_root)?;
     remove_shared_queue_lease(queue_dir, job_name)
 }
 

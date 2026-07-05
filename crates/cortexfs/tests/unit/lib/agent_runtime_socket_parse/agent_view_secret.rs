@@ -71,7 +71,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
 
 #[test]
 fn secret_tool_lookup_uses_absolute_program_path() {
-    assert_eq!(super::get_secret_tool_program(), "/usr/bin/secret-tool");
+    assert_eq!(super::SECRET_TOOL_PROGRAM, "/usr/bin/secret-tool");
 }
 
 #[test]

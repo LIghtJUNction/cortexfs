@@ -37,20 +37,6 @@ fn run_cli_tool(name: &str, args: &[OsString]) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
-fn run_cli_tool_to_writer(
-    name: &str,
-    args: &[OsString],
-    writer: &mut dyn Write,
-) -> Result<(), String> {
-    match run_core_tool_cli(name, args, writer) {
-        Ok(Some(code)) if code == ExitCode::SUCCESS => Ok(()),
-        Ok(Some(code)) => Err(format!("{name} tool exited with {code:?}")),
-        Ok(None) => Err("tool is not implemented by cortexfs-object-runner".to_owned()),
-        Err(error) => Err(format!("cannot run tool: {error}")),
-    }
-}
-
 fn passthrough_tool_program(name: &str) -> Option<&'static str> {
     match name {
         "bash" => Some("/usr/bin/bash"),
@@ -104,23 +90,9 @@ fn collect_input(args: &[OsString]) -> io::Result<String> {
     if !input.is_empty() {
         return Ok(input);
     }
-    read_runner_stdin_limited(io::stdin(), MAX_RUNNER_STDIN_INPUT_BYTES)
-}
-
-fn read_runner_stdin_limited(reader: impl Read, max_bytes: usize) -> io::Result<String> {
-    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("stdin read limit is invalid: {error}"),
-        )
-    })?;
-    let mut input = String::new();
-    reader.take(limit).read_to_string(&mut input)?;
-    if input.len() > max_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "stdin exceeds runner input limit",
-        ));
-    }
-    Ok(input)
+    read_limited_input_text(
+        io::stdin(),
+        MAX_RUNNER_STDIN_INPUT_BYTES,
+        "stdin exceeds runner input limit",
+    )
 }

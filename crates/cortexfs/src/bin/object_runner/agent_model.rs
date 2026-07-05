@@ -64,7 +64,7 @@ fn run_agent_model_once_with_timeout(
                 }
                 if frames.len() >= MAX_AGENT_MODEL_FRAMES {
                     let message = "agent model output frame count exceeds limit";
-                    terminate_process_group(&mut child);
+                    process_helpers::terminate_process_group(&mut child);
                     let _ignored = child.wait();
                     let _stderr = collect_child_stderr(stderr_reader);
                     let _ignored = stdout_reader.handle.join();
@@ -80,7 +80,7 @@ fn run_agent_model_once_with_timeout(
                     writeln!(stdout, "{line}")
                         .and_then(|()| stdout.flush())
                         .map_err(|error| {
-                            terminate_process_group(&mut child);
+                            process_helpers::terminate_process_group(&mut child);
                             let _ignored = child.wait();
                             format!("cannot write output: {error}")
                         })?;
@@ -89,7 +89,7 @@ fn run_agent_model_once_with_timeout(
                 frames.push(line);
             }
             Ok(Err(error)) => {
-                terminate_process_group(&mut child);
+                process_helpers::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 let _stderr = collect_child_stderr(stderr_reader);
                 let _ignored = stdout_reader.handle.join();
@@ -104,7 +104,7 @@ fn run_agent_model_once_with_timeout(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if Instant::now() >= deadline {
                     let message = format!("agent model timed out after {}s", timeout.as_secs());
-                    terminate_process_group(&mut child);
+                    process_helpers::terminate_process_group(&mut child);
                     let _ignored = child.wait();
                     let _stderr = collect_child_stderr(stderr_reader);
                     let _ignored = stdout_reader.handle.join();

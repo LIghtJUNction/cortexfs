@@ -36,45 +36,6 @@ fn help_describes_generic_visible_tool_invocation() {
 }
 
 #[test]
-fn get_id_program_returns_absolute_path() {
-    assert_eq!(get_id_program(), "/usr/bin/id");
-}
-
-#[test]
-fn id_command_uses_clean_runtime_environment() {
-    let command = id_command();
-    let args = command
-        .get_args()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let mut envs = command
-        .get_envs()
-        .map(|(name, value)| {
-            (
-                name.to_string_lossy().into_owned(),
-                value.map(|value| value.to_string_lossy().into_owned()),
-            )
-        })
-        .collect::<Vec<_>>();
-    envs.sort();
-
-    assert_eq!(command.get_program(), "/usr/bin/id");
-    assert_eq!(args, vec!["-u".to_owned()]);
-    assert_eq!(
-        envs,
-        vec![("PATH".to_owned(), Some("/usr/bin:/bin".to_owned()))]
-    );
-}
-
-#[test]
-fn parse_current_uid_accepts_digits_only() {
-    assert_eq!(parse_current_uid("1000\n"), Ok("1000".to_owned()));
-    assert!(parse_current_uid("1000\n1001\n").is_err());
-    assert!(parse_current_uid("user\n").is_err());
-    assert!(parse_current_uid("\n").is_err());
-}
-
-#[test]
 fn parses_repl_words_without_shell_operators() {
     assert_eq!(
         parse_repl_line(r#"fs.read '{"path":"/tmp/a b"}'"#),
@@ -146,7 +107,7 @@ fn rejects_tshrc_ctx_path_outside_ctx_namespace() {
 }
 
 #[test]
-fn standalone_tshrc_ctx_path_takes_precedence_over_process_env() {
+fn tshrc_precedence_depends_on_standalone_mode() {
     let dir = std::env::temp_dir().join(format!("cortexfs-tsh-ctx-path-{}", std::process::id()));
     let root = dir.join("ctx");
     let home = root.join("home").join("1000");
@@ -162,21 +123,26 @@ fn standalone_tshrc_ctx_path_takes_precedence_over_process_env() {
         .is_ok(),
         "failed to write test .tshrc"
     );
+    let env_path = format!("{}:{}", root.join("tool").display(), home.join("tool").display());
 
     let Ok(tool_path) = ctx_tool_path_with_home(
         &root,
         &home,
-        Ok(format!(
-            "{}:{}",
-            root.join("tool").display(),
-            home.join("tool").display()
-        )),
+        Ok(env_path.clone()),
         true,
     ) else {
         return;
     };
 
     assert_eq!(tool_path.dirs(), &[home.join("tool"), root.join("tool")]);
+
+    let Ok(tool_path) =
+        ctx_tool_path_with_home(&root, &home, Ok(env_path), false)
+    else {
+        return;
+    };
+
+    assert_eq!(tool_path.dirs(), &[root.join("tool"), home.join("tool")]);
 
     let _ignored = fs::remove_dir_all(dir);
 }
@@ -192,11 +158,9 @@ fn standalone_tshrc_abi_paths_are_resolved_under_selected_root() {
     assert!(fs::create_dir_all(home.join("tool")).is_ok());
     assert!(fs::create_dir_all(root.join("tool")).is_ok());
     assert!(
-        fs::write(
-            home.join(".tshrc"),
-            "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n"
-        )
-        .is_ok()
+        fs::write(home.join(".tshrc"), "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n")
+        .is_ok(),
+        "failed to write test .tshrc",
     );
 
     let Ok(tool_path) =
@@ -207,41 +171,6 @@ fn standalone_tshrc_abi_paths_are_resolved_under_selected_root() {
 
     assert_eq!(tool_path.dirs(), &[root.join("tool"), home.join("tool")]);
     assert!(!tool_path.dirs().contains(&PathBuf::from("/ctx/tool")));
-
-    let _ignored = fs::remove_dir_all(dir);
-}
-
-#[test]
-fn agent_tsh_process_env_takes_precedence_over_tshrc() {
-    let dir = std::env::temp_dir().join(format!(
-        "cortexfs-tsh-agent-ctx-path-{}",
-        std::process::id()
-    ));
-    let root = dir.join("ctx");
-    let home = root.join("home").join("1000");
-    assert!(
-        fs::create_dir_all(&home).is_ok(),
-        "failed to create test home"
-    );
-    assert!(
-        fs::write(
-            home.join(".tshrc"),
-            "CTX_PATH=/ctx/home/1000/tool:/ctx/tool\n",
-        )
-        .is_ok(),
-        "failed to write test .tshrc"
-    );
-
-    let env_path = format!(
-        "{}:{}",
-        root.join("tool").display(),
-        home.join("tool").display()
-    );
-    let Ok(tool_path) = ctx_tool_path_with_home(&root, &home, Ok(env_path), false) else {
-        return;
-    };
-
-    assert_eq!(tool_path.dirs(), &[root.join("tool"), home.join("tool")]);
 
     let _ignored = fs::remove_dir_all(dir);
 }
@@ -291,7 +220,7 @@ fn tshrc_ctx_path_refuses_symlink_intermediate_directory() {
 #[test]
 fn parses_tsh_config_as_data() {
     assert_eq!(
-        parse_tsh_config(
+        parse_tsh_runtime_config(
             "\
 # tsh runtime policy
 max_loaded_tools=16
@@ -299,16 +228,16 @@ cache_capacity=8
 window_percent=25
 "
         ),
-        Ok(TshConfig {
+        Ok(TshRuntimeConfig {
             max_loaded_tools: 16,
             cache_capacity: 8,
             window_percent: 25,
         })
     );
-    assert!(parse_tsh_config("max_loaded_tools=0\n").is_err());
-    assert!(parse_tsh_config("cache_capacity=1025\n").is_err());
-    assert!(parse_tsh_config("window_percent=101\n").is_err());
-    assert!(parse_tsh_config("export cache_capacity=8\n").is_err());
+    assert!(parse_tsh_runtime_config("max_loaded_tools=0\n").is_err());
+    assert!(parse_tsh_runtime_config("cache_capacity=1025\n").is_err());
+    assert!(parse_tsh_runtime_config("window_percent=101\n").is_err());
+    assert!(parse_tsh_runtime_config("export cache_capacity=8\n").is_err());
 }
 
 #[test]

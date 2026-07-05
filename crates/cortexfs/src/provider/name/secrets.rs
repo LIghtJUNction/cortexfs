@@ -14,7 +14,7 @@ pub fn store_provider_system_secret(
     set_private_dir_permissions(parent)?;
     crate::atomic_replace_text_with_mode(&path, &format!("{secret}\n"), 0o600)
         .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
-    sync_provider_secret_dir(parent)
+    crate::plain_fs::sync_plain_dir(parent).map_err(|_error| ProviderSystemSecretError::CannotWrite)
 }
 
 /// Reads a provider API secret from the root-owned `CortexFS` system secret store.

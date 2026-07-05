@@ -2,7 +2,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
     () => {
 fn mknod(
     &self,
-    _req: &Request,
+                req: &Request,
     parent: INodeNo,
     name: &OsStr,
     mode: u32,
@@ -12,23 +12,14 @@ fn mknod(
 ) {
             let file_type = mode & S_IFMT;
             if file_type == S_IFREG || file_type == 0 {
-                let Some(name) = name.to_str() else {
-                    reply.error(Errno::EINVAL);
-                    return;
-                };
-                let parent_path = path_for_inode_or_reply!(self, parent, reply);
-                let Some(path) = child_path(&parent_path, name) else {
-                    reply.error(Errno::EINVAL);
-                    return;
-                };
-                if let Err(error) = self.projection.create_session_layout_file(&path) {
-                    reply.error(if matches!(error, FuseV1Error::NotControlFile) {
-                        readonly_mutation_errno()
-                    } else {
-                        errno(error)
-                    });
-                    return;
-                }
+                let path = create_session_layout_child_or_reply!(
+                    self,
+                    req,
+                    parent,
+                    name,
+                    reply,
+                    create_session_layout_file
+                );
                 match self.projected_node_for_path(&path) {
                     Ok(node) => self.reply_entry(&node, reply),
                     Err(error) => reply.error(errno(error)),

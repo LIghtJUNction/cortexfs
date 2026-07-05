@@ -109,15 +109,11 @@ const SECRET_TOOL_PROGRAM: &str = "/usr/bin/secret-tool";
 const MAX_SECRET_TOOL_OUTPUT_BYTES: usize = 8 * 1024;
 const SECRET_TOOL_TIMEOUT_SECONDS: u64 = 5;
 
-fn get_secret_tool_program() -> &'static str {
-    SECRET_TOOL_PROGRAM
-}
-
 fn secret_tool_lookup(
     service: &str,
     account: &str,
 ) -> Result<Option<String>, ApiKeyResolutionError> {
-    let mut command = Command::new(get_secret_tool_program());
+    let mut command = Command::new(SECRET_TOOL_PROGRAM);
     command
         .env_clear()
         .args(["lookup", "service", service, "account", account])
@@ -160,7 +156,7 @@ fn run_secret_tool_command_with_timeout(
         .take()
         .ok_or_else(|| "cannot read secret-tool stdout".to_owned())?;
     let stdout_reader = thread::spawn(move || {
-        read_agent_runtime_limited_bytes(stdout, MAX_SECRET_TOOL_OUTPUT_BYTES.saturating_add(1))
+        process_helpers::read_limited_bytes(stdout, MAX_SECRET_TOOL_OUTPUT_BYTES.saturating_add(1))
     });
     let mut stdout_reader = Some(stdout_reader);
     let mut stdout = None;
@@ -176,7 +172,7 @@ fn run_secret_tool_command_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_SECRET_TOOL_OUTPUT_BYTES {
-                terminate_agent_runtime_process_group(&mut child);
+                process_helpers::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 return Err("secret-tool output exceeds limit".to_owned());
             }
@@ -186,7 +182,7 @@ fn run_secret_tool_command_with_timeout(
             break status;
         }
         if Instant::now() >= deadline {
-            terminate_agent_runtime_process_group(&mut child);
+            process_helpers::terminate_process_group(&mut child);
             let _ignored = child.wait();
             if let Some(reader) = stdout_reader.take() {
                 let _ignored = reader.join();
@@ -209,42 +205,6 @@ fn run_secret_tool_command_with_timeout(
         stdout,
         stderr: Vec::new(),
     })
-}
-
-fn read_agent_runtime_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(limit.min(8 * 1024));
-    let mut buffer = [0_u8; 8 * 1024];
-    loop {
-        let read = match reader.read(&mut buffer) {
-            Ok(0) | Err(_) => break,
-            Ok(read) => read,
-        };
-        let remaining = limit.saturating_sub(output.len());
-        let kept = read.min(remaining);
-        if let Some(chunk) = buffer.get(..kept) {
-            output.extend_from_slice(chunk);
-        }
-        if output.len() >= limit {
-            break;
-        }
-    }
-    output
-}
-
-fn terminate_agent_runtime_process_group(child: &mut Child) {
-    if let Ok(pid) = i32::try_from(child.id()) {
-        signal_agent_runtime_process_group(pid, nix::sys::signal::Signal::SIGTERM);
-        for _attempt in 0..5 {
-            let _ignored = child.try_wait();
-            thread::sleep(Duration::from_millis(50));
-        }
-        signal_agent_runtime_process_group(pid, nix::sys::signal::Signal::SIGKILL);
-    }
-    let _ignored = child.kill();
-}
-
-fn signal_agent_runtime_process_group(pid: i32, signal: nix::sys::signal::Signal) {
-    let _ignored = nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), signal);
 }
 
 fn secret_tool_dbus_address(
