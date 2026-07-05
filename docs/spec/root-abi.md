@@ -298,7 +298,6 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
 
       model/
         main -> /ctx/model/openai/gpt-5.5
-        coder -> /ctx/model/main
 
   shared/
     project-a/

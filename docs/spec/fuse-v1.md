@@ -24,6 +24,7 @@ getattr
 read
 write small control files
 atomic replace
+remove empty durable user/shared directories
 read-only executable object projection
 Unix socket path projection
 session files
@@ -126,3 +127,12 @@ Token counts are estimates unless a runtime later writes exact tokenizer
 metadata. The default estimator is `byte-estimate-v1`, a cheap read-before-read
 heuristic that does not scan full file contents. These xattrs are not control
 files; `setxattr` and `removexattr` must fail.
+
+## Directory Removal
+
+FUSE v1 supports `rmdir` only for empty durable plain directories under
+`home/<uid>/...` and `shared/<space>/...`.
+
+It must not remove `/ctx`, top-level ABI directories, global object projections,
+virtual paths, sockets, symlinks, or non-empty directories. Non-empty directories
+fail with `ENOTEMPTY`; read-only ABI/projection paths fail with `EROFS`.

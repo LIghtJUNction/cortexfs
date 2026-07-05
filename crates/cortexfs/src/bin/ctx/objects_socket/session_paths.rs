@@ -30,6 +30,12 @@ fn agent_session_name(root: &Path, agent: &str, session: Option<&str>) -> Result
 
 fn agent_socket_path(root: &Path, agent: &str) -> Result<PathBuf, CliError> {
     require_cli_name("agent name", agent)?;
+    if agent_user_control_dir(root, agent)
+        .as_deref()
+        .is_some_and(is_plain_dir)
+    {
+        return Ok(ctx_home(root)?.join("agent").join(format!("{agent}.sock")));
+    }
     Ok(root.join("agent").join(format!("{agent}.sock")))
 }
 

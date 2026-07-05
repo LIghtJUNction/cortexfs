@@ -301,4 +301,40 @@ impl ToolContext {
         }
         evicted
     }
+
+    fn from_state(state: cortexfs::TshContextState, max_loaded_tools: usize) -> Self {
+        let mut context = Self::new(max_loaded_tools);
+        let mut tools = state.tools;
+        tools.sort_by_key(|tool| tool.last_used);
+        for tool in tools {
+            let _evicted = context.insert(LoadedTool {
+                name: tool.name,
+                path: tool.path,
+                description: tool.description,
+                schema: tool.schema,
+                dynamic_resident: tool.dynamic_resident,
+                pinned: tool.pinned,
+                last_used: 0,
+            });
+        }
+        context
+    }
+
+    fn to_state(&self) -> cortexfs::TshContextState {
+        let mut state = cortexfs::TshContextState::default();
+        state.tools = self
+            .tools
+            .values()
+            .map(|tool| cortexfs::TshLoadedToolState {
+                name: tool.name.clone(),
+                path: tool.path.clone(),
+                description: tool.description.clone(),
+                schema: tool.schema.clone(),
+                dynamic_resident: tool.dynamic_resident,
+                pinned: tool.pinned,
+                last_used: tool.last_used,
+            })
+            .collect();
+        state
+    }
 }

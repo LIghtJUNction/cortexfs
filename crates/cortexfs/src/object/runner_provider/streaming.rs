@@ -119,6 +119,20 @@ fn call_openai_sse_streaming(
                     }
                 }
             }
+            Ok(OpenAiStreamEvent::ToolCall(tool_call)) => {
+                if let Err(error) = text_emitter
+                    .finish(stdout)
+                    .and_then(|()| write_model_text_or_tool_call(stdout, run, &tool_call))
+                    .and_then(|()| stdout.flush())
+                {
+                    cleanup_curl_child(&mut child);
+                    return Err(StreamFailure {
+                        message: format!("cannot write output: {error}"),
+                        can_fallback: false,
+                    });
+                }
+                emitted = true;
+            }
             Ok(OpenAiStreamEvent::Done) => {
                 match emit_openai_stream_tool_call(
                     stdout,
@@ -395,6 +409,7 @@ enum OpenAiStreamEvent {
     Usage(TokenUsage),
     ToolCallDelta(OpenAiToolCallDelta),
     ToolCallsDone,
+    ToolCall(String),
     Done,
     Ignore,
 }
@@ -439,7 +454,13 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
                     .to_owned(),
             ));
         }
+        Some("response.function_call_arguments.delta" | "response.function_call_arguments.done") => {
+            return Ok(OpenAiStreamEvent::Ignore);
+        }
         Some("response.output_item.done") => {
+            if let Some(tool_call) = response_output_item_tool_call(value.get("item")) {
+                return Ok(OpenAiStreamEvent::ToolCall(tool_call));
+            }
             return Ok(OpenAiStreamEvent::FinalText(response_output_item_text(
                 value.get("item"),
             )));
@@ -479,6 +500,10 @@ fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
     Ok(OpenAiStreamEvent::Delta(text.to_owned()))
 }
 
+fn response_output_item_tool_call(item: Option<&Value>) -> Option<String> {
+    openai_response_tool_call_content(item?)
+}
+
 fn openai_stream_tool_call_delta(value: &Value) -> OpenAiToolCallDelta {
     OpenAiToolCallDelta {
         id: value.get("id").and_then(Value::as_str).map(str::to_owned),
@@ -515,4 +540,39 @@ fn response_output_item_text(item: Option<&Value>) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+
+    #[test]
+    fn responses_stream_function_call_done_becomes_tool_call_event() -> Result<(), String> {
+        let line = concat!(
+            "data: ",
+            r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}"#
+        );
+
+        let OpenAiStreamEvent::ToolCall(frame) = openai_stream_event(line)? else {
+            return Err("expected tool call event".to_owned());
+        };
+        let value = serde_json::from_str::<Value>(&frame).map_err(|error| error.to_string())?;
+        assert_eq!(value.get("type"), Some(&json!("tool_call")));
+        assert_eq!(value.get("id"), Some(&json!("call_123")));
+        assert_eq!(value.get("name"), Some(&json!("tsh")));
+        assert_eq!(value.pointer("/arguments/args/0"), Some(&json!("tools")));
+        Ok(())
+    }
+
+    #[test]
+    fn responses_stream_function_call_argument_delta_is_not_text() -> Result<(), String> {
+        let line = concat!(
+            "data: ",
+            r#"{"type":"response.function_call_arguments.delta","delta":"{\"args\":[\"tools\"]}"}"#
+        );
+
+        let event = openai_stream_event(line)?;
+        assert!(matches!(event, OpenAiStreamEvent::Ignore));
+        Ok(())
+    }
 }

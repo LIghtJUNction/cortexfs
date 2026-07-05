@@ -106,11 +106,7 @@ fn render_agent_event_lines(
                 }
             }
             Some("tool_call") => {
-                let name = value
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("tool_call");
-                write_terminal_diagnostic(&tool_running_diagnostic(name))?;
+                write_terminal_diagnostic(&tool_running_diagnostic(&value))?;
             }
             Some("usage") => {
                 if let Some(diagnostic) = usage_totals.record_event(&value) {
@@ -325,11 +321,7 @@ fn collect_agent_events_buffered_with(
                 }
             }
             Some("tool_call") => {
-                let name = value
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("tool_call");
-                push_buffered_diagnostic(&mut diagnostics, tool_running_diagnostic(name))?;
+                push_buffered_diagnostic(&mut diagnostics, tool_running_diagnostic(&value))?;
             }
             Some("usage") => {
                 if let Some(diagnostic) = usage_totals.record_event(&value) {

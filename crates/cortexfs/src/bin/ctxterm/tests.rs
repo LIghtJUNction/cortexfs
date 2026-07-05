@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::{
-        ClientMode, Clients, CtxtermCommand, PtyWriter, RunConfig, env_u16_from_value, open_log,
-        parse_args, pty_command_with_env, read_client_mode, read_client_mode_with_timeout_duration,
-        remove_stale_socket, start_listener,
+        ClientMode, Clients, CtxtermCommand, PtyWriter, RunConfig, env_u16_from_value,
+        handle_client, open_log, parse_args, pty_command_with_env, read_client_mode,
+        read_client_mode_with_timeout_duration, remove_stale_socket, start_listener,
     };
     use std::ffi::OsString;
     use std::fs;
@@ -14,6 +14,25 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for SharedBuffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            {
+                let mut output = self
+                    .0
+                    .lock()
+                    .map_err(|_error| io::Error::other("buffer lock poisoned"))?;
+                output.extend_from_slice(buf);
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn ctxterm_defaults_to_absolute_tsh() {
@@ -208,6 +227,44 @@ mod tests {
 
         assert_eq!(mode, ClientMode::Attach);
         assert_eq!(payload, "payload");
+        Ok(())
+    }
+
+    #[test]
+    fn client_mode_accepts_emit_payload_after_newline() -> Result<(), Box<dyn std::error::Error>> {
+        let (mut client, mut server) = UnixStream::pair()?;
+        client.write_all(b"emit\npayload")?;
+        client.shutdown(Shutdown::Write)?;
+
+        let mode = read_client_mode(&mut server)?;
+        let mut payload = String::new();
+        server.read_to_string(&mut payload)?;
+
+        assert_eq!(mode, ClientMode::Emit);
+        assert_eq!(payload, "payload");
+        Ok(())
+    }
+
+    #[test]
+    fn emit_client_broadcasts_without_writing_to_pty() -> Result<(), Box<dyn std::error::Error>> {
+        let (mut emit_client, emit_server) = UnixStream::pair()?;
+        let (mut watch_reader, watch_writer) = UnixStream::pair()?;
+        watch_reader.set_read_timeout(Some(Duration::from_secs(1)))?;
+        let pty_output = Arc::new(Mutex::new(Vec::new()));
+        let writer: PtyWriter = Arc::new(Mutex::new(Box::new(SharedBuffer(Arc::clone(
+            &pty_output,
+        )))));
+        let clients: Clients = Arc::new(Mutex::new(vec![Arc::new(Mutex::new(watch_writer))]));
+
+        emit_client.write_all(b"emit\n\r\ntool bash running shell.exec 'date'\r\n")?;
+        emit_client.shutdown(Shutdown::Write)?;
+        handle_client(emit_server, writer, &clients);
+
+        let expected = b"\r\ntool bash running shell.exec 'date'\r\n";
+        let mut payload = vec![0; expected.len()];
+        watch_reader.read_exact(&mut payload)?;
+        assert_eq!(payload, expected);
+        assert!(pty_output.lock().is_ok_and(|buffer| buffer.is_empty()));
         Ok(())
     }
 

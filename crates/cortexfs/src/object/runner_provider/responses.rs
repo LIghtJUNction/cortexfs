@@ -66,6 +66,13 @@ fn parse_openai_response_content(output: &[u8]) -> Result<String, String> {
     {
         return Ok(text.to_owned());
     }
+    if let Some(tool_call) = value
+        .get("output")
+        .and_then(Value::as_array)
+        .and_then(|items| items.iter().find_map(openai_response_tool_call_content))
+    {
+        return Ok(tool_call);
+    }
     let mut content = String::new();
     if let Some(items) = value.get("output").and_then(Value::as_array) {
         for item in items {
@@ -88,6 +95,35 @@ fn parse_openai_response_content(output: &[u8]) -> Result<String, String> {
     } else {
         Ok(content)
     }
+}
+
+fn openai_response_tool_call_content(value: &Value) -> Option<String> {
+    if value.get("type").and_then(Value::as_str) != Some("function_call") {
+        return None;
+    }
+    let name = value.get("name").and_then(Value::as_str)?;
+    if !is_object_name(name) {
+        return None;
+    }
+    let id = value
+        .get("call_id")
+        .or_else(|| value.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| is_object_name(id))
+        .unwrap_or("call-1");
+    let arguments = value.get("arguments")?;
+    let args = openai_chat_tool_call_args(arguments)?;
+    Some(
+        json!({
+            "type": "tool_call",
+            "id": id,
+            "name": name,
+            "arguments": {
+                "args": args
+            }
+        })
+        .to_string(),
+    )
 }
 
 fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
@@ -184,4 +220,33 @@ fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> {
         ProviderCredential::AnthropicApiKey(ref key) => format!("x-api-key: {key}"),
     };
     vec![auth, "anthropic-version: 2023-06-01".to_owned()]
+}
+
+#[cfg(test)]
+mod responses_tests {
+    use super::*;
+
+    #[test]
+    fn responses_function_call_becomes_canonical_tool_call() {
+        let output = json!({
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_123",
+                "name": "tsh",
+                "arguments": "{\"args\":[\"tools\"]}"
+            }]
+        })
+        .to_string();
+
+        let frame = parse_openai_response_content(output.as_bytes());
+        assert!(frame.is_ok());
+        let value = frame
+            .ok()
+            .and_then(|frame| serde_json::from_str::<Value>(&frame).ok())
+            .unwrap_or_default();
+        assert_eq!(value.get("type"), Some(&json!("tool_call")));
+        assert_eq!(value.get("id"), Some(&json!("call_123")));
+        assert_eq!(value.get("name"), Some(&json!("tsh")));
+        assert_eq!(value.pointer("/arguments/args/0"), Some(&json!("tools")));
+    }
 }

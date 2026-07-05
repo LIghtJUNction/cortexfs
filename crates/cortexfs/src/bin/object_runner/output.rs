@@ -134,6 +134,43 @@ fn write_tool_result_fallback_response(
         .map_err(|error| format!("cannot write output: {error}"))
 }
 
+fn write_tool_loop_handoff_response(
+    stdout: &mut impl Write,
+    run: &str,
+    reason: &str,
+    tool_call: Option<&AgentToolCall>,
+) -> Result<(), String> {
+    let mut text = format!(
+        "当前工具循环已停止：{reason}\n\n没有自动继续当前上下文。请交给一个上下文干净的 agent 审查是否需要继续；默认由人工决定。"
+    );
+    if let Some(tool_call) = tool_call {
+        text.push_str("\n\n最后一次工具调用：");
+        text.push_str(&tool_call.name);
+        text.push(' ');
+        text.push_str(&tool_call_args_json(tool_call));
+    }
+    let message = serde_json::json!({
+        "type": "message",
+        "run": run,
+        "role": "assistant",
+        "content": [{
+            "type": "text",
+            "text": text
+        }]
+    })
+    .to_string();
+    let done = serde_json::json!({
+        "type": "done",
+        "run": run,
+        "status": "ok"
+    })
+    .to_string();
+    writeln!(stdout, "{message}")
+        .and_then(|()| writeln!(stdout, "{done}"))
+        .and_then(|()| stdout.flush())
+        .map_err(|error| format!("cannot write output: {error}"))
+}
+
 fn missing_model_message(ctx_root: &Path, model: &str, model_path: &Path) -> String {
     if is_model_alias(model)
         && let Ok(target) = read_model_alias_target(ctx_root, model)

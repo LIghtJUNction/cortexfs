@@ -165,7 +165,7 @@ impl Drop for AgentInterruptGuard {
 fn agent_repl_command(
     root: &Path,
     name: &str,
-    session: &str,
+    session: &mut String,
     line: &str,
     raw: bool,
     debug: &mut AgentDebugState,
@@ -175,17 +175,21 @@ fn agent_repl_command(
             print_agent_repl_banner(root, name, session)?;
             ExitCode::SUCCESS
         }
-        "/resume" => agent_resume(root, name, Some(session), raw)?,
+        command if command == "/new" || command.starts_with("/new ") => {
+            agent_repl_new_session(root, name, session, command)?;
+            ExitCode::SUCCESS
+        }
+        "/resume" => agent_resume(root, name, Some(session.as_str()), raw)?,
         "/history" => {
-            history(root, name, Some(session))?;
+            history(root, name, Some(session.as_str()))?;
             ExitCode::SUCCESS
         }
         "/output" => {
-            latest(root, name, Some(session))?;
+            latest(root, name, Some(session.as_str()))?;
             ExitCode::SUCCESS
         }
         "/pack" => {
-            agent_pack(root, name, Some(session))?;
+            agent_pack(root, name, Some(session.as_str()))?;
             ExitCode::SUCCESS
         }
         "/tools" => {
@@ -202,10 +206,10 @@ fn agent_repl_command(
             ExitCode::SUCCESS
         }
         "/children" => {
-            agent_children(root, name, Some(session))?;
+            agent_children(root, name, Some(session.as_str()))?;
             ExitCode::SUCCESS
         }
-        "/cancel" => agent_cancel(root, name, Some(session), None, raw)?,
+        "/cancel" => agent_cancel(root, name, Some(session.as_str()), None, raw)?,
         "/debug" => {
             debug.enabled = !debug.enabled;
             write_error(if debug.enabled {
@@ -232,6 +236,47 @@ fn agent_repl_command(
         _ => return Ok(None),
     };
     Ok(Some(code))
+}
+
+fn agent_repl_new_session(
+    root: &Path,
+    name: &str,
+    current: &mut String,
+    command: &str,
+) -> Result<(), CliError> {
+    let next = agent_repl_new_session_name(command)?;
+    let session_root = ctx_home(root)?.join("agent").join(name).join("session");
+    ensure_durable_session_layout(
+        &session_root,
+        &next,
+        &agent_cwd(root, name)?,
+        None,
+        SocketSessionScope::Private,
+    )
+    .map_err(|error| {
+        CliError::unavailable(format!("cannot prepare agent session {next}: {error:?}"))
+    })?;
+    if let Some(workspace) = preferred_workspace_source(root, name, current)? {
+        write_agent_control_plain(&session_root.join(&next).join("workspace"), &format!("{workspace}\n"))?;
+    }
+    *current = next;
+    print_agent_repl_banner(root, name, current)
+}
+
+fn agent_repl_new_session_name(command: &str) -> Result<String, CliError> {
+    let mut args = command.split_whitespace();
+    let Some("/new") = args.next() else {
+        return Err(CliError::usage(format!("unknown repl command: {command}")));
+    };
+    let session = match args.next() {
+        Some(session) => session.to_owned(),
+        None => request_id()?,
+    };
+    if args.next().is_some() {
+        return Err(CliError::usage("/new accepts at most one session name"));
+    }
+    require_cli_name("session name", &session)?;
+    Ok(session)
 }
 
 fn agent_repl_unknown_command_line(command: &str) -> String {

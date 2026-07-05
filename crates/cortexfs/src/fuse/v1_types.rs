@@ -50,6 +50,10 @@ pub enum FuseV1Error {
     NotDirectory,
     /// Operation requires a readable regular file or symlink target.
     NotFile,
+    /// Directory is not empty.
+    NotEmpty,
+    /// Mutation is outside writable durable ABI state.
+    ReadOnly,
     /// Writes through this projection are limited to ABI control files.
     NotControlFile,
     /// Control-file write did not start at offset zero.
@@ -236,6 +240,8 @@ impl FuseV1Error {
             Self::NotFound => "ENOENT",
             Self::NotDirectory => "ENOTDIR",
             Self::NotFile => "EISDIR",
+            Self::NotEmpty => "ENOTEMPTY",
+            Self::ReadOnly => "EROFS",
             Self::TooLarge => "EMSGSIZE",
             Self::PermissionDenied => "EACCES",
             Self::Io => "EIO",

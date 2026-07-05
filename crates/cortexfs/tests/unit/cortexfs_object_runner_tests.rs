@@ -20,6 +20,7 @@ use super::{
     resolved_model_path, run, read_limited_input_text, run_agent_tool_loop,
     normalize_agent_model_frame,
     run_agent_tool_process_with_timeout, run_core_tool_cli, run_passthrough_tool,
+    tool_terminal_done_line, tool_terminal_running_line,
     token_usage_from_value, tool_call_from_text, trim_tool_result, validate_agent_tsh_args,
     visible_workspace_source,
     write_model_text_or_tool_call, AgentModelRunConfig, AgentModelRunOutcome,
@@ -95,6 +96,7 @@ include!("cortexfs_object_runner_tests/tool_parsing.rs");
 include!("cortexfs_object_runner_tests/tool_loop.rs");
 include!("cortexfs_object_runner_tests/agent_process.rs");
 include!("cortexfs_object_runner_tests/tool_execution.rs");
+include!("cortexfs_object_runner_tests/loaded_native_tool.rs");
 include!("cortexfs_object_runner_tests/provider_stream.rs");
 include!("cortexfs_object_runner_tests/provider_runtime.rs");
 include!("cortexfs_object_runner_tests/provider_config.rs");

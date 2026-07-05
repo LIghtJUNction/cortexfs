@@ -718,3 +718,65 @@ fn agent_tool_context_truncation_preserves_utf8_boundaries() {
     assert!(config.tool_context.is_char_boundary(config.tool_context.len()));
     assert!(config.tool_context.contains("Tool result call-final from tsh"));
 }
+
+#[test]
+fn terminal_tool_line_shows_tool_name_and_quoted_args() {
+    let call = AgentToolCall {
+        id: "call-1".to_owned(),
+        name: "bash".to_owned(),
+        args: vec![
+            OsString::from("shell.exec"),
+            OsString::from("bash -lc 'date'"),
+        ],
+    };
+
+    assert_eq!(
+        tool_terminal_running_line(&call),
+        "\r\ntool bash running shell.exec 'bash -lc '\\''date'\\'''\r\n"
+    );
+    assert_eq!(
+        tool_terminal_done_line(&call, "ok\n", true),
+        "\r\ntool bash done 3 bytes\r\n"
+    );
+    assert_eq!(
+        tool_terminal_done_line(&call, "ERROR: bad\n", false),
+        "\r\ntool bash error 11 bytes\r\n"
+    );
+}
+
+#[test]
+fn agent_tool_loop_hands_off_when_tool_iteration_limit_is_exceeded() {
+    let mut config = test_agent_run_config();
+    let mut output = Vec::new();
+    let mut step = 0_u8;
+    let mut executions = 0_u8;
+
+    let result = run_agent_tool_loop(
+        &mut config,
+        "keep iterating",
+        &mut output,
+        |_config, _input, _stdout| {
+            step = step.saturating_add(1);
+            Ok(AgentModelRunOutcome {
+                frames: vec![format!(
+                    r#"{{"type":"tool_call","run":"r1","id":"call-{step}","name":"tsh","arguments":{{"args":["shell.exec","printf {step}"]}}}}"#
+                )],
+                success: true,
+                streamed: false,
+            })
+        },
+        |_config, _tool_call| {
+            executions = executions.saturating_add(1);
+            Ok("ok\n".to_owned())
+        },
+    );
+
+    assert_eq!(result, Ok(()));
+    assert!(executions > 1);
+    let output = String::from_utf8(output).unwrap_or_default();
+    assert!(output.contains("agent tool loop limit exceeded"), "{output}");
+    assert!(output.contains("上下文干净的 agent"), "{output}");
+    assert!(output.contains("默认由人工决定"), "{output}");
+    assert!(output.contains(r#""status":"ok""#), "{output}");
+    assert!(!output.contains(r#""code":"ELOOP""#), "{output}");
+}

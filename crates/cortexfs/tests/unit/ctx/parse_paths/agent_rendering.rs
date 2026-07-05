@@ -23,6 +23,98 @@ fn debug_tool_names_report_native_agent_tools_only() {
 }
 
 #[test]
+fn debug_tool_names_include_loaded_agent_tools() {
+    let root = clean_test_dir("ctx-agent-debug-loaded-tools");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let tool = root.join("tool").join("bash");
+    let tool_control = root.join("tool").join("bash.d");
+    assert!(
+        fs::write(
+            root.join("agent").join("coder.d").join("path"),
+            format!("{}\n", root.join("tool").display()),
+        )
+        .is_ok()
+    );
+    assert!(
+        fs::write(
+            root.join("agent").join("coder.d").join("mount"),
+            format!("{}\t{}\tro\trbind,nosuid,nodev\n", root.display(), root.display()),
+        )
+        .is_ok()
+    );
+    let tsh = root.join("tool").join("tsh");
+    let tsh_control = root.join("tool").join("tsh.d");
+    assert!(fs::create_dir_all(&tsh_control).is_ok());
+    assert!(fs::write(&tsh, "#!/bin/sh\nexit 0\n").is_ok());
+    let tsh_metadata = fs::metadata(&tsh);
+    assert!(tsh_metadata.is_ok());
+    let Ok(tsh_metadata) = tsh_metadata else { return };
+    let mut tsh_permissions = tsh_metadata.permissions();
+    tsh_permissions.set_mode(0o755);
+    assert!(fs::set_permissions(&tsh, tsh_permissions).is_ok());
+    assert!(fs::write(tsh_control.join("policy"), "allow coder_t tool:tsh execute\n").is_ok());
+    assert!(fs::create_dir_all(&tool_control).is_ok());
+    assert!(fs::write(&tool, "#!/bin/sh\nexit 0\n").is_ok());
+    let tool_metadata = fs::metadata(&tool);
+    assert!(tool_metadata.is_ok());
+    let Ok(tool_metadata) = tool_metadata else { return };
+    let mut permissions = tool_metadata.permissions();
+    permissions.set_mode(0o755);
+    assert!(fs::set_permissions(&tool, permissions).is_ok());
+    assert!(fs::write(tool_control.join("policy"), "allow coder_t tool:bash execute\n").is_ok());
+    let agent_policy = root.join("agent").join("coder.d").join("policy");
+    let mut policy = fs::read_to_string(&agent_policy).unwrap_or_default();
+    policy.push_str("\nallow coder_t tool:bash execute\n");
+    assert!(fs::write(&agent_policy, policy).is_ok());
+
+    let view = derive_agent_runtime_view(&root, "coder");
+    assert!(view.is_ok());
+    let Ok(view) = view else { return };
+    let state_path = cortexfs::tsh_context_state_path(view.home());
+    let mut state = cortexfs::TshContextState::default();
+    state.tools = vec![cortexfs::TshLoadedToolState {
+        name: "bash".to_owned(),
+        path: tool,
+        description: "shell".to_owned(),
+        schema: None,
+        dynamic_resident: true,
+        pinned: true,
+        last_used: 1,
+    }];
+    assert!(cortexfs::write_tsh_context_state(&state_path, &state).is_ok());
+
+    let tools = agent_native_tool_names(&root, "coder");
+
+    assert_eq!(tools, Ok(vec!["bash".to_owned(), "tsh".to_owned()]));
+}
+
+#[test]
+fn buffered_agent_renderer_shows_tool_args_result_preview_and_usage() {
+    let input = concat!(
+        r#"{"type":"tool_call","run":"r1","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","cargo test -p cortexfs"]}}"#,
+        "\n",
+        r#"{"type":"message","run":"r1","role":"tool","name":"tsh","arguments":{"args":["shell.exec","cargo test -p cortexfs"]},"content":[{"type":"tool_result","tool_call_id":"call-1","content":"running 2 tests\nok\n"}]}"#,
+        "\n",
+        r#"{"type":"usage","run":"r1","input_tokens":17,"output_tokens":5}"#,
+        "\n"
+    );
+
+    let rendered = collect_agent_events_buffered(std::io::Cursor::new(input));
+
+    assert!(matches!(
+        rendered,
+        Ok(ref rendered)
+            if rendered.output.is_empty()
+                && rendered.diagnostics.iter().any(|line| line.contains("tool tsh running shell.exec \"cargo test -p cortexfs\""))
+                && rendered.diagnostics.iter().any(|line| line.contains("tool tsh done 19 bytes ~5 tokens"))
+                && rendered.diagnostics.iter().any(|line| line.contains("args: shell.exec \"cargo test -p cortexfs\""))
+                && rendered.diagnostics.iter().any(|line| line.contains("result: running 2 tests\nok"))
+                && rendered.diagnostics.iter().any(|line| line.contains("tokens in +17/17 out +5/5"))
+                && rendered.exit_code == 0
+    ));
+}
+
+#[test]
 fn buffered_agent_renderer_rejects_too_much_output() {
     let chunk = "x".repeat(1024);
     let mut input = String::new();
@@ -226,4 +318,3 @@ fn interruptible_buffered_agent_request_sends_cancel_for_active_run() {
     assert!(requests.contains("\"op\":\"cancel\""));
     assert!(requests.contains("\"id\":\"run-1\""));
 }
-

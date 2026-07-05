@@ -51,6 +51,7 @@ fn call_anthropic_messages(
         usage: parse_provider_usage(&output)?,
     })
 }
+
 fn openai_chat_body(
     model: &str,
     input: &str,
@@ -78,9 +79,7 @@ fn openai_chat_body_with_agent_tools(
         "messages": provider_messages(input),
         "stream": stream
     });
-    if stream
-        && let Some(object) = body.as_object_mut()
-    {
+    if stream && let Some(object) = body.as_object_mut() {
         object.insert(
             "stream_options".to_owned(),
             json!({
@@ -101,11 +100,30 @@ fn openai_responses_body(
     stream: bool,
     effort: cortexfs::ModelEffort,
 ) -> String {
+    openai_responses_body_with_agent_tools(
+        model,
+        input,
+        stream,
+        effort,
+        env::var_os("CTX_AGENT").is_some(),
+    )
+}
+
+fn openai_responses_body_with_agent_tools(
+    model: &str,
+    input: &str,
+    stream: bool,
+    effort: cortexfs::ModelEffort,
+    agent_tools: bool,
+) -> String {
     let mut body = json!({
         "model": model,
         "input": provider_messages(input),
         "stream": stream
     });
+    if agent_tools {
+        apply_openai_responses_agent_tools(&mut body);
+    }
     apply_openai_effort(&mut body, effort);
     body.to_string()
 }
@@ -128,30 +146,111 @@ fn apply_openai_agent_tools(body: &mut Value) {
     let Some(object) = body.as_object_mut() else {
         return;
     };
+    object.insert("tools".to_owned(), Value::Array(openai_chat_tool_specs()));
+    object.insert("tool_choice".to_owned(), json!("auto"));
+}
+
+fn apply_openai_responses_agent_tools(body: &mut Value) {
+    let Some(object) = body.as_object_mut() else {
+        return;
+    };
     object.insert(
         "tools".to_owned(),
-        json!([{
-            "type": "function",
-            "function": {
-                "name": "tsh",
-                "description": "Invoke the CortexFS tool shell. Pass exact tsh argv in args.",
-                "parameters": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "args": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "minItems": 1
-                        }
-                    },
-                    "required": ["args"]
-                }
-            }
-        }]),
+        Value::Array(openai_responses_tool_specs()),
     );
     object.insert("tool_choice".to_owned(), json!("auto"));
 }
+
+fn openai_chat_tool_specs() -> Vec<Value> {
+    current_agent_openai_tools()
+        .into_iter()
+        .map(|name| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": openai_tool_description(&name),
+                    "parameters": tsh_tool_parameters_schema()
+                }
+            })
+        })
+        .collect()
+}
+
+fn openai_responses_tool_specs() -> Vec<Value> {
+    current_agent_openai_tools()
+        .into_iter()
+        .map(|name| {
+            json!({
+                "type": "function",
+                "name": name,
+                "description": openai_tool_description(&name),
+                "parameters": tsh_tool_parameters_schema()
+            })
+        })
+        .collect()
+}
+
+fn current_agent_openai_tools() -> Vec<String> {
+    let agent = env::var("CTX_AGENT").ok();
+    let root =
+        env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(cortexfs::CTX_ROOT), PathBuf::from);
+    current_agent_openai_tools_for(agent.as_deref(), &root)
+}
+
+fn current_agent_openai_tools_for(agent: Option<&str>, root: &Path) -> Vec<String> {
+    let mut tools = vec!["tsh".to_owned()];
+    let Some(agent) = agent else {
+        return tools;
+    };
+    let Ok(view) = derive_agent_runtime_view(root, agent) else {
+        return tools;
+    };
+    let state_path = cortexfs::tsh_context_state_path(view.home());
+    let Ok(state) = cortexfs::read_tsh_context_state(&state_path) else {
+        return tools;
+    };
+    for tool in state.tools {
+        if provider_function_name_is_compatible(&tool.name) && !tools.contains(&tool.name) {
+            tools.push(tool.name);
+        }
+    }
+    tools.sort();
+    tools.dedup();
+    tools
+}
+
+fn provider_function_name_is_compatible(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+fn openai_tool_description(name: &str) -> String {
+    if name == "tsh" {
+        "Invoke CortexFS tool shell. Pass exact tsh argv in args.".to_owned()
+    } else {
+        format!("Invoke loaded CortexFS tool `{name}` directly. Pass exact argv in args.")
+    }
+}
+
+fn tsh_tool_parameters_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "args": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 1
+            }
+        },
+        "required": ["args"]
+    })
+}
+
 fn provider_messages(input: &str) -> Value {
     let agent = env::var("CTX_AGENT")
         .ok()
@@ -169,12 +268,124 @@ fn provider_messages_for_agent(
 ) -> Value {
     agent.map_or_else(
         || json!([{"role": "user", "content": input}]),
-        |agent| json!([
-            {
-                "role": "system",
-                "content": cortexfs::render_agent_system_prompt(agent, agent_system, prompt_context)
-            },
-            {"role": "user", "content": input}
-        ]),
+        |agent| {
+            json!([
+                {
+                    "role": "system",
+                    "content": cortexfs::render_agent_system_prompt(agent, agent_system, prompt_context)
+                },
+                {"role": "user", "content": input}
+            ])
+        },
     )
+}
+
+#[cfg(test)]
+mod requests_tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        env::temp_dir().join(format!(
+            "cortexfs-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn responses_agent_body_declares_tsh_function_tool() {
+        let body = openai_responses_body_with_agent_tools(
+            "gpt-test",
+            "hello",
+            true,
+            cortexfs::ModelEffort::Auto,
+            true,
+        );
+        let value = serde_json::from_str::<Value>(&body);
+        assert!(value.is_ok());
+        let value = value.unwrap_or_default();
+
+        assert_eq!(value.pointer("/tools/0/type"), Some(&json!("function")));
+        assert_eq!(value.pointer("/tools/0/name"), Some(&json!("tsh")));
+        assert_eq!(
+            value.pointer("/tools/0/parameters/properties/args/minItems"),
+            Some(&json!(1))
+        );
+        assert_eq!(value.get("tool_choice"), Some(&json!("auto")));
+    }
+
+    #[test]
+    #[expect(
+        clippy::expect_used,
+        reason = "test fixture setup should fail loudly with the missing field name"
+    )]
+    fn loaded_tools_extend_openai_tool_manifest() {
+        let root = temp_path("provider-loaded-tools");
+        let _ignored = fs::remove_dir_all(&root);
+        let control = root.join("agent").join("coder.d");
+        fs::create_dir_all(&control).expect("agent control");
+        fs::write(control.join("owner"), "1000\n").expect("owner");
+        fs::write(control.join("uid"), "1000\n").expect("uid");
+        fs::write(control.join("gid"), "1000\n").expect("gid");
+        fs::write(control.join("groups"), "1000\n").expect("groups");
+        fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n").expect("label");
+        fs::write(control.join("iso"), "shared\n").expect("iso");
+        fs::write(control.join("parent"), "\n").expect("parent");
+        fs::write(control.join("life"), "owned\n").expect("life");
+        fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n").expect("root");
+        fs::write(control.join("cwd"), "/workspace\n").expect("cwd");
+        fs::write(control.join("env"), "\n").expect("env");
+        fs::write(
+            control.join("path"),
+            format!("{}\n", root.join("tool").display()),
+        )
+        .expect("path");
+        fs::write(
+            control.join("mount"),
+            format!(
+                "{}\t{}\tro\trbind,nosuid,nodev\n",
+                root.display(),
+                root.display()
+            ),
+        )
+        .expect("mount");
+        fs::write(control.join("model"), "main\n").expect("model");
+        fs::write(control.join("policy"), "allow coder_t model:main use\n").expect("policy");
+        fs::write(control.join("status"), "idle\n").expect("status");
+        fs::write(control.join("pid"), "\n").expect("pid");
+        fs::write(control.join("log"), "\n").expect("log");
+        fs::write(control.join("meta.json"), "{}\n").expect("meta");
+        let view = derive_agent_runtime_view(&root, "coder").expect("view");
+        let mut state = cortexfs::TshContextState::default();
+        state.tools = vec![
+            cortexfs::TshLoadedToolState {
+                name: "bash".to_owned(),
+                path: root.join("tool").join("bash"),
+                description: String::new(),
+                schema: None,
+                dynamic_resident: true,
+                pinned: true,
+                last_used: 1,
+            },
+            cortexfs::TshLoadedToolState {
+                name: "shell.exec".to_owned(),
+                path: root.join("tool").join("shell.exec"),
+                description: String::new(),
+                schema: None,
+                dynamic_resident: true,
+                pinned: true,
+                last_used: 2,
+            },
+        ];
+        cortexfs::write_tsh_context_state(&cortexfs::tsh_context_state_path(view.home()), &state)
+            .expect("state");
+
+        let tools = current_agent_openai_tools_for(Some("coder"), &root);
+
+        assert_eq!(tools, vec!["bash".to_owned(), "tsh".to_owned()]);
+        let _ignored = fs::remove_dir_all(root);
+    }
 }

@@ -47,40 +47,37 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
     assert!(ensure_v1_reference_tree(&root).is_ok());
     let control = root.join("agent").join("coder.d");
-    assert!(fs::write(control.join("system.md"), "Be precise.\n").is_ok());
+    assert!(fs::write(control.join("system.md"), "Be precise.
+").is_ok());
     assert!(
         fs::write(
             control.join("prompt.template.md"),
-            "agent={{agent}}\ntime={{current_time_unix}}\ninst={{agent_instructions}}\n{{runtime_contract}}\n",
+            "agent={{agent}}
+time={{current_time_unix}}
+inst={{agent_instructions}}
+{{runtime_contract}}
+",
         )
         .is_ok()
     );
 
     let prompt = build_agent_system_prompt(&root, "coder", "123");
-
     assert!(matches!(
         prompt,
-        Ok(ref prompt)
-            if prompt.contains("agent=coder")
-                && prompt.contains("time=123")
-                && prompt.contains("inst=Be precise.")
-                && prompt.contains("Your only native callable tool is `tsh`")
-                && prompt.contains(r#"["fs.read","/workspace/PATH"]"#)
-                && prompt.contains(r#"["fs.write","/workspace/PATH","FULL UTF-8 FILE CONTENT"]"#)
-                && prompt.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#)
-                && prompt.contains(r#"["shell.exec","cargo test -p cortexfs"]"#)
-                && prompt.contains("Tool results include the original `arguments.args`")
-                && prompt.contains("For clear coding requests")
-                && prompt.contains("do not stop at a plan")
-                && prompt.contains("inspect applicable `/workspace` rules and current workspace state")
-                && prompt.contains("inspect current files before editing")
-                && prompt.contains("prefer `fs.replace` for small surgical edits")
-                && prompt.contains("format, static check, lint, and test commands")
-                && prompt.contains("keep repairing within scope")
-                && prompt.contains("inspect `git diff --stat` and the relevant diff")
-                && prompt.contains("Never run destructive git commands")
-                && !prompt.contains("{{agent}}")
-        ));
+        Ok(ref prompt) if prompt.contains("agent=coder")
+            && prompt.contains("time=123")
+            && prompt.contains("inst=Be precise.")
+            && prompt.contains("native callable tool exposed by this runtime is `tsh`")
+            && prompt.contains("When tool execution is useful")
+            && prompt.contains("Tool results include the original `arguments.args`")
+            && prompt.contains("If no concrete file path is provided")
+            && prompt.contains("For coding work")
+            && prompt.contains("inspect current files before editing")
+            && prompt.contains("Never run destructive git commands")
+            && !prompt.contains("output this exact tool call")
+            && !prompt.contains(r#"["fs.read","/workspace/PATH"]"#)
+            && !prompt.contains("{{agent}}")
+    ));
 }
 
 #[test]

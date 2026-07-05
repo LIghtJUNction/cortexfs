@@ -222,8 +222,8 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     assert!(
         matches!(agent_policy, Ok(ref content) if !content.contains("network:default connect"))
     );
-    let model_link = fs::read_link(user_model.join("coder"));
-    assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/main")));
+    assert!(user_model.is_dir());
+    assert!(!user_model.join("coder").exists());
     let private_meta =
         fs::read_to_string(agent_session_root(&root, "coder").join("default").join("meta.json"));
     assert!(matches!(private_meta, Ok(ref content) if content.contains("\"model\":\"main\"")));

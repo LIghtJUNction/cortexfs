@@ -3,8 +3,14 @@ use crate::plain_fs::{
     read_small_text_file as read_agent_runtime_small_text_file,
 };
 
-/// Derives an agent runtime view from the frozen v1 control files under
-/// `ctx_root/agent/<agent_name>.d/`.
+/// Derives an agent runtime view from the frozen v1 control files.
+///
+/// A same-named user agent control directory under
+/// `CTX_HOME/agent/<agent_name>.d/` or
+/// `ctx_root/home/<euid>/agent/<agent_name>.d/` shadows the global
+/// `ctx_root/agent/<agent_name>.d/`. The private state directory
+/// `home/<uid>/agent/<agent_name>/` remains the agent home/session tree, not
+/// an executable object.
 ///
 /// The returned environment always contains the runtime-owned `CTX_ROOT`,
 /// `CTX_PROVIDER_CONFIG_DIR`, `CTX_HOME`, `HOME`, and `CTX_PATH` values derived
@@ -23,10 +29,7 @@ pub fn derive_agent_runtime_view(
         return Err(AgentRuntimeViewError::InvalidAgentName);
     }
 
-    let control_dir = ctx_root.join("agent").join(format!("{agent_name}.d"));
-    if open_agent_runtime_plain_directory(&control_dir).is_err() {
-        return Err(AgentRuntimeViewError::MissingControlDirectory);
-    }
+    let control_dir = resolve_agent_runtime_control_dir(ctx_root, agent_name)?;
 
     let owner = parse_agent_number_control(&control_dir, AgentControlKind::Owner, "owner")?;
     let uid = parse_agent_number_control(&control_dir, AgentControlKind::Uid, "uid")?;
@@ -90,6 +93,39 @@ pub fn derive_agent_runtime_view(
         model,
         policy,
     })
+}
+
+fn resolve_agent_runtime_control_dir(
+    ctx_root: &Path,
+    agent_name: &str,
+) -> Result<PathBuf, AgentRuntimeViewError> {
+    for control_dir in current_user_agent_control_dirs(ctx_root, agent_name) {
+        if open_agent_runtime_plain_directory(&control_dir).is_ok() {
+            return Ok(control_dir);
+        }
+    }
+    let control_dir = ctx_root.join("agent").join(format!("{agent_name}.d"));
+    if open_agent_runtime_plain_directory(&control_dir).is_err() {
+        return Err(AgentRuntimeViewError::MissingControlDirectory);
+    }
+    Ok(control_dir)
+}
+
+fn current_user_agent_control_dirs(ctx_root: &Path, agent_name: &str) -> Vec<PathBuf> {
+    let mut controls = Vec::new();
+    if let Some(ctx_home) = env::var_os("CTX_HOME").map(PathBuf::from)
+        && ctx_home.starts_with(ctx_root)
+    {
+        controls.push(ctx_home.join("agent").join(format!("{agent_name}.d")));
+    }
+    let uid_home = ctx_root
+        .join("home")
+        .join(nix::unistd::Uid::effective().as_raw().to_string());
+    let uid_control = uid_home.join("agent").join(format!("{agent_name}.d"));
+    if !controls.iter().any(|control| control == &uid_control) {
+        controls.push(uid_control);
+    }
+    controls
 }
 
 fn parse_agent_number_control(

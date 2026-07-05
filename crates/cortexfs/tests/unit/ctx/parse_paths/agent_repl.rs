@@ -66,13 +66,47 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
         Ok(" Workspace: /repo".to_owned())
     );
     assert!(AGENT_REPL_COMMANDS.contains("/help"));
+    assert!(AGENT_REPL_COMMANDS.contains("/new"));
     assert!(AGENT_REPL_COMMANDS.contains("/workspace"));
     assert!(AGENT_REPL_COMMANDS.contains("/clear"));
     let mut debug = AgentDebugState::default();
+    let mut session = "default".to_owned();
     assert_eq!(
-        agent_repl_command(&root, "coder", "default", "/workspace", false, &mut debug),
+        agent_repl_command(
+            &root,
+            "coder",
+            &mut session,
+            "/workspace",
+            false,
+            &mut debug
+        ),
         Ok(Some(ExitCode::SUCCESS))
     );
+}
+
+#[test]
+fn agent_repl_new_switches_session_and_keeps_workspace() {
+    let root = clean_test_dir("ctx-agent-repl-new-session");
+    let session_root = root
+        .join("home")
+        .join(current_uid_for_test())
+        .join("agent/coder/session");
+    let default = session_root.join("default");
+    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
+    assert!(fs::create_dir_all(&default).is_ok());
+    assert!(fs::write(root.join("agent/coder.d/cwd"), "/workspace\n").is_ok());
+    assert!(fs::write(default.join("workspace"), "/repo\n").is_ok());
+
+    let mut session = "default".to_owned();
+    let mut debug = AgentDebugState::default();
+    assert_eq!(
+        agent_repl_command(&root, "coder", &mut session, "/new focus", false, &mut debug),
+        Ok(Some(ExitCode::SUCCESS))
+    );
+
+    assert_eq!(session, "focus");
+    assert!(session_root.join("focus/messages.jsonl").is_file());
+    assert!(fs::read_to_string(session_root.join("focus/workspace")).is_ok_and(|text| text == "/repo\n"));
 }
 
 #[test]
@@ -361,7 +395,7 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
                 && rendered.diagnostics
                     == vec![
                         "tool tsh running".to_owned(),
-                        "tool tsh done 3 bytes".to_owned(),
+                        "tool tsh done 3 bytes ~1 tokens\n  result: abc".to_owned(),
                         "error EIO: boom".to_owned()
                     ]
                 && rendered.exit_code == 1
