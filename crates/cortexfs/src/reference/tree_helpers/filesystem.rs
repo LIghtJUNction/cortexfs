@@ -6,11 +6,11 @@ fn open_reference_dir(path: &Path) -> Result<fs::File, ReferenceTreeError> {
     plain_fs::open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
-fn ensure_reference_home_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
+fn ensure_reference_home_entry_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
     if !nix::unistd::Uid::effective().is_root() {
         return Ok(());
     }
-    chown_reference_home_tree(path)
+    chown_reference_entry(path, REFERENCE_HOME_UID, REFERENCE_HOME_GID)
 }
 
 fn ensure_reference_agent_control_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
@@ -29,10 +29,6 @@ fn read_reference_owner_id(path: &Path) -> Result<u32, ReferenceTreeError> {
         .trim()
         .parse::<u32>()
         .map_err(|_error| ReferenceTreeError::CannotCreate)
-}
-
-fn chown_reference_home_tree(path: &Path) -> Result<(), ReferenceTreeError> {
-    chown_reference_tree(path, REFERENCE_HOME_UID, REFERENCE_HOME_GID)
 }
 
 fn chown_reference_tree(path: &Path, uid: u32, gid: u32) -> Result<(), ReferenceTreeError> {

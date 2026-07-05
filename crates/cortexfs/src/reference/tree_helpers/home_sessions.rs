@@ -13,7 +13,7 @@ fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
         "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n",
     )?;
 
-    ensure_reference_home_ownership(&root.join("home").join("1000"))
+    ensure_reference_home_scaffold_ownership(root)
 }
 
 fn ensure_reference_home_agent(root: &Path, agent: &str) -> Result<(), ReferenceTreeError> {
@@ -25,6 +25,37 @@ fn ensure_reference_home_agent(root: &Path, agent: &str) -> Result<(), Reference
     create_reference_dir(&agent_root.join("data"))?;
     create_reference_dir(&agent_root.join("cache"))?;
     create_reference_dir(&agent_root.join("log"))
+}
+
+fn ensure_reference_home_scaffold_ownership(root: &Path) -> Result<(), ReferenceTreeError> {
+    let home = root.join("home").join("1000");
+    for path in [
+        home.clone(),
+        home.join("agent"),
+        home.join("tool"),
+        home.join("model"),
+        home.join(".tshrc"),
+    ] {
+        ensure_reference_home_entry_ownership(&path)?;
+    }
+    for agent in REFERENCE_AGENTS {
+        let agent_root = home.join("agent").join(agent.name);
+        for path in [
+            agent_root.clone(),
+            agent_root.join("root"),
+            agent_root.join("session"),
+            agent_root.join("session").join("index"),
+            agent_root.join("session").join("index").join("by-cwd"),
+            agent_root.join("session").join("index").join("by-hash"),
+            agent_root.join("session").join("index").join("by-uuid"),
+            agent_root.join("data"),
+            agent_root.join("cache"),
+            agent_root.join("log"),
+        ] {
+            ensure_reference_home_entry_ownership(&path)?;
+        }
+    }
+    Ok(())
 }
 
 fn remove_deprecated_reference_home_tool_aliases(root: &Path) -> Result<(), ReferenceTreeError> {
