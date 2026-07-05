@@ -11,7 +11,7 @@ name.d/     control directory: config, state, permissions, logs
 If an object does not support stateful interaction, do not expose `name.sock`.
 A socket that only reports errors is bad ABI.
 
-Every executable object's control directory contains a hook convention subtree:
+Agent and tool control directories may contain a hook convention subtree:
 
 ```text
 name.d/
@@ -22,11 +22,12 @@ name.d/
 
 `pre.d` contains hooks that run before the object action; `post.d` contains
 hooks that run after the object action. This is an object-local convention under
-`model`, `agent`, and `tool`; it does not create a `/ctx/hook` root namespace.
-v1 defines the directory shape only. Implementations may keep compiled hook
-state in process memory, but development refresh is still a Git commit/runtime
-restart boundary; CortexFS v1 does not define background watchers, polling, or
-hot reload.
+`agent` and `tool`; it does not create a `/ctx/hook` root namespace. Model
+control directories stay limited to provider/model controls and do not carry
+empty hook trees. v1 defines the directory shape only. Implementations may keep
+compiled hook state in process memory, but development refresh is still a Git
+commit/runtime restart boundary; CortexFS v1 does not define background
+watchers, polling, or hot reload.
 
 Do not expand one object into `profile/`, `runtime/`, `policy/`, `control/`,
 and other layered trees. If a small file can say it, put it in `.d/`.

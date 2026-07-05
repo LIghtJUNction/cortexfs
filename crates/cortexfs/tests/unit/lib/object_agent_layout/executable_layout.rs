@@ -93,8 +93,13 @@ fn executable_object_bootstrap_creates_hook_phase_directories() {
     )
     .is_ok());
 
+    assert!(!root
+        .join("model")
+        .join("debug/echo.d")
+        .join(OBJECT_HOOK_DIR)
+        .exists());
+
     for (class, name) in [
-        (ObjectClass::Model, "debug/echo"),
         (ObjectClass::Agent, "coder"),
         (ObjectClass::Tool, "fs.read"),
     ] {

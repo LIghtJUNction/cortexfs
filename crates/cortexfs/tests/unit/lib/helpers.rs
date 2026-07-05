@@ -272,10 +272,12 @@ fn create_complete_object_layout(root: &Path, class: ObjectClass, name: &str, mo
         };
         write_text_file(&control_dir.join(file), &format!("{value}\n"));
     }
-    let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
-    assert!(fs::create_dir_all(&hook_dir).is_ok());
-    for phase in OBJECT_HOOK_PHASE_DIRS {
-        assert!(fs::create_dir_all(hook_dir.join(phase)).is_ok());
+    if class != ObjectClass::Model {
+        let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
+        assert!(fs::create_dir_all(&hook_dir).is_ok());
+        for phase in OBJECT_HOOK_PHASE_DIRS {
+            assert!(fs::create_dir_all(hook_dir.join(phase)).is_ok());
+        }
     }
 }
 

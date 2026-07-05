@@ -705,13 +705,9 @@ mod reference_model_tests {
         ensure_reference_provider_models_from(root.path(), config_dir.path(), cache_dir.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
-        assert!(root.path().join("model/api.test/gpt-5.4-mini").is_file());
-        assert!(
-            root.path()
-                .join("model/api.test/gpt-5.4-mini.d/hooks/pre.d")
-                .is_dir()
-        );
-        assert_eq!(
+    assert!(root.path().join("model/api.test/gpt-5.4-mini").is_file());
+    assert!(!root.path().join("model/api.test/gpt-5.4-mini.d/hooks").exists());
+    assert_eq!(
             fs::read_to_string(root.path().join("model/api.test/gpt-5.4-mini.d/id"))?,
             "api.test/gpt-5.4-mini\n"
         );

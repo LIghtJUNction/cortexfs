@@ -21,7 +21,9 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
         let label = format!("{control_label}/{file}");
         require_object_control_file(&control_dir.join(file), &label, &mut issues);
     }
-    require_object_hook_dirs(&control_dir, &control_label, &mut issues);
+    if class != ObjectClass::Model {
+        require_object_hook_dirs(&control_dir, &control_label, &mut issues);
+    }
 
     inspect_object_socket(root, class, name, &control_dir, &mut issues);
     inspect_model_capability_control(class, name, &control_dir, &mut issues);

@@ -4,21 +4,9 @@ fn model_alias_name(abi_path: &str) -> Option<&str> {
 }
 
 fn model_control_dir_entries() -> Vec<FuseV1DirEntry> {
-    let mut entries = MODEL_CONTROL_FILES
+    MODEL_CONTROL_FILES
         .iter()
         .map(|file| FuseV1DirEntry::new((*file).to_owned(), FuseV1FileType::Regular))
-        .collect::<Vec<_>>();
-    entries.push(FuseV1DirEntry::new(
-        OBJECT_HOOK_DIR.to_owned(),
-        FuseV1FileType::Directory,
-    ));
-    entries
-}
-
-fn model_control_hook_dir_entries() -> Vec<FuseV1DirEntry> {
-    OBJECT_HOOK_PHASE_DIRS
-        .iter()
-        .map(|phase| FuseV1DirEntry::new((*phase).to_owned(), FuseV1FileType::Directory))
         .collect()
 }
 

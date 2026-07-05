@@ -82,6 +82,21 @@ fn fuse_v1_projection_projects_configured_provider_models() {
         projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/default"),
         Ok("base_url=https://api.lmm.best:9000/\n".to_owned())
     );
+    assert!(fs::create_dir_all(root.join("model/api.lmm.best/gpt-5.4-mini.d/hooks/pre.d")).is_ok());
+    assert!(fs::create_dir_all(root.join("model/api.lmm.best/gpt-5.4-mini.d/hooks/post.d")).is_ok());
+    let hooks_attr = projection.getattr("model/api.lmm.best/gpt-5.4-mini.d/hooks");
+    assert!(matches!(
+        hooks_attr,
+        Ok(ref attr) if attr.file_type() == FuseV1FileType::Directory
+    ));
+    let hook_entries = projection.readdir("model/api.lmm.best/gpt-5.4-mini.d/hooks");
+    assert_eq!(
+        hook_entries.map(|entries| entries
+            .into_iter()
+            .map(|entry| entry.name().to_owned())
+            .collect::<Vec<_>>()),
+        Ok(vec!["post.d".to_owned(), "pre.d".to_owned()])
+    );
     assert_eq!(
         projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/effort"),
         Ok("auto\n".to_owned())
@@ -388,4 +403,3 @@ fn fuse_v1_projection_skips_disabled_provider_models() {
         Err(FuseV1Error::NotFound)
     );
 }
-
