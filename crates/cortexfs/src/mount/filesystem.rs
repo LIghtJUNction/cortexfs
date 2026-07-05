@@ -276,6 +276,28 @@ impl Filesystem for CortexFuse {
         }
     }
 
+    fn rmdir(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        let Some(name) = name.to_str() else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        let parent_path = path_for_inode_or_reply!(self, parent, reply);
+        let Some(path) = child_path(&parent_path, name) else {
+            reply.error(Errno::EINVAL);
+            return;
+        };
+        match self.projection.remove_empty_plain_dir(&path) {
+            Ok(()) => {
+                if let Err(error) = self.forget_path(&path) {
+                    reply.error(errno(error));
+                    return;
+                }
+                reply.ok();
+            }
+            Err(error) => reply.error(errno(error)),
+        }
+    }
+
     cortexfs_mount_readonly_mutations!();
 
     fn statfs(&self, _req: &Request, _ino: INodeNo, reply: ReplyStatfs) {

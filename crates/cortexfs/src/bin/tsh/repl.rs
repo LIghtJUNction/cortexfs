@@ -100,7 +100,9 @@ fn repl_help(root: &Path, words: &[String]) -> Result<(), TshError> {
     let Some(name) = words.get(1) else {
         return print_help();
     };
-    if is_tsh_builtin(name) {
+    if name == "tool" {
+        print_tool_diagnostic_help()
+    } else if is_tsh_builtin(name) {
         print_builtin_help(name)
     } else {
         print_tool_help(root, name)
@@ -143,7 +145,7 @@ fn builtin_words(name: &str, args: Vec<OsString>) -> Result<Vec<String>, TshErro
 
 fn repl_tools(root: &Path, words: &[String]) -> Result<(), TshError> {
     if words.len() == 1 {
-        return list_tools_with_mode(root, ToolListMode::Names);
+        return list_tools_with_mode(root, ToolListMode::Groups);
     }
     if words.len() == 2
         && words
@@ -152,7 +154,13 @@ fn repl_tools(root: &Path, words: &[String]) -> Result<(), TshError> {
     {
         return list_tools_with_mode(root, ToolListMode::Long);
     }
-    write_stdout("tsh: tools accepts only -l/--long\n")
+    if words.len() == 2 {
+        let Some(group) = words.get(1) else {
+            return write_stdout("tsh: tools requires a group name\n");
+        };
+        return list_tools_with_mode(root, ToolListMode::Group(group.clone()));
+    }
+    write_stdout("tsh: tools accepts a group name or -l/--long\n")
 }
 
 fn repl_which(root: &Path, words: &[String]) -> Result<(), TshError> {
@@ -210,6 +218,7 @@ fn repl_load(
     let path = loaded.path.clone();
     let dynamic_resident = loaded.dynamic_resident;
     let evicted = context.insert(loaded);
+    persist_context(root, context)?;
     let state = if dynamic_resident {
         "metadata+resident"
     } else {
@@ -240,6 +249,7 @@ fn repl_unload(
     };
     let hit = resolve_tool_hit(root, name)?;
     let _was_pinned = cache.unpin_path(hit.path());
+    persist_context(root, context)?;
     write_stdout(&format!(
         "unloaded {}\t{}\n",
         loaded.name,
@@ -273,6 +283,7 @@ fn repl_pin(
     let path = loaded.path.clone();
     let dynamic_resident = loaded.dynamic_resident;
     let evicted = context.insert(loaded);
+    persist_context(root, context)?;
     let state = if dynamic_resident {
         "pinned metadata+resident"
     } else {
@@ -301,6 +312,7 @@ fn repl_unpin(
         if !memory_unpinned {
             loaded.dynamic_resident = false;
         }
+        persist_context(root, context)?;
         write_stdout(&format!("unpinned {name}\t{}\n", hit.path().display()))
     } else {
         write_stdout(&format!("{name} is not loaded\n"))
@@ -371,8 +383,8 @@ fn print_command_v(root: &Path, name: &str) -> Result<(), TshError> {
 fn print_builtin_help(name: &str) -> Result<(), TshError> {
     let text = match name {
         "exit" | "quit" => "exit [CODE]\n  leave tsh\n",
-        "help" => "help [TOOL]\n  show tsh help or visible tool metadata\n",
-        "tools" => "tools [-l]\n  list visible tools from CTX_PATH\n",
+        "help" => "help [TOPIC|TOOL]\n  show tsh help, diagnostic topics, or visible tool metadata\n",
+        "tools" => "tools [GROUP|-l]\n  list top-level visible tools and groups\n  tools GROUP expands a group such as fs\n  tools -l lists every tool with path metadata\n",
         "which" => "which TOOL\n  print the resolved tool path\n",
         "type" => "type TOOL\n  show whether TOOL is a tsh builtin or visible tool\n",
         "command" => "command -v TOOL\n  print the command that tsh would run\n",
@@ -385,6 +397,42 @@ fn print_builtin_help(name: &str) -> Result<(), TshError> {
         _ => "unknown builtin\n",
     };
     write_stdout(text)
+}
+
+fn print_tool_diagnostic_help() -> Result<(), TshError> {
+    write_stdout(tool_diagnostic_help_text())
+}
+
+fn tool_diagnostic_help_text() -> &'static str {
+    "\
+tool diagnostics
+  tools
+      list top-level tools and groups from CTX_PATH
+  tools GROUP
+      expand one group, for example tools fs
+  tools -l
+      list every visible tool with path and description
+  which TOOL
+      show the resolved executable path
+  type TOOL
+      show whether TOOL is a tsh builtin or visible tool
+  help TOOL
+      show visible tool metadata and schema
+  command -v TOOL
+      print the path tsh would execute
+  load TOOL
+      load tool metadata into the current agent tsh context
+  loads
+      show loaded tools that may appear as direct agent function tools
+  pin TOOL
+      keep a loaded tool from context eviction
+  tsh.config '{\"max_loaded_tools\":N}'
+      adjust loaded-tool context size
+notes:
+  tsh never searches PATH for tools.
+  CTX_PATH controls visibility.
+  In an agent terminal, CTX_AGENT keeps the runtime CTX_PATH authoritative.
+"
 }
 
 fn print_tool_help(root: &Path, name: &str) -> Result<(), TshError> {
@@ -428,6 +476,14 @@ fn run_repl_tool(
         ))?;
         return Ok(ExitCode::from(2));
     }
-    context.touch(name);
+    if context.get_mut(name).is_none() {
+        let loaded = load_tool_context(root, name, false)?;
+        let evicted = context.insert(loaded);
+        persist_context(root, context)?;
+        report_context_evictions(evicted)?;
+    } else {
+        context.touch(name);
+        persist_context(root, context)?;
+    }
     run_tool(root, name, args)
 }

@@ -26,6 +26,7 @@ const DEFAULT_SHELL: &str = "/usr/bin/tsh";
 const CLIENT_MODE_LIMIT: usize = 16;
 const CLIENT_MODE_TIMEOUT: Duration = Duration::from_secs(1);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const MAX_EMIT_PAYLOAD_BYTES: usize = 64 * 1024;
 const PRESERVED_PTY_ENV: &[&str] = &[
     "CTX_ROOT",
     "CTX_HOME",

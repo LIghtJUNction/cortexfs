@@ -237,8 +237,9 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
 
     assert!(user_tool_dir.is_dir());
     assert!(!user_tool_dir.join("fs.read").exists());
-    let model_link = fs::read_link(ctx_home(&root).join("model").join("coder"));
-    assert!(matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/main")));
+    let user_model_dir = ctx_home(&root).join("model");
+    assert!(user_model_dir.is_dir());
+    assert!(!user_model_dir.join("coder").exists());
 
     assert!(root.join("shared").is_dir());
     assert!(!root.join("shared").join("project-a").exists());

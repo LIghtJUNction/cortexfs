@@ -29,7 +29,7 @@ struct AgentInteractiveSend<'a> {
 }
 
 const AGENT_REPL_COMMANDS: &str =
-    "/help /workspace /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
+    "/help /new [session] /workspace /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
 
 fn agent_send_interactive_with_run_id(
     root: &Path,
@@ -155,6 +155,9 @@ fn agent_cancel(
 
 fn agent_chat_request_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     let visible_socket = agent_socket_path(root, name)?;
+    if terminal_socket_exists(&visible_socket) {
+        return Ok(visible_socket);
+    }
     let runtime_socket = agent_chat_runtime_socket(root, name)?;
     if terminal_socket_exists(&runtime_socket) {
         return Ok(runtime_socket);
@@ -168,7 +171,7 @@ fn agent_repl(
     session: Option<&str>,
     raw: bool,
 ) -> Result<ExitCode, CliError> {
-    let session = agent_session_name(root, name, session)?;
+    let mut session = agent_session_name(root, name, session)?;
     let mut debug = AgentDebugState::default();
     if io::stdin().is_terminal() {
         print_agent_repl_banner(root, name, &session)?;
@@ -200,7 +203,7 @@ fn agent_repl(
             if matches!(line.as_str(), "/exit" | "/quit") {
                 return Ok(ExitCode::SUCCESS);
             }
-            if let Some(code) = agent_repl_command(root, name, &session, &line, raw, &mut debug)? {
+            if let Some(code) = agent_repl_command(root, name, &mut session, &line, raw, &mut debug)? {
                 if code != ExitCode::SUCCESS {
                     return Ok(code);
                 }
@@ -241,7 +244,7 @@ fn agent_repl(
         if matches!(line, "/exit" | "/quit") {
             break;
         }
-        if agent_repl_command(root, name, &session, line, raw, &mut debug)?.is_none() {
+        if agent_repl_command(root, name, &mut session, line, raw, &mut debug)?.is_none() {
             if debug.enabled {
                 debug.report_tools(root, name)?;
             }

@@ -294,7 +294,7 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
         .pointer("/0/content")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    assert!(system.contains("only native callable tool is `tsh`"));
+    assert!(system.contains("only native callable tool exposed by this runtime is `tsh`"));
     assert!(system.contains("## AGENT Instructions"));
     assert!(system.contains("Always answer tersely."));
     assert!(system.contains("Project rule"));
@@ -302,9 +302,9 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     assert!(system.contains("tool output"));
     assert!(system.contains("previous message"));
     assert!(system.contains("Do not claim direct access"));
-    assert!(system.contains("Do not say that you cannot execute `tsh`"));
-    assert!(system.contains("tsh load TOOL"));
-    assert!(system.contains("applicable `/workspace` rules and current workspace state"));
+    assert!(!system.contains("output this exact tool call"));
+    assert!(system.contains("When tool execution is useful"));
+    assert!(system.contains("inspect current files before editing"));
     assert!(default_agent_tool_context().contains("`/workspace`"));
     assert!(
         system.find("## Runtime Contract").unwrap_or(usize::MAX)

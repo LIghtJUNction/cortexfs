@@ -199,6 +199,34 @@ fn model_path_rejects_symlink_intermediate_directory(
 }
 
 #[test]
+fn agent_model_config_prefers_current_user_agent_control() -> Result<(), Box<dyn std::error::Error>>
+{
+    let root = unique_temp_dir("runner-agent-user-control-override")?;
+    let global_agent = root.join("agent/coder.d");
+    fs::create_dir_all(&global_agent)?;
+    fs::write(global_agent.join("model"), "main\n")?;
+    fs::write(global_agent.join("label"), "user_u:agent_r:coder_t:s0\n")?;
+    fs::write(global_agent.join("policy"), "allow coder_t model:main use\n")?;
+    let uid = nix::unistd::Uid::effective().as_raw().to_string();
+    let user_agent = root.join("home").join(uid).join("agent").join("coder.d");
+    fs::create_dir_all(&user_agent)?;
+    fs::write(user_agent.join("model"), "debug/echo\n")?;
+    fs::write(user_agent.join("label"), "user_u:agent_r:usercoder_t:s0\n")?;
+    fs::write(
+        user_agent.join("policy"),
+        "allow usercoder_t model:debug/echo use\n",
+    )?;
+    fs::create_dir_all(root.join("model/debug"))?;
+    write_executable_script(&root.join("model/debug/echo"), "#!/bin/sh\nexit 0\n")?;
+
+    let config = AgentModelRunConfig::new_with_paths("coder", root.clone(), root.clone());
+
+    assert!(matches!(config, Ok(ref config) if config.model == "debug/echo"));
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
 fn model_candidates_follow_fallback_control_file() -> Result<(), Box<dyn std::error::Error>> {
     let root = unique_temp_dir("runner-model-fallback")?;
     fs::create_dir_all(root.join("model/primary/alpha.d"))?;

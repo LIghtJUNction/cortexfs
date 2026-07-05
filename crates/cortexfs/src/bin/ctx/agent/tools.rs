@@ -21,12 +21,37 @@ fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliEr
     require_cli_name("agent name", name)?;
     let view = derive_agent_runtime_view(root, name)
         .map_err(|error| CliError::unavailable(format!("agent view {}: {name}", error.errno())))?;
+    if !agent_tool_is_authorized(&view, "tsh")? {
+        return Ok(Vec::new());
+    }
+    let mut tools = vec!["tsh".to_owned()];
+    let state_path = cortexfs::tsh_context_state_path(view.home());
+    let state = cortexfs::read_tsh_context_state(&state_path).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", state_path.display()))
+    })?;
+    for tool in state.tools {
+        if tool.name == "tsh" || tools.contains(&tool.name) {
+            continue;
+        }
+        if agent_tool_is_authorized(&view, &tool.name)? {
+            tools.push(tool.name);
+        }
+    }
+    tools.sort();
+    tools.dedup();
+    Ok(tools)
+}
+
+fn agent_tool_is_authorized(
+    view: &AgentRuntimeView,
+    tool: &str,
+) -> Result<bool, CliError> {
     let Some(hit) = view
         .tool_path()
-        .find("tsh")
+        .find(tool)
         .map_err(|error| CliError::unavailable(format!("cannot inspect CTX_PATH: {error:?}")))?
     else {
-        return Ok(Vec::new());
+        return Ok(false);
     };
     let policy = read_file_to_string(&hit.control_dir().join("policy")).map_err(|error| {
         CliError::unavailable(format!(
@@ -36,10 +61,10 @@ fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliEr
         ))
     })?;
     let tool_policy = PolicyV0::parse(&policy)
-        .map_err(|_error| CliError::unavailable("invalid policy for tool:tsh"))?;
-    if authorize_tool_execution(
+        .map_err(|_error| CliError::unavailable(format!("invalid policy for tool:{tool}")))?;
+    Ok(authorize_tool_execution(
         view.tool_path(),
-        "tsh",
+        tool,
         ToolExecutionAuthority::new(
             view.identity(),
             view.mount_table(),
@@ -48,11 +73,7 @@ fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliEr
             &tool_policy,
         ),
     )
-    .is_err()
-    {
-        return Ok(Vec::new());
-    }
-    Ok(vec!["tsh".to_owned()])
+    .is_ok())
 }
 
 fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibleTool>, CliError> {

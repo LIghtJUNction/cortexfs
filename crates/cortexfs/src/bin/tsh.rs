@@ -50,13 +50,16 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let config = read_tsh_config(&root)?;
     let mut cache =
         DynamicToolCache::with_window_percent(config.cache_capacity, config.window_percent);
-    let mut context = ToolContext::new(config.max_loaded_tools);
+    let mut context = load_persistent_context(&root, config.max_loaded_tools)?;
+    restore_persistent_cache(&mut cache, &context);
     match command {
         TshCommand::Repl => run_repl(&root, &mut cache, &mut context),
         TshCommand::Tool { name, args } if is_tsh_builtin(&name) => {
             run_builtin_once(&root, &mut cache, &mut context, &name, args)
         }
-        TshCommand::Tool { name, args } => run_tool(&root, &name, args),
+        TshCommand::Tool { name, args } => {
+            run_tool_with_context(&root, &mut cache, &mut context, &name, args)
+        }
         TshCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
         TshCommand::List => list_tools(&root).map(|()| ExitCode::SUCCESS),
     }
@@ -139,8 +142,9 @@ principles:
 
 repl:
   help             show this help
-  tools            list visible tools
-  tools -l         list visible tools with paths and descriptions
+  tools            list top-level visible tools and tool groups
+  tools GROUP      list tools in a tool group, for example tools fs
+  tools -l         list all visible tools with paths and descriptions
   which TOOL       print the resolved tool path
   type TOOL        explain whether TOOL is a builtin or visible tool
   command -v TOOL  print the command that tsh would run
@@ -158,40 +162,103 @@ repl:
 }
 
 fn list_tools(root: &Path) -> Result<(), TshError> {
-    list_tools_with_mode(root, ToolListMode::Names)
+    list_tools_with_mode(root, ToolListMode::Groups)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum ToolListMode {
-    Names,
+    Groups,
     Long,
+    Group(String),
 }
 
 fn list_tools_with_mode(root: &Path, mode: ToolListMode) -> Result<(), TshError> {
     let tool_path = ctx_tool_path(root)?;
     let hits = tool_path.list().map_err(tool_path_error)?;
-    let mut stdout = io::stdout().lock();
+    let mut entries = Vec::new();
     for hit in hits {
         let Some(name) = hit.path().file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        match mode {
-            ToolListMode::Names => {
+        entries.push(ToolListEntry {
+            name: name.to_owned(),
+            path: hit.path().to_path_buf(),
+            description: tool_description(&hit),
+        });
+    }
+    let mut stdout = io::stdout().lock();
+    match mode {
+        ToolListMode::Groups => {
+            for name in top_level_tool_names(&entries) {
                 writeln!(stdout, "{name}").map_err(|error| write_error_to_tsh(&error))?;
             }
-            ToolListMode::Long => {
-                let description = tool_description(&hit);
-                if description.is_empty() {
-                    writeln!(stdout, "{name}\t{}", hit.path().display())
-                        .map_err(|error| write_error_to_tsh(&error))?;
-                } else {
-                    writeln!(stdout, "{name}\t{}\t{description}", hit.path().display())
-                        .map_err(|error| write_error_to_tsh(&error))?;
-                }
+        }
+        ToolListMode::Long => {
+            for entry in &entries {
+                write_tool_list_entry(&mut stdout, entry)?;
+            }
+        }
+        ToolListMode::Group(group) => {
+            let mut matched = false;
+            for entry in entries
+                .iter()
+                .filter(|entry| tool_is_in_group(&entry.name, &group))
+            {
+                matched = true;
+                writeln!(stdout, "{}", entry.name).map_err(|error| write_error_to_tsh(&error))?;
+            }
+            if !matched {
+                writeln!(stdout, "tsh: tool group not found: {group}\ntry: tools")
+                    .map_err(|error| write_error_to_tsh(&error))?;
             }
         }
     }
     stdout.flush().map_err(|error| write_error_to_tsh(&error))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ToolListEntry {
+    name: String,
+    path: PathBuf,
+    description: String,
+}
+
+fn write_tool_list_entry(stdout: &mut impl Write, entry: &ToolListEntry) -> Result<(), TshError> {
+    if entry.description.is_empty() {
+        writeln!(stdout, "{}\t{}", entry.name, entry.path.display())
+            .map_err(|error| write_error_to_tsh(&error))
+    } else {
+        writeln!(
+            stdout,
+            "{}\t{}\t{}",
+            entry.name,
+            entry.path.display(),
+            entry.description
+        )
+        .map_err(|error| write_error_to_tsh(&error))
+    }
+}
+
+fn top_level_tool_names(entries: &[ToolListEntry]) -> Vec<String> {
+    let mut names = BTreeSet::new();
+    for entry in entries {
+        if let Some((group, _leaf)) = entry.name.split_once('.')
+            && !group.is_empty()
+        {
+            let _inserted = names.insert(format!("{group}."));
+            continue;
+        }
+        let _inserted = names.insert(entry.name.clone());
+    }
+    names.into_iter().collect()
+}
+
+fn tool_is_in_group(name: &str, group: &str) -> bool {
+    let group = group.trim_end_matches('.');
+    !group.is_empty()
+        && name
+            .strip_prefix(group)
+            .is_some_and(|suffix| suffix.starts_with('.') && suffix.len() > 1)
 }
 
 fn read_tsh_config(root: &Path) -> Result<cortexfs::tool::core::tools::TshRuntimeConfig, TshError> {
@@ -237,6 +304,43 @@ include!("shared/proc_fd.rs");
 include!("shared/no_follow_fs.rs");
 include!("shared/small_text.rs");
 
+fn load_persistent_context(root: &Path, max_loaded_tools: usize) -> Result<ToolContext, TshError> {
+    let Some(path) = persistent_context_path(root)? else {
+        return Ok(ToolContext::new(max_loaded_tools));
+    };
+    let state = cortexfs::read_tsh_context_state(&path).map_err(|error| {
+        TshError::unavailable(format!("cannot read {}: {error}", path.display()))
+    })?;
+    Ok(ToolContext::from_state(state, max_loaded_tools))
+}
+
+fn persist_context(root: &Path, context: &ToolContext) -> Result<(), TshError> {
+    let Some(path) = persistent_context_path(root)? else {
+        return Ok(());
+    };
+    cortexfs::write_tsh_context_state(&path, &context.to_state())
+        .map_err(|error| TshError::unavailable(format!("cannot write {}: {error}", path.display())))
+}
+
+fn persistent_context_path(root: &Path) -> Result<Option<PathBuf>, TshError> {
+    let Some(agent) = env::var("CTX_AGENT").ok() else {
+        return Ok(None);
+    };
+    let view =
+        derive_agent_runtime_view(root, &agent).map_err(|error| agent_view_error_to_tsh(&error))?;
+    Ok(Some(cortexfs::tsh_context_state_path(view.home())))
+}
+
+fn restore_persistent_cache(cache: &mut DynamicToolCache, context: &ToolContext) {
+    for tool in context.values() {
+        if tool.pinned {
+            cache.pin_path(&tool.path);
+        } else if tool.dynamic_resident {
+            cache.load_path(&tool.path);
+        }
+    }
+}
+
 fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let (grant, env) = authorize_tsh_tool_execution(root, name)?;
     let hit = grant.hit();
@@ -268,6 +372,23 @@ fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, Ts
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
+}
+
+fn run_tool_with_context(
+    root: &Path,
+    cache: &mut DynamicToolCache,
+    context: &mut ToolContext,
+    name: &str,
+    args: Vec<OsString>,
+) -> Result<ExitCode, TshError> {
+    authorize_tsh_tool_execution(root, name)?;
+    let mut loaded = load_tool_context(root, name, false)?;
+    cache.load_path(&loaded.path);
+    loaded.dynamic_resident = cache.contains_path(&loaded.path);
+    let evicted = context.insert(loaded);
+    persist_context(root, context)?;
+    report_context_evictions(evicted)?;
+    run_tool(root, name, args)
 }
 
 fn authorize_tsh_tool_execution(root: &Path, name: &str) -> Result<AuthorizedTshTool, TshError> {
@@ -337,11 +458,12 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        DynamicToolCache, LoadedTool, MAX_TSH_REPL_LINE_BYTES, ToolContext, TshCommand,
-        append_schema_help, builtin_words, ctx_tool_path_with_home, help_text, load_tool_context,
-        open_executable_no_follow, parse_args, parse_repl_line, parse_tshrc_ctx_path,
-        read_repl_line_canonical_from, read_tsh_config_text, requires_explicit_repl_input,
-        run_repl_tool, run_tool, terminal_safe_text, tiny_lfu_admits, tshrc_ctx_path,
+        DynamicToolCache, LoadedTool, MAX_TSH_REPL_LINE_BYTES, ToolContext, ToolListEntry,
+        TshCommand, append_schema_help, builtin_words, ctx_tool_path_with_home, help_text,
+        load_tool_context, open_executable_no_follow, parse_args, parse_repl_line,
+        parse_tshrc_ctx_path, read_repl_line_canonical_from, read_tsh_config_text,
+        requires_explicit_repl_input, run_repl_tool, run_tool, terminal_safe_text, tiny_lfu_admits,
+        tool_diagnostic_help_text, tool_is_in_group, top_level_tool_names, tshrc_ctx_path,
         validate_tshrc_ctx_path, wtinylfu_victim_path,
     };
     use cortexfs::tool::core::tools::{TshRuntimeConfig, parse_tsh_runtime_config};

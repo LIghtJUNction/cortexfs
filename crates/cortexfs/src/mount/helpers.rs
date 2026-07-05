@@ -350,6 +350,8 @@ fn errno(error: FuseV1Error) -> Errno {
         FuseV1Error::NotFound => Errno::ENOENT,
         FuseV1Error::NotDirectory => Errno::ENOTDIR,
         FuseV1Error::NotFile => Errno::EISDIR,
+        FuseV1Error::NotEmpty => Errno::ENOTEMPTY,
+        FuseV1Error::ReadOnly => Errno::EROFS,
         FuseV1Error::TooLarge => Errno::EMSGSIZE,
         FuseV1Error::PermissionDenied => Errno::EACCES,
         FuseV1Error::Io => Errno::EIO,

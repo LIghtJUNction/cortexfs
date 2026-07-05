@@ -1,4 +1,4 @@
-use crate::{agent_start_workspace_source, ensure_agent_start_session};
+use crate::{agent_socket_path, agent_start_workspace_source, ensure_agent_start_session};
 
 fn current_uid_for_test() -> String {
     std::process::Command::new("id")
@@ -675,4 +675,17 @@ fn agent_start_chat_socket_path_is_root_scoped() {
     assert!(matches!((&left_socket, &right_socket), (Ok(left), Ok(right)) if left != right));
     assert_eq!(agent_chat_unit(&left, "coder"), agent_chat_unit(&left, "coder"));
     assert_ne!(agent_chat_unit(&left, "coder"), agent_chat_unit(&right, "coder"));
+}
+
+#[test]
+fn agent_socket_path_prefers_current_user_agent_override() {
+    let root = clean_test_dir("ctx-agent-user-socket-override");
+    let uid = current_uid_for_test();
+    let control = root.join("home").join(&uid).join("agent").join("coder.d");
+    assert!(fs::create_dir_all(&control).is_ok());
+
+    assert_eq!(
+        agent_socket_path(&root, "coder"),
+        Ok(root.join("home").join(uid).join("agent").join("coder.sock"))
+    );
 }

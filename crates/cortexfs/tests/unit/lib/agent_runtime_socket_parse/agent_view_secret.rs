@@ -70,6 +70,44 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
 }
 
 #[test]
+fn agent_runtime_view_prefers_current_user_agent_control() {
+    let root = clean_test_dir("agent-runtime-view-user-override");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let uid = nix::unistd::Uid::effective().as_raw().to_string();
+    let user_control = root.join("home").join(&uid).join("agent").join("coder.d");
+    assert!(fs::create_dir_all(&user_control).is_ok());
+    let root_control = format!("/ctx/home/{uid}/agent/coder/root");
+    let tool_path = format!("/ctx/tool:/ctx/home/{uid}/tool");
+    for (file, value) in [
+        ("owner", uid.as_str()),
+        ("uid", uid.as_str()),
+        ("gid", uid.as_str()),
+        ("groups", uid.as_str()),
+        ("label", "user_u:agent_r:usercoder_t:s0"),
+        ("iso", "shared"),
+        ("parent", "agent:base"),
+        ("life", "owned"),
+        ("root", root_control.as_str()),
+        ("cwd", "/workspace"),
+        ("env", ""),
+        ("path", tool_path.as_str()),
+        ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev"),
+        ("model", "debug/echo"),
+        ("policy", "allow usercoder_t model:debug/echo use"),
+    ] {
+        write_text_file(&user_control.join(file), &format!("{value}\n"));
+    }
+
+    let view = derive_agent_runtime_view(&root, "coder");
+    let view = ok!(view);
+
+    assert_eq!(view.control_dir(), user_control.as_path());
+    assert_eq!(view.owner().to_string(), uid);
+    assert_eq!(view.policy_subject(), "usercoder_t");
+    assert_eq!(view.model(), "debug/echo");
+}
+
+#[test]
 fn secret_tool_lookup_uses_absolute_program_path() {
     assert_eq!(super::SECRET_TOOL_PROGRAM, "/usr/bin/secret-tool");
 }

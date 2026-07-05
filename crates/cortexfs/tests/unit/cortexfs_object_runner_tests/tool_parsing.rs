@@ -93,34 +93,21 @@ fn tool_call_arguments_reject_excessive_limits() {
 }
 
 #[test]
-fn runtime_contract_requires_immediate_tsh_tool_calls() {
+fn runtime_contract_describes_native_tsh_without_prompt_heuristics() {
     let contract = agent_runtime_contract("coder");
 
-    assert!(contract.contains("you must call `tsh` immediately"));
-    assert!(contract.contains("Do not ask the user to let you execute `tsh`"));
-    assert!(contract.contains("Do not say that you cannot execute `tsh`"));
+    assert!(contract.contains("native callable tool exposed by this runtime is `tsh`"));
     assert!(contract.contains("hidden platform tools such as `image_gen`"));
-    assert!(contract.contains("output exactly one JSON object line and no prose"));
-    assert!(contract.contains(r#""name":"tsh""#));
+    assert!(contract.contains("When tool execution is useful"));
     assert!(contract.contains("Tool results include the original `arguments.args`"));
     assert!(contract.contains("If no concrete file path is provided"));
-    assert!(contract.contains("For clear coding requests"));
-    assert!(contract.contains("do not stop at a plan"));
-    assert!(contract.contains("Ask for clarification only when the target path or scope is missing"));
-    assert!(contract.contains("inspect applicable `/workspace` rules and current workspace state"));
+    assert!(contract.contains("For coding work"));
+    assert!(contract.contains("inspect current files before editing"));
+    assert!(!contract.contains("you must call `tsh` immediately"));
+    assert!(!contract.contains("output this exact tool call"));
+    assert!(!contract.contains(r#""name":"tsh""#));
     assert!(!contract.contains("git status --short"));
     assert!(!contract.contains("find /workspace -name AGENTS.md -print"));
-    assert!(!contract.contains("find .. -name AGENTS.md -print"));
-    assert!(contract.contains("project rules that apply to each file you edit"));
-    assert!(contract.contains(r#"["fs.replace","/workspace/PATH","OLD TEXT","NEW TEXT"]"#));
-    assert!(contract.contains("prefer `fs.replace` for small surgical edits"));
-    assert!(contract.contains("format, static check, lint, and test commands"));
-    assert!(contract.contains("keep repairing within scope"));
-    assert!(contract.contains("inspect `git diff --stat` and the relevant diff"));
-    assert!(contract.contains("Never overwrite, revert, delete, or reformat unrelated user changes"));
-    assert!(contract.contains("Never run destructive git commands"));
-    assert!(contract.contains("git reset --hard"));
-    assert!(contract.contains("If verification fails"));
 }
 
 #[test]

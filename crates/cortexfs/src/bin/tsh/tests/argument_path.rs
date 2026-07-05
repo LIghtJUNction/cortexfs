@@ -36,6 +36,45 @@ fn help_describes_generic_visible_tool_invocation() {
 }
 
 #[test]
+fn tools_default_collapses_dotted_names_into_groups() {
+    let entries = vec![
+        test_tool_list_entry("bash"),
+        test_tool_list_entry("fs.read"),
+        test_tool_list_entry("fs.write"),
+        test_tool_list_entry("tmux"),
+    ];
+
+    assert_eq!(top_level_tool_names(&entries), vec!["bash", "fs.", "tmux"]);
+}
+
+#[test]
+fn tools_group_matches_only_children() {
+    assert!(tool_is_in_group("fs.read", "fs"));
+    assert!(tool_is_in_group("fs.write", "fs."));
+    assert!(!tool_is_in_group("fs", "fs"));
+    assert!(!tool_is_in_group("fstat", "fs"));
+    assert!(!tool_is_in_group("bash", "fs"));
+}
+
+#[test]
+fn help_tool_describes_diagnostic_flow() {
+    let help = tool_diagnostic_help_text();
+
+    assert!(help.contains("tool diagnostics"));
+    assert!(help.contains("tools GROUP"));
+    assert!(help.contains("which TOOL"));
+    assert!(help.contains("CTX_PATH controls visibility"));
+}
+
+fn test_tool_list_entry(name: &str) -> ToolListEntry {
+    ToolListEntry {
+        name: name.to_owned(),
+        path: PathBuf::from("/ctx/tool").join(name),
+        description: String::new(),
+    }
+}
+
+#[test]
 fn parses_repl_words_without_shell_operators() {
     assert_eq!(
         parse_repl_line(r#"fs.read '{"path":"/tmp/a b"}'"#),

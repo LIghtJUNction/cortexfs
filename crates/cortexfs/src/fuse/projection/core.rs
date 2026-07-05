@@ -183,6 +183,20 @@ impl FuseV1Projection {
         read_fuse_v1_symlink_target(&path).map_err(|error| fuse_readlink_error(&error))
     }
 
+    /// Removes one empty durable plain directory.
+    pub fn remove_empty_plain_dir(&self, abi_path: &str) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if !is_removable_durable_dir_path(&normalized) {
+            return Err(FuseV1Error::ReadOnly);
+        }
+        let path = self.resolve(&normalized)?;
+        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(FuseV1Error::NotDirectory);
+        }
+        fs::remove_dir(&path).map_err(|error| fuse_remove_dir_error(&error))
+    }
+
     /// Projects a same-directory atomic write for v1 control files.
     pub fn write_control_file(&self, abi_path: &str, content: &str) -> Result<(), FuseV1Error> {
         self.write_control_file_at(abi_path, 0, content.as_bytes())
@@ -561,5 +575,50 @@ fn fuse_readlink_error(error: &std::io::Error) -> FuseV1Error {
         std::io::ErrorKind::NotFound => FuseV1Error::NotFound,
         std::io::ErrorKind::PermissionDenied => FuseV1Error::PermissionDenied,
         _ => FuseV1Error::InvalidPath,
+    }
+}
+
+fn fuse_remove_dir_error(error: &std::io::Error) -> FuseV1Error {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => FuseV1Error::NotFound,
+        std::io::ErrorKind::NotADirectory => FuseV1Error::NotDirectory,
+        std::io::ErrorKind::DirectoryNotEmpty => FuseV1Error::NotEmpty,
+        std::io::ErrorKind::PermissionDenied => FuseV1Error::PermissionDenied,
+        _ => FuseV1Error::Io,
+    }
+}
+
+fn is_removable_durable_dir_path(normalized: &str) -> bool {
+    let parts = normalized.split('/').collect::<Vec<_>>();
+    let Some((root, rest)) = parts.split_first() else {
+        return false;
+    };
+    match *root {
+        "home" => {
+            let Some((uid, tail)) = rest.split_first() else {
+                return false;
+            };
+            !tail.is_empty()
+                && uid.parse::<u32>().is_ok()
+                && matches!(
+                    parse_abi_path(normalized),
+                    AbiPathKind::HomeDir
+                        | AbiPathKind::SessionRoot
+                        | AbiPathKind::SessionDir { .. }
+                        | AbiPathKind::Ordinary
+                )
+        }
+        "shared" => {
+            let Some((space, tail)) = rest.split_first() else {
+                return false;
+            };
+            !tail.is_empty()
+                && is_object_name(space)
+                && matches!(
+                    parse_abi_path(normalized),
+                    AbiPathKind::SharedDir { .. } | AbiPathKind::Ordinary
+                )
+        }
+        _ => false,
     }
 }

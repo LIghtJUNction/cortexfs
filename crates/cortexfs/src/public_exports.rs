@@ -13,6 +13,10 @@ pub use abi::path::{
     AbiPathKind, ObjectClass, classify_abi_path, is_model_name, is_object_name, is_root_entry,
     parse_abi_path,
 };
+pub use tsh_context_state::{
+    TshContextState, TshLoadedToolState, read_tsh_context_state, tsh_context_state_path,
+    write_tsh_context_state,
+};
 pub use agent::control::{
     AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
 };

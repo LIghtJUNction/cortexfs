@@ -13,10 +13,6 @@ fn ensure_reference_home(root: &Path) -> Result<(), ReferenceTreeError> {
         "CTX_PATH=/ctx/tool:/ctx/home/1000/tool\n",
     )?;
 
-    ensure_reference_model_alias(
-        &root.join("home").join("1000").join("model").join("coder"),
-        Path::new("/ctx/model/main"),
-    )?;
     ensure_reference_home_ownership(&root.join("home").join("1000"))
 }
 

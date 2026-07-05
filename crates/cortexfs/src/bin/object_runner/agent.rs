@@ -65,11 +65,11 @@ where
                         &pair.1,
                     );
                 }
-                return write_tool_error(
+                return write_tool_loop_handoff_response(
                     stdout,
                     &config.run,
-                    "ELOOP",
                     "agent repeated the same tool call",
+                    Some(&tool_call),
                 )
                 .map_err(|error| format!("cannot write output: {error}"));
             }
@@ -79,8 +79,12 @@ where
                 &outcome.frames,
                 &tool_call,
             )?;
-            let result = execute_tool_call(config, &tool_call)
-                .unwrap_or_else(|error| format!("ERROR: {error}\n"));
+            emit_agent_terminal_tool_running(config, &tool_call);
+            let (result, success) = match execute_tool_call(config, &tool_call) {
+                Ok(result) => (result, true),
+                Err(error) => (format!("ERROR: {error}\n"), false),
+            };
+            emit_agent_terminal_tool_done(config, &tool_call, &result, success);
             write_tool_result_event(stdout, &config.run, &tool_call, &result)?;
             stdout
                 .flush()
@@ -89,11 +93,12 @@ where
             last_tool_signature = Some(signature);
             last_tool_result = Some((tool_call, result));
             if iteration == MAX_AGENT_TOOL_ITERATIONS {
-                return write_tool_error(
+                let tool_call = last_tool_result.as_ref().map(|pair| &pair.0);
+                return write_tool_loop_handoff_response(
                     stdout,
                     &config.run,
-                    "ELOOP",
                     "agent tool loop limit exceeded",
+                    tool_call,
                 )
                 .map_err(|error| format!("cannot write output: {error}"));
             }
@@ -138,6 +143,180 @@ where
     Ok(())
 }
 
+fn emit_agent_terminal_tool_running(config: &AgentModelRunConfig, tool_call: &AgentToolCall) {
+    emit_agent_terminal_tool_line(config, &tool_terminal_running_line(tool_call));
+}
+
+fn emit_agent_terminal_tool_done(
+    config: &AgentModelRunConfig,
+    tool_call: &AgentToolCall,
+    result: &str,
+    success: bool,
+) {
+    emit_agent_terminal_tool_line(config, &tool_terminal_done_line(tool_call, result, success));
+}
+
+fn emit_agent_terminal_tool_line(config: &AgentModelRunConfig, line: &str) {
+    for socket in agent_terminal_emit_sockets(config) {
+        let Ok(mut stream) = UnixStream::connect(socket) else {
+            continue;
+        };
+        let _ignored = stream.set_write_timeout(Some(Duration::from_secs(1)));
+        if stream
+            .write_all(b"emit\n")
+            .and_then(|()| stream.write_all(line.as_bytes()))
+            .and_then(|()| stream.flush())
+            .is_ok()
+        {
+            return;
+        }
+    }
+}
+
+fn agent_terminal_emit_sockets(config: &AgentModelRunConfig) -> Vec<PathBuf> {
+    let Some(session) = env::var("CTX_SESSION").ok() else {
+        return Vec::new();
+    };
+    if !is_object_name(&session) {
+        return Vec::new();
+    }
+    let Ok(view) = derive_agent_runtime_view(&config.ctx_root, &config.agent) else {
+        return Vec::new();
+    };
+    let mut sockets = vec![agent_terminal_visible_socket(
+        view.ctx_home(),
+        &config.agent,
+        &session,
+    )];
+    if let Some(runtime) = agent_terminal_runtime_socket(view.ctx_home(), &config.agent, &session) {
+        sockets.push(runtime);
+    }
+    sockets.push(agent_terminal_legacy_runtime_socket(
+        view.ctx_home(),
+        &config.agent,
+        &session,
+    ));
+    sockets
+}
+
+fn agent_terminal_visible_socket(ctx_home: &Path, agent: &str, session: &str) -> PathBuf {
+    ctx_home
+        .join("agent")
+        .join(agent)
+        .join("session")
+        .join(session)
+        .join("terminal")
+        .join("main.sock")
+}
+
+fn agent_terminal_runtime_socket(ctx_home: &Path, agent: &str, session: &str) -> Option<PathBuf> {
+    Some(
+        agent_terminal_runtime_root(ctx_home)?
+            .join("cortexfs")
+            .join("terminal")
+            .join(agent)
+            .join(session)
+            .join("main.sock"),
+    )
+}
+
+fn agent_terminal_legacy_runtime_socket(ctx_home: &Path, agent: &str, session: &str) -> PathBuf {
+    PathBuf::from("/run")
+        .join("cortexfs")
+        .join("terminal")
+        .join(ctx_home_uid(ctx_home).unwrap_or_else(|| nix::unistd::Uid::effective().to_string()))
+        .join(agent)
+        .join(session)
+        .join("main.sock")
+}
+
+fn agent_terminal_runtime_root(ctx_home: &Path) -> Option<PathBuf> {
+    env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .or_else(|| Some(PathBuf::from("/run").join("user").join(ctx_home_uid(ctx_home)?)))
+}
+
+fn ctx_home_uid(ctx_home: &Path) -> Option<String> {
+    ctx_home
+        .file_name()
+        .and_then(|uid| uid.to_str())
+        .filter(|uid| uid.bytes().all(|byte| byte.is_ascii_digit()))
+        .map(str::to_owned)
+}
+
+fn tool_terminal_running_line(tool_call: &AgentToolCall) -> String {
+    let args = tool_terminal_args(tool_call);
+    if args.is_empty() {
+        format!("\r\ntool {} running\r\n", terminal_safe_text(&tool_call.name))
+    } else {
+        format!(
+            "\r\ntool {} running {}\r\n",
+            terminal_safe_text(&tool_call.name),
+            args
+        )
+    }
+}
+
+fn tool_terminal_done_line(tool_call: &AgentToolCall, result: &str, success: bool) -> String {
+    let status = if success { "done" } else { "error" };
+    format!(
+        "\r\ntool {} {} {} bytes\r\n",
+        terminal_safe_text(&tool_call.name),
+        status,
+        result.len()
+    )
+}
+
+fn tool_terminal_args(tool_call: &AgentToolCall) -> String {
+    let mut parts = Vec::new();
+    for (index, arg) in tool_call.args.iter().enumerate() {
+        let text = arg.to_string_lossy();
+        if index == 0 {
+            parts.push(terminal_safe_text(&text));
+        } else {
+            parts.push(terminal_safe_text(&tool_terminal_quote(&text)));
+        }
+    }
+    parts.join(" ")
+}
+
+fn tool_terminal_quote(value: &str) -> String {
+    if value.bytes().all(|byte| {
+        matches!(
+            byte,
+            b'A'..=b'Z'
+                | b'a'..=b'z'
+                | b'0'..=b'9'
+                | b'_'
+                | b'-'
+                | b'.'
+                | b'/'
+                | b':'
+                | b'@'
+                | b'%'
+                | b'+'
+                | b'='
+                | b','
+        )
+    }) {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+fn terminal_safe_text(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if character.is_control() && character != '\n' && character != '\t' {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
+}
+
 struct AgentModelRunConfig {
     agent: String,
     source: PathBuf,
@@ -167,10 +346,8 @@ impl AgentModelRunConfig {
 
     fn new_with_paths(agent: &str, source: PathBuf, ctx_root: PathBuf) -> Result<Self, String> {
         let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
-        let model_path = source
-            .join("agent")
-            .join(format!("{agent}.d"))
-            .join("model");
+        let agent_dir = agent_model_control_dir(&source, agent);
+        let model_path = agent_dir.join("model");
         let configured_model = read_small_plain_text_file(
             &model_path,
             MAX_RUNNER_CONTROL_BYTES,
@@ -204,7 +381,6 @@ impl AgentModelRunConfig {
             .ok_or_else(|| format!("invalid model reference: {requested_model}"))?;
         let model_path = selected.path.clone();
         let model = selected.name.clone();
-        let agent_dir = source.join("agent").join(format!("{agent}.d"));
         authorize_agent_model_use(&agent_dir, &requested_model, &primary_model, &model)?;
         let system_prompt = read_small_plain_text_file(
             &agent_dir.join("system.md"),
@@ -252,4 +428,36 @@ impl AgentModelRunConfig {
         self.tool_context.push_str(result);
         trim_tool_context_to_limit(&mut self.tool_context);
     }
+}
+
+fn agent_model_control_dir(source: &Path, agent: &str) -> PathBuf {
+    for control in current_user_agent_model_control_dirs(source, agent) {
+        if is_plain_directory_no_follow(&control) {
+            return control;
+        }
+    }
+    source.join("agent").join(format!("{agent}.d"))
+}
+
+fn current_user_agent_model_control_dirs(source: &Path, agent: &str) -> Vec<PathBuf> {
+    let mut controls = Vec::new();
+    if let Some(ctx_home) = env::var_os("CTX_HOME").map(PathBuf::from)
+        && ctx_home.starts_with(source)
+    {
+        controls.push(ctx_home.join("agent").join(format!("{agent}.d")));
+    }
+    let uid_control = source
+        .join("home")
+        .join(nix::unistd::Uid::effective().as_raw().to_string())
+        .join("agent")
+        .join(format!("{agent}.d"));
+    if !controls.iter().any(|control| control == &uid_control) {
+        controls.push(uid_control);
+    }
+    controls
+}
+
+fn is_plain_directory_no_follow(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_dir() && !metadata.file_type().is_symlink())
 }

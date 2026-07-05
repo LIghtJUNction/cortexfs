@@ -52,6 +52,14 @@ fn handle_client(mut stream: UnixStream, pty_writer: PtyWriter, clients: &Client
     let Ok(mode) = read_client_mode_with_timeout(&mut stream) else {
         return;
     };
+    if mode == ClientMode::Emit {
+        if let Ok(payload) = read_emit_payload(stream)
+            && !payload.is_empty()
+        {
+            broadcast(clients, &payload);
+        }
+        return;
+    }
     let Ok(output) = stream.try_clone() else {
         return;
     };
@@ -90,6 +98,7 @@ fn read_client_mode_with_timeout_duration(
 enum ClientMode {
     Watch,
     Attach,
+    Emit,
 }
 
 fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode> {
@@ -116,9 +125,25 @@ fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode> {
     match mode.as_slice() {
         b"watch" => Ok(ClientMode::Watch),
         b"attach" => Ok(ClientMode::Attach),
+        b"emit" => Ok(ClientMode::Emit),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid ctxterm client mode",
         )),
     }
+}
+
+fn read_emit_payload(stream: UnixStream) -> io::Result<Vec<u8>> {
+    let mut payload = Vec::new();
+    let max_payload = u64::try_from(MAX_EMIT_PAYLOAD_BYTES)
+        .map_err(|_error| io::Error::other("ctxterm payload limit overflow"))?;
+    let mut reader = stream.take(max_payload.saturating_add(1));
+    reader.read_to_end(&mut payload)?;
+    if payload.len() > MAX_EMIT_PAYLOAD_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ctxterm emit payload too large",
+        ));
+    }
+    Ok(payload)
 }

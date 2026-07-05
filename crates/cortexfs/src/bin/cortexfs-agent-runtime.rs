@@ -48,7 +48,11 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
         );
     };
 
-    let session_root = view.home().join("session");
+    let session_root = view
+        .ctx_home()
+        .join("agent")
+        .join(view.agent_name())
+        .join("session");
     let default_cwd = view.cwd().display().to_string();
     let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;

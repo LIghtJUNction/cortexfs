@@ -160,7 +160,18 @@ fn agent_object_path(root: &Path, agent: &str) -> PathBuf {
 }
 
 fn agent_control_dir(root: &Path, agent: &str) -> PathBuf {
-    agent_object_path(root, &format!("{agent}.d"))
+    agent_user_control_dir(root, agent)
+        .filter(|control| is_plain_dir(control))
+        .unwrap_or_else(|| agent_object_path(root, &format!("{agent}.d")))
+}
+
+fn agent_user_control_dir(root: &Path, agent: &str) -> Option<PathBuf> {
+    Some(ctx_home(root).ok()?.join("agent").join(format!("{agent}.d")))
+}
+
+fn is_plain_dir(path: &Path) -> bool {
+    path.symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_dir() && !metadata.file_type().is_symlink())
 }
 
 fn agent_control_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {

@@ -2,14 +2,16 @@ fn execute_agent_tool_call(
     config: &AgentModelRunConfig,
     tool_call: &AgentToolCall,
 ) -> Result<String, String> {
-    if tool_call.name != "tsh" {
+    let view = derive_agent_runtime_view(&config.ctx_root, &config.agent)
+        .map_err(|error| format!("cannot derive agent authority: {}", error.errno()))?;
+    if tool_call.name == "tsh" {
+        validate_agent_tsh_args(&tool_call.args)?;
+    } else if !agent_tool_is_loaded(&view, &tool_call.name)? {
         return Err(format!(
-            "unsupported native tool {}; use tsh",
+            "unsupported native tool {}; load it through tsh first",
             tool_call.name
         ));
     }
-    let view = derive_agent_runtime_view(&config.ctx_root, &config.agent)
-        .map_err(|error| format!("cannot derive agent authority: {}", error.errno()))?;
     let Some(hit) = view
         .tool_path()
         .find(&tool_call.name)
@@ -34,8 +36,6 @@ fn execute_agent_tool_call(
         ),
     )
     .map_err(|denial| tool_denial_message(&tool_call.name, denial))?;
-    validate_agent_tsh_args(&tool_call.args)?;
-
     let tool_executable = open_executable_no_follow(grant.hit().path())
         .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
     let sandbox = prepare_agent_tool_sandbox(&view)?;
@@ -70,6 +70,13 @@ fn execute_agent_tool_call(
         return Err(trim_tool_result(&result));
     }
     Ok(trim_tool_result(&result))
+}
+
+fn agent_tool_is_loaded(view: &cortexfs::AgentRuntimeView, name: &str) -> Result<bool, String> {
+    let state_path = cortexfs::tsh_context_state_path(view.home());
+    let state = cortexfs::read_tsh_context_state(&state_path)
+        .map_err(|error| format!("cannot read {}: {error}", state_path.display()))?;
+    Ok(state.tools.iter().any(|tool| tool.name == name))
 }
 
 #[derive(Debug)]
