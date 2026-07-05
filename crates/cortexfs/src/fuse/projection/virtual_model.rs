@@ -243,13 +243,18 @@ impl FuseV1Projection {
                 .map_err(|_error| FuseV1Error::Io)?,
                 0o777,
             ))),
-            "model/debug"
-            | "model/debug/echo.d"
-            => {
+            "model/debug" | "model/debug/echo.d"
+                if !self.backing_directory_exists(abi_path)? =>
+            {
                 Ok(Some((FuseV1FileType::Directory, 0, 0o755)))
             }
             "model/debug/echo" => virtual_regular_entry(&debug_echo_model_metadata(), 0o555),
             path => {
+                if path.starts_with("model/debug/echo.d/")
+                    && self.backing_directory_exists(path)?
+                {
+                    return Ok(None);
+                }
                 if let Some(file) = path.strip_prefix("model/debug/echo.d/") {
                     let Some(content) = debug_model_control_content(DEBUG_ECHO_MODEL, file) else {
                         return Ok(None);
@@ -299,6 +304,14 @@ impl FuseV1Projection {
                 };
                 virtual_regular_entry(&content, 0o644)
             }
+        }
+    }
+
+    fn backing_directory_exists(&self, abi_path: &str) -> Result<bool, FuseV1Error> {
+        match fs::symlink_metadata(self.resolve(abi_path)?) {
+            Ok(metadata) => Ok(metadata.is_dir() && !metadata.file_type().is_symlink()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(fuse_metadata_error(&error)),
         }
     }
 

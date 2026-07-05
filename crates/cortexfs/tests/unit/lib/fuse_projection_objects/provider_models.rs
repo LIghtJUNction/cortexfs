@@ -117,6 +117,36 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 }
 
 #[test]
+fn fuse_v1_projection_keeps_debug_hook_dirs_disk_backed() {
+    let root = reference_tree("fuse-v1-debug-model-hooks");
+    assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/pre.d")).is_ok());
+    assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/post.d")).is_ok());
+    let projection = FuseV1Projection::new(&root);
+
+    for path in [
+        "model/debug",
+        "model/debug/echo.d",
+        "model/debug/echo.d/hooks",
+        "model/debug/echo.d/hooks/pre.d",
+        "model/debug/echo.d/hooks/post.d",
+    ] {
+        let attr = projection.getattr(path);
+        assert!(matches!(
+            attr,
+            Ok(ref attr) if attr.file_type() == FuseV1FileType::Directory
+        ));
+    }
+    let hook_entries = projection.readdir("model/debug/echo.d/hooks");
+    assert_eq!(
+        hook_entries.map(|entries| entries
+            .into_iter()
+            .map(|entry| entry.name().to_owned())
+            .collect::<Vec<_>>()),
+        Ok(vec!["post.d".to_owned(), "pre.d".to_owned()])
+    );
+}
+
+#[test]
 fn fuse_v1_projection_rejects_symlink_provider_model_control_dir() {
     let root = reference_tree("fuse-v1-provider-model-control-symlink");
     let providers = root.join("providers.d");
