@@ -35,7 +35,9 @@ pub fn install_executable_object_wrapper(
         atomic_replace_text_with_mode(&control_dir.join(file), &content, 0o644)
             .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
     }
-    ensure_object_hook_dirs(&control_dir)?;
+    if class != ObjectClass::Model {
+        ensure_object_hook_dirs(&control_dir)?;
+    }
 
     Ok(ObjectBootstrap::new(executable, control_dir))
 }

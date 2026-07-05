@@ -46,11 +46,10 @@ fn fuse_projection_exposes_object_hook_directories() {
     assert!(ensure_v1_reference_tree(&root).is_ok());
     let projection = FuseV1Projection::new(root.as_path());
 
-    for path in [
-        "model/debug/echo.d",
-        "agent/coder.d",
-        "tool/fs.read.d",
-    ] {
+    let model_entries = ok!(projection.readdir("model/debug/echo.d"));
+    assert!(!model_entries.iter().any(|entry| entry.name() == OBJECT_HOOK_DIR));
+
+    for path in ["agent/coder.d", "tool/fs.read.d"] {
         let entries = ok!(projection.readdir(path));
         assert!(entries.iter().any(|entry| entry.name() == OBJECT_HOOK_DIR));
 

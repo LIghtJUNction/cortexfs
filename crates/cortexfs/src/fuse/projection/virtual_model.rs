@@ -67,32 +67,8 @@ impl FuseV1Projection {
                 FuseV1DirEntry::new(DEBUG_ECHO_NAME.to_owned(), FuseV1FileType::Regular),
                 FuseV1DirEntry::new(format!("{DEBUG_ECHO_NAME}.d"), FuseV1FileType::Directory),
             ],
-            "model/debug/echo.d" => model_control_dir_entries(),
-            "model/debug/echo.d/hooks" => model_control_hook_dir_entries(),
-            "model/debug/echo.d/hooks/pre.d" | "model/debug/echo.d/hooks/post.d" => Vec::new(),
+            "model/debug/echo.d" => self.virtual_model_control_dir_entries(abi_path)?,
             _ => {
-                if let Some(model_control_dir) = abi_path.strip_suffix("/hooks")
-                    && projected_provider_model_control_dir(
-                        &self.provider_config_dir,
-                        &self.provider_model_cache_dir,
-                        model_control_dir,
-                    )?
-                    .is_some()
-                {
-                    return Ok(Some(model_control_hook_dir_entries()));
-                }
-                if let Some(model_control_dir) = abi_path
-                    .strip_suffix("/hooks/pre.d")
-                    .or_else(|| abi_path.strip_suffix("/hooks/post.d"))
-                    && projected_provider_model_control_dir(
-                        &self.provider_config_dir,
-                        &self.provider_model_cache_dir,
-                        model_control_dir,
-                    )?
-                    .is_some()
-                {
-                    return Ok(Some(Vec::new()));
-                }
                 if let Some(model) =
                     projected_provider_model_control_dir(
                         &self.provider_config_dir,
@@ -101,7 +77,7 @@ impl FuseV1Projection {
                     )?
                 {
                     let _ = model;
-                    model_control_dir_entries()
+                    self.virtual_model_control_dir_entries(abi_path)?
                 } else if let Some(provider) = abi_path.strip_prefix("model/") {
                     if provider.contains('/') || provider == DEBUG_ECHO_PROVIDER {
                         return Ok(None);
@@ -133,6 +109,53 @@ impl FuseV1Projection {
         };
         entries.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(Some(entries))
+    }
+
+    fn virtual_model_control_dir_entries(
+        &self,
+        abi_path: &str,
+    ) -> Result<Vec<FuseV1DirEntry>, FuseV1Error> {
+        let mut entries = model_control_dir_entries();
+        self.append_backing_dir_entries(abi_path, &mut entries)?;
+        Ok(entries)
+    }
+
+    fn append_backing_dir_entries(
+        &self,
+        abi_path: &str,
+        entries: &mut Vec<FuseV1DirEntry>,
+    ) -> Result<(), FuseV1Error> {
+        let path = self.resolve(abi_path)?;
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(fuse_metadata_error(&error)),
+        };
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Ok(());
+        }
+        let directory =
+            open_fuse_v1_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
+        for entry in fs::read_dir(plain_fs::proc_fd_path(&directory))
+            .map_err(|error| fuse_metadata_error(&error))?
+        {
+            let entry = entry.map_err(|error| fuse_metadata_error(&error))?;
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_error| FuseV1Error::InvalidPath)?;
+            if entries.iter().any(|entry| entry.name() == name) {
+                continue;
+            }
+            let stat = nix::sys::stat::fstatat(
+                &directory,
+                name.as_str(),
+                nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+            )
+            .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
+            entries.push(FuseV1DirEntry::new(name, fuse_file_type_from_mode(stat.st_mode)));
+        }
+        Ok(())
     }
 
     fn virtual_object_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
@@ -222,9 +245,7 @@ impl FuseV1Projection {
             ))),
             "model/debug"
             | "model/debug/echo.d"
-            | "model/debug/echo.d/hooks"
-            | "model/debug/echo.d/hooks/pre.d"
-            | "model/debug/echo.d/hooks/post.d" => {
+            => {
                 Ok(Some((FuseV1FileType::Directory, 0, 0o755)))
             }
             "model/debug/echo" => virtual_regular_entry(&debug_echo_model_metadata(), 0o555),
@@ -241,28 +262,6 @@ impl FuseV1Projection {
                 path,
             )?
             .is_some()
-            {
-                return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
-            }
-            if let Some(model_control_dir) = path.strip_suffix("/hooks")
-                && projected_provider_model_control_dir(
-                    &self.provider_config_dir,
-                    &self.provider_model_cache_dir,
-                    model_control_dir,
-                )?
-                .is_some()
-            {
-                return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
-            }
-            if let Some(model_control_dir) = path
-                .strip_suffix("/hooks/pre.d")
-                .or_else(|| path.strip_suffix("/hooks/post.d"))
-                && projected_provider_model_control_dir(
-                    &self.provider_config_dir,
-                    &self.provider_model_cache_dir,
-                    model_control_dir,
-                )?
-                .is_some()
             {
                 return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
             }
@@ -304,10 +303,19 @@ impl FuseV1Projection {
     }
 
     fn backing_control_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
-        match read_fuse_v1_small_text_file(
-            &self.resolve(abi_path)?,
-            MAX_FUSE_V1_SMALL_READ_BYTES,
-        ) {
+        let path = self.resolve(abi_path)?;
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(_error) => return Err(FuseV1Error::Io),
+        };
+        if metadata.is_dir() {
+            return Ok(None);
+        }
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(FuseV1Error::Io);
+        }
+        match read_fuse_v1_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
             Ok(content) => Ok(Some(content)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(_error) => Err(FuseV1Error::Io),
