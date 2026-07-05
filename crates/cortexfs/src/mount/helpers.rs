@@ -200,9 +200,12 @@ impl CortexFuse {
     fn xattrs_for_path(&self, path: &str) -> Result<Vec<CortexXattr>, FuseV1Error> {
         let attr = self.projected_getattr(path)?;
         let backing_path = self.projection.root().join(path);
-        let backing_exists = fs::symlink_metadata(&backing_path).is_ok();
+        let backing_metadata = fs::symlink_metadata(&backing_path).ok();
+        let backing_exists = backing_metadata.is_some();
+        let backing_is_dir =
+            backing_metadata.is_some_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
         let overlay = self.has_socket_overlay(path)?;
-        let virtual_projection = self.is_virtual_projection_path(path, backing_exists, overlay);
+        let virtual_projection = self.is_virtual_projection_path(path, backing_exists, backing_is_dir, overlay);
         let (origin, storage, virtual_value) = if overlay {
             ("overlay", "memory", "true")
         } else if virtual_projection {
@@ -243,17 +246,23 @@ impl CortexFuse {
         Ok(attrs)
     }
 
-    fn is_virtual_projection_path(&self, path: &str, backing_exists: bool, overlay: bool) -> bool {
+    fn is_virtual_projection_path(
+        &self,
+        path: &str,
+        backing_exists: bool,
+        backing_is_dir: bool,
+        overlay: bool,
+    ) -> bool {
         if overlay {
             return true;
         }
         if matches!(path, "model/main" | "model/helper") {
             return !backing_exists || self.projection.readlink(path).is_ok();
         }
-        if path == "model/debug"
-            || path == "model/debug/echo"
-            || path.starts_with("model/debug/echo.d/")
-        {
+        if path == "model/debug" || path.starts_with("model/debug/echo.d/") {
+            return !backing_is_dir;
+        }
+        if path == "model/debug/echo" {
             return true;
         }
         if matches!(classify_abi_path(path), "ctx.agent.exec" | "ctx.tool.exec") {

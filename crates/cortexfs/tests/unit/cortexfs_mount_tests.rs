@@ -435,6 +435,27 @@ fn xattrs_describe_virtual_memory_and_disk_backing() {
     let schema_path = root.join("tool/tsh.d/schema").display().to_string();
     assert_eq!(xattr_value(&schema, "user.cortexfs.backing_path"), Some(schema_path.as_str()));
 
+    assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/pre.d")).is_ok());
+    assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/post.d")).is_ok());
+    for path in [
+        "model/debug",
+        "model/debug/echo.d/hooks",
+        "model/debug/echo.d/hooks/pre.d",
+        "model/debug/echo.d/hooks/post.d",
+    ] {
+        let attrs = fs.xattrs_for_path(path);
+        assert!(attrs.is_ok());
+        let attrs = attrs.unwrap_or_default();
+        assert_eq!(xattr_value(&attrs, "user.cortexfs.origin"), Some("disk"));
+        assert_eq!(xattr_value(&attrs, "user.cortexfs.storage"), Some("disk"));
+        assert_eq!(xattr_value(&attrs, "user.cortexfs.virtual"), Some("false"));
+        let backing_path = root.join(path).display().to_string();
+        assert_eq!(
+            xattr_value(&attrs, "user.cortexfs.backing_path"),
+            Some(backing_path.as_str())
+        );
+    }
+
     let helper = fs.xattrs_for_path("model/helper");
     assert!(helper.is_ok());
     let helper = helper.unwrap_or_default();
