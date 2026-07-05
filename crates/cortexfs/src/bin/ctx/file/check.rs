@@ -272,22 +272,6 @@ fn parent_policy_subject(root: &Path, parent_agent: &str) -> Result<String, CliE
     }
 }
 
-fn policy_subject_from_label(label: &str) -> Option<&str> {
-    if is_object_name(label) {
-        return Some(label);
-    }
-    let mut fields = label.split(':');
-    let _user = fields.next()?;
-    let _role = fields.next()?;
-    let subject = fields.next()?;
-    let _level = fields.next()?;
-    if fields.next().is_none() && is_object_name(subject) {
-        Some(subject)
-    } else {
-        None
-    }
-}
-
 fn format_model_fallback_issues(issues: &[ModelFallbackIssue]) -> String {
     issues
         .iter()

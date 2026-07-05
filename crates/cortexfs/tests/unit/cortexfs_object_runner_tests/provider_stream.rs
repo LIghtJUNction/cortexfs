@@ -20,18 +20,62 @@ fn cli_tool_mode_outputs_plain_text() {
     let path = std::env::temp_dir().join(format!("cortexfs-runner-cli-{}", std::process::id()));
     assert!(fs::write(&path, "plain").is_ok());
     let mut output = Vec::new();
-    let result = run_cli_tool_to_writer("fs.read", &[OsString::from(&path)], &mut output);
-    assert!(result.is_ok());
+let result = run_core_tool_cli("fs.read", &[OsString::from(&path)], &mut output);
+assert!(matches!(result, Ok(Some(code)) if code == std::process::ExitCode::SUCCESS));
     assert_eq!(String::from_utf8(output).unwrap_or_default(), "plain");
     let _ignored = fs::remove_file(path);
 }
 
 #[test]
-fn openai_stream_event_extracts_chat_delta_text() {
+fn openai_stream_event_extracts_chat_tool_call_delta() {
     let event = openai_stream_event(
         r#"data: {"choices":[{"delta":{"content":"hel"}}]}"#,
     );
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
+
+    let event = openai_stream_event(
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\""}}]}}]}"#,
+    );
+    assert!(matches!(
+        event,
+        Ok(OpenAiStreamEvent::ToolCallDelta(delta))
+            if delta.id.as_deref() == Some("call-abc")
+                && delta.name.as_deref() == Some("tsh")
+                && delta.arguments == r#"{"args""#
+    ));
+
+    assert!(matches!(
+        openai_stream_event(r#"data: {"choices":[{"finish_reason":"tool_calls"}]}"#),
+        Ok(OpenAiStreamEvent::ToolCallsDone)
+    ));
+}
+
+#[test]
+fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut stream = OpenAiToolCallStream::default();
+    let first = openai_stream_event(
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\""}}]}}]}"#,
+    )?;
+    let second = openai_stream_event(
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"type":"function","function":{"arguments":":[\"tools\"]}"}}]}}]}"#,
+    )?;
+
+    if let OpenAiStreamEvent::ToolCallDelta(delta) = first {
+        stream.push(delta);
+    }
+    if let OpenAiStreamEvent::ToolCallDelta(delta) = second {
+        stream.push(delta);
+    }
+
+    assert_eq!(
+        stream.finish()?,
+        Some(
+            r#"{"arguments":{"args":["tools"]},"id":"call-abc","name":"tsh","type":"tool_call"}"#
+                .to_owned()
+        )
+    );
+    Ok(())
 }
 
 #[test]
@@ -203,6 +247,32 @@ fn openai_request_bodies_include_non_auto_effort() {
 }
 
 #[test]
+fn openai_agent_chat_body_declares_tsh_tool() {
+    let body = openai_chat_body_with_agent_tools(
+        "gpt-5.5",
+        "what tools?",
+        true,
+        cortexfs::ModelEffort::Auto,
+        true,
+    );
+    assert!(body.contains(r#""name":"tsh""#), "{body}");
+    assert!(body.contains(r#""tool_choice":"auto""#), "{body}");
+    assert!(body.contains(r#""stream_options":{"include_usage":true}"#), "{body}");
+    assert!(body.contains(r#""required":["args"]"#), "{body}");
+}
+
+#[test]
+fn openai_chat_tool_call_response_parses_as_canonical_tool_call() {
+    let content = parse_openai_chat_content(
+        br#"{"choices":[{"message":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]}}]}"#,
+    );
+    assert_eq!(
+        content,
+        Ok(r#"{"arguments":{"args":["tools"]},"id":"call-abc","name":"tsh","type":"tool_call"}"#.to_owned())
+    );
+}
+
+#[test]
 fn openai_response_content_parses_output_parts() {
     assert_eq!(
         parse_openai_response_content(
@@ -234,7 +304,7 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
     assert!(system.contains("Do not claim direct access"));
     assert!(system.contains("Do not say that you cannot execute `tsh`"));
     assert!(system.contains("tsh load TOOL"));
-    assert!(system.contains("nearest `AGENTS.md` files"));
+    assert!(system.contains("applicable `/workspace` rules and current workspace state"));
     assert!(default_agent_tool_context().contains("`/workspace`"));
     assert!(
         system.find("## Runtime Contract").unwrap_or(usize::MAX)

@@ -213,30 +213,21 @@ impl Filesystem for CortexFuse {
 
     fn mkdir(
         &self,
-        _req: &Request,
+        req: &Request,
         parent: INodeNo,
         name: &OsStr,
         _mode: u32,
         _umask: u32,
         reply: ReplyEntry,
     ) {
-        let Some(name) = name.to_str() else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        let parent_path = path_for_inode_or_reply!(self, parent, reply);
-        let Some(path) = child_path(&parent_path, name) else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        if let Err(error) = self.projection.create_session_layout_dir(&path) {
-            reply.error(if matches!(error, FuseV1Error::NotControlFile) {
-                readonly_mutation_errno()
-            } else {
-                errno(error)
-            });
-            return;
-        }
+        let path = create_session_layout_child_or_reply!(
+            self,
+            req,
+            parent,
+            name,
+            reply,
+            create_session_layout_dir
+        );
         match self.projected_node_for_path(&path) {
             Ok(node) => {
                 if let Err(error) = self.remember(&node) {
@@ -251,7 +242,7 @@ impl Filesystem for CortexFuse {
 
     fn create(
         &self,
-        _req: &Request,
+        req: &Request,
         parent: INodeNo,
         name: &OsStr,
         _mode: u32,
@@ -259,23 +250,14 @@ impl Filesystem for CortexFuse {
         _flags: i32,
         reply: ReplyCreate,
     ) {
-        let Some(name) = name.to_str() else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        let parent_path = path_for_inode_or_reply!(self, parent, reply);
-        let Some(path) = child_path(&parent_path, name) else {
-            reply.error(Errno::EINVAL);
-            return;
-        };
-        if let Err(error) = self.projection.create_session_layout_file(&path) {
-            reply.error(if matches!(error, FuseV1Error::NotControlFile) {
-                readonly_mutation_errno()
-            } else {
-                errno(error)
-            });
-            return;
-        }
+        let path = create_session_layout_child_or_reply!(
+            self,
+            req,
+            parent,
+            name,
+            reply,
+            create_session_layout_file
+        );
         match self.projected_node_for_path(&path) {
             Ok(node) => {
                 if let Err(error) = self.remember(&node) {
@@ -361,7 +343,7 @@ impl Filesystem for CortexFuse {
 
     fn write(
         &self,
-        _req: &Request,
+        req: &Request,
         ino: INodeNo,
         _fh: FileHandle,
         offset: u64,
@@ -383,7 +365,10 @@ impl Filesystem for CortexFuse {
             reply.error(error);
             return;
         }
-        match self.projection.write_control_file_at(&path, offset, data) {
+        match self
+            .projection
+            .write_fuse_file_at_for_owner(&path, offset, data, req.uid(), req.gid())
+        {
             Ok(()) => match u32::try_from(data.len()) {
                 Ok(count) => reply.written(count),
                 Err(_error) => reply.error(Errno::EFBIG),

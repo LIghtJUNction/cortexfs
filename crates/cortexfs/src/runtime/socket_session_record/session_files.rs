@@ -27,10 +27,8 @@ fn write_text_file_if_absent(path: &Path, content: &str) -> std::io::Result<()> 
             "text file must have a parent",
         )
     })?;
-    let name = path_file_name(path).ok_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "text file must have a name")
-    })?;
-    let parent_dir = open_plain_directory(parent)?;
+    let name = plain_fs::plain_file_name(path)?;
+    let parent_dir = plain_fs::open_plain_directory(parent)?;
     match nix::fcntl::openat(
         &parent_dir,
         name,
@@ -82,13 +80,8 @@ fn create_private_context_dir(path: &Path) -> std::io::Result<()> {
                     "context directory must have a parent",
                 )
             })?;
-            let name = path_file_name(path).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "context directory must have a file name",
-                )
-            })?;
-            let parent_dir = open_plain_directory(parent)?;
+            let name = plain_fs::plain_file_name(path)?;
+            let parent_dir = plain_fs::open_plain_directory(parent)?;
             nix::sys::stat::mkdirat(
                 &parent_dir,
                 name,
@@ -107,7 +100,7 @@ fn create_private_context_dir(path: &Path) -> std::io::Result<()> {
 }
 
 fn open_private_context_dir(path: &Path) -> std::io::Result<fs::File> {
-    let dir = open_plain_directory_for_sync(path)?;
+    let dir = plain_fs::open_plain_directory(path)?;
     if !dir.metadata()?.is_dir() {
         return Err(std::io::Error::other("path is not a directory"));
     }

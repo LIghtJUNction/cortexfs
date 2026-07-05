@@ -1,132 +1,61 @@
 fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-            sync_reference_dir(path)
-        } else {
-            Err(ReferenceTreeError::CannotCreate)
-        };
-    }
-
-    let mut missing = Vec::new();
-    let mut cursor = Some(path);
-    while let Some(current) = cursor {
-        match fs::symlink_metadata(current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
-                return Err(ReferenceTreeError::CannotCreate);
-            }
-            Ok(_metadata) => break,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                missing.push(current.to_path_buf());
-                cursor = current.parent();
-            }
-            Err(_error) => return Err(ReferenceTreeError::CannotCreate),
-        }
-    }
-    let mut parent_dir = if let Some(existing_parent) = missing.last().and_then(|path| path.parent())
-    {
-        open_reference_dir(existing_parent)?
-    } else {
-        return Ok(());
-    };
-
-    for directory in missing.iter().rev() {
-        let name = reference_file_name(directory)?;
-        nix::sys::stat::mkdirat(&parent_dir, name, nix::sys::stat::Mode::from_bits_truncate(0o755))
-            .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-        parent_dir
-            .sync_all()
-            .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-        let child = nix::fcntl::openat(
-            &parent_dir,
-            name,
-            nix::fcntl::OFlag::O_DIRECTORY
-                | nix::fcntl::OFlag::O_RDONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::empty(),
-        )
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-        parent_dir = fs::File::from(child);
-        parent_dir
-            .sync_all()
-            .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    }
-    Ok(())
-}
-
-fn reference_file_name(path: &Path) -> Result<&str, ReferenceTreeError> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ReferenceTreeError::CannotCreate)
-}
-
-fn sync_reference_dir(path: &Path) -> Result<(), ReferenceTreeError> {
-    let directory = open_reference_dir(path)?;
-    directory
-        .sync_all()
-        .map_err(|_error| ReferenceTreeError::CannotCreate)
+    plain_fs::create_plain_dir(path).map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 fn open_reference_dir(path: &Path) -> Result<fs::File, ReferenceTreeError> {
-    let mut directory = if path.is_absolute() {
-        open_reference_dir_leaf(Path::new("/"))?
-    } else {
-        open_reference_dir_leaf(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or(ReferenceTreeError::CannotCreate)?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(ReferenceTreeError::CannotCreate);
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_reference_dir_leaf(path: &Path) -> Result<fs::File, ReferenceTreeError> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    if !directory
-        .metadata()
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?
-        .is_dir()
-    {
-        return Err(ReferenceTreeError::CannotCreate);
-    }
-    Ok(directory)
+    plain_fs::open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 fn ensure_reference_home_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
     if !nix::unistd::Uid::effective().is_root() {
         return Ok(());
     }
-    chown_reference_home_entry(path)
+    chown_reference_home_tree(path)
 }
 
-fn chown_reference_home_entry(path: &Path) -> Result<(), ReferenceTreeError> {
+fn ensure_reference_agent_control_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
+    if !nix::unistd::Uid::effective().is_root() {
+        return Ok(());
+    }
+    let uid = read_reference_owner_id(&path.join("uid"))?;
+    let gid = read_reference_owner_id(&path.join("gid"))?;
+    chown_reference_tree(path, uid, gid)
+}
+
+fn read_reference_owner_id(path: &Path) -> Result<u32, ReferenceTreeError> {
+    let value = plain_fs::read_small_text_file(path, 64)
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    value
+        .trim()
+        .parse::<u32>()
+        .map_err(|_error| ReferenceTreeError::CannotCreate)
+}
+
+fn chown_reference_home_tree(path: &Path) -> Result<(), ReferenceTreeError> {
+    chown_reference_tree(path, REFERENCE_HOME_UID, REFERENCE_HOME_GID)
+}
+
+fn chown_reference_tree(path: &Path, uid: u32, gid: u32) -> Result<(), ReferenceTreeError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    chown_reference_entry(path, uid, gid)?;
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path).map_err(|_error| ReferenceTreeError::CannotCreate)? {
+            let entry = entry.map_err(|_error| ReferenceTreeError::CannotCreate)?;
+            chown_reference_tree(&entry.path(), uid, gid)?;
+        }
+    }
+    Ok(())
+}
+
+fn chown_reference_entry(path: &Path, uid: u32, gid: u32) -> Result<(), ReferenceTreeError> {
     nix::unistd::fchownat(
         nix::fcntl::AT_FDCWD,
         path,
-        Some(nix::unistd::Uid::from_raw(REFERENCE_HOME_UID)),
-        Some(nix::unistd::Gid::from_raw(REFERENCE_HOME_GID)),
+        Some(nix::unistd::Uid::from_raw(uid)),
+        Some(nix::unistd::Gid::from_raw(gid)),
         nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
     )
     .map_err(|_error| ReferenceTreeError::CannotCreate)

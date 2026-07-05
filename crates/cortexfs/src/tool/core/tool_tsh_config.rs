@@ -53,11 +53,12 @@ impl Tool for TshConfigTool {
     }
 }
 
+#[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TshRuntimeConfig {
-    max_loaded_tools: usize,
-    cache_capacity: usize,
-    window_percent: usize,
+pub struct TshRuntimeConfig {
+    pub max_loaded_tools: usize,
+    pub cache_capacity: usize,
+    pub window_percent: usize,
 }
 
 impl Default for TshRuntimeConfig {
@@ -100,10 +101,11 @@ fn read_tsh_runtime_config(path: &Path) -> ToolResult<TshRuntimeConfig> {
         }
         Err(error) => return Err(ToolError::denied(format!("cannot read config: {error}"))),
     };
-    parse_tsh_runtime_config(&content)
+    parse_tsh_runtime_config(&content).map_err(ToolError::invalid)
 }
 
-fn parse_tsh_runtime_config(content: &str) -> ToolResult<TshRuntimeConfig> {
+#[doc(hidden)]
+pub fn parse_tsh_runtime_config(content: &str) -> Result<TshRuntimeConfig, String> {
     let mut config = TshRuntimeConfig::default();
     for (index, line) in content.lines().enumerate() {
         let line = line.trim();
@@ -111,16 +113,16 @@ fn parse_tsh_runtime_config(content: &str) -> ToolResult<TshRuntimeConfig> {
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
-            return Err(ToolError::invalid(format!(
+            return Err(format!(
                 "line {} must be key=value",
                 index.saturating_add(1)
-            )));
+            ));
         };
         let value = value.parse::<usize>().map_err(|_error| {
-            ToolError::invalid(format!(
+            format!(
                 "line {} value must be a positive integer",
                 index.saturating_add(1)
-            ))
+            )
         })?;
         match key {
             "max_loaded_tools" | "cache_capacity" if (1..=MAX_TSH_TOOL_COUNT).contains(&value) => {
@@ -132,22 +134,22 @@ fn parse_tsh_runtime_config(content: &str) -> ToolResult<TshRuntimeConfig> {
             }
             "window_percent" if (1..=100).contains(&value) => config.window_percent = value,
             "max_loaded_tools" | "cache_capacity" => {
-                return Err(ToolError::invalid(format!(
+                return Err(format!(
                     "line {} value must be 1..{MAX_TSH_TOOL_COUNT}",
                     index.saturating_add(1),
-                )));
+                ));
             }
             "window_percent" => {
-                return Err(ToolError::invalid(format!(
+                return Err(format!(
                     "line {} window_percent must be 1..100",
                     index.saturating_add(1)
-                )));
+                ));
             }
             _ => {
-                return Err(ToolError::invalid(format!(
+                return Err(format!(
                     "line {} has unknown key {key}",
                     index.saturating_add(1)
-                )));
+                ));
             }
         }
     }
@@ -167,84 +169,8 @@ fn write_tsh_runtime_config(path: &Path, config: TshRuntimeConfig) -> ToolResult
 }
 
 fn create_tsh_config_dir(path: &Path) -> ToolResult<()> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-            sync_tsh_config_dir(path)
-        } else {
-            Err(ToolError::denied(
-                "config directory is not a plain directory",
-            ))
-        };
-    }
-
-    let mut missing = Vec::new();
-    let mut cursor = Some(path);
-    while let Some(current) = cursor {
-        match fs::symlink_metadata(current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
-                return Err(ToolError::denied(
-                    "config path contains a non-directory entry",
-                ));
-            }
-            Ok(_metadata) => break,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                missing.push(current.to_path_buf());
-                cursor = current.parent();
-            }
-            Err(error) => {
-                return Err(ToolError::denied(format!(
-                    "cannot inspect config directory: {error}"
-                )));
-            }
-        }
-    }
-
-    let mut parent_dir =
-        if let Some(existing_parent) = missing.last().and_then(|path| path.parent()) {
-            open_plain_directory(existing_parent)
-                .map_err(|error| ToolError::denied(format!("cannot open config parent: {error}")))?
-        } else {
-            return Ok(());
-        };
-
-    for directory in missing.iter().rev() {
-        let name = directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| ToolError::denied("invalid config directory name"))?;
-        nix::sys::stat::mkdirat(
-            &parent_dir,
-            name,
-            nix::sys::stat::Mode::from_bits_truncate(0o755),
-        )
-        .map_err(|error| ToolError::denied(format!("cannot create config directory: {error}")))?;
-        parent_dir
-            .sync_all()
-            .map_err(|error| ToolError::denied(format!("cannot sync config parent: {error}")))?;
-        let child = nix::fcntl::openat(
-            &parent_dir,
-            name,
-            nix::fcntl::OFlag::O_DIRECTORY
-                | nix::fcntl::OFlag::O_RDONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::empty(),
-        )
-        .map_err(|error| ToolError::denied(format!("cannot open config directory: {error}")))?;
-        parent_dir = fs::File::from(child);
-        parent_dir
-            .sync_all()
-            .map_err(|error| ToolError::denied(format!("cannot sync config directory: {error}")))?;
-    }
-    Ok(())
-}
-
-fn sync_tsh_config_dir(path: &Path) -> ToolResult<()> {
-    let directory = open_plain_directory(path)
-        .map_err(|error| ToolError::denied(format!("cannot open config directory: {error}")))?;
-    directory
-        .sync_all()
-        .map_err(|error| ToolError::denied(format!("cannot sync config directory: {error}")))
+    crate::plain_fs::create_plain_dir(path)
+        .map_err(|error| ToolError::denied(format!("cannot create config directory: {error}")))
 }
 
 fn format_tsh_runtime_config(config: TshRuntimeConfig) -> String {

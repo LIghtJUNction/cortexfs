@@ -1,10 +1,15 @@
+use crate::plain_fs::{
+    create_plain_dir as create_provider_model_cache_dir,
+    read_small_text_file as read_provider_model_cache_file,
+};
+
 const MAX_PROVIDER_MODEL_RESPONSE_BYTES: u64 = 1024 * 1024;
 const MAX_PROVIDER_MODEL_CACHE_BYTES: u64 = 1024 * 1024;
 const MAX_PROVIDER_MODEL_COUNT: usize = 256;
 const CURL_BIN: &str = "/usr/bin/curl";
 
 pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Result<(), FuseV1Error> {
-    create_provider_model_cache_dir(cache_dir)?;
+    create_provider_model_cache_dir(cache_dir).map_err(|_error| FuseV1Error::Io)?;
     for config in read_provider_configs(config_dir)? {
         if !config.config.enabled {
             continue;
@@ -31,121 +36,9 @@ pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Resu
     Ok(())
 }
 
-fn create_provider_model_cache_dir(path: &Path) -> Result<(), FuseV1Error> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-            sync_provider_model_cache_dir(path)
-        } else {
-            Err(FuseV1Error::Io)
-        };
-    }
-
-    let mut missing = Vec::new();
-    let mut cursor = Some(path);
-    while let Some(current) = cursor {
-        match fs::symlink_metadata(current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
-                return Err(FuseV1Error::Io);
-            }
-            Ok(_metadata) => break,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                missing.push(current.to_path_buf());
-                cursor = current.parent();
-            }
-            Err(_error) => return Err(FuseV1Error::Io),
-        }
-    }
-    let existing_parent = missing
-        .last()
-        .and_then(|path| path.parent())
-        .ok_or(FuseV1Error::Io)?;
-    let mut parent_dir = open_provider_model_cache_dir(existing_parent)?;
-    for directory in missing.iter().rev() {
-        let name = provider_model_cache_file_name(directory)?;
-        nix::sys::stat::mkdirat(
-            &parent_dir,
-            name,
-            nix::sys::stat::Mode::from_bits_truncate(0o755),
-        )
-        .map_err(|_error| FuseV1Error::Io)?;
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)?;
-        let child = nix::fcntl::openat(
-            &parent_dir,
-            name,
-            nix::fcntl::OFlag::O_DIRECTORY
-                | nix::fcntl::OFlag::O_RDONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::empty(),
-        )
-        .map_err(|_error| FuseV1Error::Io)?;
-        parent_dir = fs::File::from(child);
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)?;
-    }
-    Ok(())
-}
-
-fn sync_provider_model_cache_dir(path: &Path) -> Result<(), FuseV1Error> {
-    let directory = open_provider_model_cache_dir(path)?;
-    directory.sync_all().map_err(|_error| FuseV1Error::Io)
-}
-
-fn open_provider_model_cache_dir(path: &Path) -> Result<fs::File, FuseV1Error> {
-    let mut directory = if path.is_absolute() {
-        open_provider_model_cache_dir_leaf(Path::new("/"))?
-    } else {
-        open_provider_model_cache_dir_leaf(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or(FuseV1Error::Io)?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(|_error| FuseV1Error::Io)?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(FuseV1Error::Io);
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_provider_model_cache_dir_leaf(path: &Path) -> Result<fs::File, FuseV1Error> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|_error| FuseV1Error::Io)?;
-    if !directory
-        .metadata()
-        .map_err(|_error| FuseV1Error::Io)?
-        .is_dir()
-    {
-        return Err(FuseV1Error::Io);
-    }
-    Ok(directory)
-}
-
-fn provider_model_cache_file_name(path: &Path) -> Result<&str, FuseV1Error> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(FuseV1Error::Io)
-}
-
 fn provider_cached_models(cache_dir: &Path, provider: &str) -> Vec<String> {
     let path = provider_model_cache_path(cache_dir, provider);
-    let Ok(content) = read_fuse_v1_small_text_file(&path, MAX_PROVIDER_MODEL_CACHE_BYTES) else {
+    let Ok(content) = read_provider_model_cache_file(&path, MAX_PROVIDER_MODEL_CACHE_BYTES) else {
         return Vec::new();
     };
     let Ok(cache) = serde_json::from_str::<ProviderModelCache>(&content) else {

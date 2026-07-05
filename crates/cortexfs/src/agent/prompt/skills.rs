@@ -101,10 +101,10 @@ fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
     if depth > 8 || paths.len() >= MAX_SKILL_FILES {
         return;
     }
-    let Ok(root_dir) = open_directory_no_symlink_components(root) else {
+    let Ok(root_dir) = plain_fs::open_plain_directory(root) else {
         return;
     };
-    let Ok(entries) = fs::read_dir(proc_fd_path(&root_dir)) else {
+    let Ok(entries) = fs::read_dir(plain_fs::proc_fd_path(&root_dir)) else {
         return;
     };
     for entry in entries.flatten() {

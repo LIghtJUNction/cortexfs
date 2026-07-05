@@ -1,3 +1,8 @@
+use crate::plain_fs::{
+    open_plain_directory as open_plain_directory_no_follow,
+    plain_file_name as provider_secret_plain_file_name,
+};
+
 fn read_provider_secret_file(path: &Path) -> std::io::Result<String> {
     let mut file = open_provider_secret_file(path)?;
     let len = file.metadata()?.len();
@@ -93,7 +98,8 @@ fn create_private_provider_secret_dir(path: &Path) -> Result<(), ProviderSystemS
     let mut parent_dir = open_plain_directory_no_follow(parent)
         .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
     for directory in missing.iter().rev() {
-        let name = plain_file_name(directory).ok_or(ProviderSystemSecretError::CannotWrite)?;
+        let name =
+            provider_secret_plain_file_name(directory).map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
         nix::sys::stat::mkdirat(
             &parent_dir,
             name,
@@ -120,66 +126,6 @@ fn create_private_provider_secret_dir(path: &Path) -> Result<(), ProviderSystemS
             .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
     }
     Ok(())
-}
-
-fn sync_provider_secret_dir(path: &Path) -> Result<(), ProviderSystemSecretError> {
-    let dir = open_plain_directory_no_follow(path)
-        .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
-    dir.sync_all()
-        .map_err(|_error| ProviderSystemSecretError::CannotWrite)
-}
-
-fn open_plain_directory_no_follow(path: &Path) -> std::io::Result<File> {
-    let mut directory = if path.is_absolute() {
-        open_plain_directory_no_follow_leaf(Path::new("/"))?
-    } else {
-        open_plain_directory_no_follow_leaf(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )?;
-                directory = File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "directory path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_plain_directory_no_follow_leaf(path: &Path) -> std::io::Result<File> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "path is not a plain directory",
-        ));
-    }
-    Ok(directory)
-}
-
-fn plain_file_name(path: &Path) -> Option<&str> {
-    path.file_name()?.to_str()
 }
 
 fn clear_fd_cloexec(file: &File) -> Result<(), ProviderSystemSecretError> {

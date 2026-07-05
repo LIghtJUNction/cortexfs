@@ -36,12 +36,6 @@ fn resolve_model_alias(ctx_root: &Path, name: &str) -> Result<String, String> {
     Ok(model.to_owned())
 }
 
-fn read_model_alias_target(ctx_root: &Path, name: &str) -> io::Result<String> {
-    let model_dir = open_plain_directory(&ctx_root.join("model"))?;
-    let target = nix::fcntl::readlinkat(&model_dir, name)?;
-    Ok(target.to_string_lossy().into_owned())
-}
-
 fn is_model_alias(name: &str) -> bool {
     matches!(name, "main" | "helper")
 }
@@ -145,7 +139,7 @@ fn model_fallback_chain(ctx_root: &Path, model: &str) -> Vec<String> {
         .join(provider)
         .join(format!("{name}.d"))
         .join("fallback");
-    let Ok(content) = read_small_plain_text_file(&path) else {
+    let Ok(content) = read_small_plain_text_file(&path, MAX_RUNNER_CONTROL_BYTES, "runner") else {
         return Vec::new();
     };
     let (fallback, report) = parse_model_fallback(&content);

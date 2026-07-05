@@ -156,7 +156,7 @@ fn durable_session_sync_plain_directory_refuses_symlink_without_touching_target(
     let link = root.join("context");
     assert!(symlink(&outside, &link).is_ok());
 
-    let result = sync_plain_directory(&link);
+    let result = plain_fs::sync_plain_dir(&link);
 
     assert!(result.is_err());
     assert_eq!(

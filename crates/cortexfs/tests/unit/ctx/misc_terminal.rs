@@ -136,9 +136,10 @@ fn provider_secret_stdin_reader_rejects_input_over_limit() {
 fn agent_repl_stdin_reader_accepts_input_at_limit() {
     let input = "x".repeat(MAX_AGENT_REPL_STDIN_BYTES);
 
-    let read = read_agent_repl_stdin_limited(
+    let read = read_limited_input_text(
         std::io::Cursor::new(input.as_bytes()),
         MAX_AGENT_REPL_STDIN_BYTES,
+        "agent stdin exceeds input limit",
     );
 
     assert_eq!(read.unwrap_or_default().len(), MAX_AGENT_REPL_STDIN_BYTES);
@@ -148,9 +149,10 @@ fn agent_repl_stdin_reader_accepts_input_at_limit() {
 fn agent_repl_stdin_reader_rejects_input_over_limit() {
     let input = "x".repeat(MAX_AGENT_REPL_STDIN_BYTES + 1);
 
-    let read = read_agent_repl_stdin_limited(
+    let read = read_limited_input_text(
         std::io::Cursor::new(input.as_bytes()),
         MAX_AGENT_REPL_STDIN_BYTES,
+        "agent stdin exceeds input limit",
     );
 
     assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));
@@ -329,4 +331,3 @@ fn ctx_agent_read_helpers_refuse_symlink_files() {
 
     assert!(read_optional_trimmed(&root.join("model")).is_err());
 }
-

@@ -4,12 +4,20 @@ fn authorize_agent_model_use(
     primary_model: &str,
     selected_model: &str,
 ) -> Result<(), String> {
-    let label = read_small_plain_text_file(&agent_dir.join("label"))
-        .map_err(|error| format!("cannot read agent label: {error}"))?;
-    let subject = policy_subject_from_agent_label(label.trim())
+    let label = read_small_plain_text_file(
+        &agent_dir.join("label"),
+        MAX_RUNNER_CONTROL_BYTES,
+        "runner",
+    )
+    .map_err(|error| format!("cannot read agent label: {error}"))?;
+    let subject = policy_subject_from_label(label.trim())
         .ok_or_else(|| "invalid agent label".to_owned())?;
-    let policy_text = read_small_plain_text_file(&agent_dir.join("policy"))
-        .map_err(|error| format!("cannot read agent policy: {error}"))?;
+    let policy_text = read_small_plain_text_file(
+        &agent_dir.join("policy"),
+        MAX_RUNNER_CONTROL_BYTES,
+        "runner",
+    )
+    .map_err(|error| format!("cannot read agent policy: {error}"))?;
     let policy =
         PolicyV0::parse(&policy_text).map_err(|_error| "invalid agent policy".to_owned())?;
     if policy.allows(
@@ -34,22 +42,6 @@ fn authorize_agent_model_use(
         ));
     }
     Err(format!("agent policy denies model:{selected_model} use"))
-}
-
-fn policy_subject_from_agent_label(label: &str) -> Option<&str> {
-    if is_object_name(label) {
-        return Some(label);
-    }
-    let mut fields = label.split(':');
-    let _user = fields.next()?;
-    let _role = fields.next()?;
-    let subject = fields.next()?;
-    let _level = fields.next()?;
-    if fields.next().is_none() && is_object_name(subject) {
-        Some(subject)
-    } else {
-        None
-    }
 }
 
 fn agent_debug_timing_start_unix_ms() -> Option<u128> {

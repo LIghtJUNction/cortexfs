@@ -11,7 +11,7 @@ fn model_effort(ctx_root: &Path, provider: &str, model: &str) -> cortexfs::Model
         .join(provider)
         .join(format!("{model}.d"))
         .join("effort");
-    read_small_plain_text_file(&path)
+    read_small_plain_text_file(&path, MAX_RUNNER_CONTROL_BYTES, "runner")
         .ok()
         .and_then(|content| cortexfs::ModelEffort::parse(&content))
         .unwrap_or(cortexfs::ModelEffort::Auto)

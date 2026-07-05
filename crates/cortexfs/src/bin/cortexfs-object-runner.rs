@@ -5,7 +5,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
@@ -46,6 +45,11 @@ const AGENT_MODEL_TIMEOUT_SECONDS: u64 = 120;
 const MAX_AGENT_MODEL_TIMEOUT_SECONDS: u64 = 600;
 const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
 
+mod process_helpers {
+    include!("../process_helpers.rs");
+}
+use process_helpers::read_limited_bytes;
+
 include!("../object/runner_provider.rs");
 include!("object_runner/model.rs");
 include!("object_runner/agent.rs");
@@ -54,11 +58,21 @@ include!("object_runner/agent_model.rs");
 include!("object_runner/agent_io.rs");
 include!("object_runner/agent_frames.rs");
 include!("object_runner/tool_call.rs");
+include!("shared/shell_words.rs");
+include!("shared/limited_input.rs");
+include!("../policy_subject.rs");
 include!("object_runner/tool_args.rs");
 include!("object_runner/tool_exec.rs");
 include!("object_runner/timeout.rs");
 include!("object_runner/tool.rs");
 include!("object_runner/output.rs");
+include!("shared/plain_dir.rs");
+include!("shared/model_alias.rs");
+include!("shared/proc_fd.rs");
+include!("shared/no_follow_fs.rs");
+include!("shared/small_text.rs");
+include!("shared/stderr.rs");
+include!("shared/json.rs");
 include!("object_runner/fs.rs");
 include!("object_runner/exec_path.rs");
 

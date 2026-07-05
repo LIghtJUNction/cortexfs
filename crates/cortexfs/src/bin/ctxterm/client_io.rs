@@ -27,23 +27,6 @@ fn copy_reader_to_pty(mut reader: impl Read, pty_writer: &PtyWriter) -> io::Resu
     Ok(())
 }
 
-fn copy_reader_to_stdout(mut reader: impl Read) -> io::Result<()> {
-    let mut stdout = io::stdout().lock();
-    let mut buffer = [0; 8192];
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        let Some(chunk) = buffer.get(..read) else {
-            return Err(io::Error::other("output read exceeded buffer"));
-        };
-        stdout.write_all(chunk)?;
-        stdout.flush()?;
-    }
-    Ok(())
-}
-
 fn broadcast(clients: &Clients, chunk: &[u8]) {
     let Ok(mut clients) = clients.lock() else {
         return;
@@ -76,13 +59,7 @@ fn run_client(socket: &Path, write: bool) -> Result<ExitCode, CtxtermError> {
     if write {
         let _raw_mode =
             RawTerminalMode::maybe_new().map_err(|error| write_error_to_ctxterm(&error))?;
-        let input = thread::spawn(move || {
-            let mut stdin = io::stdin().lock();
-            let result = io::copy(&mut stdin, &mut stream);
-            drop(stdin);
-            let _ignored = stream.shutdown(Shutdown::Write);
-            result
-        });
+        let input = thread::spawn(move || copy_stdin_to_stream_and_shutdown(stream));
         match input.join() {
             Ok(Ok(_bytes)) => {}
             Ok(Err(error)) if is_terminal_disconnect(&error) => {}
@@ -99,42 +76,6 @@ fn run_client(socket: &Path, write: bool) -> Result<ExitCode, CtxtermError> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn is_terminal_disconnect(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
-    )
-}
-
-#[derive(Debug)]
-struct RawTerminalMode {
-    original: Termios,
-}
-
-impl RawTerminalMode {
-    fn maybe_new() -> io::Result<Option<Self>> {
-        let stdin = io::stdin();
-        if !stdin.is_terminal() {
-            return Ok(None);
-        }
-        let original = tcgetattr(stdin.as_fd()).map_err(nix_error_to_io)?;
-        let mut raw = original.clone();
-        cfmakeraw(&mut raw);
-        tcsetattr(stdin.as_fd(), SetArg::TCSANOW, &raw).map_err(nix_error_to_io)?;
-        Ok(Some(Self { original }))
-    }
-}
-
-impl Drop for RawTerminalMode {
-    fn drop(&mut self) {
-        let stdin = io::stdin();
-        let _ignored = tcsetattr(stdin.as_fd(), SetArg::TCSANOW, &self.original);
-    }
-}
-
-fn nix_error_to_io(error: nix::errno::Errno) -> io::Error {
-    io::Error::from(error)
-}
 
 fn pty_size() -> PtySize {
     PtySize {
@@ -163,11 +104,6 @@ fn write_stdout(message: &str) -> Result<(), CtxtermError> {
         .write_all(message.as_bytes())
         .and_then(|()| stdout.flush())
         .map_err(|error| write_error_to_ctxterm(&error))
-}
-
-fn write_error(message: &str) -> io::Result<()> {
-    let mut stderr = io::stderr().lock();
-    writeln!(stderr, "{message}")
 }
 
 fn write_error_to_ctxterm(error: &io::Error) -> CtxtermError {

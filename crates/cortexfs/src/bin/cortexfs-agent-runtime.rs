@@ -21,6 +21,9 @@ use nix::unistd::{Gid, Uid};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 
+include!("shared/proc_fd.rs");
+include!("shared/stderr.rs");
+
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -78,7 +81,7 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
             ),
         ]);
     }
-    let agent_executable = runtime_agent_executable(&config.source, &config.agent);
+    let agent_executable = config.source.join("agent").join(&config.agent);
     let result = serve_agent_executable_socket_listener_once(
         &listener,
         Some(peer_policy),
@@ -108,10 +111,6 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
 
 fn runtime_model(_source: &Path, requested_model: &str) -> String {
     requested_model.to_owned()
-}
-
-fn runtime_agent_executable(ctx_root: &Path, agent: &str) -> PathBuf {
-    ctx_root.join("agent").join(agent)
 }
 
 fn repair_agent_session_permissions(session_root: &Path, uid: u32, gid: u32) -> Result<(), String> {
@@ -218,10 +217,6 @@ fn repair_child_path_permissions(
     repair_open_path_permissions(&fd, &format!("{parent_label}/{name}"), is_dir, uid, gid)
 }
 
-fn proc_fd_path(fd: &OwnedFd) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", fd.as_raw_fd()))
-}
-
 fn open_session_repair_path_no_follow(path: &Path, is_dir: bool) -> Result<OwnedFd, String> {
     let mut current = if path.is_absolute() {
         open_dir_no_follow(Path::new("/"))?
@@ -263,13 +258,6 @@ fn open_dir_no_follow(path: &Path) -> Result<OwnedFd, String> {
         Mode::empty(),
     )
     .map_err(|error| format!("cannot open runtime credential dir: {error}"))
-}
-
-fn write_error(line: &str) -> io::Result<()> {
-    let mut stderr = io::stderr().lock();
-    stderr
-        .write_all(line.as_bytes())
-        .and_then(|()| stderr.write_all(b"\n"))
 }
 
 #[derive(Debug, Eq, PartialEq)]

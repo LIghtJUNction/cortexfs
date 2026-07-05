@@ -7,7 +7,6 @@ use std::env;
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::fs;
-use std::fs::OpenOptions;
 use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::Shutdown;
@@ -21,6 +20,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use nix::libc;
 
 use cortexfs::{
     AbiPathKind, AgentControlIssue, AgentPromptContext, AgentRuntimeView, AgentScheduleIssue,
@@ -49,6 +50,13 @@ use cortexfs::{
 use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 use serde::Deserialize;
 
+include!("shared/stderr.rs");
+include!("shared/json.rs");
+include!("shared/current_uid.rs");
+include!("shared/terminal_io.rs");
+include!("shared/limited_input.rs");
+include!("../policy_subject.rs");
+
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(code) => code,
@@ -68,6 +76,12 @@ include!("ctx/parse.rs");
 include!("ctx/agent.rs");
 
 include!("ctx/output_mount.rs");
+
+include!("shared/plain_dir.rs");
+include!("shared/create_plain_dir.rs");
+include!("shared/stale_socket.rs");
+include!("shared/model_alias.rs");
+include!("shared/proc_fd.rs");
 
 include!("ctx/objects_socket.rs");
 

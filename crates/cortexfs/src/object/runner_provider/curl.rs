@@ -105,8 +105,12 @@ fn wait_for_curl_json_output(mut child: Child) -> Result<std::process::Output, S
         return Err("cannot read curl diagnostics".to_owned());
     };
     let stdout_reader =
-        thread::spawn(move || read_limited_bytes(stdout, MAX_PROVIDER_RESPONSE_BYTES + 1));
-    let stderr_reader = thread::spawn(move || read_limited_bytes(stderr, MAX_CHILD_STDERR_BYTES + 1));
+        thread::spawn(move || {
+        read_limited_bytes(stdout, MAX_PROVIDER_RESPONSE_BYTES + 1)
+    });
+    let stderr_reader = thread::spawn(move || {
+        read_limited_bytes(stderr, MAX_CHILD_STDERR_BYTES + 1)
+    });
     let (status, mut stdout, stderr) =
         wait_for_limited_curl_output(child, stdout_reader, stderr_reader)?;
     Ok(std::process::Output {

@@ -1,48 +1,50 @@
+macro_rules! runtime_secret_env_matches {
+    ($provider:expr, $account:expr, $get_env:expr) => {
+        $get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() == Ok($provider)
+            && $get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() == Ok($account)
+    };
+}
+
 fn provider_credential(
     provider: &str,
     config: &RunnerProviderConfig,
     key_slot: Option<&str>,
     driver: ProviderRuntimeDriver,
 ) -> Result<Option<ProviderCredential>, String> {
-    let account = key_slot.unwrap_or("default");
-    if let Some(api_key) = provider_secret_from_runtime_value(provider, account) {
-        return Ok(Some(match driver {
-            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
-            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
-                ProviderCredential::Bearer(api_key)
+    macro_rules! credential_from_secret {
+        ($api_key:expr) => {
+            match driver {
+                ProviderRuntimeDriver::AnthropicMessages => {
+                    ProviderCredential::AnthropicApiKey($api_key)
+                }
+                ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
+                    ProviderCredential::Bearer($api_key)
+                }
             }
-        }));
+        };
     }
-    if let Some(api_key) = provider_secret_from_runtime_file(provider, account)
+
+    let account = key_slot.unwrap_or("default");
+    if let Some(api_key) =
+        provider_secret_from_runtime_value_with_env(provider, account, |name| env::var(name))
+    {
+        return Ok(Some(credential_from_secret!(api_key)));
+    }
+    if let Some(api_key) =
+        provider_secret_from_runtime_file_with_env(provider, account, |name| env::var(name))
         .map_err(|_error| format!("runtime provider secret unavailable: {provider}"))?
     {
-        return Ok(Some(match driver {
-            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
-            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
-                ProviderCredential::Bearer(api_key)
-            }
-        }));
+        return Ok(Some(credential_from_secret!(api_key)));
     }
-    if let Some(api_key) = provider_secret_from_inherited_fd(provider, account)
+    if let Some(api_key) =
+        provider_secret_from_inherited_fd_with_env(provider, account, |name| env::var(name))
         .map_err(|_error| format!("inherited provider secret unavailable: {provider}"))?
     {
-        return Ok(Some(match driver {
-            ProviderRuntimeDriver::AnthropicMessages => ProviderCredential::AnthropicApiKey(api_key),
-            ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
-                ProviderCredential::Bearer(api_key)
-            }
-        }));
+        return Ok(Some(credential_from_secret!(api_key)));
     }
     match cortexfs::read_provider_system_secret(provider, account) {
         Ok(Some(api_key)) => {
-            return Ok(Some(match driver {
-                ProviderRuntimeDriver::AnthropicMessages => {
-                    ProviderCredential::AnthropicApiKey(api_key)
-                }
-                ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
-                    ProviderCredential::Bearer(api_key)
-                }
-            }));
+            return Ok(Some(credential_from_secret!(api_key)));
         }
         Ok(None) | Err(cortexfs::ProviderSystemSecretError::CannotRead) => {}
         Err(_error) => return Err(format!("system provider secret unavailable: {provider}")),
@@ -58,18 +60,12 @@ fn provider_credential(
     Ok(None)
 }
 
-fn provider_secret_from_runtime_value(provider: &str, account: &str) -> Option<String> {
-    provider_secret_from_runtime_value_with_env(provider, account, |name| env::var(name))
-}
-
 fn provider_secret_from_runtime_value_with_env(
     provider: &str,
     account: &str,
     get_env: impl Fn(&str) -> Result<String, env::VarError>,
 ) -> Option<String> {
-    if get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
-        || get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
-    {
+    if !runtime_secret_env_matches!(provider, account, get_env) {
         return None;
     }
     let secret = get_env("CTX_PROVIDER_SECRET_VALUE").ok()?;
@@ -81,21 +77,12 @@ fn provider_secret_from_runtime_value_with_env(
     }
 }
 
-fn provider_secret_from_runtime_file(
-    provider: &str,
-    account: &str,
-) -> Result<Option<String>, io::Error> {
-    provider_secret_from_runtime_file_with_env(provider, account, |name| env::var(name))
-}
-
 fn provider_secret_from_runtime_file_with_env(
     provider: &str,
     account: &str,
     get_env: impl Fn(&str) -> Result<String, env::VarError>,
 ) -> Result<Option<String>, io::Error> {
-    if get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
-        || get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
-    {
+    if !runtime_secret_env_matches!(provider, account, get_env) {
         return Ok(None);
     }
     let Ok(path) = get_env("CTX_PROVIDER_SECRET_PATH") else {
@@ -118,7 +105,7 @@ fn provider_secret_from_runtime_file_with_env(
 }
 
 fn read_runtime_provider_secret_file(path: &Path) -> Result<String, io::Error> {
-    let mut file = open_plain_read_file(path)?;
+    let mut file = open_regular_file_no_follow(path, nix::fcntl::OFlag::O_CLOEXEC)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > MAX_RUNTIME_PROVIDER_SECRET_BYTES {
         return Err(io::Error::new(
@@ -131,21 +118,12 @@ fn read_runtime_provider_secret_file(path: &Path) -> Result<String, io::Error> {
     read_utf8_exact_len(&mut file, len)
 }
 
-fn provider_secret_from_inherited_fd(
-    provider: &str,
-    account: &str,
-) -> Result<Option<String>, io::Error> {
-    provider_secret_from_inherited_fd_with_env(provider, account, |name| env::var(name))
-}
-
 fn provider_secret_from_inherited_fd_with_env(
     provider: &str,
     account: &str,
     get_env: impl Fn(&str) -> Result<String, env::VarError>,
 ) -> Result<Option<String>, io::Error> {
-    if get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() != Ok(provider)
-        || get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() != Ok(account)
-    {
+    if !runtime_secret_env_matches!(provider, account, get_env) {
         return Ok(None);
     }
     let Ok(fd) = get_env("CTX_PROVIDER_SECRET_FD") else {

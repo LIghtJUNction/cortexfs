@@ -261,29 +261,24 @@ fn format_session_control_issues(issues: &[SessionControlIssue]) -> String {
     })
 }
 
-fn format_object_layout_issues(issues: &[ObjectLayoutIssue]) -> String {
-    format_issue_list(issues, |output, issue| {
-        output.push_str(issue.kind());
-        output.push(' ');
-        output.push_str(&terminal_safe_text(issue.path()));
-        if let Some(value) = issue.value() {
-            output.push('=');
-            output.push_str(&terminal_safe_text(value));
+macro_rules! format_layout_issue_fn {
+    ($name:ident, $issue:ty) => {
+        fn $name(issues: &[$issue]) -> String {
+            format_issue_list(issues, |output, issue| {
+                output.push_str(issue.kind());
+                output.push(' ');
+                output.push_str(&terminal_safe_text(issue.path()));
+                if let Some(value) = issue.value() {
+                    output.push('=');
+                    output.push_str(&terminal_safe_text(value));
+                }
+            })
         }
-    })
+    };
 }
 
-fn format_session_layout_issues(issues: &[SessionLayoutIssue]) -> String {
-    format_issue_list(issues, |output, issue| {
-        output.push_str(issue.kind());
-        output.push(' ');
-        output.push_str(&terminal_safe_text(issue.path()));
-        if let Some(value) = issue.value() {
-            output.push('=');
-            output.push_str(&terminal_safe_text(value));
-        }
-    })
-}
+format_layout_issue_fn!(format_object_layout_issues, ObjectLayoutIssue);
+format_layout_issue_fn!(format_session_layout_issues, SessionLayoutIssue);
 
 fn format_shared_queue_layout_issues(issues: &[SharedQueueLayoutIssue]) -> String {
     format_issue_list(issues, |output, issue| {

@@ -73,7 +73,11 @@ fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| CliError::usage("set requires a valid file name"))?;
-    let content = newline_terminated(value);
+    let content = if value.ends_with('\n') {
+        value.to_owned()
+    } else {
+        format!("{value}\n")
+    };
 
     for attempt in 0..16 {
         let temp_name = temp_file_name(attempt);
@@ -135,7 +139,11 @@ fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| CliError::usage("append requires a valid file name"))?;
-    let content = newline_terminated(value);
+    let content = if value.ends_with('\n') {
+        value.to_owned()
+    } else {
+        format!("{value}\n")
+    };
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
@@ -166,61 +174,9 @@ fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
 }
 
 fn open_plain_file_parent_dir(path: &Path) -> Result<fs::File, CliError> {
-    let mut directory = if path.is_absolute() {
-        open_single_plain_file_parent_dir(Path::new("/"))?
-    } else {
-        open_single_plain_file_parent_dir(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    CliError::unavailable(format!(
-                        "cannot open parent {}: invalid directory name",
-                        path.display()
-                    ))
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(|error| {
-                    CliError::unavailable(format!("cannot open parent {}: {error}", path.display()))
-                })?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(CliError::unavailable(format!(
-                    "cannot open parent {}: unsupported path component",
-                    path.display()
-                )));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_single_plain_file_parent_dir(path: &Path) -> Result<fs::File, CliError> {
-    let directory = OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_DIRECTORY | nix::libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot open parent {}: {error}", path.display()))
-        })?;
-    if !directory.metadata().is_ok_and(|metadata| metadata.is_dir()) {
-        return Err(CliError::unavailable(format!(
-            "cannot open parent {}: not a directory",
-            path.display()
-        )));
-    }
-    Ok(directory)
+    open_plain_directory(path).map_err(|error| {
+        CliError::unavailable(format!("cannot open parent {}: {error}", path.display()))
+    })
 }
 
 fn file_type(root: &Path, path: &str) -> Result<(), CliError> {
@@ -282,7 +238,7 @@ fn fs_type_name(metadata: &fs::Metadata) -> &'static str {
         "directory"
     } else if file_type.is_symlink() {
         "symlink"
-    } else if metadata.mode() & nix::libc::S_IFMT == nix::libc::S_IFREG {
+    } else if metadata.mode() & libc::S_IFMT == libc::S_IFREG {
         "regular"
     } else if file_type.is_socket() {
         "socket"

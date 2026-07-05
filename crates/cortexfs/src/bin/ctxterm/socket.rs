@@ -4,7 +4,14 @@ fn start_listener(
     clients: Clients,
 ) -> Result<(), CtxtermError> {
     if let Some(parent) = socket.parent() {
-        create_ctxterm_plain_dir(parent).map_err(|error| {
+        create_plain_directory(
+            parent,
+            0o700,
+            "ctxterm parent path is not a plain directory",
+            "ctxterm path contains a non-directory entry",
+            "invalid ctxterm directory name",
+        )
+        .map_err(|error| {
             CtxtermError::unavailable(format!("cannot create {}: {error}", parent.display()))
         })?;
     }
@@ -25,33 +32,9 @@ fn start_listener(
     Ok(())
 }
 
-fn remove_stale_socket(socket: &Path) -> io::Result<()> {
-    let parent = socket.parent().unwrap_or_else(|| Path::new("."));
-    let parent = open_ctxterm_plain_dir(parent)?;
-    let file_name = socket
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid socket name"))?;
-    match nix::sys::stat::fstatat(&parent, file_name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
-        Ok(stat)
-            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
-        {
-            nix::unistd::unlinkat(&parent, file_name, nix::unistd::UnlinkatFlags::NoRemoveDir)
-                .map_err(io::Error::from)
-        }
-        Ok(_metadata) => Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "refusing to replace non-socket path",
-        )),
-        Err(nix::errno::Errno::ENOENT) => Ok(()),
-        Err(error) => Err(io::Error::from(error)),
-    }
-}
-
 fn set_ctxterm_socket_permissions(socket: &Path) -> io::Result<()> {
     let parent = socket.parent().unwrap_or_else(|| Path::new("."));
-    let parent = open_ctxterm_plain_dir(parent)?;
+    let parent = open_plain_directory(parent)?;
     let file_name = socket
         .file_name()
         .and_then(|name| name.to_str())

@@ -129,7 +129,8 @@ fn collect_reference_session_meta_paths(
 }
 
 fn reference_tree_read_dir(directory: &fs::File) -> Result<fs::ReadDir, ReferenceTreeError> {
-    fs::read_dir(reference_tree_proc_fd_path(directory)).map_err(|_error| ReferenceTreeError::CannotCreate)
+    fs::read_dir(plain_fs::proc_fd_path(directory))
+        .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 fn reference_tree_entry_name(entry: &fs::DirEntry) -> Result<String, ReferenceTreeError> {
@@ -204,7 +205,7 @@ fn remove_reference_entry(path: &Path) -> Result<(), ReferenceTreeError> {
 }
 
 fn migrate_reference_session_meta_model(meta_path: &Path) -> Result<(), ReferenceTreeError> {
-    let content = read_reference_session_meta(meta_path)
+    let content = plain_fs::read_small_text_file(meta_path, MAX_REFERENCE_SESSION_META_BYTES)
         .map_err(|_error| ReferenceTreeError::CannotCreate)?;
     let Ok(mut value) = serde_json::from_str::<Value>(&content) else {
         return Ok(());
@@ -224,24 +225,4 @@ fn migrate_reference_session_meta_model(meta_path: &Path) -> Result<(), Referenc
         serde_json::to_string(&value).map_err(|_error| ReferenceTreeError::CannotCreate)?;
     atomic_replace_text(meta_path, &format!("{content}\n"))
         .map_err(|_error| ReferenceTreeError::CannotCreate)
-}
-
-fn read_reference_session_meta(path: &Path) -> std::io::Result<String> {
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_REFERENCE_SESSION_META_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "reference session metadata is too large or not a plain file",
-        ));
-    }
-    let len = usize::try_from(metadata.len())
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content)?;
-    String::from_utf8(content)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
 }

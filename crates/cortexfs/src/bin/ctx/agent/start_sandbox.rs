@@ -14,7 +14,7 @@ fn agent_start_systemd_command(
 ) -> AgentStartCommand {
     let home = view.ctx_home();
     let mut command = AgentStartCommand {
-        program: get_systemd_run_program().to_owned(),
+        program: SYSTEMD_RUN_PROGRAM.to_owned(),
         args: vec![
             "--user".to_owned(),
             "--unit".to_owned(),
@@ -42,7 +42,7 @@ fn agent_chat_socket_systemd_command(
     unit: &str,
 ) -> AgentStartCommand {
     AgentStartCommand {
-        program: get_systemd_run_program().to_owned(),
+        program: SYSTEMD_RUN_PROGRAM.to_owned(),
         args: vec![
             "--user".to_owned(),
             "--unit".to_owned(),
@@ -322,10 +322,6 @@ fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMount]) -> Stri
 
 const SYSTEMD_RUN_PROGRAM: &str = "/usr/bin/systemd-run";
 
-fn get_systemd_run_program() -> &'static str {
-    SYSTEMD_RUN_PROGRAM
-}
-
 fn agent_start_mounts(args: &AgentStartArgs) -> Result<Vec<AgentMount>, CliError> {
     let default_source = env::current_dir()
         .map_err(|error| CliError::unavailable(format!("cannot read current directory: {error}")))?;
@@ -487,7 +483,9 @@ fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
     if !Path::new(&mount.source).is_absolute() {
         return Err(CliError::usage("agent mount source must be absolute"));
     }
-    let Some(target) = normalized_absolute_mount_target(&mount.target) else {
+    let Some(target) =
+        normalized_absolute_path(Path::new(&mount.target)).map(|path| path.display().to_string())
+    else {
         return Err(CliError::usage("agent mount target must be absolute"));
     };
     if !matches!(mount.mode.as_str(), "ro" | "rw") {
@@ -499,25 +497,6 @@ fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
         ));
     }
     Ok(())
-}
-
-fn normalized_absolute_mount_target(target: &str) -> Option<String> {
-    let path = Path::new(target);
-    if !path.is_absolute() {
-        return None;
-    }
-    let mut normalized = PathBuf::from("/");
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            std::path::Component::Normal(part) => normalized.push(part),
-            std::path::Component::Prefix(_) => return None,
-        }
-    }
-    Some(normalized.display().to_string())
 }
 
 fn is_protected_agent_mount_target(target: &str) -> bool {
@@ -555,7 +534,7 @@ fn ensure_agent_terminal_socket(
         })?;
     }
     ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)?;
-    match remove_stale_agent_terminal_socket(runtime_socket) {
+    match remove_stale_socket(runtime_socket) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
@@ -593,7 +572,7 @@ fn ensure_agent_chat_socket(visible_socket: &Path, runtime_socket: &Path) -> Res
             CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
         })?;
     }
-    match remove_stale_agent_terminal_socket(runtime_socket) {
+    match remove_stale_socket(runtime_socket) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => {
@@ -604,7 +583,7 @@ fn ensure_agent_chat_socket(visible_socket: &Path, runtime_socket: &Path) -> Res
         }
     }
     if let Err(error) = remove_socket_or_symlink(visible_socket) {
-        if is_read_only_filesystem_error(&error) {
+        if is_unreplaceable_visible_socket_error(&error) {
             return Ok(());
         }
         return Err(CliError::unavailable(format!(
@@ -614,7 +593,7 @@ fn ensure_agent_chat_socket(visible_socket: &Path, runtime_socket: &Path) -> Res
     }
     match std::os::unix::fs::symlink(runtime_socket, visible_socket) {
         Ok(()) => Ok(()),
-        Err(error) if is_read_only_filesystem_error(&error) => Ok(()),
+        Err(error) if is_unreplaceable_visible_socket_error(&error) => Ok(()),
         Err(error) => Err(CliError::unavailable(format!(
             "cannot link {} -> {}: {error}",
             visible_socket.display(),
@@ -623,8 +602,8 @@ fn ensure_agent_chat_socket(visible_socket: &Path, runtime_socket: &Path) -> Res
     }
 }
 
-fn is_read_only_filesystem_error(error: &io::Error) -> bool {
-    error.raw_os_error() == Some(nix::libc::EROFS)
+fn is_unreplaceable_visible_socket_error(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(libc::EROFS) || error.kind() == io::ErrorKind::PermissionDenied
 }
 
 fn remove_socket_or_symlink(path: &Path) -> io::Result<()> {

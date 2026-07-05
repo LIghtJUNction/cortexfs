@@ -209,7 +209,7 @@ fn interruptible_buffered_agent_request_sends_cancel_for_active_run() {
     };
     guard.interrupted_flag().store(true, std::sync::atomic::Ordering::SeqCst);
 
-    let result = stream_agent_socket_request_buffered_interruptible(
+    let result = stream_agent_socket_request_streaming_interruptible(
         &socket,
         "{\"op\":\"send\",\"id\":\"run-1\"}\n",
         false,

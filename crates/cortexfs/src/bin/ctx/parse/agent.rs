@@ -140,11 +140,11 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
             }))
         }
         "watch" => {
-            let (name, session) = parse_agent_terminal_args(values, "agent watch")?;
+            let (name, session) = parse_agent_session_option_args(values, "agent watch")?;
             Ok(Command::Agent(AgentArgs::Watch { name, session }))
         }
         "attach" => {
-            let (name, session) = parse_agent_terminal_args(values, "agent attach")?;
+            let (name, session) = parse_agent_session_option_args(values, "agent attach")?;
             Ok(Command::Agent(AgentArgs::Attach { name, session }))
         }
         _ => Err(CliError::usage(format!("unknown agent command: {command}"))),
@@ -328,26 +328,6 @@ fn parse_agent_start(mut values: impl Iterator<Item = String>) -> Result<AgentSt
         }
     }
     Ok(args)
-}
-
-fn parse_agent_terminal_args(
-    mut values: impl Iterator<Item = String>,
-    command: &str,
-) -> Result<(String, Option<String>), CliError> {
-    let name = required_arg(&mut values, &format!("{command} requires an agent name"))?;
-    let mut session = None;
-    while let Some(value) = values.next() {
-        match value.as_str() {
-            "--session" | "-s" => {
-                session = Some(required_arg(
-                    &mut values,
-                    &format!("{command} --session requires a session name"),
-                )?);
-            }
-            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
-        }
-    }
-    Ok((name, session))
 }
 
 fn parse_agent_new(mut values: impl Iterator<Item = String>) -> Result<AgentNewArgs, CliError> {

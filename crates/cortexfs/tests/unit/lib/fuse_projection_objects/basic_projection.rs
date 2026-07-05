@@ -111,7 +111,7 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
         "home/1000/agent/coder/session/index/by-hash",
         "home/1000/agent/coder/session/index/by-uuid",
     ] {
-        assert_eq!(projection.create_session_layout_dir(dir), Ok(()));
+        assert_eq!(projection.create_session_layout_dir(dir, 1000, 1000), Ok(()));
     }
 
     for file in [
@@ -138,7 +138,7 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
         "home/1000/agent/coder/session/index/current",
         "home/1000/agent/coder/session/index/by-cwd/workspace",
     ] {
-        assert_eq!(projection.create_session_layout_file(file), Ok(()));
+        assert_eq!(projection.create_session_layout_file(file, 1000, 1000), Ok(()));
     }
 
     assert!(root.join(session).join("messages.jsonl").is_file());
@@ -158,11 +158,11 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
         Ok(0o600)
     ));
     assert_eq!(
-        projection.create_session_layout_dir("home/1000/tool/not-session"),
+        projection.create_session_layout_dir("home/1000/tool/not-session", 1000, 1000),
         Err(FuseV1Error::NotControlFile)
     );
     assert_eq!(
-        projection.create_session_layout_file("home/1000/agent/coder/session/fuse/bad"),
+        projection.create_session_layout_file("home/1000/agent/coder/session/fuse/bad", 1000, 1000),
         Err(FuseV1Error::NotControlFile)
     );
 }

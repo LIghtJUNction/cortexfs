@@ -119,12 +119,6 @@ fn model_alias_target_exists(root: &Path, target: &str) -> bool {
         .is_ok_and(|metadata| !metadata.file_type().is_symlink())
 }
 
-fn read_model_alias_target(root: &Path, model: &str) -> io::Result<String> {
-    let model_dir = open_agent_terminal_runtime_dir(&root.join("model"))?;
-    let target = nix::fcntl::readlinkat(&model_dir, model).map_err(io::Error::from)?;
-    Ok(target.to_string_lossy().into_owned())
-}
-
 fn agent_repl_editor_config() -> rustyline::Config {
     rustyline::Config::builder().enable_signals(true).build()
 }

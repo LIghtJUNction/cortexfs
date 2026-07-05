@@ -1,12 +1,61 @@
 fn parse_openai_chat_content(output: &[u8]) -> Result<String, String> {
     let value = serde_json::from_slice::<Value>(output)
         .map_err(|error| format!("invalid provider json: {error}"))?;
-    value
+    if let Some(content) = value
         .pointer("/choices/0/message/content")
         .and_then(Value::as_str)
         .or_else(|| value.get("output_text").and_then(Value::as_str))
-        .map(str::to_owned)
-        .ok_or_else(|| "provider response missing content".to_owned())
+        && !content.is_empty()
+    {
+        return Ok(content.to_owned());
+    }
+    if let Some(tool_call) = value
+        .pointer("/choices/0/message/tool_calls/0")
+        .and_then(openai_chat_tool_call_content)
+    {
+        return Ok(tool_call);
+    }
+    Err("provider response missing content".to_owned())
+}
+
+fn openai_chat_tool_call_content(value: &Value) -> Option<String> {
+    let function = value.get("function")?;
+    let name = function.get("name").and_then(Value::as_str)?;
+    if !is_object_name(name) {
+        return None;
+    }
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| is_object_name(id))
+        .unwrap_or("call-1");
+    let arguments = function.get("arguments")?;
+    let args = openai_chat_tool_call_args(arguments)?;
+    Some(
+        json!({
+            "type": "tool_call",
+            "id": id,
+            "name": name,
+            "arguments": {
+                "args": args
+            }
+        })
+        .to_string(),
+    )
+}
+
+fn openai_chat_tool_call_args(arguments: &Value) -> Option<Vec<String>> {
+    let value = if let Some(arguments) = arguments.as_str() {
+        serde_json::from_str::<Value>(arguments).ok()?
+    } else {
+        arguments.clone()
+    };
+    value
+        .get("args")?
+        .as_array()?
+        .iter()
+        .map(|value| value.as_str().map(str::to_owned))
+        .collect()
 }
 
 fn parse_openai_response_content(output: &[u8]) -> Result<String, String> {
@@ -100,80 +149,34 @@ fn token_usage_from_usage_value(value: &Value) -> Option<TokenUsage> {
     })
 }
 
-fn chat_completions_url(base_url: &str) -> String {
-    let base = base_url.trim().trim_end_matches('/');
-    if base.rsplit('/').next() == Some("v1") {
-        format!("{base}/chat/completions")
-    } else {
-        format!("{base}/v1/chat/completions")
-    }
-}
-
-fn responses_url(base_url: &str) -> String {
-    let base = base_url.trim().trim_end_matches('/');
-    if base.rsplit('/').next() == Some("v1") {
-        format!("{base}/responses")
-    } else {
-        format!("{base}/v1/responses")
-    }
-}
-
-fn chat_completions_target(transport: &ResolvedTransport) -> CurlJsonTarget {
-    let (base_url, unix_socket) = match *transport {
-        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
-            (base_url, None)
+macro_rules! provider_target_fn {
+    ($name:ident, $path:literal) => {
+        fn $name(transport: &ResolvedTransport) -> CurlJsonTarget {
+            let (base_url, unix_socket) = match *transport {
+                ResolvedTransport::Direct { ref base_url }
+                | ResolvedTransport::Http { ref base_url } => (base_url, None),
+                ResolvedTransport::Unix {
+                    ref base_url,
+                    ref socket_path,
+                } => (base_url, Some(socket_path.clone())),
+            };
+            let base = base_url.trim().trim_end_matches('/');
+            let url = if base.rsplit('/').next() == Some("v1") {
+                format!("{base}/{}", $path)
+            } else {
+                format!("{base}/v1/{}", $path)
+            };
+            CurlJsonTarget {
+                url,
+                unix_socket,
+            }
         }
-        ResolvedTransport::Unix {
-            ref base_url,
-            ref socket_path,
-        } => (base_url, Some(socket_path.clone())),
     };
-    CurlJsonTarget {
-        url: chat_completions_url(base_url),
-        unix_socket,
-    }
 }
 
-fn responses_target(transport: &ResolvedTransport) -> CurlJsonTarget {
-    let (base_url, unix_socket) = match *transport {
-        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
-            (base_url, None)
-        }
-        ResolvedTransport::Unix {
-            ref base_url,
-            ref socket_path,
-        } => (base_url, Some(socket_path.clone())),
-    };
-    CurlJsonTarget {
-        url: responses_url(base_url),
-        unix_socket,
-    }
-}
-
-fn anthropic_messages_target(transport: &ResolvedTransport) -> CurlJsonTarget {
-    let (base_url, unix_socket) = match *transport {
-        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
-            (base_url, None)
-        }
-        ResolvedTransport::Unix {
-            ref base_url,
-            ref socket_path,
-        } => (base_url, Some(socket_path.clone())),
-    };
-    CurlJsonTarget {
-        url: anthropic_messages_url(base_url),
-        unix_socket,
-    }
-}
-
-fn anthropic_messages_url(base_url: &str) -> String {
-    let base = base_url.trim().trim_end_matches('/');
-    if base.rsplit('/').next() == Some("v1") {
-        format!("{base}/messages")
-    } else {
-        format!("{base}/v1/messages")
-    }
-}
+provider_target_fn!(chat_completions_target, "chat/completions");
+provider_target_fn!(responses_target, "responses");
+provider_target_fn!(anthropic_messages_target, "messages");
 
 fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> {
     let auth = match *credential {

@@ -60,7 +60,28 @@ fn object_socket_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
 
 fn current_session_name(session_root: &Path) -> Result<String, CliError> {
     let current_path = session_root.join("index").join("current");
-    match read_current_session_file(&current_path) {
+    let current = (|| -> io::Result<String> {
+        let mut file = open_current_session_plain_file(&current_path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() || metadata.len() > 64 * 1024 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "current session file is not a bounded regular file",
+            ));
+        }
+        let len = usize::try_from(metadata.len()).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("file is too large to read: {error}"),
+            )
+        })?;
+        let mut content = vec![0; len];
+        file.read_exact(&mut content)?;
+        String::from_utf8(content)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
+    })();
+
+    match current {
         Ok(value) => {
             let session = value.trim();
             if is_object_name(session) {
@@ -87,32 +108,11 @@ fn current_session_name(session_root: &Path) -> Result<String, CliError> {
     }
 }
 
-fn read_current_session_file(path: &Path) -> io::Result<String> {
-    let mut file = open_current_session_plain_file(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > 64 * 1024 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "current session file is not a bounded regular file",
-        ));
-    }
-    let len = usize::try_from(metadata.len()).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("file is too large to read: {error}"),
-        )
-    })?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content)?;
-    String::from_utf8(content)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
-}
-
 fn open_current_session_plain_file(path: &Path) -> io::Result<fs::File> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "session file has no parent"))?;
-    let parent_dir = open_read_dir_plain_directory(parent)?;
+    let parent_dir = open_plain_directory(parent)?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -134,50 +134,14 @@ fn ctx_home(root: &Path) -> Result<PathBuf, CliError> {
         return Ok(PathBuf::from(home));
     }
 
-    Ok(root.join("home").join(current_uid()?))
-}
-
-fn current_uid() -> Result<String, CliError> {
-    let output = id_command()
-        .output()
-        .map_err(|error| CliError::unavailable(format!("cannot run id -u: {error}")))?;
-    if !output.status.success() {
-        return Err(CliError::unavailable("id -u failed"));
-    }
-    let uid = String::from_utf8(output.stdout)
-        .map_err(|_error| CliError::unavailable("id -u returned non-UTF-8 output"))?;
-    parse_current_uid(&uid)
-}
-
-fn parse_current_uid(output: &str) -> Result<String, CliError> {
-    let uid = output.trim();
-    if uid.is_empty() {
-        return Err(CliError::unavailable("id -u returned empty output"));
-    }
-    if !uid.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(CliError::unavailable("id -u returned invalid uid"));
-    }
-    Ok(uid.to_owned())
-}
-
-const ID_PROGRAM: &str = "/usr/bin/id";
-
-fn get_id_program() -> &'static str {
-    ID_PROGRAM
-}
-
-fn id_command() -> std::process::Command {
-    let mut command = std::process::Command::new(get_id_program());
-    command
-        .arg("-u")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin");
-    command
+    Ok(root.join("home").join(
+        current_uid_text().map_err(CliError::unavailable)?,
+    ))
 }
 
 #[cfg(test)]
 mod objects_socket_id_program_tests {
-    use super::{get_id_program, id_command, parse_current_uid};
+    use super::{get_id_program, id_command, parse_current_uid_text};
 
     #[test]
     fn get_id_program_returns_absolute_path() {
@@ -212,9 +176,9 @@ mod objects_socket_id_program_tests {
 
     #[test]
     fn parse_current_uid_accepts_digits_only() {
-        assert_eq!(parse_current_uid("1000\n"), Ok("1000".to_owned()));
-        assert!(parse_current_uid("1000\n1001\n").is_err());
-        assert!(parse_current_uid("user\n").is_err());
-        assert!(parse_current_uid("\n").is_err());
+        assert_eq!(parse_current_uid_text("1000\n"), Ok("1000".to_owned()));
+        assert!(parse_current_uid_text("1000\n1001\n").is_err());
+        assert!(parse_current_uid_text("user\n").is_err());
+        assert!(parse_current_uid_text("\n").is_err());
     }
 }

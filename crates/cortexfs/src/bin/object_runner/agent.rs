@@ -34,7 +34,26 @@ where
     let mut last_tool_signature = None;
     let mut last_tool_result: Option<(AgentToolCall, String)> = None;
     for iteration in 0..=MAX_AGENT_TOOL_ITERATIONS {
-        let outcome = run_model_once(config, input, stdout)?;
+        let suppress_model_error_events = config.suppress_model_error_events;
+        if last_tool_result.is_some() {
+            config.suppress_model_error_events = true;
+        }
+        let outcome = match run_model_once(config, input, stdout) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                config.suppress_model_error_events = suppress_model_error_events;
+                if let Some(pair) = last_tool_result.as_ref() {
+                    return write_tool_result_fallback_response(
+                        stdout,
+                        &config.run,
+                        &pair.0,
+                        &pair.1,
+                    );
+                }
+                return Err(error);
+            }
+        };
+        config.suppress_model_error_events = suppress_model_error_events;
         if let Some(tool_call) = first_tool_call(&outcome.frames)? {
             let signature = tool_call_signature(&tool_call);
             if last_tool_signature.as_deref() == Some(signature.as_str()) {
@@ -84,6 +103,13 @@ where
         if outcome.success
             && last_tool_result.is_some()
             && !frames_have_visible_assistant_response(&outcome.frames)
+            && let Some(pair) = last_tool_result.as_ref()
+        {
+            return write_tool_result_fallback_response(stdout, &config.run, &pair.0, &pair.1);
+        }
+        if !outcome.success
+            && last_tool_result.is_some()
+            && frames_have_error(&outcome.frames)
             && let Some(pair) = last_tool_result.as_ref()
         {
             return write_tool_result_fallback_response(stdout, &config.run, &pair.0, &pair.1);
@@ -145,7 +171,12 @@ impl AgentModelRunConfig {
             .join("agent")
             .join(format!("{agent}.d"))
             .join("model");
-        let configured_model = read_small_plain_text_file(&model_path).map_or_else(
+        let configured_model = read_small_plain_text_file(
+            &model_path,
+            MAX_RUNNER_CONTROL_BYTES,
+            "runner",
+        )
+        .map_or_else(
             |_error| "main".to_owned(),
             |content| content.trim().to_owned(),
         );
@@ -175,10 +206,18 @@ impl AgentModelRunConfig {
         let model = selected.name.clone();
         let agent_dir = source.join("agent").join(format!("{agent}.d"));
         authorize_agent_model_use(&agent_dir, &requested_model, &primary_model, &model)?;
-        let system_prompt =
-            read_small_plain_text_file(&agent_dir.join("system.md")).unwrap_or_default();
-        let prompt_template = read_small_plain_text_file(&agent_dir.join("prompt.template.md"))
-            .unwrap_or_else(|_error| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());
+        let system_prompt = read_small_plain_text_file(
+            &agent_dir.join("system.md"),
+            MAX_RUNNER_CONTROL_BYTES,
+            "runner",
+        )
+        .unwrap_or_default();
+        let prompt_template = read_small_plain_text_file(
+            &agent_dir.join("prompt.template.md"),
+            MAX_RUNNER_CONTROL_BYTES,
+            "runner",
+        )
+        .unwrap_or_else(|_error| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());
         Ok(Self {
             agent: agent.to_owned(),
             source,

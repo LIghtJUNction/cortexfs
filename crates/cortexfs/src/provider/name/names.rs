@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Read as _;
 use std::net::IpAddr;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use nix::fcntl::{FcntlArg, FdFlag, fcntl};

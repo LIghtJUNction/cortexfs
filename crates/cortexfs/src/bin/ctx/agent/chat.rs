@@ -111,22 +111,15 @@ fn agent_session_workspace_source(
     let Some(workspace) = read_optional_trimmed(&path)? else {
         return Ok(None);
     };
-    if is_absolute_host_workspace_path(&workspace) {
-        Ok(Some(workspace))
-    } else {
-        Ok(None)
-    }
-}
-
-fn is_absolute_host_workspace_path(value: &str) -> bool {
-    !value.bytes().any(|byte| byte.is_ascii_control())
-        && Path::new(value).is_absolute()
-        && Path::new(value).components().all(|component| {
+    Ok((!workspace.bytes().any(|byte| byte.is_ascii_control())
+        && Path::new(&workspace).is_absolute()
+        && Path::new(&workspace).components().all(|component| {
             matches!(
                 component,
                 std::path::Component::RootDir | std::path::Component::Normal(_)
             )
-        })
+        }))
+    .then_some(workspace))
 }
 
 fn agent_resume(
@@ -235,8 +228,12 @@ fn agent_repl(
         }
     }
 
-    let input = read_agent_repl_stdin_limited(io::stdin(), MAX_AGENT_REPL_STDIN_BYTES)
-        .map_err(|error| CliError::unavailable(format!("cannot read stdin: {error}")))?;
+    let input = read_limited_input_text(
+        io::stdin(),
+        MAX_AGENT_REPL_STDIN_BYTES,
+        "agent stdin exceeds input limit",
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot read stdin: {error}")))?;
     for line in input.lines() {
         if line.is_empty() {
             continue;
@@ -252,25 +249,4 @@ fn agent_repl(
         }
     }
     Ok(ExitCode::SUCCESS)
-}
-
-fn read_agent_repl_stdin_limited(
-    reader: impl Read,
-    max_bytes: usize,
-) -> io::Result<String> {
-    let limit = u64::try_from(max_bytes.saturating_add(1)).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("stdin read limit is invalid: {error}"),
-        )
-    })?;
-    let mut input = String::new();
-    reader.take(limit).read_to_string(&mut input)?;
-    if input.len() > max_bytes {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "agent stdin exceeds input limit",
-        ));
-    }
-    Ok(input)
 }

@@ -35,10 +35,6 @@ fn open_agent_executable_no_follow(path: &Path) -> Result<fs::File, SocketRuntim
     }
 }
 
-fn proc_fd_path(file: &fs::File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
-}
-
 fn terminate_agent_process_group(child: &mut Child) {
     if let Ok(pid) = i32::try_from(child.id()) {
         signal_agent_process_group(pid, nix::sys::signal::Signal::SIGTERM);

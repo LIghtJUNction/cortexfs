@@ -21,7 +21,8 @@ pub fn install_executable_object_wrapper(
 
     let class_dir = root.join(class.as_str());
     let control_dir = class_dir.join(format!("{name}.d"));
-    create_object_bootstrap_dir(&control_dir)?;
+    plain_fs::create_plain_dir(&control_dir)
+        .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
 
     let executable = class_dir.join(name);
     let wrapper = executable_wrapper_script(class, name, wrapper_target);
@@ -41,130 +42,12 @@ pub fn install_executable_object_wrapper(
 
 fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapError> {
     let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
-    create_object_bootstrap_dir(&hook_dir)?;
+    plain_fs::create_plain_dir(&hook_dir).map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     for phase in OBJECT_HOOK_PHASE_DIRS {
-        create_object_bootstrap_dir(&hook_dir.join(phase))?;
-    }
-    Ok(())
-}
-
-fn create_object_bootstrap_dir(path: &Path) -> Result<(), ObjectBootstrapError> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
-            sync_directory_for_object_bootstrap(path)
-        } else {
-            Err(ObjectBootstrapError::CannotCreate)
-        };
-    }
-
-    let mut missing = Vec::new();
-    let mut cursor = Some(path);
-    while let Some(current) = cursor {
-        match fs::symlink_metadata(current) {
-            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
-                return Err(ObjectBootstrapError::CannotCreate);
-            }
-            Ok(_metadata) => break,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                missing.push(current.to_path_buf());
-                cursor = current.parent();
-            }
-            Err(_error) => return Err(ObjectBootstrapError::CannotCreate),
-        }
-    }
-
-    let mut parent_dir = if let Some(existing_parent) = missing.last().and_then(|path| path.parent())
-    {
-        open_object_bootstrap_dir(existing_parent)?
-    } else {
-        return Ok(());
-    };
-
-    for directory in missing.iter().rev() {
-        let name = object_bootstrap_file_name(directory)?;
-        nix::sys::stat::mkdirat(&parent_dir, name, nix::sys::stat::Mode::from_bits_truncate(0o755))
-            .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
-        parent_dir
-            .sync_all()
-            .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
-        let child = nix::fcntl::openat(
-            &parent_dir,
-            name,
-            nix::fcntl::OFlag::O_DIRECTORY
-                | nix::fcntl::OFlag::O_RDONLY
-                | nix::fcntl::OFlag::O_NOFOLLOW
-                | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::empty(),
-        )
-        .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
-        parent_dir = fs::File::from(child);
-        parent_dir
-            .sync_all()
+        plain_fs::create_plain_dir(&hook_dir.join(phase))
             .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     }
     Ok(())
-}
-
-fn object_bootstrap_file_name(path: &Path) -> Result<&str, ObjectBootstrapError> {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ObjectBootstrapError::CannotCreate)
-}
-
-fn sync_directory_for_object_bootstrap(path: &Path) -> Result<(), ObjectBootstrapError> {
-    let directory = open_object_bootstrap_dir(path)?;
-    directory
-        .sync_all()
-        .map_err(|_error| ObjectBootstrapError::CannotCreate)
-}
-
-fn open_object_bootstrap_dir(path: &Path) -> Result<fs::File, ObjectBootstrapError> {
-    let mut directory = if path.is_absolute() {
-        open_object_bootstrap_single_dir(Path::new("/"))?
-    } else {
-        open_object_bootstrap_single_dir(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name
-                    .to_str()
-                    .ok_or(ObjectBootstrapError::CannotCreate)?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(ObjectBootstrapError::CannotCreate);
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_object_bootstrap_single_dir(path: &Path) -> Result<fs::File, ObjectBootstrapError> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(path)
-        .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
-    if !directory
-        .metadata()
-        .map_err(|_error| ObjectBootstrapError::CannotCreate)?
-        .is_dir()
-    {
-        return Err(ObjectBootstrapError::CannotCreate);
-    }
-    Ok(directory)
 }
 
 fn validate_control_overrides(

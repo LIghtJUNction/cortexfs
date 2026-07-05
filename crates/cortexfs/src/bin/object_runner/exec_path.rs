@@ -91,7 +91,7 @@ fn object_path_from_exec_metadata(path: &Path) -> Option<PathBuf> {
 fn read_exec_metadata_text(path: &Path) -> Option<String> {
     let path_text = path.to_string_lossy();
     if !path_text.starts_with("/proc/self/fd/") && !path_text.starts_with("/dev/fd/") {
-        return read_small_plain_text_file(path).ok();
+        return read_small_plain_text_file(path, MAX_RUNNER_CONTROL_BYTES, "runner").ok();
     }
     let file = fs::File::open(path).ok()?;
     let mut content = String::new();
@@ -99,11 +99,4 @@ fn read_exec_metadata_text(path: &Path) -> Option<String> {
         .read_to_string(&mut content)
         .ok()?;
     (u64::try_from(content.len()).ok()? <= MAX_RUNNER_CONTROL_BYTES).then_some(content)
-}
-
-fn write_error(line: &str) -> io::Result<()> {
-    let mut stderr = io::stderr().lock();
-    stderr
-        .write_all(line.as_bytes())
-        .and_then(|()| stderr.write_all(b"\n"))
 }

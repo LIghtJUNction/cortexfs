@@ -57,11 +57,12 @@ const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
 
 fn ensure_reference_models(root: &Path) -> Result<(), ReferenceTreeError> {
     ensure_reference_debug_model(root)?;
-    ensure_reference_provider_models_from(
+    let models = ensure_reference_provider_models_from(
         root,
         Path::new(SYSTEM_PROVIDER_CONFIG_DIR),
         Path::new(SYSTEM_PROVIDER_MODEL_CACHE_DIR),
-    )
+    )?;
+    ensure_reference_model_aliases(root, &models)
 }
 
 fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceTreeError> {
@@ -90,13 +91,13 @@ fn ensure_reference_provider_models_from(
     root: &Path,
     config_dir: &Path,
     cache_dir: &Path,
-) -> Result<(), ReferenceTreeError> {
+) -> Result<Vec<ProjectedProviderModel>, ReferenceTreeError> {
     let models =
         projected_provider_models(config_dir, cache_dir).map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    for model in models {
-        ensure_reference_provider_model(root, &model)?;
+    for model in &models {
+        ensure_reference_provider_model(root, model)?;
     }
-    Ok(())
+    Ok(models)
 }
 
 fn ensure_reference_provider_model(
@@ -121,6 +122,43 @@ fn ensure_reference_provider_model(
     )
     .map(|_object| ())
     .map_err(ReferenceTreeError::Object)
+}
+
+fn ensure_reference_model_aliases(
+    root: &Path,
+    models: &[ProjectedProviderModel],
+) -> Result<(), ReferenceTreeError> {
+    let main = reference_model_alias_target(root, DEFAULT_MODEL_ALIAS_TARGET, models, None);
+    let helper = reference_model_alias_target(root, HELPER_MODEL_ALIAS_TARGET, models, Some("codex-auto-review"));
+    ensure_reference_model_alias(&root.join("model").join(DEFAULT_MODEL_ALIAS), Path::new(&main))?;
+    ensure_reference_model_alias(&root.join("model").join(HELPER_MODEL_ALIAS), Path::new(&helper))
+}
+
+fn reference_model_alias_target(
+    root: &Path,
+    preferred: &str,
+    models: &[ProjectedProviderModel],
+    preferred_model: Option<&str>,
+) -> String {
+    if reference_model_target_exists(root, preferred) {
+        return preferred.to_owned();
+    }
+    if let Some(model_name) = preferred_model
+        && let Some(model) = models.iter().find(|model| model.model == model_name)
+    {
+        return format!("/ctx/model/{}/{}", model.provider, model.model);
+    }
+    models.first().map_or_else(
+        || format!("/ctx/model/{DEBUG_ECHO_MODEL}"),
+        |model| format!("/ctx/model/{}/{}", model.provider, model.model),
+    )
+}
+
+fn reference_model_target_exists(root: &Path, target: &str) -> bool {
+    let Some(model) = target.strip_prefix("/ctx/model/") else {
+        return false;
+    };
+    fs::symlink_metadata(root.join("model").join(model)).is_ok_and(|metadata| metadata.is_file())
 }
 
 fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeError> {
@@ -168,7 +206,7 @@ fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError> {
 
 fn remove_deprecated_reference_bin_te(root: &Path) -> Result<(), ReferenceTreeError> {
     let path = root.join("bin").join("te");
-    let Ok(content) = read_reference_tree_small_text(&path) else {
+    let Ok(content) = plain_fs::read_small_text_file(&path, MAX_REFERENCE_SESSION_META_BYTES) else {
         return Ok(());
     };
     if content.contains("# CortexFS reference-tree te placeholder.") {
@@ -226,7 +264,8 @@ fn ensure_reference_agent(
         &reference_agent_wrapper_script(name),
     )?;
     set_reference_executable(&root.join("agent").join(name))?;
-    ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")))
+    ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")))?;
+    ensure_reference_agent_control_ownership(&control)
 }
 
 fn reference_agent_wrapper_script(name: &str) -> String {
@@ -319,8 +358,8 @@ Prefer exact surgical edits through `fs.replace`; use atomic full-file writes th
 For clear coding requests, do not stop at a plan; implement the requested change directly through `tsh`, then report changed files and exact verification results.
 When available, run the touched project's formatter, static check, lint, and focused tests before claiming success.
 Ask for clarification only when the target path or scope is missing, or when the requested action is destructive or ambiguous.
-Open-ended project iteration requests are clear coding requests. When the user says `迭代本项目`, `bootstrap`, `self-improve`, `improve this project`, or asks to make the project better without narrower target, do not ask what to do. Immediately use `tsh` to inspect `/workspace/AGENTS.md`, `docs/DESIGN.md`, `git status --short`, and nearest relevant files; choose one small safe improvement that moves the repository toward the requested goal; edit it; run focused verification; report exact files and commands. If no safe edit is available, run a focused health check and report the blocker with evidence.
-Before source edits, inspect `/workspace` rules with `find /workspace -name AGENTS.md -print`, read the nearest applicable `AGENTS.md` files, and check `git status --short`; never overwrite, revert, delete, or reformat unrelated user changes.
+Open-ended project iteration requests are clear coding requests. When the user asks to iterate, bootstrap, self-improve, or make the project better without narrower target, do not ask what to do. Use available `tsh` tools to inspect the applicable project rules, current workspace state, and relevant files; choose one small safe improvement that moves the repository toward the requested goal; edit it; run focused verification; report exact files and commands. If no safe edit is available, run a focused health check and report the blocker with evidence.
+Before source edits, inspect the applicable `/workspace` rules and current workspace state; never overwrite, revert, delete, or reformat unrelated user changes.
 Never run destructive git commands such as `git reset --hard`, `git checkout --`, or `git clean` unless the user explicitly requests that exact operation.
 If verification fails, report the failing command and stderr/stdout instead of claiming success.
 Keep local work focused on implementation. Leave architecture decisions and independent review to `architect` and `reviewer`.
@@ -331,7 +370,7 @@ Do not add background schedulers, polling loops, hot reload, or new root ABI nam
 You are CortexFS agent `worker`.
 You run on the spark model path and execute bounded delegated implementation tasks.
 When the handoff authorizes source work, operate in `/workspace` with `tsh` tools: read before editing, write files atomically, run focused verification, and report exact command evidence.
-Before editing, inspect authorized rules and `git status --short`; do not overwrite unrelated user changes.
+Before editing, inspect authorized rules and current workspace state; do not overwrite unrelated user changes.
 Worker-role agent names include `worker`, `worker-*`, `executor`, and `executor-*`; they inherit the spark worker model when no explicit model control file is present.
 Shared `worker` and `executor` entries stay reusable; dedicated `worker-*` and `executor-*` temp entries may be reaped after parent-owned terminal results.
 Read only the handoff context and authorized refs you are given.
@@ -541,10 +580,12 @@ fn is_deprecated_reference_placeholder_tool(executable: &Path, control_dir: &Pat
     {
         return false;
     }
-    let Ok(wrapper) = read_reference_tree_small_text(executable) else {
+    let Ok(wrapper) = plain_fs::read_small_text_file(executable, MAX_REFERENCE_SESSION_META_BYTES) else {
         return false;
     };
-    let Ok(description) = read_reference_tree_small_text(&control_dir.join("description")) else {
+    let Ok(description) =
+        plain_fs::read_small_text_file(&control_dir.join("description"), MAX_REFERENCE_SESSION_META_BYTES)
+    else {
         return false;
     };
     ((wrapper.contains("# CortexFS generated object wrapper.\n")
@@ -558,7 +599,7 @@ fn deprecated_placeholder_tool_control_dir_is_exact(control_dir: &Path) -> bool 
     let Ok(control_dir_file) = open_reference_dir(control_dir) else {
         return false;
     };
-    let Ok(entries) = fs::read_dir(reference_tree_proc_fd_path(&control_dir_file)) else {
+    let Ok(entries) = fs::read_dir(plain_fs::proc_fd_path(&control_dir_file)) else {
         return false;
     };
     let mut seen = Vec::new();
@@ -602,7 +643,7 @@ fn deprecated_placeholder_hook_dir_is_exact(control_dir: &Path) -> bool {
     let Ok(hook_dir_file) = open_reference_dir(&hook_dir) else {
         return false;
     };
-    let Ok(entries) = fs::read_dir(reference_tree_proc_fd_path(&hook_dir_file)) else {
+    let Ok(entries) = fs::read_dir(plain_fs::proc_fd_path(&hook_dir_file)) else {
         return false;
     };
     let mut seen = Vec::new();
@@ -629,34 +670,6 @@ fn deprecated_placeholder_hook_dir_is_exact(control_dir: &Path) -> bool {
     OBJECT_HOOK_PHASE_DIRS
         .iter()
         .all(|required| seen.iter().any(|file| file == required))
-}
-
-fn reference_tree_proc_fd_path(directory: &fs::File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
-}
-
-fn read_reference_tree_small_text(path: &Path) -> std::io::Result<String> {
-    let mut file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_REFERENCE_SESSION_META_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "reference tree file is not a bounded regular file",
-        ));
-    }
-    let len = usize::try_from(metadata.len()).map_err(|error| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("file is too large to read: {error}"),
-        )
-    })?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content)?;
-    String::from_utf8(content)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error.utf8_error()))
 }
 
 #[cfg(test)]
@@ -701,6 +714,78 @@ mod reference_model_tests {
         assert_eq!(
             fs::read_to_string(root.path().join("model/api.test/gpt-5.4-mini.d/id"))?,
             "api.test/gpt-5.4-mini\n"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_model_aliases_point_to_materialized_reference_models(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        create_reference_root(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_bin(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_debug_model(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        let models = vec![
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "gpt-main".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "openai.chat".to_owned(),
+                cap: "chat\nstream".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "codex-auto-review".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "openai.chat".to_owned(),
+                cap: "chat\nstream".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+            },
+        ];
+        for model in &models {
+            ensure_reference_provider_model(root.path(), model)
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        }
+        ensure_reference_model_aliases(root.path(), &models)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+
+        assert_eq!(
+            fs::read_link(root.path().join("model/main"))?,
+            PathBuf::from("/ctx/model/api.test/gpt-main")
+        );
+        assert_eq!(
+            fs::read_link(root.path().join("model/helper"))?,
+            PathBuf::from("/ctx/model/api.test/codex-auto-review")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_model_aliases_fall_back_to_debug_model_without_provider_models(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        create_reference_root(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_bin(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_debug_model(root.path())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_model_aliases(root.path(), &[])
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+
+        assert_eq!(
+            fs::read_link(root.path().join("model/main"))?,
+            PathBuf::from("/ctx/model/debug/echo")
+        );
+        assert_eq!(
+            fs::read_link(root.path().join("model/helper"))?,
+            PathBuf::from("/ctx/model/debug/echo")
         );
         Ok(())
     }

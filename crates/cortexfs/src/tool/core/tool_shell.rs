@@ -59,9 +59,13 @@ fn run_shell_exec_command_with_timeout(
         .take()
         .ok_or_else(|| "cannot read shell stderr".to_owned())?;
     let stdout_reader =
-        thread::spawn(move || read_limited_bytes(stdout, MAX_SHELL_EXEC_OUTPUT_BYTES + 1));
+        thread::spawn(move || {
+            crate::process_helpers::read_limited_bytes(stdout, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
+        });
     let stderr_reader =
-        thread::spawn(move || read_limited_bytes(stderr, MAX_SHELL_EXEC_OUTPUT_BYTES + 1));
+        thread::spawn(move || {
+            crate::process_helpers::read_limited_bytes(stderr, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
+        });
     let mut stdout_reader = Some(stdout_reader);
     let mut stderr_reader = Some(stderr_reader);
     let mut stdout = None;
@@ -78,7 +82,7 @@ fn run_shell_exec_command_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
-                terminate_process_group(&mut child);
+                crate::process_helpers::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 if let Some(reader) = stderr_reader.take() {
                     let _ignored = reader.join();
@@ -99,7 +103,7 @@ fn run_shell_exec_command_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
-                terminate_process_group(&mut child);
+                crate::process_helpers::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 if let Some(reader) = stdout_reader.take() {
                     let _ignored = reader.join();
@@ -114,7 +118,7 @@ fn run_shell_exec_command_with_timeout(
             break status;
         }
         if Instant::now() >= deadline {
-            terminate_process_group(&mut child);
+            crate::process_helpers::terminate_process_group(&mut child);
             let _ignored = child.wait();
             if let Some(reader) = stdout_reader.take() {
                 let _ignored = reader.join();
@@ -151,42 +155,6 @@ fn run_shell_exec_command_with_timeout(
         stdout,
         stderr,
     })
-}
-
-fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(limit.min(8 * 1024));
-    let mut buffer = [0_u8; 8 * 1024];
-    loop {
-        let read = match reader.read(&mut buffer) {
-            Ok(0) | Err(_) => break,
-            Ok(read) => read,
-        };
-        let remaining = limit.saturating_sub(output.len());
-        let kept = read.min(remaining);
-        if let Some(chunk) = buffer.get(..kept) {
-            output.extend_from_slice(chunk);
-        }
-        if output.len() >= limit {
-            break;
-        }
-    }
-    output
-}
-
-fn terminate_process_group(child: &mut Child) {
-    if let Ok(pid) = i32::try_from(child.id()) {
-        signal_process_group(pid, nix::sys::signal::Signal::SIGTERM);
-        for _attempt in 0..5 {
-            let _ignored = child.try_wait();
-            thread::sleep(Duration::from_millis(50));
-        }
-        signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
-    }
-    let _ignored = child.kill();
-}
-
-fn signal_process_group(pid: i32, signal: nix::sys::signal::Signal) {
-    let _ignored = nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), signal);
 }
 
 fn run_shell_exec_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {

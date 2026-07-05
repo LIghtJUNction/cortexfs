@@ -1,13 +1,11 @@
 use std::collections::VecDeque;
 use std::env;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::DEFAULT_AGENT_PROMPT_TEMPLATE;
+use crate::{DEFAULT_AGENT_PROMPT_TEMPLATE, plain_fs};
 use nix::libc;
 use serde_json::Value;
 

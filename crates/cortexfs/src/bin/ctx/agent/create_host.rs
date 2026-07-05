@@ -5,7 +5,7 @@ fn agent_new_host_fallback(root: &Path, args: &AgentNewArgs) -> Result<ExitCode,
             "host agent creation fallback accepts at most one --model",
         ));
     }
-    let uid = current_uid()?;
+    let uid = current_uid_text().map_err(CliError::unavailable)?;
     let model = args
         .models
         .first()

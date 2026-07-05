@@ -37,134 +37,10 @@ fn tool_schema(hit: &cortexfs::ToolHit) -> Option<String> {
 }
 
 fn read_control_text(hit: &cortexfs::ToolHit, file: &str) -> Option<String> {
-    read_small_plain_text_file(&hit.control_dir().join(file))
+    read_small_plain_text_file(&hit.control_dir().join(file), MAX_TSH_CONTROL_BYTES, "tsh")
         .ok()
         .map(|content| content.trim().to_owned())
         .filter(|content| !content.is_empty())
-}
-
-fn read_small_plain_text_file(path: &Path) -> io::Result<String> {
-    let mut file = open_plain_read_file(path)?;
-    let metadata = file.metadata()?;
-    if metadata.len() > MAX_TSH_CONTROL_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "file exceeds tsh control read limit",
-        ));
-    }
-    let len = usize::try_from(metadata.len()).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("file is too large to read: {error}"),
-        )
-    })?;
-    let mut content = vec![0; len];
-    file.read_exact(&mut content)?;
-    String::from_utf8(content)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.utf8_error()))
-}
-
-fn open_plain_read_file(path: &Path) -> io::Result<fs::File> {
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
-    })?;
-    let parent_dir = open_plain_directory(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
-    let file_fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )?;
-    let file = fs::File::from(file_fd);
-    if !file.metadata()?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "path is not a regular file",
-        ));
-    }
-    Ok(file)
-}
-
-fn open_executable_no_follow(path: &Path) -> io::Result<fs::File> {
-    let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
-    })?;
-    let parent_dir = open_plain_directory(parent)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid file name"))?;
-    let file_fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW,
-        nix::sys::stat::Mode::empty(),
-    )?;
-    let file = fs::File::from(file_fd);
-    if !file.metadata()?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "path is not a regular file",
-        ));
-    }
-    Ok(file)
-}
-
-fn proc_fd_path(file: &fs::File) -> PathBuf {
-    PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()))
-}
-
-fn open_plain_directory(path: &Path) -> io::Result<fs::File> {
-    let mut directory = if path.is_absolute() {
-        open_single_plain_directory(Path::new("/"))?
-    } else {
-        open_single_plain_directory(Path::new("."))?
-    };
-    for component in path.components() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )?;
-                directory = fs::File::from(next);
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "directory path contains unsupported components",
-                ));
-            }
-        }
-    }
-    Ok(directory)
-}
-
-fn open_single_plain_directory(path: &Path) -> io::Result<fs::File> {
-    let directory = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(path)?;
-    if !directory.metadata()?.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path is not a plain directory",
-        ));
-    }
-    Ok(directory)
 }
 
 fn terminal_safe_text(text: &str) -> String {
@@ -249,7 +125,7 @@ fn tshrc_tool_path(root: &Path, home: &Path, value: &str) -> ToolPath {
 
 fn tshrc_ctx_path(root: &Path, home: &Path) -> Result<Option<String>, TshError> {
     let path = home.join(".tshrc");
-    let content = match read_small_plain_text_file(&path) {
+    let content = match read_small_plain_text_file(&path, MAX_TSH_CONTROL_BYTES, "tsh") {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -326,42 +202,9 @@ fn ctx_home(root: &Path) -> Result<PathBuf, TshError> {
     if let Some(home) = env::var_os("CTX_HOME") {
         return Ok(PathBuf::from(home));
     }
-    Ok(root.join("home").join(current_uid()?))
-}
-
-const ID_PROGRAM: &str = "/usr/bin/id";
-
-fn get_id_program() -> &'static str {
-    ID_PROGRAM
-}
-
-fn id_command() -> ProcessCommand {
-    let mut command = ProcessCommand::new(get_id_program());
-    command.arg("-u").env_clear().env("PATH", "/usr/bin:/bin");
-    command
-}
-
-fn current_uid() -> Result<String, TshError> {
-    let output = id_command()
-        .output()
-        .map_err(|error| TshError::unavailable(format!("cannot run id -u: {error}")))?;
-    if !output.status.success() {
-        return Err(TshError::unavailable("id -u failed"));
-    }
-    let uid = String::from_utf8(output.stdout)
-        .map_err(|_error| TshError::unavailable("id -u returned non-UTF-8 output"))?;
-    parse_current_uid(&uid)
-}
-
-fn parse_current_uid(output: &str) -> Result<String, TshError> {
-    let uid = output.trim();
-    if uid.is_empty() {
-        return Err(TshError::unavailable("id -u returned empty output"));
-    }
-    if !uid.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(TshError::unavailable("id -u returned invalid uid"));
-    }
-    Ok(uid.to_owned())
+    Ok(root.join("home").join(
+        current_uid_text().map_err(TshError::unavailable)?,
+    ))
 }
 
 fn tool_path_error(error: cortexfs::ToolPathError) -> TshError {

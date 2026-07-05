@@ -5,7 +5,6 @@ use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 use std::{env, fs};
@@ -18,33 +17,18 @@ use nix::libc;
 use nix::sys::termios::{self, ControlFlags, InputFlags, LocalFlags, OutputFlags, SetArg};
 use serde_json::Value;
 
-#[derive(Debug, Eq, PartialEq)]
-struct TshError {
-    code: u8,
-    message: String,
-}
+include!("shared/stderr.rs");
+include!("shared/current_uid.rs");
+include!("shared/shell_words.rs");
+include!("shared/simple_cli_error.rs");
+
+define_simple_cli_error!(TshError);
 
 const MAX_TSH_CONTROL_BYTES: u64 = 64 * 1024;
 const MAX_TSH_REPL_LINE_BYTES: usize = 1024 * 1024;
 const MAX_TSH_TOOL_COUNT: usize = 1024;
 type TshToolEnv = Vec<(String, String)>;
 type AuthorizedTshTool = (cortexfs::ToolExecutionGrant, TshToolEnv);
-
-impl TshError {
-    fn usage(message: impl Into<String>) -> Self {
-        Self {
-            code: 2,
-            message: message.into(),
-        }
-    }
-
-    fn unavailable(message: impl Into<String>) -> Self {
-        Self {
-            code: 69,
-            message: message.into(),
-        }
-    }
-}
 
 fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -63,7 +47,7 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
         TshCommand::List => return list_tools(&root).map(|()| ExitCode::SUCCESS),
         TshCommand::Repl | TshCommand::Tool { .. } => {}
     }
-    let config = TshConfig::read(&root)?;
+    let config = read_tsh_config(&root)?;
     let mut cache =
         DynamicToolCache::with_window_percent(config.cache_capacity, config.window_percent);
     let mut context = ToolContext::new(config.max_loaded_tools);
@@ -210,39 +194,20 @@ fn list_tools_with_mode(root: &Path, mode: ToolListMode) -> Result<(), TshError>
     stdout.flush().map_err(|error| write_error_to_tsh(&error))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TshConfig {
-    max_loaded_tools: usize,
-    cache_capacity: usize,
-    window_percent: usize,
-}
-
-impl Default for TshConfig {
-    fn default() -> Self {
-        Self {
-            max_loaded_tools: 64,
-            cache_capacity: 32,
-            window_percent: 1,
-        }
+fn read_tsh_config(root: &Path) -> Result<cortexfs::tool::core::tools::TshRuntimeConfig, TshError> {
+    let mut config = if let Some(content) = read_tsh_config_text(root)? {
+        cortexfs::tool::core::tools::parse_tsh_runtime_config(&content)
+            .map_err(|message| TshError::usage(format!("invalid tsh.d/config: {message}")))?
+    } else {
+        cortexfs::tool::core::tools::TshRuntimeConfig::default()
+    };
+    if let Some(capacity) = env::var("CTX_TOOL_CACHE")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        config.cache_capacity = capacity.clamp(1, MAX_TSH_TOOL_COUNT);
     }
-}
-
-impl TshConfig {
-    fn read(root: &Path) -> Result<Self, TshError> {
-        let mut config = if let Some(content) = read_tsh_config_text(root)? {
-            parse_tsh_config(&content)
-                .map_err(|message| TshError::usage(format!("invalid tsh.d/config: {message}")))?
-        } else {
-            Self::default()
-        };
-        if let Some(capacity) = env::var("CTX_TOOL_CACHE")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-        {
-            config.cache_capacity = capacity.clamp(1, MAX_TSH_TOOL_COUNT);
-        }
-        Ok(config)
-    }
+    Ok(config)
 }
 
 fn read_tsh_config_text(root: &Path) -> Result<Option<String>, TshError> {
@@ -251,7 +216,7 @@ fn read_tsh_config_text(root: &Path) -> Result<Option<String>, TshError> {
         return Ok(None);
     };
     let path = hit.control_dir().join("config");
-    match read_small_plain_text_file(&path) {
+    match read_small_plain_text_file(&path, MAX_TSH_CONTROL_BYTES, "tsh") {
         Ok(content) => Ok(Some(content)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(TshError::unavailable(format!(
@@ -261,63 +226,16 @@ fn read_tsh_config_text(root: &Path) -> Result<Option<String>, TshError> {
     }
 }
 
-fn parse_tsh_config(content: &str) -> Result<TshConfig, String> {
-    let mut config = TshConfig::default();
-    for (index, line) in content.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            return Err(format!(
-                "line {} must be key=value",
-                index.saturating_add(1)
-            ));
-        };
-        let value = value.parse::<usize>().map_err(|_error| {
-            format!(
-                "line {} value must be a positive integer",
-                index.saturating_add(1)
-            )
-        })?;
-        match key {
-            "max_loaded_tools" | "cache_capacity" if (1..=MAX_TSH_TOOL_COUNT).contains(&value) => {
-                if key == "max_loaded_tools" {
-                    config.max_loaded_tools = value;
-                } else {
-                    config.cache_capacity = value;
-                }
-            }
-            "window_percent" if (1..=100).contains(&value) => config.window_percent = value,
-            "max_loaded_tools" | "cache_capacity" => {
-                return Err(format!(
-                    "line {} value must be 1..{MAX_TSH_TOOL_COUNT}",
-                    index.saturating_add(1),
-                ));
-            }
-            "window_percent" => {
-                return Err(format!(
-                    "line {} window_percent must be 1..100",
-                    index.saturating_add(1)
-                ));
-            }
-            _ => {
-                return Err(format!(
-                    "line {} has unknown key {key}",
-                    index.saturating_add(1)
-                ));
-            }
-        }
-    }
-    Ok(config)
-}
-
 include!("tsh/context.rs");
 
 include!("tsh/terminal.rs");
 
 include!("tsh/repl_parse.rs");
 include!("tsh/repl.rs");
+include!("shared/plain_dir.rs");
+include!("shared/proc_fd.rs");
+include!("shared/no_follow_fs.rs");
+include!("shared/small_text.rs");
 
 fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let (grant, env) = authorize_tsh_tool_execution(root, name)?;
@@ -360,9 +278,10 @@ fn authorize_tsh_tool_execution(root: &Path, name: &str) -> Result<AuthorizedTsh
         return command_not_found(name);
     };
     let policy_path = view_hit.control_dir().join("policy");
-    let policy_text = read_small_plain_text_file(&policy_path).map_err(|error| {
-        TshError::unavailable(format!("cannot read {}: {error}", policy_path.display()))
-    })?;
+    let policy_text = read_small_plain_text_file(&policy_path, MAX_TSH_CONTROL_BYTES, "tsh")
+        .map_err(|error| {
+            TshError::unavailable(format!("cannot read {}: {error}", policy_path.display()))
+        })?;
     let tool_policy = PolicyV0::parse(&policy_text)
         .map_err(|_error| TshError::unavailable(format!("invalid policy for tool:{name}")))?;
     let grant = authorize_tool_execution(
@@ -407,11 +326,6 @@ fn write_stdout(message: &str) -> Result<(), TshError> {
         .map_err(|error| write_error_to_tsh(&error))
 }
 
-fn write_error(message: &str) -> io::Result<()> {
-    let mut stderr = io::stderr().lock();
-    writeln!(stderr, "{message}")
-}
-
 fn report_repl_error(error: &TshError) -> Result<(), TshError> {
     write_error(&format!("tsh: {}", error.message)).map_err(|error| write_error_to_tsh(&error))
 }
@@ -423,14 +337,14 @@ fn write_error_to_tsh(error: &io::Error) -> TshError {
 #[cfg(test)]
 mod tests {
     use super::{
-        DynamicToolCache, LoadedTool, MAX_TSH_REPL_LINE_BYTES, ToolContext, TshCommand, TshConfig,
-        append_schema_help, builtin_words, ctx_tool_path_with_home, get_id_program, help_text,
-        id_command, load_tool_context, open_executable_no_follow, parse_args, parse_current_uid,
-        parse_repl_line, parse_tsh_config, parse_tshrc_ctx_path, read_repl_line_canonical_from,
-        read_tsh_config_text, requires_explicit_repl_input, run_repl_tool, run_tool,
-        terminal_safe_text, tiny_lfu_admits, tshrc_ctx_path, validate_tshrc_ctx_path,
-        wtinylfu_victim_path,
+        DynamicToolCache, LoadedTool, MAX_TSH_REPL_LINE_BYTES, ToolContext, TshCommand,
+        append_schema_help, builtin_words, ctx_tool_path_with_home, help_text, load_tool_context,
+        open_executable_no_follow, parse_args, parse_repl_line, parse_tshrc_ctx_path,
+        read_repl_line_canonical_from, read_tsh_config_text, requires_explicit_repl_input,
+        run_repl_tool, run_tool, terminal_safe_text, tiny_lfu_admits, tshrc_ctx_path,
+        validate_tshrc_ctx_path, wtinylfu_victim_path,
     };
+    use cortexfs::tool::core::tools::{TshRuntimeConfig, parse_tsh_runtime_config};
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
