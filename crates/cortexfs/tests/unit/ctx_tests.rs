@@ -11,7 +11,7 @@ use super::{
     format_shared_queue_layout_issues, format_tool_schema_issues, format_debug_tool_line,
     json_string, list_names, parse, parse_command, absolute_existing_path,
     ctx_home,
-    agent_bwrap_args, agent_chat_runtime_socket, agent_chat_socket_systemd_command,
+    agent_bwrap_args, agent_chat_request_socket, agent_chat_runtime_socket, agent_chat_socket_systemd_command,
     agent_chat_unit, agent_host_mount_source, agent_native_tool_names, agent_new,
     agent_new_request_json, agent_send_request_json,
     agent_repl_banner_lines, agent_repl_command, agent_repl_model_summary, agent_repl_prompt,

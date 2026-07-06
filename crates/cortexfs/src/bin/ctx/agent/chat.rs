@@ -154,13 +154,13 @@ fn agent_cancel(
 }
 
 fn agent_chat_request_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
-    let visible_socket = agent_socket_path(root, name)?;
-    if terminal_socket_exists(&visible_socket) {
-        return Ok(visible_socket);
-    }
     let runtime_socket = agent_chat_runtime_socket(root, name)?;
     if terminal_socket_exists(&runtime_socket) {
         return Ok(runtime_socket);
+    }
+    let visible_socket = agent_socket_path(root, name)?;
+    if terminal_socket_exists(&visible_socket) {
+        return Ok(visible_socket);
     }
     Ok(visible_socket)
 }

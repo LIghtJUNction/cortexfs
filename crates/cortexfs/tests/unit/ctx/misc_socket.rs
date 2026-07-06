@@ -165,6 +165,38 @@ fn terminal_socket_exists_rejects_plain_file() {
 }
 
 #[test]
+fn agent_chat_request_socket_prefers_runtime_socket_over_visible_socket()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = clean_test_dir("ctx-agent-chat-request-prefers-runtime");
+    let visible_parent = root.join("agent");
+    fs::create_dir_all(&visible_parent)?;
+    let visible_socket = visible_parent.join("coder.sock");
+    let visible_listener = std::os::unix::net::UnixListener::bind(&visible_socket)?;
+    let runtime_socket = match agent_chat_runtime_socket(&root, "coder") {
+        Ok(socket) => socket,
+        Err(error) => {
+            return Err(format!("runtime chat socket path should be available: {error:?}").into());
+        }
+    };
+    let runtime_parent = runtime_socket
+        .parent()
+        .ok_or("runtime socket has no parent")?;
+    fs::create_dir_all(runtime_parent)?;
+    let runtime_listener = std::os::unix::net::UnixListener::bind(&runtime_socket)?;
+
+    let selected_socket = match agent_chat_request_socket(&root, "coder") {
+        Ok(socket) => socket,
+        Err(error) => return Err(format!("chat request socket should be available: {error:?}").into()),
+    };
+    assert_eq!(selected_socket, runtime_socket);
+
+    drop(runtime_listener);
+    drop(visible_listener);
+    let _ignored = fs::remove_file(runtime_socket);
+    Ok(())
+}
+
+#[test]
 fn socket_bind_path_rejects_symlink_parent() {
     let root = clean_test_dir("ctx-terminal-socket-bind-parent-symlink");
     let outside = clean_test_dir("ctx-terminal-socket-bind-parent-symlink-outside");
