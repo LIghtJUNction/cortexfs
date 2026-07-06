@@ -36,6 +36,36 @@ fn durable_session_layout_uses_private_modes_for_session_state() {
 }
 
 #[test]
+fn durable_session_layout_preserves_existing_meta_json() {
+    let root = clean_test_dir("durable-session-preserve-meta");
+
+    assert!(ensure_durable_session_layout(
+        &root,
+        "default",
+        "/work/project",
+        Some("debug/echo"),
+        SocketSessionScope::Private,
+    )
+    .is_ok());
+    let meta = root.join("default").join("meta.json");
+    write_text_file(&meta, "{\"client\":\"ctx\",\"model\":\"custom/model\",\"scope\":\"private\"}\n");
+
+    assert!(ensure_durable_session_layout(
+        &root,
+        "default",
+        "/work/project",
+        Some("debug/echo"),
+        SocketSessionScope::Private,
+    )
+    .is_ok());
+
+    assert_eq!(
+        fs::read_to_string(meta).ok().as_deref(),
+        Some("{\"client\":\"ctx\",\"model\":\"custom/model\",\"scope\":\"private\"}\n")
+    );
+}
+
+#[test]
 fn durable_session_layout_rejects_session_symlink() {
     let root = clean_test_dir("durable-session-symlink");
     assert!(fs::create_dir_all(&root).is_ok());
