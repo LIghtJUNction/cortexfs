@@ -1,4 +1,5 @@
 include!("agent/core.rs");
+include!("agent/session_gc.rs");
 include!("agent/start.rs");
 include!("agent/chat.rs");
 include!("agent/repl.rs");
