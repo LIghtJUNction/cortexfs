@@ -46,7 +46,7 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
-        "agent requires new, start, stop, status, env, ps, send, chat, repl, resume, history, output, pack, prompt, tools, children, wait, cancel, watch, or attach",
+        "agent requires new, start, stop, status, env, ps, send, chat, repl, resume, history, output, pack, session, prompt, tools, children, wait, cancel, watch, or attach",
     )?;
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) {
@@ -108,6 +108,7 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
             let (name, session) = parse_agent_session_option_args(values, "agent pack")?;
             Ok(Command::Agent(AgentArgs::Pack { name, session }))
         }
+        "session" => parse_agent_session_admin(values),
         "prompt" => {
             let name = required_arg(&mut values, "agent prompt requires an agent name")?;
             no_extra_args(values)?;
@@ -149,6 +150,55 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
         }
         _ => Err(CliError::usage(format!("unknown agent command: {command}"))),
     }
+}
+
+fn parse_agent_session_admin(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+    let command = required_arg(&mut values, "agent session requires gc")?;
+    match command.as_str() {
+        "gc" => Ok(Command::Agent(AgentArgs::SessionGc(parse_agent_session_gc(values)?))),
+        _ => Err(CliError::usage(format!("unknown agent session command: {command}"))),
+    }
+}
+
+fn parse_agent_session_gc(mut values: impl Iterator<Item = String>) -> Result<AgentSessionGcArgs, CliError> {
+    let name = required_arg(&mut values, "agent session gc requires an agent name")?;
+    let mut args = AgentSessionGcArgs {
+        name,
+        dry_run: true,
+        yes: false,
+        keep: Vec::new(),
+        patterns: Vec::new(),
+        older_than_days: None,
+    };
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--dry-run" => args.dry_run = true,
+            "--yes" => {
+                args.yes = true;
+                args.dry_run = false;
+            }
+            "--keep" => args.keep.push(required_arg(
+                &mut values,
+                "agent session gc --keep requires a session name",
+            )?),
+            "--match" => args.patterns.push(required_arg(
+                &mut values,
+                "agent session gc --match requires a glob pattern",
+            )?),
+            "--older-than-days" => {
+                let days = required_arg(
+                    &mut values,
+                    "agent session gc --older-than-days requires a number",
+                )?;
+                args.older_than_days = Some(
+                    days.parse()
+                        .map_err(|_error| CliError::usage("invalid --older-than-days value"))?,
+                );
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(args)
 }
 
 fn parse_agent_session_option_args(

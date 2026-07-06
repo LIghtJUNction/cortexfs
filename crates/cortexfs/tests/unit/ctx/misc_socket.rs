@@ -341,6 +341,18 @@ fn current_session_name_falls_back_to_default_when_index_is_unreadable() {
 }
 
 #[test]
+fn current_session_name_falls_back_to_default_when_index_points_to_deleted_session() {
+    let root = clean_test_dir("ctx-current-session-deleted");
+    let index = root.join("index");
+    assert!(fs::create_dir_all(&index).is_ok());
+    assert!(fs::write(index.join("current"), "deleted-session\n").is_ok());
+
+    let name = current_session_name(&root);
+
+    assert!(matches!(name, Ok(ref name) if name == "default"));
+}
+
+#[test]
 fn current_session_name_rejects_symlink_index_dir_without_reading_target() {
     let root = clean_test_dir("ctx-current-session-symlink-index");
     let outside = clean_test_dir("ctx-current-session-symlink-index-target");

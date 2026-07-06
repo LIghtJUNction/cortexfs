@@ -34,6 +34,7 @@ enum AgentArgs {
         name: String,
         session: Option<String>,
     },
+    SessionGc(AgentSessionGcArgs),
     Prompt {
         name: String,
     },
@@ -86,6 +87,16 @@ struct AgentStartArgs {
     cwd: String,
     default_workspace: bool,
     mounts: Vec<AgentMount>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AgentSessionGcArgs {
+    name: String,
+    dry_run: bool,
+    yes: bool,
+    keep: Vec<String>,
+    patterns: Vec<String>,
+    older_than_days: Option<u64>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -148,6 +159,7 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
             ref name,
             ref session,
         } => success(agent_pack(root, name, session.as_deref())),
+        AgentArgs::SessionGc(ref args) => success(agent_session_gc(root, args)),
         AgentArgs::Prompt { ref name } => success(agent_prompt(root, name)),
         AgentArgs::Tools { ref name } => success(agent_tools(root, name)),
         AgentArgs::Children {

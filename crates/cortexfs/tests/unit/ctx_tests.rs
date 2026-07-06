@@ -32,7 +32,7 @@ use super::{
     cli_error_line, cortexfs_xattr_line, socket_bind_path, terminal_socket_exists,
     visible_terminal_errno_is_best_effort, visible_terminal_write_error_is_best_effort,
     build_agent_system_prompt,
-    AgentDebugState, AgentInterruptGuard, AgentProcess, collect_agent_events_buffered,
+    agent_session_gc, AgentDebugState, AgentInterruptGuard, AgentProcess, collect_agent_events_buffered,
     collect_agent_events_buffered_interruptible, copy_socket_response_interruptible, ctx_state,
     cortexfs_mount_bin, ctx_root_entry_present, ctx_root_shape, env_exports, is_mount_point,
     parse_systemctl_main_pid, plain_sibling_mount_bin, read_agent_processes, read_ctx_status,
@@ -43,7 +43,7 @@ use super::{
     schedule_child_context_abi_paths, schedule_context_abi_path, shell_quote_arg,
     stream_agent_socket_request_streaming_interruptible, stream_socket_request,
     stream_terminal_socket, terminal_connect_cli_error, AgentArgs, AgentChildRow, AgentMount,
-    AgentStartArgs, AgentStartCommand, Cli, Command, FileCommand, LsTarget, ObjectClass,
+    AgentSessionGcArgs, AgentStartArgs, AgentStartCommand, Cli, Command, FileCommand, LsTarget, ObjectClass,
     open_executable_no_follow, CliError,
     ProviderArgs, ScheduleArgs, ScheduleChildContextAbiPaths, MAX_AGENT_EVENTS,
     MAX_AGENT_RESPONSE_BYTES, MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS,
@@ -78,3 +78,4 @@ include!("ctx/format_check.rs");
 include!("ctx/file_doctor.rs");
 include!("ctx/misc_terminal.rs");
 include!("ctx/misc_socket.rs");
+include!("ctx/session_gc.rs");

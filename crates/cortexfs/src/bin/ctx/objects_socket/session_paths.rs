@@ -91,6 +91,9 @@ fn current_session_name(session_root: &Path) -> Result<String, CliError> {
         Ok(value) => {
             let session = value.trim();
             if is_object_name(session) {
+                if session != "default" && !plain_session_dir_exists(&session_root.join(session)) {
+                    return Ok("default".to_owned());
+                }
                 Ok(session.to_owned())
             } else {
                 Err(CliError::unavailable(format!(
@@ -112,6 +115,11 @@ fn current_session_name(session_root: &Path) -> Result<String, CliError> {
             current_path.display()
         ))),
     }
+}
+
+fn plain_session_dir_exists(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
 }
 
 fn open_current_session_plain_file(path: &Path) -> io::Result<fs::File> {
