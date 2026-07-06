@@ -88,7 +88,7 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
     );
     assert_eq!(updated, Ok(()));
     let meta = fs::read_to_string(session.join("meta.json"));
-    assert!(matches!(meta, Ok(ref meta) if meta.contains("\"model\":\"openai/gpt-4o\"")));
+    assert!(matches!(meta, Ok(ref meta) if meta.contains("\"model\":\"main\"")));
 
     let request = parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,

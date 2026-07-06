@@ -184,7 +184,7 @@ pub fn ensure_durable_session_layout(
     write_text_file_if_missing(&session_dir.join("created_at"), &now)?;
     write_text_file_if_missing(&session_dir.join("updated_at"), &now)?;
     let meta_json = session_dir.join("meta.json");
-    write_private_text_file(&meta_json, &durable_session_meta_json(model, scope))?;
+    write_text_file_if_missing(&meta_json, &durable_session_meta_json(model, scope))?;
 
     write_text_file_if_missing(&context.join("budget"), "0\n")?;
     write_text_file_if_missing(
