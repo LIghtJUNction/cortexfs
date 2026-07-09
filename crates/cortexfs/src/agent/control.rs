@@ -1,4 +1,8 @@
-use crate::{ChildLifecycle, parent_ref_agent_name};
+use crate::{
+    ChildLifecycle, ControlLineIssue,
+    authority::parent_ref_agent_name,
+    support::control_text::{inspect_control_line, inspect_control_lines},
+};
 
 /// Stable agent control file kind with fixed v1 value syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,26 +46,16 @@ impl AgentControlKind {
     }
 }
 
-/// Agent control-file validation issue.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AgentControlIssue {
-    /// A required single value is empty.
-    EmptyValue,
-    /// A single-value control file contains more than one line.
-    MultipleValues { line: usize },
-    /// Numeric uid/gid/pid value is malformed.
-    InvalidNumber { line: usize, value: String },
-    /// Fixed vocabulary or parent reference value is malformed.
-    InvalidValue { line: usize, value: String },
-}
+/// Agent control-file validation uses the shared control-line issue model.
+pub type AgentControlIssue = ControlLineIssue;
 
 /// Result of inspecting a fixed-format agent control file.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AgentControlReport {
-    issues: Vec<AgentControlIssue>,
+    issues: Vec<ControlLineIssue>,
 }
 
-impl_issue_report!(AgentControlReport, AgentControlIssue);
+impl_issue_report!(AgentControlReport, ControlLineIssue);
 
 /// Inspects a fixed-format v1 agent control file body.
 #[must_use]
@@ -79,95 +73,81 @@ pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentCont
     }
 }
 
-fn inspect_required_agent_number_control(content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, true, |line, value, issues| {
+pub(crate) fn inspect_required_agent_number_control(content: &str) -> AgentControlReport {
+    AgentControlReport::new(inspect_control_line(
+        content,
+        true,
+        |line, value, issues| {
+            if value.parse::<u32>().is_err() {
+                issues.push(ControlLineIssue::InvalidNumber {
+                    line,
+                    value: value.to_owned(),
+                });
+            }
+        },
+    ))
+}
+
+pub(crate) fn inspect_optional_agent_number_control(content: &str) -> AgentControlReport {
+    AgentControlReport::new(inspect_control_line(
+        content,
+        false,
+        |line, value, issues| {
+            if !value.is_empty() && value.parse::<u32>().is_err() {
+                issues.push(ControlLineIssue::InvalidNumber {
+                    line,
+                    value: value.to_owned(),
+                });
+            }
+        },
+    ))
+}
+
+pub(crate) fn inspect_agent_groups_control(content: &str) -> AgentControlReport {
+    AgentControlReport::new(inspect_control_lines(content, |line, value, issues| {
         if value.parse::<u32>().is_err() {
-            issues.push(AgentControlIssue::InvalidNumber {
+            issues.push(ControlLineIssue::InvalidNumber {
                 line,
                 value: value.to_owned(),
             });
         }
-    })
+    }))
 }
 
-fn inspect_optional_agent_number_control(content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, false, |line, value, issues| {
-        if !value.is_empty() && value.parse::<u32>().is_err() {
-            issues.push(AgentControlIssue::InvalidNumber {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    })
+pub(crate) fn inspect_optional_agent_parent_control(content: &str) -> AgentControlReport {
+    AgentControlReport::new(inspect_control_line(
+        content,
+        false,
+        |line, value, issues| {
+            if !value.is_empty() && parent_ref_agent_name(value).is_err() {
+                issues.push(ControlLineIssue::InvalidValue {
+                    line,
+                    value: value.to_owned(),
+                });
+            }
+        },
+    ))
 }
 
-fn inspect_agent_groups_control(content: &str) -> AgentControlReport {
-    let mut issues = Vec::new();
-    for (index, raw_line) in content.lines().enumerate() {
-        let line = index + 1;
-        let value = raw_line.trim();
-        if value.is_empty() {
-            issues.push(AgentControlIssue::EmptyValue);
-        } else if value != raw_line || value.parse::<u32>().is_err() {
-            issues.push(AgentControlIssue::InvalidNumber {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    }
-    AgentControlReport::new(issues)
-}
-
-fn inspect_optional_agent_parent_control(content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, false, |line, value, issues| {
-        if !value.is_empty() && parent_ref_agent_name(value).is_err() {
-            issues.push(AgentControlIssue::InvalidValue {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    })
-}
-
-fn inspect_agent_vocab_control(kind: AgentControlKind, content: &str) -> AgentControlReport {
-    inspect_single_agent_control_value(content, true, |line, value, issues| {
-        if !agent_vocab_allows(kind, value) {
-            issues.push(AgentControlIssue::InvalidValue {
-                line,
-                value: value.to_owned(),
-            });
-        }
-    })
-}
-
-fn inspect_single_agent_control_value(
+pub(crate) fn inspect_agent_vocab_control(
+    kind: AgentControlKind,
     content: &str,
-    required: bool,
-    validate: impl Fn(usize, &str, &mut Vec<AgentControlIssue>),
 ) -> AgentControlReport {
-    let mut issues = Vec::new();
-    let mut lines = content.lines();
-    let first_line = lines.next();
-    let value = first_line.map_or("", str::trim);
-    if value.is_empty() {
-        if required {
-            issues.push(AgentControlIssue::EmptyValue);
-        }
-    } else if first_line.is_some_and(|line| line != value) {
-        issues.push(AgentControlIssue::InvalidValue {
-            line: 1,
-            value: value.to_owned(),
-        });
-    } else {
-        validate(1, value, &mut issues);
-    }
-    if lines.next().is_some() {
-        issues.push(AgentControlIssue::MultipleValues { line: 2 });
-    }
-    AgentControlReport::new(issues)
+    AgentControlReport::new(inspect_control_line(
+        content,
+        true,
+        |line, value, issues| {
+            if !agent_vocab_allows(kind, value) {
+                issues.push(ControlLineIssue::InvalidValue {
+                    line,
+                    value: value.to_owned(),
+                });
+            }
+        },
+    ))
 }
 
-fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
+pub(crate) fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
     match kind {
         AgentControlKind::Iso => matches!(value, "shared" | "uid" | "userns"),
         AgentControlKind::Life => ChildLifecycle::parse(value).is_ok(),

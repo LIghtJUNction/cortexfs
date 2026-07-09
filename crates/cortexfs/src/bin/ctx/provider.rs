@@ -1,10 +1,23 @@
-include!("provider/secrets.rs");
-include!("provider/presets.rs");
-include!("provider/config_files.rs");
-include!("provider/oauth.rs");
-include!("provider/oauth_callback.rs");
+use crate::*;
 
-fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
+pub(crate) use config_files::*;
+pub(crate) use oauth::*;
+pub(crate) use oauth_callback::*;
+pub(crate) use presets::*;
+pub(crate) use secrets::*;
+
+#[path = "provider/config-files.rs"]
+pub mod config_files;
+#[path = "provider/oauth.rs"]
+pub mod oauth;
+#[path = "provider/oauth-callback.rs"]
+pub mod oauth_callback;
+#[path = "provider/presets.rs"]
+pub mod presets;
+#[path = "provider/secrets.rs"]
+pub mod secrets;
+
+pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
     match *args {
         ProviderArgs::Login {
             ref provider,

@@ -1,10 +1,12 @@
+use crate::*;
+
 use crate::plain_fs::{
     open_plain_file as open_object_metadata_plain_file,
     path_metadata_no_follow as object_metadata_plain_path_metadata,
 };
 
 const MAX_OBJECT_METADATA_CONTROL_BYTES: u64 = 64 * 1024;
-const MAX_ECHO_MODEL_STDIN_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_ECHO_MODEL_STDIN_BYTES: usize = 1024 * 1024;
 
 /// Returns executable metadata text for a model object.
 pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
@@ -107,7 +109,7 @@ pub fn agent_exec_metadata(name: &str, control_dir: &Path) -> Result<String, Fus
     ]))
 }
 
-fn object_exec_metadata(
+pub(crate) fn object_exec_metadata(
     class: ObjectClass,
     name: &str,
     control_dir: &Path,
@@ -119,7 +121,7 @@ fn object_exec_metadata(
     }
 }
 
-fn exec_metadata(fields: &[(&str, String)]) -> String {
+pub(crate) fn exec_metadata(fields: &[(&str, String)]) -> String {
     let mut output = format!("#!{CORTEXFS_OBJECT_RUNNER}\n");
     for field in fields {
         output.push_str("# cortexfs.");
@@ -131,7 +133,7 @@ fn exec_metadata(fields: &[(&str, String)]) -> String {
     output
 }
 
-fn model_metadata_description(name: &str, driver: &str) -> &'static str {
+pub(crate) fn model_metadata_description(name: &str, driver: &str) -> &'static str {
     if name == "debug/echo" && driver == "debug" {
         "Built-in debug echo model"
     } else {
@@ -139,11 +141,11 @@ fn model_metadata_description(name: &str, driver: &str) -> &'static str {
     }
 }
 
-fn model_metadata_type(driver: &str) -> &str {
+pub(crate) fn model_metadata_type(driver: &str) -> &str {
     if driver == "debug" { "debug" } else { "chat" }
 }
 
-fn model_metadata_owner(name: &str, driver: &str) -> &'static str {
+pub(crate) fn model_metadata_owner(name: &str, driver: &str) -> &'static str {
     if name == "debug/echo" && driver == "debug" {
         "cortexfs"
     } else {
@@ -151,7 +153,7 @@ fn model_metadata_owner(name: &str, driver: &str) -> &'static str {
     }
 }
 
-fn model_metadata_context_length(_name: &str, _driver: &str) -> u64 {
+pub(crate) fn model_metadata_context_length(_name: &str, _driver: &str) -> u64 {
     0
 }
 
@@ -182,7 +184,7 @@ where
     stdout.write_all(b"\n")
 }
 
-fn read_echo_model_stdin_limited(
+pub(crate) fn read_echo_model_stdin_limited(
     reader: impl Read,
     max_bytes: usize,
 ) -> std::io::Result<String> {
@@ -203,7 +205,10 @@ fn read_echo_model_stdin_limited(
     Ok(input)
 }
 
-fn read_object_control_for_metadata(control_dir: &Path, file: &str) -> Result<String, FuseV1Error> {
+pub(crate) fn read_object_control_for_metadata(
+    control_dir: &Path,
+    file: &str,
+) -> Result<String, FuseV1Error> {
     let path = control_dir.join(file);
     let metadata =
         object_metadata_plain_path_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
@@ -221,7 +226,7 @@ fn read_object_control_for_metadata(control_dir: &Path, file: &str) -> Result<St
         .map_err(|_error| FuseV1Error::InvalidContent)
 }
 
-fn is_valid_env_key(value: &str) -> bool {
+pub(crate) fn is_valid_env_key(value: &str) -> bool {
     let mut bytes = value.bytes();
     let Some(first) = bytes.next() else {
         return false;

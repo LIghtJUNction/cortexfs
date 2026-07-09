@@ -1,5 +1,7 @@
+use crate::*;
+
 #[derive(Debug)]
-enum ProviderArgs {
+pub(crate) enum ProviderArgs {
     Login { provider: String, timeout: u64 },
     Status { provider: String },
     Refresh { provider: String },
@@ -10,7 +12,7 @@ enum ProviderArgs {
     PresetInstall { preset: String },
 }
 
-fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
+pub(crate) fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let command = required_arg(&mut values, "provider requires oauth, preset, or secret")?;
     let rest = values.collect::<Vec<_>>();
@@ -21,7 +23,9 @@ fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
         && matches!(rest.as_slice(), [subcommand, help] if is_help_flag(help) && matches!(subcommand.as_str(), "login" | "status" | "refresh"))
     {
         let Some(subcommand) = rest.first() else {
-            return Err(CliError::usage("provider oauth requires login, status, or refresh"));
+            return Err(CliError::usage(
+                "provider oauth requires login, status, or refresh",
+            ));
         };
         return Ok(Command::HelpTopic(format!("provider oauth {subcommand}")));
     }
@@ -41,8 +45,13 @@ fn parse_provider_command(args: Vec<String>) -> Result<Command, CliError> {
     }
 }
 
-fn parse_provider_oauth_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
-    let command = required_arg(&mut values, "provider oauth requires login, status, or refresh")?;
+pub(crate) fn parse_provider_oauth_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let command = required_arg(
+        &mut values,
+        "provider oauth requires login, status, or refresh",
+    )?;
     match command.as_str() {
         "login" => {
             let provider = required_arg(&mut values, "provider oauth login requires a provider")?;
@@ -73,12 +82,19 @@ fn parse_provider_oauth_command(mut values: impl Iterator<Item = String>) -> Res
             no_extra_args(values)?;
             Ok(Command::Provider(ProviderArgs::Refresh { provider }))
         }
-        _ => Err(CliError::usage("provider oauth expects login, status, or refresh")),
+        _ => Err(CliError::usage(
+            "provider oauth expects login, status, or refresh",
+        )),
     }
 }
 
-fn parse_provider_preset_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
-    let command = required_arg(&mut values, "provider preset requires list, show, or install")?;
+pub(crate) fn parse_provider_preset_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let command = required_arg(
+        &mut values,
+        "provider preset requires list, show, or install",
+    )?;
     match command.as_str() {
         "list" => {
             no_extra_args(values)?;
@@ -94,11 +110,13 @@ fn parse_provider_preset_command(mut values: impl Iterator<Item = String>) -> Re
             no_extra_args(values)?;
             Ok(Command::Provider(ProviderArgs::PresetInstall { preset }))
         }
-        _ => Err(CliError::usage("provider preset expects list, show, or install")),
+        _ => Err(CliError::usage(
+            "provider preset expects list, show, or install",
+        )),
     }
 }
 
-fn parse_provider_secret_command(
+pub(crate) fn parse_provider_secret_command(
     mut values: impl Iterator<Item = String>,
 ) -> Result<Command, CliError> {
     let command = required_arg(&mut values, "provider secret requires set or status")?;
@@ -106,18 +124,26 @@ fn parse_provider_secret_command(
         "set" => {
             let provider = required_arg(&mut values, "provider secret set requires a provider")?;
             let slot = parse_provider_secret_slot(values)?;
-            Ok(Command::Provider(ProviderArgs::SecretSet { provider, slot }))
+            Ok(Command::Provider(ProviderArgs::SecretSet {
+                provider,
+                slot,
+            }))
         }
         "status" => {
             let provider = required_arg(&mut values, "provider secret status requires a provider")?;
             let slot = parse_provider_secret_slot(values)?;
-            Ok(Command::Provider(ProviderArgs::SecretStatus { provider, slot }))
+            Ok(Command::Provider(ProviderArgs::SecretStatus {
+                provider,
+                slot,
+            }))
         }
         _ => Err(CliError::usage("provider secret expects set or status")),
     }
 }
 
-fn parse_provider_secret_slot(mut values: impl Iterator<Item = String>) -> Result<String, CliError> {
+pub(crate) fn parse_provider_secret_slot(
+    mut values: impl Iterator<Item = String>,
+) -> Result<String, CliError> {
     let mut slot = "default".to_owned();
     while let Some(value) = values.next() {
         match value.as_str() {
@@ -130,17 +156,21 @@ fn parse_provider_secret_slot(mut values: impl Iterator<Item = String>) -> Resul
     Ok(slot)
 }
 
-fn is_help_flag(value: &str) -> bool {
+pub(crate) fn is_help_flag(value: &str) -> bool {
     matches!(value, "--help" | "-h")
 }
 
-fn parse_ls_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+pub(crate) fn parse_ls_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
     let target = values.next().map_or(LsTarget::Root, LsTarget::Path);
     no_extra_args(values)?;
     Ok(Command::Ls(target))
 }
 
-fn parse_mount_command(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+pub(crate) fn parse_mount_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
     let mut source = None;
     let mut mountpoint = None;
 

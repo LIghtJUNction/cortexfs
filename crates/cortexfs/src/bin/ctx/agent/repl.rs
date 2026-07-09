@@ -1,4 +1,10 @@
-fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(), CliError> {
+use crate::*;
+
+pub(crate) fn print_agent_repl_banner(
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<(), CliError> {
     let color = color_enabled();
     for line in agent_repl_banner_lines(color, root, name, session)? {
         write_error(&line)
@@ -7,7 +13,7 @@ fn print_agent_repl_banner(root: &Path, name: &str, session: &str) -> Result<(),
     Ok(())
 }
 
-fn agent_repl_banner_lines(
+pub(crate) fn agent_repl_banner_lines(
     color: bool,
     root: &Path,
     name: &str,
@@ -39,24 +45,22 @@ fn agent_repl_banner_lines(
         ),
     ];
     lines.push(workspace);
-    lines.push(
-        format!(
-            " {} {}",
-            styled(color, ANSI_BOLD_BLUE, "Commands:"),
-            styled(color, ANSI_DIM, AGENT_REPL_COMMANDS)
-        )
-    );
+    lines.push(format!(
+        " {} {}",
+        styled(color, ANSI_BOLD_BLUE, "Commands:"),
+        styled(color, ANSI_DIM, AGENT_REPL_COMMANDS)
+    ));
     Ok(lines)
 }
 
-fn agent_repl_workspace_line(
+pub(crate) fn agent_repl_workspace_line(
     color: bool,
     root: &Path,
     name: &str,
     session: &str,
 ) -> Result<String, CliError> {
-    let workspace = preferred_workspace_source(root, name, session)?
-        .unwrap_or_else(|| "(unknown)".to_owned());
+    let workspace =
+        preferred_workspace_source(root, name, session)?.unwrap_or_else(|| "(unknown)".to_owned());
     Ok(format!(
         " {} {}",
         styled(color, ANSI_BOLD_BLUE, "Workspace:"),
@@ -64,7 +68,7 @@ fn agent_repl_workspace_line(
     ))
 }
 
-fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
+pub(crate) fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
     format!(
         "{} {}{} ",
         styled(color, ANSI_DIM, "ctx agent"),
@@ -73,7 +77,11 @@ fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
     )
 }
 
-fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> Result<String, CliError> {
+pub(crate) fn agent_repl_model_summary(
+    color: bool,
+    root: &Path,
+    name: &str,
+) -> Result<String, CliError> {
     let model = read_agent_model_for_context(&agent_control_dir(root, name), "agent")?;
     let model_text = styled(color, ANSI_CYAN, &model);
     if !matches!(model.as_str(), "main" | "helper") {
@@ -101,11 +109,15 @@ fn agent_repl_model_summary(color: bool, root: &Path, name: &str) -> Result<Stri
                 )
             )
         }
-        Err(_error) => format!("{} {}", model_text, styled(color, ANSI_RED, "(missing alias)")),
+        Err(_error) => format!(
+            "{} {}",
+            model_text,
+            styled(color, ANSI_RED, "(missing alias)")
+        ),
     })
 }
 
-fn model_alias_target_exists(root: &Path, target: &str) -> bool {
+pub(crate) fn model_alias_target_exists(root: &Path, target: &str) -> bool {
     let Some(relative) = target.strip_prefix("/ctx/model/") else {
         return false;
     };
@@ -119,11 +131,13 @@ fn model_alias_target_exists(root: &Path, target: &str) -> bool {
         .is_ok_and(|metadata| !metadata.file_type().is_symlink())
 }
 
-fn agent_repl_editor_config() -> rustyline::Config {
+pub(crate) fn agent_repl_editor_config() -> rustyline::Config {
     rustyline::Config::builder().enable_signals(true).build()
 }
 
-fn agent_repl_should_exit_on_readline_error(error: &rustyline::error::ReadlineError) -> bool {
+pub(crate) fn agent_repl_should_exit_on_readline_error(
+    error: &rustyline::error::ReadlineError,
+) -> bool {
     matches!(
         error,
         rustyline::error::ReadlineError::Interrupted
@@ -132,13 +146,13 @@ fn agent_repl_should_exit_on_readline_error(error: &rustyline::error::ReadlineEr
     )
 }
 
-struct AgentInterruptGuard {
-    interrupted: Arc<AtomicBool>,
-    signal_id: signal_hook::SigId,
+pub(crate) struct AgentInterruptGuard {
+    pub(crate) interrupted: Arc<AtomicBool>,
+    pub(crate) signal_id: signal_hook::SigId,
 }
 
 impl AgentInterruptGuard {
-    fn new() -> Result<Self, CliError> {
+    pub(crate) fn new() -> Result<Self, CliError> {
         let interrupted = Arc::new(AtomicBool::new(false));
         let signal_id =
             signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted))
@@ -151,7 +165,7 @@ impl AgentInterruptGuard {
         })
     }
 
-    fn interrupted_flag(&self) -> &AtomicBool {
+    pub(crate) fn interrupted_flag(&self) -> &AtomicBool {
         &self.interrupted
     }
 }
@@ -162,7 +176,7 @@ impl Drop for AgentInterruptGuard {
     }
 }
 
-fn agent_repl_command(
+pub(crate) fn agent_repl_command(
     root: &Path,
     name: &str,
     session: &mut String,
@@ -238,7 +252,7 @@ fn agent_repl_command(
     Ok(Some(code))
 }
 
-fn agent_repl_new_session(
+pub(crate) fn agent_repl_new_session(
     root: &Path,
     name: &str,
     current: &mut String,
@@ -257,13 +271,16 @@ fn agent_repl_new_session(
         CliError::unavailable(format!("cannot prepare agent session {next}: {error:?}"))
     })?;
     if let Some(workspace) = preferred_workspace_source(root, name, current)? {
-        write_agent_control_plain(&session_root.join(&next).join("workspace"), &format!("{workspace}\n"))?;
+        write_agent_control_plain(
+            &session_root.join(&next).join("workspace"),
+            &format!("{workspace}\n"),
+        )?;
     }
     *current = next;
     print_agent_repl_banner(root, name, current)
 }
 
-fn agent_repl_new_session_name(command: &str) -> Result<String, CliError> {
+pub(crate) fn agent_repl_new_session_name(command: &str) -> Result<String, CliError> {
     let mut args = command.split_whitespace();
     let Some("/new") = args.next() else {
         return Err(CliError::usage(format!("unknown repl command: {command}")));
@@ -279,11 +296,11 @@ fn agent_repl_new_session_name(command: &str) -> Result<String, CliError> {
     Ok(session)
 }
 
-fn agent_repl_unknown_command_line(command: &str) -> String {
+pub(crate) fn agent_repl_unknown_command_line(command: &str) -> String {
     format!("ctx: unknown repl command: {}", terminal_safe_text(command))
 }
 
-fn clear_terminal_screen() -> Result<(), CliError> {
+pub(crate) fn clear_terminal_screen() -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(b"\x1b[2J\x1b[H")
@@ -292,13 +309,13 @@ fn clear_terminal_screen() -> Result<(), CliError> {
 }
 
 #[derive(Default)]
-struct AgentDebugState {
-    enabled: bool,
-    previous_tools: Option<Vec<String>>,
+pub(crate) struct AgentDebugState {
+    pub(crate) enabled: bool,
+    pub(crate) previous_tools: Option<Vec<String>>,
 }
 
 impl AgentDebugState {
-    fn report_tools(&mut self, root: &Path, name: &str) -> Result<(), CliError> {
+    pub(crate) fn report_tools(&mut self, root: &Path, name: &str) -> Result<(), CliError> {
         let tools = agent_native_tool_names(root, name)?;
         let line = format_debug_tool_line(self.previous_tools.as_deref(), &tools);
         self.previous_tools = Some(tools);
@@ -307,7 +324,7 @@ impl AgentDebugState {
     }
 }
 
-fn format_debug_tool_line(previous: Option<&[String]>, current: &[String]) -> String {
+pub(crate) fn format_debug_tool_line(previous: Option<&[String]>, current: &[String]) -> String {
     let current_text = current.join(" ");
     let Some(previous) = previous else {
         return format!("[debug tools] = {current_text}");

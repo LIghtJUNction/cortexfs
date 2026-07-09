@@ -1,21 +1,24 @@
-const CTX_PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
+use crate::*;
+
+pub(crate) const CTX_PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
 const OAUTH_CALLBACK_RESPONSE_BODY: &str =
     "CortexFS OAuth login complete. You may close this tab.\n";
 const MAX_OAUTH_TOKEN_RESPONSE_BYTES: u64 = 1024 * 1024;
 
-fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliError> {
+pub(crate) fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
     let pkce = oauth_pkce_from_system_entropy()?;
     let state = oauth_state_from_system_entropy()?;
     let auth_url = cortexfs::oauth_authorization_url(&config, &state, &pkce)
         .map_err(|_error| CliError::usage("invalid provider oauth config"))?;
     let callback = parse_oauth_redirect_uri(&config.redirect_uri)?;
-    let listener = std::net::TcpListener::bind((callback.host.as_str(), callback.port)).map_err(
-        |error| CliError::unavailable(format!("cannot listen on oauth redirect uri: {error}")),
-    )?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|error| CliError::unavailable(format!("cannot configure oauth listener: {error}")))?;
+    let listener =
+        std::net::TcpListener::bind((callback.host.as_str(), callback.port)).map_err(|error| {
+            CliError::unavailable(format!("cannot listen on oauth redirect uri: {error}"))
+        })?;
+    listener.set_nonblocking(true).map_err(|error| {
+        CliError::unavailable(format!("cannot configure oauth listener: {error}"))
+    })?;
 
     print_line("open this URL in your browser:")?;
     print_line(&auth_url)?;
@@ -46,7 +49,7 @@ fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliErro
     print_line("oauth login ok")
 }
 
-fn oauth_callback_response() -> String {
+pub(crate) fn oauth_callback_response() -> String {
     format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\n\r\n{}",
         OAUTH_CALLBACK_RESPONSE_BODY.len(),
@@ -54,7 +57,7 @@ fn oauth_callback_response() -> String {
     )
 }
 
-fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
+pub(crate) fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
     let service = provider_keychain_service(provider);
     let access = keychain_has_secret(&service, config.access_account())?;
@@ -69,7 +72,7 @@ fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
     ))
 }
 
-fn accept_oauth_callback(
+pub(crate) fn accept_oauth_callback(
     listener: &std::net::TcpListener,
     deadline: std::time::Instant,
 ) -> Result<std::net::TcpStream, CliError> {
@@ -83,13 +86,15 @@ fn accept_oauth_callback(
                 std::thread::sleep(Duration::from_millis(50));
             }
             Err(error) => {
-                return Err(CliError::unavailable(format!("oauth callback failed: {error}")));
+                return Err(CliError::unavailable(format!(
+                    "oauth callback failed: {error}"
+                )));
             }
         }
     }
 }
 
-fn provider_oauth_refresh(provider: &str) -> Result<(), CliError> {
+pub(crate) fn provider_oauth_refresh(provider: &str) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
     let service = provider_keychain_service(provider);
     let refresh = keychain_get_secret(&service, config.refresh_account())?
@@ -101,7 +106,9 @@ fn provider_oauth_refresh(provider: &str) -> Result<(), CliError> {
     print_line("oauth refresh ok")
 }
 
-fn provider_oauth_config(provider: &str) -> Result<cortexfs::OAuthProviderConfig, CliError> {
+pub(crate) fn provider_oauth_config(
+    provider: &str,
+) -> Result<cortexfs::OAuthProviderConfig, CliError> {
     if !is_provider_name(provider) {
         return Err(CliError::usage("invalid provider name"));
     }
@@ -111,7 +118,10 @@ fn provider_oauth_config(provider: &str) -> Result<cortexfs::OAuthProviderConfig
     Ok(config)
 }
 
-fn exchange_oauth_token(token_url: &str, form: &str) -> Result<cortexfs::OAuthTokenResponse, CliError> {
+pub(crate) fn exchange_oauth_token(
+    token_url: &str,
+    form: &str,
+) -> Result<cortexfs::OAuthTokenResponse, CliError> {
     let mut child = ctx_provider_curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -155,13 +165,13 @@ fn exchange_oauth_token(token_url: &str, form: &str) -> Result<cortexfs::OAuthTo
         .map_err(|_error| CliError::unavailable("invalid oauth token response"))
 }
 
-fn ctx_provider_curl_command() -> ProcessCommand {
+pub(crate) fn ctx_provider_curl_command() -> ProcessCommand {
     let mut command = ProcessCommand::new(CTX_PROVIDER_CURL_BIN);
     command.env_clear().arg("-q").arg("--config").arg("-");
     command
 }
 
-fn store_oauth_tokens(
+pub(crate) fn store_oauth_tokens(
     provider: &str,
     config: &cortexfs::OAuthProviderConfig,
     token: &cortexfs::OAuthTokenResponse,
@@ -176,11 +186,14 @@ fn store_oauth_tokens(
     Ok(())
 }
 
-fn keychain_has_secret(service: &str, account: &str) -> Result<bool, CliError> {
+pub(crate) fn keychain_has_secret(service: &str, account: &str) -> Result<bool, CliError> {
     keychain_get_secret(service, account).map(|value| value.is_some())
 }
 
-fn keychain_get_secret(service: &str, account: &str) -> Result<Option<String>, CliError> {
+pub(crate) fn keychain_get_secret(
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, CliError> {
     let entry = match keyring::Entry::new(service, account) {
         Ok(entry) => entry,
         Err(keyring::Error::NoDefaultStore) => return Ok(None),
@@ -194,7 +207,11 @@ fn keychain_get_secret(service: &str, account: &str) -> Result<Option<String>, C
     }
 }
 
-fn keychain_set_secret(service: &str, account: &str, secret: &str) -> Result<(), CliError> {
+pub(crate) fn keychain_set_secret(
+    service: &str,
+    account: &str,
+    secret: &str,
+) -> Result<(), CliError> {
     let entry = keyring::Entry::new(service, account)
         .map_err(|_error| CliError::unavailable("system keychain unavailable"))?;
     entry
@@ -202,21 +219,21 @@ fn keychain_set_secret(service: &str, account: &str, secret: &str) -> Result<(),
         .map_err(|_error| CliError::unavailable("system keychain unavailable"))
 }
 
-fn provider_keychain_service(provider: &str) -> String {
+pub(crate) fn provider_keychain_service(provider: &str) -> String {
     format!("cortexfs:{provider}")
 }
 
-fn oauth_pkce_from_system_entropy() -> Result<cortexfs::OAuthPkce, CliError> {
+pub(crate) fn oauth_pkce_from_system_entropy() -> Result<cortexfs::OAuthPkce, CliError> {
     let entropy = read_system_entropy(32)?;
     cortexfs::OAuthPkce::from_entropy(&entropy)
         .map_err(|_error| CliError::unavailable("cannot create oauth pkce verifier"))
 }
 
-fn oauth_state_from_system_entropy() -> Result<String, CliError> {
+pub(crate) fn oauth_state_from_system_entropy() -> Result<String, CliError> {
     Ok(hex_bytes(&read_system_entropy(16)?))
 }
 
-fn read_system_entropy(size: usize) -> Result<Vec<u8>, CliError> {
+pub(crate) fn read_system_entropy(size: usize) -> Result<Vec<u8>, CliError> {
     let mut file = fs::File::open("/dev/urandom")
         .map_err(|error| CliError::unavailable(format!("cannot read system entropy: {error}")))?;
     let mut bytes = vec![0; size];
@@ -225,7 +242,7 @@ fn read_system_entropy(size: usize) -> Result<Vec<u8>, CliError> {
     Ok(bytes)
 }
 
-fn hex_bytes(bytes: &[u8]) -> String {
+pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
     let mut output = String::new();
     for byte in bytes {
         let _ignored = write!(output, "{byte:02x}");

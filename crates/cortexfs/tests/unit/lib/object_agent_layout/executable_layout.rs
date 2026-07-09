@@ -54,9 +54,7 @@ fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
     assert!(agent.is_ok());
     let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
     assert!(!report.is_ok());
-    assert!(report.issues().contains(&ObjectLayoutIssue::MissingSocket(
-        "agent/coder.sock".to_owned()
-    )));
+    assert!(report.issues().contains(&PathLayoutIssue::missing("agent/coder.sock".to_owned(), LayoutPathRole::Socket)));
     let _agent_socket = bind_socket(&root.join("agent").join("coder.sock"));
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
     assert_eq!(ObjectBootstrapError::InvalidControlValue.errno(), "EINVAL");
@@ -204,9 +202,7 @@ fn object_layout_rejects_symlink_class_directory_for_socket_lookup() {
     let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::MissingSocket(
-            "agent/coder.sock".to_owned()
-        )));
+        .contains(&PathLayoutIssue::missing("agent/coder.sock".to_owned(), LayoutPathRole::Socket)));
 }
 
 #[test]
@@ -219,15 +215,11 @@ fn object_layout_reports_missing_parts() {
     assert!(!report.is_ok());
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::NotExecutable("agent/coder".to_owned())));
+        .contains(&PathLayoutIssue::wrong_kind("agent/coder".to_owned(), LayoutPathRole::Executable)));
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::MissingControlDirectory(
-            "agent/coder.d".to_owned()
-        )));
-    assert!(report.issues().contains(&ObjectLayoutIssue::MissingSocket(
-        "agent/coder.sock".to_owned()
-    )));
+        .contains(&PathLayoutIssue::missing("agent/coder.d".to_owned(), LayoutPathRole::ControlDirectory)));
+    assert!(report.issues().contains(&PathLayoutIssue::missing("agent/coder.sock".to_owned(), LayoutPathRole::Socket)));
 }
 
 #[test]
@@ -244,7 +236,7 @@ fn object_layout_rejects_symlink_executable_and_control_paths() {
     let report = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::NotExecutable("tool/fs.read".to_owned())));
+        .contains(&PathLayoutIssue::wrong_kind("tool/fs.read".to_owned(), LayoutPathRole::Executable)));
 
     write_fixture_file(&root.join("tool").join("fs.read"), 0o755);
     assert!(fs::remove_dir_all(root.join("tool").join("fs.read.d")).is_ok());
@@ -253,9 +245,7 @@ fn object_layout_rejects_symlink_executable_and_control_paths() {
     let report = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::NotControlDirectory(
-            "tool/fs.read.d".to_owned()
-        )));
+        .contains(&PathLayoutIssue::wrong_kind("tool/fs.read.d".to_owned(), LayoutPathRole::ControlDirectory)));
 
     assert!(fs::remove_file(root.join("tool").join("fs.read.d")).is_ok());
     create_complete_object_layout(&root, ObjectClass::Tool, "fs.read", "");
@@ -268,15 +258,10 @@ fn object_layout_rejects_symlink_executable_and_control_paths() {
     let report = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::NotControlFile(
-            "tool/fs.read.d/schema".to_owned()
-        )));
+        .contains(&PathLayoutIssue::wrong_kind("tool/fs.read.d/schema".to_owned(), LayoutPathRole::ControlFile)));
     assert!(!report
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "tool/fs.read.d/schema".to_owned(),
-            value: "authority".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("tool/fs.read.d/schema".to_owned(), "authority".to_owned())));
 }
 
 #[test]
@@ -294,18 +279,11 @@ fn object_layout_rejects_symlink_class_directory_without_reading_target() {
     let report = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::MissingExecutable(
-            "tool/fs.read".to_owned()
-        )));
+        .contains(&PathLayoutIssue::missing("tool/fs.read".to_owned(), LayoutPathRole::Executable)));
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::MissingControlDirectory(
-            "tool/fs.read.d".to_owned()
-        )));
+        .contains(&PathLayoutIssue::missing("tool/fs.read.d".to_owned(), LayoutPathRole::ControlDirectory)));
     assert!(!report
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "tool/fs.read.d/schema".to_owned(),
-            value: "authority".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("tool/fs.read.d/schema".to_owned(), "authority".to_owned())));
 }

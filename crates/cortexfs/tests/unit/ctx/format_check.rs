@@ -2,14 +2,11 @@
 fn formats_session_layout_issues_for_file_check() {
     assert_eq!(
         format_session_layout_issues(&[
-            SessionLayoutIssue::MissingFile("messages.jsonl".to_owned()),
-            SessionLayoutIssue::NotDirectory("context".to_owned()),
-            SessionLayoutIssue::InvalidFileValue {
-                path: "state".to_owned(),
-                value: "running".to_owned(),
-            },
+            PathLayoutIssue::missing("messages.jsonl".to_owned(), LayoutPathRole::File),
+            PathLayoutIssue::wrong_kind("context".to_owned(), LayoutPathRole::Directory),
+            PathLayoutIssue::invalid_value("state".to_owned(), "running".to_owned()),
         ]),
-        "missing file messages.jsonl, not directory context, invalid file value state=running"
+        "missing file messages.jsonl, not directory context, invalid value state=running"
     );
 }
 
@@ -186,14 +183,14 @@ fn formats_tool_schema_issues_for_file_check() {
 fn formats_session_index_issues_for_file_check() {
     assert_eq!(
         format_session_index_issues(&[
-            SessionIndexIssue::InvalidSessionName {
+            ControlLineIssue::InvalidValue {
                 line: 2,
                 value: "bad/name".to_owned(),
             },
-            SessionIndexIssue::MultipleValues { line: 3 },
-            SessionIndexIssue::EmptyValue { line: 4 },
+            ControlLineIssue::MultipleValues { line: 3 },
+            ControlLineIssue::EmptyValue { line: 4 },
         ]),
-        "invalid session name line 2 bad/name, multiple values line 3, empty value line 4"
+        "invalid value line 2 bad/name, multiple values line 3, empty value line 4"
     );
 }
 
@@ -201,18 +198,18 @@ fn formats_session_index_issues_for_file_check() {
 fn formats_agent_control_issues_for_file_check() {
     assert_eq!(
         format_agent_control_issues(&[
-            AgentControlIssue::InvalidNumber {
+            ControlLineIssue::InvalidNumber {
                 line: 1,
                 value: "abc".to_owned(),
             },
-            AgentControlIssue::InvalidValue {
+            ControlLineIssue::InvalidValue {
                 line: 2,
                 value: "detached".to_owned(),
             },
-            AgentControlIssue::MultipleValues { line: 3 },
-            AgentControlIssue::EmptyValue,
+            ControlLineIssue::MultipleValues { line: 3 },
+            ControlLineIssue::EmptyValue { line: 1 },
         ]),
-        "invalid number line 1 abc, invalid value line 2 detached, multiple values line 3, empty value"
+        "invalid number line 1 abc, invalid value line 2 detached, multiple values line 3, empty value line 1"
     );
 }
 
@@ -220,16 +217,16 @@ fn formats_agent_control_issues_for_file_check() {
 fn formats_session_control_issues_for_file_check() {
     assert_eq!(
         format_session_control_issues(&[
-            SessionControlIssue::InvalidValue {
+            ControlLineIssue::InvalidValue {
                 line: 1,
                 value: "running".to_owned(),
             },
-            SessionControlIssue::MultipleValues { line: 2 },
-            SessionControlIssue::InvalidJson,
-            SessionControlIssue::NotObject,
-            SessionControlIssue::EmptyValue,
+            ControlLineIssue::MultipleValues { line: 2 },
+            ControlLineIssue::InvalidJson,
+            ControlLineIssue::NotObject,
+            ControlLineIssue::EmptyValue { line: 1 },
         ]),
-        "invalid value line 1 running, multiple values line 2, invalid json, not object, empty value"
+        "invalid value line 1 running, multiple values line 2, invalid json, not object, empty value line 1"
     );
 }
 
@@ -295,7 +292,7 @@ fn file_check_validates_session_index_files() {
     assert_file_check_error_contains(
         &root,
         "shared/im-qq-dev/agent/bot/session/index/list",
-        &["invalid session name"],
+        &["invalid value"],
     );
     assert!(file_check(&root, "shared/im-qq-dev/agent/bot/session/index/current").is_ok());
     assert!(file_check(

@@ -1,3 +1,5 @@
+use crate::*;
+
 struct RawTerminal<'fd> {
     fd: BorrowedFd<'fd>,
     original: termios::Termios,
@@ -41,7 +43,7 @@ impl Drop for RawTerminal<'_> {
 }
 
 #[derive(Clone, Copy)]
-enum ReplKey {
+pub(crate) enum ReplKey {
     Byte(u8),
     Up,
     Down,
@@ -51,7 +53,7 @@ enum ReplKey {
     End,
 }
 
-fn read_repl_line(prompt: &str, history: &[String]) -> Result<Option<String>, TshError> {
+pub(crate) fn read_repl_line(prompt: &str, history: &[String]) -> Result<Option<String>, TshError> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     if !stdin.is_terminal() || !stdout.is_terminal() {
@@ -152,14 +154,16 @@ fn read_repl_line(prompt: &str, history: &[String]) -> Result<Option<String>, Ts
     }
 }
 
-fn read_repl_line_canonical(prompt: &str) -> Result<Option<String>, TshError> {
+pub(crate) fn read_repl_line_canonical(prompt: &str) -> Result<Option<String>, TshError> {
     write_stdout(prompt)?;
     let stdin = io::stdin();
     let mut stdin = stdin.lock();
     read_repl_line_canonical_from(&mut stdin)
 }
 
-fn read_repl_line_canonical_from(reader: &mut impl BufRead) -> Result<Option<String>, TshError> {
+pub(crate) fn read_repl_line_canonical_from(
+    reader: &mut impl BufRead,
+) -> Result<Option<String>, TshError> {
     let mut line = String::new();
     let limit = u64::try_from(MAX_TSH_REPL_LINE_BYTES.saturating_add(2))
         .map_err(|error| TshError::unavailable(format!("input limit is invalid: {error}")))?;
@@ -179,7 +183,7 @@ fn read_repl_line_canonical_from(reader: &mut impl BufRead) -> Result<Option<Str
     Ok(Some(line))
 }
 
-fn read_repl_key(input: &mut impl Read) -> Result<ReplKey, TshError> {
+pub(crate) fn read_repl_key(input: &mut impl Read) -> Result<ReplKey, TshError> {
     let byte = read_byte(input)?;
     if byte != b'\x1b' {
         return Ok(ReplKey::Byte(byte));
@@ -209,7 +213,7 @@ fn read_repl_key(input: &mut impl Read) -> Result<ReplKey, TshError> {
     }
 }
 
-fn read_byte(input: &mut impl Read) -> Result<u8, TshError> {
+pub(crate) fn read_byte(input: &mut impl Read) -> Result<u8, TshError> {
     let mut byte = [0u8; 1];
     input
         .read_exact(&mut byte)
@@ -217,7 +221,11 @@ fn read_byte(input: &mut impl Read) -> Result<u8, TshError> {
     Ok(byte[0])
 }
 
-fn redraw_repl_line(prompt: &str, buffer: &[char], cursor: usize) -> Result<(), TshError> {
+pub(crate) fn redraw_repl_line(
+    prompt: &str,
+    buffer: &[char],
+    cursor: usize,
+) -> Result<(), TshError> {
     let text: String = buffer.iter().collect();
     write_stdout(&format!("\r{prompt}{text}\x1b[K"))?;
     let right = buffer.len().saturating_sub(cursor);
@@ -227,7 +235,7 @@ fn redraw_repl_line(prompt: &str, buffer: &[char], cursor: usize) -> Result<(), 
     Ok(())
 }
 
-fn push_history(history: &mut Vec<String>, line: &str) {
+pub(crate) fn push_history(history: &mut Vec<String>, line: &str) {
     if history.last().is_some_and(|entry| entry == line) {
         return;
     }

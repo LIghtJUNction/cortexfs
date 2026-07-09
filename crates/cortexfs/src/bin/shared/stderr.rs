@@ -1,4 +1,6 @@
-fn write_error(line: &str) -> io::Result<()> {
+use crate::*;
+
+pub(crate) fn write_error(line: &str) -> io::Result<()> {
     let mut stderr = io::stderr().lock();
     stderr
         .write_all(line.as_bytes())

@@ -1,18 +1,20 @@
+use crate::*;
+
 #[derive(Debug, Eq, PartialEq)]
-struct CliError {
-    code: u8,
-    message: String,
+pub(crate) struct CliError {
+    pub(crate) code: u8,
+    pub(crate) message: String,
 }
 
 impl CliError {
-    fn usage(message: impl Into<String>) -> Self {
+    pub(crate) fn usage(message: impl Into<String>) -> Self {
         Self {
             code: 2,
             message: message.into(),
         }
     }
 
-    fn unavailable(message: impl Into<String>) -> Self {
+    pub(crate) fn unavailable(message: impl Into<String>) -> Self {
         Self {
             code: 69,
             message: message.into(),
@@ -21,13 +23,13 @@ impl CliError {
 }
 
 #[derive(Debug)]
-struct Cli {
-    root: PathBuf,
-    command: Command,
+pub(crate) struct Cli {
+    pub(crate) root: PathBuf,
+    pub(crate) command: Command,
 }
 
 #[derive(Debug)]
-enum Command {
+pub(crate) enum Command {
     Help,
     HelpTopic(String),
     Abi,
@@ -95,26 +97,26 @@ enum Command {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FileCommand {
+pub(crate) enum FileCommand {
     Info,
     Type,
     Check,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum LsTarget {
+pub(crate) enum LsTarget {
     Root,
     Path(String),
 }
 
 #[derive(Debug)]
-struct FileArgs {
-    command: FileCommand,
-    path: String,
+pub(crate) struct FileArgs {
+    pub(crate) command: FileCommand,
+    pub(crate) path: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum ScheduleArgs {
+pub(crate) enum ScheduleArgs {
     Status {
         path: String,
         done: Vec<String>,
@@ -136,7 +138,7 @@ enum ScheduleArgs {
     },
 }
 
-fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
+pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
     let cli = parse(args)?;
     match cli.command {
         Command::Help => success(print_help()),
@@ -182,11 +184,11 @@ fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
     }
 }
 
-fn success(result: Result<(), CliError>) -> Result<ExitCode, CliError> {
+pub(crate) fn success(result: Result<(), CliError>) -> Result<ExitCode, CliError> {
     result.map(|()| ExitCode::SUCCESS)
 }
 
-fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
+pub(crate) fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
     let mut root = env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(CTX_ROOT), PathBuf::from);
     let mut values = args.into_iter();
     let mut rest = Vec::new();
@@ -220,7 +222,7 @@ fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
     Ok(Cli { root, command })
 }
 
-fn os_string(value: OsString) -> Result<String, CliError> {
+pub(crate) fn os_string(value: OsString) -> Result<String, CliError> {
     value.into_string().map_err(|value| {
         CliError::usage(format!(
             "arguments must be valid UTF-8: {}",
@@ -229,15 +231,18 @@ fn os_string(value: OsString) -> Result<String, CliError> {
     })
 }
 
-fn required_arg(
+pub(crate) fn required_arg(
     values: &mut impl Iterator<Item = String>,
     message: &str,
 ) -> Result<String, CliError> {
     values.next().ok_or_else(|| CliError::usage(message))
 }
 
-#[expect(clippy::too_many_lines, reason = "flat CLI dispatch keeps subcommand parsing explicit")]
-fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat CLI dispatch keeps subcommand parsing explicit"
+)]
+pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let Some(command) = values.next() else {
         return Ok(Command::Status);
@@ -386,11 +391,11 @@ fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     }
 }
 
-fn is_help_args(args: &[String]) -> bool {
+pub(crate) fn is_help_args(args: &[String]) -> bool {
     matches!(args, [value] if is_help_flag(value))
 }
 
-fn is_top_level_help_topic(command: &str) -> bool {
+pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
     matches!(
         command,
         "status"

@@ -1,11 +1,15 @@
-const TTL: Duration = Duration::from_secs(1);
-const S_IFMT: u32 = 0o170_000;
-const S_IFREG: u32 = 0o100_000;
-const S_IFSOCK: u32 = 0o140_000;
+use crate::*;
 
-include!("statfs.rs");
+pub(crate) const TTL: Duration = Duration::from_secs(1);
+pub(crate) const S_IFMT: u32 = 0o170_000;
+pub(crate) const S_IFREG: u32 = 0o100_000;
+pub(crate) const S_IFSOCK: u32 = 0o140_000;
 
-fn main() -> ExitCode {
+#[path = "statfs.rs"]
+pub mod statfs;
+pub(crate) use statfs::*;
+
+pub(crate) fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -15,7 +19,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<OsString>) -> Result<(), String> {
+pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     let config = MountConfig::parse(args)?;
     let fs = CortexFuse::new(config.source)?;
     let mut options = Config::default();
@@ -69,12 +73,12 @@ impl MountConfig {
     }
 }
 
-fn usage() -> String {
+pub(crate) fn usage() -> String {
     "usage: cortexfs-mount [--source CTX_ROOT] MOUNTPOINT".to_owned()
 }
 
 impl CortexFuse {
-    fn projected_getattr(&self, path: &str) -> Result<FuseV1Attr, FuseV1Error> {
+    pub(crate) fn projected_getattr(&self, path: &str) -> Result<FuseV1Attr, FuseV1Error> {
         match self.projection.getattr(path) {
             Ok(attr) => Ok(attr),
             Err(FuseV1Error::NotFound) if self.has_socket_overlay(path)? => {
@@ -84,7 +88,7 @@ impl CortexFuse {
         }
     }
 
-    fn projected_node_for_path(&self, path: &str) -> Result<FuseV1Node, FuseV1Error> {
+    pub(crate) fn projected_node_for_path(&self, path: &str) -> Result<FuseV1Node, FuseV1Error> {
         match self.projection.node_for_path(path) {
             Ok(node) => Ok(node),
             Err(FuseV1Error::NotFound) if self.has_socket_overlay(path)? => {
@@ -94,7 +98,11 @@ impl CortexFuse {
         }
     }
 
-    fn projected_lookup(&self, parent: &FuseV1Node, name: &str) -> Result<FuseV1Node, FuseV1Error> {
+    pub(crate) fn projected_lookup(
+        &self,
+        parent: &FuseV1Node,
+        name: &str,
+    ) -> Result<FuseV1Node, FuseV1Error> {
         match self.projection.lookup(parent, name) {
             Ok(node) => Ok(node),
             Err(FuseV1Error::NotFound) => {
@@ -111,7 +119,7 @@ impl CortexFuse {
         }
     }
 
-    fn projected_readdir(&self, path: &str) -> Result<Vec<FuseV1DirEntry>, FuseV1Error> {
+    pub(crate) fn projected_readdir(&self, path: &str) -> Result<Vec<FuseV1DirEntry>, FuseV1Error> {
         let mut entries = self.projection.readdir(path)?;
         let overlays = self
             .socket_overlays
@@ -129,14 +137,18 @@ impl CortexFuse {
         Ok(entries)
     }
 
-    fn has_socket_overlay(&self, path: &str) -> Result<bool, FuseV1Error> {
+    pub(crate) fn has_socket_overlay(&self, path: &str) -> Result<bool, FuseV1Error> {
         self.socket_overlays
             .lock()
             .map_err(|_error| FuseV1Error::Io)
             .map(|sockets| sockets.contains(path))
     }
 
-    fn socket_child_path(&self, parent: INodeNo, name: &OsStr) -> Result<String, FuseV1Error> {
+    pub(crate) fn socket_child_path(
+        &self,
+        parent: INodeNo,
+        name: &OsStr,
+    ) -> Result<String, FuseV1Error> {
         let name = name.to_str().ok_or(FuseV1Error::InvalidPath)?;
         let parent_path = self.path_for_inode(parent)?;
         let path = child_path(&parent_path, name).ok_or(FuseV1Error::InvalidPath)?;
@@ -145,7 +157,11 @@ impl CortexFuse {
             .ok_or(FuseV1Error::InvalidPath)
     }
 
-    fn model_alias_child_path(&self, parent: INodeNo, name: &OsStr) -> Result<String, FuseV1Error> {
+    pub(crate) fn model_alias_child_path(
+        &self,
+        parent: INodeNo,
+        name: &OsStr,
+    ) -> Result<String, FuseV1Error> {
         let name = name.to_str().ok_or(FuseV1Error::InvalidPath)?;
         let parent_path = self.path_for_inode(parent)?;
         let path = child_path(&parent_path, name).ok_or(FuseV1Error::InvalidPath)?;
@@ -154,7 +170,7 @@ impl CortexFuse {
             .ok_or(FuseV1Error::InvalidPath)
     }
 
-    fn model_symlink_child_path(
+    pub(crate) fn model_symlink_child_path(
         &self,
         parent: INodeNo,
         name: &OsStr,
@@ -167,7 +183,11 @@ impl CortexFuse {
         Ok(format!("model/{name}"))
     }
 
-    fn unlink_model_path(&self, parent: INodeNo, name: &OsStr) -> Result<bool, FuseV1Error> {
+    pub(crate) fn unlink_model_path(
+        &self,
+        parent: INodeNo,
+        name: &OsStr,
+    ) -> Result<bool, FuseV1Error> {
         if let Ok(path) = self.model_alias_child_path(parent, name) {
             self.projection.remove_model_alias(&path)?;
             self.forget_path(&path)?;
@@ -183,7 +203,7 @@ impl CortexFuse {
         Ok(true)
     }
 
-    fn rename_model_alias_path(
+    pub(crate) fn rename_model_alias_path(
         &self,
         parent: INodeNo,
         name: &OsStr,
@@ -197,15 +217,16 @@ impl CortexFuse {
         self.rename_path(&source, &target)
     }
 
-    fn xattrs_for_path(&self, path: &str) -> Result<Vec<CortexXattr>, FuseV1Error> {
+    pub(crate) fn xattrs_for_path(&self, path: &str) -> Result<Vec<CortexXattr>, FuseV1Error> {
         let attr = self.projected_getattr(path)?;
         let backing_path = self.projection.root().join(path);
         let backing_metadata = fs::symlink_metadata(&backing_path).ok();
         let backing_exists = backing_metadata.is_some();
-        let backing_is_dir =
-            backing_metadata.is_some_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
+        let backing_is_dir = backing_metadata
+            .is_some_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
         let overlay = self.has_socket_overlay(path)?;
-        let virtual_projection = self.is_virtual_projection_path(path, backing_exists, backing_is_dir, overlay);
+        let virtual_projection =
+            self.is_virtual_projection_path(path, backing_exists, backing_is_dir, overlay);
         let (origin, storage, virtual_value) = if overlay {
             ("overlay", "memory", "true")
         } else if virtual_projection {
@@ -246,7 +267,7 @@ impl CortexFuse {
         Ok(attrs)
     }
 
-    fn is_virtual_projection_path(
+    pub(crate) fn is_virtual_projection_path(
         &self,
         path: &str,
         backing_exists: bool,
@@ -274,7 +295,7 @@ impl CortexFuse {
         false
     }
 
-    fn node_for_dir_entry(
+    pub(crate) fn node_for_dir_entry(
         &self,
         parent_path: &str,
         entry: &FuseV1DirEntry,
@@ -285,9 +306,9 @@ impl CortexFuse {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct CortexXattr {
-    name: &'static str,
-    value: String,
+pub(crate) struct CortexXattr {
+    pub(crate) name: &'static str,
+    pub(crate) value: String,
 }
 
 impl CortexXattr {
@@ -300,14 +321,14 @@ impl CortexXattr {
 }
 
 #[derive(Debug)]
-struct FuseDirRow {
-    inode: u64,
-    kind: FileType,
-    name: OsString,
+pub(crate) struct FuseDirRow {
+    pub(crate) inode: u64,
+    pub(crate) kind: FileType,
+    pub(crate) name: OsString,
 }
 
 impl FuseDirRow {
-    fn new(inode: u64, kind: FileType, name: impl Into<OsString>) -> Self {
+    pub(crate) fn new(inode: u64, kind: FileType, name: impl Into<OsString>) -> Self {
         Self {
             inode,
             kind,
@@ -316,7 +337,7 @@ impl FuseDirRow {
     }
 }
 
-fn file_attr(inode: u64, attr: &FuseV1Attr) -> FileAttr {
+pub(crate) fn file_attr(inode: u64, attr: &FuseV1Attr) -> FileAttr {
     let perm: u16 = u16::try_from(attr.mode() & 0o7777).unwrap_or_default();
     FileAttr {
         ino: INodeNo(inode),
@@ -341,7 +362,7 @@ fn file_attr(inode: u64, attr: &FuseV1Attr) -> FileAttr {
     }
 }
 
-fn fuser_file_type(kind: FuseV1FileType) -> FileType {
+pub(crate) fn fuser_file_type(kind: FuseV1FileType) -> FileType {
     match kind {
         FuseV1FileType::Directory => FileType::Directory,
         FuseV1FileType::Regular | FuseV1FileType::Other => FileType::RegularFile,
@@ -350,7 +371,7 @@ fn fuser_file_type(kind: FuseV1FileType) -> FileType {
     }
 }
 
-fn errno(error: FuseV1Error) -> Errno {
+pub(crate) fn errno(error: FuseV1Error) -> Errno {
     match error {
         FuseV1Error::InvalidPath
         | FuseV1Error::NotControlFile
@@ -367,7 +388,10 @@ fn errno(error: FuseV1Error) -> Errno {
     }
 }
 
-fn parent_inode(path: &str, paths: &Mutex<HashMap<u64, String>>) -> Result<u64, FuseV1Error> {
+pub(crate) fn parent_inode(
+    path: &str,
+    paths: &Mutex<HashMap<u64, String>>,
+) -> Result<u64, FuseV1Error> {
     if path.is_empty() {
         return Ok(FUSE_V1_ROOT_INODE);
     }
@@ -383,14 +407,14 @@ fn parent_inode(path: &str, paths: &Mutex<HashMap<u64, String>>) -> Result<u64, 
         .unwrap_or(FUSE_V1_ROOT_INODE))
 }
 
-fn usize_from_u32(value: u32) -> usize {
+pub(crate) fn usize_from_u32(value: u32) -> usize {
     match usize::try_from(value) {
         Ok(value) => value,
         Err(_error) => usize::MAX,
     }
 }
 
-fn reply_xattr_bytes(bytes: &[u8], size: u32, reply: ReplyXattr) {
+pub(crate) fn reply_xattr_bytes(bytes: &[u8], size: u32, reply: ReplyXattr) {
     if size == 0 {
         match u32::try_from(bytes.len()) {
             Ok(len) => reply.size(len),
@@ -403,11 +427,11 @@ fn reply_xattr_bytes(bytes: &[u8], size: u32, reply: ReplyXattr) {
     }
 }
 
-fn estimate_tokens_from_bytes(bytes: u64) -> u64 {
+pub(crate) fn estimate_tokens_from_bytes(bytes: u64) -> u64 {
     if bytes == 0 { 0 } else { bytes.div_ceil(4) }
 }
 
-fn child_path(parent: &str, name: &str) -> Option<String> {
+pub(crate) fn child_path(parent: &str, name: &str) -> Option<String> {
     if name.is_empty()
         || name == "."
         || name == ".."
@@ -423,22 +447,25 @@ fn child_path(parent: &str, name: &str) -> Option<String> {
     }
 }
 
-fn is_projected_socket_path(path: &str) -> bool {
+pub(crate) fn is_projected_socket_path(path: &str) -> bool {
     matches!(
         classify_abi_path(path),
         "ctx.agent.socket" | "ctx.model.socket"
     )
 }
 
-fn socket_attr(path: &str, mode: u32) -> FuseV1Attr {
+pub(crate) fn socket_attr(path: &str, mode: u32) -> FuseV1Attr {
     FuseV1Attr::with_owner(path.to_owned(), FuseV1FileType::Socket, 0, mode, 0, 0)
 }
 
-fn socket_node(path: &str, mode: u32) -> FuseV1Node {
+pub(crate) fn socket_node(path: &str, mode: u32) -> FuseV1Node {
     FuseV1Node::new(socket_inode(path), path.to_owned(), socket_attr(path, mode))
 }
 
-fn remove_backing_model_alias_symlink(root: &Path, abi_path: &str) -> Result<bool, FuseV1Error> {
+pub(crate) fn remove_backing_model_alias_symlink(
+    root: &Path,
+    abi_path: &str,
+) -> Result<bool, FuseV1Error> {
     let (parent, file_name) =
         open_backing_socket_parent(root, abi_path).map_err(|_error| FuseV1Error::Io)?;
     let stat = match fstatat(&parent, file_name.as_str(), AtFlags::AT_SYMLINK_NOFOLLOW) {
@@ -455,7 +482,7 @@ fn remove_backing_model_alias_symlink(root: &Path, abi_path: &str) -> Result<boo
     }
 }
 
-fn socket_inode(path: &str) -> u64 {
+pub(crate) fn socket_inode(path: &str) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in path.bytes() {
         hash ^= u64::from(byte);
@@ -464,7 +491,7 @@ fn socket_inode(path: &str) -> u64 {
     hash.max(FUSE_V1_ROOT_INODE + 1)
 }
 
-fn immediate_child_name<'a>(parent: &str, child: &'a str) -> Option<&'a str> {
+pub(crate) fn immediate_child_name<'a>(parent: &str, child: &'a str) -> Option<&'a str> {
     if parent.is_empty() {
         return child.split_once('/').is_none().then_some(child);
     }

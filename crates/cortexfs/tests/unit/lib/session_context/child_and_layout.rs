@@ -72,21 +72,17 @@ fn session_layout_inspector_reports_missing_and_wrong_types() {
     assert!(!report.is_ok());
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::NotFile("messages.jsonl".to_owned())));
+        .contains(&PathLayoutIssue::wrong_kind("messages.jsonl".to_owned(), LayoutPathRole::File)));
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::MissingFile("events.jsonl".to_owned())));
+        .contains(&PathLayoutIssue::missing("events.jsonl".to_owned(), LayoutPathRole::File)));
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::NotFile("context/pack.md".to_owned())));
-    assert!(report.issues().contains(&SessionLayoutIssue::MissingFile(
-        "context/child/rev-1/result.md".to_owned()
-    )));
+        .contains(&PathLayoutIssue::wrong_kind("context/pack.md".to_owned(), LayoutPathRole::File)));
+    assert!(report.issues().contains(&PathLayoutIssue::missing("context/child/rev-1/result.md".to_owned(), LayoutPathRole::File)));
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::MissingDirectory(
-            "context/child/rev-1/artifact".to_owned()
-        )));
+        .contains(&PathLayoutIssue::missing("context/child/rev-1/artifact".to_owned(), LayoutPathRole::Directory)));
 }
 
 #[test]
@@ -105,16 +101,13 @@ fn session_layout_inspector_rejects_symlink_files_and_directories_without_follow
 
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::NotFile("state".to_owned())));
+        .contains(&PathLayoutIssue::wrong_kind("state".to_owned(), LayoutPathRole::File)));
     assert!(!report
         .issues()
-        .contains(&SessionLayoutIssue::InvalidFileValue {
-            path: "state".to_owned(),
-            value: "running".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("state".to_owned(), "running".to_owned())));
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::NotDirectory("context".to_owned())));
+        .contains(&PathLayoutIssue::wrong_kind("context".to_owned(), LayoutPathRole::Directory)));
     assert_file_text(&outside.join("state"), "running\n");
 }
 
@@ -132,15 +125,12 @@ fn session_layout_inspector_rejects_symlink_session_root_without_following() {
 
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::NotDirectory(".".to_owned())));
+        .contains(&PathLayoutIssue::wrong_kind(".".to_owned(), LayoutPathRole::Directory)));
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::MissingFile("state".to_owned())));
+        .contains(&PathLayoutIssue::missing("state".to_owned(), LayoutPathRole::File)));
     assert!(!report
         .issues()
-        .contains(&SessionLayoutIssue::InvalidFileValue {
-            path: "state".to_owned(),
-            value: "running".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("state".to_owned(), "running".to_owned())));
     assert_file_text(&outside.join("state"), "running\n");
 }

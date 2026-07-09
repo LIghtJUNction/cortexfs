@@ -1,4 +1,6 @@
-fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
+use crate::*;
+
+pub(crate) fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
     let resolved = resolve_abi_path(root, path)?;
     let abi_path = classify_input_path(root, path)?;
     let parsed = parse_abi_path(&abi_path);
@@ -67,9 +69,8 @@ fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
         if matches!(
             kind,
             SessionIndexKind::ByCwd | SessionIndexKind::ByHash | SessionIndexKind::ByUuid
-        )
-            && fs::symlink_metadata(&resolved)
-                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        ) && fs::symlink_metadata(&resolved)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
         {
             return Err(CliError::usage(
                 "invalid session index: secondary index entry is a symlink",
@@ -104,8 +105,9 @@ fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
 
     if parsed.is_agent_schedule_plan() {
         let content = read_file_to_string(&resolved)?;
-        let parent_agent = parent_agent_for_session_context_path(&abi_path)
-            .ok_or_else(|| CliError::usage("agent schedule plan must belong to an agent session"))?;
+        let parent_agent = parent_agent_for_session_context_path(&abi_path).ok_or_else(|| {
+            CliError::usage("agent schedule plan must belong to an agent session")
+        })?;
         let parent_subject = parent_policy_subject(root, parent_agent)?;
         let parent_policy = parent_agent_policy(root, parent_agent)?;
         let report = inspect_agent_schedule_json(&content, &parent_subject, &parent_policy);
@@ -131,7 +133,7 @@ fn file_check(root: &Path, path: &str) -> Result<(), CliError> {
     print_line(shape)
 }
 
-fn check_report(
+pub(crate) fn check_report(
     label: &str,
     is_ok: bool,
     format_issues: impl FnOnce() -> String,
@@ -145,7 +147,10 @@ fn check_report(
     )))
 }
 
-fn file_check_policy_or_mount(parsed: AbiPathKind<'_>, resolved: &Path) -> Result<bool, CliError> {
+pub(crate) fn file_check_policy_or_mount(
+    parsed: AbiPathKind<'_>,
+    resolved: &Path,
+) -> Result<bool, CliError> {
     if parsed.control_file() == Some("policy") {
         let content = read_file_to_string(resolved)?;
         PolicyV0::parse(&content)
@@ -165,7 +170,10 @@ fn file_check_policy_or_mount(parsed: AbiPathKind<'_>, resolved: &Path) -> Resul
     Ok(false)
 }
 
-fn file_check_jsonl_content(parsed: AbiPathKind<'_>, resolved: &Path) -> Result<bool, CliError> {
+pub(crate) fn file_check_jsonl_content(
+    parsed: AbiPathKind<'_>,
+    resolved: &Path,
+) -> Result<bool, CliError> {
     if matches!(
         parsed,
         AbiPathKind::SessionFile {
@@ -208,7 +216,10 @@ fn file_check_jsonl_content(parsed: AbiPathKind<'_>, resolved: &Path) -> Result<
     Ok(false)
 }
 
-fn file_check_model_driver(parsed: AbiPathKind<'_>, resolved: &Path) -> Result<bool, CliError> {
+pub(crate) fn file_check_model_driver(
+    parsed: AbiPathKind<'_>,
+    resolved: &Path,
+) -> Result<bool, CliError> {
     if parsed.model_control_file() != Some("driver") {
         return Ok(false);
     }
@@ -226,7 +237,7 @@ fn file_check_model_driver(parsed: AbiPathKind<'_>, resolved: &Path) -> Result<b
     }
 }
 
-fn parent_agent_for_session_context_path(path: &str) -> Option<&str> {
+pub(crate) fn parent_agent_for_session_context_path(path: &str) -> Option<&str> {
     let parts = path.split('/').collect::<Vec<_>>();
     if parts.len() == 8
         && matches!(parts.first(), Some(&("home" | "shared")))
@@ -241,7 +252,7 @@ fn parent_agent_for_session_context_path(path: &str) -> Option<&str> {
     }
 }
 
-fn parent_agent_policy(root: &Path, parent_agent: &str) -> Result<PolicyV0, CliError> {
+pub(crate) fn parent_agent_policy(root: &Path, parent_agent: &str) -> Result<PolicyV0, CliError> {
     let policy_path = agent_control_dir(root, parent_agent).join("policy");
     let content = read_file_to_string(&policy_path)?;
     PolicyV0::parse(&content).map_err(|error| {
@@ -251,7 +262,7 @@ fn parent_agent_policy(root: &Path, parent_agent: &str) -> Result<PolicyV0, CliE
     })
 }
 
-fn parent_policy_subject(root: &Path, parent_agent: &str) -> Result<String, CliError> {
+pub(crate) fn parent_policy_subject(root: &Path, parent_agent: &str) -> Result<String, CliError> {
     let label_path = agent_control_dir(root, parent_agent).join("label");
     match fs::symlink_metadata(&label_path) {
         Ok(_metadata) => {
@@ -272,7 +283,7 @@ fn parent_policy_subject(root: &Path, parent_agent: &str) -> Result<String, CliE
     }
 }
 
-fn format_model_fallback_issues(issues: &[ModelFallbackIssue]) -> String {
+pub(crate) fn format_model_fallback_issues(issues: &[ModelFallbackIssue]) -> String {
     issues
         .iter()
         .map(|issue| match *issue {

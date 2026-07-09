@@ -1,16 +1,14 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashSet;
 
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{
-    PolicyObjectClass, PolicyPermission, PolicyV0, abi::path::is_model_reference, is_object_name,
-};
+use crate::PolicyV0;
 
 /// Maximum number of nodes accepted in one parent-session hybrid schedule.
 pub const MAX_AGENT_SCHEDULE_NODES: usize = 1024;
 
-const DEFAULT_DELEGATED_AGENT: &str = "worker";
+pub(crate) const DEFAULT_DELEGATED_AGENT: &str = "worker";
 
 /// Stable issue found in a parent-session hybrid agent schedule.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -99,14 +97,14 @@ impl AgentScheduleNodeKind {
 /// Validated parent-session schedule node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentScheduleNode {
-    id: String,
-    kind: AgentScheduleNodeKind,
-    agent: String,
-    child: Option<String>,
-    child_session: Option<String>,
-    handoff: Option<String>,
-    deps: Vec<String>,
-    max_steps: Option<u64>,
+    pub(crate) id: String,
+    pub(crate) kind: AgentScheduleNodeKind,
+    pub(crate) agent: String,
+    pub(crate) child: Option<String>,
+    pub(crate) child_session: Option<String>,
+    pub(crate) handoff: Option<String>,
+    pub(crate) deps: Vec<String>,
+    pub(crate) max_steps: Option<u64>,
 }
 
 impl AgentScheduleNode {
@@ -162,11 +160,11 @@ impl AgentScheduleNode {
 /// Ready delegated child handoff derived from a validated schedule.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentScheduleChildHandoff {
-    node: String,
-    child: String,
-    agent: String,
-    session: String,
-    handoff: String,
+    pub(crate) node: String,
+    pub(crate) child: String,
+    pub(crate) agent: String,
+    pub(crate) session: String,
+    pub(crate) handoff: String,
 }
 
 impl AgentScheduleChildHandoff {
@@ -260,39 +258,39 @@ impl AgentScheduleRecordError {
 }
 
 #[derive(Deserialize)]
-struct ScheduleJson {
-    version: Option<Value>,
-    mode: Option<Value>,
-    nodes: Option<Value>,
+pub(crate) struct ScheduleJson {
+    pub(crate) version: Option<Value>,
+    pub(crate) mode: Option<Value>,
+    pub(crate) nodes: Option<Value>,
 }
 
 #[derive(Deserialize)]
-struct ScheduleNodeJson {
-    id: Option<Value>,
-    kind: Option<Value>,
-    agent: Option<Value>,
-    child: Option<Value>,
-    session: Option<Value>,
-    handoff: Option<Value>,
-    deps: Option<Value>,
-    max_steps: Option<Value>,
-    requires: Option<Value>,
+pub(crate) struct ScheduleNodeJson {
+    pub(crate) id: Option<Value>,
+    pub(crate) kind: Option<Value>,
+    pub(crate) agent: Option<Value>,
+    pub(crate) child: Option<Value>,
+    pub(crate) session: Option<Value>,
+    pub(crate) handoff: Option<Value>,
+    pub(crate) deps: Option<Value>,
+    pub(crate) max_steps: Option<Value>,
+    pub(crate) requires: Option<Value>,
 }
 
 #[derive(Deserialize)]
-struct SchedulePermissionJson {
-    class: Option<Value>,
-    name: Option<Value>,
-    permission: Option<Value>,
+pub(crate) struct SchedulePermissionJson {
+    pub(crate) class: Option<Value>,
+    pub(crate) name: Option<Value>,
+    pub(crate) permission: Option<Value>,
 }
 
-struct ScheduleInspectContext<'a> {
-    parent_subject: &'a str,
-    parent_policy: &'a PolicyV0,
+pub(crate) struct ScheduleInspectContext<'a> {
+    pub(crate) parent_subject: &'a str,
+    pub(crate) parent_policy: &'a PolicyV0,
 }
 
 #[derive(Default)]
-struct ScheduleSeen {
-    nodes: HashSet<String>,
-    children: HashSet<String>,
+pub(crate) struct ScheduleSeen {
+    pub(crate) nodes: HashSet<String>,
+    pub(crate) children: HashSet<String>,
 }

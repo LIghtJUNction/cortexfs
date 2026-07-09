@@ -179,7 +179,7 @@ impl MountTable {
     }
 }
 
-fn mount_mode_allows(parent: MountMode, child: MountMode) -> bool {
+pub(crate) fn mount_mode_allows(parent: MountMode, child: MountMode) -> bool {
     matches!(
         (parent, child),
         (
@@ -189,17 +189,17 @@ fn mount_mode_allows(parent: MountMode, child: MountMode) -> bool {
     )
 }
 
-fn mount_options_allow(parent: &[MountOption], child: &[MountOption]) -> bool {
+pub(crate) fn mount_options_allow(parent: &[MountOption], child: &[MountOption]) -> bool {
     safety_options_preserved(parent, child) && bind_rank(child) <= bind_rank(parent)
 }
 
-fn safety_options_preserved(parent: &[MountOption], child: &[MountOption]) -> bool {
+pub(crate) fn safety_options_preserved(parent: &[MountOption], child: &[MountOption]) -> bool {
     [MountOption::NoSuid, MountOption::NoDev, MountOption::NoExec]
         .into_iter()
         .all(|option| !parent.contains(&option) || child.contains(&option))
 }
 
-fn bind_rank(options: &[MountOption]) -> u8 {
+pub(crate) fn bind_rank(options: &[MountOption]) -> u8 {
     if options.contains(&MountOption::RecursiveBind) {
         2
     } else {
@@ -207,7 +207,7 @@ fn bind_rank(options: &[MountOption]) -> u8 {
     }
 }
 
-fn is_absolute_mount_path(value: &str) -> bool {
+pub(crate) fn is_absolute_mount_path(value: &str) -> bool {
     if value.bytes().any(|byte| byte.is_ascii_control()) {
         return false;
     }
@@ -227,7 +227,7 @@ fn is_absolute_mount_path(value: &str) -> bool {
         })
 }
 
-fn parse_mount_options(value: &str) -> Result<Vec<MountOption>, MountError> {
+pub(crate) fn parse_mount_options(value: &str) -> Result<Vec<MountOption>, MountError> {
     if value == "-" {
         return Ok(Vec::new());
     }

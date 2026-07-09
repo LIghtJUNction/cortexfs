@@ -200,8 +200,8 @@ fn doctor_lines_escape_terminal_controls() {
 fn formats_shared_queue_layout_issues_for_doctor() {
     assert_eq!(
         format_shared_queue_layout_issues(&[
-            SharedQueueLayoutIssue::MissingDirectory("done".to_owned()),
-            SharedQueueLayoutIssue::NotDirectory("failed".to_owned()),
+            PathLayoutIssue::missing("done".to_owned(), LayoutPathRole::Directory),
+            PathLayoutIssue::wrong_kind("failed".to_owned(), LayoutPathRole::Directory),
         ]),
         "missing directory done, not directory failed"
     );
@@ -211,13 +211,10 @@ fn formats_shared_queue_layout_issues_for_doctor() {
 fn formats_object_layout_issues_for_file_check() {
     assert_eq!(
         format_object_layout_issues(&[
-            ObjectLayoutIssue::MissingExecutable("agent/coder".to_owned()),
-            ObjectLayoutIssue::InvalidControlValue {
-                path: "model/openai/gpt-4o.d/session".to_owned(),
-                value: "native_thread".to_owned(),
-            },
+            PathLayoutIssue::missing("agent/coder".to_owned(), LayoutPathRole::Executable),
+            PathLayoutIssue::invalid_value("model/openai/gpt-4o.d/session".to_owned(), "native_thread".to_owned()),
         ]),
-        "missing executable agent/coder, invalid control value model/openai/gpt-4o.d/session=native_thread"
+        "missing executable agent/coder, invalid value model/openai/gpt-4o.d/session=native_thread"
     );
 }
 

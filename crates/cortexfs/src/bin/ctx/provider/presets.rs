@@ -1,9 +1,11 @@
+use crate::*;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ProviderPreset {
-    name: &'static str,
-    aliases: &'static [&'static str],
-    file: &'static str,
-    config: &'static str,
+pub(crate) struct ProviderPreset {
+    pub(crate) name: &'static str,
+    pub(crate) aliases: &'static [&'static str],
+    pub(crate) file: &'static str,
+    pub(crate) config: &'static str,
 }
 
 const PROVIDER_PRESETS: &[ProviderPreset] = &[
@@ -44,19 +46,19 @@ const PROVIDER_PRESETS: &[ProviderPreset] = &[
     },
 ];
 
-fn provider_preset_list() -> Result<(), CliError> {
+pub(crate) fn provider_preset_list() -> Result<(), CliError> {
     for preset in PROVIDER_PRESETS {
         print_line(preset.name)?;
     }
     Ok(())
 }
 
-fn provider_preset_show(preset: &str) -> Result<(), CliError> {
+pub(crate) fn provider_preset_show(preset: &str) -> Result<(), CliError> {
     let preset = provider_preset(preset)?;
     print_line(preset.config.trim_end())
 }
 
-fn provider_preset_install(preset: &str) -> Result<(), CliError> {
+pub(crate) fn provider_preset_install(preset: &str) -> Result<(), CliError> {
     let preset = provider_preset(preset)?;
     create_provider_config_dir(Path::new(PROVIDER_CONFIG_DIR))?;
     let path = PathBuf::from(PROVIDER_CONFIG_DIR).join(preset.file);
@@ -64,7 +66,7 @@ fn provider_preset_install(preset: &str) -> Result<(), CliError> {
     print_line(&format!("installed {}", path.display()))
 }
 
-fn provider_preset(name: &str) -> Result<ProviderPreset, CliError> {
+pub(crate) fn provider_preset(name: &str) -> Result<ProviderPreset, CliError> {
     PROVIDER_PRESETS
         .iter()
         .copied()

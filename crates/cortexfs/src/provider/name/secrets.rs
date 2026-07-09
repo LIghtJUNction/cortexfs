@@ -1,3 +1,14 @@
+use super::names::PROVIDER_SYSTEM_SECRET_ROOT;
+use crate::*;
+use std::fs::File;
+use std::os::fd::AsRawFd;
+
+use super::model_selection::provider_system_secret_path;
+use super::secret_files::{
+    clear_fd_cloexec, create_private_provider_secret_dir, open_provider_secret_file,
+    read_provider_secret_file, set_private_dir_permissions,
+};
+
 /// Stores a provider API secret in the root-owned `CortexFS` system secret store.
 pub fn store_provider_system_secret(
     provider: &str,
@@ -12,9 +23,9 @@ pub fn store_provider_system_secret(
     set_private_dir_permissions(Path::new("/var/lib/cortexfs/secrets"))?;
     set_private_dir_permissions(Path::new(PROVIDER_SYSTEM_SECRET_ROOT))?;
     set_private_dir_permissions(parent)?;
-    crate::atomic_replace_text_with_mode(&path, &format!("{secret}\n"), 0o600)
+    atomic_replace_text_with_mode(&path, &format!("{secret}\n"), 0o600)
         .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
-    crate::plain_fs::sync_plain_dir(parent).map_err(|_error| ProviderSystemSecretError::CannotWrite)
+    plain_fs::sync_plain_dir(parent).map_err(|_error| ProviderSystemSecretError::CannotWrite)
 }
 
 /// Reads a provider API secret from the root-owned `CortexFS` system secret store.
@@ -66,7 +77,7 @@ pub fn provider_system_secret_exists(
     provider_secret_file_exists(&path)
 }
 
-fn provider_secret_file_exists(path: &Path) -> Result<bool, ProviderSystemSecretError> {
+pub(crate) fn provider_secret_file_exists(path: &Path) -> Result<bool, ProviderSystemSecretError> {
     match open_provider_secret_file(path) {
         Ok(_file) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -97,9 +108,9 @@ pub struct ProviderSystemSecretHandle {
 /// Provider secret material read before entering a reduced-privilege runtime.
 #[derive(Debug)]
 pub struct ProviderSystemSecret {
-    provider: String,
-    account: String,
-    secret: String,
+    pub(crate) provider: String,
+    pub(crate) account: String,
+    pub(crate) secret: String,
 }
 
 impl ProviderSystemSecret {

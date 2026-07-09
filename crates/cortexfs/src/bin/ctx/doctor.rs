@@ -1,4 +1,6 @@
-fn doctor(root: &Path) -> Result<(), CliError> {
+use crate::*;
+
+pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
     let mut ok = true;
     if doctor_is_dir(root) {
         print_line(&doctor_root_line("ok", root))?;
@@ -42,7 +44,7 @@ fn doctor(root: &Path) -> Result<(), CliError> {
     }
 }
 
-fn doctor_objects(root: &Path) -> Result<bool, CliError> {
+pub(crate) fn doctor_objects(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     for class in [ObjectClass::Model, ObjectClass::Agent, ObjectClass::Tool] {
         let dir = root.join(class.as_str());
@@ -57,7 +59,10 @@ fn doctor_objects(root: &Path) -> Result<bool, CliError> {
     Ok(ok)
 }
 
-fn object_names_for_doctor(dir: &Path, class: ObjectClass) -> Result<Vec<String>, CliError> {
+pub(crate) fn object_names_for_doctor(
+    dir: &Path,
+    class: ObjectClass,
+) -> Result<Vec<String>, CliError> {
     if class != ObjectClass::Model {
         return Ok(read_dir_names(dir)?
             .into_iter()
@@ -89,7 +94,7 @@ fn object_names_for_doctor(dir: &Path, class: ObjectClass) -> Result<Vec<String>
     Ok(names)
 }
 
-fn doctor_object(root: &Path, class: ObjectClass, name: &str) -> Result<bool, CliError> {
+pub(crate) fn doctor_object(root: &Path, class: ObjectClass, name: &str) -> Result<bool, CliError> {
     let report = inspect_object_layout(root, class, name);
     if report.is_ok() {
         print_line(&doctor_object_line("ok", class, name))?;
@@ -104,7 +109,7 @@ fn doctor_object(root: &Path, class: ObjectClass, name: &str) -> Result<bool, Cl
     }
 }
 
-fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
+pub(crate) fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     for (label, session_dir) in discover_session_dirs(root)? {
         let report = inspect_session_layout(&session_dir);
@@ -117,7 +122,7 @@ fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
     Ok(ok)
 }
 
-fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
+pub(crate) fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     let shared = root.join("shared");
     if !doctor_is_dir(&shared) {
@@ -141,7 +146,7 @@ fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
     Ok(ok)
 }
 
-fn print_doctor_report(label: &str, ok: bool, issues: &str) -> Result<bool, CliError> {
+pub(crate) fn print_doctor_report(label: &str, ok: bool, issues: &str) -> Result<bool, CliError> {
     if ok {
         print_line(&doctor_report_line("ok", label, None))?;
     } else {
@@ -150,24 +155,23 @@ fn print_doctor_report(label: &str, ok: bool, issues: &str) -> Result<bool, CliE
     Ok(ok)
 }
 
-fn doctor_root_line(status: &str, root: &Path) -> String {
-    format!("{} root {}", status, terminal_safe_text(&root.display().to_string()))
-}
-
-fn doctor_unexpected_entry_line(entry: &str) -> String {
-    format!("unexpected {}", terminal_safe_text(entry))
-}
-
-fn doctor_object_line(status: &str, class: ObjectClass, name: &str) -> String {
+pub(crate) fn doctor_root_line(status: &str, root: &Path) -> String {
     format!(
-        "{} {}/{}",
+        "{} root {}",
         status,
-        class.as_str(),
-        terminal_safe_text(name)
+        terminal_safe_text(&root.display().to_string())
     )
 }
 
-fn doctor_invalid_object_line(class: ObjectClass, name: &str, issues: &str) -> String {
+pub(crate) fn doctor_unexpected_entry_line(entry: &str) -> String {
+    format!("unexpected {}", terminal_safe_text(entry))
+}
+
+pub(crate) fn doctor_object_line(status: &str, class: ObjectClass, name: &str) -> String {
+    format!("{} {}/{}", status, class.as_str(), terminal_safe_text(name))
+}
+
+pub(crate) fn doctor_invalid_object_line(class: ObjectClass, name: &str, issues: &str) -> String {
     format!(
         "invalid {}/{}: {}",
         class.as_str(),
@@ -176,7 +180,7 @@ fn doctor_invalid_object_line(class: ObjectClass, name: &str, issues: &str) -> S
     )
 }
 
-fn doctor_report_line(status: &str, label: &str, issues: Option<&str>) -> String {
+pub(crate) fn doctor_report_line(status: &str, label: &str, issues: Option<&str>) -> String {
     let label = terminal_safe_text(label);
     issues.map_or_else(
         || format!("{status} {label}"),
@@ -184,7 +188,7 @@ fn doctor_report_line(status: &str, label: &str, issues: Option<&str>) -> String
     )
 }
 
-fn discover_session_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
+pub(crate) fn discover_session_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
     let mut sessions = Vec::new();
     collect_home_sessions(root, &mut sessions)?;
     collect_shared_sessions(root, &mut sessions)?;
@@ -192,7 +196,7 @@ fn discover_session_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError
     Ok(sessions)
 }
 
-fn collect_home_sessions(
+pub(crate) fn collect_home_sessions(
     root: &Path,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
@@ -206,7 +210,7 @@ fn collect_home_sessions(
     Ok(())
 }
 
-fn collect_shared_sessions(
+pub(crate) fn collect_shared_sessions(
     root: &Path,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
@@ -223,16 +227,24 @@ fn collect_shared_sessions(
     Ok(())
 }
 
-fn collect_space_sessions(
+pub(crate) fn collect_space_sessions(
     root: &Path,
     label_prefix: &str,
     sessions: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), CliError> {
-    collect_agent_sessions(&root.join("agent"), &format!("{label_prefix}/agent"), sessions)?;
-    collect_model_sessions(&root.join("model"), &format!("{label_prefix}/model"), sessions)
+    collect_agent_sessions(
+        &root.join("agent"),
+        &format!("{label_prefix}/agent"),
+        sessions,
+    )?;
+    collect_model_sessions(
+        &root.join("model"),
+        &format!("{label_prefix}/model"),
+        sessions,
+    )
 }
 
-fn collect_agent_sessions(
+pub(crate) fn collect_agent_sessions(
     agent_root: &Path,
     label_prefix: &str,
     sessions: &mut Vec<(String, PathBuf)>,
@@ -253,7 +265,7 @@ fn collect_agent_sessions(
     Ok(())
 }
 
-fn collect_model_sessions(
+pub(crate) fn collect_model_sessions(
     model_root: &Path,
     label_prefix: &str,
     sessions: &mut Vec<(String, PathBuf)>,
@@ -287,7 +299,7 @@ fn collect_model_sessions(
     Ok(())
 }
 
-fn collect_named_sessions(
+pub(crate) fn collect_named_sessions(
     session_root: &Path,
     label_prefix: &str,
     sessions: &mut Vec<(String, PathBuf)>,
@@ -307,16 +319,16 @@ fn collect_named_sessions(
     Ok(())
 }
 
-fn doctor_is_file(path: &Path) -> bool {
+pub(crate) fn doctor_is_file(path: &Path) -> bool {
     path.symlink_metadata()
         .is_ok_and(|metadata| metadata.is_file())
 }
 
-fn doctor_is_dir(path: &Path) -> bool {
+pub(crate) fn doctor_is_dir(path: &Path) -> bool {
     path.symlink_metadata()
         .is_ok_and(|metadata| metadata.is_dir())
 }
 
-fn doctor_exists(path: &Path) -> bool {
+pub(crate) fn doctor_exists(path: &Path) -> bool {
     path.symlink_metadata().is_ok()
 }

@@ -11,18 +11,13 @@ fn model_session_control_decides_socket_requirement() {
     let missing_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(missing_socket
         .issues()
-        .contains(&ObjectLayoutIssue::MissingSocket(
-            "model/openai/gpt-4o.sock".to_owned()
-        )));
+        .contains(&PathLayoutIssue::missing("model/openai/gpt-4o.sock".to_owned(), LayoutPathRole::Socket)));
 
     write_text_file(&control.join("session"), "native_thread\n");
     let invalid = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(invalid
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "model/openai/gpt-4o.d/session".to_owned(),
-            value: "native_thread".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("model/openai/gpt-4o.d/session".to_owned(), "native_thread".to_owned())));
 }
 
 #[test]
@@ -133,10 +128,7 @@ fn model_object_layout_rejects_provider_private_capabilities() {
     let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "model/openai/gpt-4o.d/cap".to_owned(),
-            value: "native_thread".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("model/openai/gpt-4o.d/cap".to_owned(), "native_thread".to_owned())));
 }
 
 #[test]
@@ -149,10 +141,7 @@ fn model_object_layout_rejects_invalid_driver_routes() {
     let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "model/openai/gpt-4o.d/driver".to_owned(),
-            value: "line 1 invalid driver /bin/sh".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("model/openai/gpt-4o.d/driver".to_owned(), "line 1 invalid driver /bin/sh".to_owned())));
 }
 
 #[test]
@@ -195,8 +184,5 @@ fn tool_object_layout_rejects_authority_shaped_schema() {
     let report = inspect_object_layout(&root, ObjectClass::Tool, "fs.read");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "tool/fs.read.d/schema".to_owned(),
-            value: "policy".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("tool/fs.read.d/schema".to_owned(), "policy".to_owned())));
 }

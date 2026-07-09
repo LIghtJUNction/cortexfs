@@ -1,17 +1,19 @@
+use crate::*;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AgentProcess {
-    name: String,
-    parent: Option<String>,
-    parent_session: Option<String>,
-    parent_run: Option<String>,
-    status: String,
-    ppid: Option<String>,
-    pid: Option<String>,
-    model: String,
-    life: String,
+pub(crate) struct AgentProcess {
+    pub(crate) name: String,
+    pub(crate) parent: Option<String>,
+    pub(crate) parent_session: Option<String>,
+    pub(crate) parent_run: Option<String>,
+    pub(crate) status: String,
+    pub(crate) ppid: Option<String>,
+    pub(crate) pid: Option<String>,
+    pub(crate) model: String,
+    pub(crate) life: String,
 }
 
-fn agent_ps(root: &Path) -> Result<(), CliError> {
+pub(crate) fn agent_ps(root: &Path) -> Result<(), CliError> {
     let processes = read_agent_processes(root)?;
     for line in render_agent_process_forest(&processes) {
         print_line(&line)?;
@@ -19,7 +21,7 @@ fn agent_ps(root: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn render_agent_process_forest(processes: &[AgentProcess]) -> Vec<String> {
+pub(crate) fn render_agent_process_forest(processes: &[AgentProcess]) -> Vec<String> {
     let mut processes = processes.to_vec();
     processes.sort_by(|left, right| left.name.cmp(&right.name));
     let names = processes
@@ -46,7 +48,7 @@ fn render_agent_process_forest(processes: &[AgentProcess]) -> Vec<String> {
 }
 
 #[cfg(test)]
-fn render_agent_process_tree(
+pub(crate) fn render_agent_process_tree(
     process: &AgentProcess,
     processes: &[AgentProcess],
     prefix: &str,
@@ -114,7 +116,7 @@ impl<'a> AgentProcessTreeRenderer<'a> {
     }
 }
 
-fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
+pub(crate) fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
     let names = list_kind_names(root, ObjectClass::Agent)?;
     let mut processes = Vec::new();
     for name in names {
@@ -151,30 +153,35 @@ fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, CliError> {
     Ok(processes)
 }
 
-fn default_agent_process_model(name: &str) -> &'static str {
+pub(crate) fn default_agent_process_model(name: &str) -> &'static str {
     default_agent_model_for_name(name)
 }
 
-fn agent_object_path(root: &Path, agent: &str) -> PathBuf {
+pub(crate) fn agent_object_path(root: &Path, agent: &str) -> PathBuf {
     root.join("agent").join(agent)
 }
 
-fn agent_control_dir(root: &Path, agent: &str) -> PathBuf {
+pub(crate) fn agent_control_dir(root: &Path, agent: &str) -> PathBuf {
     agent_user_control_dir(root, agent)
         .filter(|control| is_plain_dir(control))
         .unwrap_or_else(|| agent_object_path(root, &format!("{agent}.d")))
 }
 
-fn agent_user_control_dir(root: &Path, agent: &str) -> Option<PathBuf> {
-    Some(ctx_home(root).ok()?.join("agent").join(format!("{agent}.d")))
+pub(crate) fn agent_user_control_dir(root: &Path, agent: &str) -> Option<PathBuf> {
+    Some(
+        ctx_home(root)
+            .ok()?
+            .join("agent")
+            .join(format!("{agent}.d")),
+    )
 }
 
-fn is_plain_dir(path: &Path) -> bool {
+pub(crate) fn is_plain_dir(path: &Path) -> bool {
     path.symlink_metadata()
         .is_ok_and(|metadata| metadata.file_type().is_dir() && !metadata.file_type().is_symlink())
 }
 
-fn agent_control_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
+pub(crate) fn agent_control_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
     let agent_root = agent_object_path(root, "");
     let entries = fs::read_dir(&agent_root).map_err(|error| {
         CliError::unavailable(format!("cannot read {}: {error}", agent_root.display()))
@@ -195,23 +202,23 @@ fn agent_control_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
     Ok(controls)
 }
 
-fn live_agent_status_and_pid(control: &Path) -> Result<(String, Option<String>), CliError> {
+pub(crate) fn live_agent_status_and_pid(
+    control: &Path,
+) -> Result<(String, Option<String>), CliError> {
     let status =
         read_agent_control_trimmed(control, "status")?.unwrap_or_else(|| "unknown".to_owned());
     let recorded_pid = read_agent_control_trimmed(control, "pid")?;
     let pid = live_agent_pid(recorded_pid.clone());
-    let status = if recorded_pid.is_some()
-        && pid.is_none()
-        && matches!(status.as_str(), "ready" | "busy")
-    {
-        "dead".to_owned()
-    } else {
-        status
-    };
+    let status =
+        if recorded_pid.is_some() && pid.is_none() && matches!(status.as_str(), "ready" | "busy") {
+            "dead".to_owned()
+        } else {
+            status
+        };
     Ok((status, pid))
 }
 
-fn live_agent_pid(pid: Option<String>) -> Option<String> {
+pub(crate) fn live_agent_pid(pid: Option<String>) -> Option<String> {
     let pid = pid?;
     if pid.bytes().all(|byte| byte.is_ascii_digit()) && Path::new("/proc").join(&pid).is_dir() {
         Some(pid)
@@ -220,7 +227,7 @@ fn live_agent_pid(pid: Option<String>) -> Option<String> {
     }
 }
 
-fn process_model_suffix(process: &AgentProcess) -> String {
+pub(crate) fn process_model_suffix(process: &AgentProcess) -> String {
     if process.model == "main" {
         String::new()
     } else {
@@ -228,7 +235,7 @@ fn process_model_suffix(process: &AgentProcess) -> String {
     }
 }
 
-fn process_life_suffix(process: &AgentProcess) -> String {
+pub(crate) fn process_life_suffix(process: &AgentProcess) -> String {
     if process.life == "owned" {
         String::new()
     } else {
@@ -236,7 +243,7 @@ fn process_life_suffix(process: &AgentProcess) -> String {
     }
 }
 
-fn process_role_suffix(process: &AgentProcess) -> String {
+pub(crate) fn process_role_suffix(process: &AgentProcess) -> String {
     if agent_role_for_display(&process.name) == "worker" {
         " role=worker".to_owned()
     } else {
@@ -244,7 +251,7 @@ fn process_role_suffix(process: &AgentProcess) -> String {
     }
 }
 
-fn process_parent_suffix(process: &AgentProcess) -> String {
+pub(crate) fn process_parent_suffix(process: &AgentProcess) -> String {
     let mut suffix = String::new();
     if let Some(session) = process.parent_session.as_ref() {
         suffix.push_str(" parent_session=");
@@ -257,20 +264,20 @@ fn process_parent_suffix(process: &AgentProcess) -> String {
     suffix
 }
 
-fn process_id_suffix(label: &str, pid: Option<&str>) -> String {
+pub(crate) fn process_id_suffix(label: &str, pid: Option<&str>) -> String {
     pid.map_or_else(String::new, |pid| {
         format!(" {label}={}", terminal_safe_text(pid))
     })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AgentParentRef {
-    agent: String,
-    session: Option<String>,
-    run: Option<String>,
+pub(crate) struct AgentParentRef {
+    pub(crate) agent: String,
+    pub(crate) session: Option<String>,
+    pub(crate) run: Option<String>,
 }
 
-fn agent_parent_ref_display(parent: &AgentParentRef) -> String {
+pub(crate) fn agent_parent_ref_display(parent: &AgentParentRef) -> String {
     let mut display = format!("agent:{}", parent.agent);
     if let Some(session) = parent.session.as_ref() {
         display.push_str(" session:");
@@ -283,7 +290,7 @@ fn agent_parent_ref_display(parent: &AgentParentRef) -> String {
     display
 }
 
-fn agent_parent_ref_matches(
+pub(crate) fn agent_parent_ref_matches(
     parent: &AgentParentRef,
     agent: &str,
     session: Option<&str>,
@@ -297,7 +304,7 @@ fn agent_parent_ref_matches(
         && run.is_none_or(|expected| parent.run.as_deref() == Some(expected))
 }
 
-fn read_agent_parent_ref(control: &Path) -> Result<Option<AgentParentRef>, CliError> {
+pub(crate) fn read_agent_parent_ref(control: &Path) -> Result<Option<AgentParentRef>, CliError> {
     let Some(parent) = read_agent_control_trimmed(control, "parent")? else {
         return Ok(None);
     };
@@ -311,7 +318,10 @@ fn read_agent_parent_ref(control: &Path) -> Result<Option<AgentParentRef>, CliEr
     })
 }
 
-fn read_agent_life_for_context(control: &Path, context: &str) -> Result<String, CliError> {
+pub(crate) fn read_agent_life_for_context(
+    control: &Path,
+    context: &str,
+) -> Result<String, CliError> {
     let life = read_agent_control_trimmed(control, "life")?.unwrap_or_else(|| "owned".to_owned());
     if cortexfs::ChildLifecycle::parse(&life).is_err() {
         return Err(CliError::usage(format!(
@@ -322,7 +332,7 @@ fn read_agent_life_for_context(control: &Path, context: &str) -> Result<String, 
     Ok(life)
 }
 
-fn read_agent_model_life_for_context(
+pub(crate) fn read_agent_model_life_for_context(
     control: &Path,
     context: &str,
 ) -> Result<(String, String), CliError> {
@@ -332,7 +342,10 @@ fn read_agent_model_life_for_context(
     ))
 }
 
-fn read_agent_model_for_context(control: &Path, context: &str) -> Result<String, CliError> {
+pub(crate) fn read_agent_model_for_context(
+    control: &Path,
+    context: &str,
+) -> Result<String, CliError> {
     let model = read_agent_control_trimmed(control, "model")?
         .unwrap_or_else(|| default_agent_process_model(control_agent_name(control)).to_owned());
     if !(is_model_name(&model) || matches!(model.as_str(), "main" | "helper")) {
@@ -344,7 +357,7 @@ fn read_agent_model_for_context(control: &Path, context: &str) -> Result<String,
     Ok(model)
 }
 
-fn control_agent_name(control: &Path) -> &str {
+pub(crate) fn control_agent_name(control: &Path) -> &str {
     control
         .file_name()
         .and_then(|name| name.to_str())
@@ -352,7 +365,7 @@ fn control_agent_name(control: &Path) -> &str {
         .unwrap_or("agent")
 }
 
-fn parse_agent_parent_ref(value: &str) -> Option<AgentParentRef> {
+pub(crate) fn parse_agent_parent_ref(value: &str) -> Option<AgentParentRef> {
     let mut fields = value.split_whitespace();
     let agent = fields.next()?.strip_prefix("agent:")?;
     if !is_object_name(agent) {
@@ -379,7 +392,10 @@ fn parse_agent_parent_ref(value: &str) -> Option<AgentParentRef> {
     })
 }
 
-fn read_agent_control_trimmed(control: &Path, file: &str) -> Result<Option<String>, CliError> {
+pub(crate) fn read_agent_control_trimmed(
+    control: &Path,
+    file: &str,
+) -> Result<Option<String>, CliError> {
     let path = control.join(file);
     match fs::symlink_metadata(&path) {
         Ok(_metadata) => {}

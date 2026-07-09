@@ -1,3 +1,5 @@
+use crate::*;
+
 /// Installs a v1 executable object wrapper plus required `.d` control files.
 ///
 /// The wrapper is a small POSIX shell `exec` shim to an existing runtime,
@@ -42,7 +44,7 @@ pub fn install_executable_object_wrapper(
     Ok(ObjectBootstrap::new(executable, control_dir))
 }
 
-fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapError> {
+pub(crate) fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapError> {
     let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
     plain_fs::create_plain_dir(&hook_dir).map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     for phase in OBJECT_HOOK_PHASE_DIRS {
@@ -52,7 +54,7 @@ fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapErro
     Ok(())
 }
 
-fn validate_control_overrides(
+pub(crate) fn validate_control_overrides(
     class: ObjectClass,
     control_overrides: &[(&str, &str)],
 ) -> Result<(), ObjectBootstrapError> {
@@ -65,7 +67,7 @@ fn validate_control_overrides(
     Ok(())
 }
 
-fn object_control_content(
+pub(crate) fn object_control_content(
     class: ObjectClass,
     object_name: &str,
     file: &str,
@@ -84,7 +86,7 @@ fn object_control_content(
     Ok(content)
 }
 
-fn validate_object_control_content(
+pub(crate) fn validate_object_control_content(
     class: ObjectClass,
     file: &str,
     content: &str,
@@ -96,7 +98,10 @@ fn validate_object_control_content(
     }
 }
 
-fn validate_model_control_content(file: &str, content: &str) -> Result<(), ObjectBootstrapError> {
+pub(crate) fn validate_model_control_content(
+    file: &str,
+    content: &str,
+) -> Result<(), ObjectBootstrapError> {
     match file {
         "cap" if inspect_model_capabilities(content).is_ok() => Ok(()),
         "driver" if parse_model_driver_routes(content).is_ok() => Ok(()),
@@ -111,7 +116,7 @@ fn validate_model_control_content(file: &str, content: &str) -> Result<(), Objec
     }
 }
 
-fn validate_agent_bootstrap_control_content(
+pub(crate) fn validate_agent_bootstrap_control_content(
     file: &str,
     content: &str,
 ) -> Result<(), ObjectBootstrapError> {
@@ -128,7 +133,10 @@ fn validate_agent_bootstrap_control_content(
     }
 }
 
-fn validate_tool_control_content(file: &str, content: &str) -> Result<(), ObjectBootstrapError> {
+pub(crate) fn validate_tool_control_content(
+    file: &str,
+    content: &str,
+) -> Result<(), ObjectBootstrapError> {
     match file {
         "schema" if inspect_tool_schema_json(content).is_ok() => Ok(()),
         "schema" => Err(ObjectBootstrapError::InvalidControlValue),
@@ -137,7 +145,11 @@ fn validate_tool_control_content(file: &str, content: &str) -> Result<(), Object
     }
 }
 
-fn default_object_control_value(class: ObjectClass, object_name: &str, file: &str) -> String {
+pub(crate) fn default_object_control_value(
+    class: ObjectClass,
+    object_name: &str,
+    file: &str,
+) -> String {
     match class {
         ObjectClass::Model => default_model_control_value(object_name, file),
         ObjectClass::Agent => default_agent_control_value(object_name, file),
@@ -145,7 +157,7 @@ fn default_object_control_value(class: ObjectClass, object_name: &str, file: &st
     }
 }
 
-fn default_model_control_value(object_name: &str, file: &str) -> String {
+pub(crate) fn default_model_control_value(object_name: &str, file: &str) -> String {
     match file {
         "id" => object_name.to_owned(),
         "driver" => "rig".to_owned(),
@@ -158,7 +170,7 @@ fn default_model_control_value(object_name: &str, file: &str) -> String {
     }
 }
 
-fn default_agent_control_value(object_name: &str, file: &str) -> String {
+pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> String {
     match file {
         "owner" | "uid" | "gid" => "0".to_owned(),
         "label" => format!("user_u:agent_r:{object_name}_t:s0"),
@@ -176,7 +188,7 @@ fn default_agent_control_value(object_name: &str, file: &str) -> String {
     }
 }
 
-fn default_tool_control_value(object_name: &str, file: &str) -> String {
+pub(crate) fn default_tool_control_value(object_name: &str, file: &str) -> String {
     match file {
         "name" => object_name.to_owned(),
         "schema" => "{\"type\":\"object\"}".to_owned(),
@@ -185,11 +197,15 @@ fn default_tool_control_value(object_name: &str, file: &str) -> String {
     }
 }
 
-fn is_valid_wrapper_target(value: &str) -> bool {
+pub(crate) fn is_valid_wrapper_target(value: &str) -> bool {
     !value.trim().is_empty() && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
-fn executable_wrapper_script(class: ObjectClass, name: &str, wrapper_target: &str) -> String {
+pub(crate) fn executable_wrapper_script(
+    class: ObjectClass,
+    name: &str,
+    wrapper_target: &str,
+) -> String {
     format!(
         "#!/bin/sh\n# CortexFS generated object wrapper.\n# cortexfs.object={}\n# cortexfs.name={}\nexec {} \"$0\" \"$@\"\n",
         class.as_str(),

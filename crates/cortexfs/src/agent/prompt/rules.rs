@@ -1,3 +1,8 @@
+use super::file_read::{push_str_byte_limit, read_bounded_regular_utf8};
+use super::*;
+use crate::*;
+use std::env;
+
 #[must_use]
 pub fn collect_agent_rules() -> String {
     let mut paths = Vec::new();

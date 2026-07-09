@@ -88,7 +88,10 @@ fn runner_rejects_missing_object_path() {
 #[test]
 fn runner_rejects_unknown_model() {
     assert_eq!(
-        run(vec![OsString::from("/ctx/model/missing-provider/gpt-5.4")]),
+        run(vec![
+            OsString::from("/ctx/model/missing-provider/gpt-5.4"),
+            OsString::from("{}"),
+        ]),
         Err("missing provider: missing-provider".to_owned())
     );
 }

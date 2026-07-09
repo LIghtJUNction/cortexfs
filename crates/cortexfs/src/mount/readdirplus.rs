@@ -35,7 +35,11 @@ macro_rules! cortexfs_mount_readdirplus {
                 }
             };
             let mut rows = vec![
-                (node.inode(), OsString::from("."), file_attr(node.inode(), node.attr())),
+                (
+                    node.inode(),
+                    OsString::from("."),
+                    file_attr(node.inode(), node.attr()),
+                ),
                 (
                     parent_node.inode(),
                     OsString::from(".."),
@@ -71,7 +75,14 @@ macro_rules! cortexfs_mount_readdirplus {
             };
             for (index, (inode, name, attr)) in rows.into_iter().enumerate().skip(start) {
                 let next_offset = u64::try_from(index + 1).unwrap_or(u64::MAX);
-                if reply.add(INodeNo(inode), next_offset, name, &TTL, &attr, Generation(0)) {
+                if reply.add(
+                    INodeNo(inode),
+                    next_offset,
+                    name,
+                    &TTL,
+                    &attr,
+                    Generation(0),
+                ) {
                     break;
                 }
             }

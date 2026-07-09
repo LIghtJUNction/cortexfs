@@ -1,3 +1,5 @@
+use crate::*;
+
 impl Filesystem for CortexFuse {
     cortexfs_mount_init!();
     cortexfs_mount_lifecycle!();
@@ -331,7 +333,10 @@ impl Filesystem for CortexFuse {
     }
 
     fn opendir(&self, _req: &Request, ino: INodeNo, flags: OpenFlags, reply: ReplyOpen) {
-        if matches!(flags.acc_mode(), OpenAccMode::O_WRONLY | OpenAccMode::O_RDWR) {
+        if matches!(
+            flags.acc_mode(),
+            OpenAccMode::O_WRONLY | OpenAccMode::O_RDWR
+        ) {
             reply.error(Errno::EISDIR);
             return;
         }
@@ -387,10 +392,13 @@ impl Filesystem for CortexFuse {
             reply.error(error);
             return;
         }
-        match self
-            .projection
-            .write_fuse_file_at_for_owner(&path, offset, data, req.uid(), req.gid())
-        {
+        match self.projection.write_fuse_file_at_for_owner(
+            &path,
+            offset,
+            data,
+            req.uid(),
+            req.gid(),
+        ) {
             Ok(()) => match u32::try_from(data.len()) {
                 Ok(count) => reply.written(count),
                 Err(_error) => reply.error(Errno::EFBIG),

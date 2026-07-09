@@ -15,6 +15,7 @@ tool 提交语义，不是新的根目录或新的 workflow 入口。
 
 ```text
 DESIGN.md
+naming-guide.md
 spec/README.md
 spec/root-abi.md
 spec/object-abi.md
@@ -24,6 +25,9 @@ spec/tool-policy-abi.md
 spec/ctx-coreutils.md
 aimock-testing.md
 ```
+
+源码树命名（kebab 文件名、`#[path]` 模块映射、禁止 `mod.rs`、函数动词约定）见
+[naming-guide.md](naming-guide.md)。
 
 根 ABI 只包含：
 

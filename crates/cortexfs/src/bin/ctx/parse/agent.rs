@@ -1,4 +1,6 @@
-fn parse_agent_session(
+use crate::*;
+
+pub(crate) fn parse_agent_session(
     mut values: impl Iterator<Item = String>,
     command: &str,
 ) -> Result<(String, Option<String>), CliError> {
@@ -19,7 +21,7 @@ fn parse_agent_session(
     Ok((agent, session))
 }
 
-fn parse_send(
+pub(crate) fn parse_send(
     mut values: impl Iterator<Item = String>,
 ) -> Result<(String, Option<String>, String), CliError> {
     let agent = required_arg(&mut values, "send requires an agent name")?;
@@ -29,7 +31,9 @@ fn parse_send(
     }
     if matches!(rest.first().map(String::as_str), Some("--session" | "-s")) {
         if rest.len() < 3 {
-            return Err(CliError::usage("send --session requires a session and input text"));
+            return Err(CliError::usage(
+                "send --session requires a session and input text",
+            ));
         }
         let session = rest.remove(1);
         rest.remove(0);
@@ -42,7 +46,7 @@ fn parse_send(
     Ok((agent, Some(session), rest.join(" ")))
 }
 
-fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
+pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
@@ -152,15 +156,23 @@ fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     }
 }
 
-fn parse_agent_session_admin(mut values: impl Iterator<Item = String>) -> Result<Command, CliError> {
+pub(crate) fn parse_agent_session_admin(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
     let command = required_arg(&mut values, "agent session requires gc")?;
     match command.as_str() {
-        "gc" => Ok(Command::Agent(AgentArgs::SessionGc(parse_agent_session_gc(values)?))),
-        _ => Err(CliError::usage(format!("unknown agent session command: {command}"))),
+        "gc" => Ok(Command::Agent(AgentArgs::SessionGc(
+            parse_agent_session_gc(values)?,
+        ))),
+        _ => Err(CliError::usage(format!(
+            "unknown agent session command: {command}"
+        ))),
     }
 }
 
-fn parse_agent_session_gc(mut values: impl Iterator<Item = String>) -> Result<AgentSessionGcArgs, CliError> {
+pub(crate) fn parse_agent_session_gc(
+    mut values: impl Iterator<Item = String>,
+) -> Result<AgentSessionGcArgs, CliError> {
     let name = required_arg(&mut values, "agent session gc requires an agent name")?;
     let mut args = AgentSessionGcArgs {
         name,
@@ -201,7 +213,7 @@ fn parse_agent_session_gc(mut values: impl Iterator<Item = String>) -> Result<Ag
     Ok(args)
 }
 
-fn parse_agent_session_option_args(
+pub(crate) fn parse_agent_session_option_args(
     mut values: impl Iterator<Item = String>,
     command: &str,
 ) -> Result<(String, Option<String>), CliError> {
@@ -221,7 +233,7 @@ fn parse_agent_session_option_args(
     Ok((name, session))
 }
 
-fn parse_agent_wait_args(
+pub(crate) fn parse_agent_wait_args(
     mut values: impl Iterator<Item = String>,
 ) -> Result<(String, Option<String>, String), CliError> {
     let name = required_arg(&mut values, "agent wait requires an agent name")?;
@@ -243,7 +255,7 @@ fn parse_agent_wait_args(
     Ok((name, session, child))
 }
 
-fn parse_agent_session_raw_args(
+pub(crate) fn parse_agent_session_raw_args(
     mut values: impl Iterator<Item = String>,
     command: &str,
 ) -> Result<(String, Option<String>, bool), CliError> {
@@ -265,21 +277,23 @@ fn parse_agent_session_raw_args(
     Ok((name, session, raw))
 }
 
-struct ParsedAgentSend {
-    name: String,
-    session: Option<String>,
-    raw: bool,
-    input: String,
+pub(crate) struct ParsedAgentSend {
+    pub(crate) name: String,
+    pub(crate) session: Option<String>,
+    pub(crate) raw: bool,
+    pub(crate) input: String,
 }
 
-struct ParsedAgentCancel {
-    name: String,
-    session: Option<String>,
-    raw: bool,
-    run: Option<String>,
+pub(crate) struct ParsedAgentCancel {
+    pub(crate) name: String,
+    pub(crate) session: Option<String>,
+    pub(crate) raw: bool,
+    pub(crate) run: Option<String>,
 }
 
-fn parse_agent_send_args(mut values: impl Iterator<Item = String>) -> Result<ParsedAgentSend, CliError> {
+pub(crate) fn parse_agent_send_args(
+    mut values: impl Iterator<Item = String>,
+) -> Result<ParsedAgentSend, CliError> {
     let name = required_arg(&mut values, "agent send requires an agent name")?;
     let mut session = None;
     let mut raw = false;
@@ -311,7 +325,7 @@ fn parse_agent_send_args(mut values: impl Iterator<Item = String>) -> Result<Par
     })
 }
 
-fn parse_agent_cancel_args(
+pub(crate) fn parse_agent_cancel_args(
     mut values: impl Iterator<Item = String>,
 ) -> Result<ParsedAgentCancel, CliError> {
     let name = required_arg(&mut values, "agent cancel requires an agent name")?;
@@ -339,7 +353,9 @@ fn parse_agent_cancel_args(
     })
 }
 
-fn parse_agent_start(mut values: impl Iterator<Item = String>) -> Result<AgentStartArgs, CliError> {
+pub(crate) fn parse_agent_start(
+    mut values: impl Iterator<Item = String>,
+) -> Result<AgentStartArgs, CliError> {
     let name = required_arg(&mut values, "agent start requires an agent name")?;
     let mut args = AgentStartArgs {
         name,
@@ -351,10 +367,8 @@ fn parse_agent_start(mut values: impl Iterator<Item = String>) -> Result<AgentSt
     while let Some(value) = values.next() {
         match value.as_str() {
             "--session" | "-s" => {
-                args.session = required_arg(
-                    &mut values,
-                    "agent start --session requires a session name",
-                )?;
+                args.session =
+                    required_arg(&mut values, "agent start --session requires a session name")?;
             }
             "--cwd" => {
                 args.cwd = required_arg(&mut values, "agent start --cwd requires a path")?;
@@ -380,7 +394,9 @@ fn parse_agent_start(mut values: impl Iterator<Item = String>) -> Result<AgentSt
     Ok(args)
 }
 
-fn parse_agent_new(mut values: impl Iterator<Item = String>) -> Result<AgentNewArgs, CliError> {
+pub(crate) fn parse_agent_new(
+    mut values: impl Iterator<Item = String>,
+) -> Result<AgentNewArgs, CliError> {
     let name = required_arg(&mut values, "agent new requires an agent name")?;
     let mut args = AgentNewArgs {
         name,
@@ -426,10 +442,8 @@ fn parse_agent_new(mut values: impl Iterator<Item = String>) -> Result<AgentNewA
                 args.shared.push(parse_agent_shared(&value)?);
             }
             "--mount" => {
-                let source =
-                    required_arg(&mut values, "agent new --mount requires a source path")?;
-                let target =
-                    required_arg(&mut values, "agent new --mount requires a target path")?;
+                let source = required_arg(&mut values, "agent new --mount requires a source path")?;
+                let target = required_arg(&mut values, "agent new --mount requires a target path")?;
                 let mode = required_arg(&mut values, "agent new --mount requires ro or rw")?;
                 args.mounts.push(AgentMount {
                     source,
@@ -444,9 +458,11 @@ fn parse_agent_new(mut values: impl Iterator<Item = String>) -> Result<AgentNewA
     Ok(args)
 }
 
-fn parse_agent_shared(value: &str) -> Result<AgentShared, CliError> {
+pub(crate) fn parse_agent_shared(value: &str) -> Result<AgentShared, CliError> {
     let Some((name, access)) = value.split_once(':') else {
-        return Err(CliError::usage("agent new --shared expects NAME:read|write"));
+        return Err(CliError::usage(
+            "agent new --shared expects NAME:read|write",
+        ));
     };
     Ok(AgentShared {
         name: name.to_owned(),

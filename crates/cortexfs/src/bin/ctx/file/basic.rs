@@ -1,4 +1,6 @@
-fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, CliError> {
+use crate::*;
+
+pub(crate) fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, CliError> {
     let abi_path = classify_input_path(root, path)?;
     if !matches!(
         classify_abi_path(&abi_path),
@@ -24,7 +26,7 @@ fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, Cli
         .map_or_else(|| ExitCode::from(70), ExitCode::from))
 }
 
-fn object_execution_command(root: &Path, path: &Path) -> ProcessCommand {
+pub(crate) fn object_execution_command(root: &Path, path: &Path) -> ProcessCommand {
     let mut command = ProcessCommand::new(path);
     command
         .env_clear()
@@ -33,7 +35,7 @@ fn object_execution_command(root: &Path, path: &Path) -> ProcessCommand {
     command
 }
 
-fn file_command(root: &Path, args: &FileArgs) -> Result<(), CliError> {
+pub(crate) fn file_command(root: &Path, args: &FileArgs) -> Result<(), CliError> {
     match args.command {
         FileCommand::Info => file_info(root, &args.path),
         FileCommand::Type => file_type(root, &args.path),
@@ -41,12 +43,12 @@ fn file_command(root: &Path, args: &FileArgs) -> Result<(), CliError> {
     }
 }
 
-fn file_cat(root: &Path, path: &str) -> Result<(), CliError> {
+pub(crate) fn file_cat(root: &Path, path: &str) -> Result<(), CliError> {
     let path = resolve_abi_path(root, path)?;
     cat_path(&path)
 }
 
-fn cat_path(path: &Path) -> Result<(), CliError> {
+pub(crate) fn cat_path(path: &Path) -> Result<(), CliError> {
     let mut file = open_plain_read_file(path)?;
     let metadata = file.metadata().map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
@@ -63,7 +65,7 @@ fn cat_path(path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
+pub(crate) fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     let path = resolve_abi_path(root, path)?;
     let Some(parent) = path.parent() else {
         return Err(CliError::usage("set requires a parent directory"));
@@ -129,7 +131,7 @@ fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     Err(CliError::unavailable("cannot create unique temp file"))
 }
 
-fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
+pub(crate) fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     let path = resolve_abi_path(root, path)?;
     let Some(parent) = path.parent() else {
         return Err(CliError::usage("append requires a parent directory"));
@@ -173,17 +175,17 @@ fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
     })
 }
 
-fn open_plain_file_parent_dir(path: &Path) -> Result<fs::File, CliError> {
+pub(crate) fn open_plain_file_parent_dir(path: &Path) -> Result<fs::File, CliError> {
     open_plain_directory(path).map_err(|error| {
         CliError::unavailable(format!("cannot open parent {}: {error}", path.display()))
     })
 }
 
-fn file_type(root: &Path, path: &str) -> Result<(), CliError> {
+pub(crate) fn file_type(root: &Path, path: &str) -> Result<(), CliError> {
     print_line(&file_type_name(root, path)?)
 }
 
-fn file_info(root: &Path, path: &str) -> Result<(), CliError> {
+pub(crate) fn file_info(root: &Path, path: &str) -> Result<(), CliError> {
     let resolved = resolve_abi_path(root, path)?;
     let metadata = fs::symlink_metadata(&resolved).map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", resolved.display()))
@@ -201,7 +203,7 @@ fn file_info(root: &Path, path: &str) -> Result<(), CliError> {
     print_cortexfs_xattrs(&resolved)
 }
 
-fn file_type_name(root: &Path, path: &str) -> Result<String, CliError> {
+pub(crate) fn file_type_name(root: &Path, path: &str) -> Result<String, CliError> {
     let resolved = resolve_abi_path(root, path)?;
     let shape = classify_abi_path(&classify_input_path(root, path)?);
     if shape != "ctx.unknown" {
@@ -232,7 +234,7 @@ fn file_type_name(root: &Path, path: &str) -> Result<String, CliError> {
     }
 }
 
-fn fs_type_name(metadata: &fs::Metadata) -> &'static str {
+pub(crate) fn fs_type_name(metadata: &fs::Metadata) -> &'static str {
     let file_type = metadata.file_type();
     if file_type.is_dir() {
         "directory"
@@ -253,7 +255,7 @@ fn fs_type_name(metadata: &fs::Metadata) -> &'static str {
     }
 }
 
-fn cortexfs_token_estimate(path: &Path, bytes: u64) -> String {
+pub(crate) fn cortexfs_token_estimate(path: &Path, bytes: u64) -> String {
     read_xattr_string(path, "user.cortexfs.token_estimate").unwrap_or_else(|| {
         if bytes == 0 {
             "0".to_owned()
@@ -263,7 +265,7 @@ fn cortexfs_token_estimate(path: &Path, bytes: u64) -> String {
     })
 }
 
-fn print_cortexfs_xattrs(path: &Path) -> Result<(), CliError> {
+pub(crate) fn print_cortexfs_xattrs(path: &Path) -> Result<(), CliError> {
     let Ok(names) = xattr::list(path) else {
         return Ok(());
     };
@@ -280,7 +282,7 @@ fn print_cortexfs_xattrs(path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn cortexfs_xattr_line(name: &str, value: &str) -> String {
+pub(crate) fn cortexfs_xattr_line(name: &str, value: &str) -> String {
     format!(
         "xattr.{}={}",
         terminal_safe_text(name),
@@ -288,7 +290,7 @@ fn cortexfs_xattr_line(name: &str, value: &str) -> String {
     )
 }
 
-fn read_xattr_string(path: &Path, name: &str) -> Option<String> {
+pub(crate) fn read_xattr_string(path: &Path, name: &str) -> Option<String> {
     let value = xattr::get(path, name).ok()??;
     String::from_utf8(value).ok()
 }

@@ -1,3 +1,5 @@
+use crate::*;
+
 const MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES: u64 = 64 * 1024;
 const MAX_SOCKET_RUNTIME_EVENTS_BYTES: u64 = 1024 * 1024;
 const MAX_AGENT_EXECUTABLE_FRAME_BYTES: usize = 256 * 1024;
@@ -115,7 +117,7 @@ pub fn serve_unix_socket_stream_once(
     })
 }
 
-fn serve_socket_stream_with(
+pub(crate) fn serve_socket_stream_with(
     stream: &mut UnixStream,
     peer_policy: Option<SocketPeerPolicy>,
     dispatch: impl FnOnce(&mut UnixStream, &str) -> Result<SocketRuntimeResponse, SocketRuntimeError>,
@@ -148,9 +150,19 @@ fn serve_socket_stream_with(
     }
 }
 
-include!("socket_agent_exec.rs");
-include!("socket_bwrap.rs");
-include!("socket_agent_events.rs");
-include!("socket_stream.rs");
-include!("socket_session.rs");
-include!("socket_fs.rs");
+#[path = "socket-agent-events.rs"]
+pub mod socket_agent_events;
+#[path = "socket-agent-exec.rs"]
+pub mod socket_agent_exec;
+#[path = "socket-bwrap.rs"]
+pub mod socket_bwrap;
+#[path = "socket-session.rs"]
+pub mod socket_session;
+#[path = "socket-stream.rs"]
+pub mod socket_stream;
+
+pub(crate) use socket_agent_events::*;
+pub(crate) use socket_agent_exec::*;
+pub(crate) use socket_bwrap::*;
+pub(crate) use socket_session::*;
+pub(crate) use socket_stream::*;

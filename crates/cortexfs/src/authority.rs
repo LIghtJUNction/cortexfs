@@ -1,3 +1,7 @@
+use crate::*;
+
+pub mod helpers;
+
 /// Decides whether an agent may execute a tool through `CTX_PATH`.
 ///
 /// This is a pure effective-authority check for the stable tool boundary:
@@ -82,8 +86,8 @@ pub fn authorize_shared_access(
         return Err(SharedAccessDenial::ReadOnlyMount);
     }
 
-    let metadata = symlink_safe_metadata(path)
-        .map_err(|_error| SharedAccessDenial::CannotInspectPath)?;
+    let metadata =
+        symlink_safe_metadata(path).map_err(|_error| SharedAccessDenial::CannotInspectPath)?;
     let linux_allowed = match access {
         SharedAccess::Read => linux_identity_can_read(&metadata, authority.identity),
         SharedAccess::Write => linux_identity_can_write(&metadata, authority.identity),
@@ -124,8 +128,8 @@ pub fn authorize_session_access(
         return Err(SessionAccessDenial::ReadOnlyMount);
     }
 
-    let metadata = symlink_safe_metadata(path)
-        .map_err(|_error| SessionAccessDenial::CannotInspectPath)?;
+    let metadata =
+        symlink_safe_metadata(path).map_err(|_error| SessionAccessDenial::CannotInspectPath)?;
     let linux_allowed = match access {
         SessionAccess::Read | SessionAccess::Resume => {
             linux_identity_can_read(&metadata, authority.identity)
@@ -180,7 +184,10 @@ pub fn authorize_child_agent(
     if !parent_ref_matches(request.parent_ref, authority.parent_agent)? {
         return Err(ChildAgentDenial::ParentMismatch);
     }
-    if !matches!(request.lifecycle, ChildLifecycle::Owned | ChildLifecycle::Temp) {
+    if !matches!(
+        request.lifecycle,
+        ChildLifecycle::Owned | ChildLifecycle::Temp
+    ) {
         return Err(ChildAgentDenial::UnsupportedLifecycle);
     }
     if request.controls.identity.uid() != authority.identity.uid()
@@ -280,12 +287,15 @@ pub fn record_owned_child_cancellation(
     Ok(events)
 }
 
-fn is_plain_authority_file(path: &Path) -> bool {
+pub(crate) fn is_plain_authority_file(path: &Path) -> bool {
     path.symlink_metadata()
         .is_ok_and(|metadata| metadata.is_file())
 }
 
-fn parent_ref_matches(value: &str, parent_agent: &str) -> Result<bool, ChildAgentDenial> {
+pub(crate) fn parent_ref_matches(
+    value: &str,
+    parent_agent: &str,
+) -> Result<bool, ChildAgentDenial> {
     Ok(parent_ref_agent_name(value)? == parent_agent)
 }
 
@@ -317,7 +327,7 @@ pub(crate) fn parent_ref_agent_name(value: &str) -> Result<&str, ChildAgentDenia
     Ok(agent_name)
 }
 
-fn groups_are_subset(child_groups: &[u32], parent_groups: &[u32]) -> bool {
+pub(crate) fn groups_are_subset(child_groups: &[u32], parent_groups: &[u32]) -> bool {
     child_groups
         .iter()
         .all(|child_group| parent_groups.contains(child_group))

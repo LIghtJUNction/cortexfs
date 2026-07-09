@@ -1,4 +1,6 @@
-fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
+use crate::*;
+
+pub(crate) fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(pty_size())
@@ -73,11 +75,11 @@ fn run_pty(config: RunConfig) -> Result<ExitCode, CtxtermError> {
     Ok(exit_code(&status))
 }
 
-fn pty_command(config: &RunConfig) -> Result<CommandBuilder, CtxtermError> {
+pub(crate) fn pty_command(config: &RunConfig) -> Result<CommandBuilder, CtxtermError> {
     pty_command_with_env(config, env::vars_os())
 }
 
-fn pty_command_with_env(
+pub(crate) fn pty_command_with_env(
     config: &RunConfig,
     envs: impl IntoIterator<Item = (OsString, OsString)>,
 ) -> Result<CommandBuilder, CtxtermError> {
@@ -98,8 +100,7 @@ fn pty_command_with_env(
     Ok(command)
 }
 
-fn preserved_pty_env_key(key: &OsStr) -> bool {
+pub(crate) fn preserved_pty_env_key(key: &OsStr) -> bool {
     key.to_str()
         .is_some_and(|key| PRESERVED_PTY_ENV.contains(&key))
 }
-

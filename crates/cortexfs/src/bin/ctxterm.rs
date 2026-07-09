@@ -1,9 +1,26 @@
 #![forbid(unsafe_code)]
+#![expect(
+    clippy::allow_attributes,
+    reason = "allow target-specific lint exceptions"
+)]
+#![allow(
+    unfulfilled_lint_expectations,
+    reason = "expected target-specific lint results"
+)]
+#![expect(
+    clippy::wildcard_imports,
+    reason = "uniform submodules with wildcard imports"
+)]
+#![expect(clippy::redundant_pub_crate, reason = "submodule visibility alignment")]
+#![expect(
+    clippy::field_scoped_visibility_modifiers,
+    reason = "internal structs with scoped fields"
+)]
+#![expect(clippy::module_inception, reason = "allow submodule self name")]
 
 use std::env;
 use std::ffi::OsStr;
 use std::ffi::OsString;
-use std::fs;
 use std::fs::OpenOptions;
 use std::io::{self, IsTerminal, Read, Write};
 use std::net::Shutdown;
@@ -44,13 +61,28 @@ type PtyWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type Client = Arc<Mutex<UnixStream>>;
 type Clients = Arc<Mutex<Vec<Client>>>;
 
-include!("shared/stderr.rs");
-include!("shared/terminal_io.rs");
-include!("shared/simple_cli_error.rs");
+#[path = "shared/stderr.rs"]
+pub mod stderr;
+#[path = "shared/terminal-io.rs"]
+pub mod terminal_io;
+#[macro_use]
+#[path = "shared/simple-cli-error.rs"]
+pub mod simple_cli_error;
 
 define_simple_cli_error!(CtxtermError);
 
-fn main() -> ExitCode {
+pub(crate) use cli::*;
+pub(crate) use client_io::*;
+pub(crate) use cortexfs::plain_fs::open_plain_directory;
+pub(crate) use create_plain_dir::*;
+pub(crate) use fs::*;
+pub(crate) use pty::*;
+pub(crate) use socket::*;
+pub(crate) use stale_socket::*;
+pub(crate) use stderr::*;
+pub(crate) use terminal_io::*;
+
+pub(crate) fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(code) => code,
         Err(error) => {
@@ -60,7 +92,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<OsString>) -> Result<ExitCode, CtxtermError> {
+pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CtxtermError> {
     let command = parse_args(args)?;
     match command {
         CtxtermCommand::Help => print_help().map(|()| ExitCode::SUCCESS),
@@ -105,14 +137,23 @@ struct RunConfig {
     args: Vec<OsString>,
 }
 
-include!("ctxterm/cli.rs");
-include!("ctxterm/pty.rs");
-include!("shared/plain_dir.rs");
-include!("shared/create_plain_dir.rs");
-include!("shared/stale_socket.rs");
-include!("ctxterm/socket.rs");
-include!("ctxterm/fs.rs");
-include!("ctxterm/client_io.rs");
+#[path = "ctxterm/cli.rs"]
+pub mod cli;
+#[path = "ctxterm/client-io.rs"]
+pub mod client_io;
+#[path = "shared/create-plain-dir.rs"]
+pub mod create_plain_dir;
+#[path = "ctxterm/fs.rs"]
+pub mod fs;
+#[path = "shared/plain-dir.rs"]
+pub mod plain_dir;
+#[path = "ctxterm/pty.rs"]
+pub mod pty;
+#[path = "ctxterm/socket.rs"]
+pub mod socket;
+#[path = "shared/stale-socket.rs"]
+pub mod stale_socket;
 
 #[cfg(test)]
-include!("ctxterm/tests.rs");
+#[path = "ctxterm/tests.rs"]
+pub mod tests;

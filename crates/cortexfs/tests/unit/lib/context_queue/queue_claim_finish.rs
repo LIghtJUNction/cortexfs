@@ -14,12 +14,10 @@ fn shared_queue_layout_inspector_checks_recommended_dirs() {
     assert!(!report.is_ok());
     assert!(report
         .issues()
-        .contains(&SharedQueueLayoutIssue::MissingDirectory(
-            "failed".to_owned()
-        )));
+        .contains(&PathLayoutIssue::missing("failed".to_owned(), LayoutPathRole::Directory)));
     assert!(report
         .issues()
-        .contains(&SharedQueueLayoutIssue::NotDirectory("done".to_owned())));
+        .contains(&PathLayoutIssue::wrong_kind("done".to_owned(), LayoutPathRole::Directory)));
 }
 
 #[test]
@@ -33,9 +31,7 @@ fn shared_queue_layout_rejects_symlink_directories() {
     let report = inspect_shared_queue_layout(&root);
     assert!(report
         .issues()
-        .contains(&SharedQueueLayoutIssue::NotDirectory(
-            "pending".to_owned()
-        )));
+        .contains(&PathLayoutIssue::wrong_kind("pending".to_owned(), LayoutPathRole::Directory)));
     assert_eq!(
         claim_next_shared_queue_job(&root, "worker-a"),
         Err(SharedQueueClaimError::InvalidQueueDirectory)

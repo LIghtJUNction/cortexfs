@@ -1,8 +1,13 @@
-fn schedule_command(root: &Path, args: &ScheduleArgs) -> Result<(), CliError> {
+use crate::*;
+
+pub(crate) fn schedule_command(root: &Path, args: &ScheduleArgs) -> Result<(), CliError> {
     match *args {
         ScheduleArgs::Status { ref path, ref done } => schedule_status(root, path, done),
         ScheduleArgs::Advance { ref path, ref done } => schedule_advance(root, path, done),
-        ScheduleArgs::Claim { ref path, ref child } => schedule_claim(root, path, child),
+        ScheduleArgs::Claim {
+            ref path,
+            ref child,
+        } => schedule_claim(root, path, child),
         ScheduleArgs::Result {
             ref path,
             ref child,
@@ -13,7 +18,7 @@ fn schedule_command(root: &Path, args: &ScheduleArgs) -> Result<(), CliError> {
     }
 }
 
-fn schedule_status(root: &Path, path: &str, done: &[String]) -> Result<(), CliError> {
+pub(crate) fn schedule_status(root: &Path, path: &str, done: &[String]) -> Result<(), CliError> {
     let schedule = load_schedule_context(root, path, "status")?;
     for line in schedule_status_lines(root, &schedule, done)? {
         print_line(&line)?;
@@ -21,7 +26,7 @@ fn schedule_status(root: &Path, path: &str, done: &[String]) -> Result<(), CliEr
     Ok(())
 }
 
-fn schedule_status_lines(
+pub(crate) fn schedule_status_lines(
     root: &Path,
     schedule: &LoadedScheduleContext,
     done: &[String],
@@ -42,13 +47,23 @@ fn schedule_status_lines(
         &schedule.parent_policy,
         &completed_refs,
     )
-    .map_err(|report| schedule_record_cli_error("status", AgentScheduleRecordError::InvalidSchedule(report)))?;
-    let ready = ready.iter().map(AgentScheduleNode::id).collect::<HashSet<_>>();
+    .map_err(|report| {
+        schedule_record_cli_error("status", AgentScheduleRecordError::InvalidSchedule(report))
+    })?;
+    let ready = ready
+        .iter()
+        .map(AgentScheduleNode::id)
+        .collect::<HashSet<_>>();
     let completed = completed.iter().map(String::as_str).collect::<HashSet<_>>();
     let mut lines = Vec::new();
-    for node in agent_schedule_nodes(&schedule.json, &schedule.parent_subject, &schedule.parent_policy)
-        .map_err(|report| schedule_record_cli_error("status", AgentScheduleRecordError::InvalidSchedule(report)))?
-    {
+    for node in agent_schedule_nodes(
+        &schedule.json,
+        &schedule.parent_subject,
+        &schedule.parent_policy,
+    )
+    .map_err(|report| {
+        schedule_record_cli_error("status", AgentScheduleRecordError::InvalidSchedule(report))
+    })? {
         let (model, life, child_parent) = schedule_node_agent_details(root, &node)?;
         lines.push(format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -59,7 +74,8 @@ fn schedule_status_lines(
             terminal_safe_text(&schedule_node_session(&schedule.parent_session_dir, &node)?),
             terminal_safe_text(&model),
             terminal_safe_text(&life),
-            node.child().map_or("-", |_| agent_role_for_display(node.agent())),
+            node.child()
+                .map_or("-", |_| agent_role_for_display(node.agent())),
             terminal_safe_text(&child_parent),
             schedule_node_state(root, schedule, &completed, &ready, &node)?,
         ));
@@ -67,7 +83,7 @@ fn schedule_status_lines(
     Ok(lines)
 }
 
-fn schedule_node_agent_details(
+pub(crate) fn schedule_node_agent_details(
     root: &Path,
     node: &AgentScheduleNode,
 ) -> Result<(String, String, String), CliError> {
@@ -78,26 +94,30 @@ fn schedule_node_agent_details(
     }
 }
 
-fn schedule_node_session(parent_session_dir: &Path, node: &AgentScheduleNode) -> Result<String, CliError> {
+pub(crate) fn schedule_node_session(
+    parent_session_dir: &Path,
+    node: &AgentScheduleNode,
+) -> Result<String, CliError> {
     if node.child().is_none() {
         return Ok("-".to_owned());
     }
-    Ok(node
-        .child_session()
-        .map_or(schedule_parent_session_for_output(parent_session_dir)?, str::to_owned))
+    Ok(node.child_session().map_or(
+        schedule_parent_session_for_output(parent_session_dir)?,
+        str::to_owned,
+    ))
 }
 
-struct LoadedScheduleContext {
-    abi_path: String,
-    context_abi_path: String,
-    parent_agent: String,
-    parent_session_dir: PathBuf,
-    parent_subject: String,
-    parent_policy: PolicyV0,
-    json: String,
+pub(crate) struct LoadedScheduleContext {
+    pub(crate) abi_path: String,
+    pub(crate) context_abi_path: String,
+    pub(crate) parent_agent: String,
+    pub(crate) parent_session_dir: PathBuf,
+    pub(crate) parent_subject: String,
+    pub(crate) parent_policy: PolicyV0,
+    pub(crate) json: String,
 }
 
-fn load_schedule_context(
+pub(crate) fn load_schedule_context(
     root: &Path,
     path: &str,
     command: &str,
@@ -109,8 +129,11 @@ fn load_schedule_context(
             "schedule {command} requires an agent session context/plan.json"
         )));
     }
-    let parent_agent = parent_agent_for_session_context_path(&abi_path)
-        .ok_or_else(|| CliError::usage(format!("schedule {command} plan must belong to an agent session")))?;
+    let parent_agent = parent_agent_for_session_context_path(&abi_path).ok_or_else(|| {
+        CliError::usage(format!(
+            "schedule {command} plan must belong to an agent session"
+        ))
+    })?;
     Ok(LoadedScheduleContext {
         context_abi_path: schedule_context_abi_path(&abi_path, command)?,
         parent_agent: parent_agent.to_owned(),
@@ -122,7 +145,7 @@ fn load_schedule_context(
     })
 }
 
-fn schedule_node_state(
+pub(crate) fn schedule_node_state(
     root: &Path,
     schedule: &LoadedScheduleContext,
     completed: &HashSet<&str>,
@@ -157,7 +180,11 @@ fn schedule_node_state(
     })
 }
 
-fn schedule_parent_session_dir(root: &Path, path: &str, command: &str) -> Result<PathBuf, CliError> {
+pub(crate) fn schedule_parent_session_dir(
+    root: &Path,
+    path: &str,
+    command: &str,
+) -> Result<PathBuf, CliError> {
     let abi_path = classify_input_path(root, path)?;
     let parsed = parse_abi_path(&abi_path);
     if !parsed.is_agent_schedule_plan() {
@@ -170,10 +197,12 @@ fn schedule_parent_session_dir(root: &Path, path: &str, command: &str) -> Result
         .parent()
         .and_then(Path::parent)
         .map(Path::to_path_buf)
-        .ok_or_else(|| CliError::usage(format!("schedule {command} requires an agent session plan")))
+        .ok_or_else(|| {
+            CliError::usage(format!("schedule {command} requires an agent session plan"))
+        })
 }
 
-fn schedule_advance(root: &Path, path: &str, done: &[String]) -> Result<(), CliError> {
+pub(crate) fn schedule_advance(root: &Path, path: &str, done: &[String]) -> Result<(), CliError> {
     let schedule = load_schedule_context(root, path, "advance")?;
     let done = done.iter().map(String::as_str).collect::<Vec<_>>();
     let advance = advance_agent_schedule_from_parent_context(
@@ -218,7 +247,7 @@ fn schedule_advance(root: &Path, path: &str, done: &[String]) -> Result<(), CliE
     Ok(())
 }
 
-fn schedule_handoff_agent_details(
+pub(crate) fn schedule_handoff_agent_details(
     root: &Path,
     agent: &str,
 ) -> Result<(String, String, String), CliError> {
@@ -231,7 +260,7 @@ fn schedule_handoff_agent_details(
     Ok((model, life, parent))
 }
 
-fn schedule_require_handoff_parent(
+pub(crate) fn schedule_require_handoff_parent(
     parent_ref: &str,
     agent: &str,
     child_parent: &str,
@@ -239,7 +268,9 @@ fn schedule_require_handoff_parent(
     let parent = parse_agent_parent_ref(parent_ref)
         .ok_or_else(|| CliError::unavailable("cannot derive schedule parent"))?;
     let child = parse_agent_parent_ref(child_parent).ok_or_else(|| {
-        CliError::usage(format!("invalid handoff agent parent for {agent}: {child_parent}"))
+        CliError::usage(format!(
+            "invalid handoff agent parent for {agent}: {child_parent}"
+        ))
     })?;
     if !agent_parent_ref_matches(
         &child,
@@ -254,18 +285,24 @@ fn schedule_require_handoff_parent(
     Ok(())
 }
 
-fn agent_role_for_display(agent: &str) -> &'static str {
-    if is_worker_agent_name(agent) { "worker" } else { "agent" }
+pub(crate) fn agent_role_for_display(agent: &str) -> &'static str {
+    if is_worker_agent_name(agent) {
+        "worker"
+    } else {
+        "agent"
+    }
 }
 
-fn require_schedule_handoff_agent(root: &Path, agent: &str) -> Result<(), CliError> {
+pub(crate) fn require_schedule_handoff_agent(root: &Path, agent: &str) -> Result<(), CliError> {
     let object = agent_object_path(root, agent);
-    open_executable_no_follow(&object).map(drop).map_err(|error| {
-        CliError::usage(format!(
-            "missing handoff agent object {agent}: {}",
-            error.message
-        ))
-    })?;
+    open_executable_no_follow(&object)
+        .map(drop)
+        .map_err(|error| {
+            CliError::usage(format!(
+                "missing handoff agent object {agent}: {}",
+                error.message
+            ))
+        })?;
     let control = agent_control_dir(root, agent);
     let control_metadata = fs::symlink_metadata(&control).map_err(|error| {
         CliError::usage(format!("missing handoff agent control {agent}: {error}"))
@@ -279,27 +316,30 @@ fn require_schedule_handoff_agent(root: &Path, agent: &str) -> Result<(), CliErr
     Ok(())
 }
 
-struct ScheduleChildHandoffContext {
-    abi_path: String,
-    parent_session_dir: PathBuf,
-    child_paths: ScheduleChildContextAbiPaths,
-    agent: String,
-    session: String,
-    model: String,
-    life: String,
-    parent_ref: String,
-    child_parent: String,
+pub(crate) struct ScheduleChildHandoffContext {
+    pub(crate) abi_path: String,
+    pub(crate) parent_session_dir: PathBuf,
+    pub(crate) child_paths: ScheduleChildContextAbiPaths,
+    pub(crate) agent: String,
+    pub(crate) session: String,
+    pub(crate) model: String,
+    pub(crate) life: String,
+    pub(crate) parent_ref: String,
+    pub(crate) child_parent: String,
 }
 
-fn schedule_child_handoff_context(
+pub(crate) fn schedule_child_handoff_context(
     root: &Path,
     path: &str,
     child: &str,
     command: &str,
 ) -> Result<ScheduleChildHandoffContext, CliError> {
     let abi_path = classify_input_path(root, path)?;
-    let parent_agent = parent_agent_for_session_context_path(&abi_path)
-        .ok_or_else(|| CliError::usage(format!("schedule {command} plan must belong to an agent session")))?;
+    let parent_agent = parent_agent_for_session_context_path(&abi_path).ok_or_else(|| {
+        CliError::usage(format!(
+            "schedule {command} plan must belong to an agent session"
+        ))
+    })?;
     let parent_session_dir = schedule_parent_session_dir(root, path, command)?;
     let context_abi_path = schedule_context_abi_path(&abi_path, command)?;
     let child_paths = schedule_child_context_abi_paths(&context_abi_path, child)?;
@@ -321,7 +361,7 @@ fn schedule_child_handoff_context(
     })
 }
 
-fn schedule_claim(root: &Path, path: &str, child: &str) -> Result<(), CliError> {
+pub(crate) fn schedule_claim(root: &Path, path: &str, child: &str) -> Result<(), CliError> {
     let handoff = schedule_child_handoff_context(root, path, child, "claim")?;
     schedule_claim_child_active(root, &handoff.child_paths.status)?;
     print_line(&format!(
@@ -333,7 +373,7 @@ fn schedule_claim(root: &Path, path: &str, child: &str) -> Result<(), CliError> 
     ))
 }
 
-fn schedule_handoff_identity_output(handoff: &ScheduleChildHandoffContext) -> String {
+pub(crate) fn schedule_handoff_identity_output(handoff: &ScheduleChildHandoffContext) -> String {
     format!(
         "agent={} session={} model={} life={} role={} parent={} child_parent={} plan={}",
         terminal_safe_text(&handoff.agent),
@@ -347,26 +387,37 @@ fn schedule_handoff_identity_output(handoff: &ScheduleChildHandoffContext) -> St
     )
 }
 
-fn child_context_dir(root: &Path, status_abi_path: &str, child: &str) -> Result<PathBuf, CliError> {
+pub(crate) fn child_context_dir(
+    root: &Path,
+    status_abi_path: &str,
+    child: &str,
+) -> Result<PathBuf, CliError> {
     resolve_abi_path(root, status_abi_path)?
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| CliError::usage(format!("invalid child status path for {child}")))
 }
 
-fn schedule_claim_child_active(root: &Path, status_abi_path: &str) -> Result<(), CliError> {
+pub(crate) fn schedule_claim_child_active(
+    root: &Path,
+    status_abi_path: &str,
+) -> Result<(), CliError> {
     let status = read_file_to_string(&resolve_abi_path(root, status_abi_path)?)?;
     match ChildContextStatus::parse(status.trim()) {
         Some(ChildContextStatus::Pending) => file_set(root, status_abi_path, "active"),
         Some(ChildContextStatus::Active) => Ok(()),
-        Some(ChildContextStatus::Done | ChildContextStatus::Error | ChildContextStatus::Cancelled)
+        Some(
+            ChildContextStatus::Done | ChildContextStatus::Error | ChildContextStatus::Cancelled,
+        )
         | None => Err(CliError::usage(
             "invalid child context: invalid status transition",
         )),
     }
 }
 
-fn schedule_child_context_agent_session(child_dir: &Path) -> Result<(String, String), CliError> {
+pub(crate) fn schedule_child_context_agent_session(
+    child_dir: &Path,
+) -> Result<(String, String), CliError> {
     let agent = read_optional_trimmed(&child_dir.join("agent"))?
         .ok_or_else(|| CliError::usage("invalid child context: invalid agent name"))?;
     let session = read_optional_trimmed(&child_dir.join("session"))?
@@ -375,12 +426,14 @@ fn schedule_child_context_agent_session(child_dir: &Path) -> Result<(String, Str
         return Err(CliError::usage("invalid child context: invalid agent name"));
     }
     if !is_object_name(&session) {
-        return Err(CliError::usage("invalid child context: invalid session name"));
+        return Err(CliError::usage(
+            "invalid child context: invalid session name",
+        ));
     }
     Ok((agent, session))
 }
 
-fn schedule_parent_ref_for_output(
+pub(crate) fn schedule_parent_ref_for_output(
     parent_agent: &str,
     parent_session_dir: &Path,
 ) -> Result<String, CliError> {
@@ -388,7 +441,9 @@ fn schedule_parent_ref_for_output(
     Ok(format!("agent:{parent_agent} session:{session}"))
 }
 
-fn schedule_parent_session_for_output(parent_session_dir: &Path) -> Result<String, CliError> {
+pub(crate) fn schedule_parent_session_for_output(
+    parent_session_dir: &Path,
+) -> Result<String, CliError> {
     let session = parent_session_dir
         .file_name()
         .and_then(|name| name.to_str())
@@ -397,7 +452,7 @@ fn schedule_parent_session_for_output(parent_session_dir: &Path) -> Result<Strin
     Ok(session.to_owned())
 }
 
-fn schedule_result(
+pub(crate) fn schedule_result(
     root: &Path,
     path: &str,
     child: &str,
@@ -406,8 +461,14 @@ fn schedule_result(
     refs_jsonl: &str,
 ) -> Result<(), CliError> {
     let handoff = schedule_child_handoff_context(root, path, child, "result")?;
-    record_child_result_to_parent_context(&handoff.parent_session_dir, child, status, result, refs_jsonl)
-        .map_err(schedule_child_context_cli_error)?;
+    record_child_result_to_parent_context(
+        &handoff.parent_session_dir,
+        child,
+        status,
+        result,
+        refs_jsonl,
+    )
+    .map_err(schedule_child_context_cli_error)?;
     print_line(&format!(
         "result child={child} status={} {} result={} refs={}",
         status.as_str(),
@@ -418,26 +479,28 @@ fn schedule_result(
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ScheduleChildContextAbiPaths {
-    status: String,
-    handoff: String,
-    result: String,
-    refs: String,
+pub(crate) struct ScheduleChildContextAbiPaths {
+    pub(crate) status: String,
+    pub(crate) handoff: String,
+    pub(crate) result: String,
+    pub(crate) refs: String,
 }
 
-fn schedule_context_abi_path(abi_path: &str, command: &str) -> Result<String, CliError> {
+pub(crate) fn schedule_context_abi_path(abi_path: &str, command: &str) -> Result<String, CliError> {
     abi_path
         .strip_suffix("/plan.json")
         .map(str::to_owned)
         .ok_or_else(|| CliError::usage(format!("schedule {command} requires context/plan.json")))
 }
 
-fn schedule_child_context_abi_paths(
+pub(crate) fn schedule_child_context_abi_paths(
     context_abi_path: &str,
     child: &str,
 ) -> Result<ScheduleChildContextAbiPaths, CliError> {
     if !is_object_name(child) {
-        return Err(CliError::usage("invalid child context path: invalid child name"));
+        return Err(CliError::usage(
+            "invalid child context path: invalid child name",
+        ));
     }
     let base = format!("{context_abi_path}/child/{child}");
     Ok(ScheduleChildContextAbiPaths {
@@ -448,7 +511,10 @@ fn schedule_child_context_abi_paths(
     })
 }
 
-fn schedule_record_cli_error(command: &str, error: AgentScheduleRecordError) -> CliError {
+pub(crate) fn schedule_record_cli_error(
+    command: &str,
+    error: AgentScheduleRecordError,
+) -> CliError {
     match error {
         AgentScheduleRecordError::InvalidText => {
             CliError::usage("invalid agent schedule: contains NUL byte")
@@ -457,9 +523,9 @@ fn schedule_record_cli_error(command: &str, error: AgentScheduleRecordError) -> 
             "invalid agent schedule: {}",
             format_agent_schedule_issues(report.issues())
         )),
-        AgentScheduleRecordError::MissingParentSession => {
-            CliError::unavailable(format!("cannot {command} agent schedule: missing parent session"))
-        }
+        AgentScheduleRecordError::MissingParentSession => CliError::unavailable(format!(
+            "cannot {command} agent schedule: missing parent session"
+        )),
         AgentScheduleRecordError::CannotRecord => CliError::unavailable(format!(
             "cannot {command} agent schedule: {}",
             AgentScheduleRecordError::CannotRecord.errno()
@@ -467,15 +533,29 @@ fn schedule_record_cli_error(command: &str, error: AgentScheduleRecordError) -> 
     }
 }
 
-fn schedule_child_context_cli_error(error: ChildContextRecordError) -> CliError {
+pub(crate) fn schedule_child_context_cli_error(error: ChildContextRecordError) -> CliError {
     match error {
-        ChildContextRecordError::InvalidChildName => CliError::usage("invalid child context: invalid child name"),
-        ChildContextRecordError::InvalidAgentName => CliError::usage("invalid child context: invalid agent name"),
-        ChildContextRecordError::InvalidSessionName => CliError::usage("invalid child context: invalid session name"),
-        ChildContextRecordError::InvalidStatus => CliError::usage("invalid child context: invalid status transition"),
-        ChildContextRecordError::InvalidText => CliError::usage("invalid child context: contains NUL byte"),
-        ChildContextRecordError::InvalidRefs => CliError::usage("invalid child context: refs-jsonl is invalid"),
-        ChildContextRecordError::MissingParentSession => CliError::unavailable("cannot record child context: missing parent session"),
+        ChildContextRecordError::InvalidChildName => {
+            CliError::usage("invalid child context: invalid child name")
+        }
+        ChildContextRecordError::InvalidAgentName => {
+            CliError::usage("invalid child context: invalid agent name")
+        }
+        ChildContextRecordError::InvalidSessionName => {
+            CliError::usage("invalid child context: invalid session name")
+        }
+        ChildContextRecordError::InvalidStatus => {
+            CliError::usage("invalid child context: invalid status transition")
+        }
+        ChildContextRecordError::InvalidText => {
+            CliError::usage("invalid child context: contains NUL byte")
+        }
+        ChildContextRecordError::InvalidRefs => {
+            CliError::usage("invalid child context: refs-jsonl is invalid")
+        }
+        ChildContextRecordError::MissingParentSession => {
+            CliError::unavailable("cannot record child context: missing parent session")
+        }
         ChildContextRecordError::CannotRecord => CliError::unavailable(format!(
             "cannot record child context: {}",
             ChildContextRecordError::CannotRecord.errno()

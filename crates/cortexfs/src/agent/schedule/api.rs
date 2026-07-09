@@ -1,3 +1,7 @@
+use super::dependencies::inspect_completed_nodes;
+use super::parse::parse_valid_agent_schedule_nodes;
+use crate::*;
+
 /// Inspects a hybrid DAG/ReAct schedule stored as ordinary parent session
 /// context, for example `context/plan.json`.
 ///
@@ -11,8 +15,7 @@ pub fn inspect_agent_schedule_json(
     parent_subject: &str,
     parent_policy: &PolicyV0,
 ) -> AgentScheduleReport {
-    let (_nodes, issues) =
-        parse_valid_agent_schedule_nodes(content, parent_subject, parent_policy);
+    let (_nodes, issues) = parse_valid_agent_schedule_nodes(content, parent_subject, parent_policy);
     AgentScheduleReport::new(issues)
 }
 

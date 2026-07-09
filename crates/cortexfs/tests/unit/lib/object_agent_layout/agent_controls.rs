@@ -24,28 +24,28 @@ fn agent_controls_accept_fixed_v1_values() {
 fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
     assert_eq!(
         inspect_agent_control(AgentControlKind::Uid, "not-a-uid\n").issues(),
-        &[AgentControlIssue::InvalidNumber {
+        &[ControlLineIssue::InvalidNumber {
             line: 1,
             value: "not-a-uid".to_owned()
         }]
     );
     assert_eq!(
         inspect_agent_control(AgentControlKind::Groups, "10\nbad\n").issues(),
-        &[AgentControlIssue::InvalidNumber {
+        &[ControlLineIssue::InvalidNumber {
             line: 2,
             value: "bad".to_owned()
         }]
     );
     assert_eq!(
         inspect_agent_control(AgentControlKind::Life, "detached\n").issues(),
-        &[AgentControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "detached".to_owned()
         }]
     );
     assert_eq!(
         inspect_agent_control(AgentControlKind::Parent, "coder session:default\n").issues(),
-        &[AgentControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "coder session:default".to_owned()
         }]
@@ -56,7 +56,7 @@ fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
             "agent:coder session:default run:r1 run:r2\n"
         )
         .issues(),
-        &[AgentControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "agent:coder session:default run:r1 run:r2".to_owned()
         }]
@@ -64,11 +64,11 @@ fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
     assert_eq!(
         inspect_agent_control(AgentControlKind::Status, "running\nextra\n").issues(),
         &[
-            AgentControlIssue::InvalidValue {
+            ControlLineIssue::InvalidValue {
                 line: 1,
                 value: "running".to_owned()
             },
-            AgentControlIssue::MultipleValues { line: 2 }
+            ControlLineIssue::MultipleValues { line: 2 }
         ]
     );
 }
@@ -84,14 +84,8 @@ fn agent_object_layout_rejects_invalid_control_values() {
     let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "agent/coder.d/iso".to_owned(),
-            value: "container".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("agent/coder.d/iso".to_owned(), "container".to_owned())));
     assert!(report
         .issues()
-        .contains(&ObjectLayoutIssue::InvalidControlValue {
-            path: "agent/coder.d/uid".to_owned(),
-            value: "bad".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("agent/coder.d/uid".to_owned(), "bad".to_owned())));
 }
