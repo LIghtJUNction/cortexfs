@@ -1,4 +1,8 @@
-fn inspect_string_array(
+use super::dependencies::{required_permission_object_name, required_word};
+use super::*;
+use crate::*;
+
+pub(crate) fn inspect_string_array(
     node: Option<&String>,
     field: &str,
     value: Option<&Value>,
@@ -38,7 +42,7 @@ fn inspect_string_array(
     out
 }
 
-fn requires_permission(
+pub(crate) fn requires_permission(
     value: Option<&Value>,
     expected_class: PolicyObjectClass,
     expected_name: &str,
@@ -60,7 +64,7 @@ fn requires_permission(
     })
 }
 
-fn inspect_required_permissions(
+pub(crate) fn inspect_required_permissions(
     node: &str,
     value: Option<&Value>,
     parent_subject: &str,
@@ -83,7 +87,7 @@ fn inspect_required_permissions(
     }
 }
 
-fn inspect_required_permission(
+pub(crate) fn inspect_required_permission(
     node: &str,
     value: &Value,
     parent_subject: &str,
@@ -148,4 +152,3 @@ fn inspect_required_permission(
         });
     }
 }
-

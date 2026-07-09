@@ -123,12 +123,10 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         ("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()),
         (
             "CTX_PROVIDER_SECRET_PATH".to_owned(),
-            "/run/secret".to_owned(),
-        ),
+            "/run/secret".to_owned()),
         (
             "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
-            "api.test".to_owned(),
-        ),
+            "api.test".to_owned()),
         ("CTX_PROVIDER_SECRET_SLOT".to_owned(), "default".to_owned()),
     ];
 

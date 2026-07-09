@@ -221,11 +221,14 @@ where
 }
 
 #[must_use]
-fn oauth_keychain_service(provider: &str) -> String {
+pub(crate) fn oauth_keychain_service(provider: &str) -> String {
     format!("cortexfs:{provider}")
 }
 
-fn oauth_keychain_secret(service: &str, account: &str) -> Result<Option<String>, OAuthError> {
+pub(crate) fn oauth_keychain_secret(
+    service: &str,
+    account: &str,
+) -> Result<Option<String>, OAuthError> {
     let entry = match keyring::Entry::new(service, account) {
         Ok(entry) => entry,
         Err(keyring::Error::NoDefaultStore) => return Ok(None),
@@ -243,7 +246,7 @@ fn oauth_keychain_secret(service: &str, account: &str) -> Result<Option<String>,
     }
 }
 
-fn is_valid_oauth_config(config: &OAuthProviderConfig) -> bool {
+pub(crate) fn is_valid_oauth_config(config: &OAuthProviderConfig) -> bool {
     !config.client_id.is_empty()
         && !config.auth_url.is_empty()
         && !config.token_url.is_empty()
@@ -254,18 +257,18 @@ fn is_valid_oauth_config(config: &OAuthProviderConfig) -> bool {
             .any(|scope| scope.trim().is_empty() || has_ascii_control(scope))
 }
 
-fn has_ascii_control(value: &str) -> bool {
+pub(crate) fn has_ascii_control(value: &str) -> bool {
     value.bytes().any(|byte| byte.is_ascii_control())
 }
 
-fn is_valid_pkce_verifier(verifier: &str) -> bool {
+pub(crate) fn is_valid_pkce_verifier(verifier: &str) -> bool {
     (43..=128).contains(&verifier.len())
         && verifier
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
 }
 
-fn is_valid_env_key(value: &str) -> bool {
+pub(crate) fn is_valid_env_key(value: &str) -> bool {
     let mut bytes = value.bytes();
     let Some(first) = bytes.next() else {
         return false;
@@ -274,12 +277,12 @@ fn is_valid_env_key(value: &str) -> bool {
         && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
 }
 
-fn append_query(base: &str, pairs: &[(&str, String)]) -> String {
+pub(crate) fn append_query(base: &str, pairs: &[(&str, String)]) -> String {
     let separator = if base.contains('?') { '&' } else { '?' };
     format!("{base}{separator}{}", form_urlencoded_owned(pairs))
 }
 
-fn form_urlencoded(pairs: &[(&str, &str)]) -> String {
+pub(crate) fn form_urlencoded(pairs: &[(&str, &str)]) -> String {
     pairs
         .iter()
         .map(|&(key, value)| format!("{}={}", url_encode(key), url_encode(value)))
@@ -287,7 +290,7 @@ fn form_urlencoded(pairs: &[(&str, &str)]) -> String {
         .join("&")
 }
 
-fn form_urlencoded_owned(pairs: &[(&str, String)]) -> String {
+pub(crate) fn form_urlencoded_owned(pairs: &[(&str, String)]) -> String {
     pairs
         .iter()
         .map(|pair| format!("{}={}", url_encode(pair.0), url_encode(&pair.1)))
@@ -295,7 +298,7 @@ fn form_urlencoded_owned(pairs: &[(&str, String)]) -> String {
         .join("&")
 }
 
-fn url_encode(value: &str) -> String {
+pub(crate) fn url_encode(value: &str) -> String {
     let mut output = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
@@ -307,7 +310,7 @@ fn url_encode(value: &str) -> String {
     output
 }
 
-fn base64_url_no_pad(bytes: &[u8]) -> String {
+pub(crate) fn base64_url_no_pad(bytes: &[u8]) -> String {
     let mut output = String::new();
     for chunk in bytes.chunks(3) {
         let Some(&b0) = chunk.first() else {
@@ -331,7 +334,7 @@ fn base64_url_no_pad(bytes: &[u8]) -> String {
     output
 }
 
-fn base64_url_char(index: usize) -> char {
+pub(crate) fn base64_url_char(index: usize) -> char {
     const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     char::from(TABLE.get(index).copied().unwrap_or(b'A'))
 }

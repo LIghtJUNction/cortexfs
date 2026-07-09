@@ -1,4 +1,8 @@
-fn parse_valid_agent_schedule_nodes(
+use super::dependencies::inspect_schedule_dependencies;
+use super::*;
+use crate::*;
+
+pub(crate) fn parse_valid_agent_schedule_nodes(
     content: &str,
     parent_subject: &str,
     parent_policy: &PolicyV0,
@@ -52,7 +56,7 @@ fn parse_valid_agent_schedule_nodes(
     (nodes, issues)
 }
 
-fn inspect_schedule_nodes(
+pub(crate) fn inspect_schedule_nodes(
     node_values: &[Value],
     parent_subject: &str,
     parent_policy: &PolicyV0,
@@ -78,7 +82,7 @@ fn inspect_schedule_nodes(
     nodes
 }
 
-fn inspect_schedule_node(
+pub(crate) fn inspect_schedule_node(
     index: usize,
     value: &Value,
     context: &ScheduleInspectContext<'_>,
@@ -201,7 +205,7 @@ fn inspect_schedule_node(
     }
 }
 
-fn schedule_node_agent(
+pub(crate) fn schedule_node_agent(
     node: Option<&String>,
     value: Option<&Value>,
     child: Option<&String>,

@@ -1,11 +1,13 @@
-fn agent_status(root: &Path, name: &str) -> Result<(), CliError> {
+use crate::*;
+
+pub(crate) fn agent_status(root: &Path, name: &str) -> Result<(), CliError> {
     for line in agent_status_lines(root, name)? {
         print_line(&line)?;
     }
     Ok(())
 }
 
-fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
+pub(crate) fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
     require_cli_name("agent name", name)?;
     let control = agent_control_dir(root, name);
     let (status, live_pid) = live_agent_status_and_pid(&control)?;
@@ -17,15 +19,9 @@ fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> 
         .map_or_else(|| "-".to_owned(), agent_parent_ref_display);
     Ok(vec![
         terminal_safe_text(&status),
-        format!(
-            "model={}",
-            terminal_safe_text(&model)
-        ),
+        format!("model={}", terminal_safe_text(&model)),
         format!("life={}", terminal_safe_text(&life)),
-        format!(
-            "role={}",
-            agent_role_for_display(name)
-        ),
+        format!("role={}", agent_role_for_display(name)),
         format!("parent={}", terminal_safe_text(&parent)),
         format!("children={}", agent_status_child_count(root, name)?),
         format!(
@@ -71,7 +67,7 @@ fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> 
     ])
 }
 
-fn agent_status_workspace(root: &Path, name: &str) -> Result<String, CliError> {
+pub(crate) fn agent_status_workspace(root: &Path, name: &str) -> Result<String, CliError> {
     let session = agent_session_name(root, name, None)?;
     let session_root = ctx_home(root)?
         .join("agent")
@@ -81,7 +77,7 @@ fn agent_status_workspace(root: &Path, name: &str) -> Result<String, CliError> {
     Ok(read_optional_trimmed(&session_root.join("workspace"))?.unwrap_or_else(|| "-".to_owned()))
 }
 
-fn agent_parent_live_pid(
+pub(crate) fn agent_parent_live_pid(
     root: &Path,
     parent: Option<&AgentParentRef>,
 ) -> Result<Option<String>, CliError> {
@@ -91,11 +87,11 @@ fn agent_parent_live_pid(
     agent_live_pid(root, &parent.agent)
 }
 
-fn agent_live_pid(root: &Path, agent: &str) -> Result<Option<String>, CliError> {
+pub(crate) fn agent_live_pid(root: &Path, agent: &str) -> Result<Option<String>, CliError> {
     Ok(live_agent_status_and_pid(&agent_control_dir(root, agent))?.1)
 }
 
-fn agent_status_child_count(root: &Path, name: &str) -> Result<usize, CliError> {
+pub(crate) fn agent_status_child_count(root: &Path, name: &str) -> Result<usize, CliError> {
     let mut count = 0usize;
     for (child_name, control) in agent_control_dirs(root)? {
         if child_name == name {
@@ -111,7 +107,7 @@ fn agent_status_child_count(root: &Path, name: &str) -> Result<usize, CliError> 
     Ok(count)
 }
 
-fn agent_status_groups(control: &Path) -> Result<String, CliError> {
+pub(crate) fn agent_status_groups(control: &Path) -> Result<String, CliError> {
     let Some(groups) = read_optional_trimmed(&control.join("groups"))? else {
         return Ok("-".to_owned());
     };
@@ -123,24 +119,30 @@ fn agent_status_groups(control: &Path) -> Result<String, CliError> {
     })
 }
 
-fn agent_env(root: &Path, name: &str) -> Result<(), CliError> {
+pub(crate) fn agent_env(root: &Path, name: &str) -> Result<(), CliError> {
     for line in agent_env_lines(root, name)? {
         print_line(&line)?;
     }
     Ok(())
 }
 
-fn agent_env_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
+pub(crate) fn agent_env_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
     require_cli_name("agent name", name)?;
     let view = derive_agent_runtime_view(root, name)
         .map_err(|error| CliError::unavailable(format!("agent view {}: {name}", error.errno())))?;
     Ok(agent_sandbox_env(root, &view)
         .into_iter()
-        .map(|(key, value)| format!("{}={}", terminal_safe_text(&key), terminal_safe_text(&value)))
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                terminal_safe_text(&key),
+                terminal_safe_text(&value)
+            )
+        })
         .collect())
 }
 
-fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
+pub(crate) fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
     let session_dir = agent_session_dir(root, name, session)?;
     let context = session_dir.join("context");
     for file in ["pack.md", "pack.json", "summary.md"] {
@@ -158,12 +160,12 @@ fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliE
     )))
 }
 
-fn agent_prompt(root: &Path, name: &str) -> Result<(), CliError> {
+pub(crate) fn agent_prompt(root: &Path, name: &str) -> Result<(), CliError> {
     let prompt = build_agent_system_prompt(root, name, &current_time_unix().to_string())?;
     print_terminal_text(&prompt)
 }
 
-fn build_agent_system_prompt(
+pub(crate) fn build_agent_system_prompt(
     root: &Path,
     name: &str,
     current_time_unix: &str,

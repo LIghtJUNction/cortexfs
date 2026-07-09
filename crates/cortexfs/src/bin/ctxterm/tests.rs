@@ -1,3 +1,5 @@
+use crate::*;
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -251,9 +253,8 @@ mod tests {
         let (mut watch_reader, watch_writer) = UnixStream::pair()?;
         watch_reader.set_read_timeout(Some(Duration::from_secs(1)))?;
         let pty_output = Arc::new(Mutex::new(Vec::new()));
-        let writer: PtyWriter = Arc::new(Mutex::new(Box::new(SharedBuffer(Arc::clone(
-            &pty_output,
-        )))));
+        let writer: PtyWriter =
+            Arc::new(Mutex::new(Box::new(SharedBuffer(Arc::clone(&pty_output)))));
         let clients: Clients = Arc::new(Mutex::new(vec![Arc::new(Mutex::new(watch_writer))]));
 
         emit_client.write_all(b"emit\n\r\ntool bash running shell.exec 'date'\r\n")?;

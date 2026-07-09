@@ -1,3 +1,8 @@
+use super::file_read::{push_str_byte_limit, read_history_messages_tail};
+use super::*;
+use crate::*;
+use std::collections::VecDeque;
+
 #[must_use]
 pub fn current_time_unix() -> u64 {
     SystemTime::now()
@@ -52,7 +57,7 @@ pub fn format_history_messages_jsonl(messages: &str, max_chars: usize) -> String
     fit_history_lines(rendered.into_iter().collect(), max_chars)
 }
 
-fn render_history_message_line(line: &str) -> Option<String> {
+pub(crate) fn render_history_message_line(line: &str) -> Option<String> {
     let value = serde_json::from_str::<Value>(line).ok()?;
     let role = value.get("role").and_then(Value::as_str)?;
     let text = message_content_text(value.get("content"));
@@ -62,7 +67,7 @@ fn render_history_message_line(line: &str) -> Option<String> {
     Some(format!("- {role}: {}", text.trim()))
 }
 
-fn message_content_text(content: Option<&Value>) -> String {
+pub(crate) fn message_content_text(content: Option<&Value>) -> String {
     let Some(content) = content else {
         return String::new();
     };
@@ -83,20 +88,20 @@ fn message_content_text(content: Option<&Value>) -> String {
     content.to_string()
 }
 
-fn history_budget_warning(max_chars: usize) -> String {
+pub(crate) fn history_budget_warning(max_chars: usize) -> String {
     format!(
         "WARNING: historical messages exceeded the {max_chars} character budget; oldest messages were omitted.\n\n"
     )
 }
 
-fn clipped_history_budget_warning(max_chars: usize) -> String {
+pub(crate) fn clipped_history_budget_warning(max_chars: usize) -> String {
     let warning = history_budget_warning(max_chars);
     let mut output = String::new();
     push_str_byte_limit(&mut output, &warning, max_chars);
     output.trim_end().to_owned()
 }
 
-fn fit_history_lines(lines: Vec<String>, max_chars: usize) -> String {
+pub(crate) fn fit_history_lines(lines: Vec<String>, max_chars: usize) -> String {
     let warning = history_budget_warning(max_chars);
     if warning.len() > max_chars {
         return clipped_history_budget_warning(max_chars);

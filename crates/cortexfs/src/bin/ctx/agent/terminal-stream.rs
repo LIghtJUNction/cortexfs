@@ -1,0 +1,158 @@
+use crate::*;
+
+pub(crate) fn agent_terminal(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+    write: bool,
+) -> Result<ExitCode, CliError> {
+    require_cli_name("agent name", name)?;
+    let session = agent_session_name(root, name, session)?;
+    require_session_name(&session)?;
+    let socket = agent_terminal_connect_socket(root, name, &session)?;
+    stream_terminal_socket(&socket, write, name, &session)
+}
+
+pub(crate) fn agent_terminal_socket(
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<PathBuf, CliError> {
+    Ok(ctx_home(root)?
+        .join("agent")
+        .join(name)
+        .join("session")
+        .join(session)
+        .join("terminal")
+        .join("main.sock"))
+}
+
+pub(crate) fn agent_terminal_connect_socket(
+    root: &Path,
+    name: &str,
+    session: &str,
+) -> Result<PathBuf, CliError> {
+    for socket in [
+        agent_terminal_socket(root, name, session)?,
+        agent_runtime_socket(root, name, session)?,
+        agent_legacy_runtime_socket(root, name, session)?,
+    ] {
+        if terminal_socket_exists(&socket) {
+            return Ok(socket);
+        }
+    }
+    agent_terminal_socket(root, name, session)
+}
+
+pub(crate) fn terminal_socket_exists(socket: &Path) -> bool {
+    let Some(parent) = socket.parent() else {
+        return false;
+    };
+    let Ok(parent) = open_plain_directory(parent) else {
+        return false;
+    };
+    let Some(file_name) = socket.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    nix::sys::stat::fstatat(&parent, file_name, nix::fcntl::AtFlags::empty()).is_ok_and(|stat| {
+        nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFSOCK)
+    })
+}
+
+pub(crate) fn require_session_name(session: &str) -> Result<(), CliError> {
+    if is_object_name(session) {
+        Ok(())
+    } else {
+        Err(CliError::usage("invalid session name"))
+    }
+}
+
+pub(crate) fn shell_quote_arg(value: &str) -> String {
+    if value
+        .bytes()
+        .all(|byte| matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'.' | b'/' | b':' | b'@' | b'%' | b'+' | b'=' | b','))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+pub(crate) fn stream_terminal_socket(
+    socket: &Path,
+    write: bool,
+    name: &str,
+    session: &str,
+) -> Result<ExitCode, CliError> {
+    let stream = open_terminal_socket(socket)
+        .map_err(|error| terminal_connect_cli_error(socket, name, session, &error))?;
+    stream_terminal_stream(stream, write)
+}
+
+pub(crate) fn open_terminal_socket(socket: &Path) -> Result<UnixStream, io::Error> {
+    UnixStream::connect(socket)
+}
+
+pub(crate) fn terminal_connect_cli_error(
+    socket: &Path,
+    name: &str,
+    session: &str,
+    error: &io::Error,
+) -> CliError {
+    let hint = format!(
+        "run: ctx agent start {} --session {}",
+        shell_quote_arg(name),
+        shell_quote_arg(session)
+    );
+    let reason = match error.kind() {
+        io::ErrorKind::NotFound => "terminal is not running",
+        io::ErrorKind::ConnectionRefused => "terminal socket exists but has no listener",
+        _ => "cannot connect terminal socket",
+    };
+    CliError::unavailable(format!("{reason} {}: {error}\n{hint}", socket.display()))
+}
+
+pub(crate) fn stream_terminal_stream(
+    mut stream: UnixStream,
+    write: bool,
+) -> Result<ExitCode, CliError> {
+    if write {
+        stream.write_all(b"attach\n")
+    } else {
+        stream.write_all(b"watch\n")
+    }
+    .map_err(|error| CliError::unavailable(format!("cannot write terminal mode: {error}")))?;
+
+    let mut reader = stream
+        .try_clone()
+        .map_err(|error| CliError::unavailable(format!("cannot clone terminal socket: {error}")))?;
+    let output = std::thread::spawn(move || copy_reader_to_stdout(&mut reader));
+    if write {
+        let _raw_mode = RawTerminalMode::maybe_new().map_err(|error| {
+            CliError::unavailable(format!("cannot enter raw terminal mode: {error}"))
+        })?;
+        let input = std::thread::spawn(move || copy_stdin_to_stream_and_shutdown(stream));
+        match input.join() {
+            Ok(Ok(_bytes)) => {}
+            Ok(Err(error)) if is_terminal_disconnect(&error) => {}
+            Ok(Err(error)) => {
+                return Err(CliError::unavailable(format!(
+                    "terminal input failed: {error}"
+                )));
+            }
+            Err(_error) => return Err(CliError::unavailable("terminal input thread failed")),
+        }
+    }
+    match output.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) if is_terminal_disconnect(&error) => {}
+        Ok(Err(error)) => {
+            return Err(CliError::unavailable(format!(
+                "terminal output failed: {error}"
+            )));
+        }
+        Err(_error) => return Err(CliError::unavailable("terminal output thread failed")),
+    }
+    Ok(ExitCode::SUCCESS)
+}

@@ -1,46 +1,48 @@
+use crate::*;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct LoadedTool {
-    name: String,
-    path: PathBuf,
-    description: String,
-    schema: Option<String>,
-    dynamic_resident: bool,
-    pinned: bool,
-    last_used: u64,
+pub(crate) struct LoadedTool {
+    pub(crate) name: String,
+    pub(crate) path: PathBuf,
+    pub(crate) description: String,
+    pub(crate) schema: Option<String>,
+    pub(crate) dynamic_resident: bool,
+    pub(crate) pinned: bool,
+    pub(crate) last_used: u64,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct ToolContext {
-    tools: BTreeMap<String, LoadedTool>,
-    max_loaded_tools: usize,
-    clock: u64,
+pub(crate) struct ToolContext {
+    pub(crate) tools: BTreeMap<String, LoadedTool>,
+    pub(crate) max_loaded_tools: usize,
+    pub(crate) clock: u64,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct DynamicToolCache {
-    capacity: usize,
-    window_capacity: usize,
-    clock: u64,
-    frequencies: BTreeMap<PathBuf, u64>,
-    pinned: BTreeSet<PathBuf>,
-    entries: BTreeMap<PathBuf, CachedToolPath>,
+pub(crate) struct DynamicToolCache {
+    pub(crate) capacity: usize,
+    pub(crate) window_capacity: usize,
+    pub(crate) clock: u64,
+    pub(crate) frequencies: BTreeMap<PathBuf, u64>,
+    pub(crate) pinned: BTreeSet<PathBuf>,
+    pub(crate) entries: BTreeMap<PathBuf, CachedToolPath>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CacheSegment {
+pub(crate) enum CacheSegment {
     Window,
     Main,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct CachedToolPath {
-    path: PathBuf,
-    last_used: u64,
-    segment: CacheSegment,
+pub(crate) struct CachedToolPath {
+    pub(crate) path: PathBuf,
+    pub(crate) last_used: u64,
+    pub(crate) segment: CacheSegment,
 }
 
 impl DynamicToolCache {
-    fn with_window_percent(capacity: usize, window_percent: usize) -> Self {
+    pub(crate) fn with_window_percent(capacity: usize, window_percent: usize) -> Self {
         let capacity = capacity.max(1);
         let window_percent = window_percent.clamp(1, 100);
         let window_capacity = capacity
@@ -58,15 +60,15 @@ impl DynamicToolCache {
         }
     }
 
-    fn contains_path(&self, path: &Path) -> bool {
+    pub(crate) fn contains_path(&self, path: &Path) -> bool {
         self.entries.contains_key(path)
     }
 
-    fn is_pinned_path(&self, path: &Path) -> bool {
+    pub(crate) fn is_pinned_path(&self, path: &Path) -> bool {
         self.pinned.contains(path)
     }
 
-    fn load_path(&mut self, path: &Path) {
+    pub(crate) fn load_path(&mut self, path: &Path) {
         self.record_frequency(path);
         if !self.entries.contains_key(path) {
             let path = path.to_path_buf();
@@ -86,13 +88,13 @@ impl DynamicToolCache {
         }
     }
 
-    fn pin_path(&mut self, path: &Path) {
+    pub(crate) fn pin_path(&mut self, path: &Path) {
         let path = path.to_path_buf();
         let _inserted = self.pinned.insert(path.clone());
         self.load_path(&path);
     }
 
-    fn unpin_path(&mut self, path: &Path) -> bool {
+    pub(crate) fn unpin_path(&mut self, path: &Path) -> bool {
         self.pinned.remove(path)
     }
 
@@ -149,7 +151,7 @@ impl DynamicToolCache {
         }
     }
 
-    fn unpinned_len(&self) -> usize {
+    pub(crate) fn unpinned_len(&self) -> usize {
         self.entries
             .values()
             .filter(|entry| !self.is_pinned_path(&entry.path))
@@ -214,7 +216,7 @@ impl DynamicToolCache {
     }
 }
 
-fn tiny_lfu_admits(
+pub(crate) fn tiny_lfu_admits(
     candidate_frequency: u64,
     victim_frequency: u64,
     candidate_last_used: u64,
@@ -224,7 +226,7 @@ fn tiny_lfu_admits(
         || (candidate_frequency == victim_frequency && candidate_last_used > victim_last_used)
 }
 
-fn wtinylfu_victim_path<'a>(
+pub(crate) fn wtinylfu_victim_path<'a>(
     entries: impl IntoIterator<Item = (&'a Path, u64, u64)>,
 ) -> Option<PathBuf> {
     entries
@@ -234,7 +236,7 @@ fn wtinylfu_victim_path<'a>(
 }
 
 impl ToolContext {
-    fn new(max_loaded_tools: usize) -> Self {
+    pub(crate) fn new(max_loaded_tools: usize) -> Self {
         Self {
             tools: BTreeMap::new(),
             max_loaded_tools: max_loaded_tools.max(1),
@@ -242,7 +244,7 @@ impl ToolContext {
         }
     }
 
-    fn insert(&mut self, mut tool: LoadedTool) -> Vec<LoadedTool> {
+    pub(crate) fn insert(&mut self, mut tool: LoadedTool) -> Vec<LoadedTool> {
         self.clock = self.clock.saturating_add(1);
         tool.last_used = self.clock;
         if let Some(existing) = self.tools.get(&tool.name) {
@@ -255,18 +257,18 @@ impl ToolContext {
         self.evict_over_limit()
     }
 
-    fn get_mut(&mut self, name: &str) -> Option<&mut LoadedTool> {
+    pub(crate) fn get_mut(&mut self, name: &str) -> Option<&mut LoadedTool> {
         self.tools.get_mut(name)
     }
 
-    fn touch(&mut self, name: &str) {
+    pub(crate) fn touch(&mut self, name: &str) {
         if let Some(tool) = self.tools.get_mut(name) {
             self.clock = self.clock.saturating_add(1);
             tool.last_used = self.clock;
         }
     }
 
-    fn remove_unpinned(&mut self, name: &str) -> Result<Option<LoadedTool>, TshError> {
+    pub(crate) fn remove_unpinned(&mut self, name: &str) -> Result<Option<LoadedTool>, TshError> {
         if self.tools.get(name).is_some_and(|tool| tool.pinned) {
             return Err(TshError::unavailable(format!(
                 "{name} is pinned; run `unpin {name}` before unload"
@@ -275,11 +277,11 @@ impl ToolContext {
         Ok(self.tools.remove(name))
     }
 
-    fn values(&self) -> impl Iterator<Item = &LoadedTool> {
+    pub(crate) fn values(&self) -> impl Iterator<Item = &LoadedTool> {
         self.tools.values()
     }
 
-    fn pinned_values(&self) -> impl Iterator<Item = &LoadedTool> {
+    pub(crate) fn pinned_values(&self) -> impl Iterator<Item = &LoadedTool> {
         self.tools.values().filter(|tool| tool.pinned)
     }
 
@@ -302,7 +304,7 @@ impl ToolContext {
         evicted
     }
 
-    fn from_state(state: cortexfs::TshContextState, max_loaded_tools: usize) -> Self {
+    pub(crate) fn from_state(state: cortexfs::TshContextState, max_loaded_tools: usize) -> Self {
         let mut context = Self::new(max_loaded_tools);
         let mut tools = state.tools;
         tools.sort_by_key(|tool| tool.last_used);
@@ -320,7 +322,7 @@ impl ToolContext {
         context
     }
 
-    fn to_state(&self) -> cortexfs::TshContextState {
+    pub(crate) fn to_state(&self) -> cortexfs::TshContextState {
         let mut state = cortexfs::TshContextState::default();
         state.tools = self
             .tools

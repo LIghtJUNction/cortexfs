@@ -1,4 +1,6 @@
-fn parse_args(args: Vec<OsString>) -> Result<CtxtermCommand, CtxtermError> {
+use crate::*;
+
+pub(crate) fn parse_args(args: Vec<OsString>) -> Result<CtxtermCommand, CtxtermError> {
     let mut values = args.into_iter();
     let mut listen = None;
     let mut log = None;
@@ -82,7 +84,7 @@ fn parse_args(args: Vec<OsString>) -> Result<CtxtermCommand, CtxtermError> {
     })
 }
 
-fn print_help() -> Result<(), CtxtermError> {
+pub(crate) fn print_help() -> Result<(), CtxtermError> {
     write_stdout(
         "\
 ctxterm - CortexFS agent terminal emulator

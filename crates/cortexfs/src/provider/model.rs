@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::abi::constants::{FORBIDDEN_MODEL_CAPABILITIES, STABLE_MODEL_CAPABILITIES};
-use crate::abi::path::{is_model_name, is_object_name};
+use crate::abi::path::is_model_name;
 
 /// Model capability control-file validation issue.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -240,7 +240,9 @@ impl ModelFallbackTable {
     }
 }
 
-include!("model_driver_routes.rs");
+#[path = "model-driver-routes.rs"]
+pub mod model_driver_routes;
+pub use model_driver_routes::*;
 
 impl_issue_report!(ModelCapabilityReport, ModelCapabilityIssue);
 

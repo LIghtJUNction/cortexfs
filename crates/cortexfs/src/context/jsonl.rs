@@ -1,7 +1,10 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{JsonStringField, JsonU64Field, is_object_name, validate_context_pack_source};
+use crate::{
+    JsonStringField, JsonU64Field, for_each_jsonl_line, is_object_name,
+    validate_context_pack_source,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ContextJsonlKind {
@@ -44,7 +47,7 @@ impl_issue_report!(ContextJsonlReport, ContextJsonlIssue);
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-enum JsonStringArrayField {
+pub(crate) enum JsonStringArrayField {
     Strings(Vec<String>),
     Other(Value),
 }
@@ -52,17 +55,13 @@ enum JsonStringArrayField {
 #[must_use]
 pub fn inspect_context_jsonl(kind: ContextJsonlKind, content: &str) -> ContextJsonlReport {
     let mut issues = Vec::new();
-    for (index, line) in content.lines().enumerate() {
-        let line_number = index + 1;
-        if line.trim().is_empty() {
-            continue;
-        }
+    for_each_jsonl_line(content, |line_number, line| {
         inspect_context_jsonl_line(kind, line_number, line, &mut issues);
-    }
+    });
     ContextJsonlReport::new(issues)
 }
 
-fn inspect_context_jsonl_line(
+pub(crate) fn inspect_context_jsonl_line(
     kind: ContextJsonlKind,
     line_number: usize,
     line: &str,
@@ -99,7 +98,7 @@ fn inspect_context_jsonl_line(
 }
 
 #[derive(Deserialize)]
-struct ContextJsonlRecordJson {
+pub(crate) struct ContextJsonlRecordJson {
     id: Option<JsonStringField>,
     text: Option<JsonStringField>,
     decision: Option<JsonStringField>,
@@ -113,7 +112,7 @@ struct ContextJsonlRecordJson {
     bytes: Option<JsonU64Field>,
 }
 
-fn inspect_fact_record(
+pub(crate) fn inspect_fact_record(
     line: usize,
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
@@ -121,7 +120,7 @@ fn inspect_fact_record(
     inspect_text_source_record(line, record, "text", record.text.as_ref(), issues);
 }
 
-fn inspect_decision_record(
+pub(crate) fn inspect_decision_record(
     line: usize,
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
@@ -129,7 +128,7 @@ fn inspect_decision_record(
     inspect_text_source_record(line, record, "decision", record.decision.as_ref(), issues);
 }
 
-fn inspect_text_source_record(
+pub(crate) fn inspect_text_source_record(
     line: usize,
     record: &ContextJsonlRecordJson,
     text_field: &str,
@@ -153,7 +152,7 @@ fn inspect_text_source_record(
     );
 }
 
-fn inspect_ref_record(
+pub(crate) fn inspect_ref_record(
     line: usize,
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
@@ -182,7 +181,7 @@ fn inspect_ref_record(
     );
 }
 
-fn inspect_swap_index_record(
+pub(crate) fn inspect_swap_index_record(
     line: usize,
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
@@ -206,7 +205,7 @@ fn inspect_swap_index_record(
     require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
 }
 
-fn inspect_dedup_index_record(
+pub(crate) fn inspect_dedup_index_record(
     line: usize,
     record: &ContextJsonlRecordJson,
     issues: &mut Vec<ContextJsonlIssue>,
@@ -229,7 +228,7 @@ fn inspect_dedup_index_record(
     require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
 }
 
-fn require_context_string_field(
+pub(crate) fn require_context_string_field(
     line: usize,
     value: Option<&JsonStringField>,
     field: &str,
@@ -252,7 +251,7 @@ fn require_context_string_field(
     }
 }
 
-fn require_context_string_array_field(
+pub(crate) fn require_context_string_array_field(
     line: usize,
     values: Option<&JsonStringArrayField>,
     field: &str,
@@ -284,7 +283,7 @@ fn require_context_string_array_field(
     }
 }
 
-fn require_context_number_field(
+pub(crate) fn require_context_number_field(
     line: usize,
     value: Option<&JsonU64Field>,
     field: &str,
@@ -298,7 +297,7 @@ fn require_context_number_field(
     }
 }
 
-fn json_string_array_values(value: Option<&JsonStringArrayField>) -> Option<&[String]> {
+pub(crate) fn json_string_array_values(value: Option<&JsonStringArrayField>) -> Option<&[String]> {
     value.and_then(|value| match *value {
         JsonStringArrayField::Strings(ref values) => Some(values.as_slice()),
         JsonStringArrayField::Other(ref value) => {
@@ -308,33 +307,33 @@ fn json_string_array_values(value: Option<&JsonStringArrayField>) -> Option<&[St
     })
 }
 
-fn is_context_hash_id(value: &str) -> bool {
+pub(crate) fn is_context_hash_id(value: &str) -> bool {
     is_object_name(value)
         && (value.starts_with("sha256-")
             || value.starts_with("sha256_")
             || value.starts_with("sha256."))
 }
 
-fn is_nonempty_single_line(value: &str) -> bool {
+pub(crate) fn is_nonempty_single_line(value: &str) -> bool {
     !value.is_empty() && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
-fn is_stable_context_ref_path(value: &str) -> bool {
+pub(crate) fn is_stable_context_ref_path(value: &str) -> bool {
     is_nonempty_single_line(value) && !value.split('/').any(|part| part == "." || part == "..")
 }
 
-fn is_context_ref_kind(value: &str) -> bool {
+pub(crate) fn is_context_ref_kind(value: &str) -> bool {
     matches!(
         value,
         "file" | "artifact" | "tool_output" | "swap" | "child_result"
     )
 }
 
-fn is_swap_kind(value: &str) -> bool {
+pub(crate) fn is_swap_kind(value: &str) -> bool {
     matches!(value, "message_range" | "tool_output" | "file")
 }
 
-fn is_swap_source(value: &str) -> bool {
+pub(crate) fn is_swap_source(value: &str) -> bool {
     matches!(value, "messages.jsonl" | "events.jsonl")
         || value.starts_with("context/")
             && validate_context_pack_source(value).is_ok()

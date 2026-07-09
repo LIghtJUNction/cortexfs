@@ -1,6 +1,8 @@
+use crate::*;
+
 const MAX_CTX_FILE_CHECK_BYTES: u64 = 1024 * 1024;
 
-fn read_file_to_string(path: &Path) -> Result<String, CliError> {
+pub(crate) fn read_file_to_string(path: &Path) -> Result<String, CliError> {
     let mut file = open_plain_read_file(path)?;
     let metadata = file.metadata().map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
@@ -11,8 +13,9 @@ fn read_file_to_string(path: &Path) -> Result<String, CliError> {
             path.display()
         )));
     }
-    let len = usize::try_from(metadata.len())
-        .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))?;
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+    })?;
     let mut content = vec![0; len];
     file.read_exact(&mut content).map_err(|error| {
         CliError::unavailable(format!("cannot read {}: {error}", path.display()))
@@ -21,7 +24,7 @@ fn read_file_to_string(path: &Path) -> Result<String, CliError> {
         .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))
 }
 
-fn open_plain_read_file(path: &Path) -> Result<fs::File, CliError> {
+pub(crate) fn open_plain_read_file(path: &Path) -> Result<fs::File, CliError> {
     let Some(parent) = path.parent() else {
         return Err(CliError::usage("file path must have a parent directory"));
     };
@@ -33,18 +36,18 @@ fn open_plain_read_file(path: &Path) -> Result<fs::File, CliError> {
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
-        nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(|error| CliError::unavailable(format!("cannot read {}: {error}", path.display())))?;
     Ok(fs::File::from(file_fd))
 }
 
-fn open_executable_no_follow(path: &Path) -> Result<fs::File, CliError> {
+pub(crate) fn open_executable_no_follow(path: &Path) -> Result<fs::File, CliError> {
     let Some(parent) = path.parent() else {
-        return Err(CliError::usage("executable path must have a parent directory"));
+        return Err(CliError::usage(
+            "executable path must have a parent directory",
+        ));
     };
     let parent_dir = open_plain_file_parent_dir(parent)?;
     let file_name = path
@@ -71,7 +74,7 @@ fn open_executable_no_follow(path: &Path) -> Result<fs::File, CliError> {
     Ok(file)
 }
 
-fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
+pub(crate) fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
         let relative = candidate.strip_prefix(root).map_err(|error| {
@@ -87,7 +90,7 @@ fn classify_input_path(root: &Path, path: &str) -> Result<String, CliError> {
     Ok(path.to_owned())
 }
 
-fn resolve_abi_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
+pub(crate) fn resolve_abi_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
     let candidate = Path::new(path);
     if candidate.is_absolute() {
         let relative = candidate.strip_prefix(root).map_err(|error| {
@@ -104,7 +107,7 @@ fn resolve_abi_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
     Ok(root.join(path))
 }
 
-fn validate_relative_abi_path_text(path: &str) -> Result<(), CliError> {
+pub(crate) fn validate_relative_abi_path_text(path: &str) -> Result<(), CliError> {
     if path
         .split('/')
         .any(|part| part.is_empty() || matches!(part, "." | ".."))
@@ -115,7 +118,7 @@ fn validate_relative_abi_path_text(path: &str) -> Result<(), CliError> {
     Ok(())
 }
 
-fn validate_relative_abi_path(path: &Path) -> Result<(), CliError> {
+pub(crate) fn validate_relative_abi_path(path: &Path) -> Result<(), CliError> {
     for component in path.components() {
         let std::path::Component::Normal(part) = component else {
             return Err(CliError::usage("file path must be a relative ABI path"));
@@ -131,14 +134,14 @@ fn validate_relative_abi_path(path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn temp_file_name(attempt: u8) -> String {
+pub(crate) fn temp_file_name(attempt: u8) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
     format!(".ctx.tmp.{}.{}.{}", std::process::id(), nanos, attempt)
 }
 
-fn validate_name(name: &str) -> Result<(), CliError> {
+pub(crate) fn validate_name(name: &str) -> Result<(), CliError> {
     if is_object_name(name) {
         print_line("ok")
     } else {
@@ -146,7 +149,7 @@ fn validate_name(name: &str) -> Result<(), CliError> {
     }
 }
 
-fn ctx_tool_path(root: &Path) -> Result<ToolPath, CliError> {
+pub(crate) fn ctx_tool_path(root: &Path) -> Result<ToolPath, CliError> {
     match env::var("CTX_PATH") {
         Ok(value) => Ok(ToolPath::parse(&value)),
         Err(env::VarError::NotPresent) => Ok(ToolPath::default(root, &ctx_home(root)?)),
@@ -156,7 +159,7 @@ fn ctx_tool_path(root: &Path) -> Result<ToolPath, CliError> {
     }
 }
 
-fn tool_path_error(error: cortexfs::ToolPathError) -> CliError {
+pub(crate) fn tool_path_error(error: cortexfs::ToolPathError) -> CliError {
     match error {
         cortexfs::ToolPathError::InvalidName => CliError::usage("invalid tool name"),
         cortexfs::ToolPathError::CannotReadDirectory => {
@@ -165,7 +168,7 @@ fn tool_path_error(error: cortexfs::ToolPathError) -> CliError {
     }
 }
 
-fn is_mount_point(root: &Path) -> io::Result<bool> {
+pub(crate) fn is_mount_point(root: &Path) -> io::Result<bool> {
     let mountinfo = fs::read_to_string("/proc/self/mountinfo")?;
     let root = absolute_existing_path(root)?.display().to_string();
     Ok(mountinfo
@@ -173,11 +176,11 @@ fn is_mount_point(root: &Path) -> io::Result<bool> {
         .any(|line| mount_point(line).is_some_and(|point| point == root)))
 }
 
-fn absolute_existing_path(path: &Path) -> io::Result<PathBuf> {
+pub(crate) fn absolute_existing_path(path: &Path) -> io::Result<PathBuf> {
     fs::canonicalize(path)
 }
 
-fn mount_point(line: &str) -> Option<String> {
+pub(crate) fn mount_point(line: &str) -> Option<String> {
     let mut fields = line.split(' ');
     let _id = fields.next()?;
     let _parent = fields.next()?;
@@ -186,7 +189,7 @@ fn mount_point(line: &str) -> Option<String> {
     fields.next().map(unescape_mountinfo)
 }
 
-fn unescape_mountinfo(value: &str) -> String {
+pub(crate) fn unescape_mountinfo(value: &str) -> String {
     value
         .replace("\\040", " ")
         .replace("\\011", "\t")
@@ -194,7 +197,7 @@ fn unescape_mountinfo(value: &str) -> String {
         .replace("\\134", "\\")
 }
 
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     let value = terminal_safe_text(value);
     if value.bytes().all(|byte| {
         byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b':')
@@ -205,18 +208,18 @@ fn shell_quote(value: &str) -> String {
     }
 }
 
-const ANSI_RESET: &str = "\x1b[0m";
-const ANSI_BOLD_CYAN: &str = "\x1b[1;36m";
-const ANSI_BOLD_BLUE: &str = "\x1b[1;34m";
-const ANSI_BOLD_YELLOW: &str = "\x1b[1;33m";
-const ANSI_CYAN: &str = "\x1b[36m";
-const ANSI_GREEN: &str = "\x1b[32m";
-const ANSI_YELLOW: &str = "\x1b[33m";
-const ANSI_RED: &str = "\x1b[31m";
-const ANSI_BLUE: &str = "\x1b[34m";
-const ANSI_DIM: &str = "\x1b[2m";
+pub(crate) const ANSI_RESET: &str = "\x1b[0m";
+pub(crate) const ANSI_BOLD_CYAN: &str = "\x1b[1;36m";
+pub(crate) const ANSI_BOLD_BLUE: &str = "\x1b[1;34m";
+pub(crate) const ANSI_BOLD_YELLOW: &str = "\x1b[1;33m";
+pub(crate) const ANSI_CYAN: &str = "\x1b[36m";
+pub(crate) const ANSI_GREEN: &str = "\x1b[32m";
+pub(crate) const ANSI_YELLOW: &str = "\x1b[33m";
+pub(crate) const ANSI_RED: &str = "\x1b[31m";
+pub(crate) const ANSI_BLUE: &str = "\x1b[34m";
+pub(crate) const ANSI_DIM: &str = "\x1b[2m";
 
-fn color_enabled() -> bool {
+pub(crate) fn color_enabled() -> bool {
     if env::var_os("NO_COLOR").is_some() {
         return false;
     }
@@ -226,7 +229,7 @@ fn color_enabled() -> bool {
     io::stdout().is_terminal()
 }
 
-fn styled(enabled: bool, style: &str, text: &str) -> String {
+pub(crate) fn styled(enabled: bool, style: &str, text: &str) -> String {
     if enabled {
         format!("{style}{text}{ANSI_RESET}")
     } else {
@@ -234,7 +237,7 @@ fn styled(enabled: bool, style: &str, text: &str) -> String {
     }
 }
 
-fn print_help_lines(lines: &[&str]) -> Result<(), CliError> {
+pub(crate) fn print_help_lines(lines: &[&str]) -> Result<(), CliError> {
     let color = color_enabled();
     for line in lines {
         print_line(&help_line(color, line))?;
@@ -242,7 +245,7 @@ fn print_help_lines(lines: &[&str]) -> Result<(), CliError> {
     Ok(())
 }
 
-fn help_line(color: bool, line: &str) -> String {
+pub(crate) fn help_line(color: bool, line: &str) -> String {
     if line.is_empty() {
         return String::new();
     }
@@ -258,14 +261,11 @@ fn help_line(color: bool, line: &str) -> String {
     styled(color, ANSI_DIM, line)
 }
 
-fn print_status_field(color: bool, label: &str, value: &str) -> Result<(), CliError> {
-    print_line(&format!(
-        "{} {value}",
-        styled(color, ANSI_BOLD_BLUE, label)
-    ))
+pub(crate) fn print_status_field(color: bool, label: &str, value: &str) -> Result<(), CliError> {
+    print_line(&format!("{} {value}", styled(color, ANSI_BOLD_BLUE, label)))
 }
 
-fn status_state_value(color: bool, value: &str) -> String {
+pub(crate) fn status_state_value(color: bool, value: &str) -> String {
     let style = match value {
         "running" | "ready" => ANSI_GREEN,
         "available" | "unknown" => ANSI_YELLOW,
@@ -275,11 +275,11 @@ fn status_state_value(color: bool, value: &str) -> String {
     styled(color, style, value)
 }
 
-fn status_bool_value(color: bool, value: &str, ok: bool) -> String {
+pub(crate) fn status_bool_value(color: bool, value: &str, ok: bool) -> String {
     styled(color, if ok { ANSI_GREEN } else { ANSI_RED }, value)
 }
 
-fn status_tree_line(color: bool, line: &str) -> String {
+pub(crate) fn status_tree_line(color: bool, line: &str) -> String {
     let line = line
         .replace("[idle]", &styled(color, ANSI_DIM, "[idle]"))
         .replace("[running]", &styled(color, ANSI_GREEN, "[running]"))
@@ -287,7 +287,7 @@ fn status_tree_line(color: bool, line: &str) -> String {
     styled(color, ANSI_CYAN, &line)
 }
 
-fn print_line(line: &str) -> Result<(), CliError> {
+pub(crate) fn print_line(line: &str) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(line.as_bytes())

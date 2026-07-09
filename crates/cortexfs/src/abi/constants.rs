@@ -58,15 +58,13 @@ pub fn default_agent_model_for_name(agent_name: &str) -> &'static str {
 /// Returns whether an agent name uses the v1 worker/executor role convention.
 #[must_use]
 pub fn is_worker_agent_name(agent_name: &str) -> bool {
-    matches!(agent_name, "executor" | "worker")
-        || is_dedicated_worker_agent_name(agent_name)
+    matches!(agent_name, "executor" | "worker") || is_dedicated_worker_agent_name(agent_name)
 }
 
 /// Returns whether an agent name is a dedicated worker/executor instance.
 #[must_use]
 pub fn is_dedicated_worker_agent_name(agent_name: &str) -> bool {
-    agent_name.starts_with("executor-")
-        || agent_name.starts_with("worker-")
+    agent_name.starts_with("executor-") || agent_name.starts_with("worker-")
 }
 pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.5";
 pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto-review";

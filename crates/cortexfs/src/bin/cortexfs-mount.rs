@@ -1,4 +1,22 @@
 #![forbid(unsafe_code)]
+#![expect(
+    clippy::allow_attributes,
+    reason = "allow target-specific lint exceptions"
+)]
+#![allow(
+    unfulfilled_lint_expectations,
+    reason = "expected target-specific lint results"
+)]
+#![expect(
+    clippy::wildcard_imports,
+    reason = "uniform submodules with wildcard imports"
+)]
+#![expect(clippy::redundant_pub_crate, reason = "submodule visibility alignment")]
+#![expect(
+    clippy::field_scoped_visibility_modifiers,
+    reason = "internal structs with scoped fields"
+)]
+#![expect(clippy::module_inception, reason = "allow submodule self name")]
 
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -29,7 +47,8 @@ use nix::sys::stat::{Mode, SFlag, fstatat};
 use nix::sys::statvfs;
 use nix::unistd::{UnlinkatFlags, unlinkat};
 
-include!("shared/stderr.rs");
+#[path = "shared/stderr.rs"]
+pub mod stderr;
 
 #[derive(Debug)]
 struct CortexFuse {
@@ -179,15 +198,27 @@ macro_rules! create_session_layout_child_or_reply {
     }};
 }
 
-include!("../mount/permissions.rs");
-include!("../mount/init.rs");
-include!("../mount/lifecycle.rs");
-include!("../mount/readonly_mutations.rs");
-include!("../mount/readdirplus.rs");
-include!("../mount/socket_alias_methods.rs");
-include!("../mount/filesystem.rs");
+#[path = "../mount/permissions.rs"]
+pub mod permissions;
+#[macro_use]
+#[path = "../mount/init.rs"]
+pub mod init;
+#[macro_use]
+#[path = "../mount/lifecycle.rs"]
+pub mod lifecycle;
+#[macro_use]
+#[path = "../mount/readonly-mutations.rs"]
+pub mod readonly_mutations;
+#[macro_use]
+#[path = "../mount/readdirplus.rs"]
+pub mod readdirplus;
+#[macro_use]
+#[path = "../mount/socket-alias-methods.rs"]
+pub mod socket_alias_methods;
+#[path = "../mount/filesystem.rs"]
+pub mod filesystem;
 
-fn remove_backing_socket_entry(root: &Path, abi_path: &str) -> io::Result<()> {
+pub(crate) fn remove_backing_socket_entry(root: &Path, abi_path: &str) -> io::Result<()> {
     let (parent, file_name) = open_backing_socket_parent(root, abi_path)?;
     let stat = fstatat(&parent, file_name.as_str(), AtFlags::AT_SYMLINK_NOFOLLOW)
         .map_err(io::Error::from)?;
@@ -201,7 +232,10 @@ fn remove_backing_socket_entry(root: &Path, abi_path: &str) -> io::Result<()> {
     unlinkat(&parent, file_name.as_str(), UnlinkatFlags::NoRemoveDir).map_err(io::Error::from)
 }
 
-fn open_backing_socket_parent(root: &Path, abi_path: &str) -> io::Result<(fs::File, String)> {
+pub(crate) fn open_backing_socket_parent(
+    root: &Path,
+    abi_path: &str,
+) -> io::Result<(fs::File, String)> {
     let path = Path::new(abi_path);
     let file_name = path
         .file_name()
@@ -240,7 +274,7 @@ fn open_backing_socket_parent(root: &Path, abi_path: &str) -> io::Result<(fs::Fi
     Ok((directory, file_name))
 }
 
-fn open_single_backing_socket_dir(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_single_backing_socket_dir(path: &Path) -> io::Result<fs::File> {
     let fd = openat(
         nix::fcntl::AT_FDCWD,
         path,
@@ -251,28 +285,19 @@ fn open_single_backing_socket_dir(path: &Path) -> io::Result<fs::File> {
     Ok(fs::File::from(fd))
 }
 
-include!("../mount/helpers.rs");
+#[path = "../mount/helpers.rs"]
+pub mod helpers;
+
+pub(crate) use helpers::*;
+pub(crate) use init::*;
+pub(crate) use permissions::*;
+pub(crate) use stderr::*;
+
+pub(crate) fn main() -> ExitCode {
+    helpers::main()
+}
 
 #[cfg(test)]
-mod tests {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/unit/cortexfs_mount_tests.rs"
-    ));
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/unit/cortexfs_mount_statfs_tests.rs"
-    ));
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/unit/cortexfs_mount_init_tests.rs"
-    ));
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/unit/cortexfs_mount_permission_tests.rs"
-    ));
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/unit/cortexfs_mount_model_alias_tests.rs"
-    ));
-}
+#[expect(unused_qualifications, reason = "tests use qualified paths")]
+#[path = "cortexfs-mount/tests.rs"]
+mod tests;

@@ -1,4 +1,6 @@
-fn open_log(path: &Path) -> Result<fs::File, CtxtermError> {
+use crate::*;
+
+pub(crate) fn open_log(path: &Path) -> Result<std::fs::File, CtxtermError> {
     if let Some(parent) = path.parent() {
         create_plain_directory(
             parent,
@@ -32,7 +34,7 @@ fn open_log(path: &Path) -> Result<fs::File, CtxtermError> {
             path.display()
         )));
     }
-    file.set_permissions(fs::Permissions::from_mode(0o600))
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
         .map_err(|error| {
             CtxtermError::unavailable(format!("cannot chmod {}: {error}", path.display()))
         })?;

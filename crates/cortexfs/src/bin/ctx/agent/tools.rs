@@ -1,4 +1,6 @@
-fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
+use crate::*;
+
+pub(crate) fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
     for entry in agent_visible_tool_entries(root, name)? {
         print_line(&format!(
             "{}\t{}\t{}",
@@ -11,13 +13,13 @@ fn agent_tools(root: &Path, name: &str) -> Result<(), CliError> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AgentVisibleTool {
-    name: String,
-    path: PathBuf,
-    status: String,
+pub(crate) struct AgentVisibleTool {
+    pub(crate) name: String,
+    pub(crate) path: PathBuf,
+    pub(crate) status: String,
 }
 
-fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
+pub(crate) fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
     require_cli_name("agent name", name)?;
     let view = derive_agent_runtime_view(root, name)
         .map_err(|error| CliError::unavailable(format!("agent view {}: {name}", error.errno())))?;
@@ -42,7 +44,7 @@ fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliEr
     Ok(tools)
 }
 
-fn agent_tool_is_authorized(
+pub(crate) fn agent_tool_is_authorized(
     view: &AgentRuntimeView,
     tool: &str,
 ) -> Result<bool, CliError> {
@@ -76,7 +78,10 @@ fn agent_tool_is_authorized(
     .is_ok())
 }
 
-fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibleTool>, CliError> {
+pub(crate) fn agent_visible_tool_entries(
+    root: &Path,
+    name: &str,
+) -> Result<Vec<AgentVisibleTool>, CliError> {
     require_cli_name("agent name", name)?;
     let mut paths = Vec::new();
     paths.extend(ctx_tool_path(root)?.dirs().iter().map(PathBuf::from));
@@ -99,8 +104,10 @@ fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibl
             if !is_executable_file(&tool_path) || is_control_or_socket_name(&tool) {
                 continue;
             }
-            let status = read_optional_trimmed(&tool_path.with_file_name(format!("{tool}.d")).join("status"))?
-                .unwrap_or_else(|| "unknown".to_owned());
+            let status = read_optional_trimmed(
+                &tool_path.with_file_name(format!("{tool}.d")).join("status"),
+            )?
+            .unwrap_or_else(|| "unknown".to_owned());
             tools.push(AgentVisibleTool {
                 name: tool,
                 path: tool_path,
@@ -117,18 +124,18 @@ fn agent_visible_tool_entries(root: &Path, name: &str) -> Result<Vec<AgentVisibl
     Ok(tools)
 }
 
-fn is_control_or_socket_name(name: &str) -> bool {
+pub(crate) fn is_control_or_socket_name(name: &str) -> bool {
     Path::new(name)
         .extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("sock") || ext.eq_ignore_ascii_case("d"))
 }
 
-fn agent_cwd(root: &Path, name: &str) -> Result<String, CliError> {
+pub(crate) fn agent_cwd(root: &Path, name: &str) -> Result<String, CliError> {
     let path = agent_control_dir(root, name).join("cwd");
     Ok(read_optional_trimmed(&path)?.unwrap_or_else(|| "/workspace".to_owned()))
 }
 
-fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<String, CliError> {
+pub(crate) fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<String, CliError> {
     let session_dir = agent_session_dir(root, name, Some(session))?;
     if let Some(run) = read_optional_trimmed(&session_dir.join("current_run"))? {
         return Ok(run);
@@ -148,7 +155,7 @@ fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<String, CliEr
     latest.ok_or_else(|| CliError::unavailable("missing run id; pass RUN explicitly"))
 }
 
-fn read_optional_trimmed(path: &Path) -> Result<Option<String>, CliError> {
+pub(crate) fn read_optional_trimmed(path: &Path) -> Result<Option<String>, CliError> {
     match fs::symlink_metadata(path) {
         Ok(_metadata) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),

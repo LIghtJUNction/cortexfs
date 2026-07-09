@@ -1,4 +1,6 @@
-fn run_repl(
+use crate::*;
+
+pub(crate) fn run_repl(
     root: &Path,
     cache: &mut DynamicToolCache,
     context: &mut ToolContext,
@@ -90,7 +92,7 @@ fn run_repl(
     }
 }
 
-fn repl_help(root: &Path, words: &[String]) -> Result<(), TshError> {
+pub(crate) fn repl_help(root: &Path, words: &[String]) -> Result<(), TshError> {
     if words.len() == 1 {
         return print_help();
     }
@@ -109,7 +111,7 @@ fn repl_help(root: &Path, words: &[String]) -> Result<(), TshError> {
     }
 }
 
-fn run_builtin_once(
+pub(crate) fn run_builtin_once(
     root: &Path,
     cache: &mut DynamicToolCache,
     context: &mut ToolContext,
@@ -134,7 +136,7 @@ fn run_builtin_once(
     }
 }
 
-fn builtin_words(name: &str, args: Vec<OsString>) -> Result<Vec<String>, TshError> {
+pub(crate) fn builtin_words(name: &str, args: Vec<OsString>) -> Result<Vec<String>, TshError> {
     let mut words = Vec::with_capacity(args.len() + 1);
     words.push(name.to_owned());
     for arg in args {
@@ -143,7 +145,7 @@ fn builtin_words(name: &str, args: Vec<OsString>) -> Result<Vec<String>, TshErro
     Ok(words)
 }
 
-fn repl_tools(root: &Path, words: &[String]) -> Result<(), TshError> {
+pub(crate) fn repl_tools(root: &Path, words: &[String]) -> Result<(), TshError> {
     if words.len() == 1 {
         return list_tools_with_mode(root, ToolListMode::Groups);
     }
@@ -163,7 +165,7 @@ fn repl_tools(root: &Path, words: &[String]) -> Result<(), TshError> {
     write_stdout("tsh: tools accepts a group name or -l/--long\n")
 }
 
-fn repl_which(root: &Path, words: &[String]) -> Result<(), TshError> {
+pub(crate) fn repl_which(root: &Path, words: &[String]) -> Result<(), TshError> {
     if words.len() == 2 {
         let Some(name) = words.get(1) else {
             return write_stdout("tsh: which requires a tool name\n");
@@ -176,7 +178,7 @@ fn repl_which(root: &Path, words: &[String]) -> Result<(), TshError> {
     }
 }
 
-fn repl_type(root: &Path, words: &[String]) -> Result<(), TshError> {
+pub(crate) fn repl_type(root: &Path, words: &[String]) -> Result<(), TshError> {
     if words.len() == 1 {
         return write_stdout("tsh: type requires a tool name\n");
     }
@@ -189,7 +191,7 @@ fn repl_type(root: &Path, words: &[String]) -> Result<(), TshError> {
     print_command_type(root, name)
 }
 
-fn repl_command(root: &Path, words: &[String]) -> Result<(), TshError> {
+pub(crate) fn repl_command(root: &Path, words: &[String]) -> Result<(), TshError> {
     if words.len() == 3 && words.get(1).is_some_and(|flag| flag == "-v") {
         let Some(name) = words.get(2) else {
             return write_stdout("tsh: command supports only `command -v TOOL`\n");
@@ -199,7 +201,7 @@ fn repl_command(root: &Path, words: &[String]) -> Result<(), TshError> {
     write_stdout("tsh: command supports only `command -v TOOL`\n")
 }
 
-fn repl_load(
+pub(crate) fn repl_load(
     root: &Path,
     cache: &mut DynamicToolCache,
     context: &mut ToolContext,
@@ -231,7 +233,7 @@ fn repl_load(
     report_context_evictions(evicted)
 }
 
-fn repl_unload(
+pub(crate) fn repl_unload(
     root: &Path,
     cache: &mut DynamicToolCache,
     context: &mut ToolContext,
@@ -257,14 +259,14 @@ fn repl_unload(
     ))
 }
 
-fn repl_loads(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
+pub(crate) fn repl_loads(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
     if words.len() != 1 {
         return write_stdout("tsh: loads does not accept arguments\n");
     }
     print_loaded_tools(context.values())
 }
 
-fn repl_pin(
+pub(crate) fn repl_pin(
     root: &Path,
     cache: &mut DynamicToolCache,
     context: &mut ToolContext,
@@ -293,7 +295,7 @@ fn repl_pin(
     report_context_evictions(evicted)
 }
 
-fn repl_unpin(
+pub(crate) fn repl_unpin(
     root: &Path,
     cache: &mut DynamicToolCache,
     context: &mut ToolContext,
@@ -319,14 +321,16 @@ fn repl_unpin(
     }
 }
 
-fn repl_pins(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
+pub(crate) fn repl_pins(context: &ToolContext, words: &[String]) -> Result<(), TshError> {
     if words.len() != 1 {
         return write_stdout("tsh: pins does not accept arguments\n");
     }
     print_loaded_tools(context.pinned_values())
 }
 
-fn print_loaded_tools<'a>(tools: impl Iterator<Item = &'a LoadedTool>) -> Result<(), TshError> {
+pub(crate) fn print_loaded_tools<'a>(
+    tools: impl Iterator<Item = &'a LoadedTool>,
+) -> Result<(), TshError> {
     let mut stdout = io::stdout().lock();
     for tool in tools {
         let state = match (tool.pinned, tool.dynamic_resident) {
@@ -352,7 +356,7 @@ fn print_loaded_tools<'a>(tools: impl Iterator<Item = &'a LoadedTool>) -> Result
     stdout.flush().map_err(|error| write_error_to_tsh(&error))
 }
 
-fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
+pub(crate) fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
         return write_stdout(&format!(
@@ -362,7 +366,7 @@ fn print_tool_path(root: &Path, name: &str) -> Result<(), TshError> {
     write_stdout(&format!("{}\n", hit.path().display()))
 }
 
-fn print_command_type(root: &Path, name: &str) -> Result<(), TshError> {
+pub(crate) fn print_command_type(root: &Path, name: &str) -> Result<(), TshError> {
     if is_tsh_builtin(name) {
         return write_stdout(&format!("{name} is a tsh builtin\n"));
     }
@@ -373,18 +377,22 @@ fn print_command_type(root: &Path, name: &str) -> Result<(), TshError> {
     write_stdout(&format!("{name} is {}\n", hit.path().display()))
 }
 
-fn print_command_v(root: &Path, name: &str) -> Result<(), TshError> {
+pub(crate) fn print_command_v(root: &Path, name: &str) -> Result<(), TshError> {
     if is_tsh_builtin(name) {
         return write_stdout(&format!("{name}\n"));
     }
     print_tool_path(root, name)
 }
 
-fn print_builtin_help(name: &str) -> Result<(), TshError> {
+pub(crate) fn print_builtin_help(name: &str) -> Result<(), TshError> {
     let text = match name {
         "exit" | "quit" => "exit [CODE]\n  leave tsh\n",
-        "help" => "help [TOPIC|TOOL]\n  show tsh help, diagnostic topics, or visible tool metadata\n",
-        "tools" => "tools [GROUP|-l]\n  list top-level visible tools and groups\n  tools GROUP expands a group such as fs\n  tools -l lists every tool with path metadata\n",
+        "help" => {
+            "help [TOPIC|TOOL]\n  show tsh help, diagnostic topics, or visible tool metadata\n"
+        }
+        "tools" => {
+            "tools [GROUP|-l]\n  list top-level visible tools and groups\n  tools GROUP expands a group such as fs\n  tools -l lists every tool with path metadata\n"
+        }
         "which" => "which TOOL\n  print the resolved tool path\n",
         "type" => "type TOOL\n  show whether TOOL is a tsh builtin or visible tool\n",
         "command" => "command -v TOOL\n  print the command that tsh would run\n",
@@ -399,11 +407,11 @@ fn print_builtin_help(name: &str) -> Result<(), TshError> {
     write_stdout(text)
 }
 
-fn print_tool_diagnostic_help() -> Result<(), TshError> {
+pub(crate) fn print_tool_diagnostic_help() -> Result<(), TshError> {
     write_stdout(tool_diagnostic_help_text())
 }
 
-fn tool_diagnostic_help_text() -> &'static str {
+pub(crate) fn tool_diagnostic_help_text() -> &'static str {
     "\
 tool diagnostics
   tools
@@ -435,7 +443,7 @@ notes:
 "
 }
 
-fn print_tool_help(root: &Path, name: &str) -> Result<(), TshError> {
+pub(crate) fn print_tool_help(root: &Path, name: &str) -> Result<(), TshError> {
     let tool_path = ctx_tool_path(root)?;
     let Some(hit) = tool_path.find(name).map_err(tool_path_error)? else {
         return command_not_found(name);
@@ -452,7 +460,7 @@ fn print_tool_help(root: &Path, name: &str) -> Result<(), TshError> {
     write_stdout(&text)
 }
 
-fn run_repl_tool(
+pub(crate) fn run_repl_tool(
     root: &Path,
     context: &mut ToolContext,
     name: &str,

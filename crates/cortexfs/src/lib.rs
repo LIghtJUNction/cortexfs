@@ -1,12 +1,30 @@
 #![forbid(unsafe_code)]
+#![expect(
+    clippy::allow_attributes,
+    reason = "allow compiler lint unfulfilled_lint_expectations"
+)]
+#![allow(
+    unfulfilled_lint_expectations,
+    reason = "expected target-specific lint results"
+)]
+#![expect(
+    clippy::wildcard_imports,
+    reason = "uniform submodules with wildcard imports"
+)]
+#![expect(
+    ambiguous_glob_reexports,
+    reason = "private core modules overlap in globs"
+)]
+#![expect(
+    clippy::field_scoped_visibility_modifiers,
+    reason = "internal structs with scoped fields"
+)]
 
-//! `CortexFS` Agent OS ABI design core.
-//!
-//! The old CLI, daemon, provider registry, and FUSE projection were removed
-//! before the Agent OS rewrite. This crate intentionally exposes only stable
-//! ABI names while the implementation is redesigned around Rig.
+//! `CortexFS` ABI design core.
 
-include!("source_imports.rs");
+#[path = "imports.rs"]
+pub mod imports;
+pub use imports::*;
 
 const MAX_AGENT_STDOUT_QUEUE_FRAMES: usize = 16;
 
@@ -31,7 +49,67 @@ macro_rules! impl_issue_report {
     };
 }
 
-include!("source_modules.rs");
+pub mod abi;
+pub mod agent;
+pub mod authority;
+pub mod context;
+pub mod mount;
+pub mod policy;
+pub mod provider;
+pub mod tool;
+
+pub mod fuse;
+pub mod object;
+pub mod reference;
+pub mod runtime;
+pub mod support;
+
+// Re-export moved modules at the root so that existing code referencing them as crate::module works unchanged.
+pub use abi::authority_types;
+pub use abi::authority_types::*;
+pub use abi::socket_request;
+pub use abi::socket_request::*;
+pub use policy::subject as policy_subject;
+pub use provider::model_discovery::*;
+pub use support::control_text::ControlLineIssue;
+pub use support::jsonl_line::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
+pub use support::layout_path::{LayoutPathRole, PathLayoutIssue};
+pub use support::{
+    control_text, host_path, jsonl_line, layout_path, manuals, message_stream, plain_fs,
+    process_helpers, session_index, session_layout, shared_queue, stream, tool_path, tool_schema,
+};
+pub use tool::core::runtime_types::*;
+pub use tool::tsh_context_state;
+
+pub use authority::helpers as authority_helpers;
+pub use authority::*;
+
+// Re-export contents of FUSE and runtime etc. since they were previously included in lib.rs
+pub(crate) use fuse::v1_path::*;
+pub use fuse::v1_projection::*;
+pub(crate) use fuse::v1_provider::*;
+pub use fuse::v1_types::*;
+
+pub use runtime::socket::*;
+pub use runtime::socket_session_record::*;
+pub use runtime::socket_types::*;
+
+pub use object::bootstrap::*;
+pub use object::layout::*;
+pub use object::metadata::*;
+
+pub use reference::tree_bootstrap::*;
+pub use reference::tree_helpers::*;
+
+pub use agent::child_types::*;
+pub use agent::runtime_types::*;
+pub use agent::runtime_view::*;
+
+#[cfg(test)]
+pub(crate) use agent::secret_resolution::*;
+
+pub(crate) use authority::helpers::*;
+pub use policy::subject::*;
 
 use abi::constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
@@ -44,19 +122,9 @@ use plain_fs::{
     plain_file_name as session_layout_plain_file_name,
 };
 
-include!("public_exports.rs");
-
-include!("fuse/v1_types.rs");
-
-include!("tool/core/runtime_types.rs");
-
-include!("agent/runtime_types.rs");
-
-include!("runtime/socket_types.rs");
-
-include!("authority_types.rs");
-
-include!("agent/child_types.rs");
+#[path = "exports.rs"]
+pub mod exports;
+pub use exports::*;
 
 impl_issue_report!(ObjectLayoutReport, ObjectLayoutIssue);
 
@@ -83,10 +151,6 @@ impl ObjectBootstrap {
     }
 }
 
-include!("fuse/v1_projection.rs");
-
-include!("fuse/v1_model_alias.rs");
-
 impl ReferenceTreeBootstrap {
     /// Creates a reference-tree bootstrap result.
     #[must_use]
@@ -100,10 +164,6 @@ impl ReferenceTreeBootstrap {
         &self.root
     }
 }
-
-include!("fuse/v1_provider.rs");
-
-include!("provider/model_discovery.rs");
 
 impl ObjectBootstrapError {
     /// Returns a stable errno name for this object bootstrap failure.
@@ -218,7 +278,7 @@ pub fn ensure_durable_session_layout(
     Ok(())
 }
 
-fn durable_session_meta_json(model: Option<&str>, scope: SocketSessionScope) -> String {
+pub(crate) fn durable_session_meta_json(model: Option<&str>, scope: SocketSessionScope) -> String {
     let mut value = serde_json::json!({
         "client": "ctx",
         "scope": scope.as_str()
@@ -231,7 +291,7 @@ fn durable_session_meta_json(model: Option<&str>, scope: SocketSessionScope) -> 
     format!("{value}\n")
 }
 
-fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
+pub(crate) fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(DurableSessionLayoutError::CannotCreate);
@@ -290,7 +350,10 @@ fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
     Ok(())
 }
 
-fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
+pub(crate) fn write_text_file_if_missing(
+    path: &Path,
+    content: &str,
+) -> Result<(), DurableSessionLayoutError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         return if metadata.is_file() {
             set_text_file_permissions(path)
@@ -304,7 +367,7 @@ fn write_text_file_if_missing(path: &Path, content: &str) -> Result<(), DurableS
     write_private_text_file(path, content)
 }
 
-fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
+pub(crate) fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
     let (_parent_dir, file) = open_session_layout_file_at(
         path,
         nix::fcntl::OFlag::O_RDWR | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
@@ -322,7 +385,7 @@ fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutErro
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
-fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
+pub(crate) fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
     let dir = open_session_layout_plain_directory(path)
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     dir.set_permissions(fs::Permissions::from_mode(0o700))
@@ -330,7 +393,10 @@ fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutEr
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
-fn write_private_text_file(path: &Path, content: &str) -> Result<(), DurableSessionLayoutError> {
+pub(crate) fn write_private_text_file(
+    path: &Path,
+    content: &str,
+) -> Result<(), DurableSessionLayoutError> {
     let (parent_dir, mut file) = open_session_layout_file_at(
         path,
         nix::fcntl::OFlag::O_CREAT
@@ -349,7 +415,7 @@ fn write_private_text_file(path: &Path, content: &str) -> Result<(), DurableSess
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
 }
 
-fn open_session_layout_file_at(
+pub(crate) fn open_session_layout_file_at(
     path: &Path,
     flags: nix::fcntl::OFlag,
     mode: nix::sys::stat::Mode,
@@ -366,25 +432,7 @@ fn open_session_layout_file_at(
     Ok((parent_dir, fs::File::from(file_fd)))
 }
 
-include!("runtime/socket.rs");
-
-include!("runtime/socket_session_record.rs");
-
-include!("policy_subject.rs");
-
-include!("agent/runtime_view.rs");
-
-include!("object/metadata.rs");
-
-include!("object/bootstrap.rs");
-
-include!("reference/tree_bootstrap.rs");
-
-include!("reference/tree_helpers.rs");
-
-include!("fuse/v1_path.rs");
-
-fn shell_single_quote(value: &str) -> String {
+pub(crate) fn shell_single_quote(value: &str) -> String {
     let mut quoted = String::from("'");
     for character in value.chars() {
         if character == '\'' {
@@ -397,7 +445,7 @@ fn shell_single_quote(value: &str) -> String {
     quoted
 }
 
-fn set_executable_mode(path: &Path) -> Result<(), ObjectBootstrapError> {
+pub(crate) fn set_executable_mode(path: &Path) -> Result<(), ObjectBootstrapError> {
     let file = fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -416,16 +464,6 @@ fn set_executable_mode(path: &Path) -> Result<(), ObjectBootstrapError> {
         .map_err(|_error| ObjectBootstrapError::CannotChmod)
 }
 
-include!("object/layout.rs");
-
-include!("authority.rs");
-
-include!("authority_helpers.rs");
-
 #[cfg(test)]
-mod tests {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/unit/lib_tests.rs"
-    ));
-}
+#[expect(unused_qualifications, reason = "tests use qualified paths")]
+mod tests;

@@ -1,4 +1,10 @@
-fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), CliError> {
+use crate::*;
+
+pub(crate) fn agent_children(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+) -> Result<(), CliError> {
     for row in agent_child_rows(root, name, session)? {
         print_line(&format!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -19,7 +25,7 @@ fn agent_children(root: &Path, name: &str, session: Option<&str>) -> Result<(), 
     Ok(())
 }
 
-fn agent_wait(
+pub(crate) fn agent_wait(
     root: &Path,
     name: &str,
     session: Option<&str>,
@@ -33,7 +39,10 @@ fn agent_wait(
         .ok_or_else(|| CliError::unavailable(format!("missing child status: {child}")))?;
     let status = ChildContextStatus::parse(&status)
         .ok_or_else(|| CliError::usage(format!("invalid child status for {child}: {status}")))?;
-    if matches!(status, ChildContextStatus::Pending | ChildContextStatus::Active) {
+    if matches!(
+        status,
+        ChildContextStatus::Pending | ChildContextStatus::Active
+    ) {
         return Err(CliError::unavailable(format!(
             "child {child} is not terminal: {}",
             status.as_str()
@@ -67,7 +76,7 @@ fn agent_wait(
     Ok(child_wait_exit_code(status))
 }
 
-fn reconcile_active_child_wait(
+pub(crate) fn reconcile_active_child_wait(
     root: &Path,
     parent_agent: &str,
     parent_session_dir: &Path,
@@ -106,7 +115,7 @@ fn reconcile_active_child_wait(
     Ok(Some(ChildContextStatus::Cancelled.as_str().to_owned()))
 }
 
-fn child_wait_exit_code(status: ChildContextStatus) -> ExitCode {
+pub(crate) fn child_wait_exit_code(status: ChildContextStatus) -> ExitCode {
     ExitCode::from(match status {
         ChildContextStatus::Done => 0,
         ChildContextStatus::Error => 1,
@@ -116,21 +125,21 @@ fn child_wait_exit_code(status: ChildContextStatus) -> ExitCode {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AgentChildRow {
-    child: String,
-    status: String,
-    agent: String,
-    session: String,
-    parent_session: Option<String>,
-    parent_run: Option<String>,
-    model: String,
-    life: String,
-    agent_status: String,
-    ppid: Option<String>,
-    pid: Option<String>,
+pub(crate) struct AgentChildRow {
+    pub(crate) child: String,
+    pub(crate) status: String,
+    pub(crate) agent: String,
+    pub(crate) session: String,
+    pub(crate) parent_session: Option<String>,
+    pub(crate) parent_run: Option<String>,
+    pub(crate) model: String,
+    pub(crate) life: String,
+    pub(crate) agent_status: String,
+    pub(crate) ppid: Option<String>,
+    pub(crate) pid: Option<String>,
 }
 
-fn agent_child_rows(
+pub(crate) fn agent_child_rows(
     root: &Path,
     name: &str,
     session: Option<&str>,
@@ -158,8 +167,13 @@ fn agent_child_rows(
         let (agent, session) = schedule_child_context_agent_session(&dir)?;
         let control = agent_control_dir(root, &agent);
         let parent = read_agent_parent_ref(&control)?;
-        let parent_ref =
-            require_child_backing_parent(name, &parent_session_dir, &child, &agent, parent.as_ref())?;
+        let parent_ref = require_child_backing_parent(
+            name,
+            &parent_session_dir,
+            &child,
+            &agent,
+            parent.as_ref(),
+        )?;
         let (agent_status, pid) = live_agent_status_and_pid(&control)?;
         let model = read_agent_model_for_context(&control, "agent")?;
         let life = agent_life_for_display(&control)?;
@@ -168,7 +182,9 @@ fn agent_child_rows(
             status,
             agent,
             session,
-            parent_session: parent_ref.as_ref().and_then(|parent| parent.session.clone()),
+            parent_session: parent_ref
+                .as_ref()
+                .and_then(|parent| parent.session.clone()),
             parent_run: parent_ref.and_then(|parent| parent.run),
             model,
             life,
@@ -180,7 +196,7 @@ fn agent_child_rows(
     Ok(rows)
 }
 
-fn require_child_backing_parent(
+pub(crate) fn require_child_backing_parent(
     parent_agent: &str,
     parent_session_dir: &Path,
     child: &str,
@@ -200,7 +216,7 @@ fn require_child_backing_parent(
     Ok(Some(parent.clone()))
 }
 
-fn agent_life_for_display(control: &Path) -> Result<String, CliError> {
+pub(crate) fn agent_life_for_display(control: &Path) -> Result<String, CliError> {
     match fs::symlink_metadata(control) {
         Ok(_metadata) => read_agent_life_for_context(control, "agent"),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok("unknown".to_owned()),

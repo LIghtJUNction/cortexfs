@@ -1,3 +1,5 @@
+use crate::*;
+
 const FALLBACK_STATFS_BLOCKS: u64 = 1024 * 1024;
 const FALLBACK_STATFS_USED_BLOCKS: u64 = 1024;
 const FALLBACK_STATFS_FREE_BLOCKS: u64 = FALLBACK_STATFS_BLOCKS - FALLBACK_STATFS_USED_BLOCKS;
@@ -8,15 +10,15 @@ const FALLBACK_STATFS_BLOCK_SIZE: u32 = 4096;
 const FALLBACK_STATFS_NAME_MAX: u32 = 255;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct MountStatfs {
-    blocks: u64,
-    blocks_free: u64,
-    blocks_available: u64,
-    files: u64,
-    files_free: u64,
-    block_size: u32,
-    name_max: u32,
-    fragment_size: u32,
+pub(crate) struct MountStatfs {
+    pub(crate) blocks: u64,
+    pub(crate) blocks_free: u64,
+    pub(crate) blocks_available: u64,
+    pub(crate) files: u64,
+    pub(crate) files_free: u64,
+    pub(crate) block_size: u32,
+    pub(crate) name_max: u32,
+    pub(crate) fragment_size: u32,
 }
 
 impl MountStatfs {
@@ -34,7 +36,7 @@ impl MountStatfs {
     }
 }
 
-fn mount_statfs_for_source(source: &Path) -> MountStatfs {
+pub(crate) fn mount_statfs_for_source(source: &Path) -> MountStatfs {
     match statvfs::statvfs(source) {
         Ok(stats) => sanitize_mount_statfs(MountStatfs {
             blocks: stats.blocks(),
@@ -50,7 +52,7 @@ fn mount_statfs_for_source(source: &Path) -> MountStatfs {
     }
 }
 
-fn sanitize_mount_statfs(stats: MountStatfs) -> MountStatfs {
+pub(crate) fn sanitize_mount_statfs(stats: MountStatfs) -> MountStatfs {
     let (blocks, blocks_free, blocks_available) = if stats.blocks == 0 {
         (
             FALLBACK_STATFS_BLOCKS,
@@ -97,6 +99,6 @@ fn sanitize_mount_statfs(stats: MountStatfs) -> MountStatfs {
     }
 }
 
-fn u32_from_u64(value: u64) -> u32 {
+pub(crate) fn u32_from_u64(value: u64) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }

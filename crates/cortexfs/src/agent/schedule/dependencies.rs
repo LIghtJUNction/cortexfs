@@ -1,4 +1,9 @@
-fn inspect_schedule_dependencies(
+use super::*;
+use crate::abi::path::is_model_reference;
+use crate::*;
+use std::collections::{HashMap, HashSet, VecDeque};
+
+pub(crate) fn inspect_schedule_dependencies(
     nodes: &[AgentScheduleNode],
     issues: &mut Vec<AgentScheduleIssue>,
 ) {
@@ -70,7 +75,7 @@ fn inspect_schedule_dependencies(
     }
 }
 
-fn inspect_completed_nodes(
+pub(crate) fn inspect_completed_nodes(
     nodes: &[AgentScheduleNode],
     completed_nodes: &[&str],
     issues: &mut Vec<AgentScheduleIssue>,
@@ -88,7 +93,7 @@ fn inspect_completed_nodes(
     }
 }
 
-fn required_object_name(
+pub(crate) fn required_object_name(
     node: Option<&String>,
     field: &str,
     value: Option<&Value>,
@@ -106,7 +111,7 @@ fn required_object_name(
     Some(value)
 }
 
-fn required_permission_object_name(
+pub(crate) fn required_permission_object_name(
     node: Option<&String>,
     field: &str,
     value: Option<&Value>,
@@ -134,7 +139,7 @@ fn required_permission_object_name(
     Some(value)
 }
 
-fn required_word(
+pub(crate) fn required_word(
     node: Option<&String>,
     field: &str,
     value: Option<&Value>,
@@ -167,7 +172,7 @@ fn required_word(
     Some(value.to_owned())
 }
 
-fn required_handoff_text(
+pub(crate) fn required_handoff_text(
     node: Option<&String>,
     value: &Value,
     issues: &mut Vec<AgentScheduleIssue>,
@@ -191,6 +196,6 @@ fn required_handoff_text(
     Some(value.to_owned())
 }
 
-fn valid_react_bound(value: Option<&Value>) -> bool {
+pub(crate) fn valid_react_bound(value: Option<&Value>) -> bool {
     matches!(value.and_then(Value::as_u64), Some(1..=64))
 }

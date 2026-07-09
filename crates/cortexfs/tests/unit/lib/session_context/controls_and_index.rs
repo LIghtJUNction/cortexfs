@@ -15,39 +15,39 @@ fn session_controls_accept_fixed_v1_values() {
 fn session_controls_reject_invalid_state_cwd_and_meta() {
     assert_eq!(
         inspect_session_control(SessionControlKind::State, "running\n").issues(),
-        &[SessionControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "running".to_owned()
         }]
     );
     assert_eq!(
         inspect_session_control(SessionControlKind::Cwd, "../work\n").issues(),
-        &[SessionControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "../work".to_owned()
         }]
     );
     assert_eq!(
         inspect_session_control(SessionControlKind::Cwd, "/work/../secret\n").issues(),
-        &[SessionControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "/work/../secret".to_owned()
         }]
     );
     assert_eq!(
         inspect_session_control(SessionControlKind::Cwd, "/work\rsecret\n").issues(),
-        &[SessionControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "/work\rsecret".to_owned()
         }]
     );
     assert_eq!(
         inspect_session_control(SessionControlKind::MetaJson, "{").issues(),
-        &[SessionControlIssue::InvalidJson]
+        &[ControlLineIssue::InvalidJson]
     );
     assert_eq!(
         inspect_session_control(SessionControlKind::MetaJson, "{} trailing").issues(),
-        &[SessionControlIssue::InvalidJson]
+        &[ControlLineIssue::InvalidJson]
     );
     assert_eq!(
         inspect_session_control(
@@ -55,15 +55,15 @@ fn session_controls_reject_invalid_state_cwd_and_meta() {
             "{\"client\":\"a\",\"client\":\"b\"}\n"
         )
         .issues(),
-        &[SessionControlIssue::InvalidJson]
+        &[ControlLineIssue::InvalidJson]
     );
     assert_eq!(
         inspect_session_control(SessionControlKind::MetaJson, "[]\n").issues(),
-        &[SessionControlIssue::NotObject]
+        &[ControlLineIssue::NotObject]
     );
     assert_eq!(
         inspect_session_control(SessionControlKind::MetaJson, "{\"scope\":\"global\"}\n").issues(),
-        &[SessionControlIssue::InvalidValue {
+        &[ControlLineIssue::InvalidValue {
             line: 1,
             value: "global".to_owned()
         }]
@@ -81,22 +81,13 @@ fn session_layout_inspector_rejects_invalid_control_values() {
     let report = inspect_session_layout(&root);
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::InvalidFileValue {
-            path: "state".to_owned(),
-            value: "running".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("state".to_owned(), "running".to_owned())));
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::InvalidFileValue {
-            path: "cwd".to_owned(),
-            value: "/work/../secret".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("cwd".to_owned(), "/work/../secret".to_owned())));
     assert!(report
         .issues()
-        .contains(&SessionLayoutIssue::InvalidFileValue {
-            path: "meta.json".to_owned(),
-            value: "bad/model/extra".to_owned()
-        }));
+        .contains(&PathLayoutIssue::invalid_value("meta.json".to_owned(), "bad/model/extra".to_owned())));
 }
 
 #[test]
@@ -115,12 +106,12 @@ fn session_index_rejects_invalid_names_and_multi_value_files() {
     assert_eq!(
         list.issues(),
         &[
-            SessionIndexIssue::InvalidSessionName {
+            ControlLineIssue::InvalidValue {
                 line: 2,
                 value: "bad/name".to_owned()
             },
-            SessionIndexIssue::EmptyValue { line: 3 },
-            SessionIndexIssue::InvalidSessionName {
+            ControlLineIssue::EmptyValue { line: 3 },
+            ControlLineIssue::InvalidValue {
                 line: 4,
                 value: "spaced".to_owned()
             }
@@ -130,11 +121,11 @@ fn session_index_rejects_invalid_names_and_multi_value_files() {
     let current = inspect_session_index(SessionIndexKind::Current, "default\nother\n");
     assert_eq!(
         current.issues(),
-        &[SessionIndexIssue::MultipleValues { line: 2 }]
+        &[ControlLineIssue::MultipleValues { line: 2 }]
     );
 
     let empty = inspect_session_index(SessionIndexKind::ByCwd, "");
-    assert_eq!(empty.issues(), &[SessionIndexIssue::EmptyValue { line: 1 }]);
+    assert_eq!(empty.issues(), &[ControlLineIssue::EmptyValue { line: 1 }]);
 }
 
 #[test]

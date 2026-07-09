@@ -1,5 +1,8 @@
+use super::*;
+use crate::*;
+
 #[test]
-fn tsh_refuses_tool_execution_without_agent_authority() {
+pub(crate) fn tsh_refuses_tool_execution_without_agent_authority() {
     let root = std::env::temp_dir().join(format!("cortexfs-tsh-empty-argv-{}", std::process::id()));
     let tool_dir = root.join("tool");
     assert!(fs::create_dir_all(&tool_dir).is_ok());
@@ -18,7 +21,7 @@ fn tsh_refuses_tool_execution_without_agent_authority() {
 }
 
 #[test]
-fn tsh_tool_execution_gets_clean_agent_environment() {
+pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
     if std::env::var_os("CORTEXFS_TSH_ENV_CHILD").is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap_or_default())
             .arg("--exact")
@@ -113,7 +116,7 @@ exit 0
 }
 
 #[test]
-fn repl_allows_empty_argv_for_normal_cli_tools() {
+pub(crate) fn repl_allows_empty_argv_for_normal_cli_tools() {
     let root = std::env::temp_dir().join(format!(
         "cortexfs-tsh-repl-empty-normal-{}",
         std::process::id()
@@ -137,7 +140,7 @@ fn repl_allows_empty_argv_for_normal_cli_tools() {
 }
 
 #[test]
-fn repl_keeps_explicit_input_guard_for_structured_core_tools() {
+pub(crate) fn repl_keeps_explicit_input_guard_for_structured_core_tools() {
     assert!(requires_explicit_repl_input("fs.read"));
     assert!(requires_explicit_repl_input("fs.write"));
     assert!(requires_explicit_repl_input("shell.exec"));

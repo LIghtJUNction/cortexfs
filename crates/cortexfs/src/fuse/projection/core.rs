@@ -1,3 +1,13 @@
+use super::*;
+
+use crate::plain_fs::{
+    create_plain_dir as create_fuse_v1_plain_dir,
+    open_plain_directory as open_fuse_v1_plain_directory,
+    open_plain_file as open_fuse_v1_plain_file,
+    path_metadata_no_follow as fuse_v1_plain_path_metadata,
+    plain_file_name as fuse_v1_plain_file_name, read_symlink_target as read_fuse_v1_symlink_target,
+};
+
 impl FuseV1Projection {
     /// Creates a local projection over a `/ctx`-shaped root.
     #[must_use]
@@ -235,10 +245,10 @@ impl FuseV1Projection {
         if Self::session_atomic_temp_target(&normalized).is_some() {
             return self.replace_session_plain_file(&normalized, content);
         }
-    if normalized == format!("model/{MODEL_ROUTE_FILE}") {
-        let path = self.resolve(&normalized)?;
-        let content =
-            std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+        if normalized == format!("model/{MODEL_ROUTE_FILE}") {
+            let path = self.resolve(&normalized)?;
+            let content =
+                std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
             return atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io);
         }
         if !is_fuse_v1_writable_control_path(&normalized) {
@@ -257,120 +267,128 @@ impl FuseV1Projection {
         {
             create_fuse_v1_plain_dir(parent).map_err(|_error| FuseV1Error::Io)?;
         }
-    atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
-}
+        atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
+    }
 
-/// Projects a FUSE write, preserving request ownership for session files.
-pub fn write_fuse_file_at_for_owner(
-    &self,
-    abi_path: &str,
-    offset: u64,
-    content: &[u8],
-    uid: u32,
-    gid: u32,
-) -> Result<(), FuseV1Error> {
-    if content.len() > MAX_FUSE_V1_SMALL_WRITE_BYTES {
-        return Err(FuseV1Error::TooLarge);
+    /// Projects a FUSE write, preserving request ownership for session files.
+    pub fn write_fuse_file_at_for_owner(
+        &self,
+        abi_path: &str,
+        offset: u64,
+        content: &[u8],
+        uid: u32,
+        gid: u32,
+    ) -> Result<(), FuseV1Error> {
+        if content.len() > MAX_FUSE_V1_SMALL_WRITE_BYTES {
+            return Err(FuseV1Error::TooLarge);
+        }
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if offset != 0 {
+            return self.write_control_file_at(&normalized, offset, content);
+        }
+        if Self::is_session_replace_path(&normalized)
+            || Self::is_session_append_path(&normalized)
+            || Self::session_atomic_temp_target(&normalized).is_some()
+        {
+            return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
+        }
+        self.write_control_file_at(&normalized, 0, content)?;
+        Self::chown_fuse_v1_plain_path(&self.resolve(&normalized)?, uid, gid)
     }
-    let normalized = normalize_fuse_abi_path(abi_path)?;
-    if offset != 0 {
-        return self.write_control_file_at(&normalized, offset, content);
-    }
-    if Self::is_session_replace_path(&normalized)
-        || Self::is_session_append_path(&normalized)
-        || Self::session_atomic_temp_target(&normalized).is_some()
-    {
-        return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
-    }
-    self.write_control_file_at(&normalized, 0, content)?;
-    Self::chown_fuse_v1_plain_path(&self.resolve(&normalized)?, uid, gid)
-}
 
-fn append_plain_file_at_end(
-    &self,
-    normalized: &str,
-    offset: u64,
-    content: &[u8],
-) -> Result<(), FuseV1Error> {
-    std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
-    let path = self.resolve(normalized)?;
-    let metadata = fs::symlink_metadata(&path).map_err(|_error| FuseV1Error::Io)?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(FuseV1Error::Io);
+    pub(crate) fn append_plain_file_at_end(
+        &self,
+        normalized: &str,
+        offset: u64,
+        content: &[u8],
+    ) -> Result<(), FuseV1Error> {
+        std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+        let path = self.resolve(normalized)?;
+        let metadata = fs::symlink_metadata(&path).map_err(|_error| FuseV1Error::Io)?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(FuseV1Error::Io);
+        }
+        if offset != metadata.len() {
+            return Err(FuseV1Error::InvalidOffset);
+        }
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&path)
+            .map_err(|_error| FuseV1Error::Io)?;
+        file.write_all(content).map_err(|_error| FuseV1Error::Io)?;
+        file.sync_all().map_err(|_error| FuseV1Error::Io)
     }
-    if offset != metadata.len() {
-        return Err(FuseV1Error::InvalidOffset);
-    }
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(&path)
-        .map_err(|_error| FuseV1Error::Io)?;
-    file.write_all(content).map_err(|_error| FuseV1Error::Io)?;
-    file.sync_all().map_err(|_error| FuseV1Error::Io)
-}
 
-fn replace_session_plain_file(&self, normalized: &str, content: &[u8]) -> Result<(), FuseV1Error> {
+    pub(crate) fn replace_session_plain_file(
+        &self,
+        normalized: &str,
+        content: &[u8],
+    ) -> Result<(), FuseV1Error> {
         let content = std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
         let path = self.resolve(normalized)?;
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
-        Ok(_) => return Err(FuseV1Error::Io),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_error) => return Err(FuseV1Error::Io),
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => return Err(FuseV1Error::Io),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_error) => return Err(FuseV1Error::Io),
+        }
+        atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
     }
-    atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
-}
 
-fn replace_session_plain_file_for_owner(
-    &self,
-    normalized: &str,
-    content: &[u8],
-    uid: u32,
-    gid: u32,
-) -> Result<(), FuseV1Error> {
-    self.replace_session_plain_file(normalized, content)?;
-    Self::chown_fuse_v1_plain_path(&self.resolve(normalized)?, uid, gid)
-}
+    pub(crate) fn replace_session_plain_file_for_owner(
+        &self,
+        normalized: &str,
+        content: &[u8],
+        uid: u32,
+        gid: u32,
+    ) -> Result<(), FuseV1Error> {
+        self.replace_session_plain_file(normalized, content)?;
+        Self::chown_fuse_v1_plain_path(&self.resolve(normalized)?, uid, gid)
+    }
 
-fn chown_fuse_v1_plain_path(path: &Path, uid: u32, gid: u32) -> Result<(), FuseV1Error> {
-    nix::unistd::fchownat(
-        nix::fcntl::AT_FDCWD,
-        path,
-        Some(nix::unistd::Uid::from_raw(uid)),
-        Some(nix::unistd::Gid::from_raw(gid)),
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    )
-    .map_err(|_error| FuseV1Error::Io)
-}
+    pub(crate) fn chown_fuse_v1_plain_path(
+        path: &Path,
+        uid: u32,
+        gid: u32,
+    ) -> Result<(), FuseV1Error> {
+        nix::unistd::fchownat(
+            nix::fcntl::AT_FDCWD,
+            path,
+            Some(nix::unistd::Uid::from_raw(uid)),
+            Some(nix::unistd::Gid::from_raw(gid)),
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        )
+        .map_err(|_error| FuseV1Error::Io)
+    }
 
     /// Creates one directory in the durable session layout.
     ///
     /// This is intentionally narrower than general filesystem `mkdir`: only the
     /// documented session skeleton below `home/<uid>/agent/<agent>/session` is
     /// writable through the v1 FUSE projection.
-pub fn create_session_layout_dir(
-    &self,
-    abi_path: &str,
-    uid: u32,
-    gid: u32,
-) -> Result<(), FuseV1Error> {
+    pub fn create_session_layout_dir(
+        &self,
+        abi_path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<(), FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if !Self::is_session_layout_dir_path(&normalized) {
             return Err(FuseV1Error::NotControlFile);
         }
-    let path = self.resolve(&normalized)?;
-    create_fuse_v1_plain_dir(&path).map_err(|_error| FuseV1Error::Io)?;
-    Self::chown_fuse_v1_plain_path(&path, uid, gid)
-}
+        let path = self.resolve(&normalized)?;
+        create_fuse_v1_plain_dir(&path).map_err(|_error| FuseV1Error::Io)?;
+        Self::chown_fuse_v1_plain_path(&path, uid, gid)
+    }
 
     /// Creates an initially empty durable session file.
-pub fn create_session_layout_file(
-    &self,
-    abi_path: &str,
-    uid: u32,
-    gid: u32,
-) -> Result<(), FuseV1Error> {
+    pub fn create_session_layout_file(
+        &self,
+        abi_path: &str,
+        uid: u32,
+        gid: u32,
+    ) -> Result<(), FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if !Self::is_session_replace_path(&normalized)
             && !Self::is_session_append_path(&normalized)
@@ -378,8 +396,8 @@ pub fn create_session_layout_file(
         {
             return Err(FuseV1Error::NotControlFile);
         }
-    self.replace_session_plain_file_for_owner(&normalized, b"", uid, gid)
-}
+        self.replace_session_plain_file_for_owner(&normalized, b"", uid, gid)
+    }
 
     /// Renames a same-directory durable session atomic temp file to its final file.
     pub fn rename_session_atomic_temp(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
@@ -407,14 +425,16 @@ pub fn create_session_layout_file(
         let normalized = normalize_fuse_abi_path(abi_path)?;
         let path = self.resolve(&normalized)?;
         if Self::is_session_layout_dir_path(&normalized) {
-            let directory = open_fuse_v1_plain_directory(&path).map_err(|_error| FuseV1Error::Io)?;
+            let directory =
+                open_fuse_v1_plain_directory(&path).map_err(|_error| FuseV1Error::Io)?;
             directory
                 .set_permissions(fs::Permissions::from_mode(mode & 0o7777))
                 .and_then(|()| directory.sync_all())
                 .map_err(|_error| FuseV1Error::Io)?;
             return Ok(());
         }
-        if Self::is_session_replace_path(&normalized) || Self::is_session_append_path(&normalized)
+        if Self::is_session_replace_path(&normalized)
+            || Self::is_session_append_path(&normalized)
             || Self::session_atomic_temp_target(&normalized).is_some()
         {
             let file = open_fuse_v1_plain_file(&path).map_err(|_error| FuseV1Error::Io)?;
@@ -479,11 +499,19 @@ pub fn create_session_layout_file(
             {
                 true
             }
-            ["home", uid, "agent", agent, "session", "index", index_kind, key]
-                if uid.parse::<u32>().is_ok()
-                    && is_object_name(agent)
-                    && matches!(index_kind, "by-cwd" | "by-hash" | "by-uuid")
-                    && is_object_name(key) =>
+            [
+                "home",
+                uid,
+                "agent",
+                agent,
+                "session",
+                "index",
+                index_kind,
+                key,
+            ] if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && matches!(index_kind, "by-cwd" | "by-hash" | "by-uuid")
+                && is_object_name(key) =>
             {
                 true
             }
@@ -491,42 +519,59 @@ pub fn create_session_layout_file(
                 if uid.parse::<u32>().is_ok()
                     && is_object_name(agent)
                     && is_object_name(session)
-            && matches!(
-                file,
-                "latest.md"
-                    | "state"
-                    | "cwd"
-                    | "workspace"
-                    | "created_at"
-                    | "updated_at"
-                    | "meta.json"
-            ) =>
-            {
-                true
-            }
-            ["home", uid, "agent", agent, "session", session, "context", file]
-                if uid.parse::<u32>().is_ok()
-                    && is_object_name(agent)
-                    && is_object_name(session)
                     && matches!(
                         file,
-                        "budget"
-                            | "pack.json"
-                            | "pack.md"
-                            | "summary.md"
-                            | "facts.jsonl"
-                            | "decisions.jsonl"
-                            | "todo.md"
-                            | "refs.jsonl"
+                        "latest.md"
+                            | "state"
+                            | "cwd"
+                            | "workspace"
+                            | "created_at"
+                            | "updated_at"
+                            | "meta.json"
                     ) =>
             {
                 true
             }
-            ["home", uid, "agent", agent, "session", session, "context", cache, "index.jsonl"]
-                if uid.parse::<u32>().is_ok()
-                    && is_object_name(agent)
-                    && is_object_name(session)
-                    && matches!(cache, "swap" | "dedup") =>
+            [
+                "home",
+                uid,
+                "agent",
+                agent,
+                "session",
+                session,
+                "context",
+                file,
+            ] if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && is_object_name(session)
+                && matches!(
+                    file,
+                    "budget"
+                        | "pack.json"
+                        | "pack.md"
+                        | "summary.md"
+                        | "facts.jsonl"
+                        | "decisions.jsonl"
+                        | "todo.md"
+                        | "refs.jsonl"
+                ) =>
+            {
+                true
+            }
+            [
+                "home",
+                uid,
+                "agent",
+                agent,
+                "session",
+                session,
+                "context",
+                cache,
+                "index.jsonl",
+            ] if uid.parse::<u32>().is_ok()
+                && is_object_name(agent)
+                && is_object_name(session)
+                && matches!(cache, "swap" | "dedup") =>
             {
                 true
             }
@@ -542,20 +587,29 @@ pub fn create_session_layout_file(
             {
                 true
             }
-            ["home", uid, "agent", agent, "session", "index", ref tail @ ..]
-                if uid.parse::<u32>().is_ok() && is_object_name(agent) =>
-            {
+            [
+                "home",
+                uid,
+                "agent",
+                agent,
+                "session",
+                "index",
+                ref tail @ ..,
+            ] if uid.parse::<u32>().is_ok() && is_object_name(agent) => {
                 matches!(tail, [] | ["by-cwd" | "by-hash" | "by-uuid"])
             }
-            ["home", uid, "agent", agent, "session", session, ref tail @ ..]
-                if uid.parse::<u32>().is_ok()
-                    && is_object_name(agent)
-                    && is_object_name(session) =>
-            {
+            [
+                "home",
+                uid,
+                "agent",
+                agent,
+                "session",
+                session,
+                ref tail @ ..,
+            ] if uid.parse::<u32>().is_ok() && is_object_name(agent) && is_object_name(session) => {
                 matches!(
                     tail,
-                    []
-                        | ["context"]
+                    [] | ["context"]
                         | ["context", "pinned" | "swap" | "dedup" | "child"]
                         | ["context", "swap", "chunk"]
                         | ["context", "dedup", "blob"]
@@ -565,12 +619,12 @@ pub fn create_session_layout_file(
         }
     }
 
-    fn resolve(&self, abi_path: &str) -> Result<PathBuf, FuseV1Error> {
+    pub(crate) fn resolve(&self, abi_path: &str) -> Result<PathBuf, FuseV1Error> {
         resolve_fuse_abi_path(&self.root, abi_path)
     }
 }
 
-fn fuse_readlink_error(error: &std::io::Error) -> FuseV1Error {
+pub(crate) fn fuse_readlink_error(error: &std::io::Error) -> FuseV1Error {
     match error.kind() {
         std::io::ErrorKind::NotFound => FuseV1Error::NotFound,
         std::io::ErrorKind::PermissionDenied => FuseV1Error::PermissionDenied,
@@ -578,7 +632,7 @@ fn fuse_readlink_error(error: &std::io::Error) -> FuseV1Error {
     }
 }
 
-fn fuse_remove_dir_error(error: &std::io::Error) -> FuseV1Error {
+pub(crate) fn fuse_remove_dir_error(error: &std::io::Error) -> FuseV1Error {
     match error.kind() {
         std::io::ErrorKind::NotFound => FuseV1Error::NotFound,
         std::io::ErrorKind::NotADirectory => FuseV1Error::NotDirectory,
@@ -588,7 +642,7 @@ fn fuse_remove_dir_error(error: &std::io::Error) -> FuseV1Error {
     }
 }
 
-fn is_removable_durable_dir_path(normalized: &str) -> bool {
+pub(crate) fn is_removable_durable_dir_path(normalized: &str) -> bool {
     let parts = normalized.split('/').collect::<Vec<_>>();
     let Some((root, rest)) = parts.split_first() else {
         return false;

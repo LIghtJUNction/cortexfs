@@ -1,16 +1,12 @@
-use crate::{CTX_ROOT, MAX_FUSE_V1_SMALL_WRITE_BYTES};
+use crate::CTX_ROOT;
 use cortexfs_tool_sdk::{
     Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
 };
-use serde_json::{Map, Value};
+use serde_json::Map;
 use std::ffi::OsString;
-use std::fs;
-use std::io::{self, Read, Write};
-use std::os::unix::process::CommandExt;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::ExitCode;
 
 const SHELL_EXEC_SHELL: &str = "/bin/sh";
 const MAX_FS_READ_BYTES: u64 = 1024 * 1024;
@@ -34,10 +30,19 @@ pub struct ShellExecTool;
 #[derive(Debug)]
 pub struct TshConfigTool;
 
-include!("tool_schemas.rs");
-include!("tool_io.rs");
-include!("tool_shell.rs");
-include!("tool_tsh_config.rs");
+#[path = "tool-io.rs"]
+pub mod tool_io;
+#[path = "tool-schemas.rs"]
+pub mod tool_schemas;
+#[path = "tool-shell.rs"]
+pub mod tool_shell;
+#[path = "tool-tsh-config.rs"]
+pub mod tool_tsh_config;
+
+pub(crate) use tool_io::*;
+pub(crate) use tool_schemas::*;
+pub(crate) use tool_shell::*;
+pub use tool_tsh_config::*;
 
 #[must_use]
 pub fn core_tool_specs() -> Vec<ToolSpec> {
@@ -89,22 +94,22 @@ pub fn run_core_tool_cli_with_root(
     }
 }
 
-fn ctx_root_from_env() -> PathBuf {
+pub(crate) fn ctx_root_from_env() -> PathBuf {
     std::env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(CTX_ROOT), PathBuf::from)
 }
 
-fn exit_code_from_status(status: std::process::ExitStatus) -> ExitCode {
+pub(crate) fn exit_code_from_status(status: std::process::ExitStatus) -> ExitCode {
     status
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from)
 }
 
-fn tool_error_to_io(error: &ToolError) -> io::Error {
+pub(crate) fn tool_error_to_io(error: &ToolError) -> io::Error {
     io::Error::other(format!("{}: {}", error.code(), error.message()))
 }
 
 #[cfg(test)]
-mod tests {
-    include!("tools_tests.rs");
-}
+#[expect(unused_qualifications, reason = "tests use qualified paths")]
+#[path = "tools-tests.rs"]
+pub mod tests;

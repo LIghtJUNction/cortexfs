@@ -1,4 +1,6 @@
-fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
+use crate::*;
+
+pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
     require_cli_name("agent name", &args.name)?;
     require_session_name(&args.session)?;
     require_sandbox_cwd(&args.cwd)?;
@@ -14,7 +16,13 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     })?;
     let session_cwd = agent_start_sandbox_cwd(args, &cli_mounts);
     let session_workspace = agent_start_workspace_source(&cli_mounts);
-    ensure_agent_start_session(root, args, &view, &session_cwd, session_workspace.as_deref())?;
+    ensure_agent_start_session(
+        root,
+        args,
+        &view,
+        &session_cwd,
+        session_workspace.as_deref(),
+    )?;
     let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
     let socket = agent_runtime_socket(root, &args.name, &args.session)?;
     ensure_agent_terminal_socket(&visible_socket, &socket)?;
@@ -37,7 +45,8 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
     ensure_agent_chat_socket(&chat_visible_socket, &chat_socket)?;
     let chat_unit = agent_chat_unit(root, &args.name);
     reset_agent_chat_unit(&chat_unit);
-    let chat_command = agent_chat_socket_systemd_command(root, &args.name, &chat_socket, &chat_unit);
+    let chat_command =
+        agent_chat_socket_systemd_command(root, &args.name, &chat_socket, &chat_unit);
     let chat_output = agent_start_process_command(&chat_command)
         .output()
         .map_err(|error| {
@@ -71,7 +80,11 @@ fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError>
         ("gid", gid.as_str()),
         ("groups", groups.as_str()),
     ];
-    let identity_lines = [("UID", uid.as_str()), ("GID", gid.as_str()), ("Groups", groups.as_str())];
+    let identity_lines = [
+        ("UID", uid.as_str()),
+        ("GID", gid.as_str()),
+        ("Groups", groups.as_str()),
+    ];
     record_agent_start_state(root, args, &unit, &start_facts, invocation.as_deref())?;
     let current_uid = current_uid_for_ctx(root)?;
     for line in agent_start_status_lines(
@@ -120,12 +133,15 @@ pub(crate) fn ensure_agent_start_session(
         ))
     })?;
     if let Some(workspace) = workspace {
-        write_agent_control_plain(&session_root.join(&args.session).join("workspace"), &format!("{workspace}\n"))?;
+        write_agent_control_plain(
+            &session_root.join(&args.session).join("workspace"),
+            &format!("{workspace}\n"),
+        )?;
     }
     Ok(())
 }
 
-fn record_agent_start_state(
+pub(crate) fn record_agent_start_state(
     root: &Path,
     args: &AgentStartArgs,
     unit: &str,
@@ -151,7 +167,7 @@ fn record_agent_start_state(
     )
 }
 
-fn agent_start_log_event(
+pub(crate) fn agent_start_log_event(
     agent: &str,
     session: &str,
     unit: &str,
@@ -181,7 +197,7 @@ fn agent_start_log_event(
     clippy::too_many_arguments,
     reason = "status output mirrors systemctl's flat field list"
 )]
-fn agent_start_status_lines(
+pub(crate) fn agent_start_status_lines(
     color: bool,
     agent: &str,
     model: &str,
@@ -288,7 +304,7 @@ fn agent_start_status_lines(
     lines
 }
 
-fn systemd_run_invocation_id(output: &std::process::Output) -> Option<String> {
+pub(crate) fn systemd_run_invocation_id(output: &std::process::Output) -> Option<String> {
     let mut text = String::new();
     text.push_str(&String::from_utf8_lossy(&output.stdout));
     text.push_str(&String::from_utf8_lossy(&output.stderr));
@@ -299,7 +315,7 @@ fn systemd_run_invocation_id(output: &std::process::Output) -> Option<String> {
     })
 }
 
-fn systemd_run_diagnostics(output: &std::process::Output) -> String {
+pub(crate) fn systemd_run_diagnostics(output: &std::process::Output) -> String {
     let mut diagnostics = String::new();
     for bytes in [&output.stderr, &output.stdout] {
         let text = String::from_utf8_lossy(bytes);
@@ -316,7 +332,7 @@ fn systemd_run_diagnostics(output: &std::process::Output) -> String {
     diagnostics
 }
 
-fn reset_agent_terminal_unit(unit: &str) {
+pub(crate) fn reset_agent_terminal_unit(unit: &str) {
     let service = format!("{unit}.service");
     let _ignored = systemctl_user_command(["stop", &service])
         .stdout(Stdio::null())
@@ -328,7 +344,7 @@ fn reset_agent_terminal_unit(unit: &str) {
         .status();
 }
 
-fn agent_unit_main_pid(unit: &str) -> Option<String> {
+pub(crate) fn agent_unit_main_pid(unit: &str) -> Option<String> {
     let service = format!("{unit}.service");
     let output = systemctl_user_command(["show", "--property", "MainPID", "--value", &service])
         .output()
@@ -339,7 +355,7 @@ fn agent_unit_main_pid(unit: &str) -> Option<String> {
     parse_systemctl_main_pid(&String::from_utf8_lossy(&output.stdout))
 }
 
-fn parse_systemctl_main_pid(output: &str) -> Option<String> {
+pub(crate) fn parse_systemctl_main_pid(output: &str) -> Option<String> {
     let pid = output.trim();
     if pid != "0" && pid.bytes().all(|byte| byte.is_ascii_digit()) {
         Some(pid.to_owned())
@@ -350,15 +366,13 @@ fn parse_systemctl_main_pid(output: &str) -> Option<String> {
 
 const SYSTEMCTL_PROGRAM: &str = "/usr/bin/systemctl";
 
-fn get_systemctl_program() -> &'static str {
+pub(crate) fn get_systemctl_program() -> &'static str {
     SYSTEMCTL_PROGRAM
 }
 
-fn systemctl_user_command<const N: usize>(args: [&str; N]) -> ProcessCommand {
+pub(crate) fn systemctl_user_command<const N: usize>(args: [&str; N]) -> ProcessCommand {
     let mut command = ProcessCommand::new(get_systemctl_program());
-    command
-        .arg("--user")
-        .args(args);
+    command.arg("--user").args(args);
     set_user_systemd_client_env(&mut command);
     command
 }

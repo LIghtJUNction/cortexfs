@@ -1,0 +1,10 @@
+#[path = "fuse/v1-model-alias.rs"]
+pub mod v1_model_alias;
+#[path = "fuse/v1-path.rs"]
+pub mod v1_path;
+#[path = "fuse/v1-projection.rs"]
+pub mod v1_projection;
+#[path = "fuse/v1-provider.rs"]
+pub mod v1_provider;
+#[path = "fuse/v1-types.rs"]
+pub mod v1_types;

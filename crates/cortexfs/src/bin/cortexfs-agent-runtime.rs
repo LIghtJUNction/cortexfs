@@ -1,4 +1,22 @@
 #![forbid(unsafe_code)]
+#![expect(
+    clippy::allow_attributes,
+    reason = "allow target-specific lint exceptions"
+)]
+#![allow(
+    unfulfilled_lint_expectations,
+    reason = "expected target-specific lint results"
+)]
+#![expect(
+    clippy::wildcard_imports,
+    reason = "uniform submodules with wildcard imports"
+)]
+#![expect(clippy::redundant_pub_crate, reason = "submodule visibility alignment")]
+#![expect(
+    clippy::field_scoped_visibility_modifiers,
+    reason = "internal structs with scoped fields"
+)]
+#![expect(clippy::module_inception, reason = "allow submodule self name")]
 
 use std::env;
 use std::ffi::OsString;
@@ -21,10 +39,14 @@ use nix::unistd::{Gid, Uid};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 
-include!("shared/proc_fd.rs");
-include!("shared/stderr.rs");
+#[path = "shared/proc-fd.rs"]
+pub mod proc_fd;
+#[path = "shared/stderr.rs"]
+pub mod stderr;
+pub(crate) use proc_fd::*;
+pub(crate) use stderr::*;
 
-fn main() -> ExitCode {
+pub(crate) fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -34,7 +56,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<OsString>) -> Result<(), String> {
+pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     let config = RuntimeConfig::parse(args)?;
     let view = derive_agent_runtime_view(&config.source, &config.agent)
         .map_err(|error| format!("agent view {}: {}", error.errno(), config.agent))?;
@@ -113,11 +135,15 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     })
 }
 
-fn runtime_model(_source: &Path, requested_model: &str) -> String {
+pub(crate) fn runtime_model(_source: &Path, requested_model: &str) -> String {
     requested_model.to_owned()
 }
 
-fn repair_agent_session_permissions(session_root: &Path, uid: u32, gid: u32) -> Result<(), String> {
+pub(crate) fn repair_agent_session_permissions(
+    session_root: &Path,
+    uid: u32,
+    gid: u32,
+) -> Result<(), String> {
     match fs::symlink_metadata(session_root) {
         Ok(_metadata) => repair_path_permissions(session_root, uid, gid),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -128,7 +154,7 @@ fn repair_agent_session_permissions(session_root: &Path, uid: u32, gid: u32) -> 
     }
 }
 
-fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
+pub(crate) fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
     if path
         .components()
         .any(|component| component.as_os_str() == "workspace-overlay")
@@ -153,7 +179,7 @@ fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String
     )
 }
 
-fn repair_open_path_permissions(
+pub(crate) fn repair_open_path_permissions(
     fd: &OwnedFd,
     label: &str,
     is_dir: bool,
@@ -188,11 +214,11 @@ fn repair_open_path_permissions(
     Ok(())
 }
 
-fn is_read_only_permission_repair_error(error: nix::errno::Errno) -> bool {
+pub(crate) fn is_read_only_permission_repair_error(error: nix::errno::Errno) -> bool {
     error == nix::errno::Errno::EROFS
 }
 
-fn repair_child_path_permissions(
+pub(crate) fn repair_child_path_permissions(
     parent_fd: &OwnedFd,
     parent_label: &str,
     name: &str,
@@ -221,7 +247,10 @@ fn repair_child_path_permissions(
     repair_open_path_permissions(&fd, &format!("{parent_label}/{name}"), is_dir, uid, gid)
 }
 
-fn open_session_repair_path_no_follow(path: &Path, is_dir: bool) -> Result<OwnedFd, String> {
+pub(crate) fn open_session_repair_path_no_follow(
+    path: &Path,
+    is_dir: bool,
+) -> Result<OwnedFd, String> {
     let mut current = if path.is_absolute() {
         open_dir_no_follow(Path::new("/"))?
     } else {
@@ -255,7 +284,7 @@ fn open_session_repair_path_no_follow(path: &Path, is_dir: bool) -> Result<Owned
     Ok(current)
 }
 
-fn open_dir_no_follow(path: &Path) -> Result<OwnedFd, String> {
+pub(crate) fn open_dir_no_follow(path: &Path) -> Result<OwnedFd, String> {
     open(
         path,
         OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
@@ -308,20 +337,16 @@ impl RuntimeConfig {
     }
 }
 
-fn os_string(value: OsString) -> Result<String, String> {
+pub(crate) fn os_string(value: OsString) -> Result<String, String> {
     value
         .into_string()
         .map_err(|value| format!("arguments must be valid UTF-8: {}", value.to_string_lossy()))
 }
 
-fn usage() -> String {
+pub(crate) fn usage() -> String {
     "usage: cortexfs-agent-runtime [--source CTX_SOURCE] --agent AGENT".to_owned()
 }
 
 #[cfg(test)]
-mod tests {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/unit/cortexfs_agent_runtime_tests.rs"
-    ));
-}
+#[path = "cortexfs-agent-runtime/tests.rs"]
+mod tests;

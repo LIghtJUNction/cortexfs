@@ -1,4 +1,6 @@
-fn start_listener(
+use crate::*;
+
+pub(crate) fn start_listener(
     socket: &Path,
     pty_writer: PtyWriter,
     clients: Clients,
@@ -32,7 +34,7 @@ fn start_listener(
     Ok(())
 }
 
-fn set_ctxterm_socket_permissions(socket: &Path) -> io::Result<()> {
+pub(crate) fn set_ctxterm_socket_permissions(socket: &Path) -> io::Result<()> {
     let parent = socket.parent().unwrap_or_else(|| Path::new("."));
     let parent = open_plain_directory(parent)?;
     let file_name = socket
@@ -48,7 +50,7 @@ fn set_ctxterm_socket_permissions(socket: &Path) -> io::Result<()> {
     .map_err(io::Error::from)
 }
 
-fn handle_client(mut stream: UnixStream, pty_writer: PtyWriter, clients: &Clients) {
+pub(crate) fn handle_client(mut stream: UnixStream, pty_writer: PtyWriter, clients: &Clients) {
     let Ok(mode) = read_client_mode_with_timeout(&mut stream) else {
         return;
     };
@@ -80,11 +82,11 @@ fn handle_client(mut stream: UnixStream, pty_writer: PtyWriter, clients: &Client
     }
 }
 
-fn read_client_mode_with_timeout(stream: &mut UnixStream) -> io::Result<ClientMode> {
+pub(crate) fn read_client_mode_with_timeout(stream: &mut UnixStream) -> io::Result<ClientMode> {
     read_client_mode_with_timeout_duration(stream, CLIENT_MODE_TIMEOUT)
 }
 
-fn read_client_mode_with_timeout_duration(
+pub(crate) fn read_client_mode_with_timeout_duration(
     stream: &mut UnixStream,
     timeout: Duration,
 ) -> io::Result<ClientMode> {
@@ -95,13 +97,13 @@ fn read_client_mode_with_timeout_duration(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ClientMode {
+pub(crate) enum ClientMode {
     Watch,
     Attach,
     Emit,
 }
 
-fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode> {
+pub(crate) fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode> {
     let mut mode = Vec::new();
     let mut byte = [0; 1];
     let mut complete = false;
@@ -133,7 +135,7 @@ fn read_client_mode(stream: &mut UnixStream) -> io::Result<ClientMode> {
     }
 }
 
-fn read_emit_payload(stream: UnixStream) -> io::Result<Vec<u8>> {
+pub(crate) fn read_emit_payload(stream: UnixStream) -> io::Result<Vec<u8>> {
     let mut payload = Vec::new();
     let max_payload = u64::try_from(MAX_EMIT_PAYLOAD_BYTES)
         .map_err(|_error| io::Error::other("ctxterm payload limit overflow"))?;

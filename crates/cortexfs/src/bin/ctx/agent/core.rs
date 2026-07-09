@@ -1,10 +1,18 @@
+use crate::*;
+
 #[derive(Debug, Eq, PartialEq)]
-enum AgentArgs {
+pub(crate) enum AgentArgs {
     New(AgentNewArgs),
     Start(AgentStartArgs),
-    Stop { name: String },
-    Status { name: String },
-    Env { name: String },
+    Stop {
+        name: String,
+    },
+    Status {
+        name: String,
+    },
+    Env {
+        name: String,
+    },
     Ps,
     Send {
         name: String,
@@ -66,55 +74,55 @@ enum AgentArgs {
     },
 }
 
-const MAX_AGENT_REPL_STDIN_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_AGENT_REPL_STDIN_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Eq, PartialEq)]
-struct AgentNewArgs {
-    name: String,
-    temporary: bool,
-    parent: Option<String>,
-    label: Option<String>,
-    models: Vec<String>,
-    tools: Vec<String>,
-    shared: Vec<AgentShared>,
-    mounts: Vec<AgentMount>,
+pub(crate) struct AgentNewArgs {
+    pub(crate) name: String,
+    pub(crate) temporary: bool,
+    pub(crate) parent: Option<String>,
+    pub(crate) label: Option<String>,
+    pub(crate) models: Vec<String>,
+    pub(crate) tools: Vec<String>,
+    pub(crate) shared: Vec<AgentShared>,
+    pub(crate) mounts: Vec<AgentMount>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct AgentStartArgs {
-    name: String,
-    session: String,
-    cwd: String,
-    default_workspace: bool,
-    mounts: Vec<AgentMount>,
+pub(crate) struct AgentStartArgs {
+    pub(crate) name: String,
+    pub(crate) session: String,
+    pub(crate) cwd: String,
+    pub(crate) default_workspace: bool,
+    pub(crate) mounts: Vec<AgentMount>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct AgentSessionGcArgs {
-    name: String,
-    dry_run: bool,
-    yes: bool,
-    keep: Vec<String>,
-    patterns: Vec<String>,
-    older_than_days: Option<u64>,
+pub(crate) struct AgentSessionGcArgs {
+    pub(crate) name: String,
+    pub(crate) dry_run: bool,
+    pub(crate) yes: bool,
+    pub(crate) keep: Vec<String>,
+    pub(crate) patterns: Vec<String>,
+    pub(crate) older_than_days: Option<u64>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct AgentShared {
-    name: String,
-    access: String,
+pub(crate) struct AgentShared {
+    pub(crate) name: String,
+    pub(crate) access: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct AgentMount {
-    source: String,
-    target: String,
-    mode: String,
+pub(crate) struct AgentMount {
+    pub(crate) source: String,
+    pub(crate) target: String,
+    pub(crate) mode: String,
 }
 
-const AGENT_SANDBOX_HOME: &str = "/home/agent";
+pub(crate) const AGENT_SANDBOX_HOME: &str = "/home/agent";
 
-fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
+pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
     match *args {
         AgentArgs::New(ref args) => agent_new(root, args),
         AgentArgs::Start(ref args) => agent_start(root, args),
@@ -188,7 +196,7 @@ fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
     }
 }
 
-fn agent_new(root: &Path, args: &AgentNewArgs) -> Result<ExitCode, CliError> {
+pub(crate) fn agent_new(root: &Path, args: &AgentNewArgs) -> Result<ExitCode, CliError> {
     let request = agent_new_request_json(args)?;
     if agent_lifecycle_tool_exists(root, "agent.create")? {
         return agent_lifecycle_tool(root, "agent.create", &request);
@@ -196,7 +204,7 @@ fn agent_new(root: &Path, args: &AgentNewArgs) -> Result<ExitCode, CliError> {
     agent_new_host_fallback(root, args)
 }
 
-fn agent_stop(root: &Path, name: &str) -> Result<ExitCode, CliError> {
+pub(crate) fn agent_stop(root: &Path, name: &str) -> Result<ExitCode, CliError> {
     if agent_lifecycle_tool_exists(root, "agent.stop")? {
         return agent_lifecycle_tool(root, "agent.stop", &agent_name_request_json(name));
     }

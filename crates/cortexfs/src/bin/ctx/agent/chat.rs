@@ -1,4 +1,6 @@
-fn agent_send(
+use crate::*;
+
+pub(crate) fn agent_send(
     root: &Path,
     name: &str,
     session: Option<&str>,
@@ -19,19 +21,18 @@ fn agent_send(
 }
 
 #[derive(Clone, Copy)]
-struct AgentInteractiveSend<'a> {
-    session: Option<&'a str>,
-    input: &'a str,
-    raw: bool,
-    run_id: &'a str,
-    interrupt: Option<&'a AgentInterruptGuard>,
-    debug: bool,
+pub(crate) struct AgentInteractiveSend<'a> {
+    pub(crate) session: Option<&'a str>,
+    pub(crate) input: &'a str,
+    pub(crate) raw: bool,
+    pub(crate) run_id: &'a str,
+    pub(crate) interrupt: Option<&'a AgentInterruptGuard>,
+    pub(crate) debug: bool,
 }
 
-const AGENT_REPL_COMMANDS: &str =
-    "/help /new [session] /workspace /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
+pub(crate) const AGENT_REPL_COMMANDS: &str = "/help /new [session] /workspace /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
 
-fn agent_send_interactive_with_run_id(
+pub(crate) fn agent_send_interactive_with_run_id(
     root: &Path,
     name: &str,
     send: AgentInteractiveSend<'_>,
@@ -45,7 +46,10 @@ fn agent_send_interactive_with_run_id(
         send.input,
         send.debug,
     );
-    let cancel_request = format!("{{\"op\":\"cancel\",\"id\":{}}}\n", json_string(send.run_id));
+    let cancel_request = format!(
+        "{{\"op\":\"cancel\",\"id\":{}}}\n",
+        json_string(send.run_id)
+    );
     stream_agent_socket_request_streaming_interruptible(
         &agent_chat_request_socket(root, name)?,
         &request,
@@ -55,7 +59,7 @@ fn agent_send_interactive_with_run_id(
     )
 }
 
-fn agent_send_request_json(
+pub(crate) fn agent_send_request_json(
     run_id: &str,
     session: &str,
     cwd: &str,
@@ -86,14 +90,14 @@ fn agent_send_request_json(
     )
 }
 
-fn current_workspace_source() -> Option<String> {
+pub(crate) fn current_workspace_source() -> Option<String> {
     env::current_dir()
         .ok()
         .filter(|path| path.is_absolute())
         .map(|path| path.display().to_string())
 }
 
-fn preferred_workspace_source(
+pub(crate) fn preferred_workspace_source(
     root: &Path,
     name: &str,
     session: &str,
@@ -102,7 +106,7 @@ fn preferred_workspace_source(
     Ok(workspace.or_else(current_workspace_source))
 }
 
-fn agent_session_workspace_source(
+pub(crate) fn agent_session_workspace_source(
     root: &Path,
     name: &str,
     session: &str,
@@ -122,7 +126,7 @@ fn agent_session_workspace_source(
     .then_some(workspace))
 }
 
-fn agent_resume(
+pub(crate) fn agent_resume(
     root: &Path,
     name: &str,
     session: Option<&str>,
@@ -136,7 +140,7 @@ fn agent_resume(
     stream_agent_socket_request(&agent_chat_request_socket(root, name)?, &request, raw)
 }
 
-fn agent_cancel(
+pub(crate) fn agent_cancel(
     root: &Path,
     name: &str,
     session: Option<&str>,
@@ -153,7 +157,7 @@ fn agent_cancel(
     stream_agent_socket_request(&agent_chat_request_socket(root, name)?, &request, raw)
 }
 
-fn agent_chat_request_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
+pub(crate) fn agent_chat_request_socket(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     let runtime_socket = agent_chat_runtime_socket(root, name)?;
     if terminal_socket_exists(&runtime_socket) {
         return Ok(runtime_socket);
@@ -165,7 +169,7 @@ fn agent_chat_request_socket(root: &Path, name: &str) -> Result<PathBuf, CliErro
     Ok(visible_socket)
 }
 
-fn agent_repl(
+pub(crate) fn agent_repl(
     root: &Path,
     name: &str,
     session: Option<&str>,
@@ -178,10 +182,10 @@ fn agent_repl(
     }
 
     if io::stdin().is_terminal() {
-        let mut editor =
-            rustyline::DefaultEditor::with_config(agent_repl_editor_config()).map_err(|error| {
-            CliError::unavailable(format!("cannot initialize line editor: {error}"))
-        })?;
+        let mut editor = rustyline::DefaultEditor::with_config(agent_repl_editor_config())
+            .map_err(|error| {
+                CliError::unavailable(format!("cannot initialize line editor: {error}"))
+            })?;
         let color = color_enabled();
         loop {
             let prompt = agent_repl_prompt(color, name, &session);
@@ -203,7 +207,9 @@ fn agent_repl(
             if matches!(line.as_str(), "/exit" | "/quit") {
                 return Ok(ExitCode::SUCCESS);
             }
-            if let Some(code) = agent_repl_command(root, name, &mut session, &line, raw, &mut debug)? {
+            if let Some(code) =
+                agent_repl_command(root, name, &mut session, &line, raw, &mut debug)?
+            {
                 if code != ExitCode::SUCCESS {
                     return Ok(code);
                 }
@@ -217,14 +223,18 @@ fn agent_repl(
             }
             let run_id = request_id()?;
             let interrupt = AgentInterruptGuard::new()?;
-            let code = agent_send_interactive_with_run_id(root, name, AgentInteractiveSend {
-                session: Some(&session),
-                input: &line,
-                raw,
-                run_id: &run_id,
-                interrupt: Some(&interrupt),
-                debug: debug.enabled,
-            })?;
+            let code = agent_send_interactive_with_run_id(
+                root,
+                name,
+                AgentInteractiveSend {
+                    session: Some(&session),
+                    input: &line,
+                    raw,
+                    run_id: &run_id,
+                    interrupt: Some(&interrupt),
+                    debug: debug.enabled,
+                },
+            )?;
             if code != ExitCode::SUCCESS {
                 return Ok(code);
             }

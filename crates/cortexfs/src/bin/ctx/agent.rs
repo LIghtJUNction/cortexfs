@@ -1,15 +1,46 @@
-include!("agent/core.rs");
-include!("agent/session_gc.rs");
-include!("agent/start.rs");
-include!("agent/chat.rs");
-include!("agent/repl.rs");
-include!("agent/context.rs");
-include!("agent/child.rs");
-include!("agent/tools.rs");
-include!("agent/start_sandbox.rs");
-include!("agent/terminal_runtime.rs");
-include!("agent/terminal_stream.rs");
-include!("agent/process.rs");
-include!("agent/create_host.rs");
-include!("agent/create_request.rs");
-include!("agent/lifecycle.rs");
+pub(crate) use chat::*;
+pub(crate) use child::*;
+pub(crate) use context::*;
+pub(crate) use core::*;
+pub(crate) use create_host::*;
+pub(crate) use create_request::*;
+pub(crate) use lifecycle::*;
+pub(crate) use process::*;
+pub(crate) use repl::*;
+pub(crate) use session_gc::*;
+pub(crate) use start::*;
+pub(crate) use start_sandbox::*;
+pub(crate) use terminal_runtime::*;
+pub(crate) use terminal_stream::*;
+pub(crate) use tools::*;
+
+#[path = "agent/chat.rs"]
+pub mod chat;
+#[path = "agent/child.rs"]
+pub mod child;
+#[path = "agent/context.rs"]
+pub mod context;
+#[path = "agent/core.rs"]
+pub mod core;
+#[path = "agent/create-host.rs"]
+pub mod create_host;
+#[path = "agent/create-request.rs"]
+pub mod create_request;
+#[path = "agent/lifecycle.rs"]
+pub mod lifecycle;
+#[path = "agent/process.rs"]
+pub mod process;
+#[path = "agent/repl.rs"]
+pub mod repl;
+#[path = "agent/session-gc.rs"]
+pub mod session_gc;
+#[path = "agent/start.rs"]
+pub mod start;
+#[path = "agent/start-sandbox.rs"]
+pub mod start_sandbox;
+#[path = "agent/terminal-runtime.rs"]
+pub mod terminal_runtime;
+#[path = "agent/terminal-stream.rs"]
+pub mod terminal_stream;
+#[path = "agent/tools.rs"]
+pub mod tools;

@@ -1,15 +1,10 @@
-use std::fs;
-use std::fs::File;
-use std::io::Read as _;
-use std::net::IpAddr;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use super::model_selection::{canonical_provider_name_from_host, provider_host_requires_name};
+use super::secret_files::provider_env_label;
+use crate::*;
 
-use nix::fcntl::{FcntlArg, FdFlag, fcntl};
+pub(crate) const PROVIDER_SYSTEM_SECRET_ROOT: &str = "/var/lib/cortexfs/secrets/provider";
 
-const PROVIDER_SYSTEM_SECRET_ROOT: &str = "/var/lib/cortexfs/secrets/provider";
-const MAX_PROVIDER_SYSTEM_SECRET_BYTES: u64 = 64 * 1024;
+pub(crate) const MAX_PROVIDER_SYSTEM_SECRET_BYTES: u64 = 64 * 1024;
 
 /// Error returned when a provider config cannot produce a stable provider name.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,7 +28,7 @@ pub fn provider_name_from_config(
     name: Option<&str>,
 ) -> Result<String, ProviderNameError> {
     if let Some(name) = name.map(str::trim).filter(|value| !value.is_empty()) {
-        return if crate::is_object_name(name) {
+        return if is_object_name(name) {
             Ok(name.to_owned())
         } else {
             Err(ProviderNameError::InvalidName)

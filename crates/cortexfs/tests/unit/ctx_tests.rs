@@ -1,4 +1,5 @@
 use super::{
+    ControlLineIssue, LayoutPathRole, PathLayoutIssue,
     agent_lifecycle_tool_command, atomic_write_provider_config, cat_path,
     create_agent_terminal_runtime_dir, create_plain_mountpoint_dir, ctx_provider_curl_command, curl_config_quote,
     detached_mount_command, direct_mount_command, doctor, doctor_report_line, doctor_root_line,
@@ -56,12 +57,12 @@ use super::{
 use cortexfs::{
     AGENT_CONTROL_FILES,
     DEFAULT_WORKER_MODEL, derive_agent_runtime_view, ensure_v1_reference_tree,
-    install_executable_object_wrapper, parse_abi_path, AbiPathKind, AgentControlIssue, AgentControlKind,
+    install_executable_object_wrapper, parse_abi_path, AbiPathKind, AgentControlKind,
     AgentScheduleIssue,
     ContextJsonlIssue, ContextJsonlKind, ContextPackIssue, ContextPackSourceError, EventStreamIssue,
-    MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError, ObjectLayoutIssue,
-    SessionControlIssue, SessionControlKind, SessionIndexIssue, SessionIndexKind,
-    SessionLayoutIssue, SharedQueueLayoutIssue, ToolSchemaIssue, ChildContextStatus,
+    MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError,
+    SessionControlKind, SessionIndexKind,
+    ToolSchemaIssue, ChildContextStatus,
     CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES,
     SESSION_REQUIRED_FILES,
 };

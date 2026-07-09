@@ -16,6 +16,20 @@ fn debug_timing_diagnostic_is_readable() {
 fn debug_tool_names_report_native_agent_tools_only() {
     let root = clean_test_dir("ctx-agent-debug-native-tools");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(
+        fs::write(
+            root.join("agent").join("coder.d").join("path"),
+            format!("{}\n", root.join("tool").display()),
+        )
+        .is_ok()
+    );
+    assert!(
+        fs::write(
+            root.join("agent").join("coder.d").join("mount"),
+            format!("{}\t{}\tro\trbind,nosuid,nodev\n", root.display(), root.display()),
+        )
+        .is_ok()
+    );
 
     let tools = agent_native_tool_names(&root, "coder");
 

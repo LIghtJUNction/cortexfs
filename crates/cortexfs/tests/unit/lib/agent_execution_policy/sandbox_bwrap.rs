@@ -63,13 +63,11 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     let mut env = view.env().to_vec();
     env.push((
         "CTX_PROVIDER_CONFIG_DIR".to_owned(),
-        "/host/providers.d".to_owned(),
-    ));
+        "/host/providers.d".to_owned()));
     env.push(("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()));
     env.push((
         "CTX_PROVIDER_SECRET_PATH".to_owned(),
-        "/run/user/1000/cortexfs/credentials/coder-default".to_owned(),
-    ));
+        "/run/user/1000/cortexfs/credentials/coder-default".to_owned()));
     env.push(("CTX_PROVIDER_SECRET_PROVIDER".to_owned(), "openai".to_owned()));
     env.push(("CTX_PROVIDER_SECRET_SLOT".to_owned(), "default".to_owned()));
     let runtime = AgentExecutableSocketRuntime {

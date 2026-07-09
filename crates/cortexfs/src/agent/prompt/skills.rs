@@ -1,3 +1,7 @@
+use super::file_read::{push_str_byte_limit, read_bounded_regular_utf8};
+use super::*;
+use crate::*;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SkillMetadata {
     pub name: String,
@@ -53,11 +57,11 @@ pub fn format_skill_metadata_with_budget(skills: &[SkillMetadata], max_chars: us
     }
 }
 
-fn discover_skill_metadata() -> Vec<SkillMetadata> {
+pub(crate) fn discover_skill_metadata() -> Vec<SkillMetadata> {
     discover_skill_metadata_from_roots(default_skill_roots())
 }
 
-fn default_skill_roots() -> Vec<PathBuf> {
+pub(crate) fn default_skill_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(cwd) = env::current_dir() {
         push_project_skill_roots(&mut roots, &cwd);
@@ -97,7 +101,7 @@ pub(crate) fn discover_skill_metadata_from_roots(
         .collect()
 }
 
-fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
+pub(crate) fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
     if depth > 8 || paths.len() >= MAX_SKILL_FILES {
         return;
     }
@@ -130,7 +134,7 @@ fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: usize) {
     }
 }
 
-fn read_skill_metadata(path: &Path) -> Option<SkillMetadata> {
+pub(crate) fn read_skill_metadata(path: &Path) -> Option<SkillMetadata> {
     let content = read_bounded_regular_utf8(path, MAX_SKILL_FILE_BYTES)?;
     let (name, description) = parse_skill_frontmatter(&content);
     let name = name.unwrap_or_else(|| {
@@ -147,7 +151,7 @@ fn read_skill_metadata(path: &Path) -> Option<SkillMetadata> {
     })
 }
 
-fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
+pub(crate) fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
     let mut lines = content.lines();
     if lines.next() != Some("---") {
         return (None, None);
@@ -167,7 +171,7 @@ fn parse_skill_frontmatter(content: &str) -> (Option<String>, Option<String>) {
     (name, description)
 }
 
-fn format_skill_metadata(skills: &[SkillMetadata], shorten: bool) -> String {
+pub(crate) fn format_skill_metadata(skills: &[SkillMetadata], shorten: bool) -> String {
     if skills.is_empty() {
         return "(no skills discovered)".to_owned();
     }
@@ -178,7 +182,7 @@ fn format_skill_metadata(skills: &[SkillMetadata], shorten: bool) -> String {
     output
 }
 
-fn format_skill_metadata_item(skill: &SkillMetadata, shorten: bool) -> String {
+pub(crate) fn format_skill_metadata_item(skill: &SkillMetadata, shorten: bool) -> String {
     let description = if shorten {
         shorten_description(&skill.description, 160)
     } else {
@@ -192,7 +196,7 @@ fn format_skill_metadata_item(skill: &SkillMetadata, shorten: bool) -> String {
     )
 }
 
-fn shorten_description(description: &str, max_chars: usize) -> String {
+pub(crate) fn shorten_description(description: &str, max_chars: usize) -> String {
     let normalized = description.split_whitespace().collect::<Vec<_>>().join(" ");
     if normalized.chars().count() <= max_chars {
         return normalized;
