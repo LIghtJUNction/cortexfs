@@ -5,7 +5,7 @@ under `crates/cortexfs/src`. It aligns multi-word filenames with kebab-case on
 disk, Rust module identifiers with `snake_case`, and helpers with short
 kernel-style verbs.
 
-Contributor entry points that point here: [AGENTS.md](../AGENTS.md),
+Contributor entry points that point here: [AGENTS.md](https://github.com/LIghtJUNction/cortexfs/blob/main/AGENTS.md),
 [developing-cortexfs.md](developing-cortexfs.md).
 
 ## 1. File Naming Rules
