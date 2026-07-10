@@ -146,6 +146,57 @@ fn agent_new_request_json_matches_lifecycle_tool_shape() {
 }
 
 #[test]
+fn agent_new_request_json_rejects_protected_mount_targets() {
+    let command = cmd!(
+        "agent", "new", "reviewer", "--mount", "/tmp/source", "/ctx", "rw",
+    );
+    assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
+    let Ok(Command::Agent(AgentArgs::New(args))) = command else {
+        return;
+    };
+    let error = agent_new_request_json(&args);
+    assert!(error.is_err());
+    let Err(error) = error else {
+        return;
+    };
+    assert!(
+        error
+            .message
+            .contains("agent mount target cannot replace sandbox system paths")
+    );
+}
+
+#[test]
+fn agent_new_rejects_control_characters_in_mount_paths() {
+    let root = clean_test_dir("ctx-agent-new-control-mount");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let cases = [
+        ("source-newline", "/tmp/source\nbad", "/workspace"),
+        ("source-escape", "/tmp/source\x1bbad", "/workspace"),
+        ("target-newline", "/tmp/source", "/workspace\nbad"),
+        ("target-escape", "/tmp/source", "/workspace\x1bbad"),
+    ];
+
+    for (name, source, target) in cases {
+        let command = parse_command(vec![
+            "agent".to_owned(),
+            "new".to_owned(),
+            name.to_owned(),
+            "--mount".to_owned(),
+            source.to_owned(),
+            target.to_owned(),
+            "rw".to_owned(),
+        ]);
+        assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
+        let Ok(Command::Agent(AgentArgs::New(args))) = command else {
+            return;
+        };
+        assert!(agent_new(&root, &args).is_err(), "accepted mount for {name}");
+        assert!(!root.join(format!("agent/{name}.d")).exists());
+    }
+}
+
+#[test]
 fn agent_new_temp_request_json_includes_lifecycle() {
     let command = cmd!("agent", "new", "scratch", "--temp");
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));

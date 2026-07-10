@@ -497,8 +497,18 @@ pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<Stri
 }
 
 pub(crate) fn require_agent_mount(mount: &AgentMount) -> Result<(), CliError> {
+    if mount.source.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(CliError::usage(
+            "agent mount source must not contain control characters",
+        ));
+    }
     if !Path::new(&mount.source).is_absolute() {
         return Err(CliError::usage("agent mount source must be absolute"));
+    }
+    if mount.target.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err(CliError::usage(
+            "agent mount target must not contain control characters",
+        ));
     }
     let Some(target) =
         normalized_absolute_path(Path::new(&mount.target)).map(|path| path.display().to_string())
