@@ -1,3 +1,6 @@
+// Support modules: single-token stems when possible; legacy multi-word files
+// keep explicit #[path] only when forced by existing filenames.
+
 #[path = "support/control-text.rs"]
 pub mod control_text;
 #[path = "support/host-path.rs"]
@@ -24,3 +27,7 @@ pub mod stream;
 pub mod tool_path;
 #[path = "support/tool-schema.rs"]
 pub mod tool_schema;
+#[path = "support/trajectory.rs"]
+pub mod trajectory;
+
+pub use trajectory::*;

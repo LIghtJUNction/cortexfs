@@ -2,7 +2,8 @@ use super::{
     ControlLineIssue, LayoutPathRole, PathLayoutIssue,
     agent_lifecycle_tool_command, atomic_write_provider_config, cat_path,
     create_agent_terminal_runtime_dir, create_plain_mountpoint_dir, ctx_provider_curl_command, curl_config_quote,
-    detached_mount_command, direct_mount_command, doctor, doctor_report_line, doctor_root_line,
+    detached_mount_command, direct_mount_command, doctor, doctor_bootstrap_state,
+    doctor_report_line, doctor_retired_reference_agents, doctor_root_line,
     doctor_unexpected_entry_line, ensure_agent_terminal_socket,
     ensure_plain_mountpoint_dir, file_append, file_check, file_set, file_type_name,
     format_agent_control_issues, format_agent_schedule_issues, format_context_jsonl_issues,
@@ -14,6 +15,9 @@ use super::{
     ctx_home,
     agent_bwrap_args, agent_chat_request_socket, agent_chat_runtime_socket, agent_chat_socket_systemd_command,
     agent_chat_unit, agent_host_mount_source, agent_native_tool_names, agent_new,
+    agent_apply, agent_new_args_from_profile, agent_new_host_fallback,
+    load_agent_profile, parse_agent_profile_text, resolve_agent_profile_path, AgentProfile,
+    AGENT_PROFILE_SCHEMA_V1,
     agent_new_request_json, agent_send_request_json,
     agent_repl_banner_lines, agent_repl_command, agent_repl_model_summary, agent_repl_prompt,
     agent_repl_editor_config, agent_repl_unknown_command_line, agent_repl_workspace_line,
@@ -44,7 +48,8 @@ use super::{
     schedule_child_context_abi_paths, schedule_context_abi_path, shell_quote_arg,
     stream_agent_socket_request_streaming_interruptible, stream_socket_request,
     stream_terminal_socket, terminal_connect_cli_error, AgentArgs, AgentChildRow, AgentMount,
-    AgentSessionGcArgs, AgentStartArgs, AgentStartCommand, Cli, Command, FileCommand, LsTarget, ObjectClass,
+    AgentNewArgs, AgentSessionGcArgs, AgentStartArgs, AgentStartCommand, Cli, Command, FileCommand,
+    LsTarget, ObjectClass,
     open_executable_no_follow, CliError,
     ProviderArgs, ScheduleArgs, ScheduleChildContextAbiPaths, MAX_AGENT_EVENTS,
     MAX_AGENT_RESPONSE_BYTES, MAX_BUFFERED_AGENT_DIAGNOSTICS, MAX_BUFFERED_AGENT_EVENTS,
@@ -67,7 +72,7 @@ use cortexfs::{
     SESSION_REQUIRED_FILES,
 };
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;

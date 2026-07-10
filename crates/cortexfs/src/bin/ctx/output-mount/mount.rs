@@ -20,14 +20,44 @@ macro_rules! ensure_reference_tree_ready {
     }};
 }
 
-pub(crate) fn bootstrap_reference_tree(source: Option<&Path>) -> Result<(), CliError> {
+pub(crate) fn bootstrap_reference_tree(
+    source: Option<&Path>,
+    dry_run: bool,
+    check: bool,
+) -> Result<(), CliError> {
     let source = match source {
         Some(path) => path.to_path_buf(),
         None => default_source_root()?,
     };
+    if check {
+        return print_bootstrap_check(&source);
+    }
+    if dry_run {
+        return print_bootstrap_dry_run(&source);
+    }
     ensure_reference_tree_ready!(&source);
+    let state = read_bootstrap_state(&source);
     for line in [
         format!("source={}", source.display()),
+        format!(
+            "tree_version={}",
+            state
+                .as_ref()
+                .map_or(REFERENCE_TREE_VERSION, |value| value.tree_version)
+        ),
+        format!(
+            "migrations={}",
+            state.as_ref().map_or_else(
+                || "none".to_owned(),
+                |value| {
+                    if value.applied_migrations.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        value.applied_migrations.join(",")
+                    }
+                }
+            )
+        ),
         "agents=architect,coder,reviewer".to_owned(),
         "agent.coder.parent=agent:architect".to_owned(),
         "agent.coder.model=main".to_owned(),
@@ -37,6 +67,37 @@ pub(crate) fn bootstrap_reference_tree(source: Option<&Path>) -> Result<(), CliE
     ] {
         print_line(&line)?;
     }
+    Ok(())
+}
+
+pub(crate) fn print_bootstrap_check(source: &Path) -> Result<(), CliError> {
+    print_line(&format!("source={}", source.display()))?;
+    let plan = plan_reference_tree_upgrade(source);
+    for line in format_bootstrap_plan_lines(&plan) {
+        // check mode uses neutral verbs
+        let line = line
+            .replace("would_skip ", "keep ")
+            .replace("would_ensure ", "missing ")
+            .replace("would_write ", "state ");
+        print_line(&line)?;
+    }
+    let retired = list_present_retired_reference_agents(source);
+    if retired.is_empty() {
+        print_line("retired=none")?;
+    } else {
+        print_line(&format!("retired={}", retired.join(",")))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn print_bootstrap_dry_run(source: &Path) -> Result<(), CliError> {
+    print_line(&format!("source={}", source.display()))?;
+    print_line("mode=dry-run")?;
+    let plan = plan_reference_tree_upgrade(source);
+    for line in format_bootstrap_plan_lines(&plan) {
+        print_line(&line)?;
+    }
+    print_line("note=no files written; run ctx update without --dry-run to apply")?;
     Ok(())
 }
 

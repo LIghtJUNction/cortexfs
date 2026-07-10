@@ -26,8 +26,8 @@ spec/ctx-coreutils.md
 aimock-testing.md
 ```
 
-源码树命名（kebab 文件名、`#[path]` 模块映射、禁止 `mod.rs`、函数动词约定）见
-[naming-guide.md](naming-guide.md)。
+源码树命名（新模块使用 single-token 文件名；legacy kebab 仅兼容保留；禁止
+`mod.rs`；函数动词约定）见 [naming-guide.md](naming-guide.md)。
 
 根 ABI 只包含：
 

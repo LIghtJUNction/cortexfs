@@ -51,8 +51,29 @@ cwd             session working directory
 created_at      creation time
 updated_at      update time
 meta.json       client, model, scope, and related metadata
+AGENTS.md       optional run snapshot: effective merged AGENTS.md rules
+SKILLS.md       optional run snapshot: discovered skill metadata only
 context/        rebuildable prompt working set and derived context cache
 ```
+
+`AGENTS.md` and `SKILLS.md` under the session directory are observability
+snapshots written when the agent runtime builds the prompt for a run. They are
+not required session layout files and must not grant authority.
+
+```text
+AGENTS.md  merged project + global AGENTS.md text injected as {{rules}}
+SKILLS.md  skill catalog metadata only (name, description, SKILL.md path)
+```
+
+Full skill bodies stay in the original `SKILL.md` paths listed in `SKILLS.md`.
+Snapshots are ordinary files replaced atomically on each run; older runs are not
+versioned inside the session directory.
+
+`ctx agent trajectory <agent> [--session <session>]` projects
+`messages.jsonl` and `events.jsonl` to validated ATIF JSON on stdout. Event
+`run` and tool-call ids remain the correlation authority for tool calls,
+observations, and usage. The projection is derived output, not a second durable
+history or submission path.
 
 History is session files. Do not add `/ctx/history`.
 Context runtime state stays under the session directory. Do not add
@@ -64,6 +85,8 @@ Users can inspect history with ordinary file operations:
 ctx agent history coder
 ctx agent output coder
 less /ctx/home/$(id -u)/agent/coder/session/default/messages.jsonl
+cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
 ```
 
 If `--session` is omitted, client commands resolve `session/index/current`

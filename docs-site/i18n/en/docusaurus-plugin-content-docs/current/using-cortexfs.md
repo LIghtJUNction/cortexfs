@@ -41,14 +41,24 @@ echo "summarize this file" | /ctx/model/main
 
 Change the `/ctx/model/main` alias when you want a different default model.
 Do that by changing the alias instead of adding provider-specific root entries.
-The reference tree provides four initial agents: `coder`, `reviewer`,
-`executor`, and `worker`. `coder` uses `model/main`, `reviewer` uses
-`model/helper`, and both `executor` and `worker` default to
-`api.lmm.best/gpt-5.3-codex-spark`. The reference `worker` is parented by
-`agent:coder` without binding to a fixed session; the default `coder` policy may
-create, start, stop, and read `worker`, so independent implementation work from
-any coder session can be delegated to the spark worker without creating another
-root ABI entry.
+The reference tree provides `architect`, `coder`, and `reviewer`.
+`architect` is the root planning and coordination agent; `coder` and
+`reviewer` use `agent:architect` as their parent.
+
+Bootstrap and inspect the reference source with:
+
+```bash
+ctx bootstrap
+ctx update --check
+ctx update --dry-run
+```
+
+`ctx update` writes `bin/cortexfs.bootstrap.json` only when the schema,
+tree version, managed-agent list, or required migrations need refresh. Retired
+`base`, `worker`, and `executor` objects are reported but retained for
+manual review because old installations have no manifest proving ownership and
+full control-tree integrity. A successful update makes the next `--check`
+clean.
 
 The default `coder.d/system.md` treats `coder` as the parent integrator:
 independent implementation work should be a delegated `react` node in
@@ -139,10 +149,28 @@ a workflow entrance:
 ```bash
 ctx agent new reviewer --model openai/gpt-4o --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
+ctx agent new --from .cortexfs/agents/reviewer/agent.yaml
+ctx agent apply reviewer --from reviewer
 ctx agent start reviewer --session default
 ctx agent status reviewer
 ctx agent ps
 ctx agent stop reviewer
+```
+
+Host-side `agent.yaml` files (also `agent.yml` and `agent.json`) are
+authoring inputs. `ctx agent new --from` and `ctx agent apply --from`
+validate and materialize them into `agent/<name>.d/*`; runtime authority
+continues to come only from the discrete control files. A short `--from NAME`
+searches `.cortexfs/agents` and `~/.config/cortexfs/agents`.
+
+```yaml
+schema: cortexfs.agent.profile/v1
+name: reviewer
+description: code review agent
+instructions: Review diffs carefully.
+model: openai/gpt-4o
+tools: [fs.read]
+parent: agent:architect
 ```
 
 `ctx agent new` prefers `/ctx/tool/agent.create`; if that tool is absent, host
@@ -359,6 +387,19 @@ hard cap is 8,000 characters. Over budget, descriptions are shortened first;
 if still over budget, some skills are omitted and the prompt includes a
 warning.
 
+When an agent run builds its prompt, CortexFS writes a best-effort load
+snapshot into that agent's private session directory (same text as
+`{{rules}}` / `{{skills}}`; snapshot write never blocks the run):
+
+```bash
+cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+```
+
+- `AGENTS.md`: effective merged rules (global + project layers)
+- `SKILLS.md`: skill metadata only (`name` / `description` / `path`), not full
+  `SKILL.md` bodies
+
 These prompt files do not grant authority. The default native tool remains
 `tsh`; other tools must be discovered, loaded, pinned, and called through
 `tsh`. Effective authority is still decided by `agent/<agent>.d/policy`,
@@ -382,6 +423,7 @@ mounts, policy, Linux uid/gid, and mode bits.
 ```bash
 ctx agent history coder
 ctx agent output coder
+ctx agent trajectory coder
 ```
 
 Without `--session`, these commands use `session/index/current` first and fall
@@ -396,3 +438,7 @@ The underlying history lives at:
 
 Raw history is durable fact; context is a rebuildable working set. Compacting
 context must not destroy raw messages.
+`ctx agent trajectory` validates and prints an ATIF JSON projection of the
+selected session's `messages.jsonl` and `events.jsonl`. Tool calls,
+observations, and usage remain associated by run and call id; the command does
+not create a second history store.

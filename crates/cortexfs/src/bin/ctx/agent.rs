@@ -6,6 +6,7 @@ pub(crate) use create_host::*;
 pub(crate) use create_request::*;
 pub(crate) use lifecycle::*;
 pub(crate) use process::*;
+pub(crate) use profile::*;
 pub(crate) use repl::*;
 pub(crate) use session_gc::*;
 pub(crate) use start::*;
@@ -30,6 +31,8 @@ pub mod create_request;
 pub mod lifecycle;
 #[path = "agent/process.rs"]
 pub mod process;
+#[path = "agent/profile.rs"]
+pub mod profile;
 #[path = "agent/repl.rs"]
 pub mod repl;
 #[path = "agent/session-gc.rs"]

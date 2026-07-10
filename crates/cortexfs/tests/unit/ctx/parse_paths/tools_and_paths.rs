@@ -145,16 +145,32 @@ fn create_agent_fixture(root: &Path, name: &str, parent: &str, status: &str, pid
 #[test]
 fn parses_bootstrap_and_mount_commands() {
     let bootstrap = cmd!("bootstrap");
-    assert!(matches!(bootstrap, Ok(Command::Bootstrap { source: None })));
+    assert!(matches!(
+        bootstrap,
+        Ok(Command::Bootstrap {
+            source: None,
+            dry_run: false,
+            check: false
+        })
+    ));
 
     let update = cmd!("update");
-    assert!(matches!(update, Ok(Command::Bootstrap { source: None })));
+    assert!(matches!(
+        update,
+        Ok(Command::Bootstrap {
+            source: None,
+            dry_run: false,
+            check: false
+        })
+    ));
 
     let bootstrap_source = cmd!("bootstrap", "/tmp/cortexfs-source");
     assert!(matches!(
         bootstrap_source,
         Ok(Command::Bootstrap {
-            source: Some(ref source)
+            source: Some(ref source),
+            dry_run: false,
+            check: false
         }) if source == Path::new("/tmp/cortexfs-source")
     ));
 
@@ -162,8 +178,35 @@ fn parses_bootstrap_and_mount_commands() {
     assert!(matches!(
         update_source,
         Ok(Command::Bootstrap {
-            source: Some(ref source)
+            source: Some(ref source),
+            dry_run: false,
+            check: false
         }) if source == Path::new("/tmp/cortexfs-source")
+    ));
+
+    let dry_run = cmd!("update", "--dry-run", "/tmp/cortexfs-source");
+    assert!(matches!(
+        dry_run,
+        Ok(Command::Bootstrap {
+            source: Some(ref source),
+            dry_run: true,
+            check: false
+        }) if source == Path::new("/tmp/cortexfs-source")
+    ));
+
+    let check = cmd!("bootstrap", "--check");
+    assert!(matches!(
+        check,
+        Ok(Command::Bootstrap {
+            source: None,
+            dry_run: false,
+            check: true
+        })
+    ));
+
+    assert!(matches!(
+        cmd!("update", "--check", "--dry-run"),
+        Err(ref error) if error.code == 2
     ));
 
     let mount = cmd!(

@@ -18,6 +18,7 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
     ensure_reference_home(root)?;
     remove_deprecated_reference_home_tool_aliases(root)?;
     migrate_reference_legacy_session_meta_models(root)?;
+    apply_reference_tree_upgrade(root)?;
     Ok(ReferenceTreeBootstrap::new(root.to_path_buf()))
 }
 

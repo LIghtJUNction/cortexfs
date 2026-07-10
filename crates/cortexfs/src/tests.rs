@@ -1,29 +1,31 @@
 use super::{
-    AGENT_CONTROL_FILES, AgentControlKind, AgentExecutableSocketExecution,
+    AGENT_CONTROL_FILES, ATIF_SCHEMA_VERSION, AgentControlKind, AgentExecutableSocketExecution,
     AgentExecutableSocketRuntime, AgentRuntimeViewError, AgentScheduleAdvance,
     AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNodeKind, AgentScheduleRecordError,
-    AgentUnixIdentity, ApiKeyResolutionError, BwrapAgentExecutableArgs, CORTEXFS_OBJECT_RUNNER,
-    CTX_ROOT, ChildAgentAuthority, ChildAgentControls, ChildAgentDenial, ChildAgentRequest,
-    ChildContextRecordError, ChildContextStatus, ChildLifecycle, ContextJsonlIssue,
-    ContextJsonlKind, ContextPackBuildError, ContextPackIssue, ContextPackSourceError,
-    ControlLineIssue, DEFAULT_WORKER_MODEL, DurableSessionLayoutError, EXEC_OBJECTS,
-    EventStreamIssue, FUSE_V1_ROOT_INODE, FuseV1Error, FuseV1FileType, FuseV1Projection,
-    IndexedSocketSessionRecordError, LayoutPathRole, MAX_AGENT_SCHEDULE_NODES,
-    MAX_ECHO_MODEL_STDIN_BYTES, MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN,
-    MAX_SOCKET_FRAME_BYTES, MODEL_CONTROL_FILES, MessageStreamIssue, ModelCapabilityIssue,
-    ModelDriverRouteError, ModelDriverUseCase, MountEntry, MountError, MountMode, MountOption,
-    MountTable, OAuthError, OAuthPkce, OAuthProviderConfig, OBJECT_HOOK_DIR,
-    OBJECT_HOOK_PHASE_DIRS, ObjectBootstrapError, ObjectClass, OwnedChildCancellationError,
-    PathLayoutIssue, PeerCredentials, PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule,
-    PolicyV0, ReferenceTreeError, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS,
-    SessionAccess, SessionAccessAuthority, SessionAccessDenial, SessionControlKind,
-    SessionIndexKind, SessionIndexUpdateError, SharedAccess, SharedAccessAuthority,
-    SharedAccessDenial, SharedQueueClaimError, SharedQueueFinishError, SharedQueueOutcome,
-    SharedQueueRecoverError, SkillMetadata, SocketPeerPolicy, SocketRequest, SocketRequestError,
-    SocketRuntimeError, SocketSessionRecordError, SocketSessionScope, TOOL_CONTROL_FILES,
-    ToolExecutionAuthority, ToolExecutionDenial, ToolExecutionPrincipal, ToolHit, ToolPath,
-    ToolPathError, ToolSchemaIssue, advance_agent_schedule_from_parent_context,
-    agent_executable_socket_bwrap_args, append_jsonl_line, atomic_replace_text_with_mode,
+    AgentUnixIdentity, ApiKeyResolutionError, BOOTSTRAP_STATE_REL, BootstrapAction,
+    BwrapAgentExecutableArgs, CORTEXFS_OBJECT_RUNNER, CTX_ROOT, ChildAgentAuthority,
+    ChildAgentControls, ChildAgentDenial, ChildAgentRequest, ChildContextRecordError,
+    ChildContextStatus, ChildLifecycle, ContextJsonlIssue, ContextJsonlKind, ContextPackBuildError,
+    ContextPackIssue, ContextPackSourceError, ControlLineIssue, DEFAULT_WORKER_MODEL,
+    DurableSessionLayoutError, EXEC_OBJECTS, EventStreamIssue, FUSE_V1_ROOT_INODE, FuseV1Error,
+    FuseV1FileType, FuseV1Projection, IndexedSocketSessionRecordError, LayoutPathRole,
+    MAX_AGENT_SCHEDULE_NODES, MAX_ECHO_MODEL_STDIN_BYTES, MAX_FUSE_V1_SMALL_WRITE_BYTES,
+    MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES, MIGRATION_RETIRED_AGENTS_V1, MODEL_CONTROL_FILES,
+    MessageStreamIssue, ModelCapabilityIssue, ModelDriverRouteError, ModelDriverUseCase,
+    MountEntry, MountError, MountMode, MountOption, MountTable, OAuthError, OAuthPkce,
+    OAuthProviderConfig, OBJECT_HOOK_DIR, OBJECT_HOOK_PHASE_DIRS, ObjectBootstrapError,
+    ObjectClass, OwnedChildCancellationError, PathLayoutIssue, PeerCredentials, PolicyError,
+    PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0, REFERENCE_TREE_VERSION,
+    ReferenceTreeError, SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, SessionAccess,
+    SessionAccessAuthority, SessionAccessDenial, SessionControlKind, SessionIndexKind,
+    SessionIndexUpdateError, SharedAccess, SharedAccessAuthority, SharedAccessDenial,
+    SharedQueueClaimError, SharedQueueFinishError, SharedQueueOutcome, SharedQueueRecoverError,
+    SkillMetadata, SocketPeerPolicy, SocketRequest, SocketRequestError, SocketRuntimeError,
+    SocketSessionRecordError, SocketSessionScope, TOOL_CONTROL_FILES, ToolExecutionAuthority,
+    ToolExecutionDenial, ToolExecutionPrincipal, ToolHit, ToolPath, ToolPathError, ToolSchemaIssue,
+    TrajectoryIssue, TrajectoryMapError, TrajectoryObservation, TrajectoryObservationResult,
+    advance_agent_schedule_from_parent_context, agent_executable_socket_bwrap_args,
+    append_jsonl_line, apply_reference_tree_upgrade, atomic_replace_text_with_mode,
     authorize_child_agent, authorize_session_access, authorize_shared_access,
     authorize_tool_execution, claim_next_shared_queue_job, classify_abi_path,
     collect_agent_rules_from_paths, collect_history_messages_from_session,
@@ -39,19 +41,22 @@ use super::{
     is_object_name, is_root_entry, is_worker_agent_name, model_exec_metadata,
     oauth_authorization_code_form, oauth_authorization_url, oauth_refresh_token_form,
     owned_child_cancellation_events, parse_model_driver_routes, parse_oauth_token_response,
-    parse_socket_request_frame, peer_credentials, plain_fs, read_echo_model_stdin_limited,
-    ready_agent_schedule_child_handoffs, ready_agent_schedule_nodes, rebuild_context_pack,
-    record_agent_schedule_to_parent_context, record_assistant_response_to_session,
-    record_child_handoff_to_parent_context, record_child_result_to_parent_context,
-    record_indexed_socket_send_to_session, record_owned_child_cancellation,
-    record_ready_agent_schedule_child_handoffs_to_parent_context, record_socket_request_to_session,
-    record_tool_execution_denial_to_session, record_tool_execution_result_to_session,
-    recover_shared_queue_job, resolve_api_key_from_env_names_with, resolve_api_key_with,
+    parse_socket_request_frame, peer_credentials, plain_fs, plan_reference_tree_upgrade,
+    read_bootstrap_state, read_echo_model_stdin_limited, ready_agent_schedule_child_handoffs,
+    ready_agent_schedule_nodes, rebuild_context_pack, record_agent_schedule_to_parent_context,
+    record_assistant_response_to_session, record_child_handoff_to_parent_context,
+    record_child_result_to_parent_context, record_indexed_socket_send_to_session,
+    record_owned_child_cancellation, record_ready_agent_schedule_child_handoffs_to_parent_context,
+    record_socket_request_to_session, record_tool_execution_denial_to_session,
+    record_tool_execution_result_to_session, recover_shared_queue_job,
+    reference_agent_system_prompt, resolve_api_key_from_env_names_with, resolve_api_key_with,
     resolve_fuse_abi_path, resolve_oauth_access_token_with, run_echo_model,
     serve_agent_executable_socket_stream_once, serve_unix_socket_listener_once,
     serve_unix_socket_stream_once, session_index_key_for_cwd, set_private_dir_permissions,
-    set_text_file_permissions, socket_runtime_error_response, update_session_index,
-    update_session_index_with_keys, validate_context_pack_source, write_text_file_if_absent,
+    set_text_file_permissions, snapshot_dirs, socket_runtime_error_response,
+    trajectory_from_session_dir, trajectory_from_session_jsonl, update_session_index,
+    update_session_index_with_keys, validate_context_pack_source, validate_trajectory,
+    write_run_snapshot, write_snapshot, write_text_file_if_absent, write_trajectory_json,
 };
 use crate::fuse::v1_projection::core::fuse_readlink_error;
 use std::fs;
@@ -78,12 +83,16 @@ include!("../tests/unit/lib/session_context.rs");
 include!("../tests/unit/lib/context_queue.rs");
 include!("../tests/unit/lib/shared_queue_access.rs");
 include!("../tests/unit/lib/tool_authority.rs");
+include!("../tests/unit/lib/trajectory/map_and_validate.rs");
 include!("../tests/unit/lib/atomic_replace.rs");
 
-/// Locks the src-tree naming convention from `docs/naming-guide.md`:
-/// multi-word files are kebab-case, and `mod.rs` is forbidden under `src/`.
+/// Locks the mechanical src-tree naming rule from `docs/naming-guide.md`.
+///
+/// New modules use single-token stems without `-` or `_`; legacy multi-word
+/// stems remain until intentionally migrated, so this test only enforces the
+/// repository-wide `mod.rs` ban.
 #[test]
-fn src_tree_uses_kebab_filenames_without_mod_rs() {
+fn src_tree_has_no_mod_rs() {
     let src_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
     assert!(
         src_root.is_dir(),
@@ -91,7 +100,6 @@ fn src_tree_uses_kebab_filenames_without_mod_rs() {
         src_root.display()
     );
 
-    let mut snake_case_files = Vec::new();
     let mut mod_rs_files = Vec::new();
     let mut stack = vec![src_root];
     while let Some(dir) = stack.pop() {
@@ -116,14 +124,6 @@ fn src_tree_uses_kebab_filenames_without_mod_rs() {
             };
             if name == "mod.rs" {
                 mod_rs_files.push(path);
-                continue;
-            }
-            if Path::new(name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"))
-                && name.contains('_')
-            {
-                snake_case_files.push(path);
             }
         }
     }
@@ -131,10 +131,6 @@ fn src_tree_uses_kebab_filenames_without_mod_rs() {
     assert!(
         mod_rs_files.is_empty(),
         "mod.rs is forbidden under crates/cortexfs/src; found: {mod_rs_files:?}"
-    );
-    assert!(
-        snake_case_files.is_empty(),
-        "multi-word sources under crates/cortexfs/src must use kebab-case (no '_'); found: {snake_case_files:?}"
     );
 }
 

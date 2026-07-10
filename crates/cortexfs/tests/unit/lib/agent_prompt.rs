@@ -182,6 +182,49 @@ fn agent_prompt_history_messages_respect_tiny_budget() {
 }
 
 #[test]
+fn agent_prompt_snapshot_writes_agents_and_skills() {
+    let root = clean_test_dir("agent-prompt-snapshot");
+    let session = root.join("session").join("default");
+    assert!(fs::create_dir_all(&session).is_ok());
+
+    let rules = "### /tmp/AGENTS.md\n\nproject rule\n";
+    let skills = "- name: demo\n  description: demo skill\n  path: /skills/demo/SKILL.md\n";
+    assert!(write_snapshot(&session, rules, skills).is_ok());
+
+    assert_eq!(
+        fs::read_to_string(session.join("AGENTS.md")).unwrap_or_default(),
+        "### /tmp/AGENTS.md\n\nproject rule\n"
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("SKILLS.md")).unwrap_or_default(),
+        "- name: demo\n  description: demo skill\n  path: /skills/demo/SKILL.md\n"
+    );
+
+    assert!(write_snapshot(&session, "updated rules", "updated skills").is_ok());
+    assert_eq!(
+        fs::read_to_string(session.join("AGENTS.md")).unwrap_or_default(),
+        "updated rules\n"
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("SKILLS.md")).unwrap_or_default(),
+        "updated skills\n"
+    );
+}
+
+#[test]
+fn agent_prompt_snapshot_dirs_reject_invalid_agent() {
+    let root = clean_test_dir("agent-prompt-snapshot-dirs");
+    assert!(snapshot_dirs(&root, "../escape").is_empty());
+    assert!(snapshot_dirs(&root, "bad/name").is_empty());
+}
+
+#[test]
+fn agent_prompt_run_snapshot_is_best_effort_when_missing() {
+    let root = clean_test_dir("agent-prompt-run-snapshot-missing");
+    write_run_snapshot(&root, "coder", "rules", "skills");
+}
+
+#[test]
 fn agent_prompt_history_session_reads_only_bounded_recent_tail() {
     let root = clean_test_dir("agent-prompt-history-bounded-tail");
     let session = root.join("session").join("default");

@@ -38,11 +38,7 @@ pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result
     atomic_replace_text_with_mode(path, content, 0o600)
 }
 
-pub(crate) fn atomic_replace_text_with_mode(
-    path: &Path,
-    content: &str,
-    mode: u32,
-) -> std::io::Result<()> {
+pub fn atomic_replace_text_with_mode(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let parent_dir = open_authority_plain_directory(parent)?;
     let file_name = authority_plain_file_name(path)?;

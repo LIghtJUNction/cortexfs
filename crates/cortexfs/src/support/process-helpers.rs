@@ -21,6 +21,9 @@ pub(crate) fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8>
 }
 
 /// Lossy UTF-8 decode of a limited byte read.
+///
+/// Prefer this when the caller only needs text; use [`read_limited_bytes`] for
+/// binary length checks before decoding.
 #[must_use]
 pub fn read_limited_text(reader: impl Read, limit: usize) -> String {
     String::from_utf8_lossy(&read_limited_bytes(reader, limit)).into_owned()
@@ -40,4 +43,19 @@ pub(crate) fn terminate_process_group(child: &mut Child) {
 
 pub(crate) fn signal_process_group(pid: i32, signal: nix::sys::signal::Signal) {
     let _ignored = nix::sys::signal::kill(nix::unistd::Pid::from_raw(-pid), signal);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn read_limited_text_caps_and_decodes() {
+        let input = b"hello world and more";
+        let text = read_limited_text(Cursor::new(input), 5);
+        assert_eq!(text, "hello");
+        let full = read_limited_text(Cursor::new(input), 64);
+        assert_eq!(full, "hello world and more");
+    }
 }

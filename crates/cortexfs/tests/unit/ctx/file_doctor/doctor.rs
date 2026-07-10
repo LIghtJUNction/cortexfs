@@ -131,6 +131,34 @@ fn doctor_validates_reference_tree_objects_sessions_and_queue() {
 }
 
 #[test]
+fn doctor_rejects_missing_or_drifted_bootstrap_state() {
+    let root = clean_test_dir("ctx-doctor-bootstrap-state");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert_eq!(doctor_bootstrap_state(&root), Ok(true));
+
+    assert!(fs::remove_file(root.join("bin/cortexfs.bootstrap.json")).is_ok());
+    assert_eq!(doctor_bootstrap_state(&root), Ok(false));
+    assert!(doctor(&root).is_err());
+
+    write_text_file(
+        &root.join("bin/cortexfs.bootstrap.json"),
+        r#"{"schema":2,"tree_version":1,"managed_agents":["architect"],"applied_migrations":[]}"#,
+    );
+    assert_eq!(doctor_bootstrap_state(&root), Ok(false));
+    assert!(doctor(&root).is_err());
+}
+
+#[test]
+fn doctor_counts_present_retired_agents_as_failure() {
+    let root = clean_test_dir("ctx-doctor-retired-agent");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    write_text_file(&root.join("agent/base"), "#!/bin/sh\n");
+
+    assert_eq!(doctor_retired_reference_agents(&root), Ok(false));
+    assert!(doctor(&root).is_err());
+}
+
+#[test]
 fn doctor_reports_reference_tree_layout_breakage() {
     let root = clean_test_dir("ctx-doctor-reference-tree-bad");
     let ensured = ensure_v1_reference_tree(&root);

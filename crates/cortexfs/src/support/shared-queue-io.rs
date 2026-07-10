@@ -2,16 +2,6 @@ use crate::*;
 use std::fs;
 use std::io;
 
-use crate::support::layout_path::require_symlink_dir;
-
-pub(crate) fn require_shared_queue_directory(
-    path: &Path,
-    label: &str,
-    issues: &mut Vec<PathLayoutIssue>,
-) {
-    require_symlink_dir(path, label, issues);
-}
-
 pub(crate) fn queue_child_dir(queue_dir: &Path, name: &str) -> io::Result<PathBuf> {
     let path = queue_dir.join(name);
     plain_fs::open_plain_directory(&path)?;

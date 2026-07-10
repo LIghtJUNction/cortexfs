@@ -92,6 +92,7 @@ pub fn record_assistant_response_to_session(
     let content_parts = text_content_parts(content);
     let message = serde_json::json!({
         "role": "assistant",
+        "run": run_id,
         "content": content_parts
     })
     .to_string();
@@ -177,6 +178,7 @@ pub fn record_tool_execution_result_to_session(
     });
     let message = serde_json::json!({
         "role": "tool",
+        "run": run_id,
         "name": tool_name,
         "content": [content_part]
     })

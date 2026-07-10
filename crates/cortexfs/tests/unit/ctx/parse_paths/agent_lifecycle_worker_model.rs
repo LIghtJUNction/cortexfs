@@ -1,5 +1,3 @@
-use crate::{agent_new_host_fallback, AgentNewArgs};
-
 #[test]
 fn agent_new_host_fallback_defaults_worker_to_spark_model() {
     let root = clean_test_dir("ctx-agent-new-host-worker-default-model");
@@ -27,7 +25,13 @@ fn agent_new_host_fallback_defaults_worker_to_spark_model() {
 #[test]
 fn agent_new_host_fallback_defaults_executor_to_spark_model() {
     let root = clean_test_dir("ctx-agent-new-host-executor-default-model");
-    let command = cmd!("agent", "new", "executor-fast", "--parent", "agent:base");
+    let command = cmd!(
+        "agent",
+        "new",
+        "executor-fast",
+        "--parent",
+        "agent:architect"
+    );
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
         return;
     };
@@ -46,7 +50,7 @@ fn agent_new_host_fallback_defaults_executor_to_spark_model() {
 #[test]
 fn agent_new_host_fallback_keeps_non_worker_stub_default_on_main() {
     let root = clean_test_dir("ctx-agent-new-host-coder-stub-default-model");
-    let command = cmd!("agent", "new", "coder", "--parent", "agent:base");
+    let command = cmd!("agent", "new", "coder", "--parent", "agent:architect");
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
         return;
     };
@@ -113,6 +117,8 @@ fn agent_new_host_fallback_rejects_invalid_name_without_writing_controls() {
         tools: Vec::new(),
         shared: Vec::new(),
         mounts: Vec::new(),
+        instructions: None,
+        description: None,
     };
 
     assert!(matches!(

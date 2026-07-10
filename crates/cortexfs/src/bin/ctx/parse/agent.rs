@@ -50,7 +50,7 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
-        "agent requires new, start, stop, status, env, ps, send, chat, repl, resume, history, output, pack, session, prompt, tools, children, wait, cancel, watch, or attach",
+        "agent requires new, apply, start, stop, status, env, ps, send, chat, repl, resume, history, output, pack, trajectory, session, prompt, tools, children, wait, cancel, watch, or attach",
     )?;
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) {
@@ -62,6 +62,7 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
     let mut values = rest.into_iter();
     match command.as_str() {
         "new" => Ok(Command::Agent(AgentArgs::New(parse_agent_new(values)?))),
+        "apply" => Ok(Command::Agent(parse_agent_apply(values)?)),
         "start" => Ok(Command::Agent(AgentArgs::Start(parse_agent_start(values)?))),
         "stop" => {
             let name = required_arg(&mut values, "agent stop requires an agent name")?;
@@ -111,6 +112,10 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
         "pack" => {
             let (name, session) = parse_agent_session_option_args(values, "agent pack")?;
             Ok(Command::Agent(AgentArgs::Pack { name, session }))
+        }
+        "trajectory" => {
+            let (name, session) = parse_agent_session_option_args(values, "agent trajectory")?;
+            Ok(Command::Agent(AgentArgs::Trajectory { name, session }))
         }
         "session" => parse_agent_session_admin(values),
         "prompt" => {
@@ -397,9 +402,10 @@ pub(crate) fn parse_agent_start(
 pub(crate) fn parse_agent_new(
     mut values: impl Iterator<Item = String>,
 ) -> Result<AgentNewArgs, CliError> {
-    let name = required_arg(&mut values, "agent new requires an agent name")?;
+    let mut name = None;
+    let mut from = None;
     let mut args = AgentNewArgs {
-        name,
+        name: String::new(),
         temporary: false,
         parent: None,
         label: None,
@@ -407,10 +413,18 @@ pub(crate) fn parse_agent_new(
         tools: Vec::new(),
         shared: Vec::new(),
         mounts: Vec::new(),
+        instructions: None,
+        description: None,
     };
 
     while let Some(value) = values.next() {
         match value.as_str() {
+            "--from" => {
+                from = Some(required_arg(
+                    &mut values,
+                    "agent new --from requires agent.yaml path, directory, or short name",
+                )?);
+            }
             "--temp" => {
                 args.temporary = true;
             }
@@ -451,11 +465,44 @@ pub(crate) fn parse_agent_new(
                     mode,
                 });
             }
+            _ if name.is_none() && !value.starts_with('-') => {
+                name = Some(value);
+            }
             _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
         }
     }
 
+    args.name = name.unwrap_or_default();
+    if let Some(path) = from {
+        let profile = load_agent_profile(Path::new(&path))?;
+        args = agent_new_args_from_profile(profile, args)?;
+    } else if args.name.is_empty() {
+        return Err(CliError::usage(
+            "agent new requires an agent name or --from agent.yaml",
+        ));
+    }
+
     Ok(args)
+}
+
+pub(crate) fn parse_agent_apply(
+    mut values: impl Iterator<Item = String>,
+) -> Result<AgentArgs, CliError> {
+    let name = required_arg(&mut values, "agent apply requires an agent name")?;
+    let mut from = None;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--from" => {
+                from = Some(required_arg(
+                    &mut values,
+                    "agent apply --from requires agent.yaml path, directory, or short name",
+                )?);
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    let from = from.ok_or_else(|| CliError::usage("agent apply requires --from agent.yaml"))?;
+    Ok(AgentArgs::Apply { name, from })
 }
 
 pub(crate) fn parse_agent_shared(value: &str) -> Result<AgentShared, CliError> {
