@@ -16,7 +16,7 @@ fn agent_executable_socket_runtime_passes_history_messages() {
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 history="$(/usr/bin/printf '%s' "$CTX_AGENT_HISTORY_MESSAGES" | /usr/bin/tr '\n' '|')"
 case "$CTX_AGENT_TOOL_CONTEXT" in
-  *'Host workspace mounted at `/workspace`: "/repo"'*) context="workspace-context-ok" ;;
+  *'Host workspace mounted at `/workspace`: configured by agent policy'*) context="workspace-context-ok" ;;
   *) context="missing-workspace-context" ;;
 esac
 printf '{"type":"delta","run":"%s","text":"%s %s"}\n' "$CTX_RUN_ID" "$history" "$context"

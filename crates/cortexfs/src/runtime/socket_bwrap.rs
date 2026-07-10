@@ -27,7 +27,6 @@ fn agent_executable_socket_command(
                 runtime,
                 mount_table,
                 cwd: request.cwd.unwrap_or(runtime.default_cwd),
-                workspace: request.workspace,
                 run_id: request.run_id,
                 session: request.session,
                 history_messages: request.history_messages,
@@ -54,7 +53,6 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub runtime: AgentExecutableSocketRuntime<'a>,
     pub mount_table: &'a MountTable,
     pub cwd: &'a str,
-    pub workspace: Option<&'a str>,
     pub run_id: &'a str,
     pub session: &'a str,
     pub history_messages: &'a str,
@@ -182,11 +180,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         ));
         bwrap.push(mount.target().to_owned());
     }
-    bwrap.extend(bwrap_workspace_bind_args(
-        request.cwd,
-        request.workspace,
-        request.mount_table,
-    ));
     bwrap.extend(bwrap_dir_args_for_chdir(request.cwd));
     bwrap.extend([
         "--chdir".to_owned(),
@@ -195,49 +188,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.input.to_owned(),
     ]);
     bwrap
-}
-
-fn bwrap_workspace_bind_args(
-    cwd: &str,
-    workspace: Option<&str>,
-    mount_table: &MountTable,
-) -> Vec<String> {
-    let Some(workspace) = workspace else {
-        return Vec::new();
-    };
-    if !cwd_uses_default_workspace(cwd) || mount_table_targets_workspace(mount_table) {
-        return Vec::new();
-    }
-    if !is_absolute_host_workspace_path(workspace) {
-        return Vec::new();
-    }
-    vec![
-        "--bind".to_owned(),
-        workspace.to_owned(),
-        "/workspace".to_owned(),
-    ]
-}
-
-fn cwd_uses_default_workspace(cwd: &str) -> bool {
-    cwd == "/workspace" || cwd.starts_with("/workspace/")
-}
-
-fn mount_table_targets_workspace(mount_table: &MountTable) -> bool {
-    mount_table
-        .entries()
-        .iter()
-        .any(|mount| cwd_uses_default_workspace(mount.target()))
-}
-
-fn is_absolute_host_workspace_path(value: &str) -> bool {
-    !value.bytes().any(|byte| byte.is_ascii_control())
-        && Path::new(value).is_absolute()
-        && Path::new(value).components().all(|component| {
-            matches!(
-                component,
-                std::path::Component::RootDir | std::path::Component::Normal(_)
-            )
-        })
 }
 
 fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {

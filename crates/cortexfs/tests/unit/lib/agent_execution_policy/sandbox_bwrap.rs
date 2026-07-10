@@ -93,7 +93,6 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
-        workspace: Some("/repo"),
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
@@ -136,7 +135,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         .iter()
         .any(|arg| arg == "/run/user/1000/cortexfs/credentials/coder-default"));
     assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
-    assert!(contains_arg_triplet(&args, "--bind", "/repo", "/workspace"));
+    assert!(!contains_arg_triplet(&args, "--bind", "/repo", "/workspace"));
     assert!(contains_arg_triplet(
         &args,
         "--ro-bind",
@@ -183,7 +182,6 @@ fn agent_executable_socket_bwrap_args_keep_network_namespace_isolated_even_when_
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
-        workspace: None,
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
@@ -228,7 +226,6 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
-        workspace: Some("/repo-default"),
         run_id: "run-1",
         session: "default",
         history_messages: "- user: hi",
@@ -249,4 +246,43 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         "/repo-default",
         "/workspace"
     ));
+}
+
+#[test]
+fn agent_executable_socket_bwrap_args_ignores_socket_workspace_without_declared_mount() {
+    let root = reference_tree("agent-bwrap-untrusted-workspace");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: view.env(),
+        session_root: &session_root,
+        default_cwd: "/workspace",
+        model: Some("debug/echo"),
+        network_allowed: false,
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/usr/bin/bwrap"),
+            mount_table: view.mount_table(),
+        },
+    };
+
+    let args = agent_executable_socket_bwrap_args(&BwrapAgentExecutableArgs {
+        runtime,
+        mount_table: view.mount_table(),
+        cwd: "/workspace",
+        run_id: "run-1",
+        session: "default",
+        history_messages: "- user: hi",
+        tool_context: "workspace context",
+        debug: None,
+        input: "hi",
+    });
+
+    assert!(!contains_arg_triplet(&args, "--bind", "/", "/workspace"));
+    assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
 }
