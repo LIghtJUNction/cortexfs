@@ -373,16 +373,23 @@ fn extend_git_file_mounts(default_source: &Path, git_file: &Path, mounts: &mut V
     let Ok(content) = fs::read_to_string(git_file) else {
         return;
     };
-    let Some(gitdir) = parse_gitdir_file(default_source, &content) else {
+    let Some(trusted_root) = trusted_git_mount_root(default_source) else {
+        return;
+    };
+    let Some(gitdir) = parse_gitdir_file(default_source, &trusted_root, &content) else {
         return;
     };
     push_readonly_host_path_mount(mounts, &gitdir);
-    if let Some(commondir) = git_common_dir(&gitdir) {
+    if let Some(commondir) = git_common_dir(&gitdir, &trusted_root) {
         push_readonly_host_path_mount(mounts, &commondir);
     }
 }
 
-fn parse_gitdir_file(default_source: &Path, content: &str) -> Option<PathBuf> {
+fn trusted_git_mount_root(default_source: &Path) -> Option<PathBuf> {
+    fs::canonicalize(default_source).ok()
+}
+
+fn parse_gitdir_file(default_source: &Path, trusted_root: &Path, content: &str) -> Option<PathBuf> {
     let line = content.lines().find_map(|line| line.strip_prefix("gitdir:"))?;
     let path = line.trim();
     if path.is_empty() {
@@ -394,11 +401,10 @@ fn parse_gitdir_file(default_source: &Path, content: &str) -> Option<PathBuf> {
     } else {
         default_source.join(path)
     };
-    let gitdir = normalized_absolute_path(&gitdir)?;
-    plain_directory(&gitdir).then_some(gitdir)
+    trusted_plain_directory(&gitdir, trusted_root)
 }
 
-fn git_common_dir(gitdir: &Path) -> Option<PathBuf> {
+fn git_common_dir(gitdir: &Path, trusted_root: &Path) -> Option<PathBuf> {
     let content = fs::read_to_string(gitdir.join("commondir")).ok()?;
     let path = content.lines().next()?.trim();
     if path.is_empty() {
@@ -410,8 +416,16 @@ fn git_common_dir(gitdir: &Path) -> Option<PathBuf> {
     } else {
         gitdir.join(path)
     };
-    let common = normalized_absolute_path(&common)?;
-    plain_directory(&common).then_some(common)
+    trusted_plain_directory(&common, trusted_root)
+}
+
+fn trusted_plain_directory(path: &Path, trusted_root: &Path) -> Option<PathBuf> {
+    let normalized = normalized_absolute_path(path)?;
+    if !plain_directory(&normalized) {
+        return None;
+    }
+    let canonical = fs::canonicalize(&normalized).ok()?;
+    canonical.starts_with(trusted_root).then_some(canonical)
 }
 
 fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {

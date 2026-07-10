@@ -151,7 +151,7 @@ fn agent_start_default_workspace_remounts_git_read_only() {
 #[test]
 fn agent_start_default_workspace_mounts_worktree_gitdir_read_only() {
     let source = clean_test_dir("ctx-agent-start-worktree-git-file");
-    let git_store = clean_test_dir("ctx-agent-start-worktree-git-store");
+    let git_store = source.join(".git-store");
     let common_dir = git_store.join("repo.git");
     let git_dir = common_dir.join("worktrees").join("coder");
     assert!(fs::create_dir_all(&git_dir).is_ok());
@@ -228,6 +228,44 @@ fn agent_start_default_workspace_mounts_worktree_gitdir_read_only() {
         common_dir.to_str().unwrap_or_default(),
         common_dir.to_str().unwrap_or_default()
     ));
+}
+
+#[test]
+fn agent_start_default_workspace_rejects_gitdir_outside_workspace() {
+    let source = clean_test_dir("ctx-agent-start-worktree-git-file-escape");
+    let secret = clean_test_dir("ctx-agent-start-worktree-git-secret");
+    write_text_file(
+        &source.join(".git"),
+        &format!("gitdir: {}\n", secret.display()),
+    );
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+
+    assert_eq!(
+        mounts,
+        vec![
+            AgentMount {
+                source: source.display().to_string(),
+                target: "/workspace".to_owned(),
+                mode: "rw".to_owned(),
+            },
+            AgentMount {
+                source: source.join(".git").display().to_string(),
+                target: "/workspace/.git".to_owned(),
+                mode: "ro".to_owned(),
+            },
+        ]
+    );
+    assert!(!mounts
+        .iter()
+        .any(|mount| mount.source == secret.display().to_string()));
 }
 
 #[test]
