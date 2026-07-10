@@ -75,6 +75,12 @@ versioned inside the session directory.
 observations, and usage. The projection is derived output, not a second durable
 history or submission path.
 
+Legacy tool results may reference a call id that has no corresponding
+`tool_call` event. Projection preserves non-empty result content, clears that
+unproven `source_call_id`, drops empty unmatched results, and records their
+count as `extra.legacy_unmatched_tool_results`. It does not synthesize a tool
+call or chat message.
+
 History is session files. Do not add `/ctx/history`.
 Context runtime state stays under the session directory. Do not add
 `/ctx/memory`, `/ctx/context`, `/ctx/swap`, or `/ctx/task`.

@@ -242,7 +242,9 @@ impl FuseV1Projection {
         if Self::is_session_append_path(&normalized) {
             return self.replace_session_plain_file(&normalized, content);
         }
-        if Self::session_atomic_temp_target(&normalized).is_some() {
+        if let Some(target) = Self::layout_atomic_temp_target(&normalized)
+            && (Self::is_session_replace_path(&target) || Self::is_session_append_path(&target))
+        {
             return self.replace_session_plain_file(&normalized, content);
         }
         if normalized == format!("model/{MODEL_ROUTE_FILE}") {
@@ -284,12 +286,34 @@ impl FuseV1Projection {
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if offset != 0 {
+            if Self::agent_control_target(&normalized).is_some()
+                || Self::is_agent_wrapper_path(&normalized)
+                || Self::layout_atomic_temp_target(&normalized).is_some_and(|target| {
+                    Self::agent_control_target(&target).is_some()
+                        || Self::is_agent_wrapper_path(&target)
+                })
+                || Self::is_session_append_path(&normalized)
+            {
+                self.authorize_layout_path(&normalized, uid)?;
+            }
             return self.write_control_file_at(&normalized, offset, content);
         }
-        if Self::is_session_replace_path(&normalized)
-            || Self::is_session_append_path(&normalized)
-            || Self::session_atomic_temp_target(&normalized).is_some()
+        if Self::is_session_replace_path(&normalized) || Self::is_session_append_path(&normalized) {
+            return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
+        }
+        if let Some(target) = Self::layout_atomic_temp_target(&normalized) {
+            if Self::is_session_replace_path(&target) || Self::is_session_append_path(&target) {
+                return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
+            }
+            self.authorize_layout_path(&normalized, uid)?;
+            Self::validate_agent_layout_content(&target, content, uid)?;
+            return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
+        }
+        if Self::is_agent_wrapper_path(&normalized)
+            || Self::agent_control_target(&normalized).is_some()
         {
+            self.authorize_layout_path(&normalized, uid)?;
+            Self::validate_agent_layout_content(&normalized, content, uid)?;
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
         self.write_control_file_at(&normalized, 0, content)?;
@@ -362,50 +386,56 @@ impl FuseV1Projection {
         .map_err(|_error| FuseV1Error::Io)
     }
 
-    /// Creates one directory in the durable session layout.
-    ///
-    /// This is intentionally narrower than general filesystem `mkdir`: only the
-    /// documented session skeleton below `home/<uid>/agent/<agent>/session` is
-    /// writable through the v1 FUSE projection.
-    pub fn create_session_layout_dir(
+    /// Creates one whitelisted session or agent-lifecycle directory.
+    pub fn create_layout_dir(
         &self,
         abi_path: &str,
         uid: u32,
         gid: u32,
+        mode: u32,
     ) -> Result<(), FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if !Self::is_session_layout_dir_path(&normalized) {
+        if !Self::is_session_layout_dir_path(&normalized)
+            && !Self::is_agent_lifecycle_dir_path(&normalized)
+        {
             return Err(FuseV1Error::NotControlFile);
         }
+        self.authorize_layout_path(&normalized, uid)?;
         let path = self.resolve(&normalized)?;
-        create_fuse_v1_plain_dir(&path).map_err(|_error| FuseV1Error::Io)?;
-        Self::chown_fuse_v1_plain_path(&path, uid, gid)
+        Self::create_layout_plain_dir(&path, uid, gid, mode)
     }
 
-    /// Creates an initially empty durable session file.
-    pub fn create_session_layout_file(
+    /// Creates one initially empty whitelisted layout file.
+    pub fn create_layout_file(
         &self,
         abi_path: &str,
         uid: u32,
         gid: u32,
+        mode: u32,
     ) -> Result<(), FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if !Self::is_session_replace_path(&normalized)
             && !Self::is_session_append_path(&normalized)
-            && Self::session_atomic_temp_target(&normalized).is_none()
+            && Self::layout_atomic_temp_target(&normalized).is_none()
+            && !Self::is_agent_wrapper_path(&normalized)
+            && Self::agent_control_target(&normalized).is_none()
         {
             return Err(FuseV1Error::NotControlFile);
         }
-        self.replace_session_plain_file_for_owner(&normalized, b"", uid, gid)
+        self.authorize_layout_path(&normalized, uid)?;
+        self.replace_session_plain_file_for_owner(&normalized, b"", uid, gid)?;
+        Self::set_plain_mode(&self.resolve(&normalized)?, mode)
     }
 
-    /// Renames a same-directory durable session atomic temp file to its final file.
-    pub fn rename_session_atomic_temp(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
+    /// Renames one whitelisted same-directory atomic temp file.
+    pub fn rename_atomic_temp(&self, from: &str, to: &str, uid: u32) -> Result<(), FuseV1Error> {
         let from = normalize_fuse_abi_path(from)?;
         let to = normalize_fuse_abi_path(to)?;
-        if Self::session_atomic_temp_target(&from).as_deref() != Some(to.as_str()) {
+        if Self::layout_atomic_temp_target(&from).as_deref() != Some(to.as_str()) {
             return Err(FuseV1Error::NotControlFile);
         }
+        self.authorize_layout_path(&from, uid)?;
+        self.authorize_layout_path(&to, uid)?;
         let from_path = self.resolve(&from)?;
         let to_path = self.resolve(&to)?;
         let parent = from_path.parent().ok_or(FuseV1Error::InvalidPath)?;
@@ -415,49 +445,243 @@ impl FuseV1Projection {
         let parent_dir = open_fuse_v1_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
         let from_name = fuse_v1_plain_file_name(&from_path).map_err(|_error| FuseV1Error::Io)?;
         let to_name = fuse_v1_plain_file_name(&to_path).map_err(|_error| FuseV1Error::Io)?;
+        let stat = nix::sys::stat::fstatat(
+            &parent_dir,
+            from_name,
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        )
+        .map_err(|_error| FuseV1Error::Io)?;
+        if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFREG)
+        {
+            return Err(FuseV1Error::InvalidPath);
+        }
         nix::fcntl::renameat(&parent_dir, from_name, &parent_dir, to_name)
             .map_err(|_error| FuseV1Error::Io)?;
         parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
     }
 
-    /// Applies mode bits to a durable session layout path.
-    pub fn set_session_layout_mode(&self, abi_path: &str, mode: u32) -> Result<(), FuseV1Error> {
+    /// Applies mode bits to one whitelisted layout path.
+    pub fn set_layout_mode(&self, abi_path: &str, mode: u32, uid: u32) -> Result<(), FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         let path = self.resolve(&normalized)?;
-        if Self::is_session_layout_dir_path(&normalized) {
-            let directory =
-                open_fuse_v1_plain_directory(&path).map_err(|_error| FuseV1Error::Io)?;
-            directory
-                .set_permissions(fs::Permissions::from_mode(mode & 0o7777))
-                .and_then(|()| directory.sync_all())
-                .map_err(|_error| FuseV1Error::Io)?;
-            return Ok(());
-        }
-        if Self::is_session_replace_path(&normalized)
+        let writable = Self::is_session_layout_dir_path(&normalized)
+            || Self::is_agent_lifecycle_dir_path(&normalized)
+            || Self::is_session_replace_path(&normalized)
             || Self::is_session_append_path(&normalized)
-            || Self::session_atomic_temp_target(&normalized).is_some()
-        {
-            let file = open_fuse_v1_plain_file(&path).map_err(|_error| FuseV1Error::Io)?;
-            if !file.metadata().map_err(|_error| FuseV1Error::Io)?.is_file() {
-                return Err(FuseV1Error::Io);
-            }
-            file.set_permissions(fs::Permissions::from_mode(mode & 0o7777))
-                .and_then(|()| file.sync_all())
-                .map_err(|_error| FuseV1Error::Io)?;
-            return Ok(());
+            || Self::layout_atomic_temp_target(&normalized).is_some()
+            || Self::is_agent_wrapper_path(&normalized)
+            || Self::agent_control_target(&normalized).is_some();
+        if !writable {
+            return Err(FuseV1Error::NotControlFile);
         }
-        Err(FuseV1Error::NotControlFile)
+        self.authorize_layout_path(&normalized, uid)?;
+        Self::set_plain_mode(&path, mode)
     }
 
     #[doc(hidden)]
     #[must_use]
-    pub fn session_atomic_temp_target(normalized: &str) -> Option<String> {
+    pub fn layout_atomic_temp_target(normalized: &str) -> Option<String> {
         let (parent, file_name) = normalized.rsplit_once('/')?;
         let rest = file_name.strip_prefix('.')?;
-        let (target_name, _suffix) = rest.split_once(".tmp-")?;
+        let (target_name, suffix) = rest.split_once(".tmp-")?;
+        let mut suffix = suffix.split('-');
+        if suffix.next()?.parse::<u32>().is_err()
+            || suffix.next()?.parse::<u128>().is_err()
+            || suffix.next()?.parse::<u8>().is_err()
+            || suffix.next().is_some()
+        {
+            return None;
+        }
         let target = format!("{parent}/{target_name}");
-        (Self::is_session_replace_path(&target) || Self::is_session_append_path(&target))
-            .then_some(target)
+        (Self::is_session_replace_path(&target)
+            || Self::is_session_append_path(&target)
+            || Self::is_agent_wrapper_path(&target)
+            || Self::agent_control_target(&target).is_some())
+        .then_some(target)
+    }
+
+    fn set_plain_mode(path: &Path, mode: u32) -> Result<(), FuseV1Error> {
+        let metadata = fuse_v1_plain_path_metadata(path).map_err(|_error| FuseV1Error::Io)?;
+        let file = if metadata.is_dir() {
+            open_fuse_v1_plain_directory(path)
+        } else if metadata.is_file() {
+            open_fuse_v1_plain_file(path)
+        } else {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        .map_err(|_error| FuseV1Error::Io)?;
+        file.set_permissions(fs::Permissions::from_mode(mode & 0o7777))
+            .and_then(|()| file.sync_all())
+            .map_err(|_error| FuseV1Error::Io)
+    }
+
+    fn create_layout_plain_dir(
+        path: &Path,
+        uid: u32,
+        gid: u32,
+        mode: u32,
+    ) -> Result<(), FuseV1Error> {
+        let created = plain_fs::create_plain_dir_exclusive(path, mode).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                FuseV1Error::AlreadyExists
+            } else {
+                FuseV1Error::Io
+            }
+        })?;
+        let result = nix::unistd::fchown(
+            &created,
+            Some(nix::unistd::Uid::from_raw(uid)),
+            Some(nix::unistd::Gid::from_raw(gid)),
+        )
+        .and_then(|()| {
+            nix::sys::stat::fchmod(
+                &created,
+                nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+            )
+        })
+        .map_err(|_error| FuseV1Error::Io)
+        .and_then(|()| created.sync_all().map_err(|_error| FuseV1Error::Io));
+        if result.is_err() {
+            drop(created);
+            let _ignored = plain_fs::remove_plain_dir(path);
+        }
+        result
+    }
+
+    fn authorize_layout_path(&self, normalized: &str, uid: u32) -> Result<(), FuseV1Error> {
+        if let Some((home_uid, agent)) = Self::home_agent_path(normalized) {
+            if home_uid != uid {
+                return Err(FuseV1Error::PermissionDenied);
+            }
+            return self.authorize_agent_owner(agent, uid);
+        }
+        if let Some((agent, _control)) = Self::agent_control_target(normalized) {
+            return self.authorize_agent_owner(agent, uid);
+        }
+        if let Some(target) = Self::layout_atomic_temp_target(normalized) {
+            return self.authorize_layout_path(&target, uid);
+        }
+        if let Some(agent) = Self::agent_control_dir_name(normalized) {
+            let path = self.resolve(normalized)?;
+            return match fs::symlink_metadata(path) {
+                Ok(_metadata) => self.authorize_agent_owner(agent, uid),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(_error) => Err(FuseV1Error::Io),
+            };
+        }
+        if let Some(agent) = Self::agent_control_tree_name(normalized) {
+            return self.authorize_agent_owner(agent, uid);
+        }
+        if let Some(agent) = Self::agent_wrapper_name(normalized) {
+            return self.authorize_agent_owner(agent, uid);
+        }
+        Err(FuseV1Error::NotControlFile)
+    }
+
+    fn validate_agent_layout_content(
+        target: &str,
+        content: &[u8],
+        uid: u32,
+    ) -> Result<(), FuseV1Error> {
+        let Some((_agent, control)) = Self::agent_control_target(target) else {
+            return std::str::from_utf8(content)
+                .map(|_content| ())
+                .map_err(|_error| FuseV1Error::InvalidContent);
+        };
+        let content = std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+        if matches!(control, "owner" | "uid") && content.trim().parse::<u32>().ok() != Some(uid) {
+            return Err(FuseV1Error::PermissionDenied);
+        }
+        validate_agent_bootstrap_control_content(control, content)
+            .map_err(|_error| FuseV1Error::InvalidContent)
+    }
+
+    pub(crate) fn authorize_agent_owner(&self, agent: &str, uid: u32) -> Result<(), FuseV1Error> {
+        let control = self.root.join("agent").join(format!("{agent}.d"));
+        let metadata = fs::symlink_metadata(&control).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                FuseV1Error::NotFound
+            } else {
+                FuseV1Error::Io
+            }
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        let owner = control.join("owner");
+        match plain_fs::read_small_text_file(&owner, 64) {
+            Ok(owner) => owner
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|owner| *owner == uid)
+                .map(|_owner| ())
+                .ok_or(FuseV1Error::PermissionDenied),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (metadata.uid() == uid)
+                .then_some(())
+                .ok_or(FuseV1Error::PermissionDenied),
+            Err(_error) => Err(FuseV1Error::InvalidContent),
+        }
+    }
+
+    fn agent_control_dir_name(normalized: &str) -> Option<&str> {
+        let mut parts = normalized.split('/');
+        let (Some("agent"), Some(control), None) = (parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        let agent = control.strip_suffix(".d")?;
+        is_object_name(agent).then_some(agent)
+    }
+
+    fn agent_control_tree_name(normalized: &str) -> Option<&str> {
+        let mut parts = normalized.split('/');
+        let (Some("agent"), Some(control), Some("hooks")) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        if !matches!(parts.next(), None | Some("pre.d" | "post.d")) || parts.next().is_some() {
+            return None;
+        }
+        let agent = control.strip_suffix(".d")?;
+        is_object_name(agent).then_some(agent)
+    }
+
+    fn agent_wrapper_name(normalized: &str) -> Option<&str> {
+        let mut parts = normalized.split('/');
+        let (Some("agent"), Some(agent), None) = (parts.next(), parts.next(), parts.next()) else {
+            return None;
+        };
+        is_object_name(agent).then_some(agent)
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_agent_wrapper_path(normalized: &str) -> bool {
+        Self::agent_wrapper_name(normalized).is_some()
+    }
+
+    fn agent_control_target(normalized: &str) -> Option<(&str, &str)> {
+        let mut parts = normalized.split('/');
+        let (Some("agent"), Some(control), Some(file), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        let agent = control.strip_suffix(".d")?;
+        (is_object_name(agent) && AGENT_CONTROL_FILES.contains(&file)).then_some((agent, file))
+    }
+
+    fn home_agent_path(normalized: &str) -> Option<(u32, &str)> {
+        let mut parts = normalized.split('/');
+        let (Some("home"), Some(uid), Some("agent"), Some(agent)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        Some((uid.parse().ok()?, is_object_name(agent).then_some(agent)?))
     }
 
     fn is_agent_log_control_path(normalized: &str) -> bool {
@@ -614,6 +838,43 @@ impl FuseV1Projection {
                         | ["context", "swap", "chunk"]
                         | ["context", "dedup", "blob"]
                 )
+            }
+            _ => false,
+        }
+    }
+
+    fn is_agent_lifecycle_dir_path(normalized: &str) -> bool {
+        if Self::agent_control_dir_name(normalized).is_some()
+            || Self::agent_control_tree_name(normalized).is_some()
+        {
+            return true;
+        }
+        let parts = normalized.split('/').collect::<Vec<_>>();
+        match *parts.as_slice() {
+            ["home", uid, "agent", agent]
+            | [
+                "home",
+                uid,
+                "agent",
+                agent,
+                "root" | "data" | "cache" | "log" | "session",
+            ] if uid.parse::<u32>().is_ok() && is_object_name(agent) => true,
+            ["home", uid, "agent", agent, "session", "index"]
+            | [
+                "home",
+                uid,
+                "agent",
+                agent,
+                "session",
+                "index",
+                "by-cwd" | "by-hash" | "by-uuid",
+            ] if uid.parse::<u32>().is_ok() && is_object_name(agent) => true,
+            ["home", uid, "agent", agent, "session", session, "terminal"]
+                if uid.parse::<u32>().is_ok()
+                    && is_object_name(agent)
+                    && is_object_name(session) =>
+            {
+                true
             }
             _ => false,
         }

@@ -54,6 +54,8 @@ pub enum FuseV1Error {
     NotFile,
     /// Directory is not empty.
     NotEmpty,
+    /// Exclusive creation found an existing path.
+    AlreadyExists,
     /// Mutation is outside writable durable ABI state.
     ReadOnly,
     /// Writes through this projection are limited to ABI control files.
@@ -243,6 +245,7 @@ impl FuseV1Error {
             Self::NotDirectory => "ENOTDIR",
             Self::NotFile => "EISDIR",
             Self::NotEmpty => "ENOTEMPTY",
+            Self::AlreadyExists => "EEXIST",
             Self::ReadOnly => "EROFS",
             Self::TooLarge => "EMSGSIZE",
             Self::PermissionDenied => "EACCES",

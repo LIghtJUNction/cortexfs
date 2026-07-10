@@ -1,3 +1,4 @@
+pub mod socket;
 #[path = "fuse/v1-model-alias.rs"]
 pub mod v1_model_alias;
 #[path = "fuse/v1-path.rs"]

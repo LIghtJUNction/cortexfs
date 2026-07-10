@@ -61,7 +61,7 @@ impl Filesystem for CortexFuse {
 
     fn setattr(
         &self,
-        _req: &Request,
+        req: &Request,
         ino: INodeNo,
         mode: Option<u32>,
         uid: Option<u32>,
@@ -101,7 +101,25 @@ impl Filesystem for CortexFuse {
         if mode_only {
             let path = path_for_inode_or_reply!(self, ino, reply);
             let mode = mode.unwrap_or_default();
-            if let Err(error) = self.projection.set_session_layout_mode(&path, mode) {
+            let has_socket_overlay = match self.has_socket_overlay(&path) {
+                Ok(value) => value,
+                Err(error) => {
+                    reply.error(errno(error));
+                    return;
+                }
+            };
+            if has_socket_overlay {
+                if let Err(error) = self.set_socket_overlay_mode(&path, req.uid(), mode) {
+                    reply.error(errno(error));
+                    return;
+                }
+                match self.projected_getattr(&path) {
+                    Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
+                    Err(error) => reply.error(errno(error)),
+                }
+                return;
+            }
+            if let Err(error) = self.projection.set_layout_mode(&path, mode, req.uid()) {
                 reply.error(if matches!(error, FuseV1Error::NotControlFile) {
                     readonly_mutation_errno()
                 } else {
@@ -135,7 +153,10 @@ impl Filesystem for CortexFuse {
             reply.error(error);
             return;
         }
-        if let Err(error) = self.projection.write_control_file_at(&path, 0, b"") {
+        if let Err(error) =
+            self.projection
+                .write_fuse_file_at_for_owner(&path, 0, b"", req.uid(), req.gid())
+        {
             reply.error(errno(error));
             return;
         }
@@ -218,8 +239,8 @@ impl Filesystem for CortexFuse {
         req: &Request,
         parent: INodeNo,
         name: &OsStr,
-        _mode: u32,
-        _umask: u32,
+        mode: u32,
+        umask: u32,
         reply: ReplyEntry,
     ) {
         let path = create_session_layout_child_or_reply!(
@@ -228,7 +249,8 @@ impl Filesystem for CortexFuse {
             parent,
             name,
             reply,
-            create_session_layout_dir
+            create_layout_dir,
+            (mode & 0o7777) & !umask
         );
         match self.projected_node_for_path(&path) {
             Ok(node) => {
@@ -247,8 +269,8 @@ impl Filesystem for CortexFuse {
         req: &Request,
         parent: INodeNo,
         name: &OsStr,
-        _mode: u32,
-        _umask: u32,
+        mode: u32,
+        umask: u32,
         _flags: i32,
         reply: ReplyCreate,
     ) {
@@ -258,7 +280,8 @@ impl Filesystem for CortexFuse {
             parent,
             name,
             reply,
-            create_session_layout_file
+            create_layout_file,
+            (mode & 0o7777) & !umask
         );
         match self.projected_node_for_path(&path) {
             Ok(node) => {

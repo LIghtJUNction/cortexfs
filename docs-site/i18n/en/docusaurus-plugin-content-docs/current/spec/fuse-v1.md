@@ -24,6 +24,8 @@ getattr
 read
 write small control files
 atomic replace
+controlled agent lifecycle creation
+remove empty durable user/shared directories
 read-only executable object projection
 Unix socket path projection
 session files
@@ -94,6 +96,48 @@ system, user, and shared tool source tiers. That projection is not durable
 state and must not be represented by writing placeholder files or default
 symlinks into `home/<uid>/tool`.
 
+## Controlled Agent Lifecycle Writes
+
+FUSE exposes `agent/` as mode `01777` so `default_permissions` lets an
+unprivileged owner begin an agent creation. The backing `agent/` directory keeps
+its original mode. This projected permission does not grant general writes:
+
+```text
+agent/<name>.d/                         owned control directory and hook skeleton
+agent/<name>.d/.<control>.tmp-...       atomic control temporary file
+agent/<name>                            owned executable wrapper
+agent/.<name>.tmp-...                   atomic wrapper temporary file
+agent/<name>.sock                       owned socket placeholder or runtime alias
+home/<uid>/agent/<name>/...             documented agent-home skeleton
+```
+
+The request uid must match `home/<uid>` and `agent/<name>.d/owner`. Before the
+`owner` control exists, the new plain control directory must be owned by the
+request uid. Atomic rename is same-directory only, accepts the generated
+`.<target>.tmp-<pid>-<nonce>-<attempt>` shape, and may target only the matching
+known control file or wrapper. Symlinks, escaped paths, another user's agent,
+unknown controls, and arbitrary files under `agent/` or `home/` fail.
+
+## Runtime Socket Aliases
+
+Agent start binds live sockets below `/run/user/<uid>/cortexfs/` and persists
+only these owner-authorized aliases in the FUSE backing tree:
+
+```text
+agent/<name>.sock
+  -> /run/user/<uid>/cortexfs/agent/.../<name>.sock
+
+home/<uid>/agent/<name>/session/<session>/terminal/main.sock
+  -> /run/user/<uid>/cortexfs/terminal/<name>/<session>/main.sock
+```
+
+Targets must be absolute, remain below the matching uid runtime prefix, and
+match the visible agent/session name. Alias parents are opened without following
+symlinks. Creation, replacement, and unlink require the agent owner uid. A
+stopped host-created agent may retain a real socket placeholder; start replaces
+it with the runtime alias. Start must fail before recording `ready` when either
+visible alias cannot be created and verified with `readlink`.
+
 ## Extended Attributes
 
 FUSE exposes read-only `user.cortexfs.*` extended attributes so agents can
@@ -126,3 +170,12 @@ Token counts are estimates unless a runtime later writes exact tokenizer
 metadata. The default estimator is `byte-estimate-v1`, a cheap read-before-read
 heuristic that does not scan full file contents. These xattrs are not control
 files; `setxattr` and `removexattr` must fail.
+
+## Directory Removal
+
+FUSE v1 supports `rmdir` only for empty durable plain directories under
+`home/<uid>/...` and `shared/<space>/...`.
+
+It must not remove `/ctx`, top-level ABI directories, global object projections,
+virtual paths, sockets, symlinks, or non-empty directories. Non-empty directories
+fail with `ENOTEMPTY`; read-only ABI/projection paths fail with `EROFS`.

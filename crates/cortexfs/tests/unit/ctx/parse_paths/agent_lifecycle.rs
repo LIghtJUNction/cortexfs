@@ -1,3 +1,5 @@
+use std::os::unix::fs::FileTypeExt;
+
 #[test]
 fn parses_agent_lifecycle_commands() {
     let new = cmd!(
@@ -201,6 +203,10 @@ fn agent_new_host_fallback_creates_spark_worker_when_lifecycle_tool_is_absent() 
 
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
     assert!(root.join("agent/worker").is_file());
+    assert!(matches!(
+        fs::symlink_metadata(root.join("agent/worker.sock")),
+        Ok(metadata) if metadata.file_type().is_socket()
+    ));
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/label"))
             .unwrap_or_default(),
@@ -238,6 +244,87 @@ fn agent_new_host_fallback_creates_spark_worker_when_lifecycle_tool_is_absent() 
         Err(ref error)
             if error.code == 69 && error.message == "agent already exists: worker"
     ));
+}
+
+#[test]
+fn agent_new_host_fallback_rejects_existing_socket_or_symlink() {
+    for kind in ["socket", "symlink"] {
+        let root = clean_test_dir(&format!("ctx-agent-new-host-{kind}-conflict"));
+        assert!(fs::create_dir_all(root.join("agent")).is_ok());
+        let socket = root.join("agent/worker.sock");
+        let _listener = if kind == "socket" {
+            std::os::unix::net::UnixListener::bind(&socket).ok()
+        } else {
+            assert!(std::os::unix::fs::symlink("missing-runtime.sock", &socket).is_ok());
+            None
+        };
+        let Ok(Command::Agent(AgentArgs::New(args))) = cmd!("agent", "new", "worker") else {
+            return;
+        };
+
+        assert!(agent_new_host_fallback(&root, &args).is_err(), "{kind}");
+        assert!(fs::symlink_metadata(&socket).is_ok(), "{kind}");
+        assert!(!root.join("agent/worker").exists(), "{kind}");
+        assert!(!root.join("agent/worker.d").exists(), "{kind}");
+    }
+}
+
+#[test]
+fn agent_new_host_fallback_rejects_existing_home_without_partial_object() {
+    let root = clean_test_dir("ctx-agent-new-host-home-conflict");
+    let home = ctx_home(&root)
+        .unwrap_or_default()
+        .join("agent/worker");
+    assert!(fs::create_dir_all(&home).is_ok());
+    assert!(fs::write(home.join("keep"), "keep\n").is_ok());
+    let Ok(Command::Agent(AgentArgs::New(args))) = cmd!("agent", "new", "worker") else {
+        return;
+    };
+
+    assert!(agent_new_host_fallback(&root, &args).is_err());
+    assert_eq!(fs::read_to_string(home.join("keep")).unwrap_or_default(), "keep\n");
+    assert!(!root.join("agent/worker").exists());
+    assert!(!root.join("agent/worker.d").exists());
+    assert!(!root.join("agent/worker.sock").exists());
+}
+
+#[test]
+fn agent_new_host_fallback_rolls_back_after_socket_creation_failure() {
+    let base = clean_test_dir("ctx-agent-new-host-socket-rollback");
+    let root = base.join("x".repeat(80));
+    assert!(fs::create_dir_all(&root).is_ok());
+    assert!(root.join("agent/worker.sock").as_os_str().len() > 108);
+    let Ok(Command::Agent(AgentArgs::New(args))) = cmd!("agent", "new", "worker") else {
+        return;
+    };
+
+    assert!(agent_new_host_fallback(&root, &args).is_err());
+    assert!(!root.join("agent/worker").exists());
+    assert!(!root.join("agent/worker.d").exists());
+    assert!(fs::symlink_metadata(root.join("agent/worker.sock")).is_err());
+    assert!(!ctx_home(&root).unwrap_or_default().join("agent/worker").exists());
+}
+
+#[test]
+fn agent_new_host_fallback_rolls_back_after_home_creation_failure() {
+    if nix::unistd::Uid::current().is_root() {
+        return;
+    }
+    let root = clean_test_dir("ctx-agent-new-host-home-rollback");
+    let home_parent = ctx_home(&root)
+        .unwrap_or_default()
+        .join("agent");
+    assert!(fs::create_dir_all(&home_parent).is_ok());
+    assert!(fs::set_permissions(&home_parent, fs::Permissions::from_mode(0o555)).is_ok());
+    let Ok(Command::Agent(AgentArgs::New(args))) = cmd!("agent", "new", "worker") else {
+        return;
+    };
+
+    assert!(agent_new_host_fallback(&root, &args).is_err());
+    assert!(!root.join("agent/worker").exists());
+    assert!(!root.join("agent/worker.d").exists());
+    assert!(fs::symlink_metadata(root.join("agent/worker.sock")).is_err());
+    assert!(!home_parent.join("worker").exists());
 }
 
 #[test]
@@ -287,21 +374,21 @@ fn agent_stop_host_fallback_cancels_owned_child_agents() {
     create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
     create_agent_fixture(
         &root,
-        "worker",
+        "helper",
         "agent:coder session:default run:r1",
         "busy",
         "101",
     );
-    create_agent_fixture(&root, "nested", "agent:worker", "ready", "102");
+    create_agent_fixture(&root, "nested", "agent:helper", "ready", "102");
     create_agent_fixture(&root, "reviewer", "agent:base", "busy", "103");
     write_text_file(&root.join("agent/coder.d/log"), "");
-    write_text_file(&root.join("agent/worker.d/log"), "");
+    write_text_file(&root.join("agent/helper.d/log"), "");
     write_text_file(&root.join("agent/nested.d/log"), "");
     write_text_file(&root.join("agent/reviewer.d/log"), "");
     assert!(fs::create_dir_all(
         ctx_home(&root)
             .unwrap_or_default()
-            .join("agent/worker/session/work-live")
+            .join("agent/helper/session/work-live")
     )
     .is_ok());
     let session = ctx_home(&root)
@@ -310,7 +397,7 @@ fn agent_stop_host_fallback_cancels_owned_child_agents() {
     create_complete_session_layout(&session);
     let child = session.join("context/child/work-123");
     assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("agent"), "helper\n");
     write_text_file(&child.join("session"), "default\n");
     write_text_file(&child.join("status"), "active\n");
     write_text_file(&child.join("handoff.md"), "Task: implement.\n");
@@ -319,7 +406,7 @@ fn agent_stop_host_fallback_cancels_owned_child_agents() {
 
     assert_eq!(agent_stop(&root, "coder"), Ok(ExitCode::SUCCESS));
 
-    for name in ["coder", "worker", "nested"] {
+    for name in ["coder", "helper", "nested"] {
         assert_eq!(
             fs::read_to_string(root.join(format!("agent/{name}.d/status"))).unwrap_or_default(),
             "dead\n",
@@ -354,11 +441,11 @@ fn agent_stop_host_fallback_cancels_owned_child_agents() {
     );
     assert_eq!(
         fs::read_to_string(child.join("result.md")).unwrap_or_default(),
-        "Child agent `worker` cancelled because the parent agent stopped.\n"
+        "Child agent `helper` cancelled because the parent agent stopped.\n"
     );
     assert_eq!(
-        agent_terminal_units(&root, "worker"),
-        Ok(vec!["cortexfs-agent-worker-work-live-terminal".to_owned()])
+        agent_terminal_units(&root, "helper"),
+        Ok(vec!["cortexfs-agent-helper-work-live-terminal".to_owned()])
     );
     assert_eq!(
         agent_wait(&root, "coder", Some("default"), "work-123"),
@@ -367,19 +454,288 @@ fn agent_stop_host_fallback_cancels_owned_child_agents() {
 }
 
 #[test]
+fn agent_stop_host_fallback_retains_unwritable_retired_worker() {
+    let root = clean_test_dir("ctx-agent-stop-retired-worker");
+    create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
+    create_agent_fixture(
+        &root,
+        "worker",
+        "agent:coder session:default run:r1",
+        "busy",
+        "101",
+    );
+    write_text_file(&root.join("agent/coder.d/log"), "");
+    write_text_file(&root.join("agent/worker.d/log"), "retained\n");
+    let metadata = fs::metadata(root.join("agent/worker.d/status"));
+    assert!(metadata.is_ok(), "{metadata:?}");
+    let Ok(metadata) = metadata else {
+        return;
+    };
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(0o444);
+    assert!(
+        fs::set_permissions(root.join("agent/worker.d/status"), permissions).is_ok()
+    );
+    let session = ctx_home(&root)
+        .unwrap_or_default()
+        .join("agent/coder/session/default");
+    create_complete_session_layout(&session);
+    let child = session.join("context/child/work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("session"), "default\n");
+    write_text_file(&child.join("status"), "active\n");
+    write_text_file(&child.join("handoff.md"), "Task: retained worker.\n");
+    write_text_file(&child.join("result.md"), "");
+    write_text_file(&child.join("refs.jsonl"), "");
+
+    assert_eq!(agent_stop(&root, "coder"), Ok(ExitCode::SUCCESS));
+
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/status")).unwrap_or_default(),
+        "dead\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/worker.d/status")).unwrap_or_default(),
+        "busy\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/worker.d/pid")).unwrap_or_default(),
+        "101\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/worker.d/log")).unwrap_or_default(),
+        "retained\n"
+    );
+    assert_eq!(
+        fs::read_to_string(child.join("status")).unwrap_or_default(),
+        "active\n"
+    );
+    assert_eq!(
+        fs::read_to_string(child.join("result.md")).unwrap_or_default(),
+        ""
+    );
+}
+
+#[test]
+fn agent_stop_host_fallback_validates_owned_children_before_stopping_parent() {
+    let root = clean_test_dir("ctx-agent-stop-invalid-owned-child");
+    let outside = clean_test_dir("ctx-agent-stop-invalid-owned-child-outside");
+    create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
+    create_agent_fixture(&root, "helper", "agent:coder", "busy", "101");
+    write_text_file(&root.join("agent/coder.d/log"), "");
+    assert!(fs::remove_file(root.join("agent/helper.d/life")).is_ok());
+    assert!(
+        symlink(
+            outside.join("life"),
+            root.join("agent/helper.d/life")
+        )
+        .is_ok()
+    );
+
+    let result = agent_stop(&root, "coder");
+
+    assert!(matches!(result, Err(ref error) if error.code == 69));
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/status")).unwrap_or_default(),
+        "busy\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/pid")).unwrap_or_default(),
+        "100\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/log")).unwrap_or_default(),
+        ""
+    );
+}
+
+#[test]
+fn agent_stop_host_fallback_validates_grandchildren_before_any_stop_write() {
+    let root = clean_test_dir("ctx-agent-stop-invalid-grandchild");
+    let outside = clean_test_dir("ctx-agent-stop-invalid-grandchild-outside");
+    create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
+    create_agent_fixture(&root, "helper", "agent:coder", "busy", "101");
+    create_agent_fixture(&root, "nested", "agent:helper", "ready", "102");
+    for name in ["coder", "helper", "nested"] {
+        write_text_file(&root.join(format!("agent/{name}.d/log")), "");
+    }
+    assert!(fs::remove_file(root.join("agent/nested.d/life")).is_ok());
+    assert!(
+        symlink(
+            outside.join("life"),
+            root.join("agent/nested.d/life")
+        )
+        .is_ok()
+    );
+
+    let result = agent_stop(&root, "coder");
+
+    assert!(matches!(result, Err(ref error) if error.code == 69));
+    for (name, status, pid) in [
+        ("coder", "busy\n", "100\n"),
+        ("helper", "busy\n", "101\n"),
+        ("nested", "ready\n", "102\n"),
+    ] {
+        assert_eq!(
+            fs::read_to_string(root.join(format!("agent/{name}.d/status")))
+                .unwrap_or_default(),
+            status,
+            "{name} status"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(format!("agent/{name}.d/pid")))
+                .unwrap_or_default(),
+            pid,
+            "{name} pid"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(format!("agent/{name}.d/log")))
+                .unwrap_or_default(),
+            "",
+            "{name} log"
+        );
+    }
+}
+
+#[test]
+fn agent_stop_host_fallback_rejects_malformed_grandchild_parent_before_writes() {
+    let root = clean_test_dir("ctx-agent-stop-invalid-grandchild-parent");
+    create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
+    create_agent_fixture(&root, "helper", "agent:coder", "busy", "101");
+    create_agent_fixture(&root, "nested", "agent:helper", "ready", "102");
+    for name in ["coder", "helper", "nested"] {
+        write_text_file(&root.join(format!("agent/{name}.d/log")), "");
+    }
+    write_text_file(&root.join("agent/nested.d/parent"), "session:default\n");
+
+    let result = agent_stop(&root, "coder");
+
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.code == 2 && error.message.contains("invalid agent parent for nested")
+    ));
+    for (name, status) in [
+        ("coder", "busy\n"),
+        ("helper", "busy\n"),
+        ("nested", "ready\n"),
+    ] {
+        assert_eq!(
+            fs::read_to_string(root.join(format!("agent/{name}.d/status")))
+                .unwrap_or_default(),
+            status,
+            "{name} status"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join(format!("agent/{name}.d/log")))
+                .unwrap_or_default(),
+            "",
+            "{name} log"
+        );
+    }
+}
+
+#[test]
+fn agent_stop_host_fallback_rejects_ownership_cycle_before_any_stop_write() {
+    let root = clean_test_dir("ctx-agent-stop-cycle");
+    create_agent_fixture(&root, "coder", "agent:nested", "busy", "100");
+    create_agent_fixture(&root, "nested", "agent:coder", "ready", "102");
+    for name in ["coder", "nested"] {
+        write_text_file(&root.join(format!("agent/{name}.d/log")), "");
+    }
+
+    let result = agent_stop(&root, "coder");
+
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.code == 69 && error.message.contains("agent stop ownership cycle")
+    ));
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/status")).unwrap_or_default(),
+        "busy\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/nested.d/status")).unwrap_or_default(),
+        "ready\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/log")).unwrap_or_default(),
+        ""
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/nested.d/log")).unwrap_or_default(),
+        ""
+    );
+}
+
+#[test]
+fn agent_stop_host_fallback_preflights_child_result_channel_before_control_writes() {
+    let root = clean_test_dir("ctx-agent-stop-unwritable-child-result");
+    create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
+    create_agent_fixture(
+        &root,
+        "helper",
+        "agent:coder session:default run:r1",
+        "busy",
+        "101",
+    );
+    for name in ["coder", "helper"] {
+        write_text_file(&root.join(format!("agent/{name}.d/log")), "");
+    }
+    let session = ctx_home(&root)
+        .unwrap_or_default()
+        .join("agent/coder/session/default");
+    create_complete_session_layout(&session);
+    let child = session.join("context/child/work-123");
+    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
+    write_text_file(&child.join("agent"), "helper\n");
+    write_text_file(&child.join("session"), "default\n");
+    write_text_file(&child.join("status"), "active\n");
+    write_text_file(&child.join("handoff.md"), "Task: test preflight.\n");
+    write_text_file(&child.join("result.md"), "");
+    write_text_file(&child.join("refs.jsonl"), "");
+    let metadata = fs::metadata(child.join("result.md"));
+    assert!(metadata.is_ok(), "{metadata:?}");
+    let Ok(metadata) = metadata else {
+        return;
+    };
+    let mut permissions = metadata.permissions();
+    permissions.set_mode(0o444);
+    assert!(fs::set_permissions(child.join("result.md"), permissions).is_ok());
+
+    let result = agent_stop(&root, "coder");
+
+    assert!(matches!(result, Err(ref error) if error.code == 69));
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/status")).unwrap_or_default(),
+        "busy\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/helper.d/status")).unwrap_or_default(),
+        "busy\n"
+    );
+    assert_eq!(
+        fs::read_to_string(child.join("status")).unwrap_or_default(),
+        "active\n"
+    );
+}
+
+#[test]
 fn agent_stop_host_fallback_cancels_sessionless_owned_child_agent() {
     let root = clean_test_dir("ctx-agent-stop-host-fallback-sessionless-child");
     create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
-    create_agent_fixture(&root, "worker", "agent:coder", "busy", "101");
+    create_agent_fixture(&root, "helper", "agent:coder", "busy", "101");
     write_text_file(&root.join("agent/coder.d/log"), "");
-    write_text_file(&root.join("agent/worker.d/log"), "");
+    write_text_file(&root.join("agent/helper.d/log"), "");
     let session = ctx_home(&root)
         .unwrap_or_default()
         .join("agent/coder/session/feature");
     create_complete_session_layout(&session);
     let child = session.join("context/child/work-live");
     assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
+    write_text_file(&child.join("agent"), "helper\n");
     write_text_file(&child.join("session"), "feature\n");
     write_text_file(&child.join("status"), "active\n");
     write_text_file(&child.join("handoff.md"), "Task: implement.\n");
@@ -389,16 +745,16 @@ fn agent_stop_host_fallback_cancels_sessionless_owned_child_agent() {
     assert_eq!(agent_stop(&root, "coder"), Ok(ExitCode::SUCCESS));
 
     assert_eq!(
-        fs::read_to_string(root.join("agent/worker.d/status")).unwrap_or_default(),
+        fs::read_to_string(root.join("agent/helper.d/status")).unwrap_or_default(),
         "dead\n"
     );
     assert_eq!(
-        fs::read_to_string(root.join("agent/worker.d/pid")).unwrap_or_default(),
+        fs::read_to_string(root.join("agent/helper.d/pid")).unwrap_or_default(),
         "\n"
     );
     assert_eq!(
-        fs::read_to_string(root.join("agent/worker.d/log")).unwrap_or_default(),
-        "{\"type\":\"agent.stop\",\"agent\":\"worker\",\"status\":\"cancelled\"}\n"
+        fs::read_to_string(root.join("agent/helper.d/log")).unwrap_or_default(),
+        "{\"type\":\"agent.stop\",\"agent\":\"helper\",\"status\":\"cancelled\"}\n"
     );
     assert_eq!(
         fs::read_to_string(child.join("status")).unwrap_or_default(),

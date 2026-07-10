@@ -365,6 +365,23 @@ pending or active parent `context/child/<child>/` channel, the fallback records
 that channel as `cancelled`, making the terminal state visible to
 `ctx agent wait`. It is not a second workflow or queue namespace.
 
+Retired reference agents `base`, `worker`, and `executor` are retained for
+manual review and never participate in this stop cascade, even when legacy
+`parent` and `life` controls make them look parent-owned. Their controls,
+runtime status, and parent child-result channels remain unchanged.
+
+Before the supervisor fallback resets a unit or writes a control, it builds and
+validates the complete non-retired descendant plan. This includes ownership
+cycle detection, no-follow writable checks for every planned control, and
+validation of existing pending/active parent child-result channels. Execution
+then follows validated post-order: descendants before their parent. A planning
+error leaves every planned control and cancellation channel unchanged.
+For a dedicated temporary `worker-*` or `executor-*`, that same plan validates
+the complete cleanup before stopping anything: wrapper/socket paths must be
+absent or removable non-directories, and every control-tree directory must be
+owner-writable. Control-tree symlink entries are cached as leaf unlinks and are
+never followed. Cleanup executes only the cached post-order entries.
+
 Recommended implementation:
 
 ```text

@@ -1,5 +1,5 @@
 mod model_alias_tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -8,7 +8,7 @@ mod model_alias_tests {
     use cortexfs::{FuseV1Error, FuseV1Projection, ensure_v1_reference_tree};
     use fuser::{Filesystem, INodeNo};
 
-    use super::super::{CortexFuse, FUSE_V1_ROOT_INODE};
+    use super::super::{CortexFuse, FUSE_V1_ROOT_INODE, SocketOverlay};
 
     #[test]
     fn unlink_model_path_ignores_non_symlink_provider_entries() {
@@ -82,11 +82,18 @@ mod model_alias_tests {
 
         assert_eq!(fs.remember_lookup(&node), Ok(()));
         assert_eq!(fs.path_for_inode(inode), Ok("status".to_owned()));
-        assert!(
-            fs.socket_overlays
-                .lock()
-                .is_ok_and(|mut sockets| sockets.insert("agent/coder.sock".to_owned()))
-        );
+        assert!(fs.socket_overlays.lock().is_ok_and(|mut sockets| {
+            sockets
+                .insert(
+                    "agent/coder.sock".to_owned(),
+                    SocketOverlay {
+                        uid: 1000,
+                        gid: 1000,
+                        mode: 0o777,
+                    },
+                )
+                .is_none()
+        }));
         fs.destroy();
 
         assert_eq!(fs.path_for_inode(inode), Err(FuseV1Error::NotFound));
@@ -115,7 +122,7 @@ mod model_alias_tests {
                 (42, "model".to_owned()),
             ])),
             lookup_counts: Mutex::new(HashMap::new()),
-            socket_overlays: Mutex::new(HashSet::new()),
+            socket_overlays: Mutex::new(HashMap::new()),
         }
     }
 }

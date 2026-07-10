@@ -196,14 +196,42 @@ pub(crate) fn agent_trajectory(
     })?;
     let report = validate_trajectory(&trajectory);
     if !report.is_ok() {
-        return Err(CliError::unavailable(format!(
+        const MAX_REPORTED_ISSUES: usize = 16;
+        let mut message = format!(
             "invalid trajectory projection ({} issues)",
             report.issues().len()
-        )));
+        );
+        for issue in report.issues().iter().take(MAX_REPORTED_ISSUES) {
+            message.push_str("\n- ");
+            message.push_str(&format_trajectory_issue(issue));
+        }
+        let remaining = report.issues().len().saturating_sub(MAX_REPORTED_ISSUES);
+        if remaining > 0 {
+            message.push_str("\n- ");
+            message.push_str(&remaining.to_string());
+            message.push_str(" more issues not shown");
+        }
+        return Err(CliError::unavailable(message));
     }
     let body = serde_json::to_string_pretty(&trajectory)
         .map_err(|error| CliError::unavailable(format!("cannot encode trajectory: {error}")))?;
     print_terminal_text(&body)
+}
+
+pub(crate) fn format_trajectory_issue(issue: &TrajectoryIssue) -> String {
+    const MAX_ISSUE_CHARS: usize = 256;
+    const ELLIPSIS_CHARS: usize = 3;
+
+    let safe = terminal_safe_text(&issue.to_string());
+    let mut characters = safe.chars();
+    let mut bounded = characters
+        .by_ref()
+        .take(MAX_ISSUE_CHARS - ELLIPSIS_CHARS)
+        .collect::<String>();
+    if characters.next().is_some() {
+        bounded.push_str("...");
+    }
+    bounded
 }
 
 pub(crate) fn ping(root: &Path, path: &str) -> Result<ExitCode, CliError> {

@@ -18,7 +18,8 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     parent,
                     name,
                     reply,
-                    create_session_layout_file
+                    create_layout_file,
+                    (mode & 0o7777) & !umask
                 );
                 match self.projected_node_for_path(&path) {
                     Ok(node) => self.reply_entry(&node, reply),
@@ -41,6 +42,24 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     return;
                 }
             };
+            if FuseV1Projection::is_socket_alias_path(&path)
+                && let Err(error) = self.projection.authorize_socket_alias(&path, req.uid())
+            {
+                reply.error(errno(error));
+                return;
+            }
+            if FuseV1Projection::is_socket_alias_path(&path) {
+                match self.projection.create_socket_placeholder(
+                    &path,
+                    req.uid(),
+                    req.gid(),
+                    (mode & 0o7777) & !umask,
+                ) {
+                    Ok(node) => self.reply_entry(&node, reply),
+                    Err(error) => reply.error(errno(error)),
+                }
+                return;
+            }
             match self.projected_getattr(&path) {
                 Ok(_attr) => {
                     reply.error(Errno::EEXIST);
@@ -52,22 +71,21 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     return;
                 }
             }
-            if let Err(_error) = self
-                .socket_overlays
-                .lock()
-                .map_err(|_error| FuseV1Error::Io)
-                .map(|mut sockets| {
-                    sockets.insert(path.clone());
-                })
+            let permissions = (mode & 0o7777) & !umask;
+            if self
+                .insert_socket_overlay(&path, req.uid(), req.gid(), permissions)
+                .is_err()
             {
                 reply.error(Errno::EIO);
                 return;
             }
-            let permissions = (mode & 0o7777) & !umask;
-            self.reply_entry(&socket_node(&path, permissions), reply);
+            self.reply_entry(
+                &socket_node(&path, permissions, req.uid(), req.gid()),
+                reply,
+            );
         }
 
-        fn unlink(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        fn unlink(&self, req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEmpty) {
             match self.unlink_model_path(parent, name) {
                 Ok(true) => {
                     reply.ok();
@@ -79,17 +97,27 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     return;
                 }
             }
-            let path = match self.socket_child_path(parent, name) {
+            let path = match self.socket_alias_child_path(parent, name) {
                 Ok(path) => path,
+                Err(_error) => match self.socket_child_path(parent, name) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        reply.error(errno(error));
+                        return;
+                    }
+                },
+            };
+            let socket_alias = FuseV1Projection::is_socket_alias_path(&path);
+            if socket_alias
+                && let Err(error) = self.projection.authorize_socket_alias(&path, req.uid())
+            {
+                reply.error(errno(error));
+                return;
+            }
+            let removed_overlay = match self.remove_socket_overlay(&path, req.uid()) {
+                Ok(removed) => removed,
                 Err(error) => {
                     reply.error(errno(error));
-                    return;
-                }
-            };
-            let removed_overlay = match self.socket_overlays.lock() {
-                Ok(mut sockets) => sockets.remove(&path),
-                Err(_error) => {
-                    reply.error(Errno::EIO);
                     return;
                 }
             };
@@ -99,6 +127,19 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     return;
                 }
                 reply.ok();
+                return;
+            }
+            if socket_alias {
+                match self.projection.remove_socket_alias(&path, req.uid()) {
+                    Ok(()) => {
+                        if let Err(error) = self.forget_path(&path) {
+                            reply.error(errno(error));
+                            return;
+                        }
+                        reply.ok();
+                    }
+                    Err(error) => reply.error(errno(error)),
+                }
                 return;
             }
             match self.projection.getattr(&path) {
@@ -120,20 +161,30 @@ macro_rules! cortexfs_mount_socket_alias_methods {
 
         fn symlink(
             &self,
-            _req: &Request,
+            req: &Request,
             parent: INodeNo,
             link_name: &OsStr,
             target: &Path,
             reply: ReplyEntry,
         ) {
-            let path = match self.model_symlink_child_path(parent, link_name) {
+            if let Ok(path) = self.model_symlink_child_path(parent, link_name) {
+                match self.projection.set_model_alias_symlink(&path, target) {
+                    Ok(node) => self.reply_entry(&node, reply),
+                    Err(error) => reply.error(errno(error)),
+                }
+                return;
+            }
+            let path = match self.socket_alias_child_path(parent, link_name) {
                 Ok(path) => path,
                 Err(_error) => {
                     reply.error(readonly_mutation_errno());
                     return;
                 }
             };
-            match self.projection.set_model_alias_symlink(&path, target) {
+            match self
+                .projection
+                .set_socket_alias(&path, target, req.uid(), req.gid())
+            {
                 Ok(node) => self.reply_entry(&node, reply),
                 Err(error) => reply.error(errno(error)),
             }
@@ -141,7 +192,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
 
         fn rename(
             &self,
-            _req: &Request,
+            req: &Request,
             parent: INodeNo,
             name: &OsStr,
             newparent: INodeNo,
@@ -178,7 +229,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                 reply.error(Errno::EINVAL);
                 return;
             };
-            match self.projection.rename_session_atomic_temp(&from, &to) {
+            match self.projection.rename_atomic_temp(&from, &to, req.uid()) {
                 Ok(()) => match self.rename_path(&from, &to) {
                     Ok(()) => reply.ok(),
                     Err(error) => reply.error(errno(error)),

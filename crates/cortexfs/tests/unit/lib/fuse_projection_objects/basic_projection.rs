@@ -18,6 +18,23 @@ fn fuse_v1_projection_root_is_traversable_when_backing_root_is_private() {
 }
 
 #[test]
+fn fuse_v1_projection_exposes_sticky_agent_creation_directory() {
+    let root = reference_tree("fuse-v1-agent-sticky-directory");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    assert!(matches!(
+        projection.getattr("agent"),
+        Ok(ref attr) if attr.mode() & 0o7777 == 0o1777
+    ));
+    assert!(matches!(
+        fs::metadata(root.join("agent"))
+            .map(|metadata| metadata.permissions().mode() & 0o7777),
+        Ok(mode) if mode != 0o1777
+    ));
+}
+
+#[test]
 fn fuse_v1_projection_allows_durable_session_record_writes() {
     let root = reference_tree("fuse-v1-session-record-writes");
     let projection =
@@ -96,6 +113,7 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
     let root = reference_tree("fuse-v1-session-layout-create");
     let projection = FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
     let session = "home/1000/agent/coder/session/fuse";
+    assert!(fs::remove_dir_all(root.join("home/1000/agent/coder/session/index")).is_ok());
 
     for dir in [
         session,
@@ -111,7 +129,7 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
         "home/1000/agent/coder/session/index/by-hash",
         "home/1000/agent/coder/session/index/by-uuid",
     ] {
-        assert_eq!(projection.create_session_layout_dir(dir, 1000, 1000), Ok(()));
+        assert_eq!(projection.create_layout_dir(dir, 1000, 1000, 0o700), Ok(()));
     }
 
     for file in [
@@ -138,14 +156,14 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
         "home/1000/agent/coder/session/index/current",
         "home/1000/agent/coder/session/index/by-cwd/workspace",
     ] {
-        assert_eq!(projection.create_session_layout_file(file, 1000, 1000), Ok(()));
+        assert_eq!(projection.create_layout_file(file, 1000, 1000, 0o600), Ok(()));
     }
 
     assert!(root.join(session).join("messages.jsonl").is_file());
     assert!(root.join(session).join("context/swap/chunk").is_dir());
-    assert_eq!(projection.set_session_layout_mode(session, 0o700), Ok(()));
+    assert_eq!(projection.set_layout_mode(session, 0o700, 1000), Ok(()));
     assert_eq!(
-        projection.set_session_layout_mode(&format!("{session}/messages.jsonl"), 0o600),
+        projection.set_layout_mode(&format!("{session}/messages.jsonl"), 0o600, 1000),
         Ok(())
     );
     assert!(matches!(
@@ -158,13 +176,340 @@ fn fuse_v1_projection_allows_durable_session_layout_creation() {
         Ok(0o600)
     ));
     assert_eq!(
-        projection.create_session_layout_dir("home/1000/tool/not-session", 1000, 1000),
+        projection.create_layout_dir("home/1000/tool/not-session", 1000, 1000, 0o700),
         Err(FuseV1Error::NotControlFile)
     );
     assert_eq!(
-        projection.create_session_layout_file("home/1000/agent/coder/session/fuse/bad", 1000, 1000),
+        projection.create_layout_file(
+            "home/1000/agent/coder/session/fuse/bad",
+            1000,
+            1000,
+            0o600,
+        ),
         Err(FuseV1Error::NotControlFile)
     );
+}
+
+#[test]
+fn fuse_v1_projection_creates_owned_agent_lifecycle_paths() {
+    let root = reference_tree("fuse-v1-agent-lifecycle-create");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    let control = "agent/scratch.d";
+    let owner_temp = "agent/scratch.d/.owner.tmp-1-1-0";
+    let wrapper_temp = "agent/.scratch.tmp-1-1-0";
+
+    assert_eq!(
+        projection.create_layout_dir(control, uid, gid, 0o755),
+        Ok(())
+    );
+    assert_eq!(
+        projection.create_layout_file(owner_temp, uid, gid, 0o644),
+        Ok(())
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(owner_temp, 0, uid.to_string().as_bytes(), uid, gid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.rename_atomic_temp(owner_temp, "agent/scratch.d/owner", uid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.create_layout_file(wrapper_temp, uid, gid, 0o600),
+        Ok(())
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(wrapper_temp, 0, b"#!/bin/sh\n", uid, gid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.rename_atomic_temp(wrapper_temp, "agent/scratch", uid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.set_layout_mode("agent/scratch", 0o755, uid),
+        Ok(())
+    );
+    for directory in [
+        format!("home/{uid}/agent/scratch"),
+        format!("home/{uid}/agent/scratch/root"),
+        format!("home/{uid}/agent/scratch/session"),
+        format!("home/{uid}/agent/scratch/session/index"),
+        format!("home/{uid}/agent/scratch/session/index/by-cwd"),
+        format!("home/{uid}/agent/scratch/data"),
+        format!("home/{uid}/agent/scratch/cache"),
+        format!("home/{uid}/agent/scratch/log"),
+    ] {
+        assert_eq!(
+            projection.create_layout_dir(&directory, uid, gid, 0o755),
+            Ok(())
+        );
+    }
+
+    assert!(root.join("agent/scratch").is_file());
+    assert_eq!(
+        fs::read_to_string(root.join("agent/scratch.d/owner")).unwrap_or_default(),
+        uid.to_string()
+    );
+    assert!(root.join(format!("home/{uid}/agent/scratch/session/index/by-cwd")).is_dir());
+}
+
+#[test]
+fn fuse_v1_projection_directory_creation_is_exclusive() {
+    let root = reference_tree("fuse-v1-agent-lifecycle-exclusive-dir");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    let path = root.join("agent/scratch.d");
+    assert!(fs::create_dir_all(&path).is_ok());
+    assert!(fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).is_ok());
+    let before = fs::symlink_metadata(&path)
+        .ok()
+        .map(|metadata| (metadata.uid(), metadata.gid(), metadata.permissions().mode() & 0o7777));
+
+    assert_eq!(
+        projection.create_layout_dir("agent/scratch.d", uid, gid, 0o755),
+        Err(FuseV1Error::AlreadyExists)
+    );
+    assert_eq!(
+        projection.create_layout_dir(
+            "agent/scratch.d",
+            uid.saturating_add(1),
+            gid.saturating_add(1),
+            0o777,
+        ),
+        Err(FuseV1Error::PermissionDenied)
+    );
+    assert_eq!(
+        fs::symlink_metadata(path).ok().map(|metadata| (
+            metadata.uid(),
+            metadata.gid(),
+            metadata.permissions().mode() & 0o7777,
+        )),
+        before
+    );
+}
+
+#[test]
+fn fuse_v1_projection_rejects_agent_control_owner_reassignment() {
+    let root = reference_tree("fuse-v1-agent-owner-reassignment");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    let first = "agent/scratch.d/.owner.tmp-1-1-0";
+    let second = "agent/scratch.d/.owner.tmp-2-2-0";
+
+    assert_eq!(
+        projection.create_layout_dir("agent/scratch.d", uid, gid, 0o755),
+        Ok(())
+    );
+    assert_eq!(
+        projection.create_layout_file(first, uid, gid, 0o644),
+        Ok(())
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(first, 0, uid.to_string().as_bytes(), uid, gid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.rename_atomic_temp(first, "agent/scratch.d/owner", uid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.create_layout_file(second, uid, gid, 0o644),
+        Ok(())
+    );
+
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(
+            second,
+            0,
+            uid.saturating_add(1).to_string().as_bytes(),
+            uid,
+            gid,
+        ),
+        Err(FuseV1Error::PermissionDenied)
+    );
+}
+
+#[test]
+fn fuse_v1_projection_persists_owned_agent_and_terminal_socket_aliases() {
+    let root = reference_tree("fuse-v1-agent-socket-aliases");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let agent_target = PathBuf::from(format!(
+        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+    ));
+    let terminal = format!("home/{uid}/agent/coder/session/test/terminal");
+    assert!(fs::create_dir_all(root.join(format!(
+        "home/{uid}/agent/coder/session/test"
+    )))
+    .is_ok());
+    assert_eq!(
+        projection.create_layout_dir(&terminal, uid, gid, 0o755),
+        Ok(())
+    );
+    let terminal_target = PathBuf::from(format!(
+        "/run/user/{uid}/cortexfs/terminal/coder/test/main.sock"
+    ));
+
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+    assert!(projection
+        .set_socket_alias("agent/coder.sock", &agent_target, uid, gid)
+        .is_ok());
+    assert!(projection
+        .set_socket_alias(
+            &format!("{terminal}/main.sock"),
+            &terminal_target,
+            uid,
+            gid,
+        )
+        .is_ok());
+
+    assert_eq!(projection.readlink("agent/coder.sock"), Ok(agent_target));
+    assert_eq!(
+        projection.readlink(&format!("{terminal}/main.sock")),
+        Ok(terminal_target)
+    );
+}
+
+#[test]
+fn fuse_v1_projection_persists_owned_agent_socket_placeholder() {
+    let root = reference_tree("fuse-v1-agent-socket-placeholder");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+
+    assert!(projection
+        .create_socket_placeholder("agent/coder.sock", uid, gid, 0o777)
+        .is_ok());
+
+    assert!(matches!(
+        fs::symlink_metadata(root.join("agent/coder.sock")),
+        Ok(metadata) if metadata.file_type().is_socket() && metadata.uid() == uid
+    ));
+}
+
+#[test]
+fn fuse_v1_projection_rejects_foreign_or_escaped_socket_aliases() {
+    let root = reference_tree("fuse-v1-agent-socket-alias-security");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+
+    assert_eq!(
+        projection.set_socket_alias(
+            "agent/coder.sock",
+            Path::new("/tmp/cortexfs/agent/coder.sock"),
+            uid,
+            gid,
+        ),
+        Err(FuseV1Error::InvalidPath)
+    );
+    assert_eq!(
+        projection.set_socket_alias(
+            &format!(
+                "home/{}/agent/coder/session/test/terminal/main.sock",
+                uid.saturating_add(1)
+            ),
+            &PathBuf::from(format!(
+                "/run/user/{uid}/cortexfs/terminal/coder/test/main.sock"
+            )),
+            uid,
+            gid,
+        ),
+        Err(FuseV1Error::PermissionDenied)
+    );
+
+    let outside = clean_test_dir("fuse-v1-agent-socket-alias-security-outside");
+    assert!(fs::remove_dir_all(root.join("agent/coder.d")).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(fs::write(outside.join("owner"), format!("{uid}\n")).is_ok());
+    assert!(symlink(&outside, root.join("agent/coder.d")).is_ok());
+    assert_eq!(
+        projection.set_socket_alias(
+            "agent/coder.sock",
+            &PathBuf::from(format!(
+                "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+            )),
+            uid,
+            gid,
+        ),
+        Err(FuseV1Error::InvalidPath)
+    );
+}
+
+#[test]
+fn fuse_v1_projection_cleans_only_new_socket_entries_after_chown_failure() {
+    let uid = nix::unistd::Uid::current().as_raw();
+    if uid == 0 {
+        return;
+    }
+    let root = reference_tree("fuse-v1-agent-socket-chown-cleanup");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let foreign_uid = uid.saturating_add(1);
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(
+        root.join("agent/coder.d/owner"),
+        format!("{foreign_uid}\n"),
+    )
+    .is_ok());
+    assert_eq!(
+        projection.remove_socket_alias("agent/coder.sock", foreign_uid),
+        Ok(())
+    );
+
+    assert_eq!(
+        projection.create_socket_placeholder("agent/coder.sock", foreign_uid, gid, 0o777),
+        Err(FuseV1Error::Io)
+    );
+    assert!(fs::symlink_metadata(root.join("agent/coder.sock")).is_err());
+
+    let existing_socket = std::os::unix::net::UnixListener::bind(root.join("agent/coder.sock"));
+    assert!(existing_socket.is_ok());
+    assert_eq!(
+        projection.create_socket_placeholder("agent/coder.sock", foreign_uid, gid, 0o777),
+        Err(FuseV1Error::Io)
+    );
+    assert!(matches!(
+        fs::symlink_metadata(root.join("agent/coder.sock")),
+        Ok(metadata) if metadata.file_type().is_socket()
+    ));
+    drop(existing_socket);
+    assert!(fs::remove_file(root.join("agent/coder.sock")).is_ok());
+
+    let target = PathBuf::from(format!(
+        "/run/user/{foreign_uid}/cortexfs/agent/root-hash/coder.sock"
+    ));
+    assert_eq!(
+        projection.set_socket_alias("agent/coder.sock", &target, foreign_uid, gid),
+        Err(FuseV1Error::Io)
+    );
+    assert!(fs::symlink_metadata(root.join("agent/coder.sock")).is_err());
+
+    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+    assert_eq!(
+        projection.set_socket_alias("agent/coder.sock", &target, foreign_uid, gid),
+        Err(FuseV1Error::Io)
+    );
+    assert!(matches!(
+        fs::read_link(root.join("agent/coder.sock")),
+        Ok(existing) if existing == target
+    ));
 }
 
 #[test]

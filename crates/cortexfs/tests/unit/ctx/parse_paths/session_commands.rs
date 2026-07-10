@@ -238,6 +238,46 @@ fn rejects_removed_agent_sh_command() {
 }
 
 #[test]
+fn agent_trajectory_error_lists_actionable_projection_issues() {
+    let root = clean_test_dir("ctx-agent-trajectory-invalid");
+    create_agent_fixture(&root, "coder", "agent:base", "idle", "");
+    let session = ctx_home(&root)
+        .unwrap_or_default()
+        .join("agent/coder/session/default");
+    create_complete_session_layout(&session);
+    write_text_file(
+        &session.join("messages.jsonl"),
+        "{\"role\":\"user\",\"content\":\"hello\"}\n",
+    );
+    write_text_file(&session.join("events.jsonl"), "");
+    write_text_file(&session.join("meta.json"), "{\"client\":\"\"}\n");
+
+    let result = agent_trajectory(&root, "coder", Some("default"));
+
+    assert!(matches!(
+        result,
+        Err(ref error)
+            if error.code == 69
+                && error.message
+                    == "invalid trajectory projection (1 issues)\n- missing agent name"
+    ));
+}
+
+#[test]
+fn trajectory_cli_issue_text_escapes_and_bounds_session_source() {
+    let source = format!("bad\n\u{1b}[31m{}", "x".repeat(2_000));
+    let issue = TrajectoryIssue::InvalidStepSource { index: 0, source };
+
+    let rendered = format_trajectory_issue(&issue);
+
+    assert!(!rendered.contains('\n'));
+    assert!(!rendered.contains('\u{1b}'));
+    assert!(rendered.contains("\\n"));
+    assert!(rendered.contains("\\u{1b}"));
+    assert!(rendered.chars().count() <= 256, "{}", rendered.len());
+}
+
+#[test]
 fn agent_send_prompt_root_words_do_not_override_selected_root() {
     let root = Path::new("/tmp/cortexfs-selected-root");
     let attacker_root = Path::new("/tmp/cortexfs-attacker-root");

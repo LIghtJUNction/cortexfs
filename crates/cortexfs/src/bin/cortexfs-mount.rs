@@ -18,7 +18,7 @@
 )]
 #![expect(clippy::module_inception, reason = "allow submodule self name")]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -55,7 +55,14 @@ struct CortexFuse {
     projection: FuseV1Projection,
     paths: Mutex<HashMap<u64, String>>,
     lookup_counts: Mutex<HashMap<u64, u64>>,
-    socket_overlays: Mutex<HashSet<String>>,
+    socket_overlays: Mutex<HashMap<String, SocketOverlay>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SocketOverlay {
+    uid: u32,
+    gid: u32,
+    mode: u32,
 }
 
 impl CortexFuse {
@@ -71,7 +78,7 @@ impl CortexFuse {
             projection,
             paths: Mutex::new(paths),
             lookup_counts: Mutex::new(HashMap::new()),
-            socket_overlays: Mutex::new(HashSet::new()),
+            socket_overlays: Mutex::new(HashMap::new()),
         })
     }
 
@@ -176,7 +183,7 @@ macro_rules! path_for_inode_or_reply {
 }
 
 macro_rules! create_session_layout_child_or_reply {
-    ($fuse:expr, $req:expr, $parent:expr, $name:expr, $reply:expr, $method:ident) => {{
+    ($fuse:expr, $req:expr, $parent:expr, $name:expr, $reply:expr, $method:ident, $mode:expr) => {{
         let Some(name) = $name.to_str() else {
             $reply.error(Errno::EINVAL);
             return;
@@ -186,7 +193,10 @@ macro_rules! create_session_layout_child_or_reply {
             $reply.error(Errno::EINVAL);
             return;
         };
-        if let Err(error) = $fuse.projection.$method(&path, $req.uid(), $req.gid()) {
+        if let Err(error) = $fuse
+            .projection
+            .$method(&path, $req.uid(), $req.gid(), $mode)
+        {
             $reply.error(if matches!(error, FuseV1Error::NotControlFile) {
                 readonly_mutation_errno()
             } else {

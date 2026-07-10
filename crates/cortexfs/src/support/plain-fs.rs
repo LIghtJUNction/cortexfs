@@ -8,6 +8,7 @@ use std::fs;
 use std::io::{Read, Result};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 
 use nix::libc;
@@ -130,6 +131,125 @@ impl CreatePlainDirMessages {
 
 pub(crate) fn create_plain_dir(path: &Path) -> Result<()> {
     create_plain_dir_with(path, CreatePlainDirMessages::library_defaults())
+}
+
+/// Creates exactly one plain directory and fails when the final entry exists.
+pub fn create_plain_dir_exclusive(path: &Path, mode: u32) -> Result<fs::File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_plain_directory(parent)?;
+    let name = plain_file_name(path)?;
+    nix::sys::stat::mkdirat(
+        &parent_dir,
+        name,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+    )
+    .map_err(std::io::Error::from)?;
+    let created = nix::fcntl::openat(
+        &parent_dir,
+        name,
+        nix::fcntl::OFlag::O_DIRECTORY
+            | nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(std::io::Error::from);
+    let created = match created {
+        Ok(created) => created,
+        Err(error) => {
+            let _ignored = remove_plain_dir_at(&parent_dir, name);
+            return Err(error);
+        }
+    };
+    if let Err(error) = created.sync_all().and_then(|()| parent_dir.sync_all()) {
+        drop(created);
+        let _ignored = remove_plain_dir_at(&parent_dir, name);
+        return Err(error);
+    }
+    Ok(created)
+}
+
+pub(crate) fn remove_plain_dir(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_plain_directory(parent)?;
+    let name = plain_file_name(path)?;
+    remove_plain_dir_at(&parent_dir, name)?;
+    parent_dir.sync_all()
+}
+
+fn remove_plain_dir_at(parent: &fs::File, name: &str) -> Result<()> {
+    nix::unistd::unlinkat(parent, name, nix::unistd::UnlinkatFlags::RemoveDir)
+        .map_err(std::io::Error::from)
+}
+
+/// Ensures that `path` is a no-follow Unix socket placeholder.
+///
+/// Returns `true` only when this call created the socket inode.
+pub fn ensure_socket_placeholder(path: &Path, mode: u32) -> Result<bool> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    create_plain_dir(parent)?;
+    let parent_dir = open_plain_directory(parent)?;
+    let name = plain_file_name(path)?;
+    match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
+        Ok(stat)
+            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+                .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
+        {
+            set_socket_mode(&parent_dir, name, mode)?;
+            return Ok(false);
+        }
+        Ok(stat)
+            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+                .contains(nix::sys::stat::SFlag::S_IFLNK) =>
+        {
+            match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::empty()) {
+                Ok(target)
+                    if nix::sys::stat::SFlag::from_bits_truncate(target.st_mode)
+                        .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
+                {
+                    return Ok(false);
+                }
+                Err(nix::errno::Errno::ENOENT) => {
+                    nix::unistd::unlinkat(
+                        &parent_dir,
+                        name,
+                        nix::unistd::UnlinkatFlags::NoRemoveDir,
+                    )
+                    .map_err(std::io::Error::from)?;
+                }
+                Ok(_) | Err(_) => {
+                    return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
+                }
+            }
+        }
+        Ok(_stat) => return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists)),
+        Err(nix::errno::Errno::ENOENT) => {}
+        Err(error) => return Err(std::io::Error::from(error)),
+    }
+    UnixListener::bind(path)?;
+    if let Err(error) = set_socket_mode(&parent_dir, name, mode) {
+        let _ignored =
+            nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir);
+        return Err(error);
+    }
+    Ok(true)
+}
+
+fn set_socket_mode(parent: &fs::File, name: &str, mode: u32) -> Result<()> {
+    nix::sys::stat::fchmodat(
+        parent,
+        name,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+        nix::sys::stat::FchmodatFlags::NoFollowSymlink,
+    )
+    .map_err(std::io::Error::from)
 }
 
 /// Creates a plain directory tree with custom mode and error messages.

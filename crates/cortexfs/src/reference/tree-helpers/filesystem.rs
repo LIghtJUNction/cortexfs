@@ -97,89 +97,9 @@ pub(crate) fn set_reference_executable(path: &Path) -> Result<(), ReferenceTreeE
 }
 
 pub(crate) fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
-    if let Some(parent) = path.parent() {
-        create_reference_dir(parent)?;
-    }
-    let Some(parent) = path.parent() else {
-        return Err(ReferenceTreeError::CannotSocket(
-            std::io::ErrorKind::InvalidInput,
-        ));
-    };
-    let parent_dir = open_reference_dir(parent)
-        .map_err(|_error| ReferenceTreeError::CannotSocket(std::io::ErrorKind::PermissionDenied))?;
-    let name =
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .ok_or(ReferenceTreeError::CannotSocket(
-                std::io::ErrorKind::InvalidInput,
-            ))?;
-    match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
-        Ok(stat)
-            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
-        {
-            return set_reference_socket_permissions(&parent_dir, name);
-        }
-        Ok(stat)
-            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFLNK) =>
-        {
-            match nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::empty()) {
-                Err(nix::errno::Errno::ENOENT) => {
-                    nix::unistd::unlinkat(
-                        &parent_dir,
-                        name,
-                        nix::unistd::UnlinkatFlags::NoRemoveDir,
-                    )
-                    .map_err(|error| {
-                        ReferenceTreeError::CannotSocket(std::io::Error::from(error).kind())
-                    })?;
-                }
-                Ok(target)
-                    if nix::sys::stat::SFlag::from_bits_truncate(target.st_mode)
-                        .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
-                {
-                    return Ok(());
-                }
-                Ok(_target) => {
-                    return Err(ReferenceTreeError::CannotSocket(
-                        std::io::ErrorKind::AlreadyExists,
-                    ));
-                }
-                Err(_error) => {
-                    return Err(ReferenceTreeError::CannotSocket(
-                        std::io::ErrorKind::AlreadyExists,
-                    ));
-                }
-            }
-        }
-        Ok(_stat) => {
-            return Err(ReferenceTreeError::CannotSocket(
-                std::io::ErrorKind::AlreadyExists,
-            ));
-        }
-        Err(nix::errno::Errno::ENOENT) => {}
-        Err(error) => {
-            return Err(ReferenceTreeError::CannotSocket(
-                std::io::Error::from(error).kind(),
-            ));
-        }
-    }
-    UnixListener::bind(path).map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;
-    set_reference_socket_permissions(&parent_dir, name)
-}
-
-pub(crate) fn set_reference_socket_permissions(
-    parent_dir: &fs::File,
-    name: &str,
-) -> Result<(), ReferenceTreeError> {
-    nix::sys::stat::fchmodat(
-        parent_dir,
-        name,
-        nix::sys::stat::Mode::from_bits_truncate(0o777),
-        nix::sys::stat::FchmodatFlags::NoFollowSymlink,
-    )
-    .map_err(|error| ReferenceTreeError::CannotSocket(std::io::Error::from(error).kind()))
+    plain_fs::ensure_socket_placeholder(path, 0o777)
+        .map(|_created| ())
+        .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))
 }
 
 pub(crate) fn ensure_reference_model_alias(
