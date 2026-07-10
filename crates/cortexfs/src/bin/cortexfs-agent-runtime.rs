@@ -11,7 +11,7 @@ use std::process::ExitCode;
 use cortexfs::{
     AgentExecutableSocketExecution, AgentExecutableSocketRuntime, PolicyObjectClass,
     PolicyPermission, SocketPeerPolicy, derive_agent_runtime_view,
-    read_provider_system_secret_for_model, serve_agent_executable_socket_listener_once,
+    serve_agent_executable_socket_listener_once,
 };
 use listenfd::ListenFd;
 use nix::fcntl::{AtFlags, OFlag, open, openat};
@@ -59,24 +59,6 @@ fn run(args: Vec<OsString>) -> Result<(), String> {
     let mut runtime_env = view.env().to_vec();
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
-    }
-    let provider_secret =
-        read_provider_system_secret_for_model(&config.source, &runtime_model).unwrap_or(None);
-    if let Some(secret) = provider_secret.as_ref() {
-        runtime_env.extend([
-            (
-                "CTX_PROVIDER_SECRET_VALUE".to_owned(),
-                secret.secret().to_owned(),
-            ),
-            (
-                "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
-                secret.provider().to_owned(),
-            ),
-            (
-                "CTX_PROVIDER_SECRET_SLOT".to_owned(),
-                secret.account().to_owned(),
-            ),
-        ]);
     }
     let agent_executable = runtime_agent_executable(&config.source, &config.agent);
     let result = serve_agent_executable_socket_listener_once(

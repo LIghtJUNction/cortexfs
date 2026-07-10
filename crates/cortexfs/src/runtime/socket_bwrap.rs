@@ -68,10 +68,7 @@ fn apply_agent_executable_socket_env(
             runtime
                 .env
                 .iter()
-                .filter(|env| {
-                    matches!(runtime.execution, AgentExecutableSocketExecution::Direct)
-                        || !is_provider_secret_env(&env.0)
-                })
+                .filter(|env| !is_provider_secret_env(&env.0))
                 .map(|env| (env.0.as_str(), env.1.as_str())),
         )
         .env("CTX_AGENT", runtime.agent_name)

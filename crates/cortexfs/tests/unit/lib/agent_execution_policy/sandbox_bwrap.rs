@@ -13,12 +13,35 @@ if [ -n "$CTX_SECRET_CANARY" ]; then
   printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
   exit 0
 fi
+if [ -n "$CTX_PROVIDER_SECRET_FD$CTX_PROVIDER_SECRET_PATH$CTX_PROVIDER_SECRET_VALUE$CTX_PROVIDER_SECRET_PROVIDER$CTX_PROVIDER_SECRET_SLOT" ]; then
+  printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
+  printf '{"type":"delta","run":"%s","text":"provider-secret-leaked"}\n' "$CTX_RUN_ID"
+  printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
+  exit 0
+fi
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 printf '{"type":"delta","run":"%s","text":"secret-not-inherited"}\n' "$CTX_RUN_ID"
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
+    let mut env = view.env().to_vec();
+    env.extend([
+        ("CTX_PROVIDER_SECRET_FD".to_owned(), "9".to_owned()),
+        (
+            "CTX_PROVIDER_SECRET_PATH".to_owned(),
+            "/run/cortexfs/provider-secret".to_owned(),
+        ),
+        (
+            "CTX_PROVIDER_SECRET_VALUE".to_owned(),
+            "runtime-secret".to_owned(),
+        ),
+        (
+            "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+            "fixture".to_owned(),
+        ),
+        ("CTX_PROVIDER_SECRET_SLOT".to_owned(), "default".to_owned()),
+    ]);
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
@@ -39,7 +62,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             ctx_root: &root,
             source_root: &root,
             identity: view.identity(),
-            env: view.env(),
+            env: &env,
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
@@ -52,6 +75,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("secret-not-inherited"));
     assert!(!outcome.jsonl().contains("leaked:"));
+    assert!(!outcome.jsonl().contains("provider-secret-leaked"));
 }
 
 #[test]
