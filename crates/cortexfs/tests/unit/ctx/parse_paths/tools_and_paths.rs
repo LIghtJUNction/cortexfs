@@ -1,4 +1,12 @@
 #[test]
+fn bootstrap_output_lists_all_reference_agents() {
+    assert_eq!(
+        BOOTSTRAP_REFERENCE_AGENT_SUMMARY_LINE,
+        "agents=architect,coder,reviewer,worker"
+    );
+}
+
+#[test]
 fn reference_bootstrap_gives_coder_source_editing_tools() {
     let root = clean_test_dir("ctx-reference-coder-source-tools");
 

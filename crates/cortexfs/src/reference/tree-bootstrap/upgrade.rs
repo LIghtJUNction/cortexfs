@@ -1,13 +1,13 @@
 use super::*;
 
 /// Monotonic reference-tree generation written to the backing source.
-pub const REFERENCE_TREE_VERSION: u32 = 1;
+pub const REFERENCE_TREE_VERSION: u32 = 2;
 
 /// Relative path for bootstrap state under the source root.
 pub const BOOTSTRAP_STATE_REL: &str = "bin/cortexfs.bootstrap.json";
 
 /// Agents formerly shipped by the reference tree and no longer installed.
-pub const RETIRED_REFERENCE_AGENTS: &[&str] = &["base", "worker", "executor"];
+pub const RETIRED_REFERENCE_AGENTS: &[&str] = &["base", "executor"];
 
 /// Migration id recording that retired reference agents were reviewed.
 pub const MIGRATION_RETIRED_AGENTS_V1: &str = "retired-agents-v1";
@@ -60,6 +60,9 @@ const fn bootstrap_state_schema_default() -> u32 {
 #[must_use]
 pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
     let state = read_bootstrap_state(root);
+    let worker_is_managed = state
+        .as_ref()
+        .is_some_and(|state| state.managed_agents.iter().any(|name| name == "worker"));
     let mut plan = BootstrapPlan {
         actions: Vec::new(),
         current_version: state.as_ref().map(|value| value.tree_version),
@@ -73,7 +76,15 @@ pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
     for agent in REFERENCE_AGENTS {
         let exec = root.join("agent").join(agent.name);
         let control = root.join("agent").join(format!("{}.d", agent.name));
-        if !(exec.exists() || control.exists()) {
+        let socket = root.join("agent").join(format!("{}.sock", agent.name));
+        let exists = exec.exists() || control.exists() || fs::symlink_metadata(socket).is_ok();
+        if agent.name == "worker" && exists && !worker_is_managed {
+            plan.actions.push(BootstrapAction::SkipAgent {
+                name: agent.name.to_owned(),
+                reason: "existing worker requires manual review before reference-tree promotion"
+                    .to_owned(),
+            });
+        } else if !exists {
             plan.actions.push(BootstrapAction::EnsureAgent {
                 name: agent.name.to_owned(),
             });
@@ -101,10 +112,28 @@ pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
 /// Applies the safe reference-tree upgrade subset and refreshes state if needed.
 pub fn apply_reference_tree_upgrade(root: &Path) -> Result<BootstrapPlan, ReferenceTreeError> {
     let plan = plan_reference_tree_upgrade(root);
-    if plan
-        .actions
-        .iter()
-        .any(|action| matches!(action, BootstrapAction::WriteState { .. }))
+    if plan.actions.iter().any(|action| {
+        matches!(action, BootstrapAction::EnsureAgent { name }
+            if REFERENCE_AGENTS.iter().any(|agent| agent.name == name))
+    }) {
+        return Ok(plan);
+    }
+    apply_precomputed_reference_tree_upgrade(root, plan)
+}
+
+pub(crate) fn apply_precomputed_reference_tree_upgrade(
+    root: &Path,
+    plan: BootstrapPlan,
+) -> Result<BootstrapPlan, ReferenceTreeError> {
+    let skips_current_agent = plan.actions.iter().any(|action| {
+        matches!(action, BootstrapAction::SkipAgent { name, .. }
+            if REFERENCE_AGENTS.iter().any(|agent| agent.name == name))
+    });
+    if !skips_current_agent
+        && plan
+            .actions
+            .iter()
+            .any(|action| matches!(action, BootstrapAction::WriteState { .. }))
     {
         write_bootstrap_state(root, &[MIGRATION_RETIRED_AGENTS_V1])?;
     }

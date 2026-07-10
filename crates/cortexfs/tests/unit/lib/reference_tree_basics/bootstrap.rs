@@ -200,7 +200,7 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
         root.join("agent").join("reviewer.d").join("system.md")
     ));
     assert!(reviewer_system.contains("independent review agent"));
-    assert!(!root.join("agent").join("worker.d").exists());
+    assert!(root.join("agent").join("worker.d").is_dir());
     let prompt_template = fs::read_to_string(
         root.join("agent")
             .join("coder.d")

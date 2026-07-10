@@ -58,7 +58,7 @@ pub(crate) fn bootstrap_reference_tree(
                 }
             )
         ),
-        "agents=architect,coder,reviewer".to_owned(),
+        BOOTSTRAP_REFERENCE_AGENT_SUMMARY_LINE.to_owned(),
         "agent.coder.parent=agent:architect".to_owned(),
         "agent.coder.model=main".to_owned(),
         "agent.coder.workspace=/workspace".to_owned(),
@@ -69,6 +69,9 @@ pub(crate) fn bootstrap_reference_tree(
     }
     Ok(())
 }
+
+pub(crate) const BOOTSTRAP_REFERENCE_AGENT_SUMMARY_LINE: &str =
+    "agents=architect,coder,reviewer,worker";
 
 pub(crate) fn print_bootstrap_check(source: &Path) -> Result<(), CliError> {
     print_line(&format!("source={}", source.display()))?;

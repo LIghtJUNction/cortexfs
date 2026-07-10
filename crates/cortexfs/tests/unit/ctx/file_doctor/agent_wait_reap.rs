@@ -298,6 +298,10 @@ fn agent_wait_rejects_invalid_backing_lifecycle() {
     write_text_file(&child.join("handoff.md"), "Task: implement.\n");
     write_text_file(&child.join("result.md"), "Done.\n");
     write_text_file(&child.join("refs.jsonl"), "");
+    write_text_file(
+        &root.join("agent/worker.d/parent"),
+        "agent:coder session:default run:r1\n",
+    );
     write_text_file(&root.join("agent/worker.d/life"), "detached\n");
 
     assert!(matches!(
@@ -327,6 +331,10 @@ fn agent_wait_rejects_invalid_backing_model() {
     write_text_file(&child.join("handoff.md"), "Task: implement.\n");
     write_text_file(&child.join("result.md"), "Done.\n");
     write_text_file(&child.join("refs.jsonl"), "");
+    write_text_file(
+        &root.join("agent/worker.d/parent"),
+        "agent:coder session:default run:r1\n",
+    );
     write_text_file(&root.join("agent/worker.d/model"), "bad/model/name\n");
 
     assert!(matches!(

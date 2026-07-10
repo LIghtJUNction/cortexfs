@@ -1,5 +1,5 @@
 #[test]
-fn agent_stop_host_fallback_retains_canonical_temp_worker_without_cancellation(
+fn agent_stop_host_fallback_stops_canonical_temp_worker_without_reaping(
 ) -> Result<(), CliError> {
     let root = clean_test_dir("ctx-agent-stop-temp-worker-cleanup");
     create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
@@ -30,15 +30,15 @@ fn agent_stop_host_fallback_retains_canonical_temp_worker_without_cancellation(
     assert!(root.join("agent/worker.d").exists());
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/status")).unwrap_or_default(),
-        "busy\n"
+        "dead\n"
     );
     assert_eq!(
         fs::read_to_string(child.join("result.md")).unwrap_or_default(),
-        ""
+        "Child agent `worker` cancelled because the parent agent stopped.\n"
     );
     assert_eq!(
         fs::read_to_string(child.join("status")).unwrap_or_default(),
-        "active\n"
+        "cancelled\n"
     );
     Ok(())
 }

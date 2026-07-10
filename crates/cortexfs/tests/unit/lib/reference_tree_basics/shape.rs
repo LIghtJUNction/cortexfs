@@ -253,11 +253,11 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
 }
 
 fn assert_reference_agents(root: &Path) {
-    for agent in ["architect", "coder", "reviewer"] {
+    for agent in ["architect", "coder", "reviewer", "worker"] {
         assert!(inspect_object_layout(root, ObjectClass::Agent, agent).is_ok());
         assert_object_hook_dirs(&root.join("agent").join(format!("{agent}.d")));
     }
-    for old_agent in ["base", "executor", "worker"] {
+    for old_agent in ["base", "executor"] {
         assert!(!root.join("agent").join(old_agent).exists());
         assert!(!root.join("agent").join(format!("{old_agent}.d")).exists());
     }
@@ -269,6 +269,11 @@ fn assert_reference_agents(root: &Path) {
     assert_file_text(&root.join("agent/coder.d/model"), "main\n");
     assert_file_text(&root.join("agent/reviewer.d/parent"), "agent:architect\n");
     assert_file_text(&root.join("agent/reviewer.d/model"), "helper\n");
+    assert_file_text(&root.join("agent/worker.d/parent"), "agent:architect\n");
+    assert_file_text(
+        &root.join("agent/worker.d/model"),
+        &format!("{DEFAULT_WORKER_MODEL}\n"),
+    );
 
     let architect_system = ok!(fs::read_to_string(root.join("agent/architect.d/system.md")));
     assert!(architect_system.contains("human role name is Architect"));
@@ -283,6 +288,9 @@ fn assert_reference_agents(root: &Path) {
 
     let reviewer_system = ok!(fs::read_to_string(root.join("agent/reviewer.d/system.md")));
     assert!(reviewer_system.contains("independent review agent"));
+
+    let worker_system = ok!(fs::read_to_string(root.join("agent/worker.d/system.md")));
+    assert!(!worker_system.contains("executor"));
     assert!(reviewer_system.contains("correctness, ABI drift"));
 
     let architect_policy = ok!(fs::read_to_string(root.join("agent/architect.d/policy")));

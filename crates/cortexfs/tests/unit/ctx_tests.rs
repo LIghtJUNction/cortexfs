@@ -1,5 +1,5 @@
 use super::{
-    ControlLineIssue, LayoutPathRole, PathLayoutIssue,
+    BOOTSTRAP_REFERENCE_AGENT_SUMMARY_LINE, ControlLineIssue, LayoutPathRole, PathLayoutIssue,
     agent_lifecycle_tool_command, atomic_write_provider_config, cat_path,
     create_agent_terminal_runtime_dir, create_plain_mountpoint_dir, ctx_provider_curl_command, curl_config_quote,
     detached_mount_command, direct_mount_command, doctor, doctor_bootstrap_state,
