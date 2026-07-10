@@ -349,6 +349,194 @@ fn agent_stop_host_fallback_marks_agent_dead_and_records_stop_event() {
 }
 
 #[test]
+fn agent_control_updates_are_atomic_and_preserve_mode_while_log_appends() {
+    let root = clean_test_dir("agent-control-atomic-update");
+    let control = root.join("agent/scratch.d");
+    assert!(fs::create_dir_all(&control).is_ok());
+    let status = control.join("status");
+    let pid = control.join("pid");
+    let log = control.join("log");
+    write_text_file(&status, "ready\n");
+    write_text_file(&pid, "123\n");
+    write_text_file(&log, "before\n");
+    assert!(fs::set_permissions(&status, fs::Permissions::from_mode(0o644)).is_ok());
+    assert!(fs::set_permissions(&pid, fs::Permissions::from_mode(0o640)).is_ok());
+    let old_status_inode = fs::symlink_metadata(&status)
+        .map(|metadata| metadata.ino())
+        .unwrap_or_default();
+
+    assert_eq!(write_agent_control_plain(&status, "dead\n"), Ok(()));
+    assert_eq!(write_agent_control_plain(&pid, "\n"), Ok(()));
+    assert_eq!(append_agent_log_event(&log, "after"), Ok(()));
+
+    assert_eq!(fs::read_to_string(&status).unwrap_or_default(), "dead\n");
+    assert_eq!(fs::read_to_string(&pid).unwrap_or_default(), "\n");
+    assert_eq!(fs::read_to_string(&log).unwrap_or_default(), "before\nafter\n");
+    assert!(matches!(
+        fs::symlink_metadata(&status),
+        Ok(ref metadata)
+            if metadata.permissions().mode() & 0o7777 == 0o644
+                && metadata.ino() != old_status_inode
+    ));
+    assert!(matches!(
+        fs::symlink_metadata(&pid),
+        Ok(ref metadata) if metadata.permissions().mode() & 0o7777 == 0o640
+    ));
+}
+
+#[test]
+fn agent_control_update_rejects_symlink_and_non_regular_target() {
+    let root = clean_test_dir("agent-control-atomic-reject");
+    let target = root.join("target");
+    let link = root.join("link");
+    let directory = root.join("directory");
+    write_text_file(&target, "keep\n");
+    assert!(symlink(&target, &link).is_ok());
+    assert!(fs::create_dir_all(&directory).is_ok());
+
+    assert!(write_agent_control_plain(&link, "bad\n").is_err());
+    assert!(write_agent_control_plain(&directory, "bad\n").is_err());
+    assert_eq!(fs::read_to_string(target).unwrap_or_default(), "keep\n");
+}
+
+#[test]
+fn agent_control_update_refuses_readonly_target_without_changes() {
+    if nix::unistd::Uid::effective().is_root() {
+        return;
+    }
+    let root = clean_test_dir("agent-control-readonly");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let status = root.join("status");
+    write_text_file(&status, "ready\n");
+    assert!(fs::set_permissions(&status, fs::Permissions::from_mode(0o444)).is_ok());
+    let before = fs::symlink_metadata(&status)
+        .map(|metadata| {
+            (
+                metadata.ino(),
+                metadata.permissions().mode() & 0o7777,
+                metadata.uid(),
+                metadata.gid(),
+            )
+        })
+        .ok();
+
+    assert!(write_agent_control_plain(&status, "dead\n").is_err());
+    assert_eq!(fs::read_to_string(&status).unwrap_or_default(), "ready\n");
+    assert_eq!(
+        fs::symlink_metadata(status)
+            .map(|metadata| (
+                metadata.ino(),
+                metadata.permissions().mode() & 0o7777,
+                metadata.uid(),
+                metadata.gid(),
+            ))
+            .ok(),
+        before
+    );
+}
+
+#[test]
+fn agent_session_update_preserves_existing_workspace_metadata() {
+    let root = clean_test_dir("agent-session-workspace-preserve");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let workspace = root.join("workspace");
+    write_text_file(&workspace, "/old\n");
+    assert!(fs::set_permissions(&workspace, fs::Permissions::from_mode(0o640)).is_ok());
+    let before = fs::symlink_metadata(&workspace)
+        .map(|metadata| {
+            (
+                metadata.ino(),
+                metadata.permissions().mode() & 0o7777,
+                metadata.uid(),
+                metadata.gid(),
+            )
+        })
+        .ok();
+
+    assert_eq!(write_agent_session_plain(&workspace, "/new\n"), Ok(()));
+    assert_eq!(fs::read_to_string(&workspace).unwrap_or_default(), "/new\n");
+    assert!(matches!(
+        (before, fs::symlink_metadata(workspace)),
+        (Some((inode, mode, uid, gid)), Ok(metadata))
+            if metadata.ino() != inode
+                && metadata.permissions().mode() & 0o7777 == mode
+                && metadata.uid() == uid
+                && metadata.gid() == gid
+    ));
+}
+
+#[test]
+fn agent_session_missing_fallback_does_not_replace_symlink() {
+    let root = clean_test_dir("agent-session-workspace-symlink");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let target = root.join("target");
+    let workspace = root.join("workspace");
+    write_text_file(&target, "keep\n");
+    assert!(symlink(&target, &workspace).is_ok());
+
+    assert!(write_agent_session_plain(&workspace, "/bad\n").is_err());
+
+    assert_eq!(fs::read_to_string(target).unwrap_or_default(), "keep\n");
+    assert!(workspace
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink()));
+}
+
+#[test]
+fn agent_session_update_atomically_creates_missing_workspace() {
+    let root = clean_test_dir("agent-session-workspace-create");
+    let workspace = root.join("workspace");
+    assert!(fs::create_dir_all(&root).is_ok());
+
+    assert_eq!(
+        write_agent_session_plain(&workspace, "/workspace\n"),
+        Ok(())
+    );
+    assert_eq!(
+        fs::read_to_string(&workspace).unwrap_or_default(),
+        "/workspace\n"
+    );
+    assert!(matches!(
+        fs::symlink_metadata(workspace),
+        Ok(metadata) if metadata.permissions().mode() & 0o7777 == 0o600
+    ));
+}
+
+#[test]
+fn agent_host_stub_replacement_is_atomic_and_ignores_umask() -> std::io::Result<()> {
+    const CHILD_ENV: &str = "CORTEXFS_TEST_AGENT_HOST_STUB_UMASK_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let root = clean_test_dir("agent-host-stub-atomic");
+        fs::create_dir_all(&root)?;
+        let wrapper = root.join("agent-wrapper");
+        write_text_file(&wrapper, "old\n");
+        write_agent_host_stub(&wrapper, "first")
+            .map_err(|error| std::io::Error::other(error.message))?;
+        let first_inode = fs::symlink_metadata(&wrapper)?.ino();
+
+        write_agent_host_stub(&wrapper, "second")
+            .map_err(|error| std::io::Error::other(error.message))?;
+
+        assert_eq!(fs::read_to_string(&wrapper)?, agent_host_stub_script("second"));
+        let metadata = fs::symlink_metadata(wrapper)?;
+        assert_ne!(metadata.ino(), first_inode);
+        assert_eq!(metadata.permissions().mode() & 0o7777, 0o755);
+        return Ok(());
+    }
+
+    let test_binary = std::env::current_exe()?;
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("umask 077; exec \"$1\" tests::agent_host_stub_replacement_is_atomic_and_ignores_umask --exact")
+        .arg("sh")
+        .arg(test_binary)
+        .env(CHILD_ENV, "1")
+        .status()?;
+    assert!(status.success());
+    Ok(())
+}
+
+#[test]
 fn agent_terminal_units_follow_existing_session_names() {
     let root = clean_test_dir("ctx-agent-terminal-units");
     let session_root = ctx_home(&root)

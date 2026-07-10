@@ -123,6 +123,19 @@ mod permission_tests {
     }
 
     #[test]
+    fn fuse_open_and_write_allow_profile_control_files_to_projection() {
+        let attr = FuseV1Attr::new(
+            "agent/worker.d/system.md".to_owned(),
+            FuseV1FileType::Regular,
+            0,
+            0o600,
+        );
+
+        assert!(fuse_open_error(&attr, OpenFlags(nix::libc::O_WRONLY)).is_none());
+        assert!(fuse_write_error(&attr).is_none());
+    }
+
+    #[test]
     fn fuse_write_error_allows_model_route_control_file_to_projection() {
         let attr = FuseV1Attr::new("model/route".to_owned(), FuseV1FileType::Regular, 0, 0o644);
 

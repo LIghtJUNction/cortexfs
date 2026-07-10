@@ -87,11 +87,13 @@ fn plan_agent_stop(root: &Path, root_agent: &str) -> Result<StopPlan, CliError> 
     let mut visiting = HashSet::new();
     let mut visited = HashSet::new();
     let mut agents = Vec::new();
+    let root_control = agent_control_dir(root, root_agent);
+    let root_temporary = read_agent_life_for_context(&root_control, "agent stop")? == "temp";
     plan_stop_subtree(
         root,
         root_agent,
         None,
-        false,
+        root_temporary,
         &candidates,
         &mut visiting,
         &mut visited,
@@ -147,17 +149,7 @@ fn plan_stop_subtree(
         if RETIRED_REFERENCE_AGENTS.contains(&child.name.as_str()) {
             continue;
         }
-        let life = read_agent_control_trimmed(&child.control, "life")?;
-        let temporary = match life.as_deref() {
-            None | Some("owned") => false,
-            Some("temp") => true,
-            Some(life) => {
-                return Err(CliError::usage(format!(
-                    "invalid agent life for {}: {life}",
-                    child.name
-                )));
-            }
-        };
+        let temporary = read_agent_life_for_context(&child.control, "agent stop")? == "temp";
         plan_stop_subtree(
             root,
             &child.name,
@@ -274,8 +266,17 @@ fn preflight_cleanup_directory(path: &Path) -> Result<(), CliError> {
     let metadata = directory.metadata().map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
     })?;
+    let fuse = cortexfs::plain_fs::is_fuse(&directory).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot inspect filesystem for {}: {error}",
+            path.display()
+        ))
+    })?;
     let uid = nix::unistd::Uid::effective().as_raw();
-    if uid != 0 && (metadata.uid() != uid || metadata.permissions().mode() & 0o300 != 0o300) {
+    if uid != 0
+        && !fuse
+        && (metadata.uid() != uid || metadata.permissions().mode() & 0o300 != 0o300)
+    {
         return Err(CliError::unavailable(format!(
             "temp cleanup directory is not owner-writable: {}",
             path.display()
@@ -461,16 +462,38 @@ pub(crate) fn agent_stop_log_event(name: &str) -> String {
 }
 
 pub(crate) fn write_agent_control_plain(path: &Path, content: &str) -> Result<(), CliError> {
-    if let Ok(metadata) = fs::symlink_metadata(path)
-        && metadata.file_type().is_symlink()
-    {
-        return Err(CliError::unavailable(format!(
-            "refusing symlink control file: {}",
-            path.display()
-        )));
-    }
-    fs::write(path, content)
+    atomic_replace_text_preserving_metadata(path, content)
         .map_err(|error| CliError::unavailable(format!("cannot write {}: {error}", path.display())))
+}
+
+pub(crate) fn write_agent_session_plain(path: &Path, content: &str) -> Result<(), CliError> {
+    for _attempt in 0..2 {
+        match atomic_replace_text_preserving_metadata(path, content) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                match atomic_create_text_with_mode(path, content, 0o600) {
+                    Ok(()) => return Ok(()),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(error) => {
+                        return Err(CliError::unavailable(format!(
+                            "cannot write {}: {error}",
+                            path.display()
+                        )));
+                    }
+                }
+            }
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot write {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Err(CliError::unavailable(format!(
+        "cannot write {}: target changed during creation",
+        path.display()
+    )))
 }
 
 pub(crate) fn append_agent_log_event(path: &Path, event: &str) -> Result<(), CliError> {

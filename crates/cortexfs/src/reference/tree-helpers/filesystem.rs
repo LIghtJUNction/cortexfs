@@ -96,10 +96,31 @@ pub(crate) fn set_reference_executable(path: &Path) -> Result<(), ReferenceTreeE
         .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
-pub(crate) fn ensure_reference_socket(path: &Path) -> Result<(), ReferenceTreeError> {
+pub(crate) fn ensure_reference_socket(
+    path: &Path,
+    uid: u32,
+    gid: u32,
+) -> Result<(), ReferenceTreeError> {
     plain_fs::ensure_socket_placeholder(path, 0o777)
-        .map(|_created| ())
-        .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))
+        .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    if !metadata.file_type().is_socket() {
+        return Err(ReferenceTreeError::CannotSocket(
+            std::io::ErrorKind::AlreadyExists,
+        ));
+    }
+    if should_repair_reference_owner(nix::unistd::Uid::effective().as_raw()) {
+        chown_reference_entry(path, uid, gid)?;
+    }
+    Ok(())
+}
+
+pub(crate) const fn should_repair_reference_owner(effective_uid: u32) -> bool {
+    effective_uid == 0
 }
 
 pub(crate) fn ensure_reference_model_alias(

@@ -17,6 +17,7 @@ use super::{
     agent_bwrap_args, agent_chat_request_socket, agent_chat_runtime_socket, agent_chat_socket_systemd_command,
     agent_chat_unit, agent_host_mount_source, agent_native_tool_names, agent_new,
     agent_apply, agent_new_args_from_profile, agent_new_host_fallback,
+    agent_host_stub_script, write_agent_host_stub,
     load_agent_profile, parse_agent_profile_text, resolve_agent_profile_path, AgentProfile,
     AGENT_PROFILE_SCHEMA_V1,
     agent_new_request_json, agent_send_request_json,
@@ -32,7 +33,9 @@ use super::{
     agent_env_lines, agent_repl_should_exit_on_readline_error, read_file_to_string,
     agent_start_mounts_with_default_source, agent_start_process_command,
     agent_start_sandbox_cwd, agent_start_status_lines, agent_start_systemd_command,
-    record_agent_start_state,
+    append_agent_log_event, record_agent_start_state, write_agent_control_plain,
+    write_agent_session_plain, rollback_agent_start_resources_with,
+    rollback_agent_late_chat_start_with, AgentChatAliasState,
     agent_child_rows, agent_status_lines, agent_stop, agent_terminal_socket,
     agent_terminal_units, agent_wait,
     cli_error_line, cortexfs_xattr_line, socket_bind_path, terminal_socket_exists,
@@ -42,7 +45,8 @@ use super::{
     cortexfs_mount_bin, ctx_root_entry_present, ctx_root_shape, env_exports, is_mount_point,
     parse_systemctl_main_pid, plain_sibling_mount_bin, read_agent_processes, read_ctx_status,
     read_status_agent_processes,
-    render_agent_event_lines, render_agent_process_tree, render_agent_status_lines,
+    remove_exact_socket_alias, render_agent_event_lines, render_agent_process_tree,
+    render_agent_status_lines,
     require_agent_mount, require_cli_name, require_session_name,
     classify_input_path, resolve_abi_path, run_visible_tool, run_visible_tool_with_writer,
     schedule_child_context_abi_paths, schedule_context_abi_path, shell_quote_arg,
@@ -71,8 +75,10 @@ use cortexfs::{
     CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES,
     SESSION_REQUIRED_FILES,
 };
+use std::cell::Cell;
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;

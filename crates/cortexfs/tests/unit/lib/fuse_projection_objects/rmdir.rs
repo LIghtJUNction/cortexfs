@@ -64,3 +64,45 @@ fn fuse_v1_projection_rmdir_rejects_symlink_dir_path() {
     );
     assert!(link.is_symlink());
 }
+
+#[test]
+fn fuse_v1_projection_rolls_back_owned_agent_lifecycle_paths_only() {
+    let root = reference_tree("fuse-v1-rmdir-agent-lifecycle");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+
+    assert_eq!(
+        projection.create_layout_dir("agent/scratch.d", uid, gid, 0o755),
+        Ok(())
+    );
+    assert_eq!(
+        projection.create_layout_file("agent/scratch.d/.owner.tmp-1-1-0", uid, gid, 0o600),
+        Ok(())
+    );
+    assert_eq!(
+        projection.remove_layout_file("agent/scratch.d/.owner.tmp-1-1-0", uid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.remove_empty_layout_dir("agent/scratch.d", uid),
+        Ok(())
+    );
+    assert!(!root.join("agent/scratch.d").exists());
+
+    let foreign = uid.saturating_add(1);
+    assert_eq!(
+        projection.remove_layout_file("agent/coder", foreign),
+        Err(FuseV1Error::PermissionDenied)
+    );
+    assert!(root.join("agent/coder").exists());
+    assert_eq!(
+        projection.remove_empty_layout_dir("agent", uid),
+        Err(FuseV1Error::NotControlFile)
+    );
+    assert_eq!(
+        projection.remove_layout_file("home/1000/.profile", uid),
+        Err(FuseV1Error::NotControlFile)
+    );
+}

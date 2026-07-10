@@ -94,6 +94,24 @@ fn agent_stop_host_fallback_removes_temp_worker_prefix_object() -> Result<(), Cl
 }
 
 #[test]
+fn agent_stop_host_fallback_removes_direct_temp_worker_prefix_object() -> Result<(), CliError> {
+    let root = clean_test_dir("ctx-stop-direct-temp-prefix");
+    create_agent_fixture(&root, "worker-fast", "agent:coder", "busy", "101");
+    write_text_file(&root.join("agent/worker-fast.d/log"), "");
+    write_text_file(&root.join("agent/worker-fast.d/life"), "temp\n");
+    let socket = root.join("agent/worker-fast.sock");
+    let _listener = std::os::unix::net::UnixListener::bind(&socket)
+        .map_err(|error| CliError::unavailable(format!("cannot bind socket: {error}")))?;
+
+    assert_eq!(agent_stop(&root, "worker-fast"), Ok(ExitCode::SUCCESS));
+
+    assert!(!root.join("agent/worker-fast").exists());
+    assert!(!root.join("agent/worker-fast.sock").exists());
+    assert!(!root.join("agent/worker-fast.d").exists());
+    Ok(())
+}
+
+#[test]
 fn agent_stop_host_fallback_preflights_temp_cleanup_before_any_stop_write() {
     let root = clean_test_dir("ctx-stop-temp-cleanup-preflight");
     create_agent_fixture(&root, "coder", "agent:base", "busy", "100");

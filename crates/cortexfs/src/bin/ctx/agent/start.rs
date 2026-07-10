@@ -8,6 +8,13 @@ pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode
     for mount in &cli_mounts {
         require_agent_mount(mount)?;
     }
+    let absolute_root = absolute_existing_path(root).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot resolve CTX_ROOT {}: {error}",
+            root.display()
+        ))
+    })?;
+    let root = absolute_root.as_path();
     let view = derive_agent_runtime_view(root, &args.name).map_err(|error| {
         CliError::unavailable(format!(
             "cannot derive agent runtime view for {}: {error:?}",
@@ -23,43 +30,12 @@ pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode
         &session_cwd,
         session_workspace.as_deref(),
     )?;
-    let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
-    let socket = agent_runtime_socket(root, &args.name, &args.session)?;
-    ensure_agent_terminal_socket(&visible_socket, &socket)?;
-    let unit = agent_terminal_unit(&args.name, &args.session);
-    reset_agent_terminal_unit(&unit);
-    let command = agent_start_systemd_command(root, args, &cli_mounts, &view, &socket, &unit);
-    let output = agent_start_process_command(&command)
-        .output()
-        .map_err(|error| CliError::unavailable(format!("cannot start systemd-run: {error}")))?;
-    if !output.status.success() {
-        let diagnostics = systemd_run_diagnostics(&output);
-        return Err(CliError::unavailable(format!(
-            "agent terminal service failed to start with {}{diagnostics}",
-            output.status
-        )));
-    }
-    wait_for_agent_terminal_socket(&socket)?;
-    let chat_visible_socket = agent_socket_path(root, &args.name)?;
-    let chat_socket = agent_chat_runtime_socket(root, &args.name)?;
-    ensure_agent_chat_socket(&chat_visible_socket, &chat_socket)?;
-    let chat_unit = agent_chat_unit(root, &args.name);
-    reset_agent_chat_unit(&chat_unit);
-    let chat_command =
-        agent_chat_socket_systemd_command(root, &args.name, &chat_socket, &chat_unit);
-    let chat_output = agent_start_process_command(&chat_command)
-        .output()
-        .map_err(|error| {
-            CliError::unavailable(format!("cannot start agent chat socket: {error}"))
-        })?;
-    if !chat_output.status.success() {
-        let diagnostics = systemd_run_diagnostics(&chat_output);
-        return Err(CliError::unavailable(format!(
-            "agent chat socket failed to start with {}{diagnostics}",
-            chat_output.status
-        )));
-    }
-    wait_for_agent_chat_socket(&chat_socket)?;
+    let AgentStartServices {
+        visible_socket,
+        socket,
+        unit,
+        output,
+    } = start_agent_runtime_services(root, args, &cli_mounts, &view)?;
     let invocation = systemd_run_invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
     let role = agent_role_for_display(view.agent_name());
@@ -108,6 +84,115 @@ pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode
     Ok(ExitCode::SUCCESS)
 }
 
+struct AgentStartServices {
+    visible_socket: PathBuf,
+    socket: PathBuf,
+    unit: String,
+    output: std::process::Output,
+}
+
+fn start_agent_runtime_services(
+    root: &Path,
+    args: &AgentStartArgs,
+    cli_mounts: &[AgentMount],
+    view: &AgentRuntimeView,
+) -> Result<AgentStartServices, CliError> {
+    let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
+    let socket = agent_runtime_socket(root, &args.name, &args.session)?;
+    let chat_visible_socket = agent_socket_path(root, &args.name)?;
+    let chat_socket = agent_chat_runtime_socket(root, &args.name)?;
+    let chat_unit = agent_chat_unit(root, &args.name);
+    let unit = agent_terminal_unit(&args.name, &args.session);
+    let terminal_alias_created = ensure_agent_terminal_socket(&visible_socket, &socket)?;
+    let terminal_aliases = terminal_alias_created
+        .then_some((visible_socket.as_path(), socket.as_path()))
+        .into_iter()
+        .collect::<Vec<_>>();
+    reset_agent_terminal_unit(&unit);
+    let command = agent_start_systemd_command(root, args, cli_mounts, view, &socket, &unit);
+    let output = match agent_start_process_command(&command).output() {
+        Ok(output) => output,
+        Err(error) => {
+            rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+            return Err(CliError::unavailable(format!(
+                "cannot start systemd-run: {error}"
+            )));
+        }
+    };
+    if !output.status.success() {
+        let diagnostics = systemd_run_diagnostics(&output);
+        let error = CliError::unavailable(format!(
+            "agent terminal service failed to start with {}{diagnostics}",
+            output.status
+        ));
+        rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+        return Err(error);
+    }
+    if let Err(error) = wait_for_agent_terminal_socket(&socket) {
+        rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+        return Err(error);
+    }
+    let chat_alias_state = match ensure_agent_chat_socket(&chat_visible_socket, &chat_socket) {
+        Ok(state) => state,
+        Err(error) => {
+            rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+            return Err(error);
+        }
+    };
+    reset_agent_chat_unit(&chat_unit);
+    let chat_command =
+        agent_chat_socket_systemd_command(root, &args.name, &chat_socket, &chat_unit);
+    let chat_output = match agent_start_process_command(&chat_command).output() {
+        Ok(output) => output,
+        Err(error) => {
+            rollback_agent_late_chat_start(
+                (&unit, &chat_unit),
+                (
+                    &terminal_aliases,
+                    &[socket.as_path(), chat_socket.as_path()],
+                ),
+                (&chat_visible_socket, &chat_socket, &chat_alias_state),
+            );
+            return Err(CliError::unavailable(format!(
+                "cannot start agent chat socket: {error}"
+            )));
+        }
+    };
+    if !chat_output.status.success() {
+        let diagnostics = systemd_run_diagnostics(&chat_output);
+        let error = CliError::unavailable(format!(
+            "agent chat socket failed to start with {}{diagnostics}",
+            chat_output.status
+        ));
+        rollback_agent_late_chat_start(
+            (&unit, &chat_unit),
+            (
+                &terminal_aliases,
+                &[socket.as_path(), chat_socket.as_path()],
+            ),
+            (&chat_visible_socket, &chat_socket, &chat_alias_state),
+        );
+        return Err(error);
+    }
+    if let Err(error) = wait_for_agent_chat_socket(&chat_socket) {
+        rollback_agent_late_chat_start(
+            (&unit, &chat_unit),
+            (
+                &terminal_aliases,
+                &[socket.as_path(), chat_socket.as_path()],
+            ),
+            (&chat_visible_socket, &chat_socket, &chat_alias_state),
+        );
+        return Err(error);
+    }
+    Ok(AgentStartServices {
+        visible_socket,
+        socket,
+        unit,
+        output,
+    })
+}
+
 pub(crate) fn ensure_agent_start_session(
     root: &Path,
     args: &AgentStartArgs,
@@ -133,7 +218,7 @@ pub(crate) fn ensure_agent_start_session(
         ))
     })?;
     if let Some(workspace) = workspace {
-        write_agent_control_plain(
+        write_agent_session_plain(
             &session_root.join(&args.session).join("workspace"),
             &format!("{workspace}\n"),
         )?;
@@ -342,6 +427,88 @@ pub(crate) fn reset_agent_terminal_unit(unit: &str) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+pub(crate) fn rollback_agent_start_resources(
+    terminal_unit: &str,
+    chat_unit: Option<&str>,
+    aliases: &[(&Path, &Path)],
+    runtime_sockets: &[&Path],
+) {
+    rollback_agent_start_resources_with(
+        terminal_unit,
+        chat_unit,
+        aliases,
+        runtime_sockets,
+        reset_agent_terminal_unit,
+        reset_agent_chat_unit,
+    );
+}
+
+pub(crate) fn rollback_agent_start_resources_with(
+    terminal_unit: &str,
+    chat_unit: Option<&str>,
+    aliases: &[(&Path, &Path)],
+    runtime_sockets: &[&Path],
+    reset_terminal: impl FnOnce(&str),
+    reset_chat: impl FnOnce(&str),
+) {
+    if let Some(chat_unit) = chat_unit {
+        reset_chat(chat_unit);
+    }
+    reset_terminal(terminal_unit);
+    for &(visible, target) in aliases {
+        remove_matching_socket_alias(visible, target);
+    }
+    for path in runtime_sockets {
+        remove_plain_runtime_socket(path);
+    }
+}
+
+type AgentStartAlias<'a> = (&'a Path, &'a Path);
+type AgentStartCleanup<'a> = (&'a [AgentStartAlias<'a>], &'a [&'a Path]);
+type AgentChatCleanup<'a> = (&'a Path, &'a Path, &'a AgentChatAliasState);
+
+fn rollback_agent_late_chat_start(
+    units: (&str, &str),
+    terminal: AgentStartCleanup<'_>,
+    chat: AgentChatCleanup<'_>,
+) {
+    rollback_agent_late_chat_start_with(
+        units,
+        terminal,
+        chat,
+        reset_agent_terminal_unit,
+        reset_agent_chat_unit,
+    );
+}
+
+pub(crate) fn rollback_agent_late_chat_start_with(
+    units: (&str, &str),
+    terminal: AgentStartCleanup<'_>,
+    chat: AgentChatCleanup<'_>,
+    reset_terminal: impl FnOnce(&str),
+    reset_chat: impl FnOnce(&str),
+) {
+    rollback_agent_start_resources_with(
+        units.0,
+        Some(units.1),
+        terminal.0,
+        terminal.1,
+        reset_terminal,
+        reset_chat,
+    );
+    let _ignored = rollback_agent_chat_alias(chat.0, chat.1, chat.2);
+}
+
+fn remove_matching_socket_alias(visible: &Path, target: &Path) {
+    let _ignored = remove_exact_socket_alias(visible, target);
+}
+
+fn remove_plain_runtime_socket(path: &Path) {
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_socket()) {
+        let _ignored = fs::remove_file(path);
+    }
 }
 
 pub(crate) fn agent_unit_main_pid(unit: &str) -> Option<String> {

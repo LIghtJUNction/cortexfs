@@ -365,6 +365,12 @@ pub fn open_plain_directory(path: &Path) -> Result<fs::File> {
     Ok(directory)
 }
 
+#[doc(hidden)]
+pub fn is_fuse(file: &fs::File) -> Result<bool> {
+    let stat = nix::sys::statfs::fstatfs(file).map_err(std::io::Error::from)?;
+    Ok(stat.filesystem_type().0 == libc::FUSE_SUPER_MAGIC)
+}
+
 pub(crate) fn open_single_plain_directory(path: &Path) -> Result<fs::File> {
     let directory = fs::OpenOptions::new()
         .read(true)
