@@ -286,19 +286,24 @@ An agent can create another agent only through normal CortexFS objects and
 policy checks. There is no root-level `spawn/`, `factory/`, or
 `agent-template/`.
 
-`base` is the ordinary root agent for v1 lineage:
+`architect` is the ordinary root agent for v1 lineage:
 
 ```text
-/ctx/agent/base
-/ctx/agent/base.sock
-/ctx/agent/base.d/
+/ctx/agent/architect
+/ctx/agent/architect.sock
+/ctx/agent/architect.d/
 ```
 
-`base` is not a template namespace and does not add inheritance semantics.
+`architect` is not a template namespace and does not add inheritance semantics.
 It is a normal agent object with a normal label, mount table, policy, socket,
 home, and session state. New top-level agents should be created by
-`agent.create` with `parent=agent:base`. Child agents created by other agents
+`agent.create` with `parent=agent:architect`. Child agents created by other agents
 must still be attenuated from their direct parent.
+
+`base` is a retired reference-agent name. `ctx update` reports any remaining
+`base` object as `would_skip` and retains it for manual review; legacy trees
+have no manifest that can prove ownership and full control-tree integrity, so
+update must not delete it automatically.
 
 The child appears as ordinary agent ABI:
 
@@ -329,7 +334,7 @@ The child appears as ordinary agent ABI:
 `parent` is a small text file. v1 should keep it simple:
 
 ```text
-agent:base
+agent:architect
 agent:coder
 ```
 

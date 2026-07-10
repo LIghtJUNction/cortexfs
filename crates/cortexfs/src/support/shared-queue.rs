@@ -2,6 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::support::layout_path::require_symlink_dir;
 use crate::{PathLayoutIssue, SHARED_QUEUE_REQUIRED_DIRS, is_object_name};
 
 /// Shared queue layout uses the shared path-layout issue model.
@@ -129,7 +130,7 @@ impl SharedQueueClaim {
 pub fn inspect_shared_queue_layout(queue_dir: &Path) -> SharedQueueLayoutReport {
     let mut issues = Vec::new();
     for dir in SHARED_QUEUE_REQUIRED_DIRS {
-        require_shared_queue_directory(&queue_dir.join(dir), dir, &mut issues);
+        require_symlink_dir(&queue_dir.join(dir), dir, &mut issues);
     }
     SharedQueueLayoutReport::new(issues)
 }

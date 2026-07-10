@@ -17,7 +17,7 @@ use crate::{
         proc_fd_path as plain_proc_fd_path, read_small_text_file,
     },
     support::control_text::inspect_control_line,
-    support::layout_path::{require_plain_dir, require_plain_file},
+    support::layout_path::{LayoutPathRole, require_plain},
 };
 
 const MAX_SESSION_LAYOUT_CONTROL_BYTES: u64 = 64 * 1024;
@@ -67,21 +67,36 @@ impl_issue_report!(SessionControlReport, ControlLineIssue);
 #[must_use]
 pub fn inspect_session_layout(session_dir: &Path) -> SessionLayoutReport {
     let mut issues = Vec::new();
-    require_plain_dir(session_dir, ".", &mut issues);
+    require_plain(session_dir, ".", LayoutPathRole::Directory, &mut issues);
     for file in SESSION_REQUIRED_FILES {
-        require_plain_file(&session_dir.join(file), file, &mut issues);
+        require_plain(
+            &session_dir.join(file),
+            file,
+            LayoutPathRole::File,
+            &mut issues,
+        );
     }
     inspect_session_control_files(session_dir, &mut issues);
 
     let context = session_dir.join("context");
-    require_plain_dir(&context, "context", &mut issues);
+    require_plain(&context, "context", LayoutPathRole::Directory, &mut issues);
     for file in CONTEXT_REQUIRED_FILES {
         let label = format!("context/{file}");
-        require_plain_file(&context.join(file), &label, &mut issues);
+        require_plain(
+            &context.join(file),
+            &label,
+            LayoutPathRole::File,
+            &mut issues,
+        );
     }
     for dir in CONTEXT_REQUIRED_DIRS {
         let label = format!("context/{dir}");
-        require_plain_dir(&context.join(dir), &label, &mut issues);
+        require_plain(
+            &context.join(dir),
+            &label,
+            LayoutPathRole::Directory,
+            &mut issues,
+        );
     }
     inspect_child_result_dirs(&context.join("child"), &mut issues);
 
@@ -239,11 +254,16 @@ pub(crate) fn inspect_child_result_dir(
 ) {
     for file in CHILD_RESULT_REQUIRED_FILES {
         let label = format!("context/child/{child_name}/{file}");
-        require_plain_file(&child_dir.join(file), &label, issues);
+        require_plain(&child_dir.join(file), &label, LayoutPathRole::File, issues);
     }
     for dir in CHILD_RESULT_REQUIRED_DIRS {
         let label = format!("context/child/{child_name}/{dir}");
-        require_plain_dir(&child_dir.join(dir), &label, issues);
+        require_plain(
+            &child_dir.join(dir),
+            &label,
+            LayoutPathRole::Directory,
+            issues,
+        );
     }
 }
 

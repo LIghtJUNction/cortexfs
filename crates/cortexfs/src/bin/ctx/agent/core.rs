@@ -3,6 +3,10 @@ use crate::*;
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum AgentArgs {
     New(AgentNewArgs),
+    Apply {
+        name: String,
+        from: String,
+    },
     Start(AgentStartArgs),
     Stop {
         name: String,
@@ -39,6 +43,10 @@ pub(crate) enum AgentArgs {
         session: Option<String>,
     },
     Pack {
+        name: String,
+        session: Option<String>,
+    },
+    Trajectory {
         name: String,
         session: Option<String>,
     },
@@ -86,6 +94,10 @@ pub(crate) struct AgentNewArgs {
     pub(crate) tools: Vec<String>,
     pub(crate) shared: Vec<AgentShared>,
     pub(crate) mounts: Vec<AgentMount>,
+    /// Optional persona text materialised into `agent/<name>.d/system.md`.
+    pub(crate) instructions: Option<String>,
+    /// Optional description materialised into `agent/<name>.d/meta.json`.
+    pub(crate) description: Option<String>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -107,7 +119,7 @@ pub(crate) struct AgentSessionGcArgs {
     pub(crate) older_than_days: Option<u64>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct AgentShared {
     pub(crate) name: String,
     pub(crate) access: String,
@@ -125,6 +137,10 @@ pub(crate) const AGENT_SANDBOX_HOME: &str = "/home/agent";
 pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, CliError> {
     match *args {
         AgentArgs::New(ref args) => agent_new(root, args),
+        AgentArgs::Apply { ref name, ref from } => {
+            require_cli_name("agent name", name)?;
+            agent_apply(root, name, Path::new(from))
+        }
         AgentArgs::Start(ref args) => agent_start(root, args),
         AgentArgs::Stop { ref name } => {
             require_cli_name("agent name", name)?;
@@ -167,6 +183,10 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             ref name,
             ref session,
         } => success(agent_pack(root, name, session.as_deref())),
+        AgentArgs::Trajectory {
+            ref name,
+            ref session,
+        } => success(agent_trajectory(root, name, session.as_deref())),
         AgentArgs::SessionGc(ref args) => success(agent_session_gc(root, args)),
         AgentArgs::Prompt { ref name } => success(agent_prompt(root, name)),
         AgentArgs::Tools { ref name } => success(agent_tools(root, name)),

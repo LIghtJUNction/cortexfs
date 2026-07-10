@@ -96,5 +96,3 @@ pub(crate) fn collect_child_stderr(reader: Option<thread::JoinHandle<String>>) -
     };
     reader.join().unwrap_or_default()
 }
-
-pub(crate) use process_helpers::read_limited_text;

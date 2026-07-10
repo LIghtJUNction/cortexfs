@@ -83,6 +83,13 @@ fn assistant_response_recorder_updates_latest_without_replacing_history() {
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(messages.contains("\"role\":\"user\""));
     assert!(messages.contains("\"role\":\"assistant\""));
+    assert!(recorded.messages().first().is_some_and(|message| {
+        serde_json::from_str::<serde_json::Value>(message)
+            .ok()
+            .and_then(|value| value.get("run").and_then(serde_json::Value::as_str).map(str::to_owned))
+            .as_deref()
+            == Some("run-1")
+    }));
     assert!(events.contains("\"type\":\"message\""));
     assert!(events.contains("\"status\":\"ok\""));
     assert_file_text(&session.join("latest.md"), "hello back\n");

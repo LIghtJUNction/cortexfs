@@ -14,9 +14,11 @@ pub mod history;
 pub mod prompt_render;
 pub mod rules;
 pub mod skills;
+pub mod snapshot;
 
 pub(crate) use file_read::*;
 pub use history::*;
 pub use prompt_render::*;
 pub use rules::*;
 pub use skills::*;
+pub use snapshot::*;

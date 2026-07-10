@@ -81,6 +81,13 @@ fn tool_result_recorder_appends_inspectable_tool_message_and_event() {
     assert!(inspect_message_stream_jsonl(&messages).is_ok());
     assert!(inspect_event_stream_jsonl(&events).is_ok());
     assert!(messages.contains("\"role\":\"tool\""));
+    assert!(recorded.messages().first().is_some_and(|message| {
+        serde_json::from_str::<serde_json::Value>(message)
+            .ok()
+            .and_then(|value| value.get("run").and_then(serde_json::Value::as_str).map(str::to_owned))
+            .as_deref()
+            == Some("run-1")
+    }));
     assert!(messages.contains("\"type\":\"tool_result\""));
     assert!(messages.contains("\"tool_call_id\":\"call-1\""));
     assert!(events.contains("\"name\":\"fs.read\""));

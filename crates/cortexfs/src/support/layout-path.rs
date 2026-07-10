@@ -184,46 +184,34 @@ pub fn push_plain_role_issues(
     }
 }
 
-pub fn require_plain_file(path: &Path, label: &str, issues: &mut Vec<PathLayoutIssue>) {
-    push_plain_role_issues(check_plain_file(path), label, LayoutPathRole::File, issues);
+/// Single entry for plain (no-follow) layout role checks.
+///
+/// Prefer this over ad-hoc missing/wrong-kind pushes. For directories inspected
+/// with `symlink_metadata` (shared queue), use [`require_symlink_dir`].
+/// Socket paths use specialized callers (e.g. object layout), not this helper.
+pub fn require_plain(
+    path: &Path,
+    label: &str,
+    role: LayoutPathRole,
+    issues: &mut Vec<PathLayoutIssue>,
+) {
+    let check = match role {
+        LayoutPathRole::File | LayoutPathRole::ControlFile => check_plain_file(path),
+        LayoutPathRole::Directory | LayoutPathRole::ControlDirectory => check_plain_dir(path),
+        LayoutPathRole::Executable => check_plain_executable(path),
+        LayoutPathRole::Socket => {
+            // Socket inspection is not plain-path metadata; treat as wrong kind
+            // only if something exists that is not handled by specialized code.
+            match path_metadata_no_follow(path) {
+                Ok(_metadata) => PlainPathKindCheck::WrongKind,
+                Err(_error) => PlainPathKindCheck::Missing,
+            }
+        }
+    };
+    push_plain_role_issues(check, label, role, issues);
 }
 
-pub fn require_plain_dir(path: &Path, label: &str, issues: &mut Vec<PathLayoutIssue>) {
-    push_plain_role_issues(
-        check_plain_dir(path),
-        label,
-        LayoutPathRole::Directory,
-        issues,
-    );
-}
-
-pub fn require_plain_executable(path: &Path, label: &str, issues: &mut Vec<PathLayoutIssue>) {
-    push_plain_role_issues(
-        check_plain_executable(path),
-        label,
-        LayoutPathRole::Executable,
-        issues,
-    );
-}
-
-pub fn require_plain_control_file(path: &Path, label: &str, issues: &mut Vec<PathLayoutIssue>) {
-    push_plain_role_issues(
-        check_plain_file(path),
-        label,
-        LayoutPathRole::ControlFile,
-        issues,
-    );
-}
-
-pub fn require_plain_control_dir(path: &Path, label: &str, issues: &mut Vec<PathLayoutIssue>) {
-    push_plain_role_issues(
-        check_plain_dir(path),
-        label,
-        LayoutPathRole::ControlDirectory,
-        issues,
-    );
-}
-
+/// Directory check via `symlink_metadata` (shared-queue layout).
 pub fn require_symlink_dir(path: &Path, label: &str, issues: &mut Vec<PathLayoutIssue>) {
     push_plain_role_issues(
         check_symlink_dir(path),
@@ -254,6 +242,16 @@ mod tests {
         assert_eq!(check_plain_file(&file), PlainPathKindCheck::Ok);
         assert_eq!(check_plain_dir(&dir), PlainPathKindCheck::Ok);
         assert_eq!(check_plain_executable(&file), PlainPathKindCheck::WrongKind);
+
+        let mut issues = Vec::new();
+        require_plain(&file, "file", LayoutPathRole::File, &mut issues);
+        require_plain(&dir, "dir", LayoutPathRole::Directory, &mut issues);
+        require_plain(&file, "exec", LayoutPathRole::Executable, &mut issues);
+        assert!(
+            issues
+                .iter()
+                .any(|issue| { issue.path() == "exec" && issue.kind() == "not executable" })
+        );
 
         let issue = PathLayoutIssue::missing("agent/x", LayoutPathRole::Executable);
         assert_eq!(issue.kind(), "missing executable");

@@ -75,8 +75,13 @@ pub use support::control_text::ControlLineIssue;
 pub use support::jsonl_line::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
 pub use support::layout_path::{LayoutPathRole, PathLayoutIssue};
 pub use support::{
-    control_text, host_path, jsonl_line, layout_path, manuals, message_stream, plain_fs,
-    process_helpers, session_index, session_layout, shared_queue, stream, tool_path, tool_schema,
+    ATIF_SCHEMA_VERSION, MAX_TRAJECTORY_SESSION_FILE_BYTES, TRAJECTORY_DEFAULT_AGENT_NAME,
+    Trajectory, TrajectoryAgent, TrajectoryFinalMetrics, TrajectoryIssue, TrajectoryMapError,
+    TrajectoryMetrics, TrajectoryObservation, TrajectoryObservationResult, TrajectoryReport,
+    TrajectoryStep, TrajectoryToolCall, control_text, host_path, jsonl_line, layout_path, manuals,
+    message_stream, plain_fs, process_helpers, session_index, session_layout, shared_queue, stream,
+    tool_path, tool_schema, trajectory, trajectory_from_session_dir, trajectory_from_session_jsonl,
+    validate_trajectory, write_trajectory_json,
 };
 pub use tool::core::runtime_types::*;
 pub use tool::tsh_context_state;

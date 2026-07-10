@@ -43,6 +43,7 @@ use nix::libc;
 
 #[cfg(test)]
 pub(crate) use cortexfs::LayoutPathRole;
+pub(crate) use cortexfs::authority_helpers::atomic_replace_text_with_mode;
 pub(crate) use cortexfs::{
     AbiPathKind, AgentControlIssue, AgentPromptContext, AgentRuntimeView, AgentScheduleIssue,
     AgentScheduleNode, AgentScheduleRecordError, CTX_ROOT, ChildContextRecordError,
@@ -50,23 +51,26 @@ pub(crate) use cortexfs::{
     DEFAULT_AGENT_PROMPT_TEMPLATE, EventStreamIssue, MANUAL_INDEX, MANUAL_INDEX_FILE,
     MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MAX_SOCKET_FRAME_BYTES, MessageStreamIssue,
     ModelCapabilityIssue, ModelDriverRouteError, ModelEffort, ModelFallbackIssue, MountMode,
-    MountTable, ObjectClass, ObjectLayoutIssue, PathLayoutIssue, PolicyV0, ROOT_ENTRIES,
-    SessionControlIssue, SessionIndexIssue, SessionIndexKind, SessionLayoutIssue,
+    MountTable, ObjectClass, ObjectLayoutIssue, PathLayoutIssue, PolicyV0, REFERENCE_TREE_VERSION,
+    ROOT_ENTRIES, SessionControlIssue, SessionIndexIssue, SessionIndexKind, SessionLayoutIssue,
     SharedQueueLayoutIssue, SocketSessionScope, ToolExecutionAuthority, ToolPath, ToolSchemaIssue,
-    advance_agent_schedule_from_parent_context, agent_schedule_nodes, authorize_tool_execution,
-    classify_abi_path, collect_agent_rules, collect_skill_metadata,
+    TrajectoryMapError, advance_agent_schedule_from_parent_context, agent_schedule_nodes,
+    authorize_tool_execution, bootstrap_state_matches_target, classify_abi_path,
+    collect_agent_rules, collect_skill_metadata,
     completed_agent_schedule_nodes_from_parent_context, cortexfs_manual, current_time_unix,
     default_agent_model_for_name, default_agent_tool_context, derive_agent_runtime_view,
     ensure_durable_session_layout, ensure_v1_reference_tree, ensure_v1_runtime_models,
-    inspect_agent_control, inspect_agent_schedule_json, inspect_context_jsonl,
-    inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
-    inspect_model_capabilities, inspect_object_layout, inspect_session_control,
-    inspect_session_index, inspect_session_layout, inspect_shared_queue_layout,
-    inspect_tool_schema_json, install_executable_object_wrapper, is_dedicated_worker_agent_name,
-    is_executable_file, is_model_name, is_object_name, is_worker_agent_name, parse_abi_path,
-    parse_model_driver_routes, parse_model_fallback, policy_subject_from_label,
-    ready_agent_schedule_nodes, record_child_result_to_parent_context, render_agent_system_prompt,
-    run_core_tool_cli_with_root, skill_metadata_budget_from_env,
+    format_bootstrap_plan_lines, inspect_agent_control, inspect_agent_schedule_json,
+    inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl,
+    inspect_message_stream_jsonl, inspect_model_capabilities, inspect_object_layout,
+    inspect_session_control, inspect_session_index, inspect_session_layout,
+    inspect_shared_queue_layout, inspect_tool_schema_json, install_executable_object_wrapper,
+    is_dedicated_worker_agent_name, is_executable_file, is_managed_reference_agent_wrapper,
+    is_model_name, is_object_name, is_worker_agent_name, list_present_retired_reference_agents,
+    parse_abi_path, parse_model_driver_routes, parse_model_fallback, plan_reference_tree_upgrade,
+    policy_subject_from_label, read_bootstrap_state, ready_agent_schedule_nodes,
+    record_child_result_to_parent_context, render_agent_system_prompt, run_core_tool_cli_with_root,
+    skill_metadata_budget_from_env, trajectory_from_session_dir, validate_trajectory,
 };
 use nix::sys::termios::{SetArg, Termios, cfmakeraw, tcgetattr, tcsetattr};
 use serde::Deserialize;

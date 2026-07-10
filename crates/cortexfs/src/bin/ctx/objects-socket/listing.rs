@@ -178,6 +178,34 @@ pub(crate) fn latest(root: &Path, agent: &str, session: Option<&str>) -> Result<
     cat_path(&session_dir.join("latest.md"))
 }
 
+/// Projects the agent session into ATIF and prints pretty JSON on stdout.
+pub(crate) fn agent_trajectory(
+    root: &Path,
+    agent: &str,
+    session: Option<&str>,
+) -> Result<(), CliError> {
+    let session_dir = agent_session_dir(root, agent, session)?;
+    let trajectory = trajectory_from_session_dir(&session_dir).map_err(|error| match error {
+        TrajectoryMapError::MissingMessages => {
+            CliError::unavailable("missing session messages.jsonl")
+        }
+        TrajectoryMapError::MissingEvents => CliError::unavailable("missing session events.jsonl"),
+        TrajectoryMapError::CannotRead(file) => {
+            CliError::unavailable(format!("cannot read session file: {file}"))
+        }
+    })?;
+    let report = validate_trajectory(&trajectory);
+    if !report.is_ok() {
+        return Err(CliError::unavailable(format!(
+            "invalid trajectory projection ({} issues)",
+            report.issues().len()
+        )));
+    }
+    let body = serde_json::to_string_pretty(&trajectory)
+        .map_err(|error| CliError::unavailable(format!("cannot encode trajectory: {error}")))?;
+    print_terminal_text(&body)
+}
+
 pub(crate) fn ping(root: &Path, path: &str) -> Result<ExitCode, CliError> {
     stream_socket_request(&object_socket_path(root, path)?, "{\"op\":\"ping\"}\n")
 }

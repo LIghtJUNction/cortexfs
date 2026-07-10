@@ -284,6 +284,17 @@ Skill 列表只注入 `name`、`description`、`SKILL.md` 路径；完整 `SKILL
 skill 后读取。Skill 元数据最多占上下文窗口 2%；上下文大小未知时硬上限为 8,000
 字符。超限时先缩短 description，仍超限则省略部分 skill 并在 prompt 中给出警告。
 
+agent 实际跑起来组 prompt 时，会把当次加载快照写到该 agent 的 private session 目录
+（与 `{{rules}}` / `{{skills}}` 同源，best-effort，不阻塞运行）：
+
+```bash
+cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+```
+
+- `AGENTS.md`：全局 + 项目等叠加后的 effective 规则正文
+- `SKILLS.md`：仅技能元数据（name / description / path），不含完整 `SKILL.md`
+
 这些 prompt 文件不授予权限。agent 默认 native tool 仍只有 `tsh`；其他工具必须通过
 `tsh` 发现、加载、pin 和调用。实际权限仍由 `agent/<agent>.d/policy`、`path`、
 `mount`、Linux uid/gid 和 mode bits 决定。

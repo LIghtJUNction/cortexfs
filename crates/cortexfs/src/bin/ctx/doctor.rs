@@ -36,11 +36,66 @@ pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
     ok &= doctor_objects(root)?;
     ok &= doctor_sessions(root)?;
     ok &= doctor_shared_queues(root)?;
+    ok &= doctor_retired_reference_agents(root)?;
+    ok &= doctor_bootstrap_state(root)?;
 
     if ok {
         Ok(())
     } else {
         Err(CliError::unavailable("doctor found ABI problems"))
+    }
+}
+
+pub(crate) fn doctor_retired_reference_agents(root: &Path) -> Result<bool, CliError> {
+    let retired = list_present_retired_reference_agents(root);
+    for name in &retired {
+        let exec = root.join("agent").join(name);
+        let status = if is_managed_reference_agent_wrapper(&exec) {
+            "stale"
+        } else {
+            "stale-user"
+        };
+        print_line(&format!(
+            "{status} agent/{name} (retired reference agent; run ctx update --check)"
+        ))?;
+    }
+    Ok(retired.is_empty())
+}
+
+pub(crate) fn doctor_bootstrap_state(root: &Path) -> Result<bool, CliError> {
+    match read_bootstrap_state(root) {
+        Some(state) if bootstrap_state_matches_target(&state) => {
+            print_line(&format!(
+                "ok bootstrap tree_version={} migrations={}",
+                state.tree_version,
+                if state.applied_migrations.is_empty() {
+                    "none".to_owned()
+                } else {
+                    state.applied_migrations.join(",")
+                }
+            ))?;
+            Ok(true)
+        }
+        Some(state) => {
+            let managed = state.managed_agents.join(",");
+            let migrations = state.applied_migrations.join(",");
+            print_line(&format!(
+                "invalid bootstrap state schema={} tree_version={} managed_agents={} migrations={} (run ctx update)",
+                state.schema,
+                state.tree_version,
+                if managed.is_empty() { "none" } else { &managed },
+                if migrations.is_empty() {
+                    "none"
+                } else {
+                    &migrations
+                }
+            ))?;
+            Ok(false)
+        }
+        None => {
+            print_line("missing bootstrap state (run ctx update)")?;
+            Ok(false)
+        }
     }
 }
 

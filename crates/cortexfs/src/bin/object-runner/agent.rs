@@ -425,6 +425,9 @@ impl AgentModelRunConfig {
             "runner",
         )
         .unwrap_or_else(|_error| DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned());
+        let rules = collect_agent_rules();
+        let skills = collect_skill_metadata(skill_metadata_budget_from_env());
+        write_run_snapshot(&ctx_root, agent, &rules, &skills);
         Ok(Self {
             agent: agent.to_owned(),
             source,
@@ -434,8 +437,8 @@ impl AgentModelRunConfig {
             model_path,
             system_prompt,
             prompt_template,
-            rules: collect_agent_rules(),
-            skills: collect_skill_metadata(skill_metadata_budget_from_env()),
+            rules,
+            skills,
             current_time_unix: current_time_unix().to_string(),
             tool_context: env::var("CTX_AGENT_TOOL_CONTEXT").unwrap_or_default(),
             history_messages: env::var("CTX_AGENT_HISTORY_MESSAGES")

@@ -41,6 +41,8 @@ pub(crate) enum Command {
     Status,
     Bootstrap {
         source: Option<PathBuf>,
+        dry_run: bool,
+        check: bool,
     },
     Mount {
         source: Option<PathBuf>,
@@ -148,7 +150,11 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
         Command::Root => success(print_line(&cli.root.display().to_string())),
         Command::Man { topic } => success(print_man(&cli.root, topic.as_deref())),
         Command::Status => success(print_status(&cli.root)),
-        Command::Bootstrap { source } => success(bootstrap_reference_tree(source.as_deref())),
+        Command::Bootstrap {
+            source,
+            dry_run,
+            check,
+        } => success(bootstrap_reference_tree(source.as_deref(), dry_run, check)),
         Command::Mount { source, mountpoint } => success(mount_reference_tree(
             &cli.root,
             source.as_deref(),
@@ -238,6 +244,38 @@ pub(crate) fn required_arg(
     values.next().ok_or_else(|| CliError::usage(message))
 }
 
+pub(crate) fn parse_bootstrap_command(
+    values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut source = None;
+    let mut dry_run = false;
+    let mut check = false;
+    for value in values {
+        match value.as_str() {
+            "--dry-run" => dry_run = true,
+            "--check" => check = true,
+            _ if source.is_none() && !value.starts_with('-') => {
+                source = Some(PathBuf::from(value));
+            }
+            _ => {
+                return Err(CliError::usage(format!(
+                    "unexpected argument: {value} (expected [--check] [--dry-run] [SOURCE])"
+                )));
+            }
+        }
+    }
+    if dry_run && check {
+        return Err(CliError::usage(
+            "bootstrap/update accepts only one of --check or --dry-run",
+        ));
+    }
+    Ok(Command::Bootstrap {
+        source,
+        dry_run,
+        check,
+    })
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "flat CLI dispatch keeps subcommand parsing explicit"
@@ -279,11 +317,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             no_extra_args(values)?;
             Ok(Command::Status)
         }
-        "bootstrap" | "update" => {
-            let source = values.next().map(PathBuf::from);
-            no_extra_args(values)?;
-            Ok(Command::Bootstrap { source })
-        }
+        "bootstrap" | "update" => parse_bootstrap_command(values),
         "mount" => parse_mount_command(values),
         "ls" => parse_ls_command(values),
         "which" => {

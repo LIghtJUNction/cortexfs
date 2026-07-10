@@ -280,6 +280,23 @@ Runtime-only blocks such as tool injection and historical message context
 remain bounded dynamic inputs; when they are not available to the CLI, the
 command prints explicit placeholder text.
 
+When an agent run builds its prompt, the object runner also writes session
+load snapshots (best-effort) under the private agent session directory:
+
+```text
+/ctx/home/<uid>/agent/<agent>/session/<session>/AGENTS.md
+/ctx/home/<uid>/agent/<agent>/session/<session>/SKILLS.md
+```
+
+```text
+AGENTS.md  effective merged rules snapshot (same text as {{rules}})
+SKILLS.md  skill metadata snapshot only (name, description, path)
+```
+
+These files are ordinary observability snapshots, not control or authority
+files. Full skill content is not inlined; the agent opens listed `SKILL.md`
+paths when needed. Snapshot writes must not fail the model run.
+
 ## Design Tests
 
 The runtime design is healthy when all of these are true:

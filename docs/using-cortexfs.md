@@ -47,9 +47,17 @@ echo "summarize this file" | /ctx/model/main
 
 ```bash
 ctx bootstrap
+ctx update --check
+ctx update --dry-run
 ctx agent start coder --session default
 ctx agent chat coder
 ```
+
+`ctx update` / `ctx bootstrap` 会物化 reference source，并按需写入
+`bin/cortexfs.bootstrap.json`。已退役的 `base` / `worker` / `executor`
+缺少可证明整个控制树归属和未漂移的旧 manifest，因此 update 只报告并保留给人工处理，
+不会自动删除。`--check` / `--dry-run` 不写盘；成功 update 后再次 `--check`
+应为 clean。
 
 改源码前可以先审计它看到的状态、工具和 prompt：
 
@@ -162,10 +170,52 @@ ABI，不引入新的 workflow 入口：
 ```bash
 ctx agent new reviewer --model openai/gpt-4o --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
+ctx agent new --from .cortexfs/agents/reviewer/agent.yaml
+ctx agent new --from .cortexfs/agents/reviewer
+ctx agent new --from reviewer
+ctx agent apply reviewer --from reviewer
 ctx agent start reviewer --session default
 ctx agent status reviewer
 ctx agent ps
 ctx agent stop reviewer
+```
+
+Host 侧用 **`agent.yaml`**（也接受 `agent.yml` / `agent.json`）声明 agent 行为，再通过
+`ctx agent new --from` / `ctx agent apply --from` **物化**为 `agent/<name>.d/*`。
+运行时只读 `.d/*`；`agent.yaml` 不是 live 控制面。
+
+约定布局：
+
+```text
+.cortexfs/agents/<name>/agent.yaml
+~/.config/cortexfs/agents/<name>/agent.yaml
+# 兼容：.cortexfs/agents/<name>.yaml
+```
+
+`--from` 解析：
+
+```text
+--from path/to/agent.yaml     直接读该文件
+--from path/to/dir            读 dir/agent.yaml
+--from <name>                 在 .cortexfs/agents 与 ~/.config/cortexfs/agents 下查找
+```
+
+支持 `schema: cortexfs.agent.profile/v1`，以及微软 AgentSchema 子集
+（`name` / `description` / `instructions` / `model`；`kind: hosted` 容器类会拒绝）。
+CLI 参数覆盖 profile 字段。
+
+示例 `.cortexfs/agents/reviewer/agent.yaml`：
+
+```yaml
+schema: cortexfs.agent.profile/v1
+name: reviewer
+description: code review agent
+instructions: |
+  Review diffs carefully.
+model: openai/gpt-4o
+tools:
+  - fs.read
+parent: agent:architect
 ```
 
 `ctx agent new` 优先调用 `/ctx/tool/agent.create`；如果该 tool 不存在，host 侧
@@ -362,6 +412,17 @@ Skill 列表只注入 `name`、`description`、`SKILL.md` 路径；完整 `SKILL
 skill 后读取。Skill 元数据最多占上下文窗口 2%；上下文大小未知时硬上限为 8,000
 字符。超限时先缩短 description，仍超限则省略部分 skill 并在 prompt 中给出警告。
 
+agent 实际跑起来组 prompt 时，会把当次加载快照写到该 agent 的 private session 目录
+（与 `{{rules}}` / `{{skills}}` 同源，best-effort，不阻塞运行）：
+
+```bash
+cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
+```
+
+- `AGENTS.md`：全局 + 项目等叠加后的 effective 规则正文
+- `SKILLS.md`：仅技能元数据（name / description / path），不含完整 `SKILL.md`
+
 这些 prompt 文件不授予权限。agent 默认 native tool 仍只有 `tsh`；其他工具必须通过
 `tsh` 发现、加载、pin 和调用。实际权限仍由 `agent/<agent>.d/policy`、`path`、
 `mount`、Linux uid/gid 和 mode bits 决定。
@@ -383,6 +444,7 @@ bits 决定。
 ```bash
 ctx agent history coder
 ctx agent output coder
+ctx agent trajectory coder
 ```
 
 不传 `--session` 时，`ctx agent history` 和 `ctx agent output` 会先使用
@@ -396,3 +458,6 @@ ctx agent output coder
 ```
 
 原始 history 是持久事实；context 是可重建工作集。压缩上下文不能销毁原始消息。
+`ctx agent trajectory` 把当前 session 的 `messages.jsonl` + `events.jsonl`
+投影成经过校验的 ATIF JSON 并输出到 stdout；tool call、observation 和 usage 按 run/id
+关联，不创建第二套 history。

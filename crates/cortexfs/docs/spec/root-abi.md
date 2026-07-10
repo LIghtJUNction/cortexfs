@@ -100,9 +100,9 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
         log
 
   agent/
-    base
+    architect
     base.sock
-    base.d/
+    architect.d/
       owner
       uid
       gid

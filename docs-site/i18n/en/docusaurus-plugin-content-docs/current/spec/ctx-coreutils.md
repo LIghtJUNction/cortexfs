@@ -85,6 +85,20 @@ ABI.
 reference source tree only; it does not remount `/ctx`, start a watcher, or add
 a second refresh boundary.
 
+Optional flags:
+
+```text
+ctx update --check [SOURCE]     report tree_version, missing agents, retired leftovers
+ctx update --dry-run [SOURCE]   show would_ensure / would_skip / would_write (no writes)
+```
+
+Default bootstrap materializes `architect` / `coder` / `reviewer` and
+writes `bin/cortexfs.bootstrap.json` (`schema`, `tree_version`,
+`managed_agents`, `applied_migrations`) only when state differs. Retired
+`base` / `worker` / `executor` objects are reported and retained for
+manual review because legacy trees have no manifest proving ownership and full
+control-tree integrity.
+
 Top-level agent session shortcuts follow the same current-session default as
 their `ctx agent ...` forms:
 
@@ -163,6 +177,8 @@ Agent lifecycle conveniences exist as thin wrappers:
 
 ```text
 ctx agent new NAME [--temp] [--parent PARENT] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]
+ctx agent new [NAME] --from PROFILE
+ctx agent apply NAME --from PROFILE
 ctx agent start NAME
 ctx agent stop NAME
 ctx agent status NAME
@@ -180,6 +196,12 @@ grant. `ctx agent new --temp` records `life=temp` in either path. `--parent`
 records the ordinary `agent/<name>.d/parent` control value, such as
 `agent:coder session:default run:r1`, so a created worker child has a
 wait/stop-visible parent without adding a separate process table.
+
+`--from` accepts a host-side `agent.yaml` file, a directory containing one,
+or a short profile name. New/apply validates profile fields before materializing
+them into ordinary `.d/*` controls. Apply preserves unspecified controls and
+unknown `meta.json` object keys; it rejects symlink controls and invalid
+profile or metadata before writing.
 
 `ctx agent start` starts the explicit runtime for an existing agent. After the
 runtime terminal socket is reachable, host-side `ctx` writes
@@ -426,7 +448,7 @@ eval "$(ctx cd project-a --shell)"
 
 ## Sessions
 
-`ctx agent history`, `ctx agent output`, and `ctx agent resume` read session files and connect to
+`ctx agent history`, `ctx agent output`, `ctx agent trajectory`, and `ctx agent resume` read session files and connect to
 the relevant socket. They do not keep a private chat database.
 
 When `--session` is omitted, they use `session/index/current` first and fall
@@ -438,6 +460,7 @@ Examples:
 ```text
 ctx agent history coder
 ctx agent output coder
+ctx agent trajectory coder
 ctx agent resume coder --session default
 ```
 
@@ -448,7 +471,12 @@ These commands read:
 /ctx/home/<uid>/agent/<agent>/session/index/current
 /ctx/home/<uid>/agent/<agent>/session/<session>/latest.md
 /ctx/home/<uid>/agent/<agent>/session/<session>/messages.jsonl
+/ctx/home/<uid>/agent/<agent>/session/<session>/events.jsonl
 ```
+
+`ctx agent trajectory` prints a validated ATIF projection. It correlates tool
+calls, observations, and token usage by run/call identity and does not create a
+second durable history.
 
 ## Provider OAuth
 

@@ -1,7 +1,4 @@
-use crate::support::layout_path::{
-    LayoutPathRole, PathLayoutIssue, require_plain_control_dir, require_plain_control_file,
-    require_plain_executable,
-};
+use crate::support::layout_path::{LayoutPathRole, PathLayoutIssue, require_plain};
 use crate::*;
 
 /// Inspects a model, agent, or tool object triple under a `CortexFS` root.
@@ -21,14 +18,29 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
 
     let exec_label = format!("{}/{name}", class.as_str());
     let exec_path = root.join(class.as_str()).join(name);
-    require_executable_file(&exec_path, &exec_label, &mut issues);
+    require_plain(
+        &exec_path,
+        &exec_label,
+        LayoutPathRole::Executable,
+        &mut issues,
+    );
 
     let control_label = format!("{}/{name}.d", class.as_str());
     let control_dir = root.join(class.as_str()).join(format!("{name}.d"));
-    require_object_control_dir(&control_dir, &control_label, &mut issues);
+    require_plain(
+        &control_dir,
+        &control_label,
+        LayoutPathRole::ControlDirectory,
+        &mut issues,
+    );
     for file in control_files_for(class) {
         let label = format!("{control_label}/{file}");
-        require_object_control_file(&control_dir.join(file), &label, &mut issues);
+        require_plain(
+            &control_dir.join(file),
+            &label,
+            LayoutPathRole::ControlFile,
+            &mut issues,
+        );
     }
     if class != ObjectClass::Model {
         require_object_hook_dirs(&control_dir, &control_label, &mut issues);
@@ -302,26 +314,6 @@ pub(crate) fn inspect_agent_control_files(
     }
 }
 
-pub(crate) fn require_executable_file(path: &Path, label: &str, issues: &mut Vec<PathLayoutIssue>) {
-    require_plain_executable(path, label, issues);
-}
-
-pub(crate) fn require_object_control_dir(
-    path: &Path,
-    label: &str,
-    issues: &mut Vec<PathLayoutIssue>,
-) {
-    require_plain_control_dir(path, label, issues);
-}
-
-pub(crate) fn require_object_control_file(
-    path: &Path,
-    label: &str,
-    issues: &mut Vec<PathLayoutIssue>,
-) {
-    require_plain_control_file(path, label, issues);
-}
-
 pub(crate) fn require_object_hook_dirs(
     control_dir: &Path,
     label: &str,
@@ -329,10 +321,20 @@ pub(crate) fn require_object_hook_dirs(
 ) {
     let hook_label = format!("{label}/{OBJECT_HOOK_DIR}");
     let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
-    require_object_control_dir(&hook_dir, &hook_label, issues);
+    require_plain(
+        &hook_dir,
+        &hook_label,
+        LayoutPathRole::ControlDirectory,
+        issues,
+    );
     for phase in OBJECT_HOOK_PHASE_DIRS {
         let phase_label = format!("{hook_label}/{phase}");
-        require_object_control_dir(&hook_dir.join(phase), &phase_label, issues);
+        require_plain(
+            &hook_dir.join(phase),
+            &phase_label,
+            LayoutPathRole::ControlDirectory,
+            issues,
+        );
     }
 }
 

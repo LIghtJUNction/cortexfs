@@ -23,7 +23,8 @@ pub use agent::prompt::{
     agent_runtime_contract, collect_agent_rules, collect_agent_rules_from_paths,
     collect_history_messages_from_session, collect_skill_metadata, current_time_unix,
     default_agent_tool_context, format_history_messages_jsonl, format_skill_metadata_with_budget,
-    render_agent_system_prompt, skill_metadata_budget_from_env,
+    render_agent_system_prompt, skill_metadata_budget_from_env, snapshot_dirs, write_run_snapshot,
+    write_snapshot,
 };
 pub use agent::schedule::{
     AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNode,
@@ -93,6 +94,13 @@ pub use tool::core::tools::{
 };
 pub use tool_path::{ToolHit, ToolPath, ToolPathError, is_executable_file};
 pub use tool_schema::{ToolSchemaIssue, ToolSchemaReport, inspect_tool_schema_json};
+pub use trajectory::{
+    ATIF_SCHEMA_VERSION, MAX_TRAJECTORY_SESSION_FILE_BYTES, TRAJECTORY_DEFAULT_AGENT_NAME,
+    Trajectory, TrajectoryAgent, TrajectoryFinalMetrics, TrajectoryIssue, TrajectoryMapError,
+    TrajectoryMetrics, TrajectoryObservation, TrajectoryObservationResult, TrajectoryReport,
+    TrajectoryStep, TrajectoryToolCall, trajectory_from_session_dir, trajectory_from_session_jsonl,
+    validate_trajectory, write_trajectory_json,
+};
 pub use tsh_context_state::{
     TshContextState, TshLoadedToolState, read_tsh_context_state, tsh_context_state_path,
     write_tsh_context_state,

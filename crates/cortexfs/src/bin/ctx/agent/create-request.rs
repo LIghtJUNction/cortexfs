@@ -63,6 +63,12 @@ pub(crate) fn agent_new_request_json(args: &AgentNewArgs) -> Result<String, CliE
     if !args.mounts.is_empty() {
         fields.push(format!("\"mount\":{}", agent_mounts_json(&args.mounts)));
     }
+    if let Some(instructions) = args.instructions.as_deref() {
+        fields.push(format!("\"instructions\":{}", json_string(instructions)));
+    }
+    if let Some(description) = args.description.as_deref() {
+        fields.push(format!("\"description\":{}", json_string(description)));
+    }
     Ok(format!("{{{}}}", fields.join(",")))
 }
 
