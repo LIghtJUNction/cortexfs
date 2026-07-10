@@ -288,15 +288,8 @@ pub(crate) fn agent_new_policy(subject: &str, model: &str, tools: &[String]) -> 
 }
 
 pub(crate) fn write_agent_host_stub(path: &Path, name: &str) -> Result<(), CliError> {
-    fs::write(path, agent_host_stub_script(name)).map_err(|error| {
-        CliError::unavailable(format!("cannot write {}: {error}", path.display()))
-    })?;
-    let mut permissions = fs::metadata(path)
-        .map_err(|error| CliError::unavailable(format!("cannot stat {}: {error}", path.display())))?
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions)
-        .map_err(|error| CliError::unavailable(format!("cannot chmod {}: {error}", path.display())))
+    atomic_replace_text_with_mode(path, &agent_host_stub_script(name), 0o755)
+        .map_err(|error| CliError::unavailable(format!("cannot write {}: {error}", path.display())))
 }
 
 pub(crate) fn agent_host_stub_script(name: &str) -> String {

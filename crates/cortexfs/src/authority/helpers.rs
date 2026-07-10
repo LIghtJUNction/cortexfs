@@ -39,54 +39,196 @@ pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result
 }
 
 pub fn atomic_replace_text_with_mode(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
+    atomic_replace_text_inner(path, content, AtomicReplaceMetadata::mode(mode), None)
+}
+
+pub fn atomic_create_text_with_mode(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
+    atomic_replace_text_inner(path, content, AtomicReplaceMetadata::create(mode), None)
+}
+
+pub fn atomic_replace_text_preserving_metadata(path: &Path, content: &str) -> std::io::Result<()> {
+    atomic_replace_text_preserving_metadata_inner(path, content, None)
+}
+
+fn atomic_replace_text_preserving_metadata_inner(
+    path: &Path,
+    content: &str,
+    before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
+) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let parent_dir = open_authority_plain_directory(parent)?;
     let file_name = authority_plain_file_name(path)?;
+    let existing_fd = nix::fcntl::openat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(nix_errno_to_io)?;
+    let existing = fs::File::from(existing_fd);
+    let metadata = existing.metadata()?;
+    if !metadata.is_file() {
+        return Err(std::io::Error::other(
+            "atomic replace target is not a regular file",
+        ));
+    }
+    let replacement = AtomicReplaceMetadata {
+        mode: metadata.permissions().mode() & 0o7777,
+        owner: Some((metadata.uid(), metadata.gid())),
+        identity: Some((metadata.dev(), metadata.ino())),
+        commit: AtomicCommit::Replace,
+    };
+    drop(existing);
+    atomic_replace_text_in_parent(&parent_dir, file_name, content, replacement, before_commit)
+}
+
+#[cfg(test)]
+pub(crate) fn atomic_replace_text_preserving_metadata_with_hook(
+    path: &Path,
+    content: &str,
+    before_commit: &mut dyn FnMut() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    atomic_replace_text_preserving_metadata_inner(path, content, Some(before_commit))
+}
+
+#[derive(Clone, Copy)]
+struct AtomicReplaceMetadata {
+    mode: u32,
+    owner: Option<(u32, u32)>,
+    identity: Option<(u64, u64)>,
+    commit: AtomicCommit,
+}
+
+#[derive(Clone, Copy)]
+enum AtomicCommit {
+    Replace,
+    NoReplace,
+}
+
+impl AtomicReplaceMetadata {
+    const fn mode(mode: u32) -> Self {
+        Self {
+            mode,
+            owner: None,
+            identity: None,
+            commit: AtomicCommit::Replace,
+        }
+    }
+
+    const fn create(mode: u32) -> Self {
+        Self {
+            mode,
+            owner: None,
+            identity: None,
+            commit: AtomicCommit::NoReplace,
+        }
+    }
+}
+
+fn atomic_replace_text_inner(
+    path: &Path,
+    content: &str,
+    metadata: AtomicReplaceMetadata,
+    before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
+) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent_dir = open_authority_plain_directory(parent)?;
+    let file_name = authority_plain_file_name(path)?;
+    atomic_replace_text_in_parent(&parent_dir, file_name, content, metadata, before_commit)
+}
+
+fn atomic_replace_text_in_parent(
+    parent_dir: &fs::File,
+    file_name: &str,
+    content: &str,
+    metadata: AtomicReplaceMetadata,
+    mut before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
+) -> std::io::Result<()> {
     for attempt in 0..16 {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_nanos());
-        let temp_name = format!(".{file_name}.tmp-{}-{nonce}-{attempt}", std::process::id());
+        let temp_name = generated_sibling_name(file_name, "tmp", attempt);
         let file_fd = match nix::fcntl::openat(
-            &parent_dir,
+            parent_dir,
             temp_name.as_str(),
             nix::fcntl::OFlag::O_CREAT
                 | nix::fcntl::OFlag::O_EXCL
                 | nix::fcntl::OFlag::O_WRONLY
                 | nix::fcntl::OFlag::O_NOFOLLOW
                 | nix::fcntl::OFlag::O_CLOEXEC,
-            nix::sys::stat::Mode::from_bits_truncate(mode),
+            nix::sys::stat::Mode::from_bits_truncate(metadata.mode),
         ) {
             Ok(file_fd) => file_fd,
             Err(nix::errno::Errno::EEXIST) => continue,
             Err(error) => return Err(nix_errno_to_io(error)),
         };
         let mut file = fs::File::from(file_fd);
+        if let Some((uid, gid)) = metadata.owner {
+            let created = match file.metadata() {
+                Ok(created) => created,
+                Err(error) => {
+                    remove_atomic_temp(parent_dir, &temp_name);
+                    return Err(error);
+                }
+            };
+            if (created.uid(), created.gid()) != (uid, gid)
+                && let Err(error) = nix::unistd::fchown(
+                    &file,
+                    Some(nix::unistd::Uid::from_raw(uid)),
+                    Some(nix::unistd::Gid::from_raw(gid)),
+                )
+            {
+                remove_atomic_temp(parent_dir, &temp_name);
+                return Err(nix_errno_to_io(error));
+            }
+        }
+        if let Err(error) = file.set_permissions(fs::Permissions::from_mode(metadata.mode & 0o7777))
+        {
+            remove_atomic_temp(parent_dir, &temp_name);
+            return Err(error);
+        }
         if let Err(error) = file.write_all(content.as_bytes()) {
-            let _ignored = nix::unistd::unlinkat(
-                &parent_dir,
-                temp_name.as_str(),
-                nix::unistd::UnlinkatFlags::NoRemoveDir,
-            );
+            remove_atomic_temp(parent_dir, &temp_name);
             return Err(error);
         }
         if let Err(error) = file.sync_all() {
-            let _ignored = nix::unistd::unlinkat(
-                &parent_dir,
-                temp_name.as_str(),
-                nix::unistd::UnlinkatFlags::NoRemoveDir,
-            );
+            remove_atomic_temp(parent_dir, &temp_name);
             return Err(error);
         }
-        drop(file);
-        if let Err(error) =
-            nix::fcntl::renameat(&parent_dir, temp_name.as_str(), &parent_dir, file_name)
+        if let Some(before_commit) = before_commit.as_deref_mut()
+            && let Err(error) = before_commit()
         {
-            let _ignored = nix::unistd::unlinkat(
-                &parent_dir,
-                temp_name.as_str(),
-                nix::unistd::UnlinkatFlags::NoRemoveDir,
+            remove_atomic_temp(parent_dir, &temp_name);
+            return Err(error);
+        }
+        if let Some(identity) = metadata.identity {
+            let replacement = file.metadata()?;
+            let replacement_identity = (replacement.dev(), replacement.ino());
+            drop(file);
+            return commit_preserving_atomic_temp(
+                parent_dir,
+                &temp_name,
+                file_name,
+                identity,
+                replacement_identity,
             );
+        }
+        drop(file);
+        let renamed = match metadata.commit {
+            AtomicCommit::Replace => {
+                nix::fcntl::renameat(parent_dir, temp_name.as_str(), parent_dir, file_name)
+            }
+            AtomicCommit::NoReplace => nix::fcntl::renameat2(
+                parent_dir,
+                temp_name.as_str(),
+                parent_dir,
+                file_name,
+                nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+            ),
+        };
+        if let Err(error) = renamed {
+            remove_atomic_temp(parent_dir, &temp_name);
             return Err(nix_errno_to_io(error));
         }
         return parent_dir.sync_all();
@@ -95,6 +237,102 @@ pub fn atomic_replace_text_with_mode(path: &Path, content: &str, mode: u32) -> s
         std::io::ErrorKind::AlreadyExists,
         "cannot create unique temp file",
     ))
+}
+
+#[must_use]
+pub fn generated_sibling_name(target: &str, kind: &str, attempt: u8) -> String {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    format!(".{target}.{kind}-{}-{nonce}-{attempt}", std::process::id())
+}
+
+#[must_use]
+pub fn generated_sibling_target<'a>(name: &'a str, kind: &str) -> Option<&'a str> {
+    let rest = name.strip_prefix('.')?;
+    let marker = format!(".{kind}-");
+    let (target, suffix) = rest.split_once(&marker)?;
+    if target.is_empty() {
+        return None;
+    }
+    let mut suffix = suffix.split('-');
+    suffix.next()?.parse::<u32>().ok()?;
+    suffix.next()?.parse::<u128>().ok()?;
+    suffix.next()?.parse::<u8>().ok()?;
+    suffix.next().is_none().then_some(target)
+}
+
+fn commit_preserving_atomic_temp(
+    parent_dir: &fs::File,
+    temp_name: &str,
+    file_name: &str,
+    expected: (u64, u64),
+    replacement: (u64, u64),
+) -> std::io::Result<()> {
+    if plain_fs::is_fuse(parent_dir)? {
+        // CortexFS synthetic inodes are path-derived, so a cross-path exchange
+        // cannot compare the temporary inode with the target inode. The mount
+        // enforces owner-UID writes; same-UID writers are one security subject.
+        if !atomic_target_matches(parent_dir, file_name, expected) {
+            remove_atomic_temp(parent_dir, temp_name);
+            return Err(std::io::Error::other("atomic replace target changed"));
+        }
+        if let Err(error) = nix::fcntl::renameat(parent_dir, temp_name, parent_dir, file_name) {
+            remove_atomic_temp(parent_dir, temp_name);
+            return Err(nix_errno_to_io(error));
+        }
+        return parent_dir.sync_all();
+    }
+
+    nix::fcntl::renameat2(
+        parent_dir,
+        temp_name,
+        parent_dir,
+        file_name,
+        nix::fcntl::RenameFlags::RENAME_EXCHANGE,
+    )
+    .map_err(nix_errno_to_io)?;
+    if atomic_target_matches(parent_dir, temp_name, expected) {
+        remove_atomic_temp(parent_dir, temp_name);
+        return parent_dir.sync_all();
+    }
+    if !atomic_target_matches(parent_dir, file_name, replacement) {
+        return Err(std::io::Error::other(
+            "atomic replace target changed during rollback",
+        ));
+    }
+    nix::fcntl::renameat2(
+        parent_dir,
+        temp_name,
+        parent_dir,
+        file_name,
+        nix::fcntl::RenameFlags::RENAME_EXCHANGE,
+    )
+    .map_err(nix_errno_to_io)?;
+    remove_atomic_temp(parent_dir, temp_name);
+    let _ignored = parent_dir.sync_all();
+    Err(std::io::Error::other("atomic replace target changed"))
+}
+
+fn atomic_target_matches(parent_dir: &fs::File, file_name: &str, identity: (u64, u64)) -> bool {
+    nix::sys::stat::fstatat(
+        parent_dir,
+        file_name,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .is_ok_and(|stat| {
+        nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFREG)
+            && (stat.st_dev, stat.st_ino) == identity
+    })
+}
+
+fn remove_atomic_temp(parent_dir: &fs::File, temp_name: &str) {
+    let _ignored = nix::unistd::unlinkat(
+        parent_dir,
+        temp_name,
+        nix::unistd::UnlinkatFlags::NoRemoveDir,
+    );
 }
 
 pub(crate) fn nix_errno_to_io(error: nix::errno::Errno) -> std::io::Error {

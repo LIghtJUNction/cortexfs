@@ -271,7 +271,7 @@ pub(crate) fn agent_repl_new_session(
         CliError::unavailable(format!("cannot prepare agent session {next}: {error:?}"))
     })?;
     if let Some(workspace) = preferred_workspace_source(root, name, current)? {
-        write_agent_control_plain(
+        write_agent_session_plain(
             &session_root.join(&next).join("workspace"),
             &format!("{workspace}\n"),
         )?;

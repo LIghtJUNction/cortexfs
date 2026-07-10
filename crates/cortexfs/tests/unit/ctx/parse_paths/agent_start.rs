@@ -627,7 +627,11 @@ fn visible_terminal_socket_verifies_expected_alias() {
 
     assert_eq!(
         ensure_best_effort_visible_terminal_socket(&visible, &runtime),
-        Ok(())
+        Ok(true)
+    );
+    assert_eq!(
+        ensure_best_effort_visible_terminal_socket(&visible, &runtime),
+        Ok(false)
     );
     assert!(matches!(fs::read_link(visible), Ok(target) if target == runtime));
 }
@@ -639,7 +643,10 @@ fn visible_chat_socket_verifies_expected_alias() {
     let runtime = root.join("runtime/coder.sock");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
 
-    assert_eq!(ensure_agent_chat_socket(&visible, &runtime), Ok(()));
+    assert_eq!(
+        ensure_agent_chat_socket(&visible, &runtime),
+        Ok(AgentChatAliasState::Created)
+    );
     assert!(matches!(fs::read_link(visible), Ok(target) if target == runtime));
 }
 
@@ -712,6 +719,18 @@ fn agent_start_chat_socket_path_is_root_scoped() {
 }
 
 #[test]
+fn agent_start_chat_unit_normalizes_existing_relative_root() {
+    let current = std::env::current_dir();
+    assert!(current.is_ok());
+    let Ok(current) = current else { return };
+
+    assert_eq!(
+        agent_chat_unit(Path::new("."), "coder"),
+        agent_chat_unit(&current, "coder")
+    );
+}
+
+#[test]
 fn agent_socket_path_prefers_current_user_agent_override() {
     let root = clean_test_dir("ctx-agent-user-socket-override");
     let uid = current_uid_for_test();
@@ -722,4 +741,205 @@ fn agent_socket_path_prefers_current_user_agent_override() {
         agent_socket_path(&root, "coder"),
         Ok(root.join("home").join(uid).join("agent").join("coder.sock"))
     );
+}
+
+#[test]
+fn agent_start_chat_alias_failure_rolls_back_terminal_resources_and_keeps_error() {
+    let root = clean_test_dir("agent-start-chat-alias-rollback");
+    let visible = root.join("visible.sock");
+    let runtime = root.join("runtime.sock");
+    let chat_placeholder = root.join("chat.sock");
+    let chat_runtime = root.join("expected-chat.sock");
+    let unrelated = root.join("unrelated.sock");
+    let reused_visible = root.join("reused-visible.sock");
+    let reused_runtime = root.join("reused-runtime.sock");
+    let status = root.join("status");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let terminal_listener = UnixListener::bind(&runtime);
+    assert!(terminal_listener.is_ok());
+    assert!(symlink(&runtime, &visible).is_ok());
+    assert!(symlink(&unrelated, &chat_placeholder).is_ok());
+    assert!(symlink(&reused_runtime, &reused_visible).is_ok());
+    assert_eq!(
+        ensure_best_effort_visible_terminal_socket(&reused_visible, &reused_runtime),
+        Ok(false)
+    );
+    write_text_file(&status, "idle\n");
+    let terminal_reset = Cell::new(false);
+    let chat_reset = Cell::new(false);
+    let original = CliError::unavailable("injected chat alias failure");
+
+    let injected: Result<(), CliError> = Err(original);
+    let result = match injected {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            rollback_agent_start_resources_with(
+                "terminal-unit",
+                None,
+                &[
+                    (visible.as_path(), runtime.as_path()),
+                    (chat_placeholder.as_path(), chat_runtime.as_path()),
+                ],
+                &[runtime.as_path()],
+                |_unit| terminal_reset.set(true),
+                |_unit| chat_reset.set(true),
+            );
+            Err(error)
+        }
+    };
+
+    assert_eq!(
+        result,
+        Err(CliError::unavailable("injected chat alias failure"))
+    );
+    assert!(terminal_reset.get());
+    assert!(!chat_reset.get());
+    assert!(fs::symlink_metadata(visible).is_err());
+    assert!(fs::symlink_metadata(runtime).is_err());
+    assert!(matches!(
+        fs::read_link(chat_placeholder),
+        Ok(target) if target == unrelated
+    ));
+    assert!(matches!(
+        fs::read_link(reused_visible),
+        Ok(target) if target == reused_runtime
+    ));
+    assert_eq!(fs::read_to_string(status).unwrap_or_default(), "idle\n");
+    drop(terminal_listener);
+}
+
+#[test]
+fn agent_chat_alias_existing_same_target_survives_rollback() {
+    let root = clean_test_dir("agent-chat-alias-existing");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let visible = root.join("visible.sock");
+    let runtime = root.join("runtime.sock");
+    assert!(symlink(&runtime, &visible).is_ok());
+    let terminal_reset = Cell::new(false);
+    let chat_reset = Cell::new(false);
+
+    let state = ensure_agent_chat_socket(&visible, &runtime);
+    assert!(matches!(state, Ok(AgentChatAliasState::ExistingSameTarget)));
+    let Ok(state) = state else { return };
+    rollback_agent_late_chat_start_with(
+        ("terminal-unit", "chat-unit"),
+        (&[], &[]),
+        (&visible, &runtime, &state),
+        |_unit| terminal_reset.set(true),
+        |_unit| chat_reset.set(true),
+    );
+    assert!(terminal_reset.get());
+    assert!(chat_reset.get());
+    assert!(matches!(fs::read_link(visible), Ok(target) if target == runtime));
+}
+
+#[test]
+fn agent_chat_alias_created_by_start_is_removed_by_rollback() {
+    let root = clean_test_dir("agent-chat-alias-created");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let visible = root.join("visible.sock");
+    let runtime = root.join("runtime.sock");
+
+    let state = ensure_agent_chat_socket(&visible, &runtime);
+    assert!(matches!(state, Ok(AgentChatAliasState::Created)));
+    assert!(matches!(fs::read_link(&visible), Ok(target) if target == runtime));
+    let Ok(state) = state else { return };
+    rollback_agent_late_chat_start_with(
+        ("terminal-unit", "chat-unit"),
+        (&[], &[]),
+        (&visible, &runtime, &state),
+        |_unit| {},
+        |_unit| {},
+    );
+    assert!(fs::symlink_metadata(visible).is_err());
+}
+
+#[test]
+fn agent_chat_placeholder_metadata_is_restored_by_rollback() {
+    let root = clean_test_dir("agent-chat-alias-placeholder");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let visible = root.join("visible.sock");
+    let runtime = root.join("runtime.sock");
+    let listener = UnixListener::bind(&visible);
+    assert!(listener.is_ok());
+    assert!(fs::set_permissions(&visible, fs::Permissions::from_mode(0o750)).is_ok());
+    let before = fs::symlink_metadata(&visible)
+        .map(|metadata| {
+            (
+                metadata.permissions().mode() & 0o7777,
+                metadata.uid(),
+                metadata.gid(),
+            )
+        })
+        .ok();
+
+    let state = ensure_agent_chat_socket(&visible, &runtime);
+    assert!(matches!(
+        state,
+        Ok(AgentChatAliasState::ReplacedPlaceholder { mode, uid, gid })
+            if Some((mode, uid, gid)) == before
+    ));
+    let Ok(state) = state else { return };
+    drop(listener);
+    rollback_agent_late_chat_start_with(
+        ("terminal-unit", "chat-unit"),
+        (&[], &[]),
+        (&visible, &runtime, &state),
+        |_unit| {},
+        |_unit| {},
+    );
+    assert!(matches!(
+        fs::symlink_metadata(visible),
+        Ok(metadata)
+            if metadata.file_type().is_socket()
+                && Some((
+                    metadata.permissions().mode() & 0o7777,
+                    metadata.uid(),
+                    metadata.gid(),
+                )) == before
+    ));
+}
+
+#[test]
+fn agent_chat_alias_rejects_mismatch_and_regular_file_without_changes() {
+    let root = clean_test_dir("agent-chat-alias-refuse");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let visible = root.join("visible.sock");
+    let runtime = root.join("runtime.sock");
+    let other = root.join("other.sock");
+    assert!(symlink(&other, &visible).is_ok());
+
+    assert!(ensure_agent_chat_socket(&visible, &runtime).is_err());
+    assert!(matches!(fs::read_link(&visible), Ok(target) if target == other));
+
+    assert!(fs::remove_file(&visible).is_ok());
+    write_text_file(&visible, "keep\n");
+    assert!(ensure_agent_chat_socket(&visible, &runtime).is_err());
+    assert_eq!(fs::read_to_string(visible).unwrap_or_default(), "keep\n");
+}
+
+#[test]
+fn exact_socket_alias_cleanup_restores_mismatched_alias_after_claim() {
+    let root = clean_test_dir("agent-socket-claim-mismatch");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let visible = root.join("visible.sock");
+    let expected = root.join("expected.sock");
+    let other = root.join("other.sock");
+    assert!(symlink(&other, &visible).is_ok());
+
+    let result = remove_exact_socket_alias(&visible, &expected);
+
+    assert!(matches!(
+        result,
+        Err(ref error) if error.kind() == std::io::ErrorKind::AlreadyExists
+    ));
+    assert!(matches!(fs::read_link(&visible), Ok(target) if target == other));
+    assert!(fs::read_dir(&root).is_ok_and(|entries| {
+        entries.flatten().all(|entry| {
+            !entry
+                .file_name()
+                .to_string_lossy()
+                .contains(".claim-")
+        })
+    }));
 }

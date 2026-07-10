@@ -221,6 +221,11 @@ fn fuse_v1_projection_creates_owned_agent_lifecycle_paths() {
         projection.create_layout_file(wrapper_temp, uid, gid, 0o600),
         Ok(())
     );
+    assert!(!projection
+        .readdir("agent")
+        .unwrap_or_default()
+        .iter()
+        .any(|entry| entry.name() == ".scratch.tmp-1-1-0"));
     assert_eq!(
         projection.write_fuse_file_at_for_owner(wrapper_temp, 0, b"#!/bin/sh\n", uid, gid),
         Ok(())
@@ -233,6 +238,10 @@ fn fuse_v1_projection_creates_owned_agent_lifecycle_paths() {
         projection.set_layout_mode("agent/scratch", 0o755, uid),
         Ok(())
     );
+    assert!(matches!(
+        projection.getattr("agent/scratch"),
+        Ok(ref attr) if attr.uid() == uid && attr.gid() == gid && attr.mode() == 0o555
+    ));
     for directory in [
         format!("home/{uid}/agent/scratch"),
         format!("home/{uid}/agent/scratch/root"),
@@ -382,6 +391,174 @@ fn fuse_v1_projection_persists_owned_agent_and_terminal_socket_aliases() {
 }
 
 #[test]
+fn fuse_v1_projection_renames_owner_socket_alias_to_generated_claim_and_back() {
+    let root = reference_tree("fuse-v1-socket-alias-claim");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let target = PathBuf::from(format!(
+        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+    ));
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+    let claim = "agent/.coder.sock.claim-1-1-0";
+
+    assert_eq!(
+        projection.rename_socket_alias_claim("agent/coder.sock", claim, uid),
+        Ok(())
+    );
+    assert!(fs::symlink_metadata(root.join("agent/coder.sock")).is_err());
+    assert!(matches!(fs::read_link(root.join(claim)), Ok(ref value) if value == &target));
+    assert_eq!(
+        projection.rename_socket_alias_claim(claim, "agent/coder.sock", uid),
+        Ok(())
+    );
+    assert!(matches!(
+        fs::read_link(root.join("agent/coder.sock")),
+        Ok(ref value) if value == &target
+    ));
+}
+
+#[test]
+fn fuse_v1_projection_rejects_foreign_socket_claim_without_moving_alias() {
+    let root = reference_tree("fuse-v1-socket-alias-claim-foreign");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let target = PathBuf::from(format!(
+        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+    ));
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+
+    assert_eq!(
+        projection.rename_socket_alias_claim(
+            "agent/coder.sock",
+            "agent/.coder.sock.claim-1-1-0",
+            uid.saturating_add(1),
+        ),
+        Err(FuseV1Error::PermissionDenied)
+    );
+    assert_eq!(
+        projection.rename_socket_alias_claim(
+            "agent/coder.sock",
+            "agent/.reviewer.sock.claim-1-1-0",
+            uid,
+        ),
+        Err(FuseV1Error::NotControlFile)
+    );
+    assert!(matches!(
+        fs::read_link(root.join("agent/coder.sock")),
+        Ok(ref value) if value == &target
+    ));
+}
+
+#[test]
+fn fuse_v1_projection_hides_but_resolves_and_removes_generated_socket_claim() {
+    let root = reference_tree("fuse-v1-socket-alias-claim-remove");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let target = PathBuf::from(format!(
+        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+    ));
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+    let claim = "agent/.coder.sock.claim-1-1-0";
+    assert_eq!(
+        projection.rename_socket_alias_claim("agent/coder.sock", claim, uid),
+        Ok(())
+    );
+
+    assert!(projection.node_for_path(claim).is_ok());
+    assert!(projection
+        .readdir("agent")
+        .is_ok_and(|entries| entries.iter().all(|entry| entry.name() != ".coder.sock.claim-1-1-0")));
+    assert_eq!(projection.remove_socket_alias_claim(claim, uid), Ok(()));
+    assert_eq!(projection.node_for_path(claim), Err(FuseV1Error::NotFound));
+}
+
+#[test]
+fn fuse_v1_projection_rejects_invalid_foreign_and_regular_socket_claims() {
+    let root = reference_tree("fuse-v1-socket-alias-claim-invalid");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+    assert!(fs::write(root.join("agent/coder.sock"), "not a socket").is_ok());
+    let claim = "agent/.coder.sock.claim-1-1-0";
+
+    assert_eq!(
+        projection.rename_socket_alias_claim("agent/coder.sock", claim, uid),
+        Err(FuseV1Error::InvalidPath)
+    );
+    assert!(root.join("agent/coder.sock").is_file());
+    assert!(fs::rename(
+        root.join("agent/coder.sock"),
+        root.join("agent/.coder.sock.claim-1-1-0")
+    )
+    .is_ok());
+    assert_eq!(
+        projection.remove_socket_alias_claim(claim, uid.saturating_add(1)),
+        Err(FuseV1Error::PermissionDenied)
+    );
+    assert_eq!(
+        projection.remove_socket_alias_claim(claim, uid),
+        Err(FuseV1Error::InvalidPath)
+    );
+    assert!(root.join(claim).is_file());
+    assert!(!FuseV1Projection::is_socket_alias_claim_path(
+        "agent/.coder.sock.claim-invalid"
+    ));
+}
+
+#[test]
+fn fuse_v1_projection_session_noreplace_create_preserves_existing_target() {
+    let root = reference_tree("fuse-v1-session-noreplace");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let session = format!("home/{uid}/agent/coder/session/fuse");
+    assert!(fs::create_dir_all(root.join(&session)).is_ok());
+    let first = format!("{session}/.state.tmp-1-1-0");
+    let second = format!("{session}/.state.tmp-2-2-0");
+    let target = format!("{session}/state");
+
+    assert_eq!(projection.create_layout_file(&first, uid, gid, 0o600), Ok(()));
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(&first, 0, b"first\n", uid, gid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.rename_atomic_temp_noreplace(&first, &target, uid),
+        Ok(())
+    );
+    assert_eq!(projection.create_layout_file(&second, uid, gid, 0o600), Ok(()));
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(&second, 0, b"second\n", uid, gid),
+        Ok(())
+    );
+    assert_eq!(
+        projection.rename_atomic_temp_noreplace(&second, &target, uid),
+        Err(FuseV1Error::AlreadyExists)
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(&target)).unwrap_or_default(),
+        "first\n"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join(&second)).unwrap_or_default(),
+        "second\n"
+    );
+}
+
+#[test]
 fn fuse_v1_projection_persists_owned_agent_socket_placeholder() {
     let root = reference_tree("fuse-v1-agent-socket-placeholder");
     let projection =
@@ -392,13 +569,49 @@ fn fuse_v1_projection_persists_owned_agent_socket_placeholder() {
     assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
 
     assert!(projection
-        .create_socket_placeholder("agent/coder.sock", uid, gid, 0o777)
+        .create_socket_placeholder("agent/coder.sock", uid, gid, 0o755)
         .is_ok());
 
     assert!(matches!(
         fs::symlink_metadata(root.join("agent/coder.sock")),
-        Ok(metadata) if metadata.file_type().is_socket() && metadata.uid() == uid
+        Ok(metadata)
+            if metadata.file_type().is_socket()
+                && metadata.uid() == uid
+                && metadata.permissions().mode() & 0o7777 == 0o755
     ));
+    assert_eq!(
+        projection.set_socket_placeholder_mode("agent/coder.sock", uid, 0o777),
+        Ok(())
+    );
+    assert!(matches!(
+        fs::symlink_metadata(root.join("agent/coder.sock")),
+        Ok(metadata) if metadata.permissions().mode() & 0o7777 == 0o777
+    ));
+    assert_eq!(
+        projection.set_socket_placeholder_mode("agent/coder.sock", uid.saturating_add(1), 0o700),
+        Err(FuseV1Error::PermissionDenied)
+    );
+    assert_eq!(
+        projection.remove_socket_alias("agent/coder.sock", uid.saturating_add(1)),
+        Err(FuseV1Error::PermissionDenied)
+    );
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+    let target = PathBuf::from(format!(
+        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+    ));
+    assert!(projection
+        .set_socket_alias("agent/coder.sock", &target, uid, gid)
+        .is_ok());
+    assert_eq!(
+        projection.set_socket_placeholder_mode("agent/coder.sock", uid, 0o777),
+        Err(FuseV1Error::InvalidPath)
+    );
+    assert_eq!(projection.remove_socket_alias("agent/coder.sock", uid), Ok(()));
+    assert!(fs::write(root.join("agent/coder.sock"), "not a socket\n").is_ok());
+    assert_eq!(
+        projection.set_socket_placeholder_mode("agent/coder.sock", uid, 0o777),
+        Err(FuseV1Error::InvalidPath)
+    );
 }
 
 #[test]

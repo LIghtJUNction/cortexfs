@@ -284,7 +284,9 @@ pub(crate) fn ensure_reference_agent(
         &reference_agent_wrapper_script(name),
     )?;
     set_reference_executable(&root.join("agent").join(name))?;
-    ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")))?;
+    let uid = read_reference_owner_id(&control.join("uid"))?;
+    let gid = read_reference_owner_id(&control.join("gid"))?;
+    ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")), uid, gid)?;
     ensure_reference_agent_control_ownership(&control)
 }
 

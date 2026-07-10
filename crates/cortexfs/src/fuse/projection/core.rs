@@ -93,7 +93,8 @@ impl FuseV1Projection {
     /// Projects `readdir`.
     pub fn readdir(&self, abi_path: &str) -> Result<Vec<FuseV1DirEntry>, FuseV1Error> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(entries) = self.virtual_model_readdir(&normalized)? {
+        if let Some(mut entries) = self.virtual_model_readdir(&normalized)? {
+            entries.retain(|entry| !Self::is_generated_hidden_child(&normalized, entry.name()));
             return Ok(entries);
         }
         let path = self.resolve(&normalized)?;
@@ -112,6 +113,9 @@ impl FuseV1Projection {
                 .file_name()
                 .into_string()
                 .map_err(|_error| FuseV1Error::InvalidPath)?;
+            if Self::is_generated_hidden_child(&normalized, &name) {
+                continue;
+            }
             let stat = nix::sys::stat::fstatat(
                 &directory,
                 name.as_str(),
@@ -125,6 +129,13 @@ impl FuseV1Projection {
         }
         output.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(output)
+    }
+
+    fn is_generated_hidden_child(parent: &str, name: &str) -> bool {
+        fuse_join_child_path(parent, name).ok().is_some_and(|path| {
+            Self::layout_atomic_temp_target(&path).is_some()
+                || Self::is_socket_alias_claim_path(&path)
+        })
     }
 
     /// Projects `readdir` for a known node.
@@ -205,6 +216,53 @@ impl FuseV1Projection {
             return Err(FuseV1Error::NotDirectory);
         }
         fs::remove_dir(&path).map_err(|error| fuse_remove_dir_error(&error))
+    }
+
+    /// Removes one owner-authorized agent lifecycle file without following links.
+    pub fn remove_layout_file(&self, abi_path: &str, uid: u32) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        let target =
+            Self::layout_atomic_temp_target(&normalized).unwrap_or_else(|| normalized.clone());
+        if !Self::is_agent_wrapper_path(&target) && Self::agent_control_target(&target).is_none() {
+            return Err(FuseV1Error::NotControlFile);
+        }
+        self.authorize_layout_path(&normalized, uid)?;
+        let path = self.resolve(&normalized)?;
+        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let directory = open_fuse_v1_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name = fuse_v1_plain_file_name(&path).map_err(|_error| FuseV1Error::Io)?;
+        let stat =
+            nix::sys::stat::fstatat(&directory, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+                .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
+        if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFREG)
+        {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        if stat.st_uid != uid {
+            return Err(FuseV1Error::PermissionDenied);
+        }
+        nix::unistd::unlinkat(&directory, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
+            .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
+        directory.sync_all().map_err(|_error| FuseV1Error::Io)
+    }
+
+    /// Removes one empty owner-authorized agent lifecycle control directory.
+    pub fn remove_empty_layout_dir(&self, abi_path: &str, uid: u32) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        if !Self::is_agent_lifecycle_dir_path(&normalized) {
+            return Err(FuseV1Error::NotControlFile);
+        }
+        self.authorize_layout_path(&normalized, uid)?;
+        let path = self.resolve(&normalized)?;
+        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(FuseV1Error::NotDirectory);
+        }
+        if metadata.uid() != uid {
+            return Err(FuseV1Error::PermissionDenied);
+        }
+        plain_fs::remove_plain_dir(&path).map_err(|error| fuse_remove_dir_error(&error))
     }
 
     /// Projects a same-directory atomic write for v1 control files.
@@ -429,6 +487,27 @@ impl FuseV1Projection {
 
     /// Renames one whitelisted same-directory atomic temp file.
     pub fn rename_atomic_temp(&self, from: &str, to: &str, uid: u32) -> Result<(), FuseV1Error> {
+        self.rename_atomic_temp_with(from, to, uid, false)
+    }
+
+    /// Creates one missing layout target from its same-directory atomic temp.
+    #[doc(hidden)]
+    pub fn rename_atomic_temp_noreplace(
+        &self,
+        from: &str,
+        to: &str,
+        uid: u32,
+    ) -> Result<(), FuseV1Error> {
+        self.rename_atomic_temp_with(from, to, uid, true)
+    }
+
+    fn rename_atomic_temp_with(
+        &self,
+        from: &str,
+        to: &str,
+        uid: u32,
+        no_replace: bool,
+    ) -> Result<(), FuseV1Error> {
         let from = normalize_fuse_abi_path(from)?;
         let to = normalize_fuse_abi_path(to)?;
         if Self::layout_atomic_temp_target(&from).as_deref() != Some(to.as_str()) {
@@ -456,8 +535,22 @@ impl FuseV1Projection {
         {
             return Err(FuseV1Error::InvalidPath);
         }
-        nix::fcntl::renameat(&parent_dir, from_name, &parent_dir, to_name)
-            .map_err(|_error| FuseV1Error::Io)?;
+        let renamed = if no_replace {
+            nix::fcntl::renameat2(
+                &parent_dir,
+                from_name,
+                &parent_dir,
+                to_name,
+                nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+            )
+        } else {
+            nix::fcntl::renameat(&parent_dir, from_name, &parent_dir, to_name)
+        };
+        renamed.map_err(|error| match error {
+            nix::errno::Errno::EEXIST => FuseV1Error::AlreadyExists,
+            nix::errno::Errno::ENOENT => FuseV1Error::NotFound,
+            _ => FuseV1Error::Io,
+        })?;
         parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
     }
 
@@ -483,16 +576,7 @@ impl FuseV1Projection {
     #[must_use]
     pub fn layout_atomic_temp_target(normalized: &str) -> Option<String> {
         let (parent, file_name) = normalized.rsplit_once('/')?;
-        let rest = file_name.strip_prefix('.')?;
-        let (target_name, suffix) = rest.split_once(".tmp-")?;
-        let mut suffix = suffix.split('-');
-        if suffix.next()?.parse::<u32>().is_err()
-            || suffix.next()?.parse::<u128>().is_err()
-            || suffix.next()?.parse::<u8>().is_err()
-            || suffix.next().is_some()
-        {
-            return None;
-        }
+        let target_name = generated_sibling_target(file_name, "tmp")?;
         let target = format!("{parent}/{target_name}");
         (Self::is_session_replace_path(&target)
             || Self::is_session_append_path(&target)
@@ -672,6 +756,12 @@ impl FuseV1Projection {
         };
         let agent = control.strip_suffix(".d")?;
         (is_object_name(agent) && AGENT_CONTROL_FILES.contains(&file)).then_some((agent, file))
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_agent_control_path(normalized: &str) -> bool {
+        Self::agent_control_target(normalized).is_some()
     }
 
     fn home_agent_path(normalized: &str) -> Option<(u32, &str)> {

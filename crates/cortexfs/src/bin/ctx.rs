@@ -43,7 +43,10 @@ use nix::libc;
 
 #[cfg(test)]
 pub(crate) use cortexfs::LayoutPathRole;
-pub(crate) use cortexfs::authority_helpers::atomic_replace_text_with_mode;
+pub(crate) use cortexfs::authority_helpers::{
+    atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
+    atomic_replace_text_with_mode,
+};
 pub(crate) use cortexfs::{
     AbiPathKind, AgentControlIssue, AgentPromptContext, AgentRuntimeView, AgentScheduleIssue,
     AgentScheduleNode, AgentScheduleRecordError, CHILD_RESULT_REQUIRED_DIRS,

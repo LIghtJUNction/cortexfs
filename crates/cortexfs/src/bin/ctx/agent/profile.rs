@@ -506,7 +506,7 @@ pub(crate) fn agent_apply(
     let updated = writes.iter().map(|entry| entry.0).collect::<Vec<_>>();
     for (file, content) in writes {
         let path = control.join(file);
-        atomic_replace_text_with_mode(&path, &content, 0o600).map_err(|error| {
+        atomic_replace_text_preserving_metadata(&path, &content).map_err(|error| {
             CliError::unavailable(format!("cannot write {}: {error}", path.display()))
         })?;
     }

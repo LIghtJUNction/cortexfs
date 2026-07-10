@@ -97,6 +97,48 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     return;
                 }
             }
+            let Some(name_text) = name.to_str() else {
+                reply.error(Errno::EINVAL);
+                return;
+            };
+            let parent_path = path_for_inode_or_reply!(self, parent, reply);
+            let Some(layout_path) = child_path(&parent_path, name_text) else {
+                reply.error(Errno::EINVAL);
+                return;
+            };
+            match self.projection.remove_layout_file(&layout_path, req.uid()) {
+                Ok(()) => {
+                    if let Err(error) = self.forget_path(&layout_path) {
+                        reply.error(errno(error));
+                        return;
+                    }
+                    reply.ok();
+                    return;
+                }
+                Err(FuseV1Error::NotControlFile) => {}
+                Err(error) => {
+                    reply.error(errno(error));
+                    return;
+                }
+            }
+            match self
+                .projection
+                .remove_socket_alias_claim(&layout_path, req.uid())
+            {
+                Ok(()) => {
+                    if let Err(error) = self.forget_path(&layout_path) {
+                        reply.error(errno(error));
+                        return;
+                    }
+                    reply.ok();
+                    return;
+                }
+                Err(FuseV1Error::NotControlFile) => {}
+                Err(error) => {
+                    reply.error(errno(error));
+                    return;
+                }
+            }
             let path = match self.socket_alias_child_path(parent, name) {
                 Ok(path) => path,
                 Err(_error) => match self.socket_child_path(parent, name) {
@@ -200,13 +242,14 @@ macro_rules! cortexfs_mount_socket_alias_methods {
             flags: RenameFlags,
             reply: ReplyEmpty,
         ) {
-            if !flags.is_empty() {
+            if flags != RenameFlags::empty() && flags != RenameFlags::RENAME_NOREPLACE {
                 reply.error(Errno::EINVAL);
                 return;
             }
-            if self
-                .rename_model_alias_path(parent, name, newparent, newname)
-                .is_ok()
+            if flags.is_empty()
+                && self
+                    .rename_model_alias_path(parent, name, newparent, newname)
+                    .is_ok()
             {
                 reply.ok();
                 return;
@@ -229,12 +272,11 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                 reply.error(Errno::EINVAL);
                 return;
             };
-            match self.projection.rename_atomic_temp(&from, &to, req.uid()) {
-                Ok(()) => match self.rename_path(&from, &to) {
-                    Ok(()) => reply.ok(),
-                    Err(error) => reply.error(errno(error)),
-                },
-                Err(FuseV1Error::NotControlFile) => reply.error(readonly_mutation_errno()),
+            match self.rename_owner_path(&from, &to, req.uid(), flags) {
+                Ok(()) => reply.ok(),
+                Err(FuseV1Error::NotControlFile) if flags.is_empty() => {
+                    reply.error(readonly_mutation_errno());
+                }
                 Err(error) => reply.error(errno(error)),
             }
         }

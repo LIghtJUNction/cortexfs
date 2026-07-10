@@ -24,6 +24,37 @@ fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
 }
 
 #[test]
+fn reference_tree_bootstrap_repairs_plain_socket_placeholder_owner() {
+    if !nix::unistd::Uid::effective().is_root() {
+        return;
+    }
+    let root = clean_test_dir("reference-tree-socket-owner-upgrade");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let socket = root.join("agent/coder.sock");
+    assert!(nix::unistd::fchownat(
+        nix::fcntl::AT_FDCWD,
+        &socket,
+        Some(nix::unistd::Uid::from_raw(0)),
+        Some(nix::unistd::Gid::from_raw(0)),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .is_ok());
+
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(matches!(
+        fs::symlink_metadata(socket),
+        Ok(metadata) if metadata.uid() == 1000 && metadata.gid() == 1000
+    ));
+}
+
+#[test]
+fn reference_socket_owner_repair_requires_effective_root() {
+    assert!(should_repair_reference_owner(0));
+    assert!(!should_repair_reference_owner(1000));
+    assert!(!should_repair_reference_owner(u32::MAX));
+}
+
+#[test]
 fn object_layout_accepts_model_agent_and_tool_triples() {
     let root = clean_test_dir("object-layout-ok");
     create_complete_object_layout(&root, ObjectClass::Model, "debug/echo", "socket");

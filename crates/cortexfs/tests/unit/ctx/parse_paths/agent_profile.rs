@@ -357,6 +357,10 @@ fn agent_apply_merges_meta_and_preserves_unknown_keys() {
         r#"{"description":"old","source":"manual","unknown":{"keep":true}}"#
     )
     .is_ok());
+    assert!(fs::set_permissions(&meta_path, fs::Permissions::from_mode(0o644)).is_ok());
+    let before_meta = fs::symlink_metadata(&meta_path)
+        .map(|metadata| (metadata.ino(), metadata.uid(), metadata.gid()))
+        .ok();
     let profile_path = root.join("description.yaml");
     assert!(fs::write(&profile_path, "description: updated\n").is_ok());
 
@@ -365,7 +369,7 @@ fn agent_apply_merges_meta_and_preserves_unknown_keys() {
         Ok(ExitCode::SUCCESS)
     );
     let meta: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(meta_path).unwrap_or_default())
+        serde_json::from_str(&fs::read_to_string(&meta_path).unwrap_or_default())
             .unwrap_or_default();
     assert_eq!(meta.get("description").and_then(serde_json::Value::as_str), Some("updated"));
     assert_eq!(meta.get("source").and_then(serde_json::Value::as_str), Some("profile"));
@@ -375,6 +379,14 @@ fn agent_apply_merges_meta_and_preserves_unknown_keys() {
             .and_then(serde_json::Value::as_bool),
         Some(true)
     );
+    assert!(matches!(
+        (before_meta, fs::symlink_metadata(meta_path)),
+        (Some((inode, uid, gid)), Ok(metadata))
+            if metadata.ino() != inode
+                && metadata.permissions().mode() & 0o7777 == 0o644
+                && metadata.uid() == uid
+                && metadata.gid() == gid
+    ));
 }
 
 #[test]

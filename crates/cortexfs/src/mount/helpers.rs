@@ -283,6 +283,30 @@ impl CortexFuse {
         self.rename_path(&source, &target)
     }
 
+    pub(crate) fn rename_owner_path(
+        &self,
+        from: &str,
+        to: &str,
+        uid: u32,
+        flags: RenameFlags,
+    ) -> Result<(), FuseV1Error> {
+        if flags.is_empty() {
+            self.projection.rename_atomic_temp(from, to, uid)?;
+        } else if flags == RenameFlags::RENAME_NOREPLACE {
+            match self.projection.rename_socket_alias_claim(from, to, uid) {
+                Ok(()) => {}
+                Err(FuseV1Error::NotControlFile) => {
+                    self.projection
+                        .rename_atomic_temp_noreplace(from, to, uid)?;
+                }
+                Err(error) => return Err(error),
+            }
+        } else {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        self.rename_path(from, to)
+    }
+
     pub(crate) fn xattrs_for_path(&self, path: &str) -> Result<Vec<CortexXattr>, FuseV1Error> {
         let attr = self.projected_getattr(path)?;
         let backing_path = self.projection.root().join(path);

@@ -297,6 +297,181 @@ pub(crate) fn socket_overlay_preserves_request_owner_for_sticky_agent_directory(
 }
 
 #[test]
+pub(crate) fn lifecycle_wrapper_rename_preserves_owner_for_mount_chmod() {
+    let root = unique_mount_test_dir("lifecycle-wrapper-owner");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let fs = CortexFuse::new(root.to_path_buf());
+    assert!(fs.is_ok());
+    let Ok(fs) = fs else { return };
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    let temp = "agent/.scratch.tmp-1-1-0";
+
+    assert_eq!(
+        fs.projection
+            .create_layout_dir("agent/scratch.d", uid, gid, 0o755),
+        Ok(())
+    );
+    assert_eq!(
+        fs.projection
+            .create_layout_file("agent/scratch.d/.owner.tmp-1-1-0", uid, gid, 0o600),
+        Ok(())
+    );
+    assert_eq!(
+        fs.projection.write_fuse_file_at_for_owner(
+            "agent/scratch.d/.owner.tmp-1-1-0",
+            0,
+            uid.to_string().as_bytes(),
+            uid,
+            gid,
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        fs.projection.rename_atomic_temp(
+            "agent/scratch.d/.owner.tmp-1-1-0",
+            "agent/scratch.d/owner",
+            uid,
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        fs.projection.create_layout_file(temp, uid, gid, 0o600),
+        Ok(())
+    );
+    let node = fs.projected_node_for_path(temp);
+    assert!(node.is_ok());
+    let Ok(node) = node else { return };
+    assert_eq!(fs.remember(&node), Ok(()));
+    assert_eq!(
+        fs.projection
+            .write_fuse_file_at_for_owner(temp, 0, b"#!/bin/sh\n", uid, gid),
+        Ok(())
+    );
+    assert_eq!(
+        fs.projection.rename_atomic_temp(temp, "agent/scratch", uid),
+        Ok(())
+    );
+    assert_eq!(fs.rename_path(temp, "agent/scratch"), Ok(()));
+    assert_eq!(
+        fs.path_for_inode(INodeNo(node.inode())),
+        Ok("agent/scratch".to_owned())
+    );
+    assert!(matches!(
+        fs.projected_getattr("agent/scratch"),
+        Ok(ref attr) if attr.uid() == uid && attr.gid() == gid
+    ));
+    assert_eq!(
+        fs.projection.set_layout_mode("agent/scratch", 0o755, uid),
+        Ok(())
+    );
+}
+
+#[test]
+pub(crate) fn owner_rename_supports_generated_socket_claim_and_restore() {
+    let root = unique_mount_test_dir("socket-claim-rename");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let fs = CortexFuse::new(root.to_path_buf());
+    assert!(fs.is_ok());
+    let Ok(fs) = fs else { return };
+    let uid = nix::unistd::Uid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    assert_eq!(
+        fs.projection.remove_socket_alias("agent/coder.sock", uid),
+        Ok(())
+    );
+    let target = PathBuf::from(format!(
+        "/run/user/{uid}/cortexfs/agent/root-hash/coder.sock"
+    ));
+    assert!(symlink(&target, root.join("agent/coder.sock")).is_ok());
+    let node = fs.projected_node_for_path("agent/coder.sock");
+    assert!(node.is_ok());
+    let Ok(node) = node else { return };
+    assert_eq!(fs.remember(&node), Ok(()));
+    let claim = "agent/.coder.sock.claim-1-1-0";
+
+    assert_eq!(
+        fs.rename_owner_path(
+            "agent/coder.sock",
+            claim,
+            uid,
+            RenameFlags::RENAME_NOREPLACE,
+        ),
+        Ok(())
+    );
+    assert!(matches!(
+        fs::read_link(root.join(claim)),
+        Ok(ref value) if value == &target
+    ));
+    assert_eq!(
+        fs.path_for_inode(INodeNo(node.inode())),
+        Ok(claim.to_owned())
+    );
+    assert!(fs.projected_node_for_path(claim).is_ok());
+    assert!(fs.projected_readdir("agent").is_ok_and(|entries| {
+        entries
+            .iter()
+            .all(|entry| entry.name() != ".coder.sock.claim-1-1-0")
+    }));
+    assert_eq!(
+        fs.rename_owner_path(
+            claim,
+            "agent/coder.sock",
+            uid,
+            RenameFlags::RENAME_NOREPLACE,
+        ),
+        Ok(())
+    );
+    assert!(matches!(
+        fs::read_link(root.join("agent/coder.sock")),
+        Ok(ref value) if value == &target
+    ));
+    assert_eq!(
+        fs.path_for_inode(INodeNo(node.inode())),
+        Ok("agent/coder.sock".to_owned())
+    );
+}
+
+#[test]
+pub(crate) fn owner_rename_noreplace_creates_missing_session_target_and_rejects_conflicts() {
+    let root = unique_mount_test_dir("session-noreplace-rename");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let fs = CortexFuse::new(root.to_path_buf());
+    assert!(fs.is_ok());
+    let Ok(fs) = fs else { return };
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let session = format!("home/{uid}/agent/coder/session/fuse");
+    assert!(fs::create_dir_all(root.join(&session)).is_ok());
+    let first = format!("{session}/.state.tmp-1-1-0");
+    let second = format!("{session}/.state.tmp-2-2-0");
+    let third = format!("{session}/.state.tmp-3-3-0");
+    let target = format!("{session}/state");
+    for temp in [&first, &second, &third] {
+        assert_eq!(
+            fs.projection.create_layout_file(temp, uid, gid, 0o600),
+            Ok(())
+        );
+    }
+
+    assert_eq!(
+        fs.rename_owner_path(&first, &target, uid, RenameFlags::RENAME_NOREPLACE),
+        Ok(())
+    );
+    assert_eq!(
+        fs.rename_owner_path(&second, &target, uid, RenameFlags::RENAME_NOREPLACE),
+        Err(FuseV1Error::AlreadyExists)
+    );
+    assert_eq!(
+        fs.rename_owner_path(&third, &target, uid, RenameFlags::RENAME_EXCHANGE),
+        Err(FuseV1Error::InvalidPath)
+    );
+    assert!(root.join(second).is_file());
+    assert!(root.join(third).is_file());
+}
+
+#[test]
 pub(crate) fn remove_backing_socket_entry_refuses_plain_files() {
     let root = unique_mount_test_dir("socket-unlink-plain-file");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());

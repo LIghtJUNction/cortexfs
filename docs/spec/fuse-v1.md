@@ -118,6 +118,12 @@ request uid. Atomic rename is same-directory only, accepts the generated
 known control file or wrapper. Symlinks, escaped paths, another user's agent,
 unknown controls, and arbitrary files under `agent/` or `home/` fail.
 
+Agent control directories admit writes only from their owner uid. CortexFS
+therefore treats processes sharing that uid as one security subject. On FUSE,
+path-derived synthetic inode numbers cannot be compared across an atomic
+temporary path and its target; the remaining same-uid lost-update window is not
+a cross-uid authorization boundary and does not grant another owner access.
+
 ## Runtime Socket Aliases
 
 Agent start binds live sockets below `/run/user/<uid>/cortexfs/` and persists

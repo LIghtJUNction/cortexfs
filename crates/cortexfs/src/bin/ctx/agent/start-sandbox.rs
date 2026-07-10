@@ -539,7 +539,7 @@ pub(crate) fn require_sandbox_cwd(cwd: &str) -> Result<(), CliError> {
 pub(crate) fn ensure_agent_terminal_socket(
     visible_socket: &Path,
     runtime_socket: &Path,
-) -> Result<(), CliError> {
+) -> Result<bool, CliError> {
     if let Some(parent) = runtime_socket.parent() {
         create_agent_terminal_runtime_dir(parent).map_err(|error| {
             CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
@@ -551,7 +551,6 @@ pub(crate) fn ensure_agent_terminal_socket(
             ))
         })?;
     }
-    ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)?;
     match remove_stale_socket(runtime_socket) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -562,7 +561,7 @@ pub(crate) fn ensure_agent_terminal_socket(
             )));
         }
     }
-    Ok(())
+    ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)
 }
 
 pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
@@ -584,10 +583,17 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
         .join(format!("{name}.sock")))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AgentChatAliasState {
+    ExistingSameTarget,
+    Created,
+    ReplacedPlaceholder { mode: u32, uid: u32, gid: u32 },
+}
+
 pub(crate) fn ensure_agent_chat_socket(
     visible_socket: &Path,
     runtime_socket: &Path,
-) -> Result<(), CliError> {
+) -> Result<AgentChatAliasState, CliError> {
     if let Some(parent) = runtime_socket.parent() {
         create_agent_terminal_runtime_dir(parent).map_err(|error| {
             CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
@@ -603,34 +609,161 @@ pub(crate) fn ensure_agent_chat_socket(
             )));
         }
     }
-    if let Err(error) = remove_socket_or_symlink(visible_socket) {
-        return Err(CliError::unavailable(format!(
-            "cannot replace {} with runtime socket link: {error}",
-            visible_socket.display()
-        )));
-    }
-    match std::os::unix::fs::symlink(runtime_socket, visible_socket) {
-        Ok(()) => verify_visible_socket_alias(visible_socket, runtime_socket),
-        Err(error) => Err(CliError::unavailable(format!(
-            "cannot link {} -> {}: {error}",
-            visible_socket.display(),
-            runtime_socket.display()
-        ))),
+    let parent = visible_socket
+        .parent()
+        .ok_or_else(|| CliError::unavailable("agent socket path has no parent"))?;
+    let parent_dir = open_plain_directory(parent).map_err(|error| {
+        CliError::unavailable(format!("cannot open {}: {error}", parent.display()))
+    })?;
+    let name = visible_socket
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::unavailable("invalid agent socket link name"))?;
+    let state = match nix::sys::stat::fstatat(
+        &parent_dir,
+        name,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    ) {
+        Ok(stat)
+            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+                .contains(nix::sys::stat::SFlag::S_IFLNK) =>
+        {
+            let target = nix::fcntl::readlinkat(&parent_dir, name).map_err(|error| {
+                CliError::unavailable(format!(
+                    "cannot inspect {}: {error}",
+                    visible_socket.display()
+                ))
+            })?;
+            if Path::new(&target) == runtime_socket {
+                return Ok(AgentChatAliasState::ExistingSameTarget);
+            }
+            return Err(CliError::unavailable(format!(
+                "{} already points at another socket",
+                visible_socket.display()
+            )));
+        }
+        Ok(stat)
+            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+                .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
+        {
+            let current = nix::sys::stat::fstatat(
+                &parent_dir,
+                name,
+                nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+            )
+            .map_err(|error| {
+                CliError::unavailable(format!(
+                    "cannot recheck {} before replacement: {error}",
+                    visible_socket.display()
+                ))
+            })?;
+            if !nix::sys::stat::SFlag::from_bits_truncate(current.st_mode)
+                .contains(nix::sys::stat::SFlag::S_IFSOCK)
+                || (current.st_dev, current.st_ino) != (stat.st_dev, stat.st_ino)
+            {
+                return Err(CliError::unavailable(format!(
+                    "{} changed before replacement",
+                    visible_socket.display()
+                )));
+            }
+            nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
+                .map_err(|error| {
+                    CliError::unavailable(format!(
+                        "cannot replace {} with runtime socket link: {error}",
+                        visible_socket.display()
+                    ))
+                })?;
+            AgentChatAliasState::ReplacedPlaceholder {
+                mode: stat.st_mode & 0o7777,
+                uid: stat.st_uid,
+                gid: stat.st_gid,
+            }
+        }
+        Ok(_stat) => {
+            return Err(CliError::unavailable(format!(
+                "cannot replace {} with runtime socket link: refusing non-socket path",
+                visible_socket.display()
+            )));
+        }
+        Err(nix::errno::Errno::ENOENT) => AgentChatAliasState::Created,
+        Err(error) => {
+            return Err(CliError::unavailable(format!(
+                "cannot inspect {}: {error}",
+                visible_socket.display()
+            )));
+        }
+    };
+    match nix::unistd::symlinkat(runtime_socket, &parent_dir, name) {
+        Ok(()) => match verify_visible_socket_alias(visible_socket, runtime_socket) {
+            Ok(()) => Ok(state),
+            Err(error) => {
+                let _ignored = rollback_agent_chat_alias(visible_socket, runtime_socket, &state);
+                Err(error)
+            }
+        },
+        Err(error) => {
+            let _ignored = rollback_agent_chat_alias(visible_socket, runtime_socket, &state);
+            Err(CliError::unavailable(format!(
+                "cannot link {} -> {}: {error}",
+                visible_socket.display(),
+                runtime_socket.display()
+            )))
+        }
     }
 }
 
-pub(crate) fn remove_socket_or_symlink(path: &Path) -> io::Result<()> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || metadata.file_type().is_socket() => {
-            fs::remove_file(path)
+pub(crate) fn rollback_agent_chat_alias(
+    visible_socket: &Path,
+    runtime_socket: &Path,
+    state: &AgentChatAliasState,
+) -> io::Result<()> {
+    match *state {
+        AgentChatAliasState::ExistingSameTarget => Ok(()),
+        AgentChatAliasState::Created => {
+            remove_exact_socket_alias(visible_socket, runtime_socket).map(|_removed| ())
         }
-        Ok(_metadata) => Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "refusing to replace non-socket path",
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+        AgentChatAliasState::ReplacedPlaceholder { mode, uid, gid } => {
+            remove_exact_socket_alias(visible_socket, runtime_socket)?;
+            restore_agent_chat_placeholder(visible_socket, mode, uid, gid)
+        }
     }
+}
+
+fn restore_agent_chat_placeholder(path: &Path, mode: u32, uid: u32, gid: u32) -> io::Result<()> {
+    cortexfs::plain_fs::ensure_socket_placeholder(path, mode)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_plain_directory(parent)?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let stat = nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(io::Error::from)?;
+    if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+        .contains(nix::sys::stat::SFlag::S_IFSOCK)
+    {
+        return Err(io::Error::other("restored agent socket is not plain"));
+    }
+    if stat.st_uid != uid || stat.st_gid != gid {
+        nix::unistd::fchownat(
+            &parent_dir,
+            name,
+            Some(nix::unistd::Uid::from_raw(uid)),
+            Some(nix::unistd::Gid::from_raw(gid)),
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        )
+        .map_err(io::Error::from)?;
+    }
+    nix::sys::stat::fchmodat(
+        &parent_dir,
+        name,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+        nix::sys::stat::FchmodatFlags::NoFollowSymlink,
+    )
+    .map_err(io::Error::from)?;
+    parent_dir.sync_all()
 }
 
 pub(crate) fn wait_for_agent_chat_socket(socket: &Path) -> Result<(), CliError> {
@@ -663,6 +796,10 @@ pub(crate) fn reset_agent_chat_unit(unit: &str) {
 
 pub(crate) fn stable_path_hash(path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
-    path.display().to_string().hash(&mut hasher);
+    absolute_existing_path(path)
+        .unwrap_or_else(|_error| path.to_path_buf())
+        .display()
+        .to_string()
+        .hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }

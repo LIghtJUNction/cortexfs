@@ -24,13 +24,23 @@ impl FuseV1Projection {
         let Some(content) = self.virtual_object_content(abi_path)? else {
             return Ok(None);
         };
+        let (uid, gid) = if Self::is_agent_wrapper_path(abi_path) {
+            let metadata = fs::symlink_metadata(self.resolve(abi_path)?)
+                .map_err(|error| fuse_metadata_error(&error))?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(FuseV1Error::InvalidPath);
+            }
+            (metadata.uid(), metadata.gid())
+        } else {
+            (0, 0)
+        };
         Ok(Some(FuseV1Attr::with_owner(
             abi_path.to_owned(),
             FuseV1FileType::Regular,
             u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
             0o555,
-            0,
-            0,
+            uid,
+            gid,
         )))
     }
 

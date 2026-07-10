@@ -185,6 +185,13 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let agent_socket_mode = fs::metadata(root.join("agent").join("coder.sock"))
         .map(|metadata| metadata.permissions().mode() & 0o777);
     assert!(matches!(agent_socket_mode, Ok(0o777)));
+    if nix::unistd::Uid::effective().is_root() {
+        assert!(matches!(
+            fs::symlink_metadata(root.join("agent").join("coder.sock")),
+            Ok(metadata)
+                if metadata.uid() == 1000 && metadata.gid() == 1000
+        ));
+    }
     assert!(!root.join("mcp").exists());
     assert!(!root.join("skill").exists());
     assert!(!root.join("memory").exists());
@@ -301,13 +308,16 @@ fn assert_object_hook_dirs(control_dir: &Path) {
     }
 }
 #[test]
-fn reference_tree_bootstrap_does_not_chmod_socket_symlink_target() {
+fn reference_tree_bootstrap_accepts_socket_symlink_without_changing_target() {
     let root = clean_test_dir("reference-tree-socket-symlink-mode");
     let outside = clean_test_dir("reference-tree-socket-symlink-mode-outside");
     assert!(fs::create_dir_all(&outside).is_ok());
     let outside_socket = outside.join("runtime.sock");
     let listener = ok!(UnixListener::bind(&outside_socket));
     set_file_mode(&outside_socket, 0o600);
+    let target_owner = fs::symlink_metadata(&outside_socket)
+        .map(|metadata| (metadata.uid(), metadata.gid()))
+        .ok();
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
     assert!(symlink(&outside_socket, root.join("agent").join("coder.sock")).is_ok());
 
@@ -322,6 +332,12 @@ fn reference_tree_bootstrap_does_not_chmod_socket_symlink_target() {
     let target_mode =
         fs::metadata(&outside_socket).map(|metadata| metadata.permissions().mode() & 0o777);
     assert!(matches!(target_mode, Ok(0o600)));
+    assert_eq!(
+        fs::symlink_metadata(&outside_socket)
+            .map(|metadata| (metadata.uid(), metadata.gid()))
+            .ok(),
+        target_owner
+    );
     drop(listener);
     let _ignored = fs::remove_dir_all(outside);
 }

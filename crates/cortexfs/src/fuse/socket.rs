@@ -34,6 +34,42 @@ impl FuseV1Projection {
         }
     }
 
+    /// Applies mode bits to one owner-authorized plain socket placeholder.
+    pub fn set_socket_placeholder_mode(
+        &self,
+        abi_path: &str,
+        uid: u32,
+        mode: u32,
+    ) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        let alias = SocketAlias::parse(&normalized).ok_or(FuseV1Error::NotControlFile)?;
+        alias.authorize(self, uid)?;
+        let path = self.resolve(&normalized)?;
+        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let parent_dir =
+            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name = plain_fs::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        let stat =
+            nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+                .map_err(|_error| FuseV1Error::Io)?;
+        if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFSOCK)
+        {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        if stat.st_uid != uid {
+            return Err(FuseV1Error::PermissionDenied);
+        }
+        nix::sys::stat::fchmodat(
+            &parent_dir,
+            name,
+            nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+            nix::sys::stat::FchmodatFlags::NoFollowSymlink,
+        )
+        .map_err(|_error| FuseV1Error::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+    }
+
     /// Persists one owner-authorized runtime socket alias.
     pub fn set_socket_alias(
         &self,
@@ -107,7 +143,7 @@ impl FuseV1Projection {
             Err(_error) => return Err(FuseV1Error::Io),
         };
         let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
-        if !kind.intersects(nix::sys::stat::SFlag::S_IFLNK | nix::sys::stat::SFlag::S_IFSOCK) {
+        if kind != nix::sys::stat::SFlag::S_IFLNK && kind != nix::sys::stat::SFlag::S_IFSOCK {
             return Err(FuseV1Error::InvalidPath);
         }
         nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
@@ -122,12 +158,113 @@ impl FuseV1Projection {
         SocketAlias::parse(abi_path).is_some()
     }
 
+    /// Returns whether the path is a generated claim for a writable socket alias.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn is_socket_alias_claim_path(abi_path: &str) -> bool {
+        socket_alias_for_claim(abi_path).is_some()
+    }
+
     /// Validates ownership for one writable socket-alias shape.
     #[doc(hidden)]
     pub fn authorize_socket_alias(&self, abi_path: &str, uid: u32) -> Result<(), FuseV1Error> {
         SocketAlias::parse(abi_path)
             .ok_or(FuseV1Error::NotControlFile)?
             .authorize(self, uid)
+    }
+
+    /// Atomically moves one owner socket alias to or from its generated claim.
+    #[doc(hidden)]
+    pub fn rename_socket_alias_claim(
+        &self,
+        from: &str,
+        to: &str,
+        uid: u32,
+    ) -> Result<(), FuseV1Error> {
+        let from = normalize_fuse_abi_path(from)?;
+        let to = normalize_fuse_abi_path(to)?;
+        let (alias_path, claim_path) = socket_alias_claim_pair(&from, &to)
+            .or_else(|| socket_alias_claim_pair(&to, &from))
+            .ok_or(FuseV1Error::NotControlFile)?;
+        SocketAlias::parse(alias_path)
+            .ok_or(FuseV1Error::NotControlFile)?
+            .authorize(self, uid)?;
+
+        let from_path = self.resolve(&from)?;
+        let to_path = self.resolve(&to)?;
+        let parent = from_path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        if to_path.parent() != Some(parent) || self.resolve(claim_path)?.parent() != Some(parent) {
+            return Err(FuseV1Error::InvalidPath);
+        }
+        let parent_dir =
+            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let from_name =
+            plain_fs::plain_file_name(&from_path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        let to_name =
+            plain_fs::plain_file_name(&to_path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        require_socket_claim_entry(&parent_dir, from_name)?;
+        nix::fcntl::renameat2(
+            &parent_dir,
+            from_name,
+            &parent_dir,
+            to_name,
+            nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+        )
+        .map_err(rename_socket_claim_error)?;
+        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+    }
+
+    /// Removes one owner-authorized generated socket claim.
+    #[doc(hidden)]
+    pub fn remove_socket_alias_claim(&self, abi_path: &str, uid: u32) -> Result<(), FuseV1Error> {
+        let normalized = normalize_fuse_abi_path(abi_path)?;
+        let alias_path = socket_alias_for_claim(&normalized).ok_or(FuseV1Error::NotControlFile)?;
+        SocketAlias::parse(&alias_path)
+            .ok_or(FuseV1Error::NotControlFile)?
+            .authorize(self, uid)?;
+
+        let path = self.resolve(&normalized)?;
+        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let parent_dir =
+            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name = plain_fs::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        require_socket_claim_entry(&parent_dir, name)?;
+        nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
+            .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
+        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+    }
+}
+
+fn socket_alias_claim_pair<'a>(alias: &'a str, claim: &'a str) -> Option<(&'a str, &'a str)> {
+    let (alias_parent, alias_name) = alias.rsplit_once('/')?;
+    let (claim_parent, claim_name) = claim.rsplit_once('/')?;
+    (alias_parent == claim_parent
+        && generated_sibling_target(claim_name, "claim").is_some_and(|target| target == alias_name)
+        && SocketAlias::parse(alias).is_some())
+    .then_some((alias, claim))
+}
+
+fn socket_alias_for_claim(claim: &str) -> Option<String> {
+    let (parent, name) = claim.rsplit_once('/')?;
+    let alias_name = generated_sibling_target(name, "claim")?;
+    let alias = format!("{parent}/{alias_name}");
+    SocketAlias::parse(&alias).is_some().then_some(alias)
+}
+
+fn require_socket_claim_entry(parent: &fs::File, name: &str) -> Result<(), FuseV1Error> {
+    let stat = nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
+    let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
+    (kind == nix::sys::stat::SFlag::S_IFLNK || kind == nix::sys::stat::SFlag::S_IFSOCK)
+        .then_some(())
+        .ok_or(FuseV1Error::InvalidPath)
+}
+
+fn rename_socket_claim_error(error: nix::errno::Errno) -> FuseV1Error {
+    match error {
+        nix::errno::Errno::EEXIST => FuseV1Error::AlreadyExists,
+        nix::errno::Errno::ENOENT => FuseV1Error::NotFound,
+        _ => FuseV1Error::Io,
     }
 }
 
