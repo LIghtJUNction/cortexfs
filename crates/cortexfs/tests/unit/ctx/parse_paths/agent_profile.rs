@@ -149,6 +149,79 @@ parent: agent:architect
 }
 
 #[test]
+fn agent_new_from_profile_rejects_protected_mount_targets() {
+    let root = clean_test_dir("ctx-agent-new-from-profile-protected-mount");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let profile_path = root.join("reviewer.yaml");
+    assert!(fs::write(
+        &profile_path,
+        "\
+schema: cortexfs.agent.profile/v1
+name: reviewer
+mounts:
+  - source: /
+    target: /ctx
+    mode: rw
+",
+    )
+    .is_ok());
+
+    let command = parse_command(vec![
+        "agent".to_owned(),
+        "new".to_owned(),
+        "--from".to_owned(),
+        profile_path.to_string_lossy().into_owned(),
+    ]);
+    assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
+    let Ok(Command::Agent(AgentArgs::New(args))) = command else {
+        return;
+    };
+
+    assert!(agent_new(&root, &args).is_err());
+    assert!(!root.join("agent/reviewer.d/mount").exists());
+}
+
+#[test]
+fn agent_new_from_profile_rejects_control_characters_in_mount_paths() {
+    let root = clean_test_dir("ctx-agent-profile-control-mount");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let cases = [
+        ("source-newline", "/tmp/source\\nbad", "/workspace"),
+        ("source-escape", "/tmp/source\\u001bbad", "/workspace"),
+        ("target-newline", "/tmp/source", "/workspace\\nbad"),
+        ("target-escape", "/tmp/source", "/workspace\\u001bbad"),
+    ];
+
+    for (name, source, target) in cases {
+        let profile_path = root.join(format!("{name}.yaml"));
+        let profile = format!(
+            "schema: cortexfs.agent.profile/v1\nname: {name}\nmounts:\n  - source: \"{source}\"\n    target: \"{target}\"\n    mode: rw\n"
+        );
+        assert!(fs::write(&profile_path, profile).is_ok());
+        let command = parse_command(vec![
+            "agent".to_owned(),
+            "new".to_owned(),
+            "--from".to_owned(),
+            profile_path.to_string_lossy().into_owned(),
+        ]);
+        assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
+        let Ok(Command::Agent(AgentArgs::New(args))) = command else {
+            return;
+        };
+        assert!(
+            args.mounts.iter().any(|mount| mount
+                .source
+                .bytes()
+                .chain(mount.target.bytes())
+                .any(|byte| byte.is_ascii_control())),
+            "profile did not decode the control character for {name}"
+        );
+        assert!(agent_new(&root, &args).is_err(), "accepted profile for {name}");
+        assert!(!root.join(format!("agent/{name}.d")).exists());
+    }
+}
+
+#[test]
 fn agent_new_from_profile_cli_overrides_model() {
     let root = clean_test_dir("ctx-agent-new-from-profile-override");
     assert!(fs::create_dir_all(&root).is_ok());
@@ -335,6 +408,28 @@ fn agent_apply_invalid_mount_does_not_change_controls() {
     assert!(fs::write(
         &profile_path,
         "instructions: changed\nmounts:\n  - source: relative\n    target: /work\n    mode: rw\n"
+    )
+    .is_ok());
+
+    assert!(agent_apply(&root, "coder", &profile_path).is_err());
+    assert_eq!(agent_apply_control_snapshot(&control), before);
+}
+
+#[test]
+fn agent_apply_protected_mount_does_not_change_controls() {
+    let root = clean_test_dir("ctx-agent-apply-profile-protected-mount");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-4o");
+    let Ok(Command::Agent(AgentArgs::New(args))) = create else {
+        return;
+    };
+    assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
+    let control = root.join("agent/coder.d");
+    let before = agent_apply_control_snapshot(&control);
+    let profile_path = root.join("protected-mount.yaml");
+    assert!(fs::write(
+        &profile_path,
+        "instructions: changed\nmounts:\n  - source: /\n    target: /etc\n    mode: rw\n"
     )
     .is_ok());
 
