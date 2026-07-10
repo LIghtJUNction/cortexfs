@@ -66,7 +66,9 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         let session_dir = runtime.session_root.join(session);
         record_tool_results_from_event_frames(&session_dir, id, &agent_frames)
             .map_err(SocketRuntimeError::Record)?;
-        if let Some(text) = assistant_text_from_event_frames(&agent_frames) {
+        let terminal_error = record_agent_error_from_event_frames(&session_dir, id, &agent_frames)
+            .map_err(SocketRuntimeError::Record)?;
+        if !terminal_error && let Some(text) = assistant_text_from_event_frames(&agent_frames) {
             record_assistant_response_to_session(&session_dir, id, &text)
                 .map_err(SocketRuntimeError::Record)?;
         }

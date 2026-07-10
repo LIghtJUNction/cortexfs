@@ -68,6 +68,135 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 }
 
 #[test]
+fn agent_executable_socket_runtime_records_terminal_provider_error() {
+    let root = reference_tree("agent-executable-provider-error");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+printf '{"type":"start","run":"%s","model":"main"}\n' "$CTX_RUN_ID"
+printf '{"type":"error","run":"%s","code":"EIO","message":"provider request failed with exit status: 22: curl: (22) The requested URL returned error: 502"}\n' "$CTX_RUN_ID"
+printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
+"#,
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"provider-error-1","session":"default","input":"hi"}
+"#,
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("main"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
+        },
+    );
+    let outcome = ok!(outcome);
+    assert!(outcome.jsonl().contains(r#""type":"error""#));
+    assert!(outcome.jsonl().contains(r#""status":"error""#));
+    let session = session_root.join("default");
+    let events = fs::read_to_string(session.join("events.jsonl")).unwrap_or_default();
+    assert!(events.lines().any(|line| {
+        line.contains(r#""type":"error""#)
+            && line.contains(r#""run":"provider-error-1""#)
+            && line.contains("502")
+    }));
+    assert!(events.lines().any(|line| {
+        line.contains(r#""type":"done""#)
+            && line.contains(r#""run":"provider-error-1""#)
+            && line.contains(r#""status":"error""#)
+    }));
+    assert_file_text(&session.join("state"), "error\n");
+}
+
+#[test]
+fn agent_executable_socket_runtime_keeps_error_after_partial_delta() {
+    let root = reference_tree("agent-executable-partial-provider-error");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+printf '{"type":"start","run":"%s","model":"main"}\n' "$CTX_RUN_ID"
+printf '{"type":"delta","run":"%s","text":"partial"}\n' "$CTX_RUN_ID"
+printf '{"type":"error","run":"%s","code":"EIO","message":"provider request failed with exit status: 22: curl: (22) The requested URL returned error: 502"}\n' "$CTX_RUN_ID"
+printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
+"#,
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let pair = UnixStream::pair();
+    let (mut client, mut socket) = ok!(pair);
+    assert!(
+        client
+            .write_all(
+                br#"{"op":"send","id":"partial-error-1","session":"default","input":"hi"}
+"#,
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("main"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
+        },
+    );
+    let outcome = ok!(outcome);
+    assert!(outcome.jsonl().contains(r#""text":"partial""#));
+    let session = session_root.join("default");
+    let events = fs::read_to_string(session.join("events.jsonl")).unwrap_or_default();
+    assert!(events.lines().any(|line| {
+        line.contains(r#""type":"error""#)
+            && line.contains(r#""run":"partial-error-1""#)
+            && line.contains("502")
+    }));
+    assert!(events.lines().any(|line| {
+        line.contains(r#""type":"done""#)
+            && line.contains(r#""run":"partial-error-1""#)
+            && line.contains(r#""status":"error""#)
+    }));
+    assert!(!events.lines().any(|line| {
+        line.contains(r#""type":"done""#)
+            && line.contains(r#""run":"partial-error-1""#)
+            && line.contains(r#""status":"ok""#)
+    }));
+    assert_file_text(&session.join("state"), "error\n");
+}
+
+#[test]
 fn agent_executable_socket_runtime_wraps_plain_text_after_visible_events() {
     let root = reference_tree("agent-plain-after-event");
     let session_root = agent_session_root(&root, "coder");
@@ -331,4 +460,3 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             .contains(&format!(r#""text":"{}""#, root.to_string_lossy()))
     );
 }
-
