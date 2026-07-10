@@ -1,10 +1,13 @@
 //! Structural validation and durable write helpers for ATIF trajectories.
 
+use std::fmt;
 use std::path::Path;
 
 use crate::atomic_replace_text;
 
 use super::types::{Trajectory, TrajectoryStep};
+
+const MAX_TRAJECTORY_ISSUE_FIELD_CHARS: usize = 128;
 
 /// Structural issue found while validating an ATIF trajectory.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -52,6 +55,80 @@ pub enum TrajectoryIssue {
         /// Referenced tool-call id.
         source_call_id: String,
     },
+}
+
+impl fmt::Display for TrajectoryIssue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::InvalidSchemaVersion => f.write_str("invalid schema version"),
+            Self::MissingAgentName => f.write_str("missing agent name"),
+            Self::MissingAgentVersion => f.write_str("missing agent version"),
+            Self::InvalidStepId { index, step_id } => write!(
+                f,
+                "invalid step id: step={} step_id={step_id}",
+                index.saturating_add(1)
+            ),
+            Self::InvalidStepSource { index, ref source } => {
+                let source = safe_issue_field(source);
+                write!(
+                    f,
+                    "invalid step source: step={} source={source}",
+                    index.saturating_add(1)
+                )
+            }
+            Self::InvalidToolCall {
+                step_index,
+                call_index,
+            } => write!(
+                f,
+                "invalid tool call: step={} call={}",
+                step_index.saturating_add(1),
+                call_index.saturating_add(1)
+            ),
+            Self::EmptyObservationResult {
+                step_index,
+                result_index,
+            } => write!(
+                f,
+                "empty observation result: step={} result={}",
+                step_index.saturating_add(1),
+                result_index.saturating_add(1)
+            ),
+            Self::UnknownObservationSourceCall {
+                step_index,
+                result_index,
+                ref source_call_id,
+            } => {
+                let source_call_id = safe_issue_field(source_call_id);
+                write!(
+                    f,
+                    "unknown observation source call: step={} result={} call_id={source_call_id}",
+                    step_index.saturating_add(1),
+                    result_index.saturating_add(1)
+                )
+            }
+        }
+    }
+}
+
+fn safe_issue_field(value: &str) -> String {
+    let mut safe = String::new();
+    let mut characters = 0_usize;
+    let mut truncated = false;
+    for character in value.chars() {
+        let escaped = character.escape_default().to_string();
+        let escaped_characters = escaped.chars().count();
+        if characters.saturating_add(escaped_characters) > MAX_TRAJECTORY_ISSUE_FIELD_CHARS - 3 {
+            truncated = true;
+            break;
+        }
+        safe.push_str(&escaped);
+        characters = characters.saturating_add(escaped_characters);
+    }
+    if truncated {
+        safe.push_str("...");
+    }
+    safe
 }
 
 /// Result of inspecting an ATIF trajectory document.

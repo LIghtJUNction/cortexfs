@@ -67,7 +67,7 @@ pub fn trajectory_from_session_jsonl(
 ) -> Trajectory {
     let meta = parse_meta(meta_json);
     let indexed = index_events(events_jsonl);
-    let (mut steps, remaining_tool_calls) =
+    let (mut steps, remaining_tool_calls, legacy_unmatched_tool_results) =
         map_messages_to_steps(messages_jsonl, indexed.tool_calls);
     attach_orphan_tool_calls(&mut steps, &remaining_tool_calls);
     attach_run_metrics(&mut steps, &indexed.usages);
@@ -76,6 +76,14 @@ pub fn trajectory_from_session_jsonl(
     let mut agent_extra = Map::new();
     if let Some(scope) = meta.scope {
         agent_extra.insert("scope".to_owned(), Value::String(scope));
+    }
+
+    let mut trajectory_extra = Map::new();
+    if legacy_unmatched_tool_results > 0 {
+        trajectory_extra.insert(
+            "legacy_unmatched_tool_results".to_owned(),
+            Value::from(legacy_unmatched_tool_results),
+        );
     }
 
     Trajectory {
@@ -96,7 +104,7 @@ pub fn trajectory_from_session_jsonl(
         steps,
         final_metrics,
         notes: Some("projected from CortexFS session messages.jsonl + events.jsonl".to_owned()),
-        extra: None,
+        extra: (!trajectory_extra.is_empty()).then_some(trajectory_extra),
     }
 }
 
@@ -231,9 +239,10 @@ fn tool_call_from_event(value: &Value) -> Option<TrajectoryToolCall> {
 fn map_messages_to_steps(
     messages_jsonl: &str,
     mut pending_tool_calls: VecDeque<RunToolCall>,
-) -> (Vec<TrajectoryStep>, VecDeque<RunToolCall>) {
+) -> (Vec<TrajectoryStep>, VecDeque<RunToolCall>, u64) {
     let mut steps = Vec::new();
     let mut step_id = 1_u64;
+    let mut legacy_unmatched_tool_results = 0_u64;
 
     for_each_jsonl_line(messages_jsonl, |_line_number, line| {
         let JsonlLineShape::Value(value) = parse_jsonl_line(line) else {
@@ -271,7 +280,7 @@ fn map_messages_to_steps(
             }
             "tool" => {
                 let message_run = event_run(&value);
-                let results = tool_observation_results(&value);
+                let mut results = tool_observation_results(&value);
                 let call_ids: Vec<String> = results
                     .iter()
                     .filter_map(|result| result.source_call_id.clone())
@@ -281,6 +290,26 @@ fn map_messages_to_steps(
                     &call_ids,
                     message_run.as_deref(),
                 );
+                results.retain_mut(|result| {
+                    let Some(source_call_id) = result.source_call_id.as_deref() else {
+                        return true;
+                    };
+                    if matched_calls
+                        .iter()
+                        .any(|call| call.call.tool_call_id == source_call_id)
+                    {
+                        return true;
+                    }
+                    legacy_unmatched_tool_results = legacy_unmatched_tool_results.saturating_add(1);
+                    result.source_call_id = None;
+                    result
+                        .content
+                        .as_ref()
+                        .is_some_and(|content| !content.is_empty())
+                });
+                if results.is_empty() && matched_calls.is_empty() {
+                    return;
+                }
                 let run = message_run.or_else(|| unique_call_run(&matched_calls));
                 if let Some(index) = agent_step_for_run(&steps, run.as_deref()) {
                     let Some(last) = steps.get_mut(index) else {
@@ -315,7 +344,7 @@ fn map_messages_to_steps(
         }
     });
 
-    (steps, pending_tool_calls)
+    (steps, pending_tool_calls, legacy_unmatched_tool_results)
 }
 
 fn tool_observation_results(message: &Value) -> Vec<TrajectoryObservationResult> {

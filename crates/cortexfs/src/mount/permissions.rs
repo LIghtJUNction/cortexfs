@@ -109,7 +109,8 @@ pub(crate) fn fuse_writable_projection_path(path: &str) -> bool {
 pub(crate) fn fuse_session_writable_projection_path(path: &str) -> bool {
     FuseV1Projection::is_session_append_path(path)
         || FuseV1Projection::is_session_replace_path(path)
-        || FuseV1Projection::session_atomic_temp_target(path).is_some()
+        || FuseV1Projection::layout_atomic_temp_target(path).is_some()
+        || FuseV1Projection::is_agent_wrapper_path(path)
 }
 
 pub(crate) fn fuse_setattr_metadata_error(changes_metadata: bool) -> Option<Errno> {

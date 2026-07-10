@@ -1,6 +1,6 @@
 use crate::*;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixListener;
@@ -54,6 +54,7 @@ pub(crate) fn fuse_errno_maps_projection_errors_to_linux_errno() {
         (FuseV1Error::NotDirectory, Errno::ENOTDIR),
         (FuseV1Error::NotFile, Errno::EISDIR),
         (FuseV1Error::InvalidPath, Errno::EINVAL),
+        (FuseV1Error::AlreadyExists, Errno::EEXIST),
         (FuseV1Error::PermissionDenied, Errno::EACCES),
     ];
     for (error, expected) in cases {
@@ -262,6 +263,40 @@ pub(crate) fn child_path_rejects_special_or_escaped_names() {
 }
 
 #[test]
+pub(crate) fn socket_overlay_preserves_request_owner_for_sticky_agent_directory() {
+    let root = unique_mount_test_dir("socket-overlay-owner");
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+    let fs = CortexFuse::new(root.to_path_buf());
+    assert!(fs.is_ok());
+    let Ok(fs) = fs else { return };
+
+    assert_eq!(
+        fs.insert_socket_overlay("agent/scratch.sock", 1234, 2345, 0o777),
+        Ok(())
+    );
+    assert!(matches!(
+        fs.projected_getattr("agent/scratch.sock"),
+        Ok(ref attr) if attr.uid() == 1234 && attr.gid() == 2345 && attr.mode() == 0o777
+    ));
+    assert_eq!(
+        fs.set_socket_overlay_mode("agent/scratch.sock", 1234, 0o660),
+        Ok(())
+    );
+    assert!(matches!(
+        fs.projected_getattr("agent/scratch.sock"),
+        Ok(ref attr) if attr.uid() == 1234 && attr.mode() == 0o660
+    ));
+    assert_eq!(
+        fs.remove_socket_overlay("agent/scratch.sock", 4321),
+        Err(FuseV1Error::PermissionDenied)
+    );
+    assert!(matches!(
+        fs.projected_getattr("agent/scratch.sock"),
+        Ok(ref attr) if attr.uid() == 1234
+    ));
+}
+
+#[test]
 pub(crate) fn remove_backing_socket_entry_refuses_plain_files() {
     let root = unique_mount_test_dir("socket-unlink-plain-file");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
@@ -326,7 +361,7 @@ pub(crate) fn unlink_model_path_rejects_symlink_model_parent_without_removing_ta
         projection: cortexfs::FuseV1Projection::new(root.to_path_buf()),
         paths: Mutex::new(HashMap::from([(42, "model".to_owned())])),
         lookup_counts: Mutex::new(HashMap::new()),
-        socket_overlays: Mutex::new(HashSet::new()),
+        socket_overlays: Mutex::new(HashMap::new()),
     };
 
     assert_eq!(

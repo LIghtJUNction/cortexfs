@@ -84,9 +84,6 @@ pub(crate) fn ensure_best_effort_visible_terminal_socket(
         "agent terminal runtime path contains a non-directory entry",
         "invalid agent terminal runtime directory name",
     ) {
-        if visible_terminal_write_error_is_best_effort(&error) {
-            return Ok(());
-        }
         return Err(CliError::unavailable(format!(
             "cannot create {}: {error}",
             parent.display()
@@ -100,15 +97,16 @@ pub(crate) fn ensure_best_effort_visible_terminal_socket(
         .and_then(|name| name.to_str())
         .ok_or_else(|| CliError::unavailable("invalid terminal socket link name"))?;
     match nix::fcntl::readlinkat(&parent_dir, file_name).map(PathBuf::from) {
-        Ok(target) if target == runtime_socket => Ok(()),
+        Ok(target) if target == runtime_socket => {
+            verify_visible_socket_alias(visible_socket, runtime_socket)
+        }
         Ok(_target) => Err(CliError::unavailable(format!(
             "{} already points at another socket",
             visible_socket.display()
         ))),
         Err(nix::errno::Errno::ENOENT) => {
             match nix::unistd::symlinkat(runtime_socket, &parent_dir, file_name) {
-                Ok(()) => Ok(()),
-                Err(error) if visible_terminal_errno_is_best_effort(error) => Ok(()),
+                Ok(()) => verify_visible_socket_alias(visible_socket, runtime_socket),
                 Err(error) => Err(CliError::unavailable(format!(
                     "cannot create terminal socket link {} -> {}: {error}",
                     visible_socket.display(),
@@ -116,7 +114,6 @@ pub(crate) fn ensure_best_effort_visible_terminal_socket(
                 ))),
             }
         }
-        Err(error) if visible_terminal_errno_is_best_effort(error) => Ok(()),
         Err(error) => Err(CliError::unavailable(format!(
             "cannot inspect {}: {error}",
             visible_socket.display()
@@ -124,28 +121,34 @@ pub(crate) fn ensure_best_effort_visible_terminal_socket(
     }
 }
 
-pub(crate) fn visible_terminal_write_error_is_best_effort(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported
-    ) || matches!(
-        error.raw_os_error(),
-        Some(code)
-            if code == libc::EACCES
-                || code == libc::EPERM
-                || code == libc::ENOSYS
-                || code == libc::EROFS
-    )
-}
-
-pub(crate) fn visible_terminal_errno_is_best_effort(error: nix::errno::Errno) -> bool {
-    matches!(
-        error,
-        nix::errno::Errno::EACCES
-            | nix::errno::Errno::EPERM
-            | nix::errno::Errno::ENOSYS
-            | nix::errno::Errno::EROFS
-    )
+pub(crate) fn verify_visible_socket_alias(
+    visible_socket: &Path,
+    runtime_socket: &Path,
+) -> Result<(), CliError> {
+    let parent = visible_socket
+        .parent()
+        .ok_or_else(|| CliError::unavailable("socket alias path has no parent"))?;
+    let parent_dir = open_plain_directory(parent).map_err(|error| {
+        CliError::unavailable(format!("cannot open {}: {error}", parent.display()))
+    })?;
+    let file_name = visible_socket
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| CliError::unavailable("invalid socket alias name"))?;
+    let target = nix::fcntl::readlinkat(&parent_dir, file_name).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot inspect {}: {error}",
+            visible_socket.display()
+        ))
+    })?;
+    if Path::new(&target) != runtime_socket {
+        return Err(CliError::unavailable(format!(
+            "{} does not point at {}",
+            visible_socket.display(),
+            runtime_socket.display()
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) fn current_uid_for_ctx(root: &Path) -> Result<String, CliError> {

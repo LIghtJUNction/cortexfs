@@ -604,27 +604,19 @@ pub(crate) fn ensure_agent_chat_socket(
         }
     }
     if let Err(error) = remove_socket_or_symlink(visible_socket) {
-        if is_unreplaceable_visible_socket_error(&error) {
-            return Ok(());
-        }
         return Err(CliError::unavailable(format!(
             "cannot replace {} with runtime socket link: {error}",
             visible_socket.display()
         )));
     }
     match std::os::unix::fs::symlink(runtime_socket, visible_socket) {
-        Ok(()) => Ok(()),
-        Err(error) if is_unreplaceable_visible_socket_error(&error) => Ok(()),
+        Ok(()) => verify_visible_socket_alias(visible_socket, runtime_socket),
         Err(error) => Err(CliError::unavailable(format!(
             "cannot link {} -> {}: {error}",
             visible_socket.display(),
             runtime_socket.display()
         ))),
     }
-}
-
-pub(crate) fn is_unreplaceable_visible_socket_error(error: &io::Error) -> bool {
-    error.raw_os_error() == Some(libc::EROFS) || error.kind() == io::ErrorKind::PermissionDenied
 }
 
 pub(crate) fn remove_socket_or_symlink(path: &Path) -> io::Result<()> {

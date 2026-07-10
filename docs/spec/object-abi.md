@@ -191,6 +191,13 @@ connected      requests and responses are JSONL frames
 closed         private/shared sessions are not deleted
 ```
 
+The durable agent object may use `agent/<name>.sock` as a stopped placeholder.
+When started, the visible path is an owner-authorized symlink to the live socket
+below `/run/user/<uid>/cortexfs/agent/`. Terminal sessions similarly expose
+`home/<uid>/agent/<name>/session/<session>/terminal/main.sock` as a symlink to
+the matching runtime terminal socket. A start is not ready until both requested
+visible aliases have been created and verified.
+
 Hard socket rules:
 
 ```text

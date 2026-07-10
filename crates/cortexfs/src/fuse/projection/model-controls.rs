@@ -46,5 +46,8 @@ pub(crate) fn projected_metadata_mode(abi_path: &str, metadata: &fs::Metadata) -
     if abi_path.is_empty() && metadata.is_dir() {
         return (mode & !0o7777) | 0o755;
     }
+    if abi_path == "agent" && metadata.is_dir() {
+        return (mode & !0o7777) | 0o1777;
+    }
     mode
 }

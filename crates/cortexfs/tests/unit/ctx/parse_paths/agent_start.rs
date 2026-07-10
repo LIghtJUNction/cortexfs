@@ -598,15 +598,49 @@ fn agent_start_status_lines_follow_systemctl_shape() {
 }
 
 #[test]
-fn visible_terminal_socket_treats_readonly_fuse_errors_as_best_effort() {
-    assert!(visible_terminal_write_error_is_best_effort(
-        &std::io::Error::from_raw_os_error(nix::libc::ENOSYS)
+fn visible_terminal_socket_rejects_readonly_alias_path() {
+    let runtime = unique_test_dir("ctx-agent-terminal-runtime-alias").join("main.sock");
+    let visible = PathBuf::from(format!(
+        "/sys/cortexfs-terminal-alias-test-{}/main.sock",
+        std::process::id()
     ));
-    assert!(visible_terminal_write_error_is_best_effort(
-        &std::io::Error::from_raw_os_error(nix::libc::EROFS)
+
+    assert!(ensure_best_effort_visible_terminal_socket(&visible, &runtime).is_err());
+}
+
+#[test]
+fn visible_chat_socket_rejects_readonly_alias_path() {
+    let runtime = unique_test_dir("ctx-agent-chat-runtime-alias").join("coder.sock");
+    let visible = PathBuf::from(format!(
+        "/sys/cortexfs-chat-alias-test-{}.sock",
+        std::process::id()
     ));
-    assert!(visible_terminal_errno_is_best_effort(nix::errno::Errno::ENOSYS));
-    assert!(visible_terminal_errno_is_best_effort(nix::errno::Errno::EROFS));
+
+    assert!(ensure_agent_chat_socket(&visible, &runtime).is_err());
+}
+
+#[test]
+fn visible_terminal_socket_verifies_expected_alias() {
+    let root = unique_test_dir("ctx-agent-terminal-visible-alias");
+    let visible = root.join("session/terminal/main.sock");
+    let runtime = root.join("runtime/main.sock");
+
+    assert_eq!(
+        ensure_best_effort_visible_terminal_socket(&visible, &runtime),
+        Ok(())
+    );
+    assert!(matches!(fs::read_link(visible), Ok(target) if target == runtime));
+}
+
+#[test]
+fn visible_chat_socket_verifies_expected_alias() {
+    let root = unique_test_dir("ctx-agent-chat-visible-alias");
+    let visible = root.join("agent/coder.sock");
+    let runtime = root.join("runtime/coder.sock");
+    assert!(fs::create_dir_all(root.join("agent")).is_ok());
+
+    assert_eq!(ensure_agent_chat_socket(&visible, &runtime), Ok(()));
+    assert!(matches!(fs::read_link(visible), Ok(target) if target == runtime));
 }
 
 #[test]

@@ -219,6 +219,13 @@ control objects inspectable. When the child agent is the backing runtime for a
 pending or active parent `context/child/<child>/` channel, the fallback records
 that parent-side child result as `cancelled` so `ctx agent wait` observes the
 terminal state. It must not invent a new lifecycle namespace or queue.
+Retired reference agents `base`, `worker`, and `executor` are manual-review
+objects: child discovery excludes them before reading legacy ownership fields,
+so stop cascade never changes their controls, status, or child result channels.
+Before any unit reset or control write, fallback stop validates the complete
+non-retired descendant plan, detects ownership cycles, and preflights planned
+controls and existing pending/active child-result channels. It executes the
+validated plan in post-order, descendants before their parent.
 `ctx agent status` reads ordinary `agent/<name>.d/*` controls and prints the
 status value first, followed by `model=`, `life=`, `parent=`, `children=`,
 `pid=`, `uid=`, `gid=`, `groups=`, `root=`, and `cwd=` lines.
@@ -476,7 +483,15 @@ These commands read:
 
 `ctx agent trajectory` prints a validated ATIF projection. It correlates tool
 calls, observations, and token usage by run/call identity and does not create a
-second durable history.
+second durable history. For legacy tool results whose call id has no matching
+event, projection preserves non-empty result content but clears the unproven
+`source_call_id`; empty unmatched results are dropped. The trajectory `extra`
+map records the stable `legacy_unmatched_tool_results` count. Projection does
+not invent a tool call or chat message. If validation still fails, the CLI lists
+actionable issue locations (step/result/call id), capped at 16 entries with the
+remaining count reported. Session-derived source/call identifiers are escaped
+for terminal output, field-bounded, and each rendered issue is capped at 256
+characters.
 
 ## Provider OAuth
 

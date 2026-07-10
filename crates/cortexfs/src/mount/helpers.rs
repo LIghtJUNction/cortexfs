@@ -81,9 +81,10 @@ impl CortexFuse {
     pub(crate) fn projected_getattr(&self, path: &str) -> Result<FuseV1Attr, FuseV1Error> {
         match self.projection.getattr(path) {
             Ok(attr) => Ok(attr),
-            Err(FuseV1Error::NotFound) if self.has_socket_overlay(path)? => {
-                Ok(socket_attr(path, 0o666))
-            }
+            Err(FuseV1Error::NotFound) => self
+                .socket_overlay(path)?
+                .map(|overlay| socket_attr(path, overlay.mode, overlay.uid, overlay.gid))
+                .ok_or(FuseV1Error::NotFound),
             Err(error) => Err(error),
         }
     }
@@ -91,9 +92,10 @@ impl CortexFuse {
     pub(crate) fn projected_node_for_path(&self, path: &str) -> Result<FuseV1Node, FuseV1Error> {
         match self.projection.node_for_path(path) {
             Ok(node) => Ok(node),
-            Err(FuseV1Error::NotFound) if self.has_socket_overlay(path)? => {
-                Ok(socket_node(path, 0o666))
-            }
+            Err(FuseV1Error::NotFound) => self
+                .socket_overlay(path)?
+                .map(|overlay| socket_node(path, overlay.mode, overlay.uid, overlay.gid))
+                .ok_or(FuseV1Error::NotFound),
             Err(error) => Err(error),
         }
     }
@@ -109,11 +111,9 @@ impl CortexFuse {
                 let Some(path) = child_path(parent.abi_path(), name) else {
                     return Err(FuseV1Error::InvalidPath);
                 };
-                if self.has_socket_overlay(&path)? {
-                    Ok(socket_node(&path, 0o666))
-                } else {
-                    Err(FuseV1Error::NotFound)
-                }
+                self.socket_overlay(&path)?
+                    .map(|overlay| socket_node(&path, overlay.mode, overlay.uid, overlay.gid))
+                    .ok_or(FuseV1Error::NotFound)
             }
             Err(error) => Err(error),
         }
@@ -125,7 +125,7 @@ impl CortexFuse {
             .socket_overlays
             .lock()
             .map_err(|_error| FuseV1Error::Io)?;
-        for socket in overlays.iter() {
+        for socket in overlays.keys() {
             if let Some(name) = immediate_child_name(path, socket)
                 && !entries.iter().any(|entry| entry.name() == name)
             {
@@ -138,10 +138,63 @@ impl CortexFuse {
     }
 
     pub(crate) fn has_socket_overlay(&self, path: &str) -> Result<bool, FuseV1Error> {
+        Ok(self.socket_overlay(path)?.is_some())
+    }
+
+    pub(crate) fn socket_overlay(&self, path: &str) -> Result<Option<SocketOverlay>, FuseV1Error> {
         self.socket_overlays
             .lock()
             .map_err(|_error| FuseV1Error::Io)
-            .map(|sockets| sockets.contains(path))
+            .map(|sockets| sockets.get(path).copied())
+    }
+
+    pub(crate) fn insert_socket_overlay(
+        &self,
+        path: &str,
+        uid: u32,
+        gid: u32,
+        mode: u32,
+    ) -> Result<(), FuseV1Error> {
+        self.socket_overlays
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)?
+            .insert(path.to_owned(), SocketOverlay { uid, gid, mode });
+        Ok(())
+    }
+
+    pub(crate) fn remove_socket_overlay(&self, path: &str, uid: u32) -> Result<bool, FuseV1Error> {
+        let mut sockets = self
+            .socket_overlays
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)?;
+        let Some(overlay) = sockets.get(path) else {
+            return Ok(false);
+        };
+        if overlay.uid != uid {
+            return Err(FuseV1Error::PermissionDenied);
+        }
+        sockets.remove(path);
+        drop(sockets);
+        Ok(true)
+    }
+
+    pub(crate) fn set_socket_overlay_mode(
+        &self,
+        path: &str,
+        uid: u32,
+        mode: u32,
+    ) -> Result<(), FuseV1Error> {
+        let mut sockets = self
+            .socket_overlays
+            .lock()
+            .map_err(|_error| FuseV1Error::Io)?;
+        let overlay = sockets.get_mut(path).ok_or(FuseV1Error::NotControlFile)?;
+        if overlay.uid != uid {
+            return Err(FuseV1Error::PermissionDenied);
+        }
+        overlay.mode = mode & 0o7777;
+        drop(sockets);
+        Ok(())
     }
 
     pub(crate) fn socket_child_path(
@@ -153,6 +206,19 @@ impl CortexFuse {
         let parent_path = self.path_for_inode(parent)?;
         let path = child_path(&parent_path, name).ok_or(FuseV1Error::InvalidPath)?;
         is_projected_socket_path(&path)
+            .then_some(path)
+            .ok_or(FuseV1Error::InvalidPath)
+    }
+
+    pub(crate) fn socket_alias_child_path(
+        &self,
+        parent: INodeNo,
+        name: &OsStr,
+    ) -> Result<String, FuseV1Error> {
+        let name = name.to_str().ok_or(FuseV1Error::InvalidPath)?;
+        let parent_path = self.path_for_inode(parent)?;
+        let path = child_path(&parent_path, name).ok_or(FuseV1Error::InvalidPath)?;
+        FuseV1Projection::is_socket_alias_path(&path)
             .then_some(path)
             .ok_or(FuseV1Error::InvalidPath)
     }
@@ -381,6 +447,7 @@ pub(crate) fn errno(error: FuseV1Error) -> Errno {
         FuseV1Error::NotDirectory => Errno::ENOTDIR,
         FuseV1Error::NotFile => Errno::EISDIR,
         FuseV1Error::NotEmpty => Errno::ENOTEMPTY,
+        FuseV1Error::AlreadyExists => Errno::EEXIST,
         FuseV1Error::ReadOnly => Errno::EROFS,
         FuseV1Error::TooLarge => Errno::EMSGSIZE,
         FuseV1Error::PermissionDenied => Errno::EACCES,
@@ -454,12 +521,16 @@ pub(crate) fn is_projected_socket_path(path: &str) -> bool {
     )
 }
 
-pub(crate) fn socket_attr(path: &str, mode: u32) -> FuseV1Attr {
-    FuseV1Attr::with_owner(path.to_owned(), FuseV1FileType::Socket, 0, mode, 0, 0)
+pub(crate) fn socket_attr(path: &str, mode: u32, uid: u32, gid: u32) -> FuseV1Attr {
+    FuseV1Attr::with_owner(path.to_owned(), FuseV1FileType::Socket, 0, mode, uid, gid)
 }
 
-pub(crate) fn socket_node(path: &str, mode: u32) -> FuseV1Node {
-    FuseV1Node::new(socket_inode(path), path.to_owned(), socket_attr(path, mode))
+pub(crate) fn socket_node(path: &str, mode: u32, uid: u32, gid: u32) -> FuseV1Node {
+    FuseV1Node::new(
+        socket_inode(path),
+        path.to_owned(),
+        socket_attr(path, mode, uid, gid),
+    )
 }
 
 pub(crate) fn remove_backing_model_alias_symlink(

@@ -33,12 +33,23 @@ pub(crate) fn agent_new_host_fallback(
         .unwrap_or_else(|| "agent:architect".to_owned());
     let agent_path = agent_object_path(root, &args.name);
     let control = agent_control_dir(root, &args.name);
-    if agent_path.exists() || control.exists() {
-        return Err(CliError::unavailable(format!(
-            "agent already exists: {}",
-            args.name
-        )));
-    }
+    let socket = root.join("agent").join(format!("{}.sock", args.name));
+    let home = ctx_home(root)?.join("agent").join(&args.name);
+    let paths = HostAgentCreatePaths {
+        agent: agent_path,
+        control,
+        socket,
+        home,
+    };
+    require_host_agent_paths_absent(
+        &args.name,
+        [
+            paths.agent.as_path(),
+            paths.control.as_path(),
+            paths.socket.as_path(),
+            paths.home.as_path(),
+        ],
+    )?;
 
     let agent_home = format!("/ctx/home/{uid}/agent/{}", args.name);
     let mount = agent_new_mount_control(&uid, &args.name, &args.mounts);
@@ -87,22 +98,151 @@ Ask for clarification only when the target path or scope is missing, or when the
         .iter()
         .map(|entry| (entry.0, entry.1.as_str()))
         .collect::<Vec<_>>();
-    install_executable_object_wrapper(
-        root,
-        ObjectClass::Agent,
-        &args.name,
-        "/bin/false",
-        &override_refs,
-    )
-    .map_err(|error| CliError::unavailable(format!("cannot create agent: {}", error.errno())))?;
-    write_agent_host_stub(&agent_path, &args.name)?;
-    ensure_agent_home_skeleton(root, &uid, &args.name)?;
+    create_host_agent_files(root, args, &override_refs, &uid, &paths)?;
     print_line(&format!(
         "agent {} created model={}",
         terminal_safe_text(&args.name),
         terminal_safe_text(&model)
     ))?;
     Ok(ExitCode::SUCCESS)
+}
+
+struct HostAgentCreatePaths {
+    agent: PathBuf,
+    control: PathBuf,
+    socket: PathBuf,
+    home: PathBuf,
+}
+
+fn create_host_agent_files(
+    root: &Path,
+    args: &AgentNewArgs,
+    overrides: &[(&str, &str)],
+    uid: &str,
+    paths: &HostAgentCreatePaths,
+) -> Result<(), CliError> {
+    create_agent_host_parent(&root.join("agent"))?;
+    let home_parent = paths
+        .home
+        .parent()
+        .ok_or_else(|| CliError::unavailable("agent home path has no parent"))?;
+    create_agent_host_parent(home_parent)?;
+    let mut created = HostAgentCreateState::default();
+    let result = (|| {
+        cortexfs::plain_fs::create_plain_dir_exclusive(&paths.control, 0o755).map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot create {}: {error}",
+                paths.control.display()
+            ))
+        })?;
+        created.control = true;
+        install_executable_object_wrapper(
+            root,
+            ObjectClass::Agent,
+            &args.name,
+            "/bin/false",
+            overrides,
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot create agent: {}", error.errno()))
+        })?;
+        write_agent_host_stub(&paths.agent, &args.name)?;
+        let socket_created = cortexfs::plain_fs::ensure_socket_placeholder(&paths.socket, 0o777)
+            .map_err(|error| {
+                CliError::unavailable(format!(
+                    "cannot create agent socket {}: {error}",
+                    paths.socket.display()
+                ))
+            })?;
+        if !socket_created {
+            return Err(CliError::unavailable(format!(
+                "agent already exists: {}",
+                args.name
+            )));
+        }
+        created.socket = true;
+        require_plain_socket_inode(&paths.socket)?;
+        cortexfs::plain_fs::create_plain_dir_exclusive(&paths.home, 0o755).map_err(|error| {
+            CliError::unavailable(format!("cannot create {}: {error}", paths.home.display()))
+        })?;
+        created.home = true;
+        ensure_agent_home_skeleton(root, uid, &args.name)
+    })();
+    if let Err(error) = result {
+        rollback_host_agent_create(paths, created);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Default)]
+struct HostAgentCreateState {
+    control: bool,
+    socket: bool,
+    home: bool,
+}
+
+fn require_host_agent_paths_absent<'a>(
+    name: &str,
+    paths: impl IntoIterator<Item = &'a Path>,
+) -> Result<(), CliError> {
+    for path in paths {
+        match fs::symlink_metadata(path) {
+            Ok(_metadata) => {
+                return Err(CliError::unavailable(format!(
+                    "agent already exists: {name}"
+                )));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot inspect {}: {error}",
+                    path.display()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn create_agent_host_parent(path: &Path) -> Result<(), CliError> {
+    create_plain_directory(
+        path,
+        0o755,
+        "agent parent is not a plain directory",
+        "agent parent contains a non-directory entry",
+        "invalid agent parent directory name",
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot create {}: {error}", path.display())))
+}
+
+fn require_plain_socket_inode(path: &Path) -> Result<(), CliError> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot inspect agent socket {}: {error}",
+            path.display()
+        ))
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_socket() {
+        return Err(CliError::unavailable(format!(
+            "agent socket is not a plain socket inode: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn rollback_host_agent_create(paths: &HostAgentCreatePaths, created: HostAgentCreateState) {
+    if created.home {
+        let _ignored = fs::remove_dir_all(&paths.home);
+    }
+    if created.socket {
+        let _ignored = fs::remove_file(&paths.socket);
+    }
+    if created.control {
+        let _ignored = fs::remove_file(&paths.agent);
+        let _ignored = fs::remove_dir_all(&paths.control);
+    }
 }
 
 pub(crate) fn agent_new_policy_subject(args: &AgentNewArgs) -> String {

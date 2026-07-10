@@ -1,20 +1,10 @@
 use crate::*;
 
 pub(crate) fn agent_stop_host_fallback(root: &Path, name: &str) -> Result<ExitCode, CliError> {
-    let control = agent_control_dir(root, name);
-    stop_agent_terminal_units(root, name)?;
-    stop_agent_control(&control, name)?;
-    stop_owned_child_agents(root, name)?;
+    let plan = plan_agent_stop(root, name)?;
+    execute_agent_stop(root, plan)?;
     print_line(&format!("agent {} stopped", terminal_safe_text(name)))?;
     Ok(ExitCode::SUCCESS)
-}
-
-pub(crate) fn stop_agent_terminal_units(root: &Path, name: &str) -> Result<(), CliError> {
-    reset_agent_chat_unit(&agent_chat_unit(root, name));
-    for unit in agent_terminal_units(root, name)? {
-        reset_agent_terminal_unit(&unit);
-    }
-    Ok(())
 }
 
 pub(crate) fn agent_terminal_units(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
@@ -49,77 +39,332 @@ pub(crate) fn stop_agent_control(control: &Path, name: &str) -> Result<(), CliEr
     append_agent_log_event(&control.join("log"), &agent_stop_log_event(name))
 }
 
-pub(crate) fn stop_owned_child_agents(root: &Path, parent: &str) -> Result<(), CliError> {
-    let mut children = Vec::new();
+struct StopCandidate {
+    name: String,
+    control: PathBuf,
+    parent: Option<AgentParentRef>,
+}
+
+struct StopPlan {
+    agents: Vec<PlannedStop>,
+}
+
+struct PlannedStop {
+    name: String,
+    terminal_units: Vec<String>,
+    cancellations: Vec<PlannedCancellation>,
+    cleanup: Option<TempCleanupPlan>,
+}
+
+struct PlannedCancellation {
+    parent_session: PathBuf,
+    child: String,
+}
+
+struct TempCleanupPlan {
+    entries: Vec<TempCleanupEntry>,
+}
+
+struct TempCleanupEntry {
+    path: PathBuf,
+    directory: bool,
+}
+
+fn plan_agent_stop(root: &Path, root_agent: &str) -> Result<StopPlan, CliError> {
+    let mut candidates = Vec::new();
     for (name, control) in agent_control_dirs(root)? {
-        if name == parent {
+        if RETIRED_REFERENCE_AGENTS.contains(&name.as_str()) && name != root_agent {
             continue;
         }
-        let Some(child_parent) = read_agent_parent_ref(&control)? else {
-            continue;
-        };
-        if child_parent.agent == parent && agent_lifecycle_is_parent_owned(&control)? {
-            children.push((name, child_parent, agent_lifecycle_is_temp(&control)?));
-        }
+        candidates.push(StopCandidate {
+            parent: read_agent_parent_ref(&control)?,
+            name,
+            control,
+        });
     }
-    children.sort_by(|left, right| left.0.cmp(&right.0));
-    for (child, child_parent, is_temp) in children {
-        let control = agent_control_dir(root, &child);
-        stop_agent_terminal_units(root, &child)?;
-        stop_agent_control(&control, &child)?;
-        record_parent_child_cancellation(root, &child, &child_parent)?;
-        stop_owned_child_agents(root, &child)?;
-        if is_temp && is_dedicated_worker_agent_name(&child) {
-            remove_temp_agent_object(root, &child)?;
+    candidates.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut visiting = HashSet::new();
+    let mut visited = HashSet::new();
+    let mut agents = Vec::new();
+    plan_stop_subtree(
+        root,
+        root_agent,
+        None,
+        false,
+        &candidates,
+        &mut visiting,
+        &mut visited,
+        &mut agents,
+    )?;
+    Ok(StopPlan { agents })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the stop DFS keeps its complete validation state explicit"
+)]
+fn plan_stop_subtree(
+    root: &Path,
+    name: &str,
+    parent: Option<&AgentParentRef>,
+    temporary: bool,
+    candidates: &[StopCandidate],
+    visiting: &mut HashSet<String>,
+    visited: &mut HashSet<String>,
+    agents: &mut Vec<PlannedStop>,
+) -> Result<(), CliError> {
+    if !visiting.insert(name.to_owned()) {
+        return Err(CliError::unavailable(format!(
+            "agent stop ownership cycle at {name}"
+        )));
+    }
+    if visited.contains(name) {
+        return Err(CliError::unavailable(format!(
+            "duplicate agent in stop plan: {name}"
+        )));
+    }
+
+    let control = agent_control_dir(root, name);
+    preflight_stop_control(&control)?;
+    let terminal_units = agent_terminal_units(root, name)?;
+    let cancellations = parent.map_or_else(
+        || Ok(Vec::new()),
+        |parent| plan_parent_child_cancellations(root, name, parent),
+    )?;
+    let cleanup = if temporary && is_dedicated_worker_agent_name(name) {
+        Some(plan_temp_cleanup(root, name)?)
+    } else {
+        None
+    };
+
+    for child in candidates.iter().filter(|candidate| {
+        candidate
+            .parent
+            .as_ref()
+            .is_some_and(|parent| parent.agent == name)
+    }) {
+        if RETIRED_REFERENCE_AGENTS.contains(&child.name.as_str()) {
+            continue;
+        }
+        let life = read_agent_control_trimmed(&child.control, "life")?;
+        let temporary = match life.as_deref() {
+            None | Some("owned") => false,
+            Some("temp") => true,
+            Some(life) => {
+                return Err(CliError::usage(format!(
+                    "invalid agent life for {}: {life}",
+                    child.name
+                )));
+            }
+        };
+        plan_stop_subtree(
+            root,
+            &child.name,
+            child.parent.as_ref(),
+            temporary,
+            candidates,
+            visiting,
+            visited,
+            agents,
+        )?;
+    }
+
+    visiting.remove(name);
+    visited.insert(name.to_owned());
+    agents.push(PlannedStop {
+        name: name.to_owned(),
+        terminal_units,
+        cancellations,
+        cleanup,
+    });
+    Ok(())
+}
+
+fn execute_agent_stop(root: &Path, plan: StopPlan) -> Result<(), CliError> {
+    for agent in plan.agents {
+        reset_agent_chat_unit(&agent_chat_unit(root, &agent.name));
+        for unit in agent.terminal_units {
+            reset_agent_terminal_unit(&unit);
+        }
+        stop_agent_control(&agent_control_dir(root, &agent.name), &agent.name)?;
+        for cancellation in agent.cancellations {
+            record_child_result_to_parent_context(
+                &cancellation.parent_session,
+                &cancellation.child,
+                ChildContextStatus::Cancelled,
+                &format!(
+                    "Child agent `{}` cancelled because the parent agent stopped.\n",
+                    agent.name
+                ),
+                "",
+            )
+            .map_err(schedule_child_context_cli_error)?;
+        }
+        if let Some(cleanup) = agent.cleanup {
+            execute_temp_cleanup(cleanup)?;
         }
     }
     Ok(())
 }
 
-pub(crate) fn remove_temp_agent_object(root: &Path, child: &str) -> Result<(), CliError> {
-    remove_temp_agent_file(&agent_object_path(root, child))?;
-    remove_temp_agent_file(&agent_socket_path(root, child)?)?;
-    let control = agent_control_dir(root, child);
-    match fs::symlink_metadata(&control) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            fs::remove_dir_all(&control).map_err(|error| {
-                CliError::unavailable(format!("cannot remove {}: {error}", control.display()))
-            })
+fn plan_temp_cleanup(root: &Path, name: &str) -> Result<TempCleanupPlan, CliError> {
+    let agent_root = root.join("agent");
+    preflight_cleanup_directory(&agent_root)?;
+
+    let mut entries = Vec::new();
+    for path in [
+        agent_object_path(root, name),
+        agent_socket_path(root, name)?,
+    ] {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_dir() => {
+                return Err(CliError::unavailable(format!(
+                    "temp agent path is not a file or socket: {}",
+                    path.display()
+                )));
+            }
+            Ok(_metadata) => entries.push(TempCleanupEntry {
+                path,
+                directory: false,
+            }),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(CliError::unavailable(format!(
+                    "cannot stat {}: {error}",
+                    path.display()
+                )));
+            }
         }
-        Ok(_metadata) => Err(CliError::unavailable(format!(
-            "temp agent control is not a plain directory: {}",
-            control.display()
-        ))),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(CliError::unavailable(format!(
-            "cannot stat {}: {error}",
-            control.display()
-        ))),
     }
+    plan_temp_cleanup_tree(&agent_control_dir(root, name), &mut entries)?;
+    Ok(TempCleanupPlan { entries })
 }
 
-pub(crate) fn remove_temp_agent_file(path: &Path) -> Result<(), CliError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if !metadata.file_type().is_dir() => fs::remove_file(path).map_err(|error| {
-            CliError::unavailable(format!("cannot remove {}: {error}", path.display()))
-        }),
-        Ok(_metadata) => Err(CliError::unavailable(format!(
-            "temp agent path is not a file or socket: {}",
-            path.display()
-        ))),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(CliError::unavailable(format!(
-            "cannot stat {}: {error}",
-            path.display()
-        ))),
+fn plan_temp_cleanup_tree(
+    directory: &Path,
+    entries: &mut Vec<TempCleanupEntry>,
+) -> Result<(), CliError> {
+    preflight_cleanup_directory(directory)?;
+    for name in read_dir_names(directory)? {
+        let path = directory.join(name);
+        let metadata = fs::symlink_metadata(&path).map_err(|error| {
+            CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+        })?;
+        if metadata.file_type().is_dir() {
+            plan_temp_cleanup_tree(&path, entries)?;
+        } else {
+            entries.push(TempCleanupEntry {
+                path,
+                directory: false,
+            });
+        }
     }
+    entries.push(TempCleanupEntry {
+        path: directory.to_path_buf(),
+        directory: true,
+    });
+    Ok(())
 }
 
-pub(crate) fn record_parent_child_cancellation(
+fn preflight_cleanup_directory(path: &Path) -> Result<(), CliError> {
+    let directory = open_plain_directory(path).map_err(|error| {
+        CliError::unavailable(format!("cannot open {}: {error}", path.display()))
+    })?;
+    let metadata = directory.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+    })?;
+    let uid = nix::unistd::Uid::effective().as_raw();
+    if uid != 0 && (metadata.uid() != uid || metadata.permissions().mode() & 0o300 != 0o300) {
+        return Err(CliError::unavailable(format!(
+            "temp cleanup directory is not owner-writable: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn execute_temp_cleanup(plan: TempCleanupPlan) -> Result<(), CliError> {
+    for entry in plan.entries {
+        let result = if entry.directory {
+            fs::remove_dir(&entry.path)
+        } else {
+            fs::remove_file(&entry.path)
+        };
+        result.map_err(|error| {
+            CliError::unavailable(format!("cannot remove {}: {error}", entry.path.display()))
+        })?;
+    }
+    Ok(())
+}
+
+pub(crate) fn remove_temp_agent_object(root: &Path, child: &str) -> Result<(), CliError> {
+    execute_temp_cleanup(plan_temp_cleanup(root, child)?)
+}
+
+fn preflight_stop_control(control: &Path) -> Result<(), CliError> {
+    open_plain_directory(control).map_err(|error| {
+        CliError::unavailable(format!("cannot open {}: {error}", control.display()))
+    })?;
+    for file in ["status", "pid"] {
+        let path = control.join(file);
+        if fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            return Err(CliError::unavailable(format!(
+                "refusing symlink control file: {}",
+                path.display()
+            )));
+        }
+        preflight_writable_plain_file(&path)?;
+    }
+    let log = control.join("log");
+    if fs::symlink_metadata(&log).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(CliError::unavailable(format!(
+            "refusing symlink log file: {}",
+            log.display()
+        )));
+    }
+    preflight_writable_plain_file(&log)?;
+    Ok(())
+}
+
+fn preflight_writable_plain_file(path: &Path) -> Result<(), CliError> {
+    let Some(parent) = path.parent() else {
+        return Err(CliError::unavailable("stop path has no parent"));
+    };
+    let directory = open_plain_directory(parent).map_err(|error| {
+        CliError::unavailable(format!("cannot open {}: {error}", parent.display()))
+    })?;
+    let Some(file) = path.file_name().and_then(|file| file.to_str()) else {
+        return Err(CliError::unavailable(format!(
+            "invalid stop path: {}",
+            path.display()
+        )));
+    };
+    let fd = nix::fcntl::openat(
+        &directory,
+        file,
+        nix::fcntl::OFlag::O_WRONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|error| CliError::unavailable(format!("cannot write {}: {error}", path.display())))?;
+    let opened = fs::File::from(fd);
+    let metadata = opened.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+    })?;
+    if !metadata.is_file() {
+        return Err(CliError::unavailable(format!(
+            "stop path is not a plain file: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn plan_parent_child_cancellations(
     root: &Path,
     child_agent: &str,
     parent: &AgentParentRef,
-) -> Result<(), CliError> {
+) -> Result<Vec<PlannedCancellation>, CliError> {
     let parent_session_dirs = if let Some(session) = parent.session.as_deref() {
         vec![agent_session_dir(root, &parent.agent, Some(session))?]
     } else {
@@ -131,7 +376,7 @@ pub(crate) fn record_parent_child_cancellation(
             .symlink_metadata()
             .is_ok_and(|metadata| metadata.is_dir())
         {
-            return Ok(());
+            return Ok(Vec::new());
         }
         read_dir_names(&session_root)?
             .into_iter()
@@ -139,6 +384,7 @@ pub(crate) fn record_parent_child_cancellation(
             .map(|name| session_root.join(name))
             .collect()
     };
+    let mut cancellations = Vec::new();
     for parent_session_dir in parent_session_dirs {
         let child_root = parent_session_dir.join("context").join("child");
         if !child_root
@@ -166,33 +412,45 @@ pub(crate) fn record_parent_child_cancellation(
             ) {
                 continue;
             }
-            record_child_result_to_parent_context(
-                &parent_session_dir,
-                &child,
-                ChildContextStatus::Cancelled,
-                &format!(
-                    "Child agent `{child_agent}` cancelled because the parent agent stopped.\n"
-                ),
-                "",
-            )
-            .map_err(schedule_child_context_cli_error)?;
+            preflight_child_cancellation(&dir)?;
+            cancellations.push(PlannedCancellation {
+                parent_session: parent_session_dir.clone(),
+                child,
+            });
         }
     }
+    Ok(cancellations)
+}
+
+fn preflight_child_cancellation(child: &Path) -> Result<(), CliError> {
+    open_plain_directory(child).map_err(|error| {
+        CliError::unavailable(format!("cannot open {}: {error}", child.display()))
+    })?;
+    for file in CHILD_RESULT_REQUIRED_FILES {
+        let path = child.join(file);
+        let opened = open_plain_read_file(&path)?;
+        let metadata = opened.metadata().map_err(|error| {
+            CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+        })?;
+        if !metadata.is_file() {
+            return Err(CliError::unavailable(format!(
+                "child result path is not a plain file: {}",
+                path.display()
+            )));
+        }
+    }
+    for directory in CHILD_RESULT_REQUIRED_DIRS {
+        open_plain_directory(&child.join(directory)).map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot open {}: {error}",
+                child.join(directory).display()
+            ))
+        })?;
+    }
+    for file in ["status", "result.md", "refs.jsonl"] {
+        preflight_writable_plain_file(&child.join(file))?;
+    }
     Ok(())
-}
-
-pub(crate) fn agent_lifecycle_is_parent_owned(control: &Path) -> Result<bool, CliError> {
-    Ok(matches!(
-        read_agent_control_trimmed(control, "life")?.as_deref(),
-        None | Some("owned" | "temp")
-    ))
-}
-
-pub(crate) fn agent_lifecycle_is_temp(control: &Path) -> Result<bool, CliError> {
-    Ok(matches!(
-        read_agent_control_trimmed(control, "life")?.as_deref(),
-        Some("temp")
-    ))
 }
 
 pub(crate) fn agent_stop_log_event(name: &str) -> String {

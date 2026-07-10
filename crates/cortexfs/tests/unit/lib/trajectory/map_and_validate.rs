@@ -269,6 +269,91 @@ fn validate_trajectory_rejects_unknown_observation_source_call() {
 }
 
 #[test]
+fn legacy_unmatched_tool_result_keeps_content_without_unproven_call_id() {
+    let trajectory = trajectory_from_session_jsonl(
+        r#"{"role":"tool","content":[{"type":"tool_result","tool_call_id":"missing-call","content":"legacy output"}]}"#,
+        "",
+        None,
+        None,
+    );
+
+    assert!(validate_trajectory(&trajectory).is_ok());
+    let result = trajectory
+        .steps
+        .first()
+        .and_then(|step| step.observation.as_ref())
+        .and_then(|observation| observation.results.first());
+    let Some(result) = result else {
+        return;
+    };
+    assert_eq!(result.content.as_deref(), Some("legacy output"));
+    assert_eq!(result.source_call_id, None);
+    assert_eq!(
+        trajectory
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("legacy_unmatched_tool_results"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+}
+
+#[test]
+fn legacy_unmatched_empty_tool_result_is_dropped() {
+    let trajectory = trajectory_from_session_jsonl(
+        r#"{"role":"tool","content":[{"type":"tool_result","tool_call_id":"missing-call"}]}"#,
+        "",
+        None,
+        None,
+    );
+
+    assert!(trajectory.steps.is_empty());
+    assert!(validate_trajectory(&trajectory).is_ok());
+    assert_eq!(
+        trajectory
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("legacy_unmatched_tool_results"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+}
+
+#[test]
+fn partially_matched_legacy_tool_results_only_clear_unmatched_id() {
+    let trajectory = trajectory_from_session_jsonl(
+        r#"{"role":"assistant","run":"run-a","content":"working"}
+{"role":"tool","run":"run-a","content":[{"type":"tool_result","tool_call_id":"call-a","content":"matched"},{"type":"tool_result","tool_call_id":"missing-call","content":"legacy"}]}"#,
+        r#"{"type":"tool_call","run":"run-a","id":"call-a","name":"fs.read","arguments":{}}"#,
+        None,
+        None,
+    );
+
+    assert!(validate_trajectory(&trajectory).is_ok());
+    let results = trajectory
+        .steps
+        .first()
+        .and_then(|step| step.observation.as_ref())
+        .map(|observation| observation.results.as_slice())
+        .unwrap_or_default();
+    assert!(results.iter().any(|result| {
+        result.source_call_id.as_deref() == Some("call-a")
+            && result.content.as_deref() == Some("matched")
+    }));
+    assert!(results.iter().any(|result| {
+        result.source_call_id.is_none() && result.content.as_deref() == Some("legacy")
+    }));
+    assert_eq!(
+        trajectory
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("legacy_unmatched_tool_results"))
+            .and_then(serde_json::Value::as_u64),
+        Some(1)
+    );
+}
+
+#[test]
 fn trajectory_reused_call_ids_match_by_run_without_deduplication() {
     let trajectory = trajectory_from_session_jsonl(
         r#"{"role":"tool","run":"run-a","content":[{"type":"tool_result","tool_call_id":"same","content":"first"}]}
@@ -384,4 +469,36 @@ fn validate_trajectory_rejects_cross_step_observation_reference() {
             ..
         } if source_call_id == "call-a"
     )));
+}
+
+#[test]
+fn trajectory_issue_display_includes_actionable_location() {
+    let issue = TrajectoryIssue::UnknownObservationSourceCall {
+        step_index: 2,
+        result_index: 4,
+        source_call_id: "call-a".to_owned(),
+    };
+
+    assert_eq!(
+        issue.to_string(),
+        "unknown observation source call: step=3 result=5 call_id=call-a"
+    );
+}
+
+#[test]
+fn trajectory_issue_display_bounds_and_escapes_session_fields() {
+    let source_call_id = format!("bad\n\u{1b}[31m{}", "x".repeat(2_000));
+    let issue = TrajectoryIssue::UnknownObservationSourceCall {
+        step_index: 0,
+        result_index: 0,
+        source_call_id,
+    };
+
+    let rendered = issue.to_string();
+
+    assert!(!rendered.contains('\n'));
+    assert!(!rendered.contains('\u{1b}'));
+    assert!(rendered.contains("\\n"));
+    assert!(rendered.contains("\\u{1b}"));
+    assert!(rendered.chars().count() <= 256, "{}", rendered.len());
 }
