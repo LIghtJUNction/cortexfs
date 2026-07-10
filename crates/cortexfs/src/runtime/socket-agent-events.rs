@@ -117,6 +117,59 @@ pub(crate) fn assistant_text_from_event_frames(frames: &[String]) -> Option<Stri
     (!output.is_empty()).then_some(output)
 }
 
+pub(crate) fn record_agent_error_from_event_frames(
+    session_dir: &Path,
+    run_id: &str,
+    frames: &[String],
+) -> Result<bool, SocketSessionRecordError> {
+    let mut error = None;
+    let mut terminal = None;
+    for frame in frames {
+        let Ok(value) = serde_json::from_str::<Value>(frame) else {
+            continue;
+        };
+        if value.get("run").and_then(Value::as_str) != Some(run_id) {
+            continue;
+        }
+        match value.get("type").and_then(Value::as_str) {
+            Some("error") => error = Some(frame.as_str()),
+            Some("done") => {
+                terminal = None;
+                if value.get("status").and_then(Value::as_str) == Some("error")
+                    && let Some(error) = error
+                {
+                    terminal = Some([error, frame.as_str()]);
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(terminal) = terminal else {
+        return Ok(false);
+    };
+
+    require_socket_session_files(session_dir)?;
+    let events = socket_runtime_read_plain_text_file(
+        &session_dir.join("events.jsonl"),
+        MAX_SOCKET_RUNTIME_EVENTS_BYTES,
+    )
+    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    let mut already_done = false;
+    for_each_jsonl_line(&events, |_line_number, line| {
+        already_done |= serde_json::from_str::<Value>(line).is_ok_and(|value| {
+            value.get("type").and_then(Value::as_str) == Some("done")
+                && value.get("run").and_then(Value::as_str) == Some(run_id)
+        });
+    });
+    if already_done {
+        return Ok(true);
+    }
+
+    append_session_lines(session_dir, "events.jsonl", &terminal)?;
+    set_session_state(session_dir, "error")?;
+    Ok(true)
+}
+
 pub(crate) fn record_tool_results_from_event_frames(
     session_dir: &Path,
     run_id: &str,
