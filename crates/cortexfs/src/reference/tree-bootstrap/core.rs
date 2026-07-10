@@ -7,9 +7,18 @@ use super::*;
 /// session skeletons, shared queue directories, and Unix socket path entries.
 /// It does not start agents, models, MCP servers, providers, or a supervisor.
 pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
+    let plan = plan_reference_tree_upgrade(root);
     create_reference_root(root)?;
     ensure_reference_bin(root)?;
     for agent in REFERENCE_AGENTS {
+        if plan.actions.iter().any(|action| {
+            matches!(
+                action,
+                BootstrapAction::SkipAgent { name, .. } if name == agent.name
+            )
+        }) {
+            continue;
+        }
         ensure_reference_agent(root, agent.name, agent.parent)?;
     }
     remove_deprecated_reference_placeholder_tools(root)?;
@@ -18,7 +27,7 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
     ensure_reference_home(root)?;
     remove_deprecated_reference_home_tool_aliases(root)?;
     migrate_reference_legacy_session_meta_models(root)?;
-    apply_reference_tree_upgrade(root)?;
+    apply_precomputed_reference_tree_upgrade(root, plan)?;
     Ok(ReferenceTreeBootstrap::new(root.to_path_buf()))
 }
 
@@ -54,6 +63,11 @@ pub(crate) const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
         name: "reviewer",
         parent: Some("agent:architect"),
         model: HELPER_MODEL_ALIAS,
+    },
+    ReferenceAgentSpec {
+        name: "worker",
+        parent: Some("agent:architect"),
+        model: DEFAULT_WORKER_MODEL,
     },
 ];
 pub(crate) const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
@@ -350,7 +364,7 @@ pub(crate) fn reference_agent_children(name: &str) -> Vec<&'static str> {
 }
 
 pub(crate) fn reference_agent_can_write_source(name: &str) -> bool {
-    name == "coder"
+    matches!(name, "coder" | "worker")
 }
 
 pub(crate) fn reference_agent_model(name: &str) -> &'static str {
@@ -366,7 +380,7 @@ pub(crate) fn reference_agent_system_prompt(name: &str) -> String {
 You are CortexFS agent `architect`.
 Your human role name is Architect.
 Act as the parent planner and architecture coordinator for the default agent tree.
-Keep task decomposition explicit in session files; delegate implementation to `coder` and verification to `reviewer`.
+Keep task decomposition explicit in session files; delegate implementation to `coder` as the primary implementer, simple bounded execution to `worker`, and independent verification to `reviewer`.
 Minimize coordination cost: merge small work, split only when implementation and review responsibilities are genuinely distinct.
 Preserve the CortexFS v1 ABI shape; do not add root namespaces, background schedulers, polling loops, watchers, or hot reload paths.
 Prefer concrete files, command evidence, and current repository state over speculative architecture.
@@ -393,8 +407,8 @@ You are CortexFS agent `worker`.
 You run on the spark model path and execute bounded delegated implementation tasks.
 When the handoff authorizes source work, operate in `/workspace` with `tsh` tools: read before editing, write files atomically, run focused verification, and report exact command evidence.
 Before editing, inspect authorized rules and current workspace state; do not overwrite unrelated user changes.
-Worker-role agent names include `worker`, `worker-*`, `executor`, and `executor-*`; they inherit the spark worker model when no explicit model control file is present.
-Shared `worker` and `executor` entries stay reusable; dedicated `worker-*` and `executor-*` temp entries may be reaped after parent-owned terminal results.
+Worker-role agent names include `worker` and `worker-*`; they inherit the spark worker model when no explicit model control file is present.
+The shared `worker` entry stays reusable; dedicated `worker-*` temp entries may be reaped after parent-owned terminal results.
 Read only the handoff context and authorized refs you are given.
 When you receive a schedule handoff line, preserve its `model=`, `life=`, and `role=` context and use its existing `plan=`, `handoff=`, `result=`, and `refs=` paths; claim the child with `ctx schedule claim <plan> <child>` before work and record the terminal outcome with `ctx schedule result <plan> <child> done|error|cancelled ...`.
 Return compact results suitable for `context/child/<child>/result.md`, including changed files, tests run, and blockers.

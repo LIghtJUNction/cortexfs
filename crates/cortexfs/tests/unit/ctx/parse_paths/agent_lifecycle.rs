@@ -642,7 +642,7 @@ fn agent_stop_host_fallback_cancels_owned_child_agents() {
 }
 
 #[test]
-fn agent_stop_host_fallback_retains_unwritable_retired_worker() {
+fn agent_stop_host_fallback_reports_unwritable_managed_worker() {
     let root = clean_test_dir("ctx-agent-stop-retired-worker");
     create_agent_fixture(&root, "coder", "agent:base", "busy", "100");
     create_agent_fixture(
@@ -677,11 +677,17 @@ fn agent_stop_host_fallback_retains_unwritable_retired_worker() {
     write_text_file(&child.join("result.md"), "");
     write_text_file(&child.join("refs.jsonl"), "");
 
-    assert_eq!(agent_stop(&root, "coder"), Ok(ExitCode::SUCCESS));
+    assert!(matches!(
+        agent_stop(&root, "coder"),
+        Err(ref error)
+            if error.code == 69
+                && error.message.contains("agent/worker.d/status")
+                && error.message.contains("EACCES")
+    ));
 
     assert_eq!(
         fs::read_to_string(root.join("agent/coder.d/status")).unwrap_or_default(),
-        "dead\n"
+        "busy\n"
     );
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/status")).unwrap_or_default(),
