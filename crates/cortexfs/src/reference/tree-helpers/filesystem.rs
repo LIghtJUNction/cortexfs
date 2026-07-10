@@ -12,7 +12,7 @@ pub(crate) fn ensure_reference_home_entry_ownership(path: &Path) -> Result<(), R
     if !nix::unistd::Uid::effective().is_root() {
         return Ok(());
     }
-    chown_reference_entry(path, REFERENCE_HOME_UID, REFERENCE_HOME_GID)
+    chown_reference_home_entry(path, REFERENCE_HOME_UID, REFERENCE_HOME_GID)
 }
 
 pub(crate) fn ensure_reference_agent_control_ownership(
@@ -65,6 +65,77 @@ pub(crate) fn chown_reference_entry(
         Some(nix::unistd::Uid::from_raw(uid)),
         Some(nix::unistd::Gid::from_raw(gid)),
         nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| ReferenceTreeError::CannotCreate)
+}
+
+pub(crate) fn chown_reference_home_entry(
+    path: &Path,
+    uid: u32,
+    gid: u32,
+) -> Result<(), ReferenceTreeError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    if metadata.is_dir() {
+        let directory = open_reference_dir(path)?;
+        chown_reference_open_entry(&directory, uid, gid)?;
+        return chown_reference_directory_symlinks(&directory, uid, gid);
+    }
+    if !metadata.is_file() {
+        return Err(ReferenceTreeError::CannotCreate);
+    }
+    let file =
+        plain_fs::open_plain_file(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+    if !file
+        .metadata()
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?
+        .is_file()
+    {
+        return Err(ReferenceTreeError::CannotCreate);
+    }
+    chown_reference_open_entry(&file, uid, gid)
+}
+
+fn chown_reference_directory_symlinks(
+    directory: &fs::File,
+    uid: u32,
+    gid: u32,
+) -> Result<(), ReferenceTreeError> {
+    for entry in fs::read_dir(plain_fs::proc_fd_path(directory))
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?
+    {
+        let entry = entry.map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        let name = reference_tree_entry_name(&entry)?;
+        let stat = nix::sys::stat::fstatat(
+            directory,
+            name.as_str(),
+            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+        )
+        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFLNK)
+        {
+            nix::unistd::fchownat(
+                directory,
+                name.as_str(),
+                Some(nix::unistd::Uid::from_raw(uid)),
+                Some(nix::unistd::Gid::from_raw(gid)),
+                nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+            )
+            .map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        }
+    }
+    Ok(())
+}
+
+fn chown_reference_open_entry(
+    file: &fs::File,
+    uid: u32,
+    gid: u32,
+) -> Result<(), ReferenceTreeError> {
+    nix::unistd::fchown(
+        file,
+        Some(nix::unistd::Uid::from_raw(uid)),
+        Some(nix::unistd::Gid::from_raw(gid)),
     )
     .map_err(|_error| ReferenceTreeError::CannotCreate)
 }

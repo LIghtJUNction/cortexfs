@@ -55,6 +55,122 @@ fn reference_socket_owner_repair_requires_effective_root() {
 }
 
 #[test]
+fn reference_home_chown_rejects_symlinked_ancestor() {
+    let root = clean_test_dir("reference-home-chown-ancestor");
+    let external = clean_test_dir("reference-home-chown-external");
+    let victim = external.join("victim");
+    assert!(fs::create_dir_all(&*root).is_ok());
+    assert!(fs::create_dir_all(&*external).is_ok());
+    assert!(fs::write(&victim, "outside\n").is_ok());
+    assert!(symlink(&*external, root.join("ancestor")).is_ok());
+    let before = ok!(fs::metadata(&victim));
+    let uid = nix::unistd::Uid::effective().as_raw();
+    let gid = nix::unistd::Gid::effective().as_raw();
+
+    let result = super::chown_reference_home_entry(&root.join("ancestor/victim"), uid, gid);
+
+    let after = ok!(fs::metadata(&victim));
+    assert!(result.is_err());
+    assert_eq!(
+        (
+            after.dev(),
+            after.ino(),
+            after.uid(),
+            after.gid(),
+            after.ctime(),
+            after.ctime_nsec(),
+        ),
+        (
+            before.dev(),
+            before.ino(),
+            before.uid(),
+            before.gid(),
+            before.ctime(),
+            before.ctime_nsec(),
+        )
+    );
+}
+
+#[test]
+fn reference_home_chown_changes_child_symlink_not_target() {
+    let root = clean_test_dir("reference-home-chown-child-link");
+    let external = clean_test_dir("reference-home-chown-child-target");
+    let directory = root.join("home");
+    let target = external.join("target");
+    let link = directory.join("child");
+    assert!(fs::create_dir_all(&directory).is_ok());
+    assert!(fs::create_dir_all(&*external).is_ok());
+    assert!(fs::write(&target, "outside\n").is_ok());
+    assert!(symlink(&target, &link).is_ok());
+    let target_before = ok!(fs::metadata(&target));
+    let link_before = ok!(fs::symlink_metadata(&link));
+    let root_user = nix::unistd::Uid::effective().is_root();
+    let uid = if root_user {
+        target_before.uid().saturating_add(1)
+    } else {
+        nix::unistd::Uid::effective().as_raw()
+    };
+    let gid = if root_user {
+        target_before.gid().saturating_add(1)
+    } else {
+        nix::unistd::Gid::effective().as_raw()
+    };
+
+    let result = super::chown_reference_home_entry(&directory, uid, gid);
+
+    let target_after = ok!(fs::metadata(&target));
+    let link_after = ok!(fs::symlink_metadata(&link));
+    assert!(result.is_ok());
+    assert_eq!((link_after.uid(), link_after.gid()), (uid, gid));
+    assert_eq!(link_after.ino(), link_before.ino());
+    assert_ne!(
+        (link_after.ctime(), link_after.ctime_nsec()),
+        (link_before.ctime(), link_before.ctime_nsec())
+    );
+    assert_eq!(
+        (
+            target_after.dev(),
+            target_after.ino(),
+            target_after.uid(),
+            target_after.gid(),
+            target_after.ctime(),
+            target_after.ctime_nsec(),
+        ),
+        (
+            target_before.dev(),
+            target_before.ino(),
+            target_before.uid(),
+            target_before.gid(),
+            target_before.ctime(),
+            target_before.ctime_nsec(),
+        )
+    );
+}
+
+#[test]
+fn reference_home_chown_repairs_plain_file_and_directory() {
+    let root = clean_test_dir("reference-home-chown-plain");
+    let directory = root.join("home");
+    let file = directory.join("entry");
+    assert!(fs::create_dir_all(&directory).is_ok());
+    assert!(fs::write(&file, "plain\n").is_ok());
+    let directory_before = ok!(fs::metadata(&directory));
+    let file_before = ok!(fs::metadata(&file));
+    let uid = nix::unistd::Uid::effective().as_raw();
+    let gid = nix::unistd::Gid::effective().as_raw();
+
+    assert!(super::chown_reference_home_entry(&directory, uid, gid).is_ok());
+    assert!(super::chown_reference_home_entry(&file, uid, gid).is_ok());
+
+    let directory_after = ok!(fs::metadata(&directory));
+    let file_after = ok!(fs::metadata(&file));
+    assert_eq!(directory_after.ino(), directory_before.ino());
+    assert_eq!(file_after.ino(), file_before.ino());
+    assert_eq!((directory_after.uid(), directory_after.gid()), (uid, gid));
+    assert_eq!((file_after.uid(), file_after.gid()), (uid, gid));
+}
+
+#[test]
 fn object_layout_accepts_model_agent_and_tool_triples() {
     let root = clean_test_dir("object-layout-ok");
     create_complete_object_layout(&root, ObjectClass::Model, "debug/echo", "socket");
