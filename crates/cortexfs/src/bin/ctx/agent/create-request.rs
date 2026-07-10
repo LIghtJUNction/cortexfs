@@ -30,15 +30,7 @@ pub(crate) fn agent_new_request_json(args: &AgentNewArgs) -> Result<String, CliE
         }
     }
     for mount in &args.mounts {
-        if !is_absolute_small_path(&mount.source) || !is_absolute_small_path(&mount.target) {
-            return Err(CliError::usage("agent mount paths must be absolute"));
-        }
-        if !matches!(mount.mode.as_str(), "ro" | "rw") {
-            return Err(CliError::usage(format!(
-                "invalid mount mode for {}: {}",
-                mount.target, mount.mode
-            )));
-        }
+        require_agent_mount(mount)?;
     }
 
     let mut fields = vec![format!("\"name\":{}", json_string(&args.name))];
@@ -107,8 +99,4 @@ pub(crate) fn json_string_list(values: &[String]) -> String {
         .map(|value| json_string(value))
         .collect::<Vec<_>>()
         .join(",")
-}
-
-pub(crate) fn is_absolute_small_path(value: &str) -> bool {
-    value.starts_with('/') && !value.bytes().any(|byte| byte.is_ascii_control())
 }
