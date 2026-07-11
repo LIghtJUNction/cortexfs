@@ -1,22 +1,27 @@
 use super::*;
+use nix::fcntl::{FcntlArg, fcntl};
+use std::os::fd::RawFd;
+
+const SOCKET_AGENT_EXECUTABLE_PATH: &str = "/run/cortexfs/agent-executable";
 
 pub(crate) fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
     agent_executable: &fs::File,
     request: AgentExecutableRunRequest<'_>,
-) -> Command {
+) -> Result<(Command, Option<InheritedFd>), SocketRuntimeError> {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
             let mut command = Command::new(support::plain::proc_fd_path(agent_executable));
             apply_agent_executable_socket_env(&mut command, runtime, request);
             command.arg(request.input);
             command.stdout(Stdio::piped()).process_group(0);
-            command
+            Ok((command, None))
         }
         AgentExecutableSocketExecution::Bwrap {
             program,
             mount_table,
         } => {
+            let agent_executable_fd = InheritedFd::duplicate(agent_executable)?;
             let mut command = Command::new(program);
             command.args(agent_executable_socket_bwrap_args(
                 &BwrapAgentExecutableArgs {
@@ -24,17 +29,14 @@ pub(crate) fn agent_executable_socket_command(
                     mount_table,
                     cwd: request.cwd.unwrap_or(runtime.default_cwd),
                     workspace: request.workspace,
-                    run_id: request.run_id,
-                    session: request.session,
-                    history_messages: request.history_messages,
-                    tool_context: request.tool_context,
                     debug: request.debug,
                     input: request.input,
+                    agent_executable_fd: agent_executable_fd.raw(),
                 },
             ));
             apply_agent_executable_socket_env(&mut command, runtime, request);
             command.stdout(Stdio::piped()).process_group(0);
-            command
+            Ok((command, Some(agent_executable_fd)))
         }
     }
 }
@@ -45,12 +47,29 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub mount_table: &'a MountTable,
     pub cwd: &'a str,
     pub workspace: Option<&'a str>,
-    pub run_id: &'a str,
-    pub session: &'a str,
-    pub history_messages: &'a str,
-    pub tool_context: &'a str,
     pub debug: Option<SocketDebugTiming>,
     pub input: &'a str,
+    pub agent_executable_fd: RawFd,
+}
+
+pub(crate) struct InheritedFd(RawFd);
+
+impl InheritedFd {
+    fn duplicate(fd: &impl std::os::fd::AsFd) -> Result<Self, SocketRuntimeError> {
+        fcntl(fd, FcntlArg::F_DUPFD(10))
+            .map(Self)
+            .map_err(|_error| SocketRuntimeError::CannotRunAgent)
+    }
+
+    fn raw(&self) -> RawFd {
+        self.0
+    }
+}
+
+impl Drop for InheritedFd {
+    fn drop(&mut self) {
+        let _ignored = nix::unistd::close(self.0);
+    }
 }
 
 pub(crate) fn apply_agent_executable_socket_env(
@@ -64,10 +83,6 @@ pub(crate) fn apply_agent_executable_socket_env(
             runtime
                 .env
                 .iter()
-                .filter(|env| {
-                    matches!(runtime.execution, AgentExecutableSocketExecution::Direct)
-                        || !is_provider_secret_env(&env.0)
-                })
                 .map(|env| (env.0.as_str(), env.1.as_str())),
         )
         .env("CTX_AGENT", runtime.agent_name)
@@ -85,20 +100,7 @@ pub(crate) fn apply_agent_executable_socket_env(
 pub(crate) fn agent_executable_socket_bwrap_args(
     request: &BwrapAgentExecutableArgs<'_>,
 ) -> Vec<String> {
-    let mut bwrap = vec!["--clearenv".to_owned()];
-    for env in request.runtime.env {
-        if env.0 == "CTX_PROVIDER_CONFIG_DIR" || is_provider_secret_env(&env.0) {
-            continue;
-        }
-        bwrap.extend(["--setenv".to_owned(), env.0.clone(), env.1.clone()]);
-    }
-    bwrap.extend([
-        "--setenv".to_owned(),
-        "CTX_AGENT".to_owned(),
-        request.runtime.agent_name.to_owned(),
-        "--setenv".to_owned(),
-        "CTX_ROOT".to_owned(),
-        request.runtime.ctx_root.display().to_string(),
+    let mut bwrap = vec![
         "--setenv".to_owned(),
         "CTX_PROVIDER_CONFIG_DIR".to_owned(),
         request
@@ -107,24 +109,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
             .join("shared/providers.d")
             .display()
             .to_string(),
-        "--setenv".to_owned(),
-        "CTX_SOURCE".to_owned(),
-        request.runtime.source_root.display().to_string(),
-        "--setenv".to_owned(),
-        "CTX_RUN_ID".to_owned(),
-        request.run_id.to_owned(),
-        "--setenv".to_owned(),
-        "CTX_SESSION".to_owned(),
-        request.session.to_owned(),
-        "--setenv".to_owned(),
-        "CTX_AGENT_HISTORY_MESSAGES".to_owned(),
-        request.history_messages.to_owned(),
-        "--setenv".to_owned(),
-        "CTX_AGENT_TOOL_CONTEXT".to_owned(),
-        request.tool_context.to_owned(),
-        "--setenv".to_owned(),
-        "CTX_WORKSPACE".to_owned(),
-        request.workspace.unwrap_or("").to_owned(),
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
         "--proc".to_owned(),
@@ -135,6 +119,13 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "/tmp".to_owned(),
         "--dir".to_owned(),
         "/run".to_owned(),
+        "--dir".to_owned(),
+        "/run/cortexfs".to_owned(),
+        "--perms".to_owned(),
+        "0755".to_owned(),
+        "--ro-bind-data".to_owned(),
+        request.agent_executable_fd.to_string(),
+        SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
         "--dir".to_owned(),
         "/home".to_owned(),
         "--ro-bind".to_owned(),
@@ -154,7 +145,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--symlink".to_owned(),
         "usr/lib".to_owned(),
         "/lib64".to_owned(),
-    ]);
+    ];
     bwrap.push("--unshare-net".to_owned());
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(timing) = request.debug {
@@ -187,14 +178,10 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     bwrap.extend([
         "--chdir".to_owned(),
         request.cwd.to_owned(),
-        request.runtime.agent_executable.display().to_string(),
+        SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
         request.input.to_owned(),
     ]);
     bwrap
-}
-
-pub(crate) fn is_provider_secret_env(name: &str) -> bool {
-    name.starts_with("CTX_PROVIDER_SECRET_")
 }
 
 pub(crate) fn bwrap_workspace_bind_args(
