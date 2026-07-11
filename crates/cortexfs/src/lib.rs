@@ -68,54 +68,46 @@ pub mod reference;
 pub mod runtime;
 pub mod support;
 
-// Re-export moved modules at the root so that existing code referencing them as crate::module works unchanged.
-pub use abi::authority_types;
-pub use abi::authority_types::*;
-pub use abi::socket_request;
-pub use abi::socket_request::*;
-pub use policy::subject as policy_subject;
-pub use provider::model_discovery::*;
-pub use support::control_text::ControlLineIssue;
-pub use support::jsonl_line::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
-pub use support::layout_path::{LayoutPathRole, PathLayoutIssue};
+pub use abi::authority::*;
+pub use abi::request::*;
+pub use provider::discovery::*;
+pub use support::control::ControlLineIssue;
+pub use support::jsonl::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
+pub use support::layout::{LayoutPathRole, PathLayoutIssue};
 pub use support::{
     ATIF_SCHEMA_VERSION, MAX_TRAJECTORY_SESSION_FILE_BYTES, TRAJECTORY_DEFAULT_AGENT_NAME,
     Trajectory, TrajectoryAgent, TrajectoryFinalMetrics, TrajectoryIssue, TrajectoryMapError,
     TrajectoryMetrics, TrajectoryObservation, TrajectoryObservationResult, TrajectoryReport,
-    TrajectoryStep, TrajectoryToolCall, control_text, host_path, jsonl_line, layout_path, manuals,
-    message_stream, plain_fs, process_helpers, session_index, session_layout, shared_queue, stream,
-    tool_path, tool_schema, trajectory, trajectory_from_session_dir, trajectory_from_session_jsonl,
-    validate_trajectory, write_trajectory_json,
+    TrajectoryStep, TrajectoryToolCall, manuals, stream, trajectory, trajectory_from_session_dir,
+    trajectory_from_session_jsonl, validate_trajectory, write_trajectory_json,
 };
-pub use tool::core::runtime_types::*;
-pub use tool::tsh_context_state;
+pub use tool::core::runtime::*;
 
-pub use authority::helpers as authority_helpers;
 pub use authority::*;
 
 // Re-export contents of FUSE and runtime etc. since they were previously included in lib.rs
-pub(crate) use fuse::v1_path::*;
-pub use fuse::v1_projection::*;
-pub(crate) use fuse::v1_provider::*;
-pub use fuse::v1_types::*;
+pub(crate) use fuse::path::*;
+pub use fuse::projection::*;
+pub(crate) use fuse::provider::*;
+pub use fuse::types::*;
 
+pub use runtime::record::*;
 pub use runtime::socket::*;
-pub use runtime::socket_session_record::*;
-pub use runtime::socket_types::*;
+pub use runtime::types::*;
 
 pub use object::bootstrap::*;
 pub use object::layout::*;
 pub use object::metadata::*;
 
-pub use reference::tree_bootstrap::*;
-pub use reference::tree_helpers::*;
+pub use reference::bootstrap::*;
+pub use reference::helpers::*;
 
-pub use agent::child_types::*;
-pub use agent::runtime_types::*;
-pub use agent::runtime_view::*;
+pub use agent::child::*;
+pub use agent::runtime::*;
+pub use agent::view::*;
 
 #[cfg(test)]
-pub(crate) use agent::secret_resolution::*;
+pub(crate) use agent::secret::*;
 
 pub(crate) use authority::helpers::*;
 pub use policy::subject::*;
@@ -126,7 +118,7 @@ use abi::constants::{
     MODEL_ROUTE_FILE, SYSTEM_PROVIDER_CONFIG_DIR, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi::path::is_object_name_for_class;
-use plain_fs::{
+use support::plain::{
     open_plain_directory as open_session_layout_plain_directory,
     plain_file_name as session_layout_plain_file_name,
 };

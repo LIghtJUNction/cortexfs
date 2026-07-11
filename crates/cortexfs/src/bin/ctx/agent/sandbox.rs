@@ -740,7 +740,7 @@ pub(crate) fn rollback_agent_chat_alias(
 }
 
 fn restore_agent_chat_placeholder(path: &Path, mode: u32, uid: u32, gid: u32) -> io::Result<()> {
-    cortexfs::plain_fs::ensure_socket_placeholder(path, mode)?;
+    cortexfs::support::plain::ensure_socket_placeholder(path, mode)?;
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;

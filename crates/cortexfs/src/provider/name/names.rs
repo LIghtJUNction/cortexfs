@@ -1,5 +1,5 @@
-use super::model_selection::{canonical_provider_name_from_host, provider_host_requires_name};
-use super::secret_files::provider_env_label;
+use super::files::provider_env_label;
+use super::selection::{canonical_provider_name_from_host, provider_host_requires_name};
 use crate::*;
 
 pub(crate) const PROVIDER_SYSTEM_SECRET_ROOT: &str = "/var/lib/cortexfs/secrets/provider";

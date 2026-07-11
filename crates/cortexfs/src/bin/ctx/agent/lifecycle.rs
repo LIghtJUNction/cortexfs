@@ -266,7 +266,7 @@ fn preflight_cleanup_directory(path: &Path) -> Result<(), CliError> {
     let metadata = directory.metadata().map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
     })?;
-    let fuse = cortexfs::plain_fs::is_fuse(&directory).map_err(|error| {
+    let fuse = cortexfs::support::plain::is_fuse(&directory).map_err(|error| {
         CliError::unavailable(format!(
             "cannot inspect filesystem for {}: {error}",
             path.display()

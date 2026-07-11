@@ -33,8 +33,8 @@ pub(crate) fn write_text_file_if_absent(path: &Path, content: &str) -> std::io::
             "text file must have a parent",
         )
     })?;
-    let name = plain_fs::plain_file_name(path)?;
-    let parent_dir = plain_fs::open_plain_directory(parent)?;
+    let name = support::plain::plain_file_name(path)?;
+    let parent_dir = support::plain::open_plain_directory(parent)?;
     match nix::fcntl::openat(
         &parent_dir,
         name,
@@ -86,8 +86,8 @@ pub(crate) fn create_private_context_dir(path: &Path) -> std::io::Result<()> {
                     "context directory must have a parent",
                 )
             })?;
-            let name = plain_fs::plain_file_name(path)?;
-            let parent_dir = plain_fs::open_plain_directory(parent)?;
+            let name = support::plain::plain_file_name(path)?;
+            let parent_dir = support::plain::open_plain_directory(parent)?;
             nix::sys::stat::mkdirat(
                 &parent_dir,
                 name,
@@ -106,7 +106,7 @@ pub(crate) fn create_private_context_dir(path: &Path) -> std::io::Result<()> {
 }
 
 pub(crate) fn open_private_context_dir(path: &Path) -> std::io::Result<fs::File> {
-    let dir = plain_fs::open_plain_directory(path)?;
+    let dir = support::plain::open_plain_directory(path)?;
     if !dir.metadata()?.is_dir() {
         return Err(std::io::Error::other("path is not a directory"));
     }

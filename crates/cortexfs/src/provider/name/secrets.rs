@@ -3,11 +3,11 @@ use crate::*;
 use std::fs::File;
 use std::os::fd::AsRawFd;
 
-use super::model_selection::provider_system_secret_path;
-use super::secret_files::{
+use super::files::{
     clear_fd_cloexec, create_private_provider_secret_dir, open_provider_secret_file,
     read_provider_secret_file, set_private_dir_permissions,
 };
+use super::selection::provider_system_secret_path;
 
 /// Stores a provider API secret in the root-owned `CortexFS` system secret store.
 pub fn store_provider_system_secret(
@@ -25,7 +25,7 @@ pub fn store_provider_system_secret(
     set_private_dir_permissions(parent)?;
     atomic_replace_text_with_mode(&path, &format!("{secret}\n"), 0o600)
         .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
-    plain_fs::sync_plain_dir(parent).map_err(|_error| ProviderSystemSecretError::CannotWrite)
+    support::plain::sync_plain_dir(parent).map_err(|_error| ProviderSystemSecretError::CannotWrite)
 }
 
 /// Reads a provider API secret from the root-owned `CortexFS` system secret store.

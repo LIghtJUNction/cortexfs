@@ -18,28 +18,20 @@ Contributor entry points:
   over `load-snapshot` / `load_snapshot`.
 - **Extension**: `.rs`.
 - **No `mod.rs`**: never. Directory modules are declared from a sibling file
-  (`agent.rs` + `agent/…`) or an explicit `#[path]` only when forced by a
-  legacy name.
+  (`agent.rs` + `agent/…`). Rename legacy files instead of retaining an
+  explicit `#[path]` declaration.
 - **Tests**: co-located production-adjacent tests may use a `tests` suffix
   only when already established; prefer `tests/unit/**` for new coverage.
 - **Scope**: production and bin sources under `crates/cortexfs/src`. The unit
   tree under `crates/cortexfs/tests/unit/**` may still use older path habits
   until a separate rename.
 
-### Legacy multi-word files
+### Canonical module names
 
-Some older modules still use kebab-case stems with `#[path]` (for example
-`plain-fs.rs` → `plain_fs`). That is **debt**, not a template:
-
-```rust
-// legacy only — do not copy this pattern for new modules
-#[path = "plain-fs.rs"]
-pub mod plain_fs;
-```
-
-When touching such a file for a real reason, prefer renaming toward a single
-token if the blast radius is acceptable. Do not mass-rename the tree for style
-alone.
+Every module has exactly one canonical name matching its file stem. When a
+module moves or is renamed, update all call sites in the same change. Do not
+retain a second module path through `pub use new as old` or an equivalent
+compatibility alias.
 
 ## 2. Module identifiers
 
@@ -49,8 +41,8 @@ alone.
   That is Rust syntax, not an excuse for `load_snapshot.rs` on disk.
 - Prefer a parent file (`support.rs`, `prompt.rs`) that lists children over a
   `mod.rs` inside the directory.
-- Public roots: keep existing `crate::…` paths working via re-exports from
-  `lib.rs` / `exports.rs` when those paths were already public.
+- Public roots follow the same rule: update callers to the canonical path
+  instead of preserving an old root module name through a re-export alias.
 
 ## 3. Function naming
 
@@ -77,8 +69,8 @@ Issue/report shapes share bases under `support/`:
 
 | Domain aliases | Shared base |
 | --- | --- |
-| `AgentControlIssue`, `SessionControlIssue`, `SessionIndexIssue`, `ToolSchemaIssue` | `ControlLineIssue` (`support/control-text.rs`) |
-| `ObjectLayoutIssue`, `SessionLayoutIssue`, `SharedQueueLayoutIssue` | `PathLayoutIssue` + `LayoutPathRole` (`support/layout-path.rs`) |
+| `AgentControlIssue`, `SessionControlIssue`, `SessionIndexIssue`, `ToolSchemaIssue` | `ControlLineIssue` (`support/control.rs`) |
+| `ObjectLayoutIssue`, `SessionLayoutIssue`, `SharedQueueLayoutIssue` | `PathLayoutIssue` + `LayoutPathRole` (`support/layout.rs`) |
 
 Prefer `inspect_control_line` / `inspect_control_lines`, `for_each_jsonl_line` /
 `parse_jsonl_line`, `require_plain` (or `require_symlink_dir` for symlink-metadata
@@ -90,9 +82,11 @@ are fine; parallel `EmptyValue` / `MissingFile` / `InvalidJson` enums are not.
 1. New module file → **single lowercase token**, no `-`, no `_` in the stem.
 2. No new `mod.rs`.
 3. No second helper that only renames or re-wraps an existing one.
-4. Public call sites still compile after a move (re-export or update imports).
-5. Prefer existing helpers (`plain_fs`, `host_path`, `process_helpers`,
-   control/layout/jsonl helpers, `bin/shared/*`, provider/route/secret paths).
+4. All call sites use the one canonical module path after a move; do not add a
+   compatibility module alias.
+5. Prefer existing helpers (`support::plain`, `support::path`,
+   `support::process`, `support::control`, `support::layout`,
+   `support::jsonl`, `cli/*`, provider/route/secret paths).
 6. New control/layout issues map onto shared bases (or a thin alias).
 7. Names should look at home next to kernel-style short modules (`rules`,
    `skills`, `snapshot`), not framework-style phrases.

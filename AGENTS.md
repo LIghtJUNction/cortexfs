@@ -11,7 +11,7 @@
 - 新增函数前必须确认没有同义函数；若只是为改名、换错误包装或迁移位置而新增 helper，优先改调用点复用现有实现。
 - 不要复制一段逻辑后只改变量名、错误包装或所在模块；存在等价逻辑时优先复用，确实需要抽取时只抽窄边界 helper。
 - 需要继续减少重复代码时，先使用 `.agents/skills/cortexfs-dry-refactor` 恢复现场、跑 jscpd、统计函数数量，再改代码。
-- 优先复用已有公共 helper：`plain_fs`（含 `create_plain_dir_with`）、`host_path`、`process_helpers`（`read_limited_bytes`/`read_limited_text`/`terminate_process_group`）、`ControlLineIssue`/`inspect_control_line`（control/index/schema 文本）、`PathLayoutIssue`/`LayoutPathRole`/`require_plain`（layout 路径 kind；共享队列目录用 `require_symlink_dir`）、`jsonl_line`（`for_each_jsonl_line`/`parse_jsonl_line`）、`bin/shared/*`、provider registry/route/secret/model alias 相关路径。
+- 优先复用已有公共 helper：`support::plain`（`support/plain.rs`，含 `create_plain_dir_with`）、`support::path`（`support/path.rs`）、`support::process`（`support/process.rs`，含 `read_limited_bytes`/`read_limited_text`/`terminate_process_group`）、`ControlLineIssue`/`inspect_control_line`（`support/control.rs`）、`PathLayoutIssue`/`LayoutPathRole`/`require_plain`（`support/layout.rs`；共享队列目录用 `require_symlink_dir`）、`support::jsonl`（`support/jsonl.rs`，含 `for_each_jsonl_line`/`parse_jsonl_line`）、`cli/*`、provider registry/route/secret/model alias 相关路径。
 - 领域 report 可用 type alias（如 `AgentControlIssue`/`ToolSchemaIssue` = `ControlLineIssue`，`ObjectLayoutIssue` = `PathLayoutIssue`），不要再复制 EmptyValue/MissingFile/InvalidJson 一类枚举；不要再加 `require_*` 同义薄包装。
 - 只有语义、错误类型、用户可见错误文本、超时/终端/进程行为一致时才合并；否则保留重复实现并说明原因。
 - 不要为了少量重复引入带大量 flag、闭包或泛型的过度抽象；合并后代码必须更短或更容易审计。

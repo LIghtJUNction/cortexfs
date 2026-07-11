@@ -1,7 +1,7 @@
 use crate::{
     ChildLifecycle, ControlLineIssue,
     authority::parent_ref_agent_name,
-    support::control_text::{inspect_control_line, inspect_control_lines},
+    support::control::{inspect_control_line, inspect_control_lines},
 };
 
 /// Stable agent control file kind with fixed v1 value syntax.

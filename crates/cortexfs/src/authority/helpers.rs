@@ -1,6 +1,6 @@
 use crate::*;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     open_plain_directory as open_authority_plain_directory,
     path_metadata_no_follow as authority_path_metadata_no_follow,
     plain_file_name as authority_plain_file_name,
@@ -269,7 +269,7 @@ fn commit_preserving_atomic_temp(
     expected: (u64, u64),
     replacement: (u64, u64),
 ) -> std::io::Result<()> {
-    if plain_fs::is_fuse(parent_dir)? {
+    if support::plain::is_fuse(parent_dir)? {
         // CortexFS synthetic inodes are path-derived, so a cross-path exchange
         // cannot compare the temporary inode with the target inode. The mount
         // enforces owner-UID writes; same-UID writers are one security subject.

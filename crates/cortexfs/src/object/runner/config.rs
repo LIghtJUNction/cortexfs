@@ -70,7 +70,7 @@ pub(crate) fn provider_config_from_dir(
         {
             continue;
         }
-        let content = cortexfs::plain_fs::read_small_text_file_at(
+        let content = cortexfs::support::plain::read_small_text_file_at(
             &directory,
             &name,
             MAX_RUNNER_PROVIDER_CONFIG_BYTES,

@@ -269,7 +269,7 @@ pub(crate) fn validate_optional_socket_workspace(
     let Some(workspace) = workspace else {
         return Ok(());
     };
-    if host_path::is_absolute_host_workspace_path(workspace) {
+    if support::path::is_absolute_host_workspace_path(workspace) {
         Ok(())
     } else {
         Err(SocketRequestError::InvalidField {

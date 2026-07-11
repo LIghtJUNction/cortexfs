@@ -129,12 +129,14 @@ fn create_host_agent_files(
     create_agent_host_parent(home_parent)?;
     let mut created = HostAgentCreateState::default();
     let result = (|| {
-        cortexfs::plain_fs::create_plain_dir_exclusive(&paths.control, 0o755).map_err(|error| {
-            CliError::unavailable(format!(
-                "cannot create {}: {error}",
-                paths.control.display()
-            ))
-        })?;
+        cortexfs::support::plain::create_plain_dir_exclusive(&paths.control, 0o755).map_err(
+            |error| {
+                CliError::unavailable(format!(
+                    "cannot create {}: {error}",
+                    paths.control.display()
+                ))
+            },
+        )?;
         created.control = true;
         install_executable_object_wrapper(
             root,
@@ -147,13 +149,15 @@ fn create_host_agent_files(
             CliError::unavailable(format!("cannot create agent: {}", error.errno()))
         })?;
         write_agent_host_stub(&paths.agent, &args.name)?;
-        let socket_created = cortexfs::plain_fs::ensure_socket_placeholder(&paths.socket, 0o777)
-            .map_err(|error| {
-                CliError::unavailable(format!(
-                    "cannot create agent socket {}: {error}",
-                    paths.socket.display()
-                ))
-            })?;
+        let socket_created =
+            cortexfs::support::plain::ensure_socket_placeholder(&paths.socket, 0o777).map_err(
+                |error| {
+                    CliError::unavailable(format!(
+                        "cannot create agent socket {}: {error}",
+                        paths.socket.display()
+                    ))
+                },
+            )?;
         if !socket_created {
             return Err(CliError::unavailable(format!(
                 "agent already exists: {}",
@@ -162,9 +166,11 @@ fn create_host_agent_files(
         }
         created.socket = true;
         require_plain_socket_inode(&paths.socket)?;
-        cortexfs::plain_fs::create_plain_dir_exclusive(&paths.home, 0o755).map_err(|error| {
-            CliError::unavailable(format!("cannot create {}: {error}", paths.home.display()))
-        })?;
+        cortexfs::support::plain::create_plain_dir_exclusive(&paths.home, 0o755).map_err(
+            |error| {
+                CliError::unavailable(format!("cannot create {}: {error}", paths.home.display()))
+            },
+        )?;
         created.home = true;
         ensure_agent_home_skeleton(root, uid, &args.name)
     })();

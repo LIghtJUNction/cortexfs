@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     create_plain_dir as create_fuse_v1_plain_dir,
     open_plain_directory as open_fuse_v1_plain_directory,
     open_plain_file as open_fuse_v1_plain_file,
@@ -104,7 +104,7 @@ impl FuseV1Projection {
         }
         let directory =
             open_fuse_v1_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
-        let entries = fs::read_dir(plain_fs::proc_fd_path(&directory))
+        let entries = fs::read_dir(support::plain::proc_fd_path(&directory))
             .map_err(|error| fuse_metadata_error(&error))?;
         let mut output = Vec::new();
         for entry in entries {
@@ -262,7 +262,7 @@ impl FuseV1Projection {
         if metadata.uid() != uid {
             return Err(FuseV1Error::PermissionDenied);
         }
-        plain_fs::remove_plain_dir(&path).map_err(|error| fuse_remove_dir_error(&error))
+        support::plain::remove_plain_dir(&path).map_err(|error| fuse_remove_dir_error(&error))
     }
 
     /// Projects a same-directory atomic write for v1 control files.
@@ -606,7 +606,7 @@ impl FuseV1Projection {
         gid: u32,
         mode: u32,
     ) -> Result<(), FuseV1Error> {
-        let created = plain_fs::create_plain_dir_exclusive(path, mode).map_err(|error| {
+        let created = support::plain::create_plain_dir_exclusive(path, mode).map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
                 FuseV1Error::AlreadyExists
             } else {
@@ -628,7 +628,7 @@ impl FuseV1Projection {
         .and_then(|()| created.sync_all().map_err(|_error| FuseV1Error::Io));
         if result.is_err() {
             drop(created);
-            let _ignored = plain_fs::remove_plain_dir(path);
+            let _ignored = support::plain::remove_plain_dir(path);
         }
         result
     }
@@ -694,7 +694,7 @@ impl FuseV1Projection {
             return Err(FuseV1Error::InvalidPath);
         }
         let owner = control.join("owner");
-        match plain_fs::read_small_text_file(&owner, 64) {
+        match support::plain::read_small_text_file(&owner, 64) {
             Ok(owner) => owner
                 .trim()
                 .parse::<u32>()

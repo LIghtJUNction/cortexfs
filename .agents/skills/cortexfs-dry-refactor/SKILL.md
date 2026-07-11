@@ -53,12 +53,12 @@ rtk proxy jscpd --reporters ai --min-lines 10 --min-tokens 80 crates/cortexfs/sr
 
 新增 Rust helper 或本地实现前，先查相邻模块和共享 helper 是否已有等价行为。优先检查这些族：
 
-- `plain_fs` 和 `bin/shared/plain_dir`：普通目录、文件创建和同步。
-- `host_path`：host workspace 路径校验。
-- `process_helpers`：有限读取进程输出、终止进程组。
-- `bin/shared/no_follow_fs`：CLI 侧 no-follow 打开文件。
-- `bin/shared/small_text`：有限读取小文本。
-- `bin/shared/stderr`、`json`、`current_uid`、`model_alias`、`shell_words`、`terminal_io`、`proc_fd`：CLI 共享工具逻辑。
+- `support/plain.rs` 和 `cli/directory.rs`：普通目录、文件创建和同步。
+- `support/path.rs`：host workspace 路径校验。
+- `support/process.rs`：有限读取进程输出、终止进程组。
+- `cli/nofollow.rs`：CLI 侧 no-follow 打开文件。
+- `cli/text.rs`：有限读取小文本。
+- `cli/stderr.rs`、`cli/json.rs`、`cli/uid.rs`、`cli/alias.rs`、`cli/shell.rs`、`cli/terminal.rs`、`cli/procfd.rs`：CLI 共享工具逻辑。
 - provider registry、route、secret、model alias 相关模块：provider/model 行为。
 
 如果新代码像这些 helper，优先调用已有 helper，或在正确边界抽一个窄 helper。不要复制实现后只改变量名。

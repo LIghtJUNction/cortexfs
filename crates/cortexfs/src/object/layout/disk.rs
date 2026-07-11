@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     open_plain_directory as open_object_layout_plain_directory,
     plain_file_name as object_layout_plain_file_name,
     read_small_text_file as read_object_layout_small_text_file,

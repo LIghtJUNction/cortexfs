@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     is_object_name,
-    plain_fs::{
+    support::plain::{
         open_plain_directory as open_tool_path_plain_directory,
         path_metadata_no_follow as tool_path_plain_file_metadata,
     },
@@ -122,7 +122,7 @@ pub(crate) fn append_tool_hits(dir: &Path, hits: &mut Vec<ToolHit>) -> Result<()
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_error) => return Err(ToolPathError::CannotReadDirectory),
     };
-    let entries = match fs::read_dir(plain_fs::proc_fd_path(&directory)) {
+    let entries = match fs::read_dir(support::plain::proc_fd_path(&directory)) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_error) => return Err(ToolPathError::CannotReadDirectory),

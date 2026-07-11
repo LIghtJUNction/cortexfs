@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     open_plain_directory as open_fuse_v1_plain_directory,
     read_small_text_file as read_fuse_v1_small_text_file,
     read_symlink_target as read_fuse_v1_symlink_target,
@@ -155,7 +155,7 @@ impl FuseV1Projection {
         }
         let directory =
             open_fuse_v1_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
-        for entry in fs::read_dir(plain_fs::proc_fd_path(&directory))
+        for entry in fs::read_dir(support::plain::proc_fd_path(&directory))
             .map_err(|error| fuse_metadata_error(&error))?
         {
             let entry = entry.map_err(|error| fuse_metadata_error(&error))?;
