@@ -1,7 +1,5 @@
 use super::*;
 
-use crate::support::plain::read_small_text_file as socket_runtime_read_plain_text_file;
-
 pub(crate) fn handle_socket_send(
     session_root: &Path,
     default_cwd: &str,
@@ -56,7 +54,7 @@ pub(crate) fn handle_socket_resume(
     if !is_object_name(session) {
         return Err(SocketRuntimeError::InvalidSessionName);
     }
-    let events = socket_runtime_read_plain_text_file(
+    let events = support::plain::read_small_text_file(
         &session_root.join(session).join("events.jsonl"),
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     )
@@ -109,7 +107,7 @@ pub(crate) fn current_or_default_session_name(
     session_root: &Path,
 ) -> Result<String, SocketRuntimeError> {
     let current_path = session_root.join("index").join("current");
-    match socket_runtime_read_plain_text_file(&current_path, MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES) {
+    match support::plain::read_small_text_file(&current_path, MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES) {
         Ok(value) => {
             let session = value.trim();
             if is_object_name(session) {

@@ -1,12 +1,11 @@
 use crate::support::plain::open_plain_directory;
-use std::fs::File as std_File;
 use std::io;
 use std::path::Path;
 
 pub fn open_regular_file_no_follow(
     path: &Path,
     extra_flags: nix::fcntl::OFlag,
-) -> io::Result<std_File> {
+) -> io::Result<std::fs::File> {
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidInput, "path has no parent directory")
     })?;
@@ -21,7 +20,7 @@ pub fn open_regular_file_no_follow(
         nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | extra_flags,
         nix::sys::stat::Mode::empty(),
     )?;
-    let file = std_File::from(file_fd);
+    let file = std::fs::File::from(file_fd);
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -32,6 +31,6 @@ pub fn open_regular_file_no_follow(
 }
 
 #[expect(dead_code, reason = "used by object-runner but not ctx")]
-pub fn open_executable_no_follow(path: &Path) -> io::Result<std_File> {
+pub fn open_executable_no_follow(path: &Path) -> io::Result<std::fs::File> {
     open_regular_file_no_follow(path, nix::fcntl::OFlag::empty())
 }

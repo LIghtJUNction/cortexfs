@@ -1,4 +1,3 @@
-use crate::support::plain::open_plain_directory as open_fuse_v1_plain_directory;
 use crate::*;
 
 pub(crate) fn debug_echo_model_metadata() -> String {
@@ -96,7 +95,7 @@ pub(crate) struct ProviderConfigEntry {
 pub(crate) fn read_provider_configs(
     config_dir: &Path,
 ) -> Result<Vec<ProviderConfigEntry>, FuseV1Error> {
-    let directory = match open_fuse_v1_plain_directory(config_dir) {
+    let directory = match support::plain::open_plain_directory(config_dir) {
         Ok(directory) => directory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_error) => return Err(FuseV1Error::Io),
@@ -381,7 +380,8 @@ pub(crate) fn default_provider_model_fallback(
 }
 
 pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {
-    let directory = open_fuse_v1_plain_directory(model_root).map_err(|_error| FuseV1Error::Io)?;
+    let directory =
+        support::plain::open_plain_directory(model_root).map_err(|_error| FuseV1Error::Io)?;
     let entries =
         fs::read_dir(support::plain::proc_fd_path(&directory)).map_err(|_error| FuseV1Error::Io)?;
     let mut names = Vec::new();
