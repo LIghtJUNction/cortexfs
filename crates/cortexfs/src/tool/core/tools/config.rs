@@ -175,7 +175,7 @@ pub(crate) fn write_tsh_runtime_config(path: &Path, config: TshRuntimeConfig) ->
 }
 
 pub(crate) fn create_tsh_config_dir(path: &Path) -> ToolResult<()> {
-    plain_fs::create_plain_dir(path)
+    support::plain::create_plain_dir(path)
         .map_err(|error| ToolError::denied(format!("cannot create config directory: {error}")))
 }
 

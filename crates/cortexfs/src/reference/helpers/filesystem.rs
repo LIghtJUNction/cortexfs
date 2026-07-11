@@ -1,11 +1,11 @@
 use super::*;
 
 pub(crate) fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError> {
-    plain_fs::create_plain_dir(path).map_err(|_error| ReferenceTreeError::CannotCreate)
+    support::plain::create_plain_dir(path).map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 pub(crate) fn open_reference_dir(path: &Path) -> Result<fs::File, ReferenceTreeError> {
-    plain_fs::open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
+    support::plain::open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 pub(crate) fn ensure_reference_home_entry_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
@@ -27,7 +27,7 @@ pub(crate) fn ensure_reference_agent_control_ownership(
 }
 
 pub(crate) fn read_reference_owner_id(path: &Path) -> Result<u32, ReferenceTreeError> {
-    let value = plain_fs::read_small_text_file(path, 64)
+    let value = support::plain::read_small_text_file(path, 64)
         .map_err(|_error| ReferenceTreeError::CannotCreate)?;
     value
         .trim()
@@ -84,7 +84,7 @@ pub(crate) fn chown_reference_home_entry(
         return Err(ReferenceTreeError::CannotCreate);
     }
     let file =
-        plain_fs::open_plain_file(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
+        support::plain::open_plain_file(path).map_err(|_error| ReferenceTreeError::CannotCreate)?;
     if !file
         .metadata()
         .map_err(|_error| ReferenceTreeError::CannotCreate)?
@@ -100,7 +100,7 @@ fn chown_reference_directory_symlinks(
     uid: u32,
     gid: u32,
 ) -> Result<(), ReferenceTreeError> {
-    for entry in fs::read_dir(plain_fs::proc_fd_path(directory))
+    for entry in fs::read_dir(support::plain::proc_fd_path(directory))
         .map_err(|_error| ReferenceTreeError::CannotCreate)?
     {
         let entry = entry.map_err(|_error| ReferenceTreeError::CannotCreate)?;
@@ -172,7 +172,7 @@ pub(crate) fn ensure_reference_socket(
     uid: u32,
     gid: u32,
 ) -> Result<(), ReferenceTreeError> {
-    plain_fs::ensure_socket_placeholder(path, 0o777)
+    support::plain::ensure_socket_placeholder(path, 0o777)
         .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| ReferenceTreeError::CannotSocket(error.kind()))?;

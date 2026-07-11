@@ -10,14 +10,14 @@ use crate::{
     CHILD_RESULT_REQUIRED_DIRS, CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_DIRS,
     CONTEXT_REQUIRED_FILES, ControlLineIssue, JsonStringField, PathLayoutIssue,
     SESSION_REQUIRED_FILES,
-    abi::path as abi_path,
+    abi::path::is_model_reference,
     is_stable_chroot_absolute_path,
-    plain_fs::{
+    support::control::inspect_control_line,
+    support::layout::{LayoutPathRole, require_plain},
+    support::plain::{
         open_plain_directory as open_session_layout_plain_directory,
         proc_fd_path as plain_proc_fd_path, read_small_text_file,
     },
-    support::control_text::inspect_control_line,
-    support::layout_path::{LayoutPathRole, require_plain},
 };
 
 const MAX_SESSION_LAYOUT_CONTROL_BYTES: u64 = 64 * 1024;
@@ -183,7 +183,7 @@ pub(crate) fn inspect_session_meta_json(content: &str) -> SessionControlReport {
         meta.model.as_ref(),
         "model",
         &mut issues,
-        abi_path::is_model_reference,
+        is_model_reference,
     );
     inspect_optional_meta_string(meta.scope.as_ref(), "scope", &mut issues, |scope| {
         matches!(scope, "private" | "shared" | "temp")

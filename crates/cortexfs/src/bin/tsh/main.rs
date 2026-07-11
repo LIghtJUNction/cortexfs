@@ -37,7 +37,7 @@ use nix::sys::termios::{self, ControlFlags, InputFlags, LocalFlags, OutputFlags,
 use serde_json::Value;
 
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use cortexfs::cli::uid as current_uid;
+pub(crate) use cortexfs::cli::uid;
 
 define_simple_cli_error!(TshError);
 
@@ -58,15 +58,15 @@ pub(crate) fn main() -> ExitCode {
 }
 
 pub(crate) use context::*;
-pub(crate) use current_uid::*;
-pub(crate) use no_follow_fs::*;
-pub(crate) use proc_fd::*;
+pub(crate) use lookup::*;
+pub(crate) use nofollow::*;
+pub(crate) use parse::*;
+pub(crate) use procfd::*;
 pub(crate) use repl::*;
-pub(crate) use repl_parse::*;
-pub(crate) use small_text::*;
 pub(crate) use stderr::*;
 pub(crate) use terminal::*;
-pub(crate) use tool_lookup::*;
+pub(crate) use text::*;
+pub(crate) use uid::*;
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let (root, command) = parse_args(args)?;
@@ -330,12 +330,11 @@ pub mod context;
 
 pub mod terminal;
 
-pub(crate) use cortexfs::cli::nofollow as no_follow_fs;
-pub(crate) use cortexfs::cli::procfd as proc_fd;
+pub(crate) use cortexfs::cli::nofollow;
+pub(crate) use cortexfs::cli::procfd;
 pub mod parse;
 pub mod repl;
-pub(crate) use cortexfs::cli::text as small_text;
-pub use parse as repl_parse;
+pub(crate) use cortexfs::cli::text;
 
 pub(crate) fn load_persistent_context(
     root: &Path,
@@ -477,7 +476,6 @@ pub(crate) fn tool_execution_denial_to_tsh(name: &str, denial: ToolExecutionDeni
 }
 
 pub mod lookup;
-pub use lookup as tool_lookup;
 
 pub(crate) fn write_stdout(message: &str) -> Result<(), TshError> {
     let mut stdout = io::stdout().lock();

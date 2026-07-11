@@ -1,6 +1,6 @@
 use crate::*;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     open_plain_file as open_object_metadata_plain_file,
     path_metadata_no_follow as object_metadata_plain_path_metadata,
 };

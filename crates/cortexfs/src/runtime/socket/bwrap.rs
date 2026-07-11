@@ -7,7 +7,7 @@ pub(crate) fn agent_executable_socket_command(
 ) -> Command {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
-            let mut command = Command::new(plain_fs::proc_fd_path(agent_executable));
+            let mut command = Command::new(support::plain::proc_fd_path(agent_executable));
             apply_agent_executable_socket_env(&mut command, runtime, request);
             command.arg(request.input);
             command.stdout(Stdio::piped()).process_group(0);
@@ -208,7 +208,7 @@ pub(crate) fn bwrap_workspace_bind_args(
     if !cwd_uses_default_workspace(cwd) || mount_table_targets_workspace(mount_table) {
         return Vec::new();
     }
-    if !host_path::is_absolute_host_workspace_path(workspace) {
+    if !support::path::is_absolute_host_workspace_path(workspace) {
         return Vec::new();
     }
     vec![

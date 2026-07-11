@@ -22,7 +22,7 @@ pub(crate) fn push_str_byte_limit(output: &mut String, value: &str, max_bytes: u
 
 pub(crate) fn read_bounded_regular_utf8(path: &Path, max_bytes: u64) -> Option<String> {
     let mut content = String::new();
-    let file = plain_fs::open_plain_file(path).ok()?;
+    let file = support::plain::open_plain_file(path).ok()?;
     let metadata = file.metadata().ok()?;
     if !metadata.is_file() || metadata.len() > max_bytes {
         return None;
@@ -47,7 +47,7 @@ pub(crate) fn fd_entry_is_directory(parent_dir: &File, name: &str) -> bool {
 }
 
 pub(crate) fn read_history_messages_tail(path: &Path) -> std::io::Result<String> {
-    let mut file = plain_fs::open_plain_file(path)?;
+    let mut file = support::plain::open_plain_file(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(std::io::Error::new(

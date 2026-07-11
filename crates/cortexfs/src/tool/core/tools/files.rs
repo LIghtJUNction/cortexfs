@@ -1,7 +1,7 @@
 use super::*;
 use crate::*;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     open_plain_directory as open_tool_io_plain_directory,
     plain_file_name as tool_io_plain_file_name,
     read_small_text_file as read_tool_io_small_text_file,

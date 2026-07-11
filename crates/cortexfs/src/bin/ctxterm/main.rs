@@ -60,20 +60,20 @@ type Client = Arc<Mutex<UnixStream>>;
 type Clients = Arc<Mutex<Vec<Client>>>;
 
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use cortexfs::cli::terminal as terminal_io;
+pub(crate) use cortexfs::cli::terminal;
 
 define_simple_cli_error!(CtxtermError);
 
 pub(crate) use cli::*;
-pub(crate) use client_io::*;
-pub(crate) use cortexfs::plain_fs::open_plain_directory;
-pub(crate) use create_plain_dir::*;
+pub(crate) use client::*;
+pub(crate) use cortexfs::support::plain::open_plain_directory;
+pub(crate) use create::*;
 pub(crate) use fs::*;
 pub(crate) use pty::*;
 pub(crate) use socket::*;
-pub(crate) use stale_socket::*;
+pub(crate) use stale::*;
 pub(crate) use stderr::*;
-pub(crate) use terminal_io::*;
+pub(crate) use terminal::*;
 
 pub(crate) fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
@@ -132,12 +132,11 @@ struct RunConfig {
 
 pub mod cli;
 pub mod client;
-pub use client as client_io;
-pub(crate) use cortexfs::cli::create as create_plain_dir;
+pub(crate) use cortexfs::cli::create;
 pub mod fs;
 pub mod pty;
 pub mod socket;
-pub(crate) use cortexfs::cli::stale as stale_socket;
+pub(crate) use cortexfs::cli::stale;
 
 #[cfg(test)]
 pub mod tests;

@@ -28,8 +28,8 @@ use super::{
 };
 use cortexfs::{
     AgentPromptContext, DEFAULT_AGENT_PROMPT_TEMPLATE, agent_runtime_contract, collect_agent_rules,
-    collect_skill_metadata, default_agent_tool_context, plain_fs::open_plain_directory,
-    render_agent_system_prompt,
+    collect_skill_metadata, default_agent_tool_context, render_agent_system_prompt,
+    support::plain::open_plain_directory,
 };
 use std::ffi::OsString;
 use std::fs;

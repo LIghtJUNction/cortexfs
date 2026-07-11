@@ -6,7 +6,7 @@ use serde_json::Value;
 pub use crate::context::jsonl::{
     ContextJsonlIssue, ContextJsonlKind, ContextJsonlReport, inspect_context_jsonl,
 };
-pub use crate::message_stream::{
+pub use crate::support::message::{
     MessageStreamIssue, MessageStreamReport, inspect_message_stream_jsonl,
 };
 use crate::{

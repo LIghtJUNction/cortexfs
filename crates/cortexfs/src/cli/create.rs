@@ -1,4 +1,4 @@
-use cortexfs::plain_fs::{CreatePlainDirMessages, create_plain_dir_with};
+use cortexfs::support::plain::{CreatePlainDirMessages, create_plain_dir_with};
 use std::io;
 use std::path::Path;
 

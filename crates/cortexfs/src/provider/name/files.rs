@@ -3,7 +3,7 @@ use crate::*;
 use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use std::fs::File;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     open_plain_directory as open_plain_directory_no_follow,
     plain_file_name as provider_secret_plain_file_name,
 };

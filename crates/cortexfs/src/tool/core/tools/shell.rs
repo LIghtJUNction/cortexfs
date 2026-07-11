@@ -62,10 +62,10 @@ pub(crate) fn run_shell_exec_command_with_timeout(
         .take()
         .ok_or_else(|| "cannot read shell stderr".to_owned())?;
     let stdout_reader = thread::spawn(move || {
-        process_helpers::read_limited_bytes(stdout, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
+        support::process::read_limited_bytes(stdout, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
     });
     let stderr_reader = thread::spawn(move || {
-        process_helpers::read_limited_bytes(stderr, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
+        support::process::read_limited_bytes(stderr, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
     });
     let mut stdout_reader = Some(stdout_reader);
     let mut stderr_reader = Some(stderr_reader);
@@ -83,7 +83,7 @@ pub(crate) fn run_shell_exec_command_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
-                process_helpers::terminate_process_group(&mut child);
+                support::process::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 if let Some(reader) = stderr_reader.take() {
                     let _ignored = reader.join();
@@ -104,7 +104,7 @@ pub(crate) fn run_shell_exec_command_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
-                process_helpers::terminate_process_group(&mut child);
+                support::process::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 if let Some(reader) = stdout_reader.take() {
                     let _ignored = reader.join();
@@ -119,7 +119,7 @@ pub(crate) fn run_shell_exec_command_with_timeout(
             break status;
         }
         if Instant::now() >= deadline {
-            process_helpers::terminate_process_group(&mut child);
+            support::process::terminate_process_group(&mut child);
             let _ignored = child.wait();
             if let Some(reader) = stdout_reader.take() {
                 let _ignored = reader.join();

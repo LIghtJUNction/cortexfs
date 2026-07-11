@@ -15,6 +15,9 @@ pub use abi::path::{
     AbiPathKind, ObjectClass, classify_abi_path, is_model_name, is_object_name, is_root_entry,
     parse_abi_path,
 };
+pub use abi::request::{
+    SocketRequest, SocketRequestError, SocketSessionScope, parse_socket_request_frame,
+};
 pub use agent::control::{
     AgentControlIssue, AgentControlKind, AgentControlReport, inspect_agent_control,
 };
@@ -36,12 +39,6 @@ pub use context::pack::{
     ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,
     ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,
     validate_context_pack_source,
-};
-pub use control_text::ControlLineIssue;
-pub use layout_path::{LayoutPathRole, PathLayoutIssue};
-pub use manuals::{
-    CortexfsManual, MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MANUALS,
-    cortexfs_manual,
 };
 pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTable};
 pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
@@ -65,43 +62,46 @@ pub use provider::oauth::{
     oauth_authorization_url, oauth_refresh_token_form, parse_oauth_token_response,
     resolve_oauth_access_token, resolve_oauth_access_token_with,
 };
-pub use session_index::{
+pub use support::control::ControlLineIssue;
+pub use support::index::{
     SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,
     inspect_session_index, preflight_session_index_update, update_session_index,
     update_session_index_with_keys,
 };
-pub use session_layout::{
-    SessionControlIssue, SessionControlKind, SessionControlReport, SessionLayoutIssue,
-    SessionLayoutReport, inspect_session_control, inspect_session_layout,
+pub use support::layout::{LayoutPathRole, PathLayoutIssue};
+pub use support::manuals::{
+    CortexfsManual, MANUAL_INDEX, MANUAL_INDEX_FILE, MANUAL_MAN_DIR, MANUAL_SHARED_DIR, MANUALS,
+    cortexfs_manual,
 };
-pub use shared_queue::{
+pub use support::queue::{
     SharedQueueClaim, SharedQueueClaimError, SharedQueueFinishError, SharedQueueLayoutIssue,
     SharedQueueLayoutReport, SharedQueueOutcome, SharedQueueRecoverError,
     claim_next_shared_queue_job, finish_shared_queue_job, inspect_shared_queue_layout,
     recover_shared_queue_job,
 };
-pub use socket_request::{
-    SocketRequest, SocketRequestError, SocketSessionScope, parse_socket_request_frame,
+pub use support::schema::{ToolSchemaIssue, ToolSchemaReport, inspect_tool_schema_json};
+pub use support::session::{
+    SessionControlIssue, SessionControlKind, SessionControlReport, SessionLayoutIssue,
+    SessionLayoutReport, inspect_session_control, inspect_session_layout,
 };
-pub use stream::{
+pub use support::stream::{
     ContextJsonlIssue, ContextJsonlKind, ContextJsonlReport, EventStreamIssue, EventStreamReport,
     MessageStreamIssue, MessageStreamReport, inspect_context_jsonl, inspect_event_stream_jsonl,
     inspect_message_stream_jsonl,
 };
-pub use tool::core::tools::{
-    FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
-    run_core_tool_cli, run_core_tool_cli_with_root,
-};
-pub use tool_path::{ToolHit, ToolPath, ToolPathError, is_executable_file};
-pub use tool_schema::{ToolSchemaIssue, ToolSchemaReport, inspect_tool_schema_json};
-pub use trajectory::{
+pub use support::toolpath::{ToolHit, ToolPath, ToolPathError, is_executable_file};
+pub use support::trajectory::{
     ATIF_SCHEMA_VERSION, MAX_TRAJECTORY_SESSION_FILE_BYTES, TRAJECTORY_DEFAULT_AGENT_NAME,
     Trajectory, TrajectoryAgent, TrajectoryFinalMetrics, TrajectoryIssue, TrajectoryMapError,
     TrajectoryMetrics, TrajectoryObservation, TrajectoryObservationResult, TrajectoryReport,
     TrajectoryStep, TrajectoryToolCall, trajectory_from_session_dir, trajectory_from_session_jsonl,
     validate_trajectory, write_trajectory_json,
 };
-pub use tsh_context_state::{
+pub use tool::core::tools::{
+    FsReadTool, FsWriteTool, ShellExecTool, TshConfigTool, core_tool_specs, run_core_tool,
+    run_core_tool_cli, run_core_tool_cli_with_root,
+};
+pub use tool::state::{
     TshContextState, TshLoadedToolState, read_tsh_context_state, tsh_context_state_path,
     write_tsh_context_state,
 };

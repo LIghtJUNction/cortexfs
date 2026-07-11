@@ -1,5 +1,5 @@
 use super::names::PROVIDER_SYSTEM_SECRET_ROOT;
-use crate::plain_fs::open_plain_directory as open_plain_directory_no_follow;
+use crate::support::plain::open_plain_directory as open_plain_directory_no_follow;
 use crate::*;
 use std::net::IpAddr;
 

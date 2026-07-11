@@ -170,7 +170,7 @@ pub(crate) fn collect_reference_session_meta_paths(
 pub(crate) fn reference_tree_read_dir(
     directory: &fs::File,
 ) -> Result<fs::ReadDir, ReferenceTreeError> {
-    fs::read_dir(plain_fs::proc_fd_path(directory))
+    fs::read_dir(support::plain::proc_fd_path(directory))
         .map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
@@ -245,7 +245,7 @@ pub(crate) fn remove_reference_entry(path: &Path) -> Result<(), ReferenceTreeErr
 pub(crate) fn migrate_reference_session_meta_model(
     meta_path: &Path,
 ) -> Result<(), ReferenceTreeError> {
-    let content = plain_fs::read_small_text_file(meta_path, MAX_REFERENCE_SESSION_META_BYTES)
+    let content = support::plain::read_small_text_file(meta_path, MAX_REFERENCE_SESSION_META_BYTES)
         .map_err(|_error| ReferenceTreeError::CannotCreate)?;
     let Ok(mut value) = serde_json::from_str::<Value>(&content) else {
         return Ok(());

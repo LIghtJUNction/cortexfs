@@ -23,7 +23,7 @@ pub fn install_executable_object_wrapper(
 
     let class_dir = root.join(class.as_str());
     let control_dir = class_dir.join(format!("{name}.d"));
-    plain_fs::create_plain_dir(&control_dir)
+    support::plain::create_plain_dir(&control_dir)
         .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
 
     let executable = class_dir.join(name);
@@ -46,9 +46,10 @@ pub fn install_executable_object_wrapper(
 
 pub(crate) fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapError> {
     let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
-    plain_fs::create_plain_dir(&hook_dir).map_err(|_error| ObjectBootstrapError::CannotCreate)?;
+    support::plain::create_plain_dir(&hook_dir)
+        .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     for phase in OBJECT_HOOK_PHASE_DIRS {
-        plain_fs::create_plain_dir(&hook_dir.join(phase))
+        support::plain::create_plain_dir(&hook_dir.join(phase))
             .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
     }
     Ok(())

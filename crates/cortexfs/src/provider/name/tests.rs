@@ -2,7 +2,7 @@ use crate::*;
 
 #[cfg(test)]
 mod provider_secret_file_tests {
-    use super::super::secret_files::set_private_dir_permissions;
+    use super::super::files::set_private_dir_permissions;
     use super::super::{
         create_private_provider_secret_dir, is_secret_account_name, open_provider_secret_file,
         provider_host_from_base_url, provider_secret_file_exists, read_provider_secret_file,
