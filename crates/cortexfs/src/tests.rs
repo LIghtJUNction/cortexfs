@@ -85,6 +85,7 @@ include!("../tests/unit/lib/agent_execution_policy.rs");
 include!("../tests/unit/lib/agent_schedule.rs");
 include!("../tests/unit/lib/child_context.rs");
 include!("../tests/unit/lib/session_context.rs");
+include!("../tests/unit/lib/session_store.rs");
 include!("../tests/unit/lib/context_queue.rs");
 include!("../tests/unit/lib/shared_queue_access.rs");
 include!("../tests/unit/lib/tool_authority.rs");

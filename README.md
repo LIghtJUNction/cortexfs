@@ -1,7 +1,7 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-social-card.png" alt="CortexFS: agent runtime as a Unix ABI" width="900">
+  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: four agents, one Unix ABI" width="900">
 </p>
 
 **CortexFS makes AI runtimes feel like Unix.**
@@ -29,7 +29,9 @@ The v1 shape is intentionally small:
 /ctx/shared
 ```
 
-For the normative ABI, start with [docs/DESIGN.md](docs/DESIGN.md).
+For the normative ABI, start with the [v1 specification](docs/spec/README.md)
+and [architecture guide](docs/architecture.md). [docs/DESIGN.md](docs/DESIGN.md)
+defines the visual system for CortexFS documentation and demos, not the ABI.
 
 ## What It Feels Like
 
@@ -40,6 +42,9 @@ workspace:
 ctx
 /ctx/agent/coder
 live chat
+
+$ ctx agent start coder
+agent coder ready
 
 $ ctx agent chat coder
 coder/default ❯ review /workspace/docs/DESIGN.md
@@ -126,12 +131,21 @@ cargo run -p cortexfs --bin ctx -- doctor
 
 ## Bootstrap A Programming Coder
 
-`ctx bootstrap` creates the default `architect`, `coder`, and `reviewer`
-agents. Start `coder` from the project checkout, then open the chat UI:
+`ctx bootstrap` creates four default agents with separate responsibilities:
+
+```text
+architect  plans and coordinates work
+coder      implements the primary change
+worker     handles bounded tasks with the Spark worker path
+reviewer   independently verifies results and constraints
+```
+
+Start `coder` from the project checkout, wait for `ready`, then open the chat UI:
 
 ```bash
 ctx bootstrap
 ctx agent start coder --session default
+ctx agent status coder
 ctx agent chat coder
 ```
 
@@ -469,6 +483,25 @@ temp     temporary, no durable resume requirement
 
 Clients should read `session/index/current`, `session/index/list`, and
 `session/index/by-cwd/*` instead of maintaining a second hidden history store.
+
+Session garbage collection is dry-run by default. `default`, the current
+session, and every explicit `--keep` name are always protected:
+
+```bash
+ctx agent session gc coder --dry-run
+ctx agent session gc coder --dry-run --match '*' --keep release-investigation
+ctx agent session gc coder --yes --match '*smoke*' --older-than-days 7 --keep release-investigation
+```
+
+Review the complete dry-run list before adding `--yes`. Without `--match`, GC
+uses conservative test-session patterns rather than treating every session as
+disposable.
+
+Provider failures are durable session facts. When a run terminates with an
+error, CortexFS records the original provider `error` frame followed by
+`done(status=error)` in `events.jsonl` and sets `state` to `error`. This terminal
+history remains available to `ctx agent resume` even when no assistant message
+was produced.
 
 ## Policy Model
 
