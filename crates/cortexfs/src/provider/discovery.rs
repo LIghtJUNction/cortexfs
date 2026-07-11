@@ -1,6 +1,6 @@
 use crate::*;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     create_plain_dir as create_provider_model_cache_dir,
     read_small_text_file as read_provider_model_cache_file,
 };

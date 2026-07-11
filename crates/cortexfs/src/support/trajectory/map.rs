@@ -6,7 +6,7 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::agent::prompt::message_content_text;
-use crate::plain_fs::read_small_text_file;
+use crate::support::plain::read_small_text_file;
 use crate::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
 
 use super::types::{

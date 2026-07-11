@@ -3,7 +3,7 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use crate::plain_fs::path_metadata_no_follow;
+use crate::support::plain::path_metadata_no_follow;
 
 /// Expected path role used when reporting missing / wrong-kind layout issues.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

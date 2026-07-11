@@ -16,7 +16,5 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 pub(crate) mod argument;
-pub(crate) use argument as argument_path;
 pub(crate) mod cache;
-pub(crate) use cache as context_cache;
 pub(crate) mod execution;

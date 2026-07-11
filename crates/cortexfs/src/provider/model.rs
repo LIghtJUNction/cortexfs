@@ -241,8 +241,7 @@ impl ModelFallbackTable {
 }
 
 pub mod routes;
-pub use model_driver_routes::*;
-pub use routes as model_driver_routes;
+pub use routes::*;
 
 impl_issue_report!(ModelCapabilityReport, ModelCapabilityIssue);
 

@@ -10,7 +10,7 @@ use crate::{
     MAX_OBJECT_NAME_LEN, ROOT_ENTRIES, SessionControlKind, SessionIndexKind,
 };
 
-pub use crate::abi::path_parse::{classify_abi_path, parse_abi_path};
+pub use crate::abi::parse::{classify_abi_path, parse_abi_path};
 
 /// Stable executable object classes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

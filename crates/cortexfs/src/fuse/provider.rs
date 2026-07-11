@@ -1,4 +1,4 @@
-use crate::plain_fs::open_plain_directory as open_fuse_v1_plain_directory;
+use crate::support::plain::open_plain_directory as open_fuse_v1_plain_directory;
 use crate::*;
 
 pub(crate) fn debug_echo_model_metadata() -> String {
@@ -101,7 +101,7 @@ pub(crate) fn read_provider_configs(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_error) => return Err(FuseV1Error::Io),
     };
-    let entries = match fs::read_dir(plain_fs::proc_fd_path(&directory)) {
+    let entries = match fs::read_dir(support::plain::proc_fd_path(&directory)) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_error) => return Err(FuseV1Error::Io),
@@ -122,7 +122,7 @@ pub(crate) fn read_provider_configs(
         if extension != "json" {
             continue;
         }
-        let Ok(content) = plain_fs::read_small_text_file_at(
+        let Ok(content) = support::plain::read_small_text_file_at(
             &directory,
             &name,
             MAX_PROVIDER_CONFIG_BYTES,
@@ -383,7 +383,7 @@ pub(crate) fn default_provider_model_fallback(
 pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {
     let directory = open_fuse_v1_plain_directory(model_root).map_err(|_error| FuseV1Error::Io)?;
     let entries =
-        fs::read_dir(plain_fs::proc_fd_path(&directory)).map_err(|_error| FuseV1Error::Io)?;
+        fs::read_dir(support::plain::proc_fd_path(&directory)).map_err(|_error| FuseV1Error::Io)?;
     let mut names = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_error| FuseV1Error::Io)?;

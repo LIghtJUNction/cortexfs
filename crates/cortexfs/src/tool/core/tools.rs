@@ -30,19 +30,15 @@ pub struct ShellExecTool;
 #[derive(Debug)]
 pub struct TshConfigTool;
 
-pub mod files;
-pub use files as tool_io;
-pub mod schemas;
-pub use schemas as tool_schemas;
-pub mod shell;
-pub use shell as tool_shell;
 pub mod config;
-pub use config as tool_tsh_config;
+pub mod files;
+pub mod schemas;
+pub mod shell;
 
-pub(crate) use tool_io::*;
-pub(crate) use tool_schemas::*;
-pub(crate) use tool_shell::*;
-pub use tool_tsh_config::*;
+pub use config::*;
+pub(crate) use files::*;
+pub(crate) use schemas::*;
+pub(crate) use shell::*;
 
 #[must_use]
 pub fn core_tool_specs() -> Vec<ToolSpec> {

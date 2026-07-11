@@ -158,7 +158,7 @@ pub(crate) fn run_secret_tool_command_with_timeout(
         .take()
         .ok_or_else(|| "cannot read secret-tool stdout".to_owned())?;
     let stdout_reader = thread::spawn(move || {
-        process_helpers::read_limited_bytes(stdout, MAX_SECRET_TOOL_OUTPUT_BYTES.saturating_add(1))
+        support::process::read_limited_bytes(stdout, MAX_SECRET_TOOL_OUTPUT_BYTES.saturating_add(1))
     });
     let mut stdout_reader = Some(stdout_reader);
     let mut stdout = None;
@@ -174,7 +174,7 @@ pub(crate) fn run_secret_tool_command_with_timeout(
                 .and_then(|reader| reader.join().ok())
                 .unwrap_or_default();
             if output.len() > MAX_SECRET_TOOL_OUTPUT_BYTES {
-                process_helpers::terminate_process_group(&mut child);
+                support::process::terminate_process_group(&mut child);
                 let _ignored = child.wait();
                 return Err("secret-tool output exceeds limit".to_owned());
             }
@@ -184,7 +184,7 @@ pub(crate) fn run_secret_tool_command_with_timeout(
             break status;
         }
         if Instant::now() >= deadline {
-            process_helpers::terminate_process_group(&mut child);
+            support::process::terminate_process_group(&mut child);
             let _ignored = child.wait();
             if let Some(reader) = stdout_reader.take() {
                 let _ignored = reader.join();

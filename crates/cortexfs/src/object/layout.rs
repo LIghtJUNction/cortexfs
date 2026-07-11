@@ -1,4 +1,4 @@
-use crate::support::layout_path::{LayoutPathRole, PathLayoutIssue, require_plain};
+use crate::support::layout::{LayoutPathRole, PathLayoutIssue, require_plain};
 use crate::*;
 
 /// Inspects a model, agent, or tool object triple under a `CortexFS` root.
@@ -355,8 +355,7 @@ pub(crate) fn require_unix_socket(
 }
 
 pub mod disk;
-pub use disk as layout_io;
-use layout_io::*;
+use disk::*;
 
 pub(crate) fn is_stable_chroot_absolute_path(value: &str) -> bool {
     if !value.starts_with('/') || value.bytes().any(|byte| byte.is_ascii_control()) {

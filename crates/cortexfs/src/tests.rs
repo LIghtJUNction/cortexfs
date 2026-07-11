@@ -42,7 +42,7 @@ use super::{
     is_object_name, is_root_entry, is_worker_agent_name, model_exec_metadata,
     oauth_authorization_code_form, oauth_authorization_url, oauth_refresh_token_form,
     owned_child_cancellation_events, parse_model_driver_routes, parse_oauth_token_response,
-    parse_socket_request_frame, peer_credentials, plain_fs, plan_reference_tree_upgrade,
+    parse_socket_request_frame, peer_credentials, plan_reference_tree_upgrade,
     read_bootstrap_state, read_echo_model_stdin_limited, ready_agent_schedule_child_handoffs,
     ready_agent_schedule_nodes, rebuild_context_pack, record_agent_schedule_to_parent_context,
     record_assistant_response_to_session, record_child_handoff_to_parent_context,
@@ -60,7 +60,7 @@ use super::{
     validate_context_pack_source, validate_trajectory, write_run_snapshot, write_snapshot,
     write_text_file_if_absent, write_trajectory_json,
 };
-use crate::fuse::v1_projection::core::fuse_readlink_error;
+use crate::fuse::projection::core::fuse_readlink_error;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::Shutdown;

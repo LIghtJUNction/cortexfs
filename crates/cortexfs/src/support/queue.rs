@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::support::layout_path::require_symlink_dir;
+use crate::support::layout::require_symlink_dir;
 use crate::{PathLayoutIssue, SHARED_QUEUE_REQUIRED_DIRS, is_object_name};
 
 /// Shared queue layout uses the shared path-layout issue model.
@@ -266,7 +266,7 @@ pub fn finish_shared_queue_job(
 
     nix::fcntl::renameat(&claim_dir_fd, job_name, &output_dir_fd, job_name)
         .map_err(|_error| SharedQueueFinishError::CannotMoveClaimedJob)?;
-    crate::plain_fs::sync_plain_dir(&output_dir)
+    crate::support::plain::sync_plain_dir(&output_dir)
         .map_err(|_error| SharedQueueFinishError::CannotMoveClaimedJob)?;
     claim_dir_fd
         .sync_all()
@@ -316,7 +316,7 @@ pub fn recover_shared_queue_job(
     }
     nix::fcntl::renameat(&claim_dir_fd, job_name, &pending_root_fd, job_name)
         .map_err(|_error| SharedQueueRecoverError::CannotRequeue)?;
-    crate::plain_fs::sync_plain_dir(&pending_root)
+    crate::support::plain::sync_plain_dir(&pending_root)
         .map_err(|_error| SharedQueueRecoverError::CannotRequeue)?;
     claim_dir_fd
         .sync_all()
@@ -331,7 +331,7 @@ pub(crate) fn pending_queue_jobs(
     pending_dir: &Path,
     pending_dir_fd: &fs::File,
 ) -> Result<Vec<(String, PathBuf)>, SharedQueueClaimError> {
-    let entries = fs::read_dir(crate::plain_fs::proc_fd_path(pending_dir_fd))
+    let entries = fs::read_dir(crate::support::plain::proc_fd_path(pending_dir_fd))
         .map_err(|_error| SharedQueueClaimError::CannotReadPending)?;
     let mut jobs = Vec::new();
     for entry in entries {
@@ -392,9 +392,9 @@ pub(crate) fn sync_claimed_queue_job(
     claim_dir: &Path,
     claimed_root: &Path,
 ) -> io::Result<()> {
-    crate::plain_fs::sync_plain_dir(pending_dir)?;
-    crate::plain_fs::sync_plain_dir(claim_dir)?;
-    crate::plain_fs::sync_plain_dir(claimed_root)
+    crate::support::plain::sync_plain_dir(pending_dir)?;
+    crate::support::plain::sync_plain_dir(claim_dir)?;
+    crate::support::plain::sync_plain_dir(claimed_root)
 }
 
 pub(crate) fn rollback_shared_queue_claim(
@@ -410,7 +410,7 @@ pub(crate) fn rollback_shared_queue_claim(
         let _ignored = nix::fcntl::renameat(&claim_dir_fd, job_name, &pending_dir_fd, job_name);
     }
     if let Some(parent) = pending_path.parent() {
-        let _ignored = crate::plain_fs::sync_plain_dir(parent);
+        let _ignored = crate::support::plain::sync_plain_dir(parent);
     }
     if let Ok(claimed_root_fd) = queue_child_dir_fd(queue_dir, "claimed") {
         let _ignored = nix::unistd::unlinkat(
@@ -420,7 +420,7 @@ pub(crate) fn rollback_shared_queue_claim(
         );
     }
     if let Some(parent) = claim_dir.parent() {
-        let _ignored = crate::plain_fs::sync_plain_dir(parent);
+        let _ignored = crate::support::plain::sync_plain_dir(parent);
     }
     let _ignored = remove_shared_queue_lease(queue_dir, job_name);
 }
@@ -436,7 +436,7 @@ pub(crate) fn cleanup_shared_queue_claim(queue_dir: &Path, job_name: &str) -> io
         Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
         Err(error) => return Err(io::Error::from(error)),
     }
-    crate::plain_fs::sync_plain_dir(&claimed_root)?;
+    crate::support::plain::sync_plain_dir(&claimed_root)?;
     remove_shared_queue_lease(queue_dir, job_name)
 }
 
@@ -484,5 +484,4 @@ pub(crate) fn remove_shared_queue_lease(queue_dir: &Path, job_name: &str) -> io:
 }
 
 pub mod store;
-use shared_queue_io::*;
-pub use store as shared_queue_io;
+use store::*;

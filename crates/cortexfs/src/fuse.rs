@@ -1,11 +1,6 @@
 pub mod alias;
-pub mod socket;
-pub use alias as v1_model_alias;
 pub mod path;
-pub use path as v1_path;
 pub mod projection;
-pub use projection as v1_projection;
 pub mod provider;
-pub use provider as v1_provider;
+pub mod socket;
 pub mod types;
-pub use types as v1_types;

@@ -1,4 +1,4 @@
-use crate::plain_fs::open_plain_directory;
+use crate::support::plain::open_plain_directory;
 use std::io;
 use std::path::Path;
 

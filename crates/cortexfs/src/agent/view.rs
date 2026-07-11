@@ -1,6 +1,6 @@
 use crate::*;
 
-use crate::plain_fs::{
+use crate::support::plain::{
     open_plain_directory as open_agent_runtime_plain_directory,
     read_small_text_file as read_agent_runtime_small_text_file,
 };
