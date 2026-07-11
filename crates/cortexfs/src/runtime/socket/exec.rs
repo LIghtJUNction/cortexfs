@@ -12,8 +12,8 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         ref session,
         scope,
         ref cwd,
-        ref workspace,
         ref input,
+        ..
     } = request
     else {
         let response = handle_socket_request(
@@ -32,7 +32,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         &runtime.session_root.join(session),
         MAX_HISTORY_MESSAGES_CHARS,
     );
-    let tool_context = agent_tool_context_for_request(cwd.as_deref(), workspace.as_deref());
+    let tool_context = agent_tool_context_for_request(cwd.as_deref());
     if let Some(debug) = debug {
         write_socket_debug_timing_frame(stream, debug, "history_collected")?;
     }
@@ -55,7 +55,6 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
             run_id: id,
             session,
             cwd: cwd.as_deref(),
-            workspace: workspace.as_deref(),
             input,
             history_messages: &history_messages,
             tool_context: &tool_context,
@@ -270,29 +269,19 @@ pub(crate) struct AgentExecutableRunRequest<'a> {
     pub(crate) run_id: &'a str,
     pub(crate) session: &'a str,
     pub(crate) cwd: Option<&'a str>,
-    pub(crate) workspace: Option<&'a str>,
     pub(crate) input: &'a str,
     pub(crate) history_messages: &'a str,
     pub(crate) tool_context: &'a str,
     pub(crate) debug: Option<SocketDebugTiming>,
 }
 
-pub(crate) fn agent_tool_context_for_request(cwd: Option<&str>, workspace: Option<&str>) -> String {
+pub(crate) fn agent_tool_context_for_request(cwd: Option<&str>) -> String {
     let mut context = default_agent_tool_context();
     context.push_str("\n\nCurrent request context:\n");
     context.push_str("- Sandbox cwd: ");
     context.push_str(&prompt_quoted(cwd.unwrap_or("/workspace")));
     context.push('\n');
-    match workspace.filter(|value| support::path::is_absolute_host_workspace_path(value)) {
-        Some(workspace) => {
-            context.push_str("- Host workspace mounted at `/workspace`: ");
-            context.push_str(&prompt_quoted(workspace));
-            context.push('\n');
-        }
-        None => {
-            context.push_str("- Host workspace mounted at `/workspace`: unknown\n");
-        }
-    }
+    context.push_str("- Host workspace configuration: determined by agent policy\n");
     context
 }
 

@@ -114,7 +114,6 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
-        workspace: Some("/repo"),
         debug: None,
         input: "hi",
         agent_executable_fd: 9,
@@ -150,7 +149,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         .iter()
         .any(|arg| arg == "/run/user/1000/cortexfs/credentials/coder-default"));
     assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
-    assert!(contains_arg_triplet(&args, "--bind", "/repo", "/workspace"));
+    assert!(!contains_arg_triplet(&args, "--bind", "/repo", "/workspace"));
     assert!(contains_arg_triplet(
         &args,
         "--ro-bind",
@@ -202,7 +201,6 @@ fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
         run_id: "run-1",
         session: "default",
         cwd: Some("/"),
-        workspace: None,
         input: "hi",
         history_messages: "",
         tool_context: "",
@@ -263,7 +261,6 @@ fn agent_executable_socket_bwrap_preserves_provider_secret_env()
         run_id: "run-1",
         session: "default",
         cwd: Some("/"),
-        workspace: None,
         input: "hi",
         history_messages: "",
         tool_context: "",
@@ -277,6 +274,65 @@ fn agent_executable_socket_bwrap_preserves_provider_secret_env()
     drop(agent_executable_fd);
     assert!(output.status.success(), "bwrap failed: {output:?}");
     assert_eq!(output.stdout, b"provider-secret");
+    Ok(())
+}
+
+#[test]
+fn agent_executable_socket_bwrap_ignores_request_workspace()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = reference_tree("agent-bwrap-workspace");
+    let session_root = agent_session_root(&root, "coder");
+    let view = derive_agent_runtime_view(&root, "coder")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+workspace_env=absent
+workspace_mount=absent
+workspace_context=neutral
+if [ -n "${CTX_WORKSPACE+x}" ]; then workspace_env=leaked; fi
+if [ -e /workspace/etc/passwd ]; then workspace_mount=leaked; fi
+case "$CTX_AGENT_TOOL_CONTEXT" in
+  *'Host workspace configuration: determined by agent policy'*) ;;
+  *) workspace_context=leaked ;;
+esac
+printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
+printf '{"type":"delta","run":"%s","text":"%s-%s-%s"}\n' "$CTX_RUN_ID" "$workspace_env" "$workspace_mount" "$workspace_context"
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+"#,
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let (mut client, mut socket) = UnixStream::pair()?;
+    client.write_all(
+        br#"{"op":"send","id":"msg-1","session":"default","cwd":"/workspace","workspace":"/","input":"hi"}
+"#,
+    )?;
+    client.shutdown(Shutdown::Write)?;
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/workspace",
+            model: Some("debug/echo"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Bwrap {
+                program: Path::new("/usr/bin/bwrap"),
+                mount_table: view.mount_table(),
+            },
+        },
+    )
+    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    assert!(outcome.jsonl().contains("absent-absent-neutral"));
+    assert!(!outcome.jsonl().contains("leaked"));
     Ok(())
 }
 
@@ -307,7 +363,6 @@ fn agent_executable_socket_bwrap_args_keep_network_namespace_isolated_even_when_
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
-        workspace: None,
         debug: None,
         input: "hi",
         agent_executable_fd: 9,
@@ -349,7 +404,6 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         runtime,
         mount_table: view.mount_table(),
         cwd: "/workspace",
-        workspace: Some("/repo-default"),
         debug: None,
         input: "hi",
         agent_executable_fd: 9,
