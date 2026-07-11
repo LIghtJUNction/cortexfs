@@ -39,9 +39,9 @@ use nix::unistd::{Gid, Uid};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 
-pub(crate) use cortexfs::cli::procfd as proc_fd;
+pub(crate) use cortexfs::cli::procfd;
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use proc_fd::*;
+pub(crate) use procfd::*;
 pub(crate) use stderr::*;
 
 pub(crate) fn main() -> ExitCode {

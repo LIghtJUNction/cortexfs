@@ -1,5 +1,4 @@
 use super::*;
-use crate::*;
 
 use std::fs;
 use std::io::Read;
@@ -16,7 +15,7 @@ pub(crate) fn is_plain_file_path(path: &Path) -> bool {
 }
 
 pub(crate) fn read_plain_text_file(path: &Path) -> std::io::Result<String> {
-    let mut file = plain_fs::open_plain_file(path)?;
+    let mut file = crate::support::plain::open_plain_file(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(std::io::Error::other("path is not a plain file"));
@@ -36,20 +35,21 @@ pub(crate) fn read_plain_text_file(path: &Path) -> std::io::Result<String> {
 }
 
 pub(crate) fn directory_entry_names(path: &Path) -> Result<Vec<String>, ContextPackBuildError> {
-    let directory = plain_fs::open_plain_directory(path).map_err(|error| {
+    let directory = crate::support::plain::open_plain_directory(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             ContextPackBuildError::MissingSession
         } else {
             ContextPackBuildError::CannotRead
         }
     })?;
-    let entries = fs::read_dir(plain_fs::proc_fd_path(&directory)).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            ContextPackBuildError::MissingSession
-        } else {
-            ContextPackBuildError::CannotRead
-        }
-    })?;
+    let entries =
+        fs::read_dir(crate::support::plain::proc_fd_path(&directory)).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ContextPackBuildError::MissingSession
+            } else {
+                ContextPackBuildError::CannotRead
+            }
+        })?;
     let mut names = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|_error| ContextPackBuildError::CannotRead)?;

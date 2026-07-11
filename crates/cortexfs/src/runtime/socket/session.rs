@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::plain_fs::read_small_text_file as socket_runtime_read_plain_text_file;
+use crate::support::plain::read_small_text_file as socket_runtime_read_plain_text_file;
 
 pub(crate) fn handle_socket_send(
     session_root: &Path,

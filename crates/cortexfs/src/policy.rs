@@ -1,6 +1,6 @@
 pub mod subject;
 
-use crate::{abi::path as abi_path, is_object_name};
+use crate::{abi, is_object_name};
 
 /// Policy syntax error for the fixed v0 allowlist.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -146,7 +146,7 @@ impl PolicyRule {
         let (class, object_name) = object.split_once(':').ok_or(PolicyError::InvalidObject)?;
         let object_class = PolicyObjectClass::parse(class).ok_or(PolicyError::UnknownClass)?;
         let valid_object_name = match object_class {
-            PolicyObjectClass::Model => abi_path::is_model_reference(object_name),
+            PolicyObjectClass::Model => abi::path::is_model_reference(object_name),
             PolicyObjectClass::Tool
             | PolicyObjectClass::Shared
             | PolicyObjectClass::Session

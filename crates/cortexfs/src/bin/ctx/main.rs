@@ -43,7 +43,7 @@ use nix::libc;
 
 #[cfg(test)]
 pub(crate) use cortexfs::LayoutPathRole;
-pub(crate) use cortexfs::authority_helpers::{
+pub(crate) use cortexfs::authority::helpers::{
     atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
     atomic_replace_text_with_mode,
 };
@@ -79,30 +79,30 @@ pub(crate) use cortexfs::{
 use serde::Deserialize;
 
 pub(crate) use agent::*;
+pub(crate) use alias::*;
 pub(crate) use basic::*;
 pub(crate) use check::*;
-pub(crate) use cortexfs::cli::input as limited_input;
+pub(crate) use cortexfs::cli::input;
 pub(crate) use cortexfs::cli::json;
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use cortexfs::cli::terminal as terminal_io;
-pub(crate) use cortexfs::cli::uid as current_uid;
-pub(crate) use cortexfs::plain_fs::open_plain_directory;
-pub(crate) use create_plain_dir::*;
-pub(crate) use current_uid::*;
+pub(crate) use cortexfs::cli::terminal;
+pub(crate) use cortexfs::cli::uid;
+pub(crate) use cortexfs::support::plain::open_plain_directory;
+pub(crate) use create::*;
 pub(crate) use doctor::*;
 pub(crate) use format::*;
+pub(crate) use input::*;
 pub(crate) use json::*;
-pub(crate) use limited_input::*;
-pub(crate) use model_alias::*;
-pub(crate) use objects_socket::*;
-pub(crate) use output_mount::*;
+pub(crate) use objects::*;
+pub(crate) use output::*;
 pub(crate) use parse::*;
-pub(crate) use proc_fd::*;
+pub(crate) use procfd::*;
 pub(crate) use provider::*;
 pub(crate) use schedule::*;
-pub(crate) use stale_socket::*;
+pub(crate) use stale::*;
 pub(crate) use stderr::*;
-pub(crate) use terminal_io::*;
+pub(crate) use terminal::*;
+pub(crate) use uid::*;
 pub(crate) use util::*;
 
 pub(crate) fn main() -> ExitCode {
@@ -124,18 +124,16 @@ pub mod parse;
 pub mod agent;
 
 pub mod output;
-pub use output as output_mount;
 
-pub(crate) use cortexfs::cli::alias as model_alias;
-pub(crate) use cortexfs::cli::create as create_plain_dir;
-pub(crate) use cortexfs::cli::stale as stale_socket;
-pub(crate) use cortexfs::cli::text as small_text;
-pub(crate) use small_text::read_small_plain_text_file;
+pub(crate) use cortexfs::cli::alias;
+pub(crate) use cortexfs::cli::create;
+pub(crate) use cortexfs::cli::stale;
+pub(crate) use cortexfs::cli::text;
+pub(crate) use text::read_small_plain_text_file;
 
-pub(crate) use cortexfs::cli::procfd as proc_fd;
+pub(crate) use cortexfs::cli::procfd;
 
 pub mod objects;
-pub use objects as objects_socket;
 
 pub mod doctor;
 

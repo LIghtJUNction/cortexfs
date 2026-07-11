@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::{
     CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES, ContextJsonlKind, ContextPackBuild,
     ContextPackBuiltItem, SESSION_REQUIRED_FILES, atomic_replace_text, inspect_context_jsonl,
-    inspect_message_stream_jsonl, is_object_name,
+    is_object_name, support::stream::inspect_message_stream_jsonl,
 };
 
 pub(crate) const MAX_CONTEXT_PACK_SOURCE_BYTES: u64 = 1024 * 1024;
@@ -111,7 +111,7 @@ pub fn rebuild_context_pack(
 
     let selected = select_pack_candidates(candidates, budget);
     let build = render_context_pack(session_name, agent, budget, &selected);
-    if !crate::context::pack_inspect::inspect_context_pack_json(build.pack_json()).is_ok() {
+    if !crate::context::inspect::inspect_context_pack_json(build.pack_json()).is_ok() {
         return Err(ContextPackBuildError::CannotRecord);
     }
 
@@ -218,7 +218,7 @@ pub(crate) fn append_context_file_candidate(
     range: Option<String>,
     candidates: &mut Vec<PackCandidate>,
 ) -> Result<(), ContextPackBuildError> {
-    crate::context::pack_source::validate_context_pack_source(source)
+    crate::context::source::validate_context_pack_source(source)
         .map_err(|_error| ContextPackBuildError::CannotRead)?;
     let body = read_context_source(context_dir, source)?;
     if !body.trim().is_empty() {
@@ -234,7 +234,7 @@ pub(crate) fn append_context_jsonl_candidate(
     jsonl_kind: ContextJsonlKind,
     candidates: &mut Vec<PackCandidate>,
 ) -> Result<(), ContextPackBuildError> {
-    crate::context::pack_source::validate_context_pack_source(source)
+    crate::context::source::validate_context_pack_source(source)
         .map_err(|_error| ContextPackBuildError::CannotRead)?;
     let body = read_context_source(context_dir, source)?;
     if body.trim().is_empty() {
@@ -422,5 +422,4 @@ pub(crate) fn push_markdown_kv(output: &mut String, key: &str, value: &str) {
 }
 
 pub mod io;
-pub use io as pack_build_io;
-use pack_build_io::*;
+use io::*;

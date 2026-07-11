@@ -45,7 +45,7 @@ fn provider_config_file_reader_refuses_symlink_leaf() -> Result<(), Box<dyn std:
     let directory = open_plain_directory(&providers)?;
 
     assert!(
-        cortexfs::plain_fs::read_small_text_file_at(
+        cortexfs::support::plain::read_small_text_file_at(
             &directory,
             "fixture.json",
             MAX_RUNNER_PROVIDER_CONFIG_BYTES,

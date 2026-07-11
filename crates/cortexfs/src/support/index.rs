@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     ControlLineIssue, atomic_replace_text, is_object_name,
-    plain_fs::read_small_text_file,
-    support::control_text::{inspect_control_line, inspect_control_lines},
+    support::control::{inspect_control_line, inspect_control_lines},
+    support::plain::read_small_text_file,
 };
 
 const MAX_SESSION_INDEX_FILE_BYTES: u64 = 64 * 1024;

@@ -1,16 +1,14 @@
 use crate::*;
 
-pub(crate) use config_files::*;
+pub(crate) use callback::*;
+pub(crate) use config::*;
 pub(crate) use oauth::*;
-pub(crate) use oauth_callback::*;
 pub(crate) use presets::*;
 pub(crate) use secrets::*;
 
-pub mod config;
-pub use config as config_files;
 pub mod callback;
+pub mod config;
 pub mod oauth;
-pub use callback as oauth_callback;
 pub mod presets;
 pub mod secrets;
 

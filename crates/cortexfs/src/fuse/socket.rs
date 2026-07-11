@@ -15,8 +15,8 @@ impl FuseV1Projection {
         };
         self.authorize_agent_owner(agent, uid)?;
         let path = self.resolve(&normalized)?;
-        let created =
-            plain_fs::ensure_socket_placeholder(&path, mode).map_err(|_error| FuseV1Error::Io)?;
+        let created = support::plain::ensure_socket_placeholder(&path, mode)
+            .map_err(|_error| FuseV1Error::Io)?;
         if let Err(error) = Self::chown_fuse_v1_plain_path(&path, uid, gid) {
             if created {
                 let _ignored = self.remove_socket_alias(&normalized, uid);
@@ -47,8 +47,9 @@ impl FuseV1Projection {
         let path = self.resolve(&normalized)?;
         let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
         let parent_dir =
-            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_fs::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+            support::plain::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name =
+            support::plain::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
         let stat =
             nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
                 .map_err(|_error| FuseV1Error::Io)?;
@@ -85,8 +86,9 @@ impl FuseV1Projection {
         let path = self.resolve(&normalized)?;
         let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
         let parent_dir =
-            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_fs::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+            support::plain::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name =
+            support::plain::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
         let created = match nix::fcntl::readlinkat(&parent_dir, name).map(PathBuf::from) {
             Ok(existing) if existing == target => false,
             Ok(_existing) => return Err(FuseV1Error::InvalidPath),
@@ -131,8 +133,9 @@ impl FuseV1Projection {
         let path = self.resolve(&normalized)?;
         let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
         let parent_dir =
-            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_fs::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+            support::plain::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name =
+            support::plain::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
         let stat = match nix::sys::stat::fstatat(
             &parent_dir,
             name,
@@ -197,11 +200,11 @@ impl FuseV1Projection {
             return Err(FuseV1Error::InvalidPath);
         }
         let parent_dir =
-            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let from_name =
-            plain_fs::plain_file_name(&from_path).map_err(|_error| FuseV1Error::InvalidPath)?;
+            support::plain::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let from_name = support::plain::plain_file_name(&from_path)
+            .map_err(|_error| FuseV1Error::InvalidPath)?;
         let to_name =
-            plain_fs::plain_file_name(&to_path).map_err(|_error| FuseV1Error::InvalidPath)?;
+            support::plain::plain_file_name(&to_path).map_err(|_error| FuseV1Error::InvalidPath)?;
         require_socket_claim_entry(&parent_dir, from_name)?;
         nix::fcntl::renameat2(
             &parent_dir,
@@ -226,8 +229,9 @@ impl FuseV1Projection {
         let path = self.resolve(&normalized)?;
         let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
         let parent_dir =
-            plain_fs::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_fs::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+            support::plain::open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name =
+            support::plain::plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
         require_socket_claim_entry(&parent_dir, name)?;
         nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
             .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;

@@ -188,7 +188,8 @@ fn retired_reference_agent_present(root: &Path, name: &str) -> bool {
 /// Returns true when the agent executable looks like a CortexFS-managed wrapper.
 #[must_use]
 pub fn is_managed_reference_agent_wrapper(path: &Path) -> bool {
-    let Ok(content) = plain_fs::read_small_text_file(path, MAX_REFERENCE_SESSION_META_BYTES) else {
+    let Ok(content) = support::plain::read_small_text_file(path, MAX_REFERENCE_SESSION_META_BYTES)
+    else {
         return false;
     };
     content.contains("# cortexfs.object=agent")
@@ -200,7 +201,8 @@ pub fn is_managed_reference_agent_wrapper(path: &Path) -> bool {
 #[must_use]
 pub fn read_bootstrap_state(root: &Path) -> Option<BootstrapState> {
     let path = root.join(BOOTSTRAP_STATE_REL);
-    let content = plain_fs::read_small_text_file(&path, MAX_REFERENCE_SESSION_META_BYTES).ok()?;
+    let content =
+        support::plain::read_small_text_file(&path, MAX_REFERENCE_SESSION_META_BYTES).ok()?;
     serde_json::from_str(&content).ok()
 }
 

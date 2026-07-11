@@ -1,9 +1,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{
-    ContextPackIssue, ContextPackReport, context::pack_source::validate_context_pack_source,
-};
+use crate::{ContextPackIssue, ContextPackReport, context::source::validate_context_pack_source};
 
 /// Inspects `context/pack.json` content for transparent, session-relative
 /// source references.

@@ -4,12 +4,12 @@ use std::io;
 
 pub(crate) fn queue_child_dir(queue_dir: &Path, name: &str) -> io::Result<PathBuf> {
     let path = queue_dir.join(name);
-    plain_fs::open_plain_directory(&path)?;
+    support::plain::open_plain_directory(&path)?;
     Ok(path)
 }
 
 pub(crate) fn queue_child_dir_fd(queue_dir: &Path, name: &str) -> io::Result<fs::File> {
-    plain_fs::open_plain_directory(&queue_dir.join(name))
+    support::plain::open_plain_directory(&queue_dir.join(name))
 }
 
 pub(crate) fn queue_job_plain_dir_fd(
@@ -107,7 +107,7 @@ pub(crate) fn write_queue_result_atomic(
                     );
                     return Err(error);
                 }
-                if let Err(error) = plain_fs::sync_plain_dir(output_dir) {
+                if let Err(error) = support::plain::sync_plain_dir(output_dir) {
                     let _ignored = nix::unistd::unlinkat(
                         output_dir_fd,
                         result_name,

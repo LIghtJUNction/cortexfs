@@ -236,7 +236,7 @@ pub(crate) fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError
 
 pub(crate) fn remove_deprecated_reference_bin_te(root: &Path) -> Result<(), ReferenceTreeError> {
     let path = root.join("bin").join("te");
-    let Ok(content) = plain_fs::read_small_text_file(&path, MAX_REFERENCE_SESSION_META_BYTES)
+    let Ok(content) = support::plain::read_small_text_file(&path, MAX_REFERENCE_SESSION_META_BYTES)
     else {
         return Ok(());
     };
@@ -622,11 +622,12 @@ pub(crate) fn is_deprecated_reference_placeholder_tool(
     {
         return false;
     }
-    let Ok(wrapper) = plain_fs::read_small_text_file(executable, MAX_REFERENCE_SESSION_META_BYTES)
+    let Ok(wrapper) =
+        support::plain::read_small_text_file(executable, MAX_REFERENCE_SESSION_META_BYTES)
     else {
         return false;
     };
-    let Ok(description) = plain_fs::read_small_text_file(
+    let Ok(description) = support::plain::read_small_text_file(
         &control_dir.join("description"),
         MAX_REFERENCE_SESSION_META_BYTES,
     ) else {
@@ -644,7 +645,7 @@ pub(crate) fn deprecated_placeholder_tool_control_dir_is_exact(control_dir: &Pat
     let Ok(control_dir_file) = open_reference_dir(control_dir) else {
         return false;
     };
-    let Ok(entries) = fs::read_dir(plain_fs::proc_fd_path(&control_dir_file)) else {
+    let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&control_dir_file)) else {
         return false;
     };
     let mut seen = Vec::new();
@@ -688,7 +689,7 @@ pub(crate) fn deprecated_placeholder_hook_dir_is_exact(control_dir: &Path) -> bo
     let Ok(hook_dir_file) = open_reference_dir(&hook_dir) else {
         return false;
     };
-    let Ok(entries) = fs::read_dir(plain_fs::proc_fd_path(&hook_dir_file)) else {
+    let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&hook_dir_file)) else {
         return false;
     };
     let mut seen = Vec::new();

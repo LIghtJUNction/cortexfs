@@ -1,6 +1,6 @@
-pub use crate::context::pack_build::{ContextPackBuildError, rebuild_context_pack};
-pub use crate::context::pack_inspect::inspect_context_pack_json;
-pub use crate::context::pack_source::{ContextPackSourceError, validate_context_pack_source};
+pub use crate::context::build::{ContextPackBuildError, rebuild_context_pack};
+pub use crate::context::inspect::inspect_context_pack_json;
+pub use crate::context::source::{ContextPackSourceError, validate_context_pack_source};
 
 /// Context pack validation issue.
 #[derive(Clone, Debug, Eq, PartialEq)]
