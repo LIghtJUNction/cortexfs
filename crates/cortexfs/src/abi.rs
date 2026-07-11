@@ -1,8 +1,8 @@
-#[path = "abi/authority-types.rs"]
-pub mod authority_types;
+pub mod authority;
+pub use authority as authority_types;
 pub mod constants;
+pub mod parse;
 pub mod path;
-#[path = "abi/path-parse.rs"]
-pub mod path_parse;
-#[path = "abi/socket-request.rs"]
-pub mod socket_request;
+pub use parse as path_parse;
+pub mod request;
+pub use request as socket_request;

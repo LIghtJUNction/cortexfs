@@ -1,11 +1,11 @@
+pub mod alias;
 pub mod socket;
-#[path = "fuse/v1-model-alias.rs"]
-pub mod v1_model_alias;
-#[path = "fuse/v1-path.rs"]
-pub mod v1_path;
-#[path = "fuse/v1-projection.rs"]
-pub mod v1_projection;
-#[path = "fuse/v1-provider.rs"]
-pub mod v1_provider;
-#[path = "fuse/v1-types.rs"]
-pub mod v1_types;
+pub use alias as v1_model_alias;
+pub mod path;
+pub use path as v1_path;
+pub mod projection;
+pub use projection as v1_projection;
+pub mod provider;
+pub use provider as v1_provider;
+pub mod types;
+pub use types as v1_types;
