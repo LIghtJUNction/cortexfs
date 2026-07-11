@@ -128,6 +128,9 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         debug: None,
         input: "hi",
         agent_executable_fd: 9,
+        agent_home_source_fd: 10,
+        agent_home_sandbox_fd: 11,
+        agent_home: session_root.parent().unwrap_or(&session_root),
     });
 
     assert!(!args.contains(&"--clearenv".to_owned()));
@@ -142,6 +145,22 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "--ro-bind-data",
         "9",
         "/run/cortexfs/agent-executable"
+    ));
+    assert!(contains_arg_triplet(
+        &args,
+        "--bind-fd",
+        "10",
+        &session_root
+            .parent()
+            .unwrap_or(&session_root)
+            .display()
+            .to_string()
+    ));
+    assert!(contains_arg_triplet(
+        &args,
+        "--bind-fd",
+        "11",
+        "/home/agent"
     ));
     assert!(!args.iter().any(|arg| arg == "- user: hi"));
     assert!(!args.iter().any(|arg| arg == "workspace context"));
@@ -355,7 +374,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 }
 
 #[test]
-fn agent_executable_socket_bwrap_args_keep_network_namespace_isolated_even_when_policy_allows() {
+fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
     let root = reference_tree("bwrap-network");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
@@ -384,9 +403,12 @@ fn agent_executable_socket_bwrap_args_keep_network_namespace_isolated_even_when_
         debug: None,
         input: "hi",
         agent_executable_fd: 9,
+        agent_home_source_fd: 10,
+        agent_home_sandbox_fd: 11,
+        agent_home: session_root.parent().unwrap_or(&session_root),
     });
 
-    assert!(args.contains(&"--unshare-net".to_owned()));
+    assert!(!args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
 }
 
@@ -425,6 +447,9 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         debug: None,
         input: "hi",
         agent_executable_fd: 9,
+        agent_home_source_fd: 10,
+        agent_home_sandbox_fd: 11,
+        agent_home: session_root.parent().unwrap_or(&session_root),
     });
 
     assert!(contains_arg_triplet(

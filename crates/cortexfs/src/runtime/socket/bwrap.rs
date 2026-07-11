@@ -8,7 +8,7 @@ pub(crate) fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
     agent_executable: &fs::File,
     request: AgentExecutableRunRequest<'_>,
-) -> Result<(Command, Option<InheritedFd>), SocketRuntimeError> {
+) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
             let mut command = Command::new(support::plain::proc_fd_path(agent_executable));
@@ -22,6 +22,14 @@ pub(crate) fn agent_executable_socket_command(
             mount_table,
         } => {
             let agent_executable_fd = InheritedFd::duplicate(agent_executable)?;
+            let agent_home = runtime
+                .session_root
+                .parent()
+                .ok_or(SocketRuntimeError::CannotRunAgent)?;
+            let agent_home_dir = open_plain_directory(agent_home)
+                .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+            let agent_home_source_fd = InheritedFd::duplicate(&agent_home_dir)?;
+            let agent_home_sandbox_fd = InheritedFd::duplicate(&agent_home_dir)?;
             let mut command = Command::new(program);
             command.args(agent_executable_socket_bwrap_args(
                 &BwrapAgentExecutableArgs {
@@ -31,11 +39,21 @@ pub(crate) fn agent_executable_socket_command(
                     debug: request.debug,
                     input: request.input,
                     agent_executable_fd: agent_executable_fd.raw(),
+                    agent_home_source_fd: agent_home_source_fd.raw(),
+                    agent_home_sandbox_fd: agent_home_sandbox_fd.raw(),
+                    agent_home,
                 },
             ));
             apply_agent_executable_socket_env(&mut command, runtime, request);
             command.stdout(Stdio::piped()).process_group(0);
-            Ok((command, Some(agent_executable_fd)))
+            Ok((
+                command,
+                Some(vec![
+                    agent_executable_fd,
+                    agent_home_source_fd,
+                    agent_home_sandbox_fd,
+                ]),
+            ))
         }
     }
 }
@@ -48,6 +66,9 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub debug: Option<SocketDebugTiming>,
     pub input: &'a str,
     pub agent_executable_fd: RawFd,
+    pub agent_home_source_fd: RawFd,
+    pub agent_home_sandbox_fd: RawFd,
+    pub agent_home: &'a Path,
 }
 
 pub(crate) struct InheritedFd(RawFd);
@@ -145,7 +166,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "usr/lib".to_owned(),
         "/lib64".to_owned(),
     ];
-    bwrap.push("--unshare-net".to_owned());
+    if !request.runtime.network_allowed {
+        bwrap.push("--unshare-net".to_owned());
+    }
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(timing) = request.debug {
         bwrap.extend([
@@ -168,6 +191,14 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         ));
         bwrap.push(mount.target().to_owned());
     }
+    bwrap.extend([
+        "--bind-fd".to_owned(),
+        request.agent_home_source_fd.to_string(),
+        request.agent_home.display().to_string(),
+        "--bind-fd".to_owned(),
+        request.agent_home_sandbox_fd.to_string(),
+        "/home/agent".to_owned(),
+    ]);
     bwrap.extend(bwrap_dir_args_for_chdir(request.cwd));
     bwrap.extend([
         "--chdir".to_owned(),
