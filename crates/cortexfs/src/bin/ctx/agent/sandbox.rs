@@ -238,7 +238,11 @@ pub(crate) fn agent_bwrap_args(
             runtime_dir.display().to_string(),
         ]);
     }
+    let has_policy_git_mount = has_policy_git_mount(view);
     for mount in view.mount_table().entries() {
+        if args.default_workspace && mount.target() == "/workspace/.git" {
+            continue;
+        }
         bwrap.push(match mount.mode() {
             MountMode::ReadOnly => "--ro-bind".to_owned(),
             MountMode::ReadWrite => "--bind".to_owned(),
@@ -251,6 +255,8 @@ pub(crate) fn agent_bwrap_args(
         };
         bwrap.push(target);
     }
+    let git_mask = agent_git_mask(args, cli_mounts, view);
+    let mut git_masked = false;
     for mount in cli_mounts {
         bwrap.extend(agent_bwrap_dir_args_for_parent(&mount.target));
         bwrap.push(match mount.mode.as_str() {
@@ -259,6 +265,26 @@ pub(crate) fn agent_bwrap_args(
         });
         bwrap.push(mount.source.clone());
         bwrap.push(mount.target.clone());
+        if !git_masked && args.default_workspace && mount.target == "/workspace" {
+            if has_policy_git_mount {
+                for mount in view
+                    .mount_table()
+                    .entries()
+                    .iter()
+                    .filter(|mount| mount.target() == "/workspace/.git")
+                {
+                    bwrap.push(match mount.mode() {
+                        MountMode::ReadOnly => "--ro-bind".to_owned(),
+                        MountMode::ReadWrite => "--bind".to_owned(),
+                    });
+                    bwrap.push(agent_host_mount_source(root, mount.source()));
+                    bwrap.push(mount.target().to_owned());
+                }
+            } else if let Some(mask) = git_mask {
+                bwrap.extend(agent_git_mask_args(mask));
+            }
+            git_masked = true;
+        }
     }
     if let Some(startup_stub) = shell_startup_stub_path(socket) {
         bwrap.extend([
@@ -347,81 +373,57 @@ pub(crate) fn agent_start_mounts_with_default_source(
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         });
-        mounts.extend(agent_start_git_mounts(default_source));
     }
     mounts.extend(args.mounts.iter().cloned());
     mounts
 }
 
-pub(crate) fn agent_start_git_mounts(default_source: &Path) -> Vec<AgentMount> {
-    let git = default_source.join(".git");
-    let Ok(metadata) = fs::symlink_metadata(&git) else {
-        return Vec::new();
-    };
-    let file_type = metadata.file_type();
-    if !file_type.is_dir() && !metadata.is_file() {
-        return Vec::new();
-    }
-    let mut mounts = vec![AgentMount {
-        source: git.display().to_string(),
-        target: "/workspace/.git".to_owned(),
-        mode: "ro".to_owned(),
-    }];
-    if metadata.is_file() {
-        extend_git_file_mounts(default_source, &git, &mut mounts);
-    }
-    mounts
+#[derive(Clone, Copy)]
+enum AgentGitMask {
+    Directory,
+    File,
 }
 
-pub(crate) fn extend_git_file_mounts(
-    default_source: &Path,
-    git_file: &Path,
-    mounts: &mut Vec<AgentMount>,
-) {
-    let Ok(content) = fs::read_to_string(git_file) else {
-        return;
-    };
-    let Some(gitdir) = parse_gitdir_file(default_source, &content) else {
-        return;
-    };
-    push_readonly_host_path_mount(mounts, &gitdir);
-    if let Some(commondir) = git_common_dir(&gitdir) {
-        push_readonly_host_path_mount(mounts, &commondir);
-    }
+fn has_policy_git_mount(view: &AgentRuntimeView) -> bool {
+    view.mount_table()
+        .entries()
+        .iter()
+        .any(|mount| mount.target() == "/workspace/.git")
 }
 
-pub(crate) fn parse_gitdir_file(default_source: &Path, content: &str) -> Option<PathBuf> {
-    let line = content
-        .lines()
-        .find_map(|line| line.strip_prefix("gitdir:"))?;
-    let path = line.trim();
-    if path.is_empty() {
+fn agent_git_mask(
+    args: &AgentStartArgs,
+    mounts: &[AgentMount],
+    view: &AgentRuntimeView,
+) -> Option<AgentGitMask> {
+    if !args.default_workspace
+        || mounts.iter().any(|mount| mount.target == "/workspace/.git")
+        || has_policy_git_mount(view)
+    {
         return None;
     }
-    let path = Path::new(path);
-    let gitdir = if path.is_absolute() {
-        path.to_path_buf()
+    let workspace = mounts
+        .iter()
+        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")?;
+    let metadata = fs::symlink_metadata(Path::new(&workspace.source).join(".git")).ok()?;
+    if metadata.is_dir() {
+        Some(AgentGitMask::Directory)
+    } else if metadata.is_file() {
+        Some(AgentGitMask::File)
     } else {
-        default_source.join(path)
-    };
-    let gitdir = normalized_absolute_path(&gitdir)?;
-    plain_directory(&gitdir).then_some(gitdir)
+        None
+    }
 }
 
-pub(crate) fn git_common_dir(gitdir: &Path) -> Option<PathBuf> {
-    let content = fs::read_to_string(gitdir.join("commondir")).ok()?;
-    let path = content.lines().next()?.trim();
-    if path.is_empty() {
-        return None;
+fn agent_git_mask_args(mask: AgentGitMask) -> Vec<String> {
+    match mask {
+        AgentGitMask::Directory => vec!["--tmpfs".to_owned(), "/workspace/.git".to_owned()],
+        AgentGitMask::File => vec![
+            "--ro-bind".to_owned(),
+            "/dev/null".to_owned(),
+            "/workspace/.git".to_owned(),
+        ],
     }
-    let path = Path::new(path);
-    let common = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        gitdir.join(path)
-    };
-    let common = normalized_absolute_path(&common)?;
-    plain_directory(&common).then_some(common)
 }
 
 pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
@@ -440,26 +442,6 @@ pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
         }
     }
     Some(normalized)
-}
-
-pub(crate) fn plain_directory(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
-}
-
-pub(crate) fn push_readonly_host_path_mount(mounts: &mut Vec<AgentMount>, path: &Path) {
-    let value = path.display().to_string();
-    if mounts
-        .iter()
-        .any(|mount| mount.source == value && mount.target == value)
-    {
-        return;
-    }
-    mounts.push(AgentMount {
-        source: value.clone(),
-        target: value,
-        mode: "ro".to_owned(),
-    });
 }
 
 pub(crate) fn agent_bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
