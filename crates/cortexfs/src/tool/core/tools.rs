@@ -30,14 +30,14 @@ pub struct ShellExecTool;
 #[derive(Debug)]
 pub struct TshConfigTool;
 
-#[path = "tool-io.rs"]
-pub mod tool_io;
-#[path = "tool-schemas.rs"]
-pub mod tool_schemas;
-#[path = "tool-shell.rs"]
-pub mod tool_shell;
-#[path = "tool-tsh-config.rs"]
-pub mod tool_tsh_config;
+pub mod files;
+pub use files as tool_io;
+pub mod schemas;
+pub use schemas as tool_schemas;
+pub mod shell;
+pub use shell as tool_shell;
+pub mod config;
+pub use config as tool_tsh_config;
 
 pub(crate) use tool_io::*;
 pub(crate) use tool_schemas::*;
@@ -111,5 +111,4 @@ pub(crate) fn tool_error_to_io(error: &ToolError) -> io::Error {
 
 #[cfg(test)]
 #[expect(unused_qualifications, reason = "tests use qualified paths")]
-#[path = "tools-tests.rs"]
 pub mod tests;

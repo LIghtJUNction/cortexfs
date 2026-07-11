@@ -6,15 +6,12 @@ pub(crate) use oauth_callback::*;
 pub(crate) use presets::*;
 pub(crate) use secrets::*;
 
-#[path = "provider/config-files.rs"]
-pub mod config_files;
-#[path = "provider/oauth.rs"]
+pub mod config;
+pub use config as config_files;
+pub mod callback;
 pub mod oauth;
-#[path = "provider/oauth-callback.rs"]
-pub mod oauth_callback;
-#[path = "provider/presets.rs"]
+pub use callback as oauth_callback;
 pub mod presets;
-#[path = "provider/secrets.rs"]
 pub mod secrets;
 
 pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {

@@ -1,5 +1,5 @@
+pub mod discovery;
 pub mod model;
-#[path = "provider/model-discovery.rs"]
-pub mod model_discovery;
+pub use discovery as model_discovery;
 pub mod name;
 pub mod oauth;

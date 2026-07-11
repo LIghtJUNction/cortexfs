@@ -30,3 +30,27 @@ xattr = "1.6.1"
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "ctx"
+path = "src/bin/ctx/main.rs"
+
+[[bin]]
+name = "ctxterm"
+path = "src/bin/ctxterm/main.rs"
+
+[[bin]]
+name = "tsh"
+path = "src/bin/tsh/main.rs"
+
+[[bin]]
+name = "cortexfs-mount"
+path = "src/bin/mount/main.rs"
+
+[[bin]]
+name = "cortexfs-object-runner"
+path = "src/bin/runner/main.rs"
+
+[[bin]]
+name = "cortexfs-agent-runtime"
+path = "src/bin/runtime/main.rs"

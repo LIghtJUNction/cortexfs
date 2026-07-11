@@ -1,3 +1,12 @@
 pub mod bootstrap;
+pub(crate) mod executor;
 pub mod layout;
 pub mod metadata;
+pub(crate) mod runner;
+
+/// Runs the installed object executor.
+#[doc(hidden)]
+#[must_use]
+pub fn runner_main() -> std::process::ExitCode {
+    executor::main()
+}

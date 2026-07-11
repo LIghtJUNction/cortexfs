@@ -22,9 +22,13 @@
 
 //! `CortexFS` ABI design core.
 
-#[path = "imports.rs"]
+extern crate self as cortexfs;
+
 pub mod imports;
 pub use imports::*;
+
+#[doc(hidden)]
+pub mod cli;
 
 const MAX_AGENT_STDOUT_QUEUE_FRAMES: usize = 16;
 
@@ -127,7 +131,6 @@ use plain_fs::{
     plain_file_name as session_layout_plain_file_name,
 };
 
-#[path = "exports.rs"]
 pub mod exports;
 pub use exports::*;
 

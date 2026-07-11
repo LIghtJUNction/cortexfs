@@ -150,16 +150,16 @@ pub(crate) fn serve_socket_stream_with(
     }
 }
 
-#[path = "socket-agent-events.rs"]
-pub mod socket_agent_events;
-#[path = "socket-agent-exec.rs"]
-pub mod socket_agent_exec;
-#[path = "socket-bwrap.rs"]
-pub mod socket_bwrap;
-#[path = "socket-session.rs"]
-pub mod socket_session;
-#[path = "socket-stream.rs"]
-pub mod socket_stream;
+pub mod events;
+pub use events as socket_agent_events;
+pub mod exec;
+pub use exec as socket_agent_exec;
+pub mod bwrap;
+pub use bwrap as socket_bwrap;
+pub mod session;
+pub use session as socket_session;
+pub mod stream;
+pub use stream as socket_stream;
 
 pub(crate) use socket_agent_events::*;
 pub(crate) use socket_agent_exec::*;
