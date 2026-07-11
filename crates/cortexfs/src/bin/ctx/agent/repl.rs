@@ -20,7 +20,7 @@ pub(crate) fn agent_repl_banner_lines(
     session: &str,
 ) -> Result<Vec<String>, CliError> {
     let model_summary = agent_repl_model_summary(color, root, name)?;
-    let workspace = agent_repl_workspace_line(color, root, name, session)?;
+    let workspace = agent_repl_workspace_line(color);
     let mut lines = vec![
         format!(
             "{} ctx agent {}/{} - {}",
@@ -53,19 +53,13 @@ pub(crate) fn agent_repl_banner_lines(
     Ok(lines)
 }
 
-pub(crate) fn agent_repl_workspace_line(
-    color: bool,
-    root: &Path,
-    name: &str,
-    session: &str,
-) -> Result<String, CliError> {
-    let workspace =
-        preferred_workspace_source(root, name, session)?.unwrap_or_else(|| "(unknown)".to_owned());
-    Ok(format!(
+pub(crate) fn agent_repl_workspace_line(color: bool) -> String {
+    let workspace = current_workspace_source().unwrap_or_else(|| "(unknown)".to_owned());
+    format!(
         " {} {}",
         styled(color, ANSI_BOLD_BLUE, "Workspace:"),
         styled(color, ANSI_CYAN, &workspace)
-    ))
+    )
 }
 
 pub(crate) fn agent_repl_prompt(color: bool, name: &str, session: &str) -> String {
@@ -211,12 +205,7 @@ pub(crate) fn agent_repl_command(
             ExitCode::SUCCESS
         }
         "/workspace" => {
-            print_terminal_line(&agent_repl_workspace_line(
-                color_enabled(),
-                root,
-                name,
-                session,
-            )?)?;
+            print_terminal_line(&agent_repl_workspace_line(color_enabled()))?;
             ExitCode::SUCCESS
         }
         "/children" => {
@@ -270,12 +259,6 @@ pub(crate) fn agent_repl_new_session(
     .map_err(|error| {
         CliError::unavailable(format!("cannot prepare agent session {next}: {error:?}"))
     })?;
-    if let Some(workspace) = preferred_workspace_source(root, name, current)? {
-        write_agent_session_plain(
-            &session_root.join(&next).join("workspace"),
-            &format!("{workspace}\n"),
-        )?;
-    }
     *current = next;
     print_agent_repl_banner(root, name, current)
 }

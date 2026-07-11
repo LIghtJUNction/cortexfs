@@ -28,7 +28,7 @@ fn agent_repl_editor_enables_terminal_signals() {
 }
 
 #[test]
-fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
+fn agent_repl_ignores_session_workspace_and_displays_current_caller() {
     let root = clean_test_dir("ctx-agent-repl-model-summary");
     assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
     let session = root
@@ -45,7 +45,7 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::create_dir_all(root.join("model")).is_ok());
     assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
-    assert!(fs::write(session.join("workspace"), "/repo\n").is_ok());
+    assert!(fs::write(session.join("workspace"), "/\n").is_ok());
     assert!(
         std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))
             .is_ok()
@@ -59,12 +59,17 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
         agent_repl_model_summary(false, &root, "coder"),
         Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
     );
+    let workspace = std::env::current_dir()
+        .ok()
+        .map_or_else(|| "(unknown)".to_owned(), |path| path.display().to_string());
+    let workspace_line = format!(" Workspace: {workspace}");
     let banner = agent_repl_banner_lines(false, &root, "coder", "default");
-    assert!(matches!(banner, Ok(ref lines) if lines.iter().any(|line| line == " Workspace: /repo")));
+    assert!(matches!(banner, Ok(ref lines) if lines.iter().any(|line| line == &workspace_line)));
     assert_eq!(
-        agent_repl_workspace_line(false, &root, "coder", "default"),
-        Ok(" Workspace: /repo".to_owned())
+        agent_repl_workspace_line(false),
+        workspace_line
     );
+    assert_ne!(agent_repl_workspace_line(false), " Workspace: /");
     assert!(AGENT_REPL_COMMANDS.contains("/help"));
     assert!(AGENT_REPL_COMMANDS.contains("/new"));
     assert!(AGENT_REPL_COMMANDS.contains("/workspace"));
@@ -85,7 +90,7 @@ fn agent_repl_prompt_and_model_summary_are_chat_oriented() {
 }
 
 #[test]
-fn agent_repl_new_switches_session_and_keeps_workspace() {
+fn agent_repl_new_does_not_copy_persisted_workspace() {
     let root = clean_test_dir("ctx-agent-repl-new-session");
     let session_root = root
         .join("home")
@@ -106,7 +111,7 @@ fn agent_repl_new_switches_session_and_keeps_workspace() {
 
     assert_eq!(session, "focus");
     assert!(session_root.join("focus/messages.jsonl").is_file());
-    assert!(fs::read_to_string(session_root.join("focus/workspace")).is_ok_and(|text| text == "/repo\n"));
+    assert!(!session_root.join("focus/workspace").exists());
 }
 
 #[test]
@@ -254,7 +259,7 @@ fn top_level_send_defaults_cwd_to_workspace() {
 }
 
 #[test]
-fn top_level_send_uses_session_workspace_hint() {
+fn top_level_send_ignores_external_session_workspace() {
     let root = clean_test_dir("ctx-top-level-send-session-workspace");
     let workspace = clean_test_dir("ctx-top-level-send-session-workspace-source");
     let agent_dir = root.join("agent").join("coder.d");
@@ -286,11 +291,12 @@ fn top_level_send_uses_session_workspace_hint() {
         return;
     };
     assert!(request.contains("\"cwd\":\"/workspace\""));
-    assert!(request.contains(&format!(r#""workspace":"{}""#, workspace.display())));
+    assert!(!request.contains("\"workspace\""));
+    assert!(!request.contains(&workspace.display().to_string()));
 }
 
 #[test]
-fn top_level_send_ignores_invalid_session_workspace_hint() {
+fn top_level_send_ignores_root_session_workspace() {
     let root = clean_test_dir("ctx-top-level-send-invalid-session-workspace");
     let agent_dir = root.join("agent").join("coder.d");
     let session = root
@@ -303,7 +309,7 @@ fn top_level_send_ignores_invalid_session_workspace_hint() {
     assert!(fs::create_dir_all(&agent_dir).is_ok());
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
-    assert!(fs::write(session.join("workspace"), "/repo/../wrong\n").is_ok());
+    assert!(fs::write(session.join("workspace"), "/\n").is_ok());
     let server = spawn_agent_socket_request_capture(&root, "coder");
 
     let result = run(vec![
@@ -321,7 +327,7 @@ fn top_level_send_ignores_invalid_session_workspace_hint() {
         return;
     };
     assert!(request.contains("\"cwd\":\"/workspace\""));
-    assert!(!request.contains("/repo/../wrong"));
+    assert!(!request.contains("\"workspace\""));
 }
 
 #[test]
@@ -471,19 +477,18 @@ fn debug_agent_send_request_marks_socket_frame() {
         "run-1",
         "default",
         "/workspace",
-        Some("/repo"),
         "hello",
         true,
     );
 
     assert!(request.contains(r#""debug":true"#));
-    assert!(request.contains(r#""workspace":"/repo""#));
+    assert!(!request.contains(r#""workspace""#));
     assert!(request.ends_with('\n'));
 }
 
 #[test]
 fn normal_agent_send_request_does_not_mark_socket_frame() {
-    let request = agent_send_request_json("run-1", "default", "/workspace", None, "hello", false);
+    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", false);
 
     assert!(!request.contains(r#""debug""#));
     assert!(!request.contains(r#""workspace""#));

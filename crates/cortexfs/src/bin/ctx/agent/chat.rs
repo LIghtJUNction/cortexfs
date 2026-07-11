@@ -13,7 +13,6 @@ pub(crate) fn agent_send(
         &request_id()?,
         &session,
         &agent_cwd(root, name)?,
-        preferred_workspace_source(root, name, &session)?.as_deref(),
         input,
         debug,
     );
@@ -42,7 +41,6 @@ pub(crate) fn agent_send_interactive_with_run_id(
         send.run_id,
         &session,
         &agent_cwd(root, name)?,
-        preferred_workspace_source(root, name, &session)?.as_deref(),
         send.input,
         send.debug,
     );
@@ -63,29 +61,23 @@ pub(crate) fn agent_send_request_json(
     run_id: &str,
     session: &str,
     cwd: &str,
-    workspace: Option<&str>,
     input: &str,
     debug: bool,
 ) -> String {
-    let workspace = workspace.map_or_else(String::new, |workspace| {
-        format!(",\"workspace\":{}", json_string(workspace))
-    });
     if debug {
         return format!(
-            "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{}{},\"input\":{},\"debug\":true}}\n",
+            "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{},\"debug\":true}}\n",
             json_string(run_id),
             json_string(session),
             json_string(cwd),
-            workspace,
             json_string(input)
         );
     }
     format!(
-        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{}{},\"input\":{}}}\n",
+        "{{\"op\":\"send\",\"id\":{},\"session\":{},\"scope\":\"private\",\"cwd\":{},\"input\":{}}}\n",
         json_string(run_id),
         json_string(session),
         json_string(cwd),
-        workspace,
         json_string(input)
     )
 }
@@ -95,35 +87,6 @@ pub(crate) fn current_workspace_source() -> Option<String> {
         .ok()
         .filter(|path| path.is_absolute())
         .map(|path| path.display().to_string())
-}
-
-pub(crate) fn preferred_workspace_source(
-    root: &Path,
-    name: &str,
-    session: &str,
-) -> Result<Option<String>, CliError> {
-    let workspace = agent_session_workspace_source(root, name, session)?;
-    Ok(workspace.or_else(current_workspace_source))
-}
-
-pub(crate) fn agent_session_workspace_source(
-    root: &Path,
-    name: &str,
-    session: &str,
-) -> Result<Option<String>, CliError> {
-    let path = agent_session_dir(root, name, Some(session))?.join("workspace");
-    let Some(workspace) = read_optional_trimmed(&path)? else {
-        return Ok(None);
-    };
-    Ok((!workspace.bytes().any(|byte| byte.is_ascii_control())
-        && Path::new(&workspace).is_absolute()
-        && Path::new(&workspace).components().all(|component| {
-            matches!(
-                component,
-                std::path::Component::RootDir | std::path::Component::Normal(_)
-            )
-        }))
-    .then_some(workspace))
 }
 
 pub(crate) fn agent_resume(
