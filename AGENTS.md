@@ -15,6 +15,7 @@
 - 领域 report 可用 type alias（如 `AgentControlIssue`/`ToolSchemaIssue` = `ControlLineIssue`，`ObjectLayoutIssue` = `PathLayoutIssue`），不要再复制 EmptyValue/MissingFile/InvalidJson 一类枚举；不要再加 `require_*` 同义薄包装。
 - 只有语义、错误类型、用户可见错误文本、超时/终端/进程行为一致时才合并；否则保留重复实现并说明原因。
 - 不要为了少量重复引入带大量 flag、闭包或泛型的过度抽象；合并后代码必须更短或更容易审计。
+- 禁止新增 `#[path]`、测试 `include!` 模块绕行、兼容模块别名、调用方/领域前缀的共享 helper `use ... as ...`、生产代码 glob import，以及只改名或透传的薄 wrapper。仅允许构建脚本生成的 `OUT_DIR` `include!`、解决 trait/type 名称冲突所必需的别名、为保持旧 flat-suite 共享夹具而冻结在 `src/tests/**` 与 `object/executor/tests/**` 内的测试父模块 glob，以及尚待独立重构且必须保持测试全名和共享词法作用域的既有 `tests/unit/ctx*` flat harness；不得扩大这些例外。
 
 测试约定：
 - FUSE 集成测试挂载点固定使用 `tests/mounts/cortexfs`。

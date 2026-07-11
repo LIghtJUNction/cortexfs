@@ -14,10 +14,7 @@ use crate::{
     is_stable_chroot_absolute_path,
     support::control::inspect_control_line,
     support::layout::{LayoutPathRole, require_plain},
-    support::plain::{
-        open_plain_directory as open_session_layout_plain_directory,
-        proc_fd_path as plain_proc_fd_path, read_small_text_file,
-    },
+    support::plain::{open_plain_directory, proc_fd_path, read_small_text_file},
 };
 
 const MAX_SESSION_LAYOUT_CONTROL_BYTES: u64 = 64 * 1024;
@@ -223,10 +220,10 @@ pub(crate) fn inspect_optional_meta_string(
 }
 
 pub(crate) fn inspect_child_result_dirs(child_root: &Path, issues: &mut Vec<PathLayoutIssue>) {
-    let Ok(child_root_dir) = open_session_layout_plain_directory(child_root) else {
+    let Ok(child_root_dir) = open_plain_directory(child_root) else {
         return;
     };
-    let Ok(entries) = fs::read_dir(plain_proc_fd_path(&child_root_dir)) else {
+    let Ok(entries) = fs::read_dir(proc_fd_path(&child_root_dir)) else {
         return;
     };
 

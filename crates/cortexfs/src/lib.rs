@@ -119,10 +119,7 @@ use abi::constants::{
     MODEL_ROUTE_FILE, SYSTEM_PROVIDER_CONFIG_DIR, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi::path::is_object_name_for_class;
-use support::plain::{
-    open_plain_directory as open_session_layout_plain_directory,
-    plain_file_name as session_layout_plain_file_name,
-};
+use support::plain::{open_plain_directory, plain_file_name};
 
 pub mod exports;
 pub use exports::*;
@@ -318,11 +315,11 @@ pub(crate) fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
         .last()
         .and_then(|path| path.parent())
         .ok_or(DurableSessionLayoutError::CannotCreate)?;
-    let mut parent_dir = open_session_layout_plain_directory(parent)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let mut parent_dir =
+        open_plain_directory(parent).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     for dir in missing.iter().rev() {
-        let name = session_layout_plain_file_name(dir)
-            .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+        let name =
+            plain_file_name(dir).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
         nix::sys::stat::mkdirat(
             &parent_dir,
             name,
@@ -387,8 +384,8 @@ pub(crate) fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessio
 }
 
 pub(crate) fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    let dir = open_session_layout_plain_directory(path)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let dir =
+        open_plain_directory(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     dir.set_permissions(fs::Permissions::from_mode(0o700))
         .and_then(|()| dir.sync_all())
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
@@ -424,10 +421,10 @@ pub(crate) fn open_session_layout_file_at(
     let parent = path
         .parent()
         .ok_or(DurableSessionLayoutError::CannotCreate)?;
-    let file_name = session_layout_plain_file_name(path)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-    let parent_dir = open_session_layout_plain_directory(parent)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let file_name =
+        plain_file_name(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let parent_dir =
+        open_plain_directory(parent).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     let file_fd = nix::fcntl::openat(&parent_dir, file_name, flags, mode)
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     Ok((parent_dir, fs::File::from(file_fd)))

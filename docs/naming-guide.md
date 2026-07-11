@@ -33,6 +33,16 @@ module moves or is renamed, update all call sites in the same change. Do not
 retain a second module path through `pub use new as old` or an equivalent
 compatibility alias.
 
+Do not add `#[path]` or test `include!` module workarounds. Do not add production
+glob imports, caller/domain-prefixed aliases for shared
+helpers (`use helper as caller_helper`), or thin wrappers that only rename or
+pass through another function. Generated `include!` from `OUT_DIR`, aliases
+needed to disambiguate traits or colliding types, the frozen test-parent globs
+inside `src/tests/**` and `object/executor/tests/**`, and the existing
+`tests/unit/ctx*` flat harness are the only exceptions. These exceptions retain
+shared fixtures, stable subprocess test names, and shared lexical scope; do not
+extend their glob or `include!` surface.
+
 ## 2. Module identifiers
 
 - Rust module names follow the file stem when the stem is a single token:
@@ -90,3 +100,8 @@ are fine; parallel `EmptyValue` / `MissingFile` / `InvalidJson` enums are not.
 6. New control/layout issues map onto shared bases (or a thin alias).
 7. Names should look at home next to kernel-style short modules (`rules`,
    `skills`, `snapshot`), not framework-style phrases.
+8. No new `#[path]`, test `include!` module workaround, compatibility module alias,
+   caller-prefixed shared-helper alias, new glob import, or rename/pass-through
+   wrapper (except generated `OUT_DIR` includes, trait/type disambiguation,
+   frozen parent globs in the migrated test trees, and the frozen legacy
+   `tests/unit/ctx*` flat harness).

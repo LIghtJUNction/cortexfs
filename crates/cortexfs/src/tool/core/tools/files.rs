@@ -1,11 +1,7 @@
 use super::*;
 use crate::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_tool_io_plain_directory,
-    plain_file_name as tool_io_plain_file_name,
-    read_small_text_file as read_tool_io_small_text_file,
-};
+use crate::support::plain::{open_plain_directory, plain_file_name, read_small_text_file};
 
 impl Tool for FsReadTool {
     fn spec(&self) -> ToolSpec {
@@ -105,7 +101,7 @@ pub(crate) fn run_fs_read_cli(args: &[OsString], writer: &mut dyn Write) -> io::
 }
 
 pub(crate) fn read_regular_utf8_file(path: &Path, max_bytes: u64) -> io::Result<String> {
-    read_tool_io_small_text_file(path, max_bytes)
+    read_small_text_file(path, max_bytes)
 }
 
 pub(crate) fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
@@ -213,8 +209,8 @@ pub(crate) fn write_text_file_atomic(path: &Path, content: &str) -> io::Result<(
             "path must have a parent directory",
         ));
     };
-    let file_name = tool_io_plain_file_name(path)?;
-    let parent_dir = open_tool_io_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
     for attempt in 0..16 {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)

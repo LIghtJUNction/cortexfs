@@ -1,10 +1,6 @@
 use super::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_fuse_v1_plain_directory,
-    read_small_text_file as read_fuse_v1_small_text_file,
-    read_symlink_target as read_fuse_v1_symlink_target,
-};
+use crate::support::plain::{open_plain_directory, read_small_text_file, read_symlink_target};
 
 impl FuseV1Projection {
     pub(crate) fn virtual_object_attr(
@@ -153,8 +149,7 @@ impl FuseV1Projection {
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Ok(());
         }
-        let directory =
-            open_fuse_v1_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
+        let directory = open_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
         for entry in fs::read_dir(support::plain::proc_fd_path(&directory))
             .map_err(|error| fuse_metadata_error(&error))?
         {
@@ -196,7 +191,7 @@ impl FuseV1Projection {
     fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
         if abi_path == format!("model/{MODEL_ROUTE_FILE}") {
             let path = self.resolve(abi_path)?;
-            return match read_fuse_v1_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
+            return match read_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
                 Ok(content) => Ok(Some(content)),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     Ok(Some(DEFAULT_MODEL_ROUTE.to_owned()))
@@ -345,7 +340,7 @@ impl FuseV1Projection {
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             return Err(FuseV1Error::Io);
         }
-        match read_fuse_v1_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
+        match read_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
             Ok(content) => Ok(Some(content)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(_error) => Err(FuseV1Error::Io),
@@ -354,7 +349,7 @@ impl FuseV1Projection {
 
     pub(crate) fn default_model_alias_target(&self, alias: &str) -> Result<PathBuf, FuseV1Error> {
         let path = self.resolve(&format!("model/{alias}"))?;
-        if let Ok(target) = read_fuse_v1_symlink_target(&path)
+        if let Ok(target) = read_symlink_target(&path)
             && is_valid_ctx_model_symlink(&target)
         {
             return Ok(target);

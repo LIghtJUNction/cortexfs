@@ -6,10 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     is_object_name,
-    support::plain::{
-        open_plain_directory as open_tool_path_plain_directory,
-        path_metadata_no_follow as tool_path_plain_file_metadata,
-    },
+    support::plain::{open_plain_directory, path_metadata_no_follow},
 };
 use nix::libc;
 
@@ -117,7 +114,7 @@ impl ToolPath {
 }
 
 pub(crate) fn append_tool_hits(dir: &Path, hits: &mut Vec<ToolHit>) -> Result<(), ToolPathError> {
-    let directory = match open_tool_path_plain_directory(dir) {
+    let directory = match open_plain_directory(dir) {
         Ok(directory) => directory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_error) => return Err(ToolPathError::CannotReadDirectory),
@@ -150,7 +147,7 @@ pub(crate) fn sibling_control_dir(path: &Path) -> PathBuf {
 /// Returns whether the path is an executable regular file.
 #[must_use]
 pub fn is_executable_file(path: &Path) -> bool {
-    tool_path_plain_file_metadata(path)
+    path_metadata_no_follow(path)
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 

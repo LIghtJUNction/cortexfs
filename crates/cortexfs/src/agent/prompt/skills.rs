@@ -105,7 +105,7 @@ pub(crate) fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: 
     if depth > 8 || paths.len() >= MAX_SKILL_FILES {
         return;
     }
-    let Ok(root_dir) = support::plain::open_plain_directory(root) else {
+    let Ok(root_dir) = open_plain_directory(root) else {
         return;
     };
     let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&root_dir)) else {

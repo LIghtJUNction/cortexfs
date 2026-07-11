@@ -66,7 +66,7 @@ pub(crate) fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<St
 }
 
 pub(crate) fn read_model_alias_target(ctx_root: &Path, alias: &str) -> std::io::Result<String> {
-    let model_dir = support::plain::open_plain_directory(&ctx_root.join("model"))?;
+    let model_dir = open_plain_directory(&ctx_root.join("model"))?;
     let target = nix::fcntl::readlinkat(&model_dir, alias).map_err(std::io::Error::from)?;
     Ok(target.to_string_lossy().into_owned())
 }

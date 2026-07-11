@@ -1,9 +1,6 @@
 use crate::*;
 
-use crate::support::plain::{
-    create_plain_dir as create_provider_model_cache_dir,
-    read_small_text_file as read_provider_model_cache_file,
-};
+use crate::support::plain::{create_plain_dir, read_small_text_file};
 
 const MAX_PROVIDER_MODEL_RESPONSE_BYTES: u64 = 1024 * 1024;
 const MAX_PROVIDER_MODEL_CACHE_BYTES: u64 = 1024 * 1024;
@@ -14,7 +11,7 @@ pub fn refresh_provider_model_cache(
     config_dir: &Path,
     cache_dir: &Path,
 ) -> Result<(), FuseV1Error> {
-    create_provider_model_cache_dir(cache_dir).map_err(|_error| FuseV1Error::Io)?;
+    create_plain_dir(cache_dir).map_err(|_error| FuseV1Error::Io)?;
     for config in read_provider_configs(config_dir)? {
         if !config.config.enabled {
             continue;
@@ -43,7 +40,7 @@ pub fn refresh_provider_model_cache(
 
 pub(crate) fn provider_cached_models(cache_dir: &Path, provider: &str) -> Vec<String> {
     let path = provider_model_cache_path(cache_dir, provider);
-    let Ok(content) = read_provider_model_cache_file(&path, MAX_PROVIDER_MODEL_CACHE_BYTES) else {
+    let Ok(content) = read_small_text_file(&path, MAX_PROVIDER_MODEL_CACHE_BYTES) else {
         return Vec::new();
     };
     let Ok(cache) = serde_json::from_str::<ProviderModelCache>(&content) else {

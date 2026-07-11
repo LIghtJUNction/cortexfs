@@ -5,7 +5,7 @@ pub(crate) fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError
 }
 
 pub(crate) fn open_reference_dir(path: &Path) -> Result<fs::File, ReferenceTreeError> {
-    support::plain::open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
+    open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 pub(crate) fn ensure_reference_home_entry_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
