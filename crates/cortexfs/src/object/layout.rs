@@ -354,8 +354,8 @@ pub(crate) fn require_unix_socket(
     }
 }
 
-#[path = "layout-io.rs"]
-pub mod layout_io;
+pub mod disk;
+pub use disk as layout_io;
 use layout_io::*;
 
 pub(crate) fn is_stable_chroot_absolute_path(value: &str) -> bool {

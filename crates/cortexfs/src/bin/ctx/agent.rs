@@ -15,35 +15,25 @@ pub(crate) use terminal_runtime::*;
 pub(crate) use terminal_stream::*;
 pub(crate) use tools::*;
 
-#[path = "agent/chat.rs"]
 pub mod chat;
-#[path = "agent/child.rs"]
 pub mod child;
-#[path = "agent/context.rs"]
 pub mod context;
-#[path = "agent/core.rs"]
 pub mod core;
-#[path = "agent/create-host.rs"]
-pub mod create_host;
-#[path = "agent/create-request.rs"]
-pub mod create_request;
-#[path = "agent/lifecycle.rs"]
+pub mod host;
+pub use host as create_host;
+pub mod create;
+pub use create as create_request;
+pub mod gc;
 pub mod lifecycle;
-#[path = "agent/process.rs"]
 pub mod process;
-#[path = "agent/profile.rs"]
 pub mod profile;
-#[path = "agent/repl.rs"]
 pub mod repl;
-#[path = "agent/session-gc.rs"]
-pub mod session_gc;
-#[path = "agent/start.rs"]
+pub use gc as session_gc;
+pub mod sandbox;
 pub mod start;
-#[path = "agent/start-sandbox.rs"]
-pub mod start_sandbox;
-#[path = "agent/terminal-runtime.rs"]
-pub mod terminal_runtime;
-#[path = "agent/terminal-stream.rs"]
-pub mod terminal_stream;
-#[path = "agent/tools.rs"]
+pub use sandbox as start_sandbox;
+pub mod runtime;
+pub use runtime as terminal_runtime;
+pub mod terminal;
+pub use terminal as terminal_stream;
 pub mod tools;

@@ -1,11 +1,11 @@
-#[path = "agent/child-types.rs"]
-pub mod child_types;
+pub mod child;
+pub use child as child_types;
 pub mod control;
 pub mod prompt;
-#[path = "agent/runtime-types.rs"]
-pub mod runtime_types;
-#[path = "agent/runtime-view.rs"]
-pub mod runtime_view;
+pub mod runtime;
+pub use runtime as runtime_types;
+pub mod view;
+pub use view as runtime_view;
 pub mod schedule;
-#[path = "agent/secret-resolution.rs"]
-pub mod secret_resolution;
+pub mod secret;
+pub use secret as secret_resolution;
