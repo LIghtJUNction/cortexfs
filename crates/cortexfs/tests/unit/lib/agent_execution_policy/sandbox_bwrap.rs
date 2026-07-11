@@ -1,15 +1,15 @@
 #[test]
-fn agent_executable_socket_runtime_does_not_inherit_service_secrets() {
-    let root = reference_tree("agent-executable-socket-runtime-env-clear");
+fn agent_executable_socket_direct_does_not_inherit_provider_secrets() {
+    let root = reference_tree("agent-direct-secrets");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
-if [ -n "$CTX_SECRET_CANARY" ]; then
+if [ -n "$CTX_PROVIDER_SECRET_VALUE$CTX_PROVIDER_SECRET_PROVIDER$CTX_PROVIDER_SECRET_SLOT$CTX_PROVIDER_SECRET_FD$CTX_PROVIDER_SECRET_PATH" ]; then
   printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
-  printf '{"type":"delta","run":"%s","text":"leaked:%s"}\n' "$CTX_RUN_ID" "$CTX_SECRET_CANARY"
+  printf '{"type":"delta","run":"%s","text":"leaked:%s:%s:%s:%s:%s"}\n' "$CTX_RUN_ID" "$CTX_PROVIDER_SECRET_VALUE" "$CTX_PROVIDER_SECRET_PROVIDER" "$CTX_PROVIDER_SECRET_SLOT" "$CTX_PROVIDER_SECRET_FD" "$CTX_PROVIDER_SECRET_PATH"
   printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
   exit 0
 fi
@@ -19,6 +19,20 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
+    let mut env = view.env().to_vec();
+    env.extend([
+        ("CTX_PROVIDER_SECRET_VALUE".to_owned(), "value-canary".to_owned()),
+        (
+            "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+            "provider-canary".to_owned(),
+        ),
+        ("CTX_PROVIDER_SECRET_SLOT".to_owned(), "slot-canary".to_owned()),
+        ("CTX_PROVIDER_SECRET_FD".to_owned(), "42".to_owned()),
+        (
+            "CTX_PROVIDER_SECRET_PATH".to_owned(),
+            "/secret/path-canary".to_owned(),
+        ),
+    ]);
 
     let pair = UnixStream::pair();
     let (mut client, mut socket) = ok!(pair);
@@ -39,7 +53,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             ctx_root: &root,
             source_root: &root,
             identity: view.identity(),
-            env: view.env(),
+            env: &env,
             session_root: &session_root,
             default_cwd: "/work",
             model: Some("debug/echo"),
@@ -52,6 +66,15 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("secret-not-inherited"));
     assert!(!outcome.jsonl().contains("leaked:"));
+    for canary in [
+        "value-canary",
+        "provider-canary",
+        "slot-canary",
+        "42",
+        "/secret/path-canary",
+    ] {
+        assert!(!outcome.jsonl().contains(canary));
+    }
 }
 
 #[test]
