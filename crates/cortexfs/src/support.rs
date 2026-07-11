@@ -1,3 +1,4 @@
+pub mod columnar;
 pub mod control;
 pub mod index;
 pub mod jsonl;

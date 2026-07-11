@@ -78,8 +78,9 @@ pub use support::{
     ATIF_SCHEMA_VERSION, MAX_TRAJECTORY_SESSION_FILE_BYTES, TRAJECTORY_DEFAULT_AGENT_NAME,
     Trajectory, TrajectoryAgent, TrajectoryFinalMetrics, TrajectoryIssue, TrajectoryMapError,
     TrajectoryMetrics, TrajectoryObservation, TrajectoryObservationResult, TrajectoryReport,
-    TrajectoryStep, TrajectoryToolCall, manuals, stream, trajectory, trajectory_from_session_dir,
-    trajectory_from_session_jsonl, validate_trajectory, write_trajectory_json,
+    TrajectoryStep, TrajectoryToolCall, columnar, manuals, stream, trajectory,
+    trajectory_from_session_dir, trajectory_from_session_jsonl, validate_trajectory,
+    write_trajectory_json,
 };
 pub use tool::core::runtime::*;
 
