@@ -28,7 +28,6 @@ pub(crate) fn agent_executable_socket_command(
                     runtime,
                     mount_table,
                     cwd: request.cwd.unwrap_or(runtime.default_cwd),
-                    workspace: request.workspace,
                     debug: request.debug,
                     input: request.input,
                     agent_executable_fd: agent_executable_fd.raw(),
@@ -46,7 +45,6 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub runtime: AgentExecutableSocketRuntime<'a>,
     pub mount_table: &'a MountTable,
     pub cwd: &'a str,
-    pub workspace: Option<&'a str>,
     pub debug: Option<SocketDebugTiming>,
     pub input: &'a str,
     pub agent_executable_fd: RawFd,
@@ -96,9 +94,6 @@ pub(crate) fn apply_agent_executable_socket_env(
         .env("CTX_SESSION", request.session)
         .env("CTX_AGENT_HISTORY_MESSAGES", request.history_messages)
         .env("CTX_AGENT_TOOL_CONTEXT", request.tool_context);
-    if let Some(workspace) = request.workspace {
-        command.env("CTX_WORKSPACE", workspace);
-    }
 }
 
 pub(crate) fn agent_executable_socket_bwrap_args(
@@ -173,11 +168,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         ));
         bwrap.push(mount.target().to_owned());
     }
-    bwrap.extend(bwrap_workspace_bind_args(
-        request.cwd,
-        request.workspace,
-        request.mount_table,
-    ));
     bwrap.extend(bwrap_dir_args_for_chdir(request.cwd));
     bwrap.extend([
         "--chdir".to_owned(),
@@ -186,38 +176,6 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.input.to_owned(),
     ]);
     bwrap
-}
-
-pub(crate) fn bwrap_workspace_bind_args(
-    cwd: &str,
-    workspace: Option<&str>,
-    mount_table: &MountTable,
-) -> Vec<String> {
-    let Some(workspace) = workspace else {
-        return Vec::new();
-    };
-    if !cwd_uses_default_workspace(cwd) || mount_table_targets_workspace(mount_table) {
-        return Vec::new();
-    }
-    if !support::path::is_absolute_host_workspace_path(workspace) {
-        return Vec::new();
-    }
-    vec![
-        "--bind".to_owned(),
-        workspace.to_owned(),
-        "/workspace".to_owned(),
-    ]
-}
-
-pub(crate) fn cwd_uses_default_workspace(cwd: &str) -> bool {
-    cwd == "/workspace" || cwd.starts_with("/workspace/")
-}
-
-pub(crate) fn mount_table_targets_workspace(mount_table: &MountTable) -> bool {
-    mount_table
-        .entries()
-        .iter()
-        .any(|mount| cwd_uses_default_workspace(mount.target()))
 }
 
 pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {

@@ -16,9 +16,11 @@ fn agent_executable_socket_runtime_passes_history_messages() {
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 history="$(/usr/bin/printf '%s' "$CTX_AGENT_HISTORY_MESSAGES" | /usr/bin/tr '\n' '|')"
 case "$CTX_AGENT_TOOL_CONTEXT" in
-  *'Host workspace mounted at `/workspace`: "/repo"'*) context="workspace-context-ok" ;;
+  *'Host workspace configuration: determined by agent policy'*) context="workspace-context-ok" ;;
   *) context="missing-workspace-context" ;;
 esac
+if [ -n "${CTX_WORKSPACE+x}" ]; then context="workspace-env-leaked"; fi
+case "$CTX_AGENT_TOOL_CONTEXT" in *'/repo'*) context="workspace-path-leaked" ;; esac
 printf '{"type":"delta","run":"%s","text":"%s %s"}\n' "$CTX_RUN_ID" "$history" "$context"
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
@@ -58,6 +60,9 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     assert!(outcome.jsonl().contains("- user: remember prior"));
     assert!(outcome.jsonl().contains("- assistant: prior answer"));
     assert!(outcome.jsonl().contains("workspace-context-ok"));
+    assert!(!outcome.jsonl().contains("workspace-env-leaked"));
+    assert!(!outcome.jsonl().contains("workspace-path-leaked"));
+    assert!(!outcome.jsonl().contains("/repo"));
     assert!(!outcome.jsonl().contains("- user: hi"));
 }
 
@@ -71,6 +76,11 @@ fn agent_executable_socket_runtime_stops_child_after_cancel() {
         &agent_executable,
         r#"#!/bin/sh
 trap 'printf term > "$CTX_SOURCE/agent-terminated"; exit 0' TERM
+if [ -n "${CTX_WORKSPACE+x}" ]; then touch "$CTX_SOURCE/workspace-env-leaked"; fi
+case "$CTX_AGENT_TOOL_CONTEXT" in
+  *'Host workspace configuration: determined by agent policy'*) ;;
+  *) touch "$CTX_SOURCE/workspace-context-leaked" ;;
+esac
 printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 sh -c 'trap "" TERM; while [ ! -f "$CTX_SOURCE/release-agent" ]; do sleep 0.05; done; printf leaked > "$CTX_SOURCE/grandchild-leaked"' &
 touch "$CTX_SOURCE/agent-ready"
@@ -88,7 +98,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     assert!(
         client
             .write_all(
-                br#"{"op":"send","id":"msg-1","session":"default","input":"hi"}
+                br#"{"op":"send","id":"msg-1","session":"default","workspace":"/","input":"hi"}
 "#,
             )
             .is_ok()
@@ -141,6 +151,8 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     assert!(!outcome.jsonl().contains("too-late"));
     assert_file_text(&session_root.join("default").join("state"), "cancelled\n");
     assert_file_text(&root.join("agent-terminated"), "term");
+    assert!(!root.join("workspace-env-leaked").exists());
+    assert!(!root.join("workspace-context-leaked").exists());
     assert!(fs::write(root.join("release-agent"), "").is_ok());
     thread::sleep(Duration::from_millis(200));
     assert!(!root.join("grandchild-leaked").exists());
