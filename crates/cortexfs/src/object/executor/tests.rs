@@ -85,13 +85,13 @@ pub(crate) fn short_unique_temp_path(name: &str) -> PathBuf {
     ))
 }
 
-include!("../../../tests/unit/cortexfs_object_runner_tests/object_model.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/tool_parsing.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/tool_loop.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/agent_process.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/tool_execution.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/loaded_native_tool.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/provider_stream.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/provider_runtime.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/provider_config.rs");
-include!("../../../tests/unit/cortexfs_object_runner_tests/prompt_discovery.rs");
+mod config;
+mod execution;
+mod model;
+mod native;
+mod parsing;
+mod process;
+mod prompt;
+mod runtime;
+mod stream;
+mod toolloop;

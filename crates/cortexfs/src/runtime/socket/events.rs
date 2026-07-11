@@ -1,9 +1,6 @@
 use super::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_socket_runtime_plain_directory,
-    read_small_text_file as socket_runtime_read_plain_text_file,
-};
+use crate::support::plain::{open_plain_directory, read_small_text_file};
 
 pub(crate) fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
     if nix::unistd::geteuid().is_root() {
@@ -18,7 +15,7 @@ pub(crate) fn open_agent_executable_no_follow(path: &Path) -> Result<fs::File, S
     let parent = path
         .parent()
         .ok_or(SocketRuntimeError::InvalidAgentExecutable)?;
-    let parent_dir = open_socket_runtime_plain_directory(parent)
+    let parent_dir = open_plain_directory(parent)
         .map_err(|_error| SocketRuntimeError::InvalidAgentExecutable)?;
     let file_name = path
         .file_name()
@@ -67,7 +64,7 @@ pub(crate) fn event_type(line: &str) -> Option<String> {
 }
 
 pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
-    let Ok(state) = socket_runtime_read_plain_text_file(
+    let Ok(state) = read_small_text_file(
         &session_dir.join("state"),
         MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES,
     ) else {
@@ -76,7 +73,7 @@ pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
     if state.trim() != "cancelled" {
         return false;
     }
-    let Ok(events) = socket_runtime_read_plain_text_file(
+    let Ok(events) = read_small_text_file(
         &session_dir.join("events.jsonl"),
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     ) else {
@@ -149,7 +146,7 @@ pub(crate) fn record_agent_error_from_event_frames(
     };
 
     require_socket_session_files(session_dir)?;
-    let events = socket_runtime_read_plain_text_file(
+    let events = read_small_text_file(
         &session_dir.join("events.jsonl"),
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     )

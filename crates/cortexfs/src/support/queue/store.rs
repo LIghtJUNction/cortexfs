@@ -4,12 +4,12 @@ use std::io;
 
 pub(crate) fn queue_child_dir(queue_dir: &Path, name: &str) -> io::Result<PathBuf> {
     let path = queue_dir.join(name);
-    support::plain::open_plain_directory(&path)?;
+    open_plain_directory(&path)?;
     Ok(path)
 }
 
 pub(crate) fn queue_child_dir_fd(queue_dir: &Path, name: &str) -> io::Result<fs::File> {
-    support::plain::open_plain_directory(&queue_dir.join(name))
+    open_plain_directory(&queue_dir.join(name))
 }
 
 pub(crate) fn queue_job_plain_dir_fd(

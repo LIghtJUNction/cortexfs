@@ -1,10 +1,6 @@
 use crate::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_authority_plain_directory,
-    path_metadata_no_follow as authority_path_metadata_no_follow,
-    plain_file_name as authority_plain_file_name,
-};
+use crate::support::plain::{open_plain_directory, path_metadata_no_follow, plain_file_name};
 
 pub(crate) fn append_jsonl_event(path: &Path, event: &str) -> std::io::Result<()> {
     append_jsonl_line(path, event)
@@ -12,8 +8,8 @@ pub(crate) fn append_jsonl_event(path: &Path, event: &str) -> std::io::Result<()
 
 pub(crate) fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_authority_plain_directory(parent)?;
-    let file_name = authority_plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
@@ -56,8 +52,8 @@ fn atomic_replace_text_preserving_metadata_inner(
     before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
 ) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_authority_plain_directory(parent)?;
-    let file_name = authority_plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
     let existing_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
@@ -135,8 +131,8 @@ fn atomic_replace_text_inner(
     before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
 ) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_authority_plain_directory(parent)?;
-    let file_name = authority_plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
     atomic_replace_text_in_parent(&parent_dir, file_name, content, metadata, before_commit)
 }
 
@@ -354,7 +350,7 @@ pub(crate) fn tool_path_denial(error: ToolPathError) -> ToolExecutionDenial {
 }
 
 pub(crate) fn symlink_safe_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
-    let metadata = authority_path_metadata_no_follow(path)?;
+    let metadata = path_metadata_no_follow(path)?;
     if metadata.file_type().is_symlink() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

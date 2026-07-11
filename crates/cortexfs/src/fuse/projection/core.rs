@@ -1,11 +1,8 @@
 use super::*;
 
 use crate::support::plain::{
-    create_plain_dir as create_fuse_v1_plain_dir,
-    open_plain_directory as open_fuse_v1_plain_directory,
-    open_plain_file as open_fuse_v1_plain_file,
-    path_metadata_no_follow as fuse_v1_plain_path_metadata,
-    plain_file_name as fuse_v1_plain_file_name, read_symlink_target as read_fuse_v1_symlink_target,
+    create_plain_dir, open_plain_directory, open_plain_file, path_metadata_no_follow,
+    plain_file_name, read_symlink_target,
 };
 
 impl FuseV1Projection {
@@ -102,8 +99,7 @@ impl FuseV1Projection {
         if !metadata.is_dir() {
             return Err(FuseV1Error::NotDirectory);
         }
-        let directory =
-            open_fuse_v1_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
+        let directory = open_plain_directory(&path).map_err(|error| fuse_metadata_error(&error))?;
         let entries = fs::read_dir(support::plain::proc_fd_path(&directory))
             .map_err(|error| fuse_metadata_error(&error))?;
         let mut output = Vec::new();
@@ -151,7 +147,7 @@ impl FuseV1Projection {
         }
         let path = self.resolve(&normalized)?;
         let metadata =
-            fuse_v1_plain_path_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+            path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
         if !metadata.is_file() {
             return Err(FuseV1Error::NotFile);
         }
@@ -159,8 +155,7 @@ impl FuseV1Projection {
             return Err(FuseV1Error::TooLarge);
         }
         let len = usize::try_from(metadata.len()).map_err(|_error| FuseV1Error::TooLarge)?;
-        let mut file =
-            open_fuse_v1_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
+        let mut file = open_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
         let mut content = vec![0; len];
         file.read_exact(&mut content)
             .map_err(|_error| FuseV1Error::Io)?;
@@ -180,12 +175,11 @@ impl FuseV1Projection {
         }
         let path = self.resolve(&normalized)?;
         let metadata =
-            fuse_v1_plain_path_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+            path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
         if !metadata.is_file() {
             return Err(FuseV1Error::NotFile);
         }
-        let mut file =
-            open_fuse_v1_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
+        let mut file = open_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|_error| FuseV1Error::Io)?;
         let mut buffer = vec![0; size];
@@ -201,7 +195,7 @@ impl FuseV1Projection {
             return self.default_model_alias_target(alias);
         }
         let path = self.resolve(&normalized)?;
-        read_fuse_v1_symlink_target(&path).map_err(|error| fuse_readlink_error(&error))
+        read_symlink_target(&path).map_err(|error| fuse_readlink_error(&error))
     }
 
     /// Removes one empty durable plain directory.
@@ -229,8 +223,8 @@ impl FuseV1Projection {
         self.authorize_layout_path(&normalized, uid)?;
         let path = self.resolve(&normalized)?;
         let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
-        let directory = open_fuse_v1_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = fuse_v1_plain_file_name(&path).map_err(|_error| FuseV1Error::Io)?;
+        let directory = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let name = plain_file_name(&path).map_err(|_error| FuseV1Error::Io)?;
         let stat =
             nix::sys::stat::fstatat(&directory, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
                 .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
@@ -325,7 +319,7 @@ impl FuseV1Projection {
         .is_some()
             && let Some(parent) = path.parent()
         {
-            create_fuse_v1_plain_dir(parent).map_err(|_error| FuseV1Error::Io)?;
+            create_plain_dir(parent).map_err(|_error| FuseV1Error::Io)?;
         }
         atomic_replace_text(&path, content).map_err(|_error| FuseV1Error::Io)
     }
@@ -521,9 +515,9 @@ impl FuseV1Projection {
         if to_path.parent() != Some(parent) {
             return Err(FuseV1Error::InvalidPath);
         }
-        let parent_dir = open_fuse_v1_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let from_name = fuse_v1_plain_file_name(&from_path).map_err(|_error| FuseV1Error::Io)?;
-        let to_name = fuse_v1_plain_file_name(&to_path).map_err(|_error| FuseV1Error::Io)?;
+        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let from_name = plain_file_name(&from_path).map_err(|_error| FuseV1Error::Io)?;
+        let to_name = plain_file_name(&to_path).map_err(|_error| FuseV1Error::Io)?;
         let stat = nix::sys::stat::fstatat(
             &parent_dir,
             from_name,
@@ -586,11 +580,11 @@ impl FuseV1Projection {
     }
 
     fn set_plain_mode(path: &Path, mode: u32) -> Result<(), FuseV1Error> {
-        let metadata = fuse_v1_plain_path_metadata(path).map_err(|_error| FuseV1Error::Io)?;
+        let metadata = path_metadata_no_follow(path).map_err(|_error| FuseV1Error::Io)?;
         let file = if metadata.is_dir() {
-            open_fuse_v1_plain_directory(path)
+            open_plain_directory(path)
         } else if metadata.is_file() {
-            open_fuse_v1_plain_file(path)
+            open_plain_file(path)
         } else {
             return Err(FuseV1Error::InvalidPath);
         }

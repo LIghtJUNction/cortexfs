@@ -1,9 +1,6 @@
 use crate::*;
 
-use crate::support::plain::{
-    open_plain_file as open_object_metadata_plain_file,
-    path_metadata_no_follow as object_metadata_plain_path_metadata,
-};
+use crate::support::plain;
 
 const MAX_OBJECT_METADATA_CONTROL_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_ECHO_MODEL_STDIN_BYTES: usize = 1024 * 1024;
@@ -211,13 +208,12 @@ pub(crate) fn read_object_control_for_metadata(
 ) -> Result<String, FuseV1Error> {
     let path = control_dir.join(file);
     let metadata =
-        object_metadata_plain_path_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        plain::path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
     if !metadata.is_file() || metadata.len() > MAX_OBJECT_METADATA_CONTROL_BYTES {
         return Err(FuseV1Error::InvalidContent);
     }
     let len = usize::try_from(metadata.len()).map_err(|_error| FuseV1Error::InvalidContent)?;
-    let mut file =
-        open_object_metadata_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
+    let mut file = plain::open_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
     let mut content = vec![0; len];
     file.read_exact(&mut content)
         .map_err(|error| fuse_metadata_error(&error))?;

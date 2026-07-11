@@ -1,9 +1,6 @@
 use crate::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_agent_runtime_plain_directory,
-    read_small_text_file as read_agent_runtime_small_text_file,
-};
+use crate::support::plain::{open_plain_directory, read_small_text_file};
 
 /// Derives an agent runtime view from the frozen v1 control files.
 ///
@@ -102,12 +99,12 @@ pub(crate) fn resolve_agent_runtime_control_dir(
     agent_name: &str,
 ) -> Result<PathBuf, AgentRuntimeViewError> {
     for control_dir in current_user_agent_control_dirs(ctx_root, agent_name) {
-        if open_agent_runtime_plain_directory(&control_dir).is_ok() {
+        if open_plain_directory(&control_dir).is_ok() {
             return Ok(control_dir);
         }
     }
     let control_dir = ctx_root.join("agent").join(format!("{agent_name}.d"));
-    if open_agent_runtime_plain_directory(&control_dir).is_err() {
+    if open_plain_directory(&control_dir).is_err() {
         return Err(AgentRuntimeViewError::MissingControlDirectory);
     }
     Ok(control_dir)
@@ -287,7 +284,7 @@ pub(crate) fn read_required_agent_control(
     file: &str,
 ) -> Result<String, AgentRuntimeViewError> {
     let path = control_dir.join(file);
-    read_agent_runtime_small_text_file(&path, MAX_AGENT_RUNTIME_CONTROL_BYTES).map_err(|error| {
+    read_small_text_file(&path, MAX_AGENT_RUNTIME_CONTROL_BYTES).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             AgentRuntimeViewError::MissingControlFile(file.to_owned())
         } else {
