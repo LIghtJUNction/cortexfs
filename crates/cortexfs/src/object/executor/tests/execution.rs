@@ -8,6 +8,7 @@ fn agent_tool_call_executes_visible_tsh_for_search_and_load()
     fs::create_dir_all(&control)?;
     fs::create_dir_all(&tool_control)?;
     fs::create_dir_all(root.join("tool"))?;
+    fs::create_dir_all(root.join("home/1000/agent/coder"))?;
     fs::write(control.join("owner"), "1000\n")?;
     fs::write(control.join("uid"), "1000\n")?;
     fs::write(control.join("gid"), "1000\n")?;
@@ -146,6 +147,10 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         mount_table: &mount_table,
         cwd: Path::new("/workspace"),
         sandbox: Some(&sandbox),
+        network_allowed: false,
+        home_fd: 10,
+        home_target: Path::new("/ctx/home/1000/agent/coder"),
+        ctx_home_target: Path::new("/ctx/home/1000"),
     });
 
     assert!(contains_os_arg_triplet(
@@ -183,6 +188,19 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
     assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PROVIDER"));
     assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_SLOT"));
     assert!(contains_os_arg_pair(&args, "--chdir", "/workspace"));
+    assert!(args.iter().any(|arg| arg == "--unshare-net"));
+    assert!(contains_os_arg_triplet(
+        &args,
+        "--bind-fd",
+        "10",
+        "/ctx/home/1000/agent/coder"
+    ));
+    assert!(contains_os_arg_triplet(
+        &args,
+        "--setenv",
+        "HOME",
+        "/home/agent"
+    ));
 
     let _ignored = fs::remove_dir_all(root);
     Ok(())
@@ -201,6 +219,8 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
     fs::create_dir_all(&workspace)?;
     fs::create_dir_all(&upper)?;
     fs::create_dir_all(&work)?;
+    let home = source.join("home/1000/agent/coder");
+    fs::create_dir_all(&home)?;
     fs::write(workspace.join("README.md"), "lower\n")?;
     let tool = root.join("write-workspace");
     write_executable_script(
@@ -223,6 +243,9 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         upper: upper.clone(),
         work,
     };
+    let home_dir = open_plain_directory(&home)?;
+    crate::provider::name::files::clear_fd_cloexec(&home_dir)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config: &config,
         tool_executable: &proc_fd_path(&tool_executable),
@@ -231,6 +254,10 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         mount_table: &mount_table,
         cwd: Path::new("/workspace"),
         sandbox: Some(&sandbox),
+        network_allowed: false,
+        home_fd: home_dir.as_raw_fd(),
+        home_target: Path::new("/ctx/home/1000/agent/coder"),
+        ctx_home_target: Path::new("/ctx/home/1000"),
     });
     let mut command = std::process::Command::new(BWRAP_PROGRAM);
     command.args(args);

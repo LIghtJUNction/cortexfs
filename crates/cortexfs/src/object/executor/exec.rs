@@ -1,4 +1,5 @@
 use super::*;
+use std::os::fd::{AsRawFd, RawFd};
 
 pub(crate) fn execute_agent_tool_call(
     config: &AgentModelRunConfig,
@@ -6,6 +7,12 @@ pub(crate) fn execute_agent_tool_call(
 ) -> Result<String, String> {
     let view = derive_agent_runtime_view(&config.ctx_root, &config.agent)
         .map_err(|error| format!("cannot derive agent authority: {}", error.errno()))?;
+    let network_allowed = view.policy().allows(
+        view.policy_subject(),
+        PolicyObjectClass::Network,
+        "default",
+        PolicyPermission::Connect,
+    );
     if tool_call.name == "tsh" {
         validate_agent_tsh_args(&tool_call.args)?;
     } else if !agent_tool_is_loaded(&view, &tool_call.name)? {
@@ -40,7 +47,27 @@ pub(crate) fn execute_agent_tool_call(
     .map_err(|denial| tool_denial_message(&tool_call.name, denial))?;
     let tool_executable = open_executable_no_follow(grant.hit().path())
         .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
-    let sandbox = prepare_agent_tool_sandbox(&view)?;
+    let git_write_declared = view.mount_table().entries().iter().any(|mount| {
+        mount.target() == "/workspace/.git" && mount.mode() == cortexfs::MountMode::ReadWrite
+    });
+    let sandbox = if git_write_declared {
+        None
+    } else {
+        prepare_agent_tool_sandbox(&view, &config.source)?
+    };
+    let owner = view.owner().to_string();
+    let ctx_home_target = Path::new(DEFAULT_CTX_ROOT).join("home").join(&owner);
+    let home_source = config
+        .source
+        .join("home")
+        .join(&owner)
+        .join("agent")
+        .join(view.agent_name());
+    let home_target = ctx_home_target.join("agent").join(view.agent_name());
+    let home_dir = open_plain_directory(&home_source)
+        .map_err(|error| format!("cannot open agent home {}: {error}", home_source.display()))?;
+    crate::provider::name::files::clear_fd_cloexec(&home_dir)
+        .map_err(|error| format!("cannot preserve agent home fd: {error:?}"))?;
     let mut command = Command::new(BWRAP_PROGRAM);
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config,
@@ -50,9 +77,14 @@ pub(crate) fn execute_agent_tool_call(
         mount_table: view.mount_table(),
         cwd: view.cwd(),
         sandbox: sandbox.as_ref(),
+        network_allowed,
+        home_fd: home_dir.as_raw_fd(),
+        home_target: &home_target,
+        ctx_home_target: &ctx_home_target,
     }));
     let output = run_agent_tool_process(&mut command)
         .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
+    drop(home_dir);
     let mut result = String::new();
     result.push_str(&String::from_utf8_lossy(&output.stdout));
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -99,10 +131,15 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) mount_table: &'a cortexfs::MountTable,
     pub(crate) cwd: &'a Path,
     pub(crate) sandbox: Option<&'a AgentToolSandbox>,
+    pub(crate) network_allowed: bool,
+    pub(crate) home_fd: RawFd,
+    pub(crate) home_target: &'a Path,
+    pub(crate) ctx_home_target: &'a Path,
 }
 
 pub(crate) fn prepare_agent_tool_sandbox(
     view: &cortexfs::AgentRuntimeView,
+    source: &Path,
 ) -> Result<Option<AgentToolSandbox>, String> {
     let Some(workspace) = env::var_os("CTX_WORKSPACE").map(PathBuf::from) else {
         return Ok(None);
@@ -116,8 +153,11 @@ pub(crate) fn prepare_agent_tool_sandbox(
         .ok()
         .filter(|value| is_stable_overlay_component(value))
         .unwrap_or_else(|| "default".to_owned());
-    let root = view
-        .home()
+    let root = source
+        .join("home")
+        .join(view.owner().to_string())
+        .join("agent")
+        .join(view.agent_name())
         .join("session")
         .join(session)
         .join("workspace-overlay")
@@ -152,7 +192,6 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from("--clearenv"),
         OsString::from("--die-with-parent"),
         OsString::from("--unshare-pid"),
-        OsString::from("--unshare-net"),
         OsString::from("--proc"),
         OsString::from("/proc"),
         OsString::from("--dev"),
@@ -181,9 +220,56 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from("usr/lib"),
         OsString::from("/lib64"),
     ];
+    if !request.network_allowed {
+        args.push(OsString::from("--unshare-net"));
+    }
     args.extend(optional_dev_toolchain_bind_args());
+    args.extend(agent_tool_env_bwrap_args(request));
+    args.extend(bwrap_source_root_bind_args(&request.config.source));
+    for mount in request.mount_table.entries() {
+        if request.sandbox.is_some() && path_uses_workspace(mount.target()) {
+            continue;
+        }
+        let Some(source) =
+            visible_mount_source(&request.config.source, mount.source(), mount.target())
+        else {
+            continue;
+        };
+        args.push(match mount.mode() {
+            cortexfs::MountMode::ReadOnly => OsString::from("--ro-bind"),
+            cortexfs::MountMode::ReadWrite => OsString::from("--bind"),
+        });
+        args.push(OsString::from(source));
+        args.push(OsString::from(mount.target()));
+    }
+    args.extend([
+        OsString::from("--bind-fd"),
+        OsString::from(request.home_fd.to_string()),
+        request.home_target.as_os_str().to_owned(),
+    ]);
+    if let Some(sandbox) = request.sandbox {
+        args.extend(overlay_workspace_bwrap_args(sandbox));
+    }
+    args.extend(bwrap_dir_args_for_chdir(cwd));
+    args.extend([
+        OsString::from("--chdir"),
+        OsString::from(cwd),
+        OsString::from("--"),
+        request.tool_executable.as_os_str().to_owned(),
+    ]);
+    args.extend(request.tool_args.iter().cloned());
+    args
+}
+
+fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> {
+    let mut args = Vec::new();
     for env in request.env {
-        if is_secret_env_name(&env.0) || env.0 == "CTX_PROVIDER_CONFIG_DIR" {
+        if is_secret_env_name(&env.0)
+            || matches!(
+                env.0.as_str(),
+                "CTX_ROOT" | "CTX_PROVIDER_CONFIG_DIR" | "CTX_HOME" | "HOME" | "PATH" | "CTX_PATH"
+            )
+        {
             continue;
         }
         args.extend([
@@ -198,7 +284,22 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from(&request.config.agent),
         OsString::from("--setenv"),
         OsString::from("CTX_ROOT"),
-        request.config.ctx_root.as_os_str().to_owned(),
+        OsString::from(DEFAULT_CTX_ROOT),
+        OsString::from("--setenv"),
+        OsString::from("CTX_PROVIDER_CONFIG_DIR"),
+        OsString::from("/ctx/shared/providers.d"),
+        OsString::from("--setenv"),
+        OsString::from("CTX_HOME"),
+        request.ctx_home_target.as_os_str().to_owned(),
+        OsString::from("--setenv"),
+        OsString::from("HOME"),
+        OsString::from("/home/agent"),
+        OsString::from("--setenv"),
+        OsString::from("CTX_PATH"),
+        OsString::from(format!(
+            "/ctx/tool:{}/tool",
+            request.ctx_home_target.display()
+        )),
         OsString::from("--setenv"),
         OsString::from("CTX_SOURCE"),
         request.config.source.as_os_str().to_owned(),
@@ -230,34 +331,6 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
             toolchain,
         ]);
     }
-    args.extend(bwrap_source_root_bind_args(&request.config.source));
-    for mount in request.mount_table.entries() {
-        if request.sandbox.is_some() && path_uses_workspace(mount.target()) {
-            continue;
-        }
-        let Some(source) =
-            visible_mount_source(&request.config.source, mount.source(), mount.target())
-        else {
-            continue;
-        };
-        args.push(match mount.mode() {
-            cortexfs::MountMode::ReadOnly => OsString::from("--ro-bind"),
-            cortexfs::MountMode::ReadWrite => OsString::from("--bind"),
-        });
-        args.push(OsString::from(source));
-        args.push(OsString::from(mount.target()));
-    }
-    if let Some(sandbox) = request.sandbox {
-        args.extend(overlay_workspace_bwrap_args(sandbox));
-    }
-    args.extend(bwrap_dir_args_for_chdir(cwd));
-    args.extend([
-        OsString::from("--chdir"),
-        OsString::from(cwd),
-        OsString::from("--"),
-        request.tool_executable.as_os_str().to_owned(),
-    ]);
-    args.extend(request.tool_args.iter().cloned());
     args
 }
 
@@ -371,8 +444,8 @@ pub(crate) fn visible_mount_source(
     if Path::new(&source).exists() {
         return Some(source);
     }
-    if target == DEFAULT_CTX_ROOT && Path::new(DEFAULT_CTX_ROOT).exists() {
-        return Some(DEFAULT_CTX_ROOT.to_owned());
+    if crate::is_stable_chroot_absolute_path(target) && Path::new(target).exists() {
+        return Some(target.to_owned());
     }
     None
 }

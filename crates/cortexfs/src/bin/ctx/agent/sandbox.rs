@@ -43,6 +43,7 @@ pub(crate) fn agent_chat_socket_systemd_command(
     socket: &Path,
     unit: &str,
 ) -> AgentStartCommand {
+    let source = agent_chat_source(root);
     AgentStartCommand {
         program: SYSTEMD_RUN_PROGRAM.to_owned(),
         args: vec![
@@ -56,10 +57,25 @@ pub(crate) fn agent_chat_socket_systemd_command(
             "SocketMode=0666".to_owned(),
             agent_runtime_program(),
             "--source".to_owned(),
-            root.display().to_string(),
+            source.display().to_string(),
             "--agent".to_owned(),
             name.to_owned(),
         ],
+    }
+}
+
+pub(crate) fn agent_chat_source(root: &Path) -> PathBuf {
+    if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() != Some("") {
+        return root.to_path_buf();
+    }
+    let Some(backing) = read_xattr_string(root, "user.cortexfs.backing_path").map(PathBuf::from)
+    else {
+        return root.to_path_buf();
+    };
+    if backing.is_absolute() && open_plain_directory(&backing).is_ok() {
+        backing
+    } else {
+        root.to_path_buf()
     }
 }
 
