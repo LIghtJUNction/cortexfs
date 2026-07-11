@@ -1,4 +1,5 @@
-use super::{DEFAULT_SOURCE, RuntimeConfig, runtime_model};
+use super::{BWRAP_PROGRAM, DEFAULT_SOURCE, RuntimeConfig, runtime_agent_execution, runtime_model};
+use cortexfs::{AgentExecutableSocketExecution, MountTable};
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -40,6 +41,23 @@ pub(crate) fn runtime_agent_executable_uses_ctx_abi_path() {
         Path::new("/ctx").join("agent").join("coder"),
         PathBuf::from("/ctx/agent/coder")
     );
+}
+
+#[test]
+pub(crate) fn runtime_agent_execution_uses_bwrap_sandbox() -> Result<(), Box<dyn std::error::Error>>
+{
+    let mount_table = MountTable::parse("/ctx\t/ctx\tro\trbind,nosuid,nodev\n")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let AgentExecutableSocketExecution::Bwrap {
+        program,
+        mount_table: selected_mount_table,
+    } = runtime_agent_execution(&mount_table)
+    else {
+        return Err("socket-activated agents must use the bwrap sandbox".into());
+    };
+    assert_eq!(program, Path::new(BWRAP_PROGRAM));
+    assert_eq!(selected_mount_table.entries(), mount_table.entries());
+    Ok(())
 }
 
 #[test]
