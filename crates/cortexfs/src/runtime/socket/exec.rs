@@ -85,13 +85,15 @@ pub(crate) fn run_agent_executable_streaming(
     request: AgentExecutableRunRequest<'_>,
 ) -> Result<Vec<String>, SocketRuntimeError> {
     let agent_executable = open_agent_executable_no_follow(runtime.agent_executable)?;
-    let mut command = agent_executable_socket_command(runtime, &agent_executable, request);
+    let (mut command, agent_executable_fd) =
+        agent_executable_socket_command(runtime, &agent_executable, request)?;
     apply_socket_debug_timing_env(&mut command, request.debug);
     apply_agent_identity_to_command(&mut command, runtime.identity);
     command.stderr(Stdio::piped());
     let mut child = command
         .spawn()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    drop(agent_executable_fd);
     write_optional_socket_debug_timing_frame(stream, request.debug, "agent_spawned")?;
     let stdout = child
         .stdout

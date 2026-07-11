@@ -92,32 +92,26 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         mount_table: view.mount_table(),
         cwd: "/workspace",
         workspace: Some("/repo"),
-        run_id: "run-1",
-        session: "default",
-        history_messages: "- user: hi",
-        tool_context: "workspace context",
         debug: None,
         input: "hi",
+        agent_executable_fd: 9,
     });
 
-    assert!(args.contains(&"--clearenv".to_owned()));
+    assert!(!args.contains(&"--clearenv".to_owned()));
     assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
     assert!(contains_arg_pair(&args, "--tmpfs", "/tmp"));
     assert!(contains_arg_pair(&args, "--ro-bind", "/usr"));
     assert!(contains_arg_pair(&args, "--dir", "/workspace"));
+    assert!(contains_arg_pair(&args, "--perms", "0755"));
     assert!(contains_arg_triplet(
         &args,
-        "--setenv",
-        "CTX_AGENT_HISTORY_MESSAGES",
-        "- user: hi"
+        "--ro-bind-data",
+        "9",
+        "/run/cortexfs/agent-executable"
     ));
-    assert!(contains_arg_triplet(
-        &args,
-        "--setenv",
-        "CTX_AGENT_TOOL_CONTEXT",
-        "workspace context"
-    ));
+    assert!(!args.iter().any(|arg| arg == "- user: hi"));
+    assert!(!args.iter().any(|arg| arg == "workspace context"));
     assert!(contains_arg_triplet(
         &args,
         "--setenv",
@@ -148,9 +142,119 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
     ));
     assert_eq!(
         args.get(args.len().saturating_sub(2)),
-        Some(&agent_executable.display().to_string())
+        Some(&"/run/cortexfs/agent-executable".to_owned())
     );
     assert_eq!(args.last().map(String::as_str), Some("hi"));
+}
+
+#[test]
+fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = reference_tree("agent-bwrap-opened-inode");
+    let session_root = agent_session_root(&root, "coder");
+    let view = derive_agent_runtime_view(&root, "coder")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(&agent_executable, "#!/bin/sh\nprintf A\n");
+    set_file_mode(&agent_executable, 0o755);
+    let opened = open_agent_executable_no_follow(&agent_executable)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: view.env(),
+        session_root: &session_root,
+        default_cwd: "/",
+        model: Some("debug/echo"),
+        network_allowed: false,
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/usr/bin/bwrap"),
+            mount_table: view.mount_table(),
+        },
+    };
+    let request = AgentExecutableRunRequest {
+        run_id: "run-1",
+        session: "default",
+        cwd: Some("/"),
+        workspace: None,
+        input: "hi",
+        history_messages: "",
+        tool_context: "",
+        debug: None,
+    };
+    let (mut command, agent_executable_fd) =
+        agent_executable_socket_command(runtime, &opened, request)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let replacement = root.join("agent").join("replacement");
+    write_text_file(&replacement, "#!/bin/sh\nprintf B\n");
+    set_file_mode(&replacement, 0o755);
+    fs::rename(replacement, &agent_executable)?;
+
+    let output = command.output()?;
+    drop(agent_executable_fd);
+    assert!(output.status.success(), "bwrap failed: {output:?}");
+    assert_eq!(output.stdout, b"A");
+    Ok(())
+}
+
+#[test]
+fn agent_executable_socket_bwrap_preserves_provider_secret_env()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = reference_tree("agent-bwrap-provider-secret-env");
+    let session_root = agent_session_root(&root, "coder");
+    let view = derive_agent_runtime_view(&root, "coder")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let agent_executable = root.join("agent").join("coder");
+    write_text_file(
+        &agent_executable,
+        "#!/bin/sh\nprintf %s \"$CTX_PROVIDER_SECRET_VALUE\"\n",
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let opened = open_agent_executable_no_follow(&agent_executable)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let mut env = view.env().to_vec();
+    env.push((
+        "CTX_PROVIDER_SECRET_VALUE".to_owned(),
+        "provider-secret".to_owned(),
+    ));
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: &env,
+        session_root: &session_root,
+        default_cwd: "/",
+        model: Some("debug/echo"),
+        network_allowed: false,
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/usr/bin/bwrap"),
+            mount_table: view.mount_table(),
+        },
+    };
+    let request = AgentExecutableRunRequest {
+        run_id: "run-1",
+        session: "default",
+        cwd: Some("/"),
+        workspace: None,
+        input: "hi",
+        history_messages: "",
+        tool_context: "",
+        debug: None,
+    };
+
+    let (mut command, agent_executable_fd) =
+        agent_executable_socket_command(runtime, &opened, request)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let output = command.output()?;
+    drop(agent_executable_fd);
+    assert!(output.status.success(), "bwrap failed: {output:?}");
+    assert_eq!(output.stdout, b"provider-secret");
+    Ok(())
 }
 
 #[test]
@@ -181,12 +285,9 @@ fn agent_executable_socket_bwrap_args_keep_network_namespace_isolated_even_when_
         mount_table: view.mount_table(),
         cwd: "/workspace",
         workspace: None,
-        run_id: "run-1",
-        session: "default",
-        history_messages: "- user: hi",
-        tool_context: "workspace context",
         debug: None,
         input: "hi",
+        agent_executable_fd: 9,
     });
 
     assert!(args.contains(&"--unshare-net".to_owned()));
@@ -226,12 +327,9 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         mount_table: view.mount_table(),
         cwd: "/workspace",
         workspace: Some("/repo-default"),
-        run_id: "run-1",
-        session: "default",
-        history_messages: "- user: hi",
-        tool_context: "workspace context",
         debug: None,
         input: "hi",
+        agent_executable_fd: 9,
     });
 
     assert!(contains_arg_triplet(

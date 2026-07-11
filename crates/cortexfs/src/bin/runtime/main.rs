@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cortexfs::{
-    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, PolicyObjectClass,
+    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, MountTable, PolicyObjectClass,
     PolicyPermission, SocketPeerPolicy, derive_agent_runtime_view,
     read_provider_system_secret_for_model, serve_agent_executable_socket_listener_once,
 };
@@ -38,6 +38,7 @@ use nix::unistd::fchown;
 use nix::unistd::{Gid, Uid};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
+const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
 
 pub(crate) use cortexfs::cli::procfd;
 pub(crate) use cortexfs::cli::stderr;
@@ -120,7 +121,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
             network_allowed,
             agent_name: view.agent_name(),
             agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
+            execution: runtime_agent_execution(view.mount_table()),
         },
     );
     repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
@@ -131,6 +132,15 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
             config.agent
         )
     })
+}
+
+pub(crate) fn runtime_agent_execution(
+    mount_table: &MountTable,
+) -> AgentExecutableSocketExecution<'_> {
+    AgentExecutableSocketExecution::Bwrap {
+        program: Path::new(BWRAP_PROGRAM),
+        mount_table,
+    }
 }
 
 pub(crate) fn runtime_model(_source: &Path, requested_model: &str) -> String {
