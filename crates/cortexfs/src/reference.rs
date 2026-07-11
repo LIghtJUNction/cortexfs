@@ -1,4 +1,4 @@
-#[path = "reference/tree-bootstrap.rs"]
-pub mod tree_bootstrap;
-#[path = "reference/tree-helpers.rs"]
-pub mod tree_helpers;
+pub mod bootstrap;
+pub use bootstrap as tree_bootstrap;
+pub mod helpers;
+pub use helpers as tree_helpers;

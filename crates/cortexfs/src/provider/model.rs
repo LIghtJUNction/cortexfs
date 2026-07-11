@@ -240,9 +240,9 @@ impl ModelFallbackTable {
     }
 }
 
-#[path = "model-driver-routes.rs"]
-pub mod model_driver_routes;
+pub mod routes;
 pub use model_driver_routes::*;
+pub use routes as model_driver_routes;
 
 impl_issue_report!(ModelCapabilityReport, ModelCapabilityIssue);
 

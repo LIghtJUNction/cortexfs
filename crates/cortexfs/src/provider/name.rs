@@ -1,10 +1,8 @@
-#[path = "name/model-selection.rs"]
-pub mod model_selection;
-#[path = "name/names.rs"]
+pub mod selection;
+pub use selection as model_selection;
+pub mod files;
 pub mod names;
-#[path = "name/secret-files.rs"]
-pub mod secret_files;
-#[path = "name/secrets.rs"]
+pub use files as secret_files;
 pub mod secrets;
 
 pub use model_selection::*;
@@ -15,5 +13,4 @@ pub use secrets::*;
 pub(crate) use secret_files::*;
 
 #[cfg(test)]
-#[path = "name/tests.rs"]
 pub mod tests;
