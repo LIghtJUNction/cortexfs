@@ -11,6 +11,93 @@ fn current_uid_for_test() -> String {
         .unwrap_or_else(|| "1000".to_owned())
 }
 
+fn git_command(home: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("/usr/bin/git");
+    command
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0");
+    command
+}
+
+fn create_real_git_worktree(fixture: &Path) -> Option<(PathBuf, PathBuf, PathBuf)> {
+    let source = fixture.join("workspace");
+    let repository = fixture.join("repository.git");
+    let home = fixture.join("home");
+    fs::create_dir_all(&home).ok()?;
+    git_command(&home)
+        .arg("-c")
+        .arg("core.hooksPath=/dev/null")
+        .arg("init")
+        .arg("--bare")
+        .arg("-q")
+        .arg(&repository)
+        .status()
+        .ok()?
+        .success()
+        .then_some(())?;
+    git_command(&home)
+        .arg("-C")
+        .arg(&repository)
+        .args([
+            "-c",
+            "core.hooksPath=/dev/null",
+            "worktree",
+            "add",
+            "--orphan",
+            "-q",
+        ])
+        .arg(&source)
+        .status()
+        .ok()?
+        .success()
+        .then_some(())?;
+    let git_file = fs::read_to_string(source.join(".git")).ok()?;
+    let gitdir = PathBuf::from(git_file.trim().strip_prefix("gitdir: ")?);
+    let commondir = repository;
+    Some((source, gitdir, commondir))
+}
+
+fn run_bwrap_script(mut args: Vec<String>, script: &str) -> Option<std::process::Output> {
+    let command = args.iter().position(|arg| arg == "/usr/bin/ctxterm")?;
+    args.truncate(command);
+    args.extend(["/bin/sh".to_owned(), "-c".to_owned(), script.to_owned()]);
+    std::process::Command::new("/usr/bin/bwrap")
+        .args(args)
+        .output()
+        .ok()
+}
+
+fn agent_bwrap_test_args(args: &AgentStartArgs, mounts: &[AgentMount]) -> Option<Vec<String>> {
+    let root = clean_test_dir("ctx-agent-git-bwrap-args");
+    ensure_v1_reference_tree(&root).ok()?;
+    let view = derive_agent_runtime_view(&root, "coder").ok()?;
+    let socket = root.join("runtime").join("main.sock");
+    Some(agent_bwrap_args(&root, args, mounts, &view, &socket, &root))
+}
+
+fn run_agent_bwrap(
+    args: &AgentStartArgs,
+    mounts: &[AgentMount],
+    policy: Option<&str>,
+    script: &str,
+) -> Option<(Vec<String>, std::process::Output)> {
+    let root = clean_test_dir("ctx-agent-git-bwrap-run");
+    ensure_v1_reference_tree(&root).ok()?;
+    if let Some(policy) = policy {
+        write_text_file(&root.join("agent").join("coder.d").join("mount"), policy);
+    }
+    let view = derive_agent_runtime_view(&root, "coder").ok()?;
+    let socket = root.join("runtime").join("main.sock");
+    fs::create_dir_all(socket.parent()?).ok()?;
+    write_text_file(&root.join("runtime").join(".empty-shell-startup"), "");
+    let bwrap = agent_bwrap_args(&root, args, mounts, &view, &socket, &root);
+    let output = run_bwrap_script(bwrap.clone(), script)?;
+    Some((bwrap, output))
+}
+
 #[test]
 fn agent_terminal_socket_uses_session_terminal_main_socket() {
     let root = clean_test_dir("ctx-agent-terminal-socket");
@@ -101,9 +188,21 @@ fn agent_start_builds_sandboxed_terminal_command() {
 }
 
 #[test]
-fn agent_start_default_workspace_remounts_git_read_only() {
+fn agent_start_default_workspace_masks_git_directory_until_explicitly_mounted() {
     let source = clean_test_dir("ctx-agent-start-git-ro");
-    assert!(fs::create_dir_all(source.join(".git")).is_ok());
+    let home = clean_test_dir("ctx-agent-start-git-home");
+    assert!(fs::create_dir_all(&home).is_ok());
+    assert!(
+        git_command(&home)
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("init")
+            .arg("-q")
+            .arg(&source)
+            .status()
+            .is_ok_and(|status| status.success())
+    );
+    write_text_file(&source.join(".git").join("host-marker"), "host metadata\n");
     let args = AgentStartArgs {
         name: "coder".to_owned(),
         session: "test".to_owned(),
@@ -111,55 +210,205 @@ fn agent_start_default_workspace_remounts_git_read_only() {
         default_workspace: true,
         mounts: Vec::new(),
     };
-
     let mounts = agent_start_mounts_with_default_source(&args, &source);
     assert_eq!(
         mounts,
-        vec![
-            AgentMount {
-                source: source.display().to_string(),
-                target: "/workspace".to_owned(),
-                mode: "rw".to_owned(),
-            },
-            AgentMount {
-                source: source.join(".git").display().to_string(),
-                target: "/workspace/.git".to_owned(),
-                mode: "ro".to_owned(),
-            },
-        ]
+        vec![AgentMount {
+            source: source.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }]
     );
 
-    let root = clean_test_dir("ctx-agent-start-git-bwrap-view");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let view = derive_agent_runtime_view(&root, "coder");
-    assert!(view.is_ok(), "reference coder view: {view:?}");
-    let Ok(view) = view else {
+    let result = run_agent_bwrap(
+        &args,
+        &mounts,
+        None,
+        "test ! -e /workspace/.git/host-marker && touch /workspace/.git/sandbox-only",
+    );
+    assert!(result.is_some(), "run masked git directory sandbox");
+    let Some((bwrap, output)) = result else {
         return;
     };
-    let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
-    let home = PathBuf::from("/ctx/home/1000");
-    let cli_mounts = mounts;
-    let bwrap = agent_bwrap_args(&root, &args, &cli_mounts, &view, &socket, &home);
+    assert!(contains_arg_pair(&bwrap, "--tmpfs", "/workspace/.git"));
+    assert!(!bwrap
+        .iter()
+        .any(|arg| arg == &source.join(".git").display().to_string()));
+    assert!(output.status.success(), "masked sandbox failed: {output:?}");
+    assert!(!source.join(".git").join("sandbox-only").exists());
+
+    let explicit_args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: vec![AgentMount {
+            source: source.join(".git").display().to_string(),
+            target: "/workspace/.git".to_owned(),
+            mode: "ro".to_owned(),
+        }],
+    };
+    let explicit_mounts = agent_start_mounts_with_default_source(&explicit_args, &source);
+    let result = run_agent_bwrap(
+        &explicit_args,
+        &explicit_mounts,
+        None,
+        "/usr/bin/git -C /workspace status --porcelain >/dev/null && ! /usr/bin/touch /workspace/.git/blocked 2>/dev/null",
+    );
+    assert!(result.is_some(), "run explicit git directory sandbox");
+    let Some((explicit_bwrap, output)) = result else {
+        return;
+    };
+    assert!(!contains_arg_pair(
+        &explicit_bwrap,
+        "--tmpfs",
+        "/workspace/.git"
+    ));
     assert!(contains_arg_triplet(
-        &bwrap,
+        &explicit_bwrap,
         "--ro-bind",
         source.join(".git").to_str().unwrap_or_default(),
         "/workspace/.git"
     ));
+    assert!(output.status.success(), "explicit sandbox failed: {output:?}");
+    assert!(!source.join(".git").join("blocked").exists());
 }
 
 #[test]
-fn agent_start_default_workspace_mounts_worktree_gitdir_read_only() {
-    let source = clean_test_dir("ctx-agent-start-worktree-git-file");
-    let git_store = clean_test_dir("ctx-agent-start-worktree-git-store");
-    let common_dir = git_store.join("repo.git");
-    let git_dir = common_dir.join("worktrees").join("coder");
-    assert!(fs::create_dir_all(&git_dir).is_ok());
-    write_text_file(&git_dir.join("commondir"), "../..\n");
+fn agent_start_git_file_does_not_authorize_external_mount() {
+    let source = clean_test_dir("ctx-agent-start-git-file");
+    let external = clean_test_dir("ctx-agent-start-git-external");
+    assert!(fs::create_dir_all(&external).is_ok());
     write_text_file(
         &source.join(".git"),
-        &format!("gitdir: {}\n", git_dir.display()),
+        &format!("gitdir: {}\n", external.display()),
     );
+
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+    assert_eq!(
+        mounts,
+        vec![AgentMount {
+            source: source.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }]
+    );
+    let bwrap = agent_bwrap_test_args(&args, &mounts);
+    assert!(bwrap.is_some(), "build git file mask args");
+    let Some(bwrap) = bwrap else {
+        return;
+    };
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        "/dev/null",
+        "/workspace/.git"
+    ));
+    assert!(!bwrap
+        .iter()
+        .any(|arg| arg == &external.display().to_string()));
+
+    assert!(fs::remove_file(source.join(".git")).is_ok());
+    assert!(std::os::unix::fs::symlink(&external, source.join(".git")).is_ok());
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        "/dev/null",
+        "/workspace/.git"
+    ));
+    assert!(!bwrap.iter().any(|arg| arg == &source.join(".git").display().to_string()));
+}
+
+#[test]
+fn agent_start_policy_git_overlays_keep_declared_order() {
+    let source = clean_test_dir("ctx-agent-start-policy-git");
+    let home = clean_test_dir("ctx-agent-start-policy-home");
+    let decoy = clean_test_dir("ctx-agent-start-policy-decoy");
+    assert!(fs::create_dir_all(&home).is_ok());
+    assert!(fs::create_dir_all(&decoy).is_ok());
+    write_text_file(&decoy.join("decoy"), "decoy\n");
+    assert!(
+        git_command(&home)
+            .arg("-c")
+            .arg("core.hooksPath=/dev/null")
+            .arg("init")
+            .arg("-q")
+            .arg(&source)
+            .status()
+            .is_ok_and(|status| status.success())
+    );
+    let args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: Vec::new(),
+    };
+    let mounts = agent_start_mounts_with_default_source(&args, &source);
+    let git = source.join(".git").display().to_string();
+    let decoy = decoy.display().to_string();
+    let rw_ro = format!(
+        "/ctx\t/ctx\tro\trbind,nosuid,nodev\n{decoy}\t/workspace/.git\trw\trbind,nosuid,nodev\n{git}\t/workspace/.git\tro\trbind,nosuid,nodev\n"
+    );
+    let result = run_agent_bwrap(
+        &args,
+        &mounts,
+        Some(&rw_ro),
+        "/usr/bin/git -C /workspace status --porcelain >/dev/null && ! /usr/bin/touch /workspace/.git/blocked 2>/dev/null",
+    );
+    assert!(result.is_some(), "run rw then ro policy overlays");
+    let Some((bwrap, output)) = result else {
+        return;
+    };
+    let rw = bwrap
+        .windows(3)
+        .position(|window| window == ["--bind", decoy.as_str(), "/workspace/.git"]);
+    let ro = bwrap
+        .windows(3)
+        .position(|window| window == ["--ro-bind", git.as_str(), "/workspace/.git"]);
+    assert!(rw.zip(ro).is_some_and(|(rw, ro)| rw < ro));
+    assert!(output.status.success(), "rw-ro policy failed: {output:?}");
+    assert!(!source.join(".git").join("blocked").exists());
+
+    let ro_rw = format!(
+        "/ctx\t/ctx\tro\trbind,nosuid,nodev\n{git}\t/workspace/.git\tro\trbind,nosuid,nodev\n{decoy}\t/workspace/.git\trw\trbind,nosuid,nodev\n"
+    );
+    let result = run_agent_bwrap(
+        &args,
+        &mounts,
+        Some(&ro_rw),
+        "test -e /workspace/.git/decoy && /usr/bin/touch /workspace/.git/policy-write",
+    );
+    assert!(result.is_some(), "run ro then rw policy overlays");
+    let Some((bwrap, output)) = result else {
+        return;
+    };
+    let ro = bwrap
+        .windows(3)
+        .position(|window| window == ["--ro-bind", git.as_str(), "/workspace/.git"]);
+    let rw = bwrap
+        .windows(3)
+        .position(|window| window == ["--bind", decoy.as_str(), "/workspace/.git"]);
+    assert!(ro.zip(rw).is_some_and(|(ro, rw)| ro < rw));
+    assert!(output.status.success(), "ro-rw policy failed: {output:?}");
+    assert!(Path::new(&decoy).join("policy-write").exists());
+}
+
+#[test]
+fn agent_start_real_worktree_requires_explicit_metadata_mounts() {
+    let fixture = clean_test_dir("ctx-agent-start-real-worktree");
+    let fixture = create_real_git_worktree(&fixture);
+    assert!(fixture.is_some(), "create real git worktree fixture");
+    let Some((source, git_dir, common_dir)) = fixture else {
+        return;
+    };
     let args = AgentStartArgs {
         name: "coder".to_owned(),
         session: "test".to_owned(),
@@ -172,12 +421,55 @@ fn agent_start_default_workspace_mounts_worktree_gitdir_read_only() {
 
     assert_eq!(
         mounts,
-        vec![
-            AgentMount {
-                source: source.display().to_string(),
-                target: "/workspace".to_owned(),
-                mode: "rw".to_owned(),
-            },
+        vec![AgentMount {
+            source: source.display().to_string(),
+            target: "/workspace".to_owned(),
+            mode: "rw".to_owned(),
+        }]
+    );
+
+    let result = run_agent_bwrap(
+        &args,
+        &mounts,
+        None,
+        "! /usr/bin/git -C /workspace rev-parse --git-dir >/dev/null 2>&1",
+    );
+    assert!(result.is_some(), "run masked worktree sandbox");
+    let Some((bwrap, output)) = result else {
+        return;
+    };
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--bind",
+        source.to_str().unwrap_or_default(),
+        "/workspace"
+    ));
+    assert!(!contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        git_dir.to_str().unwrap_or_default(),
+        git_dir.to_str().unwrap_or_default()
+    ));
+    assert!(!contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        common_dir.to_str().unwrap_or_default(),
+        common_dir.to_str().unwrap_or_default()
+    ));
+    assert!(contains_arg_triplet(
+        &bwrap,
+        "--ro-bind",
+        "/dev/null",
+        "/workspace/.git"
+    ));
+    assert!(output.status.success(), "masked worktree failed: {output:?}");
+
+    let explicit_args = AgentStartArgs {
+        name: "coder".to_owned(),
+        session: "test".to_owned(),
+        cwd: "/workspace".to_owned(),
+        default_workspace: true,
+        mounts: vec![
             AgentMount {
                 source: source.join(".git").display().to_string(),
                 target: "/workspace/.git".to_owned(),
@@ -193,41 +485,45 @@ fn agent_start_default_workspace_mounts_worktree_gitdir_read_only() {
                 target: common_dir.display().to_string(),
                 mode: "ro".to_owned(),
             },
-        ]
+        ],
+    };
+    let explicit_mounts = agent_start_mounts_with_default_source(&explicit_args, &source);
+    let result = run_agent_bwrap(
+        &explicit_args,
+        &explicit_mounts,
+        None,
+        "/usr/bin/git -C /workspace rev-parse --git-common-dir >/dev/null && gitdir=$(/usr/bin/git -C /workspace rev-parse --git-dir) && ! /usr/bin/touch \"$gitdir/blocked\" 2>/dev/null",
     );
-
-    let root = clean_test_dir("ctx-agent-start-worktree-git-bwrap-view");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let view = derive_agent_runtime_view(&root, "coder");
-    assert!(view.is_ok(), "reference coder view: {view:?}");
-    let Ok(view) = view else {
+    assert!(result.is_some(), "run explicit worktree sandbox");
+    let Some((explicit_bwrap, output)) = result else {
         return;
     };
-    let socket = PathBuf::from("/ctx/home/1000/agent/coder/session/test/terminal/main.sock");
-    let home = PathBuf::from("/ctx/home/1000");
-    let bwrap = agent_bwrap_args(&root, &args, &mounts, &view, &socket, &home);
-    assert!(contains_arg_pair(
-        &bwrap,
-        "--dir",
-        git_dir.parent().and_then(Path::to_str).unwrap_or_default()
-    ));
-    assert!(contains_arg_pair(
-        &bwrap,
-        "--dir",
-        common_dir.parent().and_then(Path::to_str).unwrap_or_default()
+    assert!(contains_arg_triplet(
+        &explicit_bwrap,
+        "--ro-bind",
+        source.join(".git").to_str().unwrap_or_default(),
+        "/workspace/.git"
     ));
     assert!(contains_arg_triplet(
-        &bwrap,
+        &explicit_bwrap,
         "--ro-bind",
         git_dir.to_str().unwrap_or_default(),
         git_dir.to_str().unwrap_or_default()
     ));
     assert!(contains_arg_triplet(
-        &bwrap,
+        &explicit_bwrap,
         "--ro-bind",
         common_dir.to_str().unwrap_or_default(),
         common_dir.to_str().unwrap_or_default()
     ));
+    assert!(!contains_arg_triplet(
+        &explicit_bwrap,
+        "--ro-bind",
+        "/dev/null",
+        "/workspace/.git"
+    ));
+    assert!(output.status.success(), "explicit worktree failed: {output:?}");
+    assert!(!git_dir.join("blocked").exists());
 }
 
 #[test]
