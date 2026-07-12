@@ -53,14 +53,99 @@ fn executable_object_bootstrap_validates_controls_and_agent_socket_boundary() {
     );
     assert!(agent.is_ok());
     let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
-    assert!(!report.is_ok());
-    assert!(report.issues().contains(&PathLayoutIssue::missing(
-        "agent/coder.sock".to_owned(),
-        LayoutPathRole::Socket
-    )));
+    assert!(report.is_ok(), "{:?}", report.issues());
     let _agent_socket = bind_socket(&root.join("agent").join("coder.sock"));
     assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
     assert_eq!(ObjectBootstrapError::InvalidControlValue.errno(), "EINVAL");
+}
+
+#[test]
+fn agent_bootstrap_rejects_invalid_optional_control_content() {
+    for (file, content) in [
+        ("abi", "future-v1\n"),
+        ("abi", " argv-v1\n"),
+        ("abi", "argv-v1\n\n"),
+        ("tools", "bad/name\n"),
+        ("tools", "fs.read\nfs.read\n"),
+        ("meta.json", "not-json\n"),
+        ("meta.json", "[]\n"),
+        ("system.md", "bad\0system\n"),
+        ("prompt.template.md", "bad\0prompt\n"),
+    ] {
+        assert_eq!(
+            crate::validate_object_control_content(ObjectClass::Agent, file, content),
+            Err(ObjectBootstrapError::InvalidControlValue),
+            "{file}: {content:?}"
+        );
+    }
+}
+
+#[test]
+fn agent_bootstrap_accepts_canonical_abi_with_optional_newline() {
+    for content in [
+        "argv-v1",
+        "argv-v1\n",
+        "sdk-envelope-v1",
+        "sdk-envelope-v1\n",
+    ] {
+        assert!(
+            crate::validate_object_control_content(ObjectClass::Agent, "abi", content).is_ok(),
+            "{content:?}"
+        );
+    }
+}
+
+#[test]
+fn agent_bootstrap_requires_sdk_envelope_for_ask_approval() {
+    let root = clean_test_dir("object-bootstrap-agent-approval");
+    let target = root.join("runtime/agent");
+    write_fixture_file(&target, 0o755);
+    let target = target.display().to_string();
+
+    assert_eq!(
+        install_executable_object_wrapper(
+            &root,
+            ObjectClass::Agent,
+            "coder",
+            &target,
+            &[("approval", "ask")],
+        ),
+        Err(ObjectBootstrapError::InvalidControlValue)
+    );
+    assert_eq!(
+        install_executable_object_wrapper(
+            &root,
+            ObjectClass::Agent,
+            "coder",
+            &target,
+            &[("approval", "ask"), ("abi", "argv-v1")],
+        ),
+        Err(ObjectBootstrapError::InvalidControlValue)
+    );
+    assert_eq!(
+        install_executable_object_wrapper(
+            &root,
+            ObjectClass::Agent,
+            "coder",
+            &target,
+            &[
+                ("approval", "ask"),
+                ("abi", "argv-v1"),
+                ("abi", "sdk-envelope-v1"),
+            ],
+        ),
+        Err(ObjectBootstrapError::InvalidControlValue)
+    );
+    assert!(
+        install_executable_object_wrapper(
+            &root,
+            ObjectClass::Agent,
+            "coder",
+            &target,
+            &[("approval", "ask"), ("abi", "sdk-envelope-v1")],
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -202,6 +287,24 @@ fn object_layout_accepts_socket_symlink_to_live_unix_socket() {
 }
 
 #[test]
+fn object_layout_rejects_dangling_agent_socket_symlink() {
+    let root = clean_test_dir("object-layout-dangling-agent-socket");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let missing_socket = root.join("runtime").join("coder.sock");
+    assert!(symlink(missing_socket, root.join("agent").join("coder.sock")).is_ok());
+
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    assert!(
+        report.issues().contains(&PathLayoutIssue::wrong_kind(
+            "agent/coder.sock".to_owned(),
+            LayoutPathRole::Socket
+        )),
+        "{:?}",
+        report.issues()
+    );
+}
+
+#[test]
 fn object_layout_rejects_symlink_class_directory_for_socket_lookup() {
     let root = clean_test_dir("object-layout-socket-symlink-class");
     let outside = clean_test_dir("object-layout-socket-symlink-class-outside");
@@ -232,10 +335,6 @@ fn object_layout_reports_missing_parts() {
     assert!(report.issues().contains(&PathLayoutIssue::missing(
         "agent/coder.d".to_owned(),
         LayoutPathRole::ControlDirectory
-    )));
-    assert!(report.issues().contains(&PathLayoutIssue::missing(
-        "agent/coder.sock".to_owned(),
-        LayoutPathRole::Socket
     )));
 }
 

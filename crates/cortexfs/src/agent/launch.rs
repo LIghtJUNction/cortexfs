@@ -38,12 +38,17 @@ pub fn persist_agent_launch_meta(
         .filter(|session| crate::is_object_name(session))
         .ok_or(AgentLaunchError::CannotExecute)?;
     let meta_path = control.join("meta.json");
-    let content = crate::support::plain::read_small_text_file(&meta_path, 65_536)
-        .map_err(|_error| AgentLaunchError::CannotExecute)?;
-    let mut meta = serde_json::from_str::<serde_json::Value>(&content)
-        .ok()
-        .and_then(|value| value.as_object().cloned())
-        .ok_or(AgentLaunchError::CannotExecute)?;
+    let (mut meta, create) = match crate::support::plain::read_small_text_file(&meta_path, 65_536) {
+        Ok(content) => {
+            let meta = serde_json::from_str::<serde_json::Value>(&content)
+                .ok()
+                .and_then(|value| value.as_object().cloned())
+                .ok_or(AgentLaunchError::CannotExecute)?;
+            (meta, false)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (serde_json::Map::new(), true),
+        Err(_error) => return Err(AgentLaunchError::CannotExecute),
+    };
     meta.insert(
         "runtime_receipt".to_owned(),
         serde_json::json!({
@@ -68,14 +73,94 @@ pub fn persist_agent_launch_meta(
         }),
     );
     let encoded = serde_json::to_string(&meta).map_err(|_error| AgentLaunchError::CannotExecute)?;
-    crate::atomic_replace_text_preserving_metadata(&meta_path, &format!("{encoded}\n"))
-        .map_err(|_error| AgentLaunchError::CannotExecute)?;
+    let recorded = if create {
+        crate::atomic_create_text_with_mode(&meta_path, &format!("{encoded}\n"), 0o644)
+    } else {
+        crate::atomic_replace_text_preserving_metadata(&meta_path, &format!("{encoded}\n"))
+    };
+    recorded.map_err(|_error| AgentLaunchError::CannotExecute)?;
     let rebound =
         fs::symlink_metadata(&control).map_err(|_error| AgentLaunchError::CannotExecute)?;
     if (rebound.dev(), rebound.ino()) != (control_meta.dev(), control_meta.ino()) {
         return Err(AgentLaunchError::StopConflict);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod launch_meta_tests {
+    use super::*;
+
+    fn receipts() -> (AgentLaunchReceipt, SystemAgentSocketReceipt) {
+        (
+            AgentLaunchReceipt {
+                unit: "terminal-unit".to_owned(),
+                pid: 42,
+                identity: AgentUnixIdentity::new(1000, 1000, [10, 20]),
+                invocation: "terminal-invocation".to_owned(),
+                socket: PathBuf::from("/run/user/1000/default/terminal.sock"),
+            },
+            SystemAgentSocketReceipt {
+                unit: "system-unit".to_owned(),
+                was_active: false,
+                owned_start: true,
+                invocation: "system-invocation".to_owned(),
+            },
+        )
+    }
+
+    #[test]
+    fn missing_agent_meta_is_created_with_runtime_receipt() {
+        let Ok(root) = tempfile::tempdir() else {
+            return;
+        };
+        let control = root.path().join("agent/child.d");
+        assert!(fs::create_dir_all(&control).is_ok());
+        let (terminal, system) = receipts();
+
+        assert_eq!(
+            persist_agent_launch_meta(root.path(), "child", &terminal, &system),
+            Ok(())
+        );
+        let meta_path = control.join("meta.json");
+        let value = fs::read_to_string(&meta_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
+        assert_eq!(
+            value
+                .as_ref()
+                .and_then(|value| value.pointer("/runtime_receipt/terminal/pid"))
+                .and_then(serde_json::Value::as_u64),
+            Some(42)
+        );
+        assert!(matches!(
+            fs::metadata(meta_path),
+            Ok(metadata) if metadata.permissions().mode() & 0o7777 == 0o644
+        ));
+    }
+
+    #[test]
+    fn malformed_or_non_object_agent_meta_is_rejected() {
+        let Ok(root) = tempfile::tempdir() else {
+            return;
+        };
+        let control = root.path().join("agent/child.d");
+        assert!(fs::create_dir_all(&control).is_ok());
+        let meta_path = control.join("meta.json");
+        let (terminal, system) = receipts();
+
+        for content in ["{malformed\n", "[]\n"] {
+            assert!(fs::write(&meta_path, content).is_ok());
+            assert_eq!(
+                persist_agent_launch_meta(root.path(), "child", &terminal, &system),
+                Err(AgentLaunchError::CannotExecute)
+            );
+            assert_eq!(
+                fs::read_to_string(&meta_path).ok().as_deref(),
+                Some(content)
+            );
+        }
+    }
 }
 
 pub(crate) fn ensure_terminal_runtime_dir(

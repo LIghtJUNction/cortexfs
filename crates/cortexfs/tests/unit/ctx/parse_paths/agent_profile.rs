@@ -309,6 +309,59 @@ tools:
 }
 
 #[test]
+fn agent_apply_creates_missing_optional_controls() {
+    let root = clean_test_dir("ctx-agent-apply-profile-missing-optional");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let Ok(Command::Agent(AgentArgs::New(args))) =
+        cmd!("agent", "new", "coder", "--model", "openai/gpt-4o")
+    else {
+        return;
+    };
+    assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
+    let control = root.join("agent/coder.d");
+    assert!(fs::remove_file(control.join("system.md")).is_ok());
+    assert!(fs::remove_file(control.join("meta.json")).is_ok());
+    let profile_path = root.join("missing-optional.yaml");
+    assert!(fs::write(
+        &profile_path,
+        "instructions: Created persona.\ndescription: created\n"
+    )
+    .is_ok());
+
+    assert_eq!(
+        agent_apply(&root, "coder", &profile_path),
+        Ok(ExitCode::SUCCESS)
+    );
+    let system_path = control.join("system.md");
+    let meta_path = control.join("meta.json");
+    assert_eq!(
+        fs::read_to_string(&system_path).ok().as_deref(),
+        Some("Created persona.\n")
+    );
+    let meta = fs::read_to_string(&meta_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
+    assert_eq!(
+        meta.as_ref()
+            .and_then(|value| value.get("description"))
+            .and_then(serde_json::Value::as_str),
+        Some("created")
+    );
+    assert_eq!(
+        meta.as_ref()
+            .and_then(|value| value.get("source"))
+            .and_then(serde_json::Value::as_str),
+        Some("profile")
+    );
+    for path in [system_path, meta_path] {
+        assert!(matches!(
+            fs::symlink_metadata(path),
+            Ok(metadata) if metadata.permissions().mode() & 0o7777 == 0o644
+        ));
+    }
+}
+
+#[test]
 fn agent_apply_preserves_controls_omitted_from_profile() {
     let root = clean_test_dir("ctx-agent-apply-profile-partial");
     assert!(fs::create_dir_all(&root).is_ok());

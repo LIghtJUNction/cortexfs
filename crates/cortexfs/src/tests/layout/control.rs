@@ -103,15 +103,139 @@ fn agent_object_layout_rejects_invalid_control_values() {
     let control = root.join("agent").join("coder.d");
     write_text_file(&control.join("iso"), "container\n");
     write_text_file(&control.join("uid"), "bad\n");
+    write_text_file(&control.join("approval"), "manual\n");
 
     let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
     assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
         "agent/coder.d/iso".to_owned(),
-        "container".to_owned()
+        "invalid content".to_owned()
     )));
     assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
         "agent/coder.d/uid".to_owned(),
-        "bad".to_owned()
+        "invalid content".to_owned()
     )));
+    assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
+        "agent/coder.d/approval".to_owned(),
+        "invalid content".to_owned()
+    )));
+}
+
+#[test]
+fn agent_object_layout_rejects_invalid_optional_control_content() {
+    let root = clean_test_dir("object-layout-agent-optional-content");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    write_text_file(&control.join("abi"), "future-v1\n");
+    write_text_file(&control.join("tools"), "fs.read\nfs.read\n");
+    write_text_file(&control.join("meta.json"), "[]\n");
+    write_text_file(&control.join("system.md"), "bad\0system\n");
+    write_text_file(&control.join("prompt.template.md"), "bad\0prompt\n");
+
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    for file in [
+        "abi",
+        "tools",
+        "meta.json",
+        "system.md",
+        "prompt.template.md",
+    ] {
+        assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
+            format!("agent/coder.d/{file}"),
+            "invalid content".to_owned()
+        )));
+    }
+}
+
+#[test]
+fn agent_object_layout_reports_bounded_read_failures_stably() {
+    let root = clean_test_dir("object-layout-agent-control-read");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    assert!(fs::write(control.join("system.md"), vec![b'x'; 64 * 1024 + 1]).is_ok());
+    assert!(fs::write(control.join("prompt.template.md"), [0xff]).is_ok());
+
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    for file in ["system.md", "prompt.template.md"] {
+        assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
+            format!("agent/coder.d/{file}"),
+            "invalid content".to_owned()
+        )));
+    }
+}
+
+#[test]
+fn agent_object_layout_requires_sdk_envelope_for_ask_approval() {
+    let root = clean_test_dir("object-layout-agent-approval-abi");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    let issue = PathLayoutIssue::invalid_value(
+        "agent/coder.d/approval".to_owned(),
+        "invalid content".to_owned(),
+    );
+    write_text_file(&control.join("approval"), "ask\n");
+    assert!(
+        inspect_object_layout(&root, ObjectClass::Agent, "coder")
+            .issues()
+            .contains(&issue)
+    );
+
+    write_text_file(&control.join("abi"), "argv-v1\n");
+    assert!(
+        inspect_object_layout(&root, ObjectClass::Agent, "coder")
+            .issues()
+            .contains(&issue)
+    );
+
+    write_text_file(&control.join("abi"), "sdk-envelope-v1\n");
+    assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
+}
+
+#[test]
+fn agent_object_layout_accepts_absent_optional_controls() {
+    let root = clean_test_dir("object-layout-agent-optional-absent");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    for file in ["system.md", "prompt.template.md", "meta.json"] {
+        assert!(fs::remove_file(control.join(file)).is_ok());
+    }
+
+    assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
+}
+
+#[test]
+fn agent_object_layout_rejects_wrong_kind_optional_controls() {
+    let root = clean_test_dir("object-layout-agent-optional-control-kind");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let approval = root.join("agent/coder.d/approval");
+    assert!(fs::create_dir_all(&approval).is_ok());
+
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    let issue = PathLayoutIssue::wrong_kind(
+        "agent/coder.d/approval".to_owned(),
+        LayoutPathRole::ControlFile,
+    );
+    assert!(report.issues().contains(&issue));
+    assert_eq!(
+        report
+            .issues()
+            .iter()
+            .filter(|candidate| *candidate == &issue)
+            .count(),
+        1
+    );
+
+    assert!(fs::remove_dir(&approval).is_ok());
+    let target = root.join("approval-target");
+    write_text_file(&target, "auto\n");
+    assert!(symlink(target, &approval).is_ok());
+    let report = inspect_object_layout(&root, ObjectClass::Agent, "coder");
+    assert_eq!(
+        report
+            .issues()
+            .iter()
+            .filter(|candidate| *candidate == &issue)
+            .count(),
+        1
+    );
 }
 use super::*;

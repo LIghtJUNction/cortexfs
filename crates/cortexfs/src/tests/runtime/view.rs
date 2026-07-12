@@ -76,6 +76,10 @@ fn agent_runtime_view_requires_sdk_envelope_for_ask_approval() {
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
     let control = root.join("agent/coder.d");
     write_text_file(&control.join("approval"), "ask\n");
+    assert!(matches!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::MissingControlFile(ref file)) if file == "abi"
+    ));
     write_text_file(&control.join("abi"), "argv-v1\n");
     assert!(matches!(
         derive_agent_runtime_view(&root, "coder"),
