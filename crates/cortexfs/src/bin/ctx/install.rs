@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 pub(crate) fn parse_object_command(
     mut values: impl Iterator<Item = String>,
 ) -> Result<Command, CliError> {
-    let action = required_arg(&mut values, "object requires check or install")?;
+    let action = required_arg(&mut values, "object requires check, install, or residue")?;
     if action == "check" {
         let manifest = PathBuf::from(required_arg(
             &mut values,
@@ -24,8 +24,11 @@ pub(crate) fn parse_object_command(
         }
         return Ok(Command::ObjectCheck { manifest });
     }
+    if action == "residue" {
+        return crate::residue::parse_object_residue_command(values);
+    }
     if action != "install" {
-        return Err(CliError::usage("object expects check or install"));
+        return Err(CliError::usage("object expects check, install, or residue"));
     }
     let mut manifest = None;
     let mut source = None;
@@ -234,7 +237,7 @@ mod tests {
     fn rejects_unsupported_action_or_flag() {
         assert!(
             parse(&["remove"])
-                .is_err_and(|error| error.message.contains("expects check or install"))
+                .is_err_and(|error| error.message.contains("expects check, install, or residue"))
         );
         assert!(
             parse(&["install", "--unknown"]).is_err_and(|error| {

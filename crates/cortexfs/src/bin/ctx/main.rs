@@ -137,6 +137,8 @@ pub mod objects;
 
 pub(crate) mod install;
 
+pub(crate) mod residue;
+
 pub mod doctor;
 
 pub mod provider;

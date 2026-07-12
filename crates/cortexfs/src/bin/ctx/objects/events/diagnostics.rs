@@ -299,6 +299,13 @@ pub(crate) fn terminal_safe_text(text: &str) -> String {
     safe
 }
 
+pub(crate) fn terminal_safe_field(text: &str) -> String {
+    terminal_safe_text(text)
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
 pub(crate) fn is_terminal_safe_character(character: char) -> bool {
     !character.is_control() || matches!(character, '\n' | '\r' | '\t')
 }

@@ -64,6 +64,11 @@ ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --d
 ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
 ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
 
+ctx object check tool.yaml
+ctx object install --source /var/lib/cortexfs/storage/v1-root tool.yaml --tier system
+ctx object residue audit --source /var/lib/cortexfs/storage/v1-root
+ctx object residue cleanup --source /var/lib/cortexfs/storage/v1-root --path tool/.cortexfs-install-123-0 --dev DEV --ino INO
+
 ctx validate-name coder
 ctx doctor
 ```
@@ -225,6 +230,52 @@ then published no-replace before the executable is published last as the
 visible object commit boundary. Both published receipts are checked again
 before success is reported. Success or failure may retain a hidden
 `.cortexfs-install-*` safety residue for explicit future cleanup.
+
+Durable residue maintenance is explicit and separate from installation:
+
+```text
+ctx object residue audit --source PATH
+ctx object residue cleanup --source PATH --path REL --dev DEV --ino INO [--yes]
+```
+
+`audit` performs a bounded, no-follow, descriptor-relative walk of the durable
+source. It reports `.cortexfs-install-*`, `.cortexfs-cleanup-*`, and
+`.ctx-rollback-*` observations in relative-path order, one terminal-safe line
+per residue, including kind, path, device, inode, file kind, empty/occupied
+state, and cleanup eligibility. An audit observation is not cleanup authority:
+a later command must supply the relative path and exact `dev`/`ino` receipt
+explicitly. Audit does not silently skip unreadable, cross-device, or
+over-limit subtrees; a system backing tree therefore requires an identity that
+can inspect the complete tree.
+
+Cleanup accepts install-stage directories only under `tool/`, `agent/`,
+`home/<decimal-uid>/tool/`, or `home/<decimal-uid>/agent/`. It defaults to a
+dry-run and prints `would-clean ... entries=N`; `--yes` is required to mutate
+and prints `cleaned ... entries=N` on success. Applying cleanup first isolates
+the top path with same-directory no-replace rename and verifies the moved inode.
+It then handles each preflighted descendant the same way before post-order
+deletion, without following symlinks. The isolation name is
+`.cortexfs-cleanup-*`; retained cleanup quarantine is always audit-only and
+cannot be supplied as a cleanup target. If a later cleanup step fails, the
+command tries to restore the original `.cortexfs-install-*` name only while the
+quarantined top-level inode still matches the submitted receipt and no-replace
+restoration is safe. Successful restoration permits a fresh audit and retry.
+If safe restoration is impossible, the error reports the exact retained
+`.cortexfs-cleanup-*` path for later audit. Unknown file kinds, traversal
+limits, new entries, or sync failures also stop cleanup.
+
+The caller must stop concurrent processes that share write authority to the
+backing directories before using `--yes`. Linux has no atomic
+“unlink only if this path still has dev/ino” operation, so receipt checks cannot
+protect the final syscall window from a hostile writer in the same Unix
+authority boundary. Cleanup never intentionally unlinks a receipt mismatch at
+its checkpoints.
+
+`.ctx-rollback-*` is always audit-only because it may preserve an inode from a
+rollback conflict. A retained `.cortexfs-cleanup-*` is likewise audit-only;
+only an eligible `.cortexfs-install-*` path can be submitted to cleanup. This
+command never deletes rollback residue or owned agent objects. Installation
+does not invoke residue cleanup automatically.
 
 At runtime, `CTX_SOURCE` is only an ambient candidate path. Durable writers
 must authenticate the runtime capability receipt and match its nofollow source
