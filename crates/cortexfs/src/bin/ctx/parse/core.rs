@@ -71,6 +71,12 @@ pub(crate) enum Command {
         manifest: PathBuf,
         tier: InstallTier,
     },
+    ObjectInspect {
+        source: PathBuf,
+        class: ObjectClass,
+        name: String,
+        tier: InstallTier,
+    },
     ObjectCheck {
         manifest: PathBuf,
     },
@@ -209,6 +215,12 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             manifest,
             tier,
         } => success(install::run_object_install(&source, &manifest, tier)),
+        Command::ObjectInspect {
+            source,
+            class,
+            name,
+            tier,
+        } => success(install::run_object_inspect(&source, class, &name, tier)),
         Command::ObjectCheck { manifest } => success(install::run_object_check(&manifest)),
         Command::ObjectResidueAudit { source } => {
             success(residue::run_object_residue_audit(&source))

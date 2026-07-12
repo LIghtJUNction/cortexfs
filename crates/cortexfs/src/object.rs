@@ -3,6 +3,7 @@ pub(crate) mod executor;
 pub mod install;
 pub mod layout;
 pub mod metadata;
+pub mod receipt;
 pub mod residue;
 pub(crate) mod runner;
 

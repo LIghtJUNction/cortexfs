@@ -228,6 +228,27 @@ process.
 Error frames use stable errno names such as `EACCES`, `EINVAL`, `ENOENT`,
 `EMSGSIZE`, and `EHOSTDOWN`. Clients must not parse natural language `message`.
 
+## Installed Object Inspection
+
+The host-side read-only inspection surface is:
+
+```text
+ctx object inspect --source PATH CLASS NAME [--tier user|system]
+```
+
+`CLASS` is `tool` or `agent`, and the tier defaults to `user`. Inspection
+validates the installer receipt and its identity/version, the recorded
+class/name/tier, the retained control directory's device/inode/type, and the
+retained executable's device/inode/regular type, execute bits, and SHA-256. It
+also rejects executable length, mode, mtime, or ctime changes observed during
+inspection; the receipt does not bind the complete install-time mode. It holds
+no-follow descriptors through validation and does not modify the backing tree.
+
+Mutable control-file contents are outside this receipt claim and are not
+revalidated against their install-time values. An object with a missing or
+legacy receipt is unmanaged and is reported as unavailable; inspection does
+not adopt it.
+
 ## Durable Safety Residue
 
 Object installation may leave a hidden `.cortexfs-install-*` stage in the

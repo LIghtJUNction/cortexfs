@@ -66,6 +66,7 @@ ctx schedule result home/1000/agent/coder/session/default/context/plan.json work
 
 ctx object check tool.yaml
 ctx object install --source /var/lib/cortexfs/storage/v1-root tool.yaml --tier system
+ctx object inspect --source /var/lib/cortexfs/storage/v1-root tool example.echo --tier system
 ctx object residue audit --source /var/lib/cortexfs/storage/v1-root
 ctx object residue cleanup --source /var/lib/cortexfs/storage/v1-root --path tool/.cortexfs-install-123-0 --dev DEV --ino INO
 
@@ -194,11 +195,13 @@ second submission namespace.
 
 Agent lifecycle conveniences exist as thin wrappers:
 
-Executable extension installation uses one host-side, new-object-only command:
+Executable extensions use host-side check, new-object-only install, and
+read-only inspect commands:
 
 ```text
 ctx object check MANIFEST
 ctx object install --source PATH MANIFEST [--tier user|system]
+ctx object inspect --source PATH CLASS NAME [--tier user|system]
 ```
 
 `ctx object check` is read-only and requires no source tree. It performs the
@@ -230,6 +233,22 @@ then published no-replace before the executable is published last as the
 visible object commit boundary. Both published receipts are checked again
 before success is reported. Success or failure may retain a hidden
 `.cortexfs-install-*` safety residue for explicit future cleanup.
+
+`ctx object inspect` is a read-only check of one exact installer-managed `tool`
+or `agent`; the tier defaults to `user`. It validates the installer receipt and
+its identity/version, the recorded class/name/tier, the retained control
+directory's device/inode/type, and the retained executable's
+device/inode/regular type, execute bits, and SHA-256. It also rejects executable
+length, mode, mtime, or ctime changes observed during inspection; the receipt
+does not bind the complete install-time mode. Success prints:
+
+```text
+installed CLASS/NAME tier=T schema=SCHEMA sha256=HASH executable=DEV:INO control=DEV:INO
+```
+
+Inspection does not claim that mutable control-file contents still match their
+install-time values. An object with a missing or legacy receipt is unmanaged
+and is reported as unavailable; inspection never adopts or modifies it.
 
 Durable residue maintenance is explicit and separate from installation:
 
