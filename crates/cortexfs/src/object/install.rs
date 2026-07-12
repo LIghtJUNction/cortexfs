@@ -124,9 +124,9 @@ struct ManifestExecutable {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum InstallError {
-    /// The manifest or requested installation is invalid.
+    /// The manifest or requested object lifecycle operation is invalid.
     Invalid(String),
-    /// The durable installation target is unavailable.
+    /// The durable object lifecycle target is unavailable.
     Unavailable(String),
 }
 
@@ -648,7 +648,9 @@ fn copy_executable(
     Ok(target_file)
 }
 
-fn create_stage(class: &fs::File) -> Result<(String, fs::File, EntryReceipt), InstallError> {
+pub(crate) fn create_stage(
+    class: &fs::File,
+) -> Result<(String, fs::File, EntryReceipt), InstallError> {
     for _attempt in 0..32 {
         let id = STAGE_ID.fetch_add(1, AtomicOrdering::Relaxed);
         let name = format!(".cortexfs-install-{}-{id}", std::process::id());
@@ -700,7 +702,7 @@ fn openat_dir(parent: &fs::File, name: &str) -> Result<fs::File, InstallError> {
     .map_err(|error| InstallError::unavailable(format!("cannot open staged directory: {error}")))
 }
 
-fn rename_noreplace(
+pub(crate) fn rename_noreplace(
     from_dir: &fs::File,
     from: &str,
     to_dir: &fs::File,

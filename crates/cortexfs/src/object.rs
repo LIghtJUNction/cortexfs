@@ -6,6 +6,7 @@ pub mod metadata;
 pub mod receipt;
 pub mod residue;
 pub(crate) mod runner;
+pub mod uninstall;
 
 /// Runs the installed object executor.
 #[doc(hidden)]
