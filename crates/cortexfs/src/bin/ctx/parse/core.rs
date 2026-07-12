@@ -74,6 +74,16 @@ pub(crate) enum Command {
     ObjectCheck {
         manifest: PathBuf,
     },
+    ObjectResidueAudit {
+        source: PathBuf,
+    },
+    ObjectResidueCleanup {
+        source: PathBuf,
+        path: PathBuf,
+        dev: u64,
+        ino: u64,
+        yes: bool,
+    },
     Provider(ProviderArgs),
     Ping {
         path: String,
@@ -200,6 +210,18 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             tier,
         } => success(install::run_object_install(&source, &manifest, tier)),
         Command::ObjectCheck { manifest } => success(install::run_object_check(&manifest)),
+        Command::ObjectResidueAudit { source } => {
+            success(residue::run_object_residue_audit(&source))
+        }
+        Command::ObjectResidueCleanup {
+            source,
+            path,
+            dev,
+            ino,
+            yes,
+        } => success(residue::run_object_residue_cleanup(
+            &source, &path, dev, ino, yes,
+        )),
         Command::Provider(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),

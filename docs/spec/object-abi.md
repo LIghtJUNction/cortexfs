@@ -227,3 +227,50 @@ process.
 
 Error frames use stable errno names such as `EACCES`, `EINVAL`, `ENOENT`,
 `EMSGSIZE`, and `EHOSTDOWN`. Clients must not parse natural language `message`.
+
+## Durable Safety Residue
+
+Object installation may leave a hidden `.cortexfs-install-*` stage in the
+install-class directory. Applied cleanup temporarily uses a
+`.cortexfs-cleanup-*` quarantine, and agent creation rollback may leave
+`.ctx-rollback-*`. These names are safety residue, not object names and not a
+second submission or orchestration namespace.
+
+The host-side maintenance surface is:
+
+```text
+ctx object residue audit --source PATH
+ctx object residue cleanup --source PATH --path REL --dev DEV --ino INO [--yes]
+```
+
+Audit is a bounded, no-follow observation of a durable source. It reports
+`.cortexfs-install-*`, `.cortexfs-cleanup-*`, and `.ctx-rollback-*` residue.
+Its reported path, device, and inode are useful for review but do not grant
+authority. Cleanup requires the caller to resubmit an explicit exact receipt
+and then builds a complete bounded receipt plan before mutation. Audit fails
+instead of silently skipping unreadable, cross-device, or over-limit subtrees.
+Only `.cortexfs-install-*` directories directly below `tool`, `agent`,
+`home/<decimal-uid>/tool`, or `home/<decimal-uid>/agent` are eligible. Cleanup
+quarantine and rollback residue are always audit-only. Cleanup is dry-run
+unless `--yes` is present.
+
+Applied cleanup isolates each candidate with same-directory
+`renameat2(RENAME_NOREPLACE)`, verifies the moved inode, and only then performs
+descriptor-relative, post-order deletion. Symlinks are unlinked as leaves and
+are never followed. If a later cleanup step fails, the original
+`.cortexfs-install-*` name is restored only when the quarantined top-level inode
+still matches the submitted receipt and no-replace restoration is safe. That
+permits a fresh audit and retry. If safe restoration is impossible, the exact
+retained `.cortexfs-cleanup-*` quarantine path is reported for later audit.
+Unknown-type, depth/count, added-entry, and sync conflicts also stop cleanup.
+
+Before `--yes`, the caller must quiesce processes that share write authority to
+the backing directories. Linux does not provide receipt-conditioned unlink, so
+no userspace design can close the final pathname syscall window against a
+hostile writer in the same Unix authority boundary. At every receipt checkpoint
+cleanup refuses to intentionally unlink a mismatched inode.
+
+Rollback residue and retained cleanup quarantine are audit-only; only an
+eligible install residue path can be submitted to cleanup. This command never
+removes rollback residue. Owned agents are not residue. Install and agent-create
+operations do not trigger automatic background residue cleanup.
