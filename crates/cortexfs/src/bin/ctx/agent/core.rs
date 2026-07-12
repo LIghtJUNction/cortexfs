@@ -23,11 +23,13 @@ pub(crate) enum AgentArgs {
         session: Option<String>,
         input: String,
         raw: bool,
+        approvals: Vec<String>,
     },
     Repl {
         name: String,
         session: Option<String>,
         raw: bool,
+        approvals: Vec<String>,
     },
     Resume {
         name: String,
@@ -160,12 +162,24 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             ref session,
             ref input,
             raw,
-        } => agent_send(root, name, session.as_deref(), input, raw, false),
+            ref approvals,
+        } => agent_send(
+            root,
+            name,
+            AgentSend {
+                session: session.as_deref(),
+                input,
+                raw,
+                debug: false,
+                approvals,
+            },
+        ),
         AgentArgs::Repl {
             ref name,
             ref session,
             raw,
-        } => agent_repl(root, name, session.as_deref(), raw),
+            ref approvals,
+        } => agent_repl(root, name, session.as_deref(), raw, approvals),
         AgentArgs::Resume {
             ref name,
             ref session,

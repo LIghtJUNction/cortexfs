@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::fmt::Write as _;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -34,6 +34,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "mount",
     "model",
     "abi",
+    "approval",
     "tools",
     "system.md",
     "prompt.template.md",
@@ -143,21 +144,34 @@ pub struct InstalledObject {
     pub name: String,
 }
 
-/// Installs one manifest-bound executable into a durable object tree.
-pub fn install_object(
-    root: &Path,
-    manifest_path: &Path,
-    tier: InstallTier,
-) -> Result<InstalledObject, InstallError> {
+/// A manifest and executable verified for publication without modifying a tree.
+#[derive(Debug)]
+pub struct CheckedObject {
+    class: ObjectClass,
+    name: String,
+    manifest: ObjectManifest,
+    source: fs::File,
+}
+
+impl CheckedObject {
+    /// Returns the verified object class.
+    #[must_use]
+    pub const fn class(&self) -> ObjectClass {
+        self.class
+    }
+
+    /// Returns the verified object name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+/// Validates one manifest-bound executable without modifying a backing tree.
+pub fn check_object(manifest_path: &Path) -> Result<CheckedObject, InstallError> {
     let manifest = read_manifest(manifest_path)?;
     validate_manifest(&manifest)?;
     let class = manifest.class.object_class();
-    if class == ObjectClass::Agent && tier == InstallTier::User {
-        return Err(InstallError::invalid(
-            "cortexfs.object/v1 cannot carry user-tier identity to the root socket runtime; install the agent with --tier system",
-        ));
-    }
-    let class_dir = install_class_dir(root, class, tier)?;
     let artifact = resolve_artifact(manifest_path, &manifest.executable.path)?;
     let mut source = open_plain_file(&artifact).map_err(|error| {
         InstallError::invalid(format!(
@@ -177,7 +191,33 @@ pub fn install_object(
             artifact.display()
         )));
     }
+    verify_executable(&mut source, &manifest.executable.sha256, None)?;
+    Ok(CheckedObject {
+        class,
+        name: manifest.name.clone(),
+        manifest,
+        source,
+    })
+}
 
+/// Installs one manifest-bound executable into a durable object tree.
+pub fn install_object(
+    root: &Path,
+    manifest_path: &Path,
+    tier: InstallTier,
+) -> Result<InstalledObject, InstallError> {
+    let CheckedObject {
+        class,
+        manifest,
+        mut source,
+        ..
+    } = check_object(manifest_path)?;
+    if class == ObjectClass::Agent && tier == InstallTier::User {
+        return Err(InstallError::invalid(
+            "cortexfs.object/v1 cannot carry user-tier identity to the root socket runtime; install the agent with --tier system",
+        ));
+    }
+    let class_dir = install_class_dir(root, class, tier)?;
     let class_fd = open_plain_directory(&class_dir).map_err(|error| {
         InstallError::unavailable(format!("cannot open object install tier: {error}"))
     })?;
@@ -188,8 +228,7 @@ pub fn install_object(
     let staged_control_fd = create_stage_control(&stage_fd)?;
     write_manifest_controls(&staged_control_fd, &manifest)?;
     let control_receipt = file_receipt(&staged_control_fd, true)?;
-    let staged_executable =
-        copy_verified_executable(&mut source, &stage_fd, &manifest.executable.sha256)?;
+    let staged_executable = copy_executable(&mut source, &stage_fd, &manifest.executable.sha256)?;
     let executable_receipt = file_receipt(&staged_executable, false)?;
     staged_control_fd.sync_all().map_err(|error| {
         InstallError::unavailable(format!("cannot sync install controls: {error}"))
@@ -355,6 +394,9 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
             {
                 return Err(InstallError::invalid("invalid control value: abi"));
             }
+            (ObjectClass::Agent, "approval") if !matches!(value.as_str(), "auto" | "ask") => {
+                return Err(InstallError::invalid("invalid control value: approval"));
+            }
             (_, "policy") if PolicyV0::parse(value).is_err() => {
                 return Err(InstallError::invalid("invalid control value: policy"));
             }
@@ -394,6 +436,17 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
                 "missing required control: {name}"
             )));
         }
+    }
+    if class == ObjectClass::Agent
+        && manifest
+            .controls
+            .get("approval")
+            .is_some_and(|value| value == "ask")
+        && manifest.controls.get("abi").map(String::as_str) != Some("sdk-envelope-v1")
+    {
+        return Err(InstallError::invalid(
+            "approval ask requires abi sdk-envelope-v1",
+        ));
     }
     Ok(())
 }
@@ -486,7 +539,48 @@ fn write_manifest_controls(
     mkdirat(&hooks, "post.d", 0o755)
 }
 
-fn copy_verified_executable(
+fn verify_executable(
+    source: &mut fs::File,
+    expected: &str,
+    mut target: Option<&mut fs::File>,
+) -> Result<(), InstallError> {
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let count = source
+            .read(&mut buffer)
+            .map_err(|error| InstallError::invalid(format!("cannot read executable: {error}")))?;
+        if count == 0 {
+            break;
+        }
+        let chunk = buffer
+            .get(..count)
+            .ok_or_else(|| InstallError::invalid("invalid executable read size"))?;
+        hasher.update(chunk);
+        if let Some(target) = target.as_mut() {
+            target.write_all(chunk).map_err(|error| {
+                InstallError::unavailable(format!("cannot stage executable: {error}"))
+            })?;
+        }
+    }
+    let actual = hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            let _ignored = write!(output, "{byte:02x}");
+            output
+        });
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(InstallError::invalid(format!(
+            "executable sha256 mismatch: expected {expected}, got {actual}"
+        )));
+    }
+    source
+        .rewind()
+        .map_err(|error| InstallError::invalid(format!("cannot rewind executable: {error}")))
+}
+
+fn copy_executable(
     source: &mut fs::File,
     stage: &fs::File,
     expected: &str,
@@ -503,35 +597,7 @@ fn copy_verified_executable(
     )
     .map_err(|error| InstallError::unavailable(format!("cannot stage executable: {error}")))?;
     let mut target_file = fs::File::from(fd);
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let count = source
-            .read(&mut buffer)
-            .map_err(|error| InstallError::invalid(format!("cannot read executable: {error}")))?;
-        if count == 0 {
-            break;
-        }
-        let chunk = buffer
-            .get(..count)
-            .ok_or_else(|| InstallError::invalid("invalid executable read size"))?;
-        hasher.update(chunk);
-        target_file.write_all(chunk).map_err(|error| {
-            InstallError::unavailable(format!("cannot stage executable: {error}"))
-        })?;
-    }
-    let actual = hasher
-        .finalize()
-        .iter()
-        .fold(String::with_capacity(64), |mut output, byte| {
-            let _ignored = write!(output, "{byte:02x}");
-            output
-        });
-    if !actual.eq_ignore_ascii_case(expected) {
-        return Err(InstallError::invalid(format!(
-            "executable sha256 mismatch: expected {expected}, got {actual}"
-        )));
-    }
+    verify_executable(source, expected, Some(&mut target_file))?;
     target_file
         .sync_all()
         .map_err(|error| InstallError::unavailable(format!("cannot sync executable: {error}")))?;
@@ -883,6 +949,17 @@ mod tests {
             agent.controls.insert("abi".to_owned(), abi.to_owned());
             assert!(validate_manifest(&agent).is_ok());
         }
+        agent
+            .controls
+            .insert("approval".to_owned(), "ask".to_owned());
+        agent
+            .controls
+            .insert("abi".to_owned(), "argv-v1".to_owned());
+        assert!(validate_manifest(&agent).is_err());
+        agent
+            .controls
+            .insert("abi".to_owned(), "sdk-envelope-v1".to_owned());
+        assert!(validate_manifest(&agent).is_ok());
         for tools in ["", "example.echo", "example.echo\nfs.read"] {
             agent.controls.insert("tools".to_owned(), tools.to_owned());
             assert!(validate_manifest(&agent).is_ok(), "{tools:?}");
@@ -896,6 +973,49 @@ mod tests {
             agent.controls.insert("tools".to_owned(), tools.to_owned());
             assert!(validate_manifest(&agent).is_err(), "{tools:?}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn check_validates_artifact_without_writing_a_backing_tree()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        let before = fs::read_dir(root.path())?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let checked = check_object(&manifest)?;
+
+        assert_eq!(checked.class(), ObjectClass::Tool);
+        assert_eq!(checked.name(), "example.echo");
+        let after = fs::read_dir(root.path())?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(after, before);
+        Ok(())
+    }
+
+    #[test]
+    fn check_rejects_malformed_digest_symlink_and_nonexecutable_artifacts()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, "not: [valid")?;
+        assert!(check_object(&manifest).is_err());
+
+        fs::write(&manifest, tool_manifest(&executable, &"0".repeat(64)))?;
+        assert!(check_object(&manifest).is_err_and(|error| error.message().contains("sha256")));
+
+        let link = root.path().join("linked-tool");
+        std::os::unix::fs::symlink(&executable, &link)?;
+        fs::write(&manifest, tool_manifest(&link, &digest))?;
+        assert!(check_object(&manifest).is_err());
+
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o644))?;
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        assert!(check_object(&manifest).is_err_and(|error| error.message().contains("executable")));
         Ok(())
     }
 

@@ -16,17 +16,32 @@ impl Agent for EchoAgent {
     ) -> AgentResult<AgentOutcome> {
         if let Some(input) = invocation.input().strip_prefix("tool ") {
             return match invocation.step() {
-                0 => AgentToolCallRequest::new("echo-call-1", "example.echo", vec![input.to_owned()])
-                    .map(AgentOutcome::YieldToolCall),
+                0 => AgentToolCallRequest::new(
+                    "echo-call-1",
+                    "example.echo",
+                    vec![serde_json::json!({ "text": input }).to_string()],
+                )
+                .map(AgentOutcome::YieldToolCall),
                 1 => AgentToolCallRequest::new(
                     "echo-call-2",
                     "example.echo",
-                    vec![format!("second:{}", invocation.observation().map_or("", |value| value.content()))],
+                    vec![
+                        serde_json::json!({
+                            "text": format!(
+                                "second:{}",
+                                invocation.observation().map_or("", |value| value.content())
+                            )
+                        })
+                        .to_string(),
+                    ],
                 )
                 .map(AgentOutcome::YieldToolCall),
                 _ => {
-                    output.message(invocation.observation().map_or("", |value| value.content()))
-                        .map_err(|error| cortexfs_agent_sdk::AgentError::new("EIO", error.to_string()))?;
+                    output
+                        .message(invocation.observation().map_or("", |value| value.content()))
+                        .map_err(|error| {
+                            cortexfs_agent_sdk::AgentError::new("EIO", error.to_string())
+                        })?;
                     Ok(AgentOutcome::Complete)
                 }
             };

@@ -71,6 +71,9 @@ pub(crate) enum Command {
         manifest: PathBuf,
         tier: InstallTier,
     },
+    ObjectCheck {
+        manifest: PathBuf,
+    },
     Provider(ProviderArgs),
     Ping {
         path: String,
@@ -179,13 +182,24 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             agent,
             session,
             input,
-        } => agent_send(&cli.root, &agent, session.as_deref(), &input, false, false),
+        } => agent_send(
+            &cli.root,
+            &agent,
+            AgentSend {
+                session: session.as_deref(),
+                input: &input,
+                raw: false,
+                debug: false,
+                approvals: &[],
+            },
+        ),
         Command::Agent(args) => agent_command(&cli.root, &args),
         Command::ObjectInstall {
             source,
             manifest,
             tier,
         } => success(install::run_object_install(&source, &manifest, tier)),
+        Command::ObjectCheck { manifest } => success(install::run_object_check(&manifest)),
         Command::Provider(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),

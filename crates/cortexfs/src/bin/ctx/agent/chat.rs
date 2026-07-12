@@ -1,22 +1,33 @@
 use crate::*;
 
+#[derive(Clone, Copy)]
+pub(crate) struct AgentSend<'a> {
+    pub(crate) session: Option<&'a str>,
+    pub(crate) input: &'a str,
+    pub(crate) raw: bool,
+    pub(crate) debug: bool,
+    pub(crate) approvals: &'a [String],
+}
+
 pub(crate) fn agent_send(
     root: &Path,
     name: &str,
-    session: Option<&str>,
-    input: &str,
-    raw: bool,
-    debug: bool,
+    send: AgentSend<'_>,
 ) -> Result<ExitCode, CliError> {
-    let session = agent_session_name(root, name, session)?;
+    let session = agent_session_name(root, name, send.session)?;
     let request = agent_send_request_json(
         &request_id()?,
         &session,
         &agent_cwd(root, name)?,
-        input,
-        debug,
+        send.input,
+        send.debug,
     );
-    stream_agent_socket_request(&agent_chat_request_socket(root, name)?, &request, raw)
+    stream_agent_socket_request_approving(
+        &agent_chat_request_socket(root, name)?,
+        &request,
+        send.raw,
+        send.approvals,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -27,6 +38,7 @@ pub(crate) struct AgentInteractiveSend<'a> {
     pub(crate) run_id: &'a str,
     pub(crate) interrupt: Option<&'a AgentInterruptGuard>,
     pub(crate) debug: bool,
+    pub(crate) approvals: &'a [String],
 }
 
 pub(crate) const AGENT_REPL_COMMANDS: &str = "/help /new [session] /workspace /resume /history /output /pack /tools /children /cancel /debug /status /clear /exit";
@@ -54,6 +66,7 @@ pub(crate) fn agent_send_interactive_with_run_id(
         send.raw,
         send.interrupt
             .map(|guard| (guard, cancel_request.as_str(), send.run_id)),
+        send.approvals,
     )
 }
 
@@ -137,6 +150,7 @@ pub(crate) fn agent_repl(
     name: &str,
     session: Option<&str>,
     raw: bool,
+    approvals: &[String],
 ) -> Result<ExitCode, CliError> {
     let mut session = agent_session_name(root, name, session)?;
     let mut debug = AgentDebugState::default();
@@ -196,6 +210,7 @@ pub(crate) fn agent_repl(
                     run_id: &run_id,
                     interrupt: Some(&interrupt),
                     debug: debug.enabled,
+                    approvals,
                 },
             )?;
             if code != ExitCode::SUCCESS {
@@ -221,7 +236,17 @@ pub(crate) fn agent_repl(
             if debug.enabled {
                 debug.report_tools(root, name)?;
             }
-            let _code = agent_send(root, name, Some(&session), line, raw, debug.enabled)?;
+            let _code = agent_send(
+                root,
+                name,
+                AgentSend {
+                    session: Some(&session),
+                    input: line,
+                    raw,
+                    debug: debug.enabled,
+                    approvals,
+                },
+            )?;
         }
     }
     Ok(ExitCode::SUCCESS)

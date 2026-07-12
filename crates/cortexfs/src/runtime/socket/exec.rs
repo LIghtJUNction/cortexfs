@@ -131,6 +131,8 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     record_owned_child_completion(runtime, session, id, &agent_outcome)?;
     let agent_frames = agent_outcome.frames;
     if scope != SocketSessionScope::Temp {
+        record_approval_frames(&session_dir, id, &agent_frames)
+            .map_err(SocketRuntimeError::Record)?;
         record_tool_results_from_event_frames(&session_dir, id, &agent_frames)
             .map_err(SocketRuntimeError::Record)?;
         let terminal_error = record_agent_error_from_event_frames(&session_dir, id, &agent_frames)
@@ -175,6 +177,7 @@ fn run_agent_envelope_loop(
     let mut frames = Vec::new();
     let mut seen = HashSet::new();
     let mut observation = Value::Null;
+    let mut approval_delivery_best_effort = false;
     for step in 0..=MAX_CALLS {
         if agent_run_cancelled(&runtime.session_root.join(request.session), request.run_id) {
             return Ok(AgentRunOutcome {
@@ -212,7 +215,7 @@ fn run_agent_envelope_loop(
         if outcome.process == AgentProcessOutcome::Error {
             let terminal = agent_process_failed_frames(request.run_id, "agent process failed");
             for frame in &terminal {
-                write_socket_frame(stream, frame)?;
+                deliver_host_frame(stream, frame, approval_delivery_best_effort)?;
             }
             frames.extend(terminal);
             return Ok(AgentRunOutcome {
@@ -225,7 +228,7 @@ fn run_agent_envelope_loop(
         let Some(call) = call else {
             let done =
                 serde_json::json!({"type":"done", "run":request.run_id, "status":"ok"}).to_string();
-            write_socket_frame(stream, &done)?;
+            deliver_host_frame(stream, &done, approval_delivery_best_effort)?;
             frames.push(done);
             return Ok(AgentRunOutcome {
                 frames,
@@ -242,7 +245,7 @@ fn run_agent_envelope_loop(
                 },
             );
             for frame in &terminal {
-                write_socket_frame(stream, frame)?;
+                deliver_host_frame(stream, frame, approval_delivery_best_effort)?;
             }
             frames.extend(terminal);
             return Ok(AgentRunOutcome {
@@ -267,8 +270,31 @@ fn run_agent_envelope_loop(
             cancel: Some((&cancel_dir, request.run_id)),
         };
         let (content, status) =
-            match object::executor::exec::execute_agent_tool_call_with(&config, &call) {
-                Ok(content) => (content, "ok"),
+            match object::executor::exec::prepare_agent_tool_call(&config, &call) {
+                Ok(prepared) if prepared.approval() == AgentApprovalMode::Ask => {
+                    approval_delivery_best_effort = true;
+                    let approval = request_tool_approval(stream, request.run_id, &call)?;
+                    let [request_frame, result_frame] = approval.frames;
+                    frames.extend([request_frame, result_frame]);
+                    if approval.allowed {
+                        if agent_run_cancelled(&cancel_dir, request.run_id) {
+                            return Ok(AgentRunOutcome {
+                                frames,
+                                process: AgentProcessOutcome::Cancelled,
+                            });
+                        }
+                        match prepared.execute(&config) {
+                            Ok(content) => (content, "ok"),
+                            Err(error) => (format!("ERROR: {error}\n"), "error"),
+                        }
+                    } else {
+                        (format!("ERROR: {}\n", approval.reason), "error")
+                    }
+                }
+                Ok(prepared) => match prepared.execute(&config) {
+                    Ok(content) => (content, "ok"),
+                    Err(error) => (format!("ERROR: {error}\n"), "error"),
+                },
                 Err(error) => (format!("ERROR: {error}\n"), "error"),
             };
         if agent_run_cancelled(&cancel_dir, request.run_id) {
@@ -290,7 +316,7 @@ fn run_agent_envelope_loop(
             .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
             .trim_end()
             .to_owned();
-        write_socket_frame(stream, &result)?;
+        deliver_host_frame(stream, &result, approval_delivery_best_effort)?;
         frames.push(result);
         observation = serde_json::json!({
             "tool_call_id": call.id, "name": call.name,
@@ -298,6 +324,105 @@ fn run_agent_envelope_loop(
         });
     }
     Err(SocketRuntimeError::InvalidAgentOutput)
+}
+
+fn deliver_host_frame(
+    stream: &mut UnixStream,
+    frame: &str,
+    best_effort: bool,
+) -> Result<(), SocketRuntimeError> {
+    match write_socket_frame(stream, frame) {
+        Ok(()) => Ok(()),
+        Err(_) if best_effort => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+struct ToolApproval {
+    frames: [String; 2],
+    allowed: bool,
+    reason: &'static str,
+}
+
+fn request_tool_approval(
+    stream: &mut UnixStream,
+    run: &str,
+    call: &object::executor::AgentToolCall,
+) -> Result<ToolApproval, SocketRuntimeError> {
+    let args = call
+        .args
+        .iter()
+        .map(|arg| arg.to_str().ok_or(SocketRuntimeError::CannotRunAgent))
+        .collect::<Result<Vec<_>, _>>()?;
+    let request = serde_json::json!({
+        "type": "approval_request",
+        "run": run,
+        "id": call.id,
+        "name": call.name,
+        "args": args
+    })
+    .to_string();
+    if request.len() > MAX_SOCKET_FRAME_BYTES {
+        return Err(SocketRuntimeError::CannotRunAgent);
+    }
+    let request_delivered = write_socket_frame(stream, &request).is_ok();
+    let response = request_delivered
+        .then(|| read_socket_request_frame_from_stream(stream))
+        .transpose()
+        .ok()
+        .flatten();
+    let decision = response
+        .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+        .filter(|value| {
+            value.as_object().is_some_and(|object| object.len() == 4)
+                && value.get("op").and_then(Value::as_str) == Some("approve")
+                && value.get("run").and_then(Value::as_str) == Some(run)
+                && value.get("id").and_then(Value::as_str) == Some(call.id.as_str())
+        })
+        .and_then(|value| {
+            value
+                .get("decision")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    let mut allowed = decision.as_deref() == Some("allow_once");
+    let mut reason = if !request_delivered {
+        "approval request delivery failed"
+    } else if allowed {
+        "approved once"
+    } else if decision.as_deref() == Some("deny") {
+        "tool approval denied"
+    } else {
+        "invalid or missing tool approval"
+    };
+    let mut result = approval_result_frame(run, call, allowed, reason);
+    if write_socket_frame(stream, &result).is_err() && allowed {
+        allowed = false;
+        reason = "approval result delivery failed";
+        result = approval_result_frame(run, call, false, reason);
+    }
+    Ok(ToolApproval {
+        frames: [request, result],
+        allowed,
+        reason,
+    })
+}
+
+fn approval_result_frame(
+    run: &str,
+    call: &object::executor::AgentToolCall,
+    allowed: bool,
+    reason: &str,
+) -> String {
+    serde_json::json!({
+        "type": "approval_result",
+        "run": run,
+        "id": call.id,
+        "name": call.name,
+        "decision": if allowed { "allow_once" } else { "deny" },
+        "reason": reason
+    })
+    .to_string()
 }
 
 fn normalize_observation(value: &str) -> (String, bool) {
@@ -670,11 +795,12 @@ pub(crate) fn run_agent_executable_streaming(
                 }
                 let value: Value = serde_json::from_str(&line)
                     .map_err(|_error| SocketRuntimeError::InvalidAgentOutput)?;
-                if request.envelope.is_some()
-                    && matches!(
-                        event_type(&line).as_deref(),
-                        Some("start" | "error" | "done")
-                    )
+                let frame_type = event_type(&line);
+                if matches!(
+                    frame_type.as_deref(),
+                    Some("approval_request" | "approval_result")
+                ) || request.envelope.is_some()
+                    && matches!(frame_type.as_deref(), Some("start" | "error" | "done"))
                 {
                     terminate_agent_process_group(&mut child);
                     let _ignored = child.wait();
@@ -696,9 +822,8 @@ pub(crate) fn run_agent_executable_streaming(
                     yielded_tool_call = Some((line, tool_call));
                     continue;
                 }
-                saw_terminal_lifecycle |=
-                    matches!(event_type(&line).as_deref(), Some("error" | "done"));
-                if event_type(&line).as_deref() != Some("start") {
+                saw_terminal_lifecycle |= matches!(frame_type.as_deref(), Some("error" | "done"));
+                if frame_type.as_deref() != Some("start") {
                     write_while_connected(&mut client_connected, || {
                         write_socket_frame(stream, &line)
                     })?;
@@ -966,6 +1091,63 @@ pub(crate) fn prompt_quoted(value: &str) -> String {
 #[cfg(test)]
 mod completion_tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::net::Shutdown;
+
+    fn approval_call() -> object::executor::AgentToolCall {
+        object::executor::AgentToolCall {
+            id: "call-1".to_owned(),
+            name: "example.echo".to_owned(),
+            args: vec![OsString::from("one")],
+        }
+    }
+
+    #[test]
+    fn approval_response_denies_eof_malformed_mismatch_and_timeout()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for response in [
+            "",
+            "not-json\n",
+            "{\"op\":\"approve\",\"run\":\"wrong\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
+            "{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"wrong\",\"decision\":\"allow_once\"}\n",
+            "{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"deny\"}\n",
+        ] {
+            let (mut client, mut server) = UnixStream::pair()?;
+            client.write_all(response.as_bytes())?;
+            client.shutdown(Shutdown::Write)?;
+            let approval = request_tool_approval(&mut server, "run-1", &approval_call())
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            assert!(!approval.allowed, "{response:?}");
+        }
+        let (_client, mut server) = UnixStream::pair()?;
+        server.set_read_timeout(Some(Duration::from_millis(10)))?;
+        let approval = request_tool_approval(&mut server, "run-1", &approval_call())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        assert!(!approval.allowed);
+        Ok(())
+    }
+
+    #[test]
+    fn approval_response_denies_replayed_allow_once_for_previous_call()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (mut client, mut server) = UnixStream::pair()?;
+        client.write_all(
+            b"{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n\
+              {\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
+        )?;
+        client.shutdown(Shutdown::Write)?;
+
+        let first = request_tool_approval(&mut server, "run-1", &approval_call())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        assert!(first.allowed);
+
+        let mut second_call = approval_call();
+        second_call.id = "call-2".to_owned();
+        let replayed = request_tool_approval(&mut server, "run-1", &second_call)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        assert!(!replayed.allowed);
+        Ok(())
+    }
 
     fn completion_root(name: &str) -> PathBuf {
         env::temp_dir().join(format!("cfs-{name}-{}", std::process::id()))

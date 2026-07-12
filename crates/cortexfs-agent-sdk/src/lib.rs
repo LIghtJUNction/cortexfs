@@ -295,7 +295,13 @@ impl<W: Write> AgentEmitter<W> {
             .ok_or_else(|| AgentError::invalid("agent event requires string type"))?;
         if matches!(
             event_type,
-            "start" | "done" | "error" | "tool_call" | "tool_result"
+            "start"
+                | "done"
+                | "error"
+                | "tool_call"
+                | "tool_result"
+                | "approval_request"
+                | "approval_result"
         ) || has_tool_result
         {
             return Err(AgentError::invalid("agent event type is reserved"));
@@ -924,7 +930,15 @@ mod tests {
                 .event(json!({ "type": "usage", "run": "spoofed" }))
                 .is_ok()
         );
-        for event_type in ["start", "done", "error", "tool_call", "tool_result"] {
+        for event_type in [
+            "start",
+            "done",
+            "error",
+            "tool_call",
+            "tool_result",
+            "approval_request",
+            "approval_result",
+        ] {
             let error = emitter.event(json!({ "type": event_type }));
             assert!(matches!(error, Err(ref error) if error.code() == "EINVAL"));
         }

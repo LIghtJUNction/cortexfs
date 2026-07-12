@@ -112,6 +112,9 @@ pub(crate) fn format_event_stream_issues(issues: &[EventStreamIssue]) -> String 
             EventStreamIssue::InvalidToolCall(line) => {
                 write!(output, "invalid tool call line {line}")
             }
+            EventStreamIssue::InvalidApproval(line) => {
+                write!(output, "invalid approval line {line}")
+            }
             EventStreamIssue::InvalidAgentLifecycle(line) => {
                 write!(output, "invalid agent lifecycle line {line}")
             }

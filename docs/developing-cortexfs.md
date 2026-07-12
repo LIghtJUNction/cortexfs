@@ -119,9 +119,15 @@ tool SDK 走结构化 JSON 和进程内调用。两者共享同一个 `.d/schema
 外部 executable plugin 使用严格的 `cortexfs.object/v1` manifest 安装：
 
 ```bash
+ctx object check tool.manifest.json
+ctx object check agent.manifest.json
 ctx object install --source "$CTX_SOURCE" tool.manifest.json --tier user
 ctx object install --source "$CTX_SOURCE" agent.manifest.json --tier system
 ```
+
+`check` 不需要 source tree，也不写任何 backing state；它先执行与安装发布前相同的 manifest、
+control、artifact 类型、可执行权限和 SHA-256 校验。只有检查通过并明确选择安装后，才提供
+`--source` 执行写入。
 
 `--source` 是唯一可写的 durable backing tree；`/ctx` 与 `--root` 只是 ABI projection，
 不能作为安装目标。tool 的 user tier 是 `home/<effective-uid>/tool`，system tier 是

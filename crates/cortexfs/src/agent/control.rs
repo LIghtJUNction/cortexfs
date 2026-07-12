@@ -28,6 +28,8 @@ pub enum AgentControlKind {
     Status,
     /// `agent/<name>.d/pid`: runtime process id, when running.
     Pid,
+    /// `agent/<name>.d/approval`: hosted direct-native approval mode.
+    Approval,
 }
 
 impl AgentControlKind {
@@ -44,6 +46,7 @@ impl AgentControlKind {
             "life" => Some(Self::Life),
             "status" => Some(Self::Status),
             "pid" => Some(Self::Pid),
+            "approval" => Some(Self::Approval),
             _ => None,
         }
     }
@@ -70,9 +73,10 @@ pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentCont
         AgentControlKind::Owner | AgentControlKind::Uid | AgentControlKind::Gid => {
             inspect_required_agent_number_control(content)
         }
-        AgentControlKind::Iso | AgentControlKind::Life | AgentControlKind::Status => {
-            inspect_agent_vocab_control(kind, content)
-        }
+        AgentControlKind::Iso
+        | AgentControlKind::Life
+        | AgentControlKind::Status
+        | AgentControlKind::Approval => inspect_agent_vocab_control(kind, content),
     }
 }
 
@@ -184,6 +188,7 @@ pub(crate) fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
                 "start" | "ready" | "busy" | "idle" | "stopping" | "dead"
             )
         }
+        AgentControlKind::Approval => matches!(value, "auto" | "ask"),
         AgentControlKind::Owner
         | AgentControlKind::Uid
         | AgentControlKind::Gid

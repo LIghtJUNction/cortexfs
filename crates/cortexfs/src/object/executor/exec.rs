@@ -38,6 +38,21 @@ pub(crate) fn execute_agent_tool_call_with(
     config: &AgentToolExecutionConfig<'_>,
     tool_call: &AgentToolCall,
 ) -> Result<String, String> {
+    prepare_agent_tool_call(config, tool_call)?.execute(config)
+}
+
+pub(crate) struct PreparedAgentToolCall {
+    command: Command,
+    home_dir: fs::File,
+    tool_executable: fs::File,
+    name: String,
+    approval: cortexfs::AgentApprovalMode,
+}
+
+pub(crate) fn prepare_agent_tool_call(
+    config: &AgentToolExecutionConfig<'_>,
+    tool_call: &AgentToolCall,
+) -> Result<PreparedAgentToolCall, String> {
     let view = derive_agent_runtime_view(config.ctx_root, config.agent)
         .map_err(|error| format!("cannot derive agent authority: {}", error.errno()))?;
     let network_allowed = view.policy().allows(
@@ -124,15 +139,38 @@ pub(crate) fn execute_agent_tool_call_with(
         ctx_home_target: &ctx_home_target,
         control: control.as_ref(),
     }));
-    let output = if let Some((session_dir, run)) = config.cancel {
-        run_agent_tool_process_cancellable(&mut command, || {
-            crate::agent_run_cancelled(session_dir, run)
-        })
-    } else {
-        run_agent_tool_process(&mut command)
+    Ok(PreparedAgentToolCall {
+        command,
+        home_dir,
+        tool_executable,
+        name: tool_call.name.clone(),
+        approval: view.approval(),
+    })
+}
+
+impl PreparedAgentToolCall {
+    pub(crate) const fn approval(&self) -> cortexfs::AgentApprovalMode {
+        self.approval
     }
-    .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
-    drop(home_dir);
+    pub(crate) fn execute(
+        mut self,
+        config: &AgentToolExecutionConfig<'_>,
+    ) -> Result<String, String> {
+        let output = if let Some((session_dir, run)) = config.cancel {
+            run_agent_tool_process_cancellable(&mut self.command, || {
+                crate::agent_run_cancelled(session_dir, run)
+            })
+        } else {
+            run_agent_tool_process(&mut self.command)
+        }
+        .map_err(|error| format!("cannot run tool:{}: {error}", self.name))?;
+        drop(self.home_dir);
+        drop(self.tool_executable);
+        finish_agent_tool_output(&output)
+    }
+}
+
+fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed = parse_tool_stdout(&stdout).map_err(|error| trim_tool_result(&error))?;
     let mut result = match parsed {

@@ -130,7 +130,7 @@ fn buffered_agent_renderer_rejects_too_much_output() {
 fn streaming_agent_renderer_rejects_oversized_frame() {
     let input = format!("{}\n", "x".repeat(MAX_SOCKET_FRAME_BYTES));
 
-    let rendered = render_agent_event_lines(std::io::Cursor::new(input), None);
+    let rendered = render_agent_event_lines(std::io::Cursor::new(input), None, None);
 
     assert!(matches!(rendered, Err(ref error) if error.message.contains("cannot read socket response")));
 }
@@ -140,7 +140,7 @@ fn streaming_agent_renderer_rejects_too_much_response_data() {
     let frame = "{\"type\":\"ignored\"}\n";
     let input = frame.repeat(MAX_AGENT_RESPONSE_BYTES / frame.len() + 1);
 
-    let rendered = render_agent_event_lines(std::io::Cursor::new(input), None);
+    let rendered = render_agent_event_lines(std::io::Cursor::new(input), None, None);
 
     assert!(matches!(rendered, Err(ref error) if error.message.contains("agent response exceeds")));
 }
@@ -149,7 +149,7 @@ fn streaming_agent_renderer_rejects_too_much_response_data() {
 fn streaming_agent_renderer_rejects_too_many_events() {
     let input = "{\"type\":\"ignored\"}\n".repeat(MAX_AGENT_EVENTS + 1);
 
-    let rendered = render_agent_event_lines(std::io::Cursor::new(input), None);
+    let rendered = render_agent_event_lines(std::io::Cursor::new(input), None, None);
 
     assert!(matches!(rendered, Err(ref error) if error.message.contains("agent response exceeds")));
 }
@@ -305,6 +305,7 @@ fn interruptible_buffered_agent_request_sends_cancel_for_active_run() {
         "{\"op\":\"send\",\"id\":\"run-1\"}\n",
         false,
         Some((&guard, "{\"op\":\"cancel\",\"id\":\"run-1\"}\n", "run-1")),
+        &[],
     );
 
     assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));

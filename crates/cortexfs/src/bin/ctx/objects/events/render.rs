@@ -14,7 +14,7 @@ pub(crate) fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliErr
         })?;
     let reader = io::BufReader::new(stream);
     Ok(ExitCode::from(
-        render_agent_event_lines(reader, None)?.exit_code,
+        render_agent_event_lines(reader, None, None)?.exit_code,
     ))
 }
 
@@ -23,12 +23,116 @@ pub(crate) fn render_agent_events_interruptible(
     interrupt: &AtomicBool,
 ) -> Result<AgentEventRender, CliError> {
     let reader = io::BufReader::new(stream);
-    render_agent_event_lines(reader, Some(interrupt))
+    render_agent_event_lines(reader, Some(interrupt), None)
 }
 
+pub(crate) fn render_agent_events_approving(
+    stream: UnixStream,
+    writer: UnixStream,
+    approvals: &[String],
+) -> Result<ExitCode, CliError> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot configure socket progress: {error}"))
+        })?;
+    let reader = io::BufReader::new(stream);
+    let mut responder = ApprovalResponder::new(writer, approvals)?;
+    Ok(ExitCode::from(
+        render_agent_event_lines(reader, None, Some(&mut responder))?.exit_code,
+    ))
+}
+
+pub(crate) fn render_agent_events_interruptible_approving(
+    stream: UnixStream,
+    interrupt: &AtomicBool,
+    approvals: &[String],
+) -> Result<AgentEventRender, CliError> {
+    if approvals.is_empty() {
+        return render_agent_events_interruptible(stream, interrupt);
+    }
+    let writer = stream
+        .try_clone()
+        .map_err(|error| CliError::unavailable(format!("cannot clone approval socket: {error}")))?;
+    let reader = io::BufReader::new(stream);
+    let mut responder = ApprovalResponder::new(writer, approvals)?;
+    render_agent_event_lines(reader, Some(interrupt), Some(&mut responder))
+}
+
+pub(crate) struct ApprovalResponder {
+    writer: UnixStream,
+    allowed: std::collections::BTreeSet<String>,
+}
+
+impl ApprovalResponder {
+    fn new(writer: UnixStream, approvals: &[String]) -> Result<Self, CliError> {
+        let mut allowed = std::collections::BTreeSet::new();
+        for name in approvals {
+            require_cli_name("approved tool name", name)?;
+            allowed.insert(name.clone());
+        }
+        Ok(Self { writer, allowed })
+    }
+
+    fn respond(&mut self, value: &serde_json::Value) -> Result<(), CliError> {
+        let object = value
+            .as_object()
+            .filter(|object| object.len() == 5)
+            .ok_or_else(|| CliError::unavailable("invalid approval request"))?;
+        let field = |name| object.get(name).and_then(serde_json::Value::as_str);
+        let run = field("run").ok_or_else(|| CliError::unavailable("invalid approval run"))?;
+        let id = field("id").ok_or_else(|| CliError::unavailable("invalid approval id"))?;
+        let name = field("name").ok_or_else(|| CliError::unavailable("invalid approval name"))?;
+        if field("type") != Some("approval_request")
+            || value
+                .get("args")
+                .and_then(serde_json::Value::as_array)
+                .is_none()
+        {
+            return Err(CliError::unavailable("invalid approval request"));
+        }
+        let decision = approval_decision(&self.allowed, name);
+        let response = serde_json::json!({
+            "op":"approve", "run":run, "id":id, "decision":decision
+        });
+        writeln!(self.writer, "{response}")
+            .and_then(|()| self.writer.flush())
+            .map_err(|error| CliError::unavailable(format!("cannot write approval: {error}")))
+    }
+}
+
+fn approval_decision(
+    allowed: &std::collections::BTreeSet<String>,
+    requested: &str,
+) -> &'static str {
+    if allowed.contains(requested) {
+        "allow_once"
+    } else {
+        "deny"
+    }
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_approval_allowlist_matches_exact_tool_name() {
+        let allowed = std::collections::BTreeSet::from(["example.echo".to_owned()]);
+        assert_eq!(approval_decision(&allowed, "example.echo"), "allow_once");
+        assert_eq!(approval_decision(&allowed, "example.echo.extra"), "deny");
+        assert_eq!(approval_decision(&allowed, "Example.echo"), "deny");
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "single-pass renderer keeps ordered socket event handling auditable"
+)]
 pub(crate) fn render_agent_event_lines(
     mut reader: impl BufRead,
     interrupt: Option<&AtomicBool>,
+    mut approval: Option<&mut ApprovalResponder>,
 ) -> Result<AgentEventRender, CliError> {
     let mut saw_delta = false;
     let mut usage_totals = AgentUsageTotals::default();
@@ -95,7 +199,14 @@ pub(crate) fn render_agent_event_lines(
             print_line(line)?;
             continue;
         };
-        match value.get("type").and_then(serde_json::Value::as_str) {
+        let event_type = value.get("type").and_then(serde_json::Value::as_str);
+        if event_type == Some("approval_request") {
+            if let Some(responder) = approval.as_mut() {
+                responder.respond(&value)?;
+            }
+            continue;
+        }
+        match event_type {
             Some("delta" | "reasoning_delta") => {
                 if let Some(text) = json_text_field(&value) {
                     print_terminal_text(text)?;

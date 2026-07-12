@@ -83,10 +83,13 @@ life    lifecycle ownership, default owned
 system.md user-editable agent instructions/persona. This is prompt text, not authority.
 prompt.template.md user-editable system prompt template. This is prompt text, not authority.
 abi     executable-agent launch ABI: argv-v1 or sdk-envelope-v1
+approval hosted SDK direct-native mode: auto or ask; missing means auto
 ```
 
 The `abi` control is optional. Its absence means the exact legacy `argv-v1`
 contract; it must not be inferred from executable contents or other controls.
+`approval=ask` requires `abi=sdk-envelope-v1`; legacy argv agents cannot request
+this host-mediated exchange.
 
 The optional `tools` control declares the agent's static direct-native tool set.
 It is empty when missing or empty and otherwise contains one canonical tool
@@ -100,6 +103,11 @@ direct execution = declared name AND CTX_PATH hit AND agent policy AND tool poli
 Every call re-derives this intersection and opens the selected executable
 without following symlinks. `tsh` load/pin cache state is dynamic prompt
 context only and never admits a direct-native call.
+
+For hosted SDK agents in `ask` mode, approval occurs after this full authority
+intersection and nofollow open, before process spawn. It is an additional
+single-call gate, not an authority grant and not Codex-equivalent coverage for
+all operations. Clients without an approval handler fail closed.
 
 Multiple agents may share one Linux uid. The uid expresses the user boundary.
 The label expresses the agent security boundary.

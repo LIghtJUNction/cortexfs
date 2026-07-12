@@ -129,6 +129,20 @@ typed envelope. The host alone emits the logical run's final `done`.
 Agent-originated results, malformed or multiple calls, and frames after a
 yielded call are invalid output.
 
+The optional `agent/<name>.d/approval` control is `auto` when absent and accepts
+`auto` or `ask`. `ask` is valid only with `sdk-envelope-v1`. After the host has
+completed direct-native declaration, path, agent/tool policy, Linux/mount, and
+nofollow executable checks—but before spawn—it emits a bounded
+`approval_request`. It reads exactly one bounded response on the same socket:
+
+```json
+{"op":"approve","run":"run-1","id":"call-1","decision":"allow_once"}
+```
+
+Only `allow_once` executes that prepared call. `deny`, EOF, timeout, malformed,
+or mismatched responses fail closed and become host-owned approval and tool
+result facts. Agent executables cannot emit approval frames.
+
 The root-authoritative system socket accepts the agent owner UID or UID 0 for
 internal child dispatch and stop. This UID 0 exception does not apply to the
 receipt-bound per-run capability socket, which remains owner-UID only.

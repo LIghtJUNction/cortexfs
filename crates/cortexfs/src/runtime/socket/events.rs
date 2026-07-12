@@ -227,6 +227,31 @@ pub(crate) fn record_tool_results_from_event_frames(
     Ok(())
 }
 
+pub(crate) fn record_approval_frames(
+    session_dir: &Path,
+    run_id: &str,
+    frames: &[String],
+) -> Result<(), SocketSessionRecordError> {
+    let approval = frames
+        .iter()
+        .filter(|frame| {
+            serde_json::from_str::<Value>(frame).is_ok_and(|value| {
+                value.get("run").and_then(Value::as_str) == Some(run_id)
+                    && matches!(
+                        value.get("type").and_then(Value::as_str),
+                        Some("approval_request" | "approval_result")
+                    )
+            })
+        })
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if approval.is_empty() {
+        return Ok(());
+    }
+    require_socket_session_files(session_dir)?;
+    append_session_lines(session_dir, "events.jsonl", &approval)
+}
+
 pub(crate) fn tool_name_for_call<'a>(
     calls: &'a [(String, String)],
     tool_call_id: &str,

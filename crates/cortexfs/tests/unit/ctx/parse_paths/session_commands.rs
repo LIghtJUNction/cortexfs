@@ -193,6 +193,7 @@ fn parses_agent_session_client_commands() {
             session: Some(ref session),
             ref input,
             raw: false,
+            ..
         })) if name == "coder" && session == "test" && input == "hello world"
     ));
 
@@ -203,6 +204,7 @@ fn parses_agent_session_client_commands() {
             ref name,
             session: None,
             raw: true,
+            ..
         })) if name == "coder"
     ));
 
@@ -213,6 +215,7 @@ fn parses_agent_session_client_commands() {
             ref name,
             session: Some(ref session),
             raw: false,
+            ..
         })) if name == "coder" && session == "focus"
     ));
 
@@ -225,6 +228,33 @@ fn parses_agent_session_client_commands() {
             run: Some(ref run),
             raw: false,
         })) if name == "coder" && session == "test" && run == "run-1"
+    ));
+}
+
+#[test]
+fn agent_send_rejects_invalid_approval_during_parse() {
+    let command = cmd!(
+        "agent",
+        "send",
+        "coder",
+        "--approve",
+        "bad/name",
+        "hello"
+    );
+
+    assert!(matches!(
+        command,
+        Err(ref error) if error.code == 2 && error.message.contains("approved tool name")
+    ));
+}
+
+#[test]
+fn agent_chat_and_repl_share_invalid_approval_parse_validation() {
+    let command = cmd!("agent", "chat", "coder", "--approve", "bad/name");
+
+    assert!(matches!(
+        command,
+        Err(ref error) if error.code == 2 && error.message.contains("approved tool name")
     ));
 }
 
@@ -303,6 +333,7 @@ fn agent_send_prompt_root_words_do_not_override_selected_root() {
                 session: None,
                 raw: false,
                 ref input,
+                ..
             }),
         }) if parsed_root == root
             && name == "coder"
