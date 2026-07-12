@@ -6,7 +6,7 @@ mod tests {
     use std::io;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
-    use std::process::Command;
+    use std::process::{Command, ExitStatus};
 
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -68,6 +68,17 @@ mod tests {
             .collect::<io::Result<Vec<_>>>()?;
         state.sort_by(|left, right| left.0.cmp(&right.0));
         Ok(state)
+    }
+
+    fn run_ctx_single_line(
+        command: &mut Command,
+    ) -> Result<(ExitStatus, String, String), Box<dyn std::error::Error>> {
+        let output = command.output()?;
+        let stdout = String::from_utf8(output.stdout)?;
+        let stderr = String::from_utf8(output.stderr)?;
+        assert!(stdout.lines().count() <= 1);
+        assert!(stderr.lines().count() <= 1);
+        Ok((output.status, stdout, stderr))
     }
 
     #[test]
@@ -299,6 +310,129 @@ mod tests {
             .args(["tool", "example.echo", "--tier", "system"])
             .output()?;
         assert_eq!(output.status.code(), Some(69));
+        Ok(())
+    }
+
+    #[test]
+    fn v2_check_install_inspect_and_incompatible_rejection()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("source");
+        let tool_dir = source.join("tool");
+        fs::create_dir_all(&tool_dir)?;
+        let artifact = root.path().join("echo-tool");
+        let artifact_bytes = b"#!/bin/sh\nprintf ok\n";
+        fs::write(&artifact, artifact_bytes)?;
+        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755))?;
+
+        let mut manifest = tool_manifest(&artifact, &sha256(artifact_bytes));
+        let fields = manifest.as_object_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "manifest is not an object")
+        })?;
+        fields.insert("schema".to_owned(), json!("cortexfs.object/v2"));
+        fields.insert("version".to_owned(), json!("1.2.3"));
+        let requirement = format!("={}", env!("CARGO_PKG_VERSION"));
+        fields.insert(
+            "compatibility".to_owned(),
+            json!({ "cortexfs": requirement }),
+        );
+        let manifest_path = root.path().join("tool-v2.json");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
+
+        let before = (state(&source)?, state(&tool_dir)?);
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "check"])
+                .arg(&manifest_path),
+        )?;
+        assert!(status.success(), "ctx object check failed: {stderr}");
+        assert_eq!(stdout, "valid tool/example.echo\n");
+        assert_eq!((state(&source)?, state(&tool_dir)?), before);
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "install", "--source"])
+                .arg(&source)
+                .arg(&manifest_path)
+                .args(["--tier", "system"]),
+        )?;
+        assert!(status.success(), "ctx object install failed: {stderr}");
+        assert_eq!(stdout, "installed tool/example.echo\n");
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "uninstall", "--source"])
+                .arg(&source)
+                .args(["tool", "example.echo", "--tier", "system"]),
+        )?;
+        assert!(
+            status.success(),
+            "ctx object uninstall dry-run failed: {stderr}"
+        );
+        assert!(stdout.starts_with("would-uninstall tool/example.echo tier=system "));
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "inspect", "--source"])
+                .arg(&source)
+                .args(["tool", "example.echo", "--tier", "system"]),
+        )?;
+        assert!(status.success(), "ctx object inspect failed: {stderr}");
+        assert!(stdout.contains(&format!(
+            "schema=cortexfs.object/v2 version=1.2.3 requires-cortexfs={requirement}"
+        )));
+
+        let control = tool_dir.join("example.echo.d");
+        let before = (state(&tool_dir)?, state(&control)?);
+        let compatibility = manifest
+            .pointer_mut("/compatibility/cortexfs")
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "compatibility is missing")
+            })?;
+        *compatibility = json!(">=99.0.0");
+        let incompatible_path = root.path().join("tool-v2-incompatible.json");
+        fs::write(&incompatible_path, serde_json::to_vec(&manifest)?)?;
+        let (status, _stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "check"])
+                .arg(&incompatible_path),
+        )?;
+        assert_eq!(status.code(), Some(2));
+        assert!(stderr.contains(">=99.0.0"));
+        assert_eq!((state(&tool_dir)?, state(&control)?), before);
+
+        let (status, _stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "install", "--source"])
+                .arg(&source)
+                .arg(&incompatible_path)
+                .args(["--tier", "system"]),
+        )?;
+        assert_eq!(status.code(), Some(2));
+        assert!(stderr.contains(">=99.0.0"));
+        assert_eq!((state(&tool_dir)?, state(&control)?), before);
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "uninstall", "--yes", "--source"])
+                .arg(&source)
+                .args(["tool", "example.echo", "--tier", "system"]),
+        )?;
+        assert!(
+            status.success(),
+            "ctx object uninstall --yes failed: {stderr}"
+        );
+        assert!(stdout.starts_with("uninstalled tool/example.echo tier=system "));
+        for path in [tool_dir.join("example.echo"), control] {
+            let Err(error) = fs::symlink_metadata(&path) else {
+                return Err(io::Error::other(format!(
+                    "uninstalled pathname still exists: {}",
+                    path.display()
+                ))
+                .into());
+            };
+            assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        }
         Ok(())
     }
 }

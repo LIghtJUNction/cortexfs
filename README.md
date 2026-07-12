@@ -412,9 +412,12 @@ tsh> pin bash
 tsh> loads
 ```
 
-Executable tool plugins can be installed from a hash-bound
-`cortexfs.object/v1` manifest and run through the normal `CTX_PATH` and policy
-path. Installation requires the durable backing tree explicitly:
+New executable tool plugins should use a hash-bound `cortexfs.object/v2`
+manifest with an object SemVer `version` and a Cargo-style
+`compatibility.cortexfs` requirement. `cortexfs.object/v1` is legacy and omits
+both fields. Installation remains new-object-only; v2 defines no upgrade or
+replacement. Plugins run through the normal `CTX_PATH` and policy path, and
+installation requires the durable backing tree explicitly:
 
 ```bash
 ctx object install --source "$CTX_SOURCE" tool.manifest.json --tier user

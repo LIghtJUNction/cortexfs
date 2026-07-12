@@ -526,6 +526,7 @@ dependencies = [
  "parquet",
  "portable-pty",
  "rustyline",
+ "semver",
  "serde",
  "serde_json",
  "serde_path_to_error",

@@ -281,8 +281,18 @@ pub(crate) fn run_object_inspect(
                 }
             }
         })?;
+    let compatibility = inspected
+        .object_version()
+        .zip(inspected.cortexfs_requirement())
+        .map_or_else(String::new, |(version, requirement)| {
+            format!(
+                " version={} requires-cortexfs={}",
+                terminal_safe_field(version),
+                terminal_safe_field(requirement)
+            )
+        });
     print_line(&format!(
-        "installed {}/{} tier={} schema={} sha256={} executable={}:{} control={}:{}",
+        "installed {}/{} tier={} schema={}{compatibility} sha256={} executable={}:{} control={}:{}",
         terminal_safe_text(inspected.class().as_str()),
         terminal_safe_text(inspected.name()),
         terminal_safe_text(inspected.tier().as_str()),

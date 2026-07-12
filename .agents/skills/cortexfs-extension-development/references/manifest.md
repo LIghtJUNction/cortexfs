@@ -1,10 +1,14 @@
-# Executable Object Manifest v1
+# Executable Object Manifests
 
-Use this host-side manifest shape:
+Use v2 for a new host-side manifest:
 
 ```json
 {
-  "schema": "cortexfs.object/v1",
+  "schema": "cortexfs.object/v2",
+  "version": "0.1.0",
+  "compatibility": {
+    "cortexfs": ">=0.1.7, <0.2.0"
+  },
   "class": "tool",
   "name": "project.echo",
   "executable": {
@@ -14,6 +18,15 @@ Use this host-side manifest shape:
   "controls": {}
 }
 ```
+
+`version` must be a SemVer. `compatibility.cortexfs` must be a Cargo-style
+SemVer requirement. `ctx object check` and `ctx object install` match it
+against the CortexFS package version compiled into the current `ctx`. A
+mismatch is invalid input, exits 2, and performs no writes.
+
+The legacy v1 shape is strict: use `schema: cortexfs.object/v1` and omit both
+`version` and `compatibility`. Supplying either field to v1 is invalid; no
+cross-version inference or fallback occurs.
 
 Resolve a relative executable path against the manifest directory. Keep the
 install tier outside the manifest and pass it explicitly to the CLI.
@@ -47,8 +60,8 @@ installer initializes the three runtime control files but never creates a
 socket.
 
 Install agents with `--tier system`. The root ABI still defines user agents at
-`home/<uid>/agent`, but `cortexfs.object/v1` cannot carry tier identity into the
-root socket runtime, so the v1 installer rejects `agent --tier user`.
+`home/<uid>/agent`, but neither manifest schema carries tier identity into the
+root socket runtime, so the installer rejects `agent --tier user`.
 
 ## Publication semantics
 
@@ -60,5 +73,12 @@ Success or failure may retain a hidden `.cortexfs-install-*` safety residue;
 leave it for explicit future cleanup. Preserve an existing object byte-for-byte
 on collision.
 
+A `cortexfs.object-install/v2` receipt records `object_version` and
+`cortexfs_requirement`; a `cortexfs.object-install/v1` receipt records neither.
+Inspection exposes these compatibility facts. They do not grant authority or
+start a runtime, and a later CortexFS mismatch does not prevent
+receipt-managed uninstall.
+
 Treat a multi-object extension as an ordered sequence of single-object
-installs. Do not claim bundle atomicity.
+installs. Do not claim bundle atomicity. Installation is new-object-only;
+manifest v2 does not define upgrade or replacement.

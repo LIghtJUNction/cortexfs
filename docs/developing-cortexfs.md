@@ -116,7 +116,10 @@ tool 是可执行能力端点。用户看到的是：
 tool SDK 走结构化 JSON 和进程内调用。两者共享同一个 `.d/schema`、`.d/policy` 和可见性
 规则。
 
-外部 executable plugin 使用严格的 `cortexfs.object/v1` manifest 安装：
+外部 executable plugin 的新扩展默认使用严格的 `cortexfs.object/v2`
+manifest；v2 必须同时提供 object SemVer `version` 和 Cargo-style
+`compatibility.cortexfs` SemVer requirement。`cortexfs.object/v1` 仅用于
+legacy manifest，且必须完全省略 `version` 和 `compatibility`：
 
 ```bash
 ctx object check tool.manifest.json
@@ -126,16 +129,18 @@ ctx object install --source "$CTX_SOURCE" agent.manifest.json --tier system
 ```
 
 `check` 不需要 source tree，也不写任何 backing state；它先执行与安装发布前相同的 manifest、
-control、artifact 类型、可执行权限和 SHA-256 校验。只有检查通过并明确选择安装后，才提供
-`--source` 执行写入。
+control、artifact 类型、可执行权限和 SHA-256 校验。对 v2，`check` 和 `install`
+都会将 CortexFS compatibility mismatch 视为 invalid input：退出码为 2 且零写入。
+只有检查通过并明确选择安装后，才提供 `--source` 执行写入。
 
 `--source` 是唯一可写的 durable backing tree；`/ctx` 与 `--root` 只是 ABI projection，
 不能作为安装目标。tool 的 user tier 是 `home/<effective-uid>/tool`，system tier 是
-`tool`。v1
-installer 的 agent 只支持 system tier `/ctx/agent`；root ABI 保留了
+`tool`。两种 manifest schema 的 agent 都只支持 system tier
+`/ctx/agent`；root ABI 保留了
 `/ctx/home/<effective-uid>/agent` user-agent tier，但在 socket runtime 能安全携带 tier
-identity 之前，`agent --tier user` 会明确拒绝。安装只新建对象、校验 executable
-SHA-256，不修改任何 agent policy；它初始化规范要求的 status/pid/log，但不创建
+identity 之前，`agent --tier user` 会明确拒绝。安装只新建对象；v2 不定义
+upgrade/replace，需要升级时应使用新对象名，直到独立的 replace contract 落地。安装会校验
+executable SHA-256，不修改任何 agent policy；它初始化规范要求的 status/pid/log，但不创建
 socket。SDK 的 `DynamicTool` loader
 目前尚未被 core runtime 消费，不应把 metadata cache 描述成已完成的 dlopen 常驻实现。
 

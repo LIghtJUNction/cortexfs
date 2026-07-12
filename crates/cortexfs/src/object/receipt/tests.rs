@@ -1,7 +1,26 @@
-use super::*;
-use std::io;
+use super::{
+    EntryKind, EntryReceipt, INSTALL_RECEIPT_FILE, InstallReceiptData, inspect_object,
+    inspect_object_with, receipt_for, write_install_receipt,
+};
+use crate::ObjectClass;
+use crate::object::install::{
+    InstallError, InstallTier, OBJECT_MANIFEST_SCHEMA_V1, OBJECT_MANIFEST_SCHEMA_V2,
+};
+use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
+use std::fs;
+use std::io::{self, Write};
+use std::os::unix::fs::PermissionsExt;
 
 fn fixture() -> Result<(tempfile::TempDir, EntryReceipt, EntryReceipt), InstallError> {
+    fixture_with_receipt(OBJECT_MANIFEST_SCHEMA_V1, None, None)
+}
+
+fn fixture_with_receipt(
+    object_schema: &str,
+    object_version: Option<&str>,
+    cortexfs_requirement: Option<&str>,
+) -> Result<(tempfile::TempDir, EntryReceipt, EntryReceipt), InstallError> {
     let root = tempfile::tempdir().map_err(|error| InstallError::unavailable(error.to_string()))?;
     let class_path = root.path().join("tool");
     fs::create_dir_all(&class_path)
@@ -33,7 +52,9 @@ fn fixture() -> Result<(tempfile::TempDir, EntryReceipt, EntryReceipt), InstallE
             class: ObjectClass::Tool,
             name: "example.echo",
             tier: InstallTier::System,
-            object_schema: OBJECT_MANIFEST_SCHEMA_V1,
+            object_schema,
+            object_version,
+            cortexfs_requirement,
             sha256: &digest,
             control: control_receipt,
             executable: executable_receipt,
@@ -43,8 +64,38 @@ fn fixture() -> Result<(tempfile::TempDir, EntryReceipt, EntryReceipt), InstallE
 }
 
 #[test]
+fn inspect_roundtrips_v2_receipt_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    let (root, _control, _executable) =
+        fixture_with_receipt(OBJECT_MANIFEST_SCHEMA_V2, Some("1.2.3"), Some(">=99.0.0"))?;
+    let inspected = inspect_object(
+        root.path(),
+        ObjectClass::Tool,
+        "example.echo",
+        InstallTier::System,
+    )?;
+    assert_eq!(
+        (
+            inspected.object_schema(),
+            inspected.object_version(),
+            inspected.cortexfs_requirement(),
+        ),
+        (OBJECT_MANIFEST_SCHEMA_V2, Some("1.2.3"), Some(">=99.0.0"),)
+    );
+    Ok(())
+}
+
+#[test]
 fn inspect_verifies_receipt_identity_and_digest() -> Result<(), Box<dyn std::error::Error>> {
     let (root, control, executable) = fixture()?;
+    let receipt: serde_json::Value = serde_json::from_slice(&fs::read(
+        root.path()
+            .join("tool/example.echo.d")
+            .join(INSTALL_RECEIPT_FILE),
+    )?)?;
+    let receipt = receipt.as_object().ok_or("receipt is not an object")?;
+    assert!(
+        !receipt.contains_key("object_version") && !receipt.contains_key("cortexfs_requirement")
+    );
     let inspected = inspect_object(
         root.path(),
         ObjectClass::Tool,
@@ -89,7 +140,7 @@ fn inspect_rejects_unknown_receipt_fields_and_versions() -> Result<(), Box<dyn s
     let schema = receipt
         .get_mut("schema")
         .ok_or("receipt schema is missing")?;
-    *schema = serde_json::Value::String("cortexfs.object-install/v2".to_owned());
+    *schema = serde_json::Value::String("cortexfs.object-install/v3".to_owned());
     fs::write(&path, serde_json::to_vec(&receipt)?)?;
     assert!(
         inspect_object(
@@ -100,6 +151,146 @@ fn inspect_rejects_unknown_receipt_fields_and_versions() -> Result<(), Box<dyn s
         )
         .is_err_and(|error| error.message().contains("unsupported"))
     );
+    Ok(())
+}
+
+#[test]
+fn inspect_rejects_inconsistent_v1_v2_receipt_without_mutation()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (root, _control, _executable) = fixture()?;
+    let executable = root.path().join("tool/example.echo");
+    let control = root.path().join("tool/example.echo.d");
+    let before = fs::read(&executable)?;
+    let path = control.join(INSTALL_RECEIPT_FILE);
+    let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
+    let object = receipt.as_object_mut().ok_or("receipt is not an object")?;
+    object.insert(
+        "object_schema".to_owned(),
+        serde_json::Value::String(OBJECT_MANIFEST_SCHEMA_V2.to_owned()),
+    );
+    object.insert(
+        "object_version".to_owned(),
+        serde_json::Value::String("1.2.3".to_owned()),
+    );
+    object.insert(
+        "cortexfs_requirement".to_owned(),
+        serde_json::Value::String(">=0.1.7, <0.2.0".to_owned()),
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644))?;
+    fs::write(&path, serde_json::to_vec(&receipt)?)?;
+
+    let Err(error) = inspect_object(
+        root.path(),
+        ObjectClass::Tool,
+        "example.echo",
+        InstallTier::System,
+    ) else {
+        return Err(io::Error::other("inconsistent receipt was accepted").into());
+    };
+    assert!(error.message().contains("inconsistent"));
+    assert_eq!(fs::read(executable)?, before);
+    assert!(control.is_dir());
+    Ok(())
+}
+
+#[test]
+fn inspect_rejects_invalid_version_metadata_without_mutation()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (object_schema, field, value, expected) in [
+        (
+            OBJECT_MANIFEST_SCHEMA_V1,
+            "object_version",
+            serde_json::Value::Null,
+            "invalid object install receipt",
+        ),
+        (
+            OBJECT_MANIFEST_SCHEMA_V1,
+            "cortexfs_requirement",
+            serde_json::Value::Null,
+            "invalid object install receipt",
+        ),
+        (
+            OBJECT_MANIFEST_SCHEMA_V2,
+            "object_version",
+            serde_json::Value::Null,
+            "invalid object install receipt",
+        ),
+        (
+            OBJECT_MANIFEST_SCHEMA_V2,
+            "cortexfs_requirement",
+            serde_json::Value::Null,
+            "invalid object install receipt",
+        ),
+        (
+            OBJECT_MANIFEST_SCHEMA_V2,
+            "object_version",
+            serde_json::Value::String("not-semver".to_owned()),
+            "invalid object version",
+        ),
+        (
+            OBJECT_MANIFEST_SCHEMA_V2,
+            "cortexfs_requirement",
+            serde_json::Value::String("not-a-version-requirement".to_owned()),
+            "invalid CortexFS version requirement",
+        ),
+    ] {
+        let (root, control_receipt, executable_receipt) = fixture_with_receipt(
+            object_schema,
+            (object_schema == OBJECT_MANIFEST_SCHEMA_V2).then_some("1.2.3"),
+            (object_schema == OBJECT_MANIFEST_SCHEMA_V2).then_some(">=0.1.7, <0.2.0"),
+        )?;
+        let executable = root.path().join("tool/example.echo");
+        let control = root.path().join("tool/example.echo.d");
+        let receipt_path = control.join(INSTALL_RECEIPT_FILE);
+        let before_executable = fs::read(&executable)?;
+        let mut receipt: serde_json::Value = serde_json::from_slice(&fs::read(&receipt_path)?)?;
+        receipt
+            .as_object_mut()
+            .ok_or("receipt is not an object")?
+            .insert(field.to_owned(), value);
+        fs::set_permissions(&receipt_path, fs::Permissions::from_mode(0o644))?;
+        fs::write(&receipt_path, serde_json::to_vec(&receipt)?)?;
+        let before_receipt = fs::read(&receipt_path)?;
+
+        let Err(error) = inspect_object(
+            root.path(),
+            ObjectClass::Tool,
+            "example.echo",
+            InstallTier::System,
+        ) else {
+            return Err(
+                io::Error::other(format!("invalid {object_schema} {field} was accepted")).into(),
+            );
+        };
+        assert!(
+            error.message().contains(expected),
+            "{object_schema} {field}: {}",
+            error.message()
+        );
+        assert_eq!(
+            fs::read(&executable)?,
+            before_executable,
+            "{object_schema} {field}"
+        );
+        assert_eq!(
+            fs::read(&receipt_path)?,
+            before_receipt,
+            "{object_schema} {field}"
+        );
+
+        let control = crate::support::plain::open_plain_directory(&control)?;
+        let executable = crate::support::plain::open_plain_file(&executable)?;
+        assert_eq!(
+            receipt_for(&control, EntryKind::Directory)?,
+            control_receipt,
+            "{object_schema} {field}"
+        );
+        assert_eq!(
+            receipt_for(&executable, EntryKind::Executable)?,
+            executable_receipt,
+            "{object_schema} {field}"
+        );
+    }
     Ok(())
 }
 
