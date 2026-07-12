@@ -67,6 +67,7 @@ ctx schedule result home/1000/agent/coder/session/default/context/plan.json work
 ctx object check tool.yaml
 ctx object install --source /var/lib/cortexfs/storage/v1-root tool.yaml --tier system
 ctx object inspect --source /var/lib/cortexfs/storage/v1-root tool example.echo --tier system
+ctx object uninstall --source /var/lib/cortexfs/storage/v1-root tool example.echo --tier system
 ctx object residue audit --source /var/lib/cortexfs/storage/v1-root
 ctx object residue cleanup --source /var/lib/cortexfs/storage/v1-root --path tool/.cortexfs-install-123-0 --dev DEV --ino INO
 
@@ -195,13 +196,14 @@ second submission namespace.
 
 Agent lifecycle conveniences exist as thin wrappers:
 
-Executable extensions use host-side check, new-object-only install, and
-read-only inspect commands:
+Executable extensions use host-side check, new-object-only install, read-only
+inspect, and receipt-managed uninstall commands:
 
 ```text
 ctx object check MANIFEST
 ctx object install --source PATH MANIFEST [--tier user|system]
 ctx object inspect --source PATH CLASS NAME [--tier user|system]
+ctx object uninstall --source PATH CLASS NAME [--tier user|system] [--yes]
 ```
 
 `ctx object check` is read-only and requires no source tree. It performs the
@@ -249,6 +251,27 @@ installed CLASS/NAME tier=T schema=SCHEMA sha256=HASH executable=DEV:INO control
 Inspection does not claim that mutable control-file contents still match their
 install-time values. An object with a missing or legacy receipt is unmanaged
 and is reported as unavailable; inspection never adopts or modifies it.
+
+`ctx object uninstall` accepts only one exact installer-receipt-managed `tool`
+or `agent` pair; the tier defaults to `user`. Its default dry-run performs the
+same retained-receipt validation as inspection and does not write. Success
+reports the exact executable and control device/inode pair that would be, or
+was, removed.
+
+With `--yes`, uninstall first quarantines the executable on the same filesystem
+to form the invisible object boundary, syncs and rechecks its receipt, then
+quarantines the control directory, syncs and rechecks both receipts. It reuses
+bounded residue cleanup only after the complete exact stage has been verified.
+This ordering is deliberately not a claim of pair atomicity. At receipt
+checkpoints, a failure does not intentionally overwrite or delete a foreign
+replacement; it may leave audit-visible safety residue when safe restoration
+cannot complete.
+
+Before `--yes`, the caller must quiesce the matching agent runtime and all other
+processes under the same Unix authority that can write the backing directory.
+Receipt checks do not close Linux's final pathname syscall race against such a
+writer. Uninstall grants no authority, creates no socket, and does not start or
+stop a runtime.
 
 Durable residue maintenance is explicit and separate from installation:
 

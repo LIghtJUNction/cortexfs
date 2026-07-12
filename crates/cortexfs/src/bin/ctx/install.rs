@@ -10,7 +10,7 @@ pub(crate) fn parse_object_command(
 ) -> Result<Command, CliError> {
     let action = required_arg(
         &mut values,
-        "object requires check, inspect, install, or residue",
+        "object requires check, inspect, install, uninstall, or residue",
     )?;
     if action == "check" {
         let manifest = PathBuf::from(required_arg(
@@ -37,9 +37,12 @@ pub(crate) fn parse_object_command(
     if action == "inspect" {
         return parse_object_inspect_command(values);
     }
+    if action == "uninstall" {
+        return parse_object_uninstall_command(values);
+    }
     if action != "install" {
         return Err(CliError::usage(
-            "object expects check, inspect, install, or residue",
+            "object expects check, inspect, install, uninstall, or residue",
         ));
     }
     let mut manifest = None;
@@ -85,6 +88,85 @@ pub(crate) fn parse_object_command(
         source,
         manifest,
         tier,
+    })
+}
+
+fn parse_object_uninstall_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let mut source = None;
+    let mut class = None;
+    let mut name = None;
+    let mut tier = InstallTier::User;
+    let mut tier_seen = false;
+    let mut yes = false;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--source" => {
+                if source.is_some() {
+                    return Err(CliError::usage("object uninstall --source specified twice"));
+                }
+                let value = required_arg(
+                    &mut values,
+                    "object uninstall --source requires a durable backing path",
+                )?;
+                if value.starts_with('-') {
+                    return Err(CliError::usage(
+                        "object uninstall --source requires a durable backing path",
+                    ));
+                }
+                source = Some(PathBuf::from(value));
+            }
+            "--tier" => {
+                if tier_seen {
+                    return Err(CliError::usage("object uninstall --tier specified twice"));
+                }
+                tier_seen = true;
+                let value = required_arg(
+                    &mut values,
+                    "object uninstall --tier requires user or system",
+                )?;
+                tier = InstallTier::parse(&value).ok_or_else(|| {
+                    CliError::usage("object uninstall --tier expects user or system")
+                })?;
+            }
+            "--yes" => {
+                if yes {
+                    return Err(CliError::usage("object uninstall --yes specified twice"));
+                }
+                yes = true;
+            }
+            _ if value.starts_with('-') => {
+                return Err(CliError::usage(format!(
+                    "unexpected object uninstall argument: {}",
+                    terminal_safe_field(&value)
+                )));
+            }
+            _ if class.is_none() => {
+                class = match ObjectClass::parse(&value) {
+                    Some(class @ (ObjectClass::Tool | ObjectClass::Agent)) => Some(class),
+                    _ => {
+                        return Err(CliError::usage(
+                            "object uninstall CLASS expects tool or agent",
+                        ));
+                    }
+                };
+            }
+            _ if name.is_none() => name = Some(value),
+            _ => return Err(CliError::usage("object uninstall accepts CLASS and NAME")),
+        }
+    }
+    Ok(Command::ObjectUninstall {
+        source: source.ok_or_else(|| {
+            CliError::usage(
+                "object uninstall requires --source PATH for the durable backing tree; /ctx and --root are ABI projections",
+            )
+        })?,
+        class: class
+            .ok_or_else(|| CliError::usage("object uninstall requires CLASS: tool or agent"))?,
+        name: name.ok_or_else(|| CliError::usage("object uninstall requires an object NAME"))?,
+        tier,
+        yes,
     })
 }
 
@@ -213,6 +295,35 @@ pub(crate) fn run_object_inspect(
     ))
 }
 
+pub(crate) fn run_object_uninstall(
+    source: &Path,
+    class: ObjectClass,
+    name: &str,
+    tier: InstallTier,
+    yes: bool,
+) -> Result<(), CliError> {
+    let inspected = cortexfs::object::uninstall::uninstall_object(source, class, name, tier, yes)
+        .map_err(|error| match error {
+        InstallError::Invalid(message) => CliError::usage(terminal_safe_field(&message)),
+        InstallError::Unavailable(message) => CliError::unavailable(terminal_safe_field(&message)),
+    })?;
+    let action = if yes {
+        "uninstalled"
+    } else {
+        "would-uninstall"
+    };
+    print_line(&format!(
+        "{action} {}/{} tier={} executable={}:{} control={}:{}",
+        terminal_safe_field(inspected.class().as_str()),
+        terminal_safe_field(inspected.name()),
+        terminal_safe_field(inspected.tier().as_str()),
+        inspected.executable_dev(),
+        inspected.executable_ino(),
+        inspected.control_dev(),
+        inspected.control_ino(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +399,148 @@ mod tests {
                 )
             })
         );
+    }
+
+    #[test]
+    fn parses_uninstall_dry_run_with_default_user_tier() {
+        assert!(
+            parse(&["uninstall", "tool", "example.echo", "--source", "/source"]).is_ok_and(
+                |command| {
+                    matches!(
+                        command,
+                        Command::ObjectUninstall {
+                            source,
+                            class: ObjectClass::Tool,
+                            name,
+                            tier: InstallTier::User,
+                            yes: false,
+                        } if source == Path::new("/source") && name == "example.echo"
+                    )
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn parses_applied_system_uninstall_in_any_option_order() {
+        assert!(
+            parse(&[
+                "uninstall",
+                "--tier",
+                "system",
+                "agent",
+                "--yes",
+                "example-agent",
+                "--source",
+                "/durable",
+            ])
+            .is_ok_and(|command| {
+                matches!(
+                    command,
+                    Command::ObjectUninstall {
+                        source,
+                        class: ObjectClass::Agent,
+                        name,
+                        tier: InstallTier::System,
+                        yes: true,
+                    } if source == Path::new("/durable") && name == "example-agent"
+                )
+            })
+        );
+    }
+
+    #[test]
+    fn uninstall_requires_source_class_and_name() {
+        for args in [
+            &["uninstall", "tool", "example.echo"][..],
+            &["uninstall", "--source", "/source"][..],
+            &["uninstall", "--source", "/source", "tool"][..],
+        ] {
+            assert!(parse(args).is_err_and(|error| error.message.contains("object uninstall")));
+        }
+    }
+
+    #[test]
+    fn uninstall_rejects_missing_duplicate_unknown_invalid_and_extra_arguments() {
+        for args in [
+            &["uninstall", "--source"][..],
+            &["uninstall", "--source", "--yes", "tool", "example.echo"][..],
+            &["uninstall", "--tier"][..],
+            &[
+                "uninstall",
+                "--source",
+                "/one",
+                "--source",
+                "/two",
+                "tool",
+                "example.echo",
+            ][..],
+            &[
+                "uninstall",
+                "--source",
+                "/source",
+                "--tier",
+                "user",
+                "--tier",
+                "system",
+                "tool",
+                "example.echo",
+            ][..],
+            &[
+                "uninstall",
+                "--source",
+                "/source",
+                "tool",
+                "example.echo",
+                "--yes",
+                "--yes",
+            ][..],
+            &[
+                "uninstall",
+                "--source",
+                "/source",
+                "--unknown",
+                "tool",
+                "example.echo",
+            ][..],
+            &["uninstall", "--source", "/source", "model", "example"][..],
+            &[
+                "uninstall",
+                "--source",
+                "/source",
+                "tool",
+                "example.echo",
+                "extra",
+            ][..],
+            &[
+                "uninstall",
+                "--source",
+                "/source",
+                "tool",
+                "example.echo",
+                "--tier",
+                "local",
+            ][..],
+        ] {
+            assert!(parse(args).is_err_and(|error| error.message.contains("object uninstall")));
+        }
+    }
+
+    #[test]
+    fn uninstall_escapes_multiline_unknown_argument() -> Result<(), &'static str> {
+        let Err(error) = parse(&[
+            "uninstall",
+            "--source",
+            "/source",
+            "tool",
+            "example.echo",
+            "--evil\nINJECTED",
+        ]) else {
+            return Err("multiline option was accepted");
+        };
+        assert_eq!(error.message.lines().count(), 1);
+        assert!(error.message.contains("--evil\\nINJECTED"));
+        Ok(())
     }
 
     #[test]
@@ -479,7 +732,7 @@ mod tests {
         assert!(parse(&["remove"]).is_err_and(|error| {
             error
                 .message
-                .contains("expects check, inspect, install, or residue")
+                .contains("expects check, inspect, install, uninstall, or residue")
         }));
         assert!(
             parse(&["install", "--unknown"]).is_err_and(|error| {

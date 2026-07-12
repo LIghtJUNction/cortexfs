@@ -228,12 +228,13 @@ process.
 Error frames use stable errno names such as `EACCES`, `EINVAL`, `ENOENT`,
 `EMSGSIZE`, and `EHOSTDOWN`. Clients must not parse natural language `message`.
 
-## Installed Object Inspection
+## Installed Object Inspection and Removal
 
-The host-side read-only inspection surface is:
+The host-side inspection and receipt-managed removal surfaces are:
 
 ```text
 ctx object inspect --source PATH CLASS NAME [--tier user|system]
+ctx object uninstall --source PATH CLASS NAME [--tier user|system] [--yes]
 ```
 
 `CLASS` is `tool` or `agent`, and the tier defaults to `user`. Inspection
@@ -248,6 +249,21 @@ Mutable control-file contents are outside this receipt claim and are not
 revalidated against their install-time values. An object with a missing or
 legacy receipt is unmanaged and is reported as unavailable; inspection does
 not adopt it.
+
+Uninstall accepts only one exact installer-receipt-managed `tool` or `agent`
+pair, with tier defaulting to `user`. It is a no-write receipt validation and
+report by default. `--yes` first quarantines the executable on the same
+filesystem to establish the invisible-object boundary, syncs and rechecks its
+receipt, then quarantines the control directory, syncs and rechecks both
+receipts. Only after the complete exact stage is verified does it reuse bounded
+residue cleanup. This is not pair atomicity.
+
+At receipt checkpoints, a failure does not intentionally overwrite or delete a
+foreign replacement and may retain audit-visible safety residue. Before
+`--yes`, the caller must quiesce the matching agent runtime and every writer
+sharing the same Unix authority. Receipt checkpoints do not close Linux's final
+pathname syscall race against such a writer. Uninstall grants no authority,
+creates no socket, and does not start or stop a runtime.
 
 ## Durable Safety Residue
 

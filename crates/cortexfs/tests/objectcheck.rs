@@ -215,4 +215,90 @@ mod tests {
         assert_eq!((state(&tool_dir)?, state(&control)?), before);
         Ok(())
     }
+
+    #[test]
+    fn install_uninstall_dry_run_apply_then_inspect() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("source");
+        let tool_dir = source.join("tool");
+        fs::create_dir_all(&tool_dir)?;
+        let artifact = root.path().join("echo-tool");
+        let artifact_bytes = b"#!/bin/sh\nprintf ok\n";
+        fs::write(&artifact, artifact_bytes)?;
+        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755))?;
+        let manifest = root.path().join("tool.json");
+        fs::write(
+            &manifest,
+            serde_json::to_vec(&tool_manifest(&artifact, &sha256(artifact_bytes)))?,
+        )?;
+
+        let output = Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .args(["object", "install", "--source"])
+            .arg(&source)
+            .arg(&manifest)
+            .args(["--tier", "system"])
+            .output()?;
+        assert!(
+            output.status.success(),
+            "ctx object install failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let installed = tool_dir.join("example.echo");
+        let control = tool_dir.join("example.echo.d");
+        let executable_metadata = fs::metadata(&installed)?;
+        let control_metadata = fs::metadata(&control)?;
+        let before = (state(&tool_dir)?, state(&control)?);
+        let expected_dry_run = format!(
+            "would-uninstall tool/example.echo tier=system executable={}:{} control={}:{}\n",
+            executable_metadata.dev(),
+            executable_metadata.ino(),
+            control_metadata.dev(),
+            control_metadata.ino(),
+        );
+
+        let output = Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .args(["object", "uninstall", "tool", "example.echo", "--source"])
+            .arg(&source)
+            .args(["--tier", "system"])
+            .output()?;
+        assert!(
+            output.status.success(),
+            "ctx object uninstall dry-run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8(output.stdout)?, expected_dry_run);
+        assert_eq!((state(&tool_dir)?, state(&control)?), before);
+
+        let output = Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .args(["object", "uninstall", "--yes", "--source"])
+            .arg(&source)
+            .args(["tool", "example.echo", "--tier", "system"])
+            .output()?;
+        assert!(
+            output.status.success(),
+            "ctx object uninstall --yes failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout)?,
+            expected_dry_run.replacen("would-uninstall", "uninstalled", 1)
+        );
+        let Err(error) = fs::symlink_metadata(&installed) else {
+            return Err(io::Error::other("installed executable pathname still exists").into());
+        };
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        let Err(error) = fs::symlink_metadata(&control) else {
+            return Err(io::Error::other("installed control pathname still exists").into());
+        };
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+
+        let output = Command::new(env!("CARGO_BIN_EXE_ctx"))
+            .args(["object", "inspect", "--source"])
+            .arg(&source)
+            .args(["tool", "example.echo", "--tier", "system"])
+            .output()?;
+        assert_eq!(output.status.code(), Some(69));
+        Ok(())
+    }
 }
