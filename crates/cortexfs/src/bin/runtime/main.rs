@@ -22,27 +22,23 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
-use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cortexfs::{
-    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, MountTable, PolicyObjectClass,
-    PolicyPermission, SocketPeerPolicy, derive_agent_runtime_view,
-    read_provider_system_secret_for_model, serve_agent_executable_socket_listener_once,
+    AgentExecutableSocketExecution, AgentExecutableSocketRuntime, AgentStopHandler, MountTable,
+    PolicyObjectClass, PolicyPermission, PreparedAgentStop, SocketPeerPolicy, SocketRuntimeError,
+    derive_agent_runtime_view, read_provider_system_secret_for_model,
+    serve_agent_executable_socket_listener_once_with_stop,
 };
 use listenfd::ListenFd;
-use nix::fcntl::{AtFlags, OFlag, open, openat};
-use nix::sys::stat::{Mode, fchmod, fstatat};
-use nix::unistd::fchown;
-use nix::unistd::{Gid, Uid};
+use nix::sys::stat::{Mode, fchmod};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
 const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
+const RUN_CONTROL_DIR: &str = "/run/cortexfs/control";
 
-pub(crate) use cortexfs::cli::procfd;
 pub(crate) use cortexfs::cli::stderr;
-pub(crate) use procfd::*;
 pub(crate) use stderr::*;
 
 pub(crate) fn main() -> ExitCode {
@@ -75,8 +71,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         .join(view.agent_name())
         .join("session");
     let default_cwd = view.cwd().display().to_string();
-    let peer_policy = SocketPeerPolicy::uid(view.identity().uid());
-    repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
+    let peer_policy = SocketPeerPolicy::uid_or_root(view.identity().uid());
     let runtime_model = runtime_model(&config.source, view.model());
     let network_allowed = view.policy().allows(
         view.policy_subject(),
@@ -107,7 +102,26 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         ]);
     }
     let agent_executable = config.source.join("agent").join(&config.agent);
-    let result = serve_agent_executable_socket_listener_once(
+    let control_dir = Path::new(RUN_CONTROL_DIR);
+    #[expect(
+        clippy::create_dir,
+        reason = "single private leaf must not recursively create or traverse parents"
+    )]
+    match fs::create_dir(control_dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(format!("cannot create run control directory: {error}")),
+    }
+    let control_fd = cortexfs::support::plain::open_plain_directory(control_dir)
+        .map_err(|error| format!("cannot open run control directory: {error}"))?;
+    fchmod(&control_fd, Mode::from_bits_truncate(0o711))
+        .map_err(|error| format!("cannot secure run control directory: {error}"))?;
+    let stop = RuntimeStopHandler {
+        source: config.source.clone(),
+        owner_uid: view.owner(),
+        runtime_agent: view.agent_name().to_owned(),
+    };
+    let result = serve_agent_executable_socket_listener_once_with_stop(
         &listener,
         Some(peer_policy),
         AgentExecutableSocketRuntime {
@@ -121,10 +135,10 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
             network_allowed,
             agent_name: view.agent_name(),
             agent_executable: &agent_executable,
-            execution: runtime_agent_execution(view.mount_table()),
+            execution: runtime_agent_execution(view.mount_table(), control_dir),
         },
+        Some(&stop),
     );
-    repair_agent_session_permissions(&session_root, view.identity().uid(), view.identity().gid())?;
     result.map(|_response| ()).map_err(|error| {
         format!(
             "socket runtime {} {error:?}: {}",
@@ -134,171 +148,59 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     })
 }
 
-pub(crate) fn runtime_agent_execution(
-    mount_table: &MountTable,
-) -> AgentExecutableSocketExecution<'_> {
+struct RuntimeStopHandler {
+    source: PathBuf,
+    owner_uid: u32,
+    runtime_agent: String,
+}
+
+struct RuntimePreparedStop(cortexfs::agent::stop::ConcreteStopPlan);
+
+impl AgentStopHandler for RuntimeStopHandler {
+    fn preflight(
+        &self,
+        agent: &str,
+        peer_uid: u32,
+    ) -> Result<Box<dyn PreparedAgentStop>, SocketRuntimeError> {
+        let context = cortexfs::agent::stop::StopContext {
+            source: self.source.clone(),
+            owner_uid: self.owner_uid,
+            peer_uid,
+            runtime_agent: self.runtime_agent.clone(),
+        };
+        cortexfs::agent::stop::plan_stop(&context, agent)
+            .map(|plan| {
+                let prepared: Box<dyn PreparedAgentStop> = Box::new(RuntimePreparedStop(plan));
+                prepared
+            })
+            .map_err(|error| {
+                let _ignored =
+                    write_error(&format!("cortexfs-agent-runtime: stop preflight: {error}"));
+                SocketRuntimeError::CannotRunAgent
+            })
+    }
+}
+
+impl PreparedAgentStop for RuntimePreparedStop {
+    fn execute(self: Box<Self>) -> Result<(), SocketRuntimeError> {
+        cortexfs::agent::stop::execute_stop(self.0)
+            .map_err(|_error| SocketRuntimeError::PostAcceptStop)
+    }
+}
+
+pub(crate) fn runtime_agent_execution<'a>(
+    mount_table: &'a MountTable,
+    control_dir: &'a Path,
+) -> AgentExecutableSocketExecution<'a> {
     AgentExecutableSocketExecution::Bwrap {
         program: Path::new(BWRAP_PROGRAM),
         mount_table,
+        control_dir: Some(control_dir),
     }
 }
 
 pub(crate) fn runtime_model(_source: &Path, requested_model: &str) -> String {
     requested_model.to_owned()
-}
-
-pub(crate) fn repair_agent_session_permissions(
-    session_root: &Path,
-    uid: u32,
-    gid: u32,
-) -> Result<(), String> {
-    match fs::symlink_metadata(session_root) {
-        Ok(_metadata) => repair_path_permissions(session_root, uid, gid),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!(
-            "cannot inspect session path {}: {error}",
-            session_root.display()
-        )),
-    }
-}
-
-pub(crate) fn repair_path_permissions(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
-    if path
-        .components()
-        .any(|component| component.as_os_str() == "workspace-overlay")
-    {
-        return Ok(());
-    }
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot inspect session path {}: {error}", path.display()))?;
-    if metadata.file_type().is_symlink() {
-        return Ok(());
-    }
-    if !metadata.is_dir() && !metadata.is_file() {
-        return Ok(());
-    }
-    let fd = open_session_repair_path_no_follow(path, metadata.is_dir())?;
-    repair_open_path_permissions(
-        &fd,
-        &path.display().to_string(),
-        metadata.is_dir(),
-        uid,
-        gid,
-    )
-}
-
-pub(crate) fn repair_open_path_permissions(
-    fd: &OwnedFd,
-    label: &str,
-    is_dir: bool,
-    uid: u32,
-    gid: u32,
-) -> Result<(), String> {
-    if let Err(error) = fchown(fd, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid))) {
-        if is_read_only_permission_repair_error(error) {
-            return Ok(());
-        }
-        return Err(format!("cannot chown session path {label}: {error}"));
-    }
-    let mode = if is_dir { 0o700 } else { 0o600 };
-    if let Err(error) = fchmod(fd, Mode::from_bits_truncate(mode)) {
-        if is_read_only_permission_repair_error(error) {
-            return Ok(());
-        }
-        return Err(format!("cannot chmod session path {label}: {error}"));
-    }
-    if is_dir {
-        for entry in fs::read_dir(proc_fd_path(fd))
-            .map_err(|error| format!("cannot read session dir {label}: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("cannot read session dir entry: {error}"))?;
-            let name = entry
-                .file_name()
-                .into_string()
-                .map_err(|_error| "session path contains invalid component".to_owned())?;
-            repair_child_path_permissions(fd, label, &name, uid, gid)?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn is_read_only_permission_repair_error(error: nix::errno::Errno) -> bool {
-    error == nix::errno::Errno::EROFS
-}
-
-pub(crate) fn repair_child_path_permissions(
-    parent_fd: &OwnedFd,
-    parent_label: &str,
-    name: &str,
-    uid: u32,
-    gid: u32,
-) -> Result<(), String> {
-    if name == "workspace-overlay" {
-        return Ok(());
-    }
-    let stat = fstatat(parent_fd, name, AtFlags::AT_SYMLINK_NOFOLLOW)
-        .map_err(|error| format!("cannot inspect session path {parent_label}/{name}: {error}"))?;
-    let file_type = stat.st_mode & nix::libc::S_IFMT;
-    if file_type == nix::libc::S_IFLNK {
-        return Ok(());
-    }
-    let is_dir = file_type == nix::libc::S_IFDIR;
-    if !is_dir && file_type != nix::libc::S_IFREG {
-        return Ok(());
-    }
-    let mut flags = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
-    if is_dir {
-        flags |= OFlag::O_DIRECTORY;
-    }
-    let fd = openat(parent_fd, name, flags, Mode::empty())
-        .map_err(|error| format!("cannot open session path {parent_label}/{name}: {error}"))?;
-    repair_open_path_permissions(&fd, &format!("{parent_label}/{name}"), is_dir, uid, gid)
-}
-
-pub(crate) fn open_session_repair_path_no_follow(
-    path: &Path,
-    is_dir: bool,
-) -> Result<OwnedFd, String> {
-    let mut current = if path.is_absolute() {
-        open_dir_no_follow(Path::new("/"))?
-    } else {
-        open_dir_no_follow(Path::new("."))?
-    };
-    let mut components = path.components().peekable();
-    while let Some(component) = components.next() {
-        match component {
-            std::path::Component::RootDir | std::path::Component::CurDir => {}
-            std::path::Component::Normal(name) => {
-                let name = name
-                    .to_str()
-                    .ok_or_else(|| "session path contains invalid component".to_owned())?;
-                let final_component = components.peek().is_none();
-                let mut flags = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
-                if !final_component || is_dir {
-                    flags |= OFlag::O_DIRECTORY;
-                }
-                current = openat(&current, name, flags, Mode::empty()).map_err(|error| {
-                    format!("cannot open session path {}: {error}", path.display())
-                })?;
-            }
-            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
-                return Err(format!(
-                    "cannot open session path {}: unsupported path component",
-                    path.display()
-                ));
-            }
-        }
-    }
-    Ok(current)
-}
-
-pub(crate) fn open_dir_no_follow(path: &Path) -> Result<OwnedFd, String> {
-    open(
-        path,
-        OFlag::O_DIRECTORY | OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
-        Mode::empty(),
-    )
-    .map_err(|error| format!("cannot open runtime credential dir: {error}"))
 }
 
 #[derive(Debug, Eq, PartialEq)]

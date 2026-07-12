@@ -1,4 +1,5 @@
 use crate::*;
+use std::collections::BTreeSet;
 
 use crate::support::plain::{open_plain_directory, read_small_text_file};
 
@@ -29,7 +30,6 @@ pub fn derive_agent_runtime_view(
     }
 
     let control_dir = resolve_agent_runtime_control_dir(ctx_root, agent_name)?;
-
     let owner = parse_agent_number_control(&control_dir, AgentControlKind::Owner, "owner")?;
     let uid = parse_agent_number_control(&control_dir, AgentControlKind::Uid, "uid")?;
     let gid = parse_agent_number_control(&control_dir, AgentControlKind::Gid, "gid")?;
@@ -66,6 +66,7 @@ pub fn derive_agent_runtime_view(
     let policy_content = read_required_agent_control(&control_dir, "policy")?;
     let policy = PolicyV0::parse(&policy_content)
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("policy".to_owned()))?;
+    let declared_tools = parse_agent_tools_control(&control_dir)?;
 
     let ctx_home = ctx_root.join("home").join(owner.to_string());
     let home = ctx_home.join("agent").join(agent_name);
@@ -91,7 +92,28 @@ pub fn derive_agent_runtime_view(
         mount_table,
         model,
         policy,
+        declared_tools,
     })
+}
+
+pub(crate) fn parse_agent_tools_control(
+    control_dir: &Path,
+) -> Result<BTreeSet<String>, AgentRuntimeViewError> {
+    let content = match read_required_agent_control(control_dir, "tools") {
+        Ok(content) => content,
+        Err(AgentRuntimeViewError::MissingControlFile(_)) => return Ok(BTreeSet::default()),
+        Err(error) => return Err(error),
+    };
+    if !inspect_agent_tools_control(&content).is_ok() {
+        return Err(AgentRuntimeViewError::InvalidControlFile(
+            "tools".to_owned(),
+        ));
+    }
+    Ok(content
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect())
 }
 
 pub(crate) fn resolve_agent_runtime_control_dir(

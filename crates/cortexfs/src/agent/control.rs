@@ -1,5 +1,8 @@
+use std::collections::BTreeSet;
+
 use crate::{
     ChildLifecycle, ControlLineIssue,
+    abi::path::is_object_name,
     authority::parent_ref_agent_name,
     support::control::{inspect_control_line, inspect_control_lines},
 };
@@ -71,6 +74,30 @@ pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentCont
             inspect_agent_vocab_control(kind, content)
         }
     }
+}
+
+/// Inspects the optional direct-native tool declaration control.
+#[must_use]
+pub fn inspect_agent_tools_control(content: &str) -> AgentControlReport {
+    if content.is_empty() || content == "\n" {
+        return AgentControlReport::default();
+    }
+    let mut seen = BTreeSet::new();
+    let mut issues = inspect_control_lines(content, |line, value, issues| {
+        if value == "tsh" || !is_object_name(value) || !seen.insert(value.to_owned()) {
+            issues.push(ControlLineIssue::InvalidValue {
+                line,
+                value: value.to_owned(),
+            });
+        }
+    });
+    if !content.is_empty() && !content.ends_with('\n') {
+        issues.push(ControlLineIssue::InvalidValue {
+            line: content.lines().count().max(1),
+            value: content.lines().last().unwrap_or_default().to_owned(),
+        });
+    }
+    AgentControlReport::new(issues)
 }
 
 pub(crate) fn inspect_required_agent_number_control(content: &str) -> AgentControlReport {

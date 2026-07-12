@@ -1,7 +1,153 @@
 #![expect(clippy::redundant_pub_crate, reason = "test functions inside module")]
 
 use super::*;
+use crate::agent::createop::{child_executable, create_child};
 use crate::*;
+
+struct ConflictTool(crate::agent::create::AgentRollbackConflict);
+
+impl cortexfs_tool_sdk::Tool for ConflictTool {
+    fn spec(&self) -> cortexfs_tool_sdk::ToolSpec {
+        cortexfs_tool_sdk::ToolSpec {
+            name: "agent.create",
+            description: "test",
+            input_schema: "{\"type\":\"object\"}",
+        }
+    }
+
+    fn call(
+        &self,
+        _invocation: &ToolInvocation,
+        _output: &mut cortexfs_tool_sdk::ToolEmitter<&mut dyn std::io::Write>,
+    ) -> cortexfs_tool_sdk::ToolResult<()> {
+        Err(create_error(
+            crate::agent::create::AgentCreateError::RollbackConflict(self.0.clone()),
+        ))
+    }
+}
+
+#[test]
+pub(crate) fn withheld_agent_create_error_contains_complete_rollback_conflict() {
+    let conflict = crate::agent::create::AgentRollbackConflict {
+        original: PathBuf::from("/ctx/agent/worker"),
+        quarantine: Some(PathBuf::from("/ctx/agent/.ctx-rollback-1")),
+        dev: 7,
+        ino: 11,
+        stage: "original-recreated",
+    };
+
+    let error = create_error(crate::agent::create::AgentCreateError::RollbackConflict(
+        conflict,
+    ));
+
+    assert_eq!(error.code(), "EIO");
+    for expected in [
+        "original=/ctx/agent/worker",
+        "quarantine=/ctx/agent/.ctx-rollback-1",
+        "dev=7",
+        "ino=11",
+        "stage=original-recreated",
+    ] {
+        assert!(error.message().contains(expected));
+    }
+
+    let conflict = ConflictTool(crate::agent::create::AgentRollbackConflict {
+        original: PathBuf::from("/ctx/agent/worker"),
+        quarantine: Some(PathBuf::from("/ctx/agent/.ctx-rollback-1")),
+        dev: 7,
+        ino: 11,
+        stage: "original-recreated",
+    });
+    let mut jsonl = Vec::new();
+    assert!(run_tool(&conflict, &ToolInvocation::new("r1", "{}"), &mut jsonl).is_ok());
+    let frames = String::from_utf8_lossy(&jsonl)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect::<Vec<_>>();
+    let error = frames.iter().find(|frame| frame["type"] == "error");
+    assert!(error.is_some());
+    let Some(error) = error else {
+        return;
+    };
+    assert_eq!(error["code"], "EIO");
+    let message = error["message"].as_str().unwrap_or_default();
+    for expected in [
+        "original=/ctx/agent/worker",
+        "quarantine=/ctx/agent/.ctx-rollback-1",
+        "dev=7",
+        "ino=11",
+        "stage=original-recreated",
+    ] {
+        assert!(message.contains(expected));
+    }
+}
+
+#[test]
+pub(crate) fn withheld_agent_create_uses_standard_agent_wrapper() {
+    let wrapper = child_executable("worker-1");
+    assert_eq!(
+        wrapper,
+        executable_wrapper_script(
+            ObjectClass::Agent,
+            "worker-1",
+            "/ctx/bin/cortexfs-object-runner"
+        )
+    );
+    assert!(!wrapper.contains("/ctx/model/"));
+}
+
+#[test]
+pub(crate) fn agent_create_is_consistent_across_public_dispatch() {
+    let spec = core_tool_specs()
+        .into_iter()
+        .find(|spec| spec.name == "agent.create");
+    assert!(spec.is_some());
+    let Some(spec) = spec else { return };
+    assert_eq!(
+        spec.input_schema,
+        crate::agent::createop::AGENT_CREATE_SCHEMA
+    );
+
+    let invocation = ToolInvocation::new("r1", r#"{"name":"worker","handoff":"task"}"#);
+    let mut output = Vec::new();
+    assert!(matches!(
+        run_core_tool("agent.create", &invocation, &mut output),
+        Ok(true)
+    ));
+    assert!(!output.is_empty());
+
+    output.clear();
+    assert!(matches!(
+        run_core_tool_cli_with_root(Path::new("/ctx"), "agent.create", &[], &mut output),
+        Ok(Some(_))
+    ));
+    assert!(!output.is_empty());
+}
+
+#[test]
+#[ignore = "requires an explicitly authorized live parent runtime"]
+pub(crate) fn live_withheld_agent_create_reaches_active_with_real_pid() {
+    let Ok(name) = std::env::var("CORTEXFS_LIVE_CHILD") else {
+        return;
+    };
+    let Ok((session, pid)) = create_child(&name, "live P3 handoff", "owned") else {
+        return;
+    };
+    assert!(!session.is_empty());
+    assert!(pid > 0);
+    let Ok(source) = std::env::var("CTX_SOURCE") else {
+        return;
+    };
+    let source = PathBuf::from(source);
+    let control = source.join("agent").join(format!("{name}.d"));
+    assert!(fs::read_to_string(control.join("status")).is_ok_and(|value| value == "ready\n"));
+    assert_eq!(
+        fs::read_to_string(control.join("pid"))
+            .ok()
+            .and_then(|value| value.trim().parse::<u32>().ok()),
+        Some(pid)
+    );
+}
 
 #[test]
 pub(crate) fn shell_exec_tool_returns_stdout() {

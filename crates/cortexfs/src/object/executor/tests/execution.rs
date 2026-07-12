@@ -140,7 +140,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
     ];
 
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
-        config: &config,
+        config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
         tool_executable: Path::new("/proc/self/fd/9"),
         tool_args: &[OsString::from("tools")],
         env: &env,
@@ -151,6 +151,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         home_fd: 10,
         home_target: Path::new("/ctx/home/1000/agent/coder"),
         ctx_home_target: Path::new("/ctx/home/1000"),
+        control: None,
     });
 
     assert!(contains_os_arg_triplet(
@@ -207,6 +208,104 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn nested_control_pair_is_propagated_and_bound() -> Result<(), Box<dyn std::error::Error>> {
+    let socket = PathBuf::from(crate::runtime::socket::SOCKET_RUN_CONTROL_PATH);
+    let token = OsString::from("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    validate_nested_control_values(socket.as_os_str(), &token)?;
+    let control = (socket.clone(), token);
+    let config = test_agent_run_config();
+    let mounts = cortexfs::MountTable::parse("")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
+        config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
+        tool_executable: Path::new("/tool"),
+        tool_args: &[],
+        env: &[],
+        mount_table: &mounts,
+        cwd: Path::new("/workspace"),
+        sandbox: None,
+        network_allowed: false,
+        home_fd: 10,
+        home_target: Path::new("/ctx/home/1000/agent/coder"),
+        ctx_home_target: Path::new("/ctx/home/1000"),
+        control: Some(&control),
+    });
+    let path = socket.display().to_string();
+    assert!(contains_os_arg_triplet(&args, "--bind", &path, &path));
+    assert!(contains_os_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_CONTROL_SOCKET",
+        &path
+    ));
+    assert!(contains_os_arg_triplet(
+        &args,
+        "--setenv",
+        "CTX_CONTROL_TOKEN",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    ));
+    Ok(())
+}
+
+#[test]
+fn nested_control_pair_absence_and_partial_values_fail_closed() {
+    assert_eq!(nested_control_environment(None, None), Ok(None));
+    assert!(nested_control_environment(Some(OsString::from("/tmp/control")), None).is_err());
+    assert!(nested_control_environment(None, Some(OsString::from("token"))).is_err());
+    for (socket, token) in [
+        (
+            "/tmp/control.sock",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        ),
+        (
+            "control.sock",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        ),
+        (crate::runtime::socket::SOCKET_RUN_CONTROL_PATH, ""),
+        (crate::runtime::socket::SOCKET_RUN_CONTROL_PATH, "xyz"),
+    ] {
+        assert!(validate_nested_control_values(OsStr::new(socket), OsStr::new(token)).is_err());
+    }
+}
+
+#[test]
+fn agent_tool_process_cancellation_terminates_process_group() {
+    let root = short_unique_temp_path("tool-cancel");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let leaked = root.join("leaked");
+    let mut command = std::process::Command::new("/bin/sh");
+    command.args([
+        "-c",
+        &format!("sleep 5; printf leaked > {}", leaked.display()),
+    ]);
+    let start = Instant::now();
+    let result = crate::object::executor::run_agent_tool_process_cancellable(&mut command, || {
+        start.elapsed() >= Duration::from_millis(100)
+    });
+    assert_eq!(result, Err("tool cancelled".to_owned()));
+    thread::sleep(Duration::from_millis(100));
+    assert!(!leaked.exists());
+}
+
+#[test]
+fn nested_control_rejects_non_socket_and_symlink_metadata() {
+    let root = short_unique_temp_path("nested-control-metadata");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let file = root.join("file");
+    assert!(fs::write(&file, "not a socket\n").is_ok());
+    let Ok(file_metadata) = fs::symlink_metadata(&file) else {
+        return;
+    };
+    assert!(!nested_control_socket_is_plain(&file_metadata));
+    let link = root.join("link");
+    assert!(std::os::unix::fs::symlink(&file, &link).is_ok());
+    let Ok(link_metadata) = fs::symlink_metadata(&link) else {
+        return;
+    };
+    assert!(!nested_control_socket_is_plain(&link_metadata));
+}
+
+#[test]
 fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn std::error::Error>>
 {
     let root = short_unique_temp_path("atl-overlay-write");
@@ -247,7 +346,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
     crate::provider::name::files::clear_fd_cloexec(&home_dir)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
-        config: &config,
+        config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
         tool_executable: &proc_fd_path(&tool_executable),
         tool_args: &[],
         env: &[],
@@ -258,6 +357,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         home_fd: home_dir.as_raw_fd(),
         home_target: Path::new("/ctx/home/1000/agent/coder"),
         ctx_home_target: Path::new("/ctx/home/1000"),
+        control: None,
     });
     let mut command = std::process::Command::new(BWRAP_PROGRAM);
     command.args(args);
@@ -507,6 +607,63 @@ fn tool_result_truncation_preserves_utf8_boundaries() {
 }
 
 #[test]
+fn tool_stdout_accepts_canonical_sdk_success() {
+    let output = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.echo\"}\n",
+        "{\"type\":\"message\",\"run\":\"r1\",\"role\":\"tool\",\"content\":[{\"type\":\"text\",\"text\":\"native:one\"}]}\n",
+        "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}\n",
+    );
+    assert_eq!(
+        parse_tool_stdout(output),
+        Ok(ToolStdout::SdkSuccess("native:one".to_owned()))
+    );
+}
+
+#[test]
+fn tool_stdout_maps_canonical_sdk_error_even_with_successful_process_status() {
+    let output = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.echo\"}\n",
+        "{\"type\":\"error\",\"run\":\"r1\",\"code\":\"EINVAL\",\"message\":\"bad input\"}\n",
+        "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"error\"}\n",
+    );
+    assert_eq!(
+        parse_tool_stdout(output),
+        Ok(ToolStdout::SdkError("EINVAL: bad input".to_owned()))
+    );
+}
+
+#[test]
+fn tool_stdout_rejects_malformed_sdk_after_start() {
+    let output = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.echo\"}\n",
+        "not-json\n",
+    );
+    assert!(parse_tool_stdout(output).is_err());
+}
+
+#[test]
+fn tool_stdout_rejects_sdk_run_mismatch_and_missing_done() {
+    let mismatch = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.echo\"}\n",
+        "{\"type\":\"done\",\"run\":\"r2\",\"status\":\"ok\"}\n",
+    );
+    let missing_done = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.echo\"}\n",
+        "{\"type\":\"message\",\"run\":\"r1\",\"role\":\"tool\",\"content\":[]}\n",
+    );
+    assert!(parse_tool_stdout(mismatch).is_err());
+    assert!(parse_tool_stdout(missing_done).is_err());
+}
+
+#[test]
+fn tool_stdout_preserves_non_sdk_legacy_plain_text() {
+    assert_eq!(
+        parse_tool_stdout("legacy output\n"),
+        Ok(ToolStdout::Legacy("legacy output\n".to_owned()))
+    );
+}
+
+#[test]
 fn agent_tool_timeout_env_is_bounded() {
     assert_eq!(
         agent_tool_timeout_seconds_from_env(|_| Some("45".to_owned())),
@@ -710,3 +867,4 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 }
 use super::runtime::test_agent_run_config;
 use super::*;
+use crate::object::executor::{ToolStdout, parse_tool_stdout};

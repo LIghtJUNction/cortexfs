@@ -1,4 +1,5 @@
 use crate::*;
+use cortexfs::object::install::InstallTier;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct CliError {
@@ -65,6 +66,11 @@ pub(crate) enum Command {
         input: String,
     },
     Agent(AgentArgs),
+    ObjectInstall {
+        source: PathBuf,
+        manifest: PathBuf,
+        tier: InstallTier,
+    },
     Provider(ProviderArgs),
     Ping {
         path: String,
@@ -175,6 +181,11 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             input,
         } => agent_send(&cli.root, &agent, session.as_deref(), &input, false, false),
         Command::Agent(args) => agent_command(&cli.root, &args),
+        Command::ObjectInstall {
+            source,
+            manifest,
+            tier,
+        } => success(install::run_object_install(&source, &manifest, tier)),
         Command::Provider(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
@@ -361,6 +372,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             })
         }
         "agent" => parse_agent_command(values.collect()),
+        "object" => install::parse_object_command(values),
         "provider" => parse_provider_command(values.collect()),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
@@ -448,6 +460,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "resume"
             | "send"
             | "agent"
+            | "object"
             | "provider"
             | "ping"
             | "cancel"

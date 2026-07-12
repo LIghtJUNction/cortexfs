@@ -131,10 +131,11 @@ The terminal CLI mode should behave like a normal command line program: argv is
 preserved, stdin/stdout/stderr are inherited, and output is plain command
 output. A tool may decide that empty argv is invalid, but `tsh` must not reject
 empty argv for ordinary visible tools before the tool runs. The native agent
-mode may load the same tool into memory and call it through the SDK ABI, using
-structured JSON input and JSONL tool frames. `load` and `pin` affect the native
-context/cache; they must not force terminal CLI commands to emit structured
-frames.
+mode uses structured JSON input and JSONL tool frames. Executable plugins run
+through the same authorized object path as other tools. The Tool SDK defines a
+dynamic-library ABI, but v1 core does not yet load it; `load` and `pin`
+currently affect metadata context/cache and must not force terminal CLI
+commands to emit structured frames.
 
 Executing a tool through `tsh` requires an agent terminal context so CortexFS
 can evaluate the agent identity, mounts, policy, and `CTX_PATH` together. A
@@ -262,10 +263,10 @@ window_percent=1
 ```
 
 `max_loaded_tools` limits unpinned tool metadata entries loaded into the `tsh`
-context. `cache_capacity` limits unpinned dynamic tool artifacts kept resident
-in memory by W-TinyLFU. `window_percent` configures the W-TinyLFU admission
-window. Pinned tools are excluded from both automatic context unload and dynamic
-cache eviction.
+context. `cache_capacity` limits unpinned tool-path cache entries tracked by
+W-TinyLFU. `window_percent` configures the W-TinyLFU admission window. Pinned
+tools are excluded from both automatic context unload and path-cache eviction.
+These settings do not imply that core loads SDK dynamic libraries.
 
 The durable configuration should normally be updated through the visible tool:
 

@@ -421,4 +421,17 @@ fn agent_runtime_view_env_prompt_and_skill_text_do_not_expand_tool_path() {
     );
     assert_eq!(denied, Err(ToolExecutionDenial::ToolNotFound));
 }
+
+#[test]
+fn agent_runtime_view_accepts_missing_and_empty_optional_tools_control() {
+    let root = clean_test_dir("agent-runtime-optional-tools");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    assert!(!control.join("tools").exists());
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    assert!(view.declared_tools().is_empty());
+    write_text_file(&control.join("tools"), "\n");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    assert!(view.declared_tools().is_empty());
+}
 use super::*;

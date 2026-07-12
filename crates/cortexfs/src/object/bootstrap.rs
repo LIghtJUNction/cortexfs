@@ -32,16 +32,39 @@ pub fn install_executable_object_wrapper(
         .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
     set_executable_mode(&executable)?;
 
-    for file in control_files_for(class) {
-        let content = object_control_content(class, name, file, control_overrides)?;
-        atomic_replace_text_with_mode(&control_dir.join(file), &content, 0o644)
-            .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
-    }
+    install_object_control_files(&control_dir, class, name, control_overrides)?;
     if class != ObjectClass::Model {
         ensure_object_hook_dirs(&control_dir)?;
     }
 
     Ok(ObjectBootstrap::new(executable, control_dir))
+}
+
+pub(crate) fn install_object_control_files(
+    control_dir: &Path,
+    class: ObjectClass,
+    name: &str,
+    control_overrides: &[(&str, &str)],
+) -> Result<(), ObjectBootstrapError> {
+    validate_control_overrides(class, control_overrides)?;
+    for file in control_files_for(class) {
+        let content = object_control_content(class, name, file, control_overrides)?;
+        atomic_replace_text_with_mode(&control_dir.join(file), &content, 0o644)
+            .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
+    }
+    if class == ObjectClass::Agent {
+        for file in AGENT_OPTIONAL_CONTROL_FILES {
+            if let Some(value) = control_overrides
+                .iter()
+                .find_map(|&(name, value)| (name == *file).then_some(value))
+            {
+                let content = ensure_trailing_newline(value);
+                atomic_replace_text_with_mode(&control_dir.join(file), &content, 0o644)
+                    .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn ensure_object_hook_dirs(control_dir: &Path) -> Result<(), ObjectBootstrapError> {
@@ -60,7 +83,9 @@ pub(crate) fn validate_control_overrides(
     control_overrides: &[(&str, &str)],
 ) -> Result<(), ObjectBootstrapError> {
     for (file, value) in control_overrides.iter().copied() {
-        if !control_files_for(class).contains(&file) {
+        if !(control_files_for(class).contains(&file)
+            || class == ObjectClass::Agent && AGENT_OPTIONAL_CONTROL_FILES.contains(&file))
+        {
             return Err(ObjectBootstrapError::InvalidControlFile);
         }
         validate_object_control_content(class, file, &ensure_trailing_newline(value))?;
@@ -87,7 +112,7 @@ pub(crate) fn object_control_content(
     Ok(content)
 }
 
-pub(crate) fn validate_object_control_content(
+pub fn validate_object_control_content(
     class: ObjectClass,
     file: &str,
     content: &str,
@@ -123,6 +148,12 @@ pub(crate) fn validate_agent_bootstrap_control_content(
 ) -> Result<(), ObjectBootstrapError> {
     if content.contains('\0') {
         return Err(ObjectBootstrapError::InvalidControlValue);
+    }
+    if file == "tools" {
+        return inspect_agent_tools_control(content)
+            .is_ok()
+            .then_some(())
+            .ok_or(ObjectBootstrapError::InvalidControlValue);
     }
     let Some(kind) = AgentControlKind::parse(file) else {
         return Ok(());
@@ -202,11 +233,9 @@ pub(crate) fn is_valid_wrapper_target(value: &str) -> bool {
     !value.trim().is_empty() && !value.bytes().any(|byte| byte.is_ascii_control())
 }
 
-pub(crate) fn executable_wrapper_script(
-    class: ObjectClass,
-    name: &str,
-    wrapper_target: &str,
-) -> String {
+/// Renders the canonical executable wrapper for one filesystem object.
+#[must_use]
+pub fn executable_wrapper_script(class: ObjectClass, name: &str, wrapper_target: &str) -> String {
     format!(
         "#!/bin/sh\n# CortexFS generated object wrapper.\n# cortexfs.object={}\n# cortexfs.name={}\nexec {} \"$0\" \"$@\"\n",
         class.as_str(),

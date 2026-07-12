@@ -159,6 +159,170 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 }
 
 #[test]
+fn sdk_envelope_cancel_stops_active_step_before_respawn() {
+    let root = reference_tree("sdk-envelope-cancel-step");
+    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        "#!/bin/sh\ntrap 'printf term > \"$CTX_SOURCE/envelope-terminated\"; exit 0' TERM\nIFS= read -r envelope\ntouch \"$CTX_SOURCE/envelope-ready\"\nsleep 10\nprintf '{\"type\":\"message\",\"run\":\"%s\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"late\"}]}\\n' \"$CTX_RUN_ID\"\n",
+    );
+    set_file_mode(&executable, 0o755);
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(
+        client
+            .write_all(
+                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"wait\"}\n"
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let cancel_root = session_root.clone();
+    let ready = root.join("envelope-ready");
+    let cancel = thread::spawn(move || {
+        for _ in 0..100 {
+            if ready.exists() {
+                return handle_socket_request_frame(
+                    &cancel_root,
+                    "/work",
+                    Some("debug/echo"),
+                    r#"{"op":"cancel","id":"r1"}"#,
+                )
+                .is_ok();
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
+    });
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &executable,
+            execution: AgentExecutableSocketExecution::Direct,
+        },
+    );
+    let cancelled = cancel.join();
+    assert!(
+        matches!(cancelled, Ok(true)),
+        "cancel={cancelled:?} outcome={outcome:?} ready={}",
+        view.home().join("tool-ready").exists()
+    );
+    let outcome = ok!(outcome);
+    assert!(!outcome.jsonl().contains("late"));
+    assert_file_text(&session_root.join("default/state"), "cancelled\n");
+    assert_file_text(&root.join("envelope-terminated"), "term");
+}
+
+#[test]
+fn sdk_envelope_cancel_during_tool_has_no_result_or_respawn() {
+    let root = reference_tree("sdk-envelope-cancel-tool");
+    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+    write_text_file(
+        &root.join("agent/coder.d/path"),
+        &format!("{}\n", root.join("tool").display()),
+    );
+    write_text_file(
+        &root.join("agent/coder.d/mount"),
+        &format!(
+            "{}\t{}\trw\trbind,nosuid,nodev\n",
+            root.display(),
+            root.display()
+        ),
+    );
+    let policy_path = root.join("agent/coder.d/policy");
+    let mut policy = ok!(fs::read_to_string(&policy_path));
+    policy.push_str("allow coder_t tool:long execute\n");
+    write_text_file(&policy_path, &policy);
+    write_text_file(&root.join("agent/coder.d/tools"), "long\n");
+    assert!(fs::create_dir_all(root.join("tool/long.d")).is_ok());
+    write_text_file(
+        &root.join("tool/long.d/policy"),
+        "allow coder_t tool:long execute\n",
+    );
+    write_text_file(
+        &root.join("tool/long"),
+        "#!/bin/sh\ntouch \"$CTX_SOURCE/tool-ready\"\nsh -c 'trap \"\" TERM; sleep 2; touch \"$CTX_SOURCE/tool-leak\"' &\nwait\n",
+    );
+    set_file_mode(&root.join("tool/long"), 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        "#!/bin/sh\nIFS= read -r envelope\nif [ \"$CTX_AGENT_STEP\" = 0 ]; then printf '{\"type\":\"tool_call\",\"run\":\"%s\",\"id\":\"long-1\",\"name\":\"long\",\"arguments\":{\"args\":[]}}\\n' \"$CTX_RUN_ID\"; else touch \"$CTX_SOURCE/respawned\"; fi\n",
+    );
+    set_file_mode(&executable, 0o755);
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(client.write_all(b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"cancel tool\"}\n").is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let watch = root.to_path_buf();
+    let cancel_root = session_root.clone();
+    let cancel = thread::spawn(move || {
+        let status = std::process::Command::new("/usr/bin/inotifywait")
+            .args([
+                "--quiet",
+                "--timeout",
+                "3",
+                "--event",
+                "create",
+                "--include",
+                "tool-ready",
+            ])
+            .arg(watch)
+            .status();
+        status.is_ok_and(|status| status.success())
+            && handle_socket_request_frame(
+                &cancel_root,
+                "/work",
+                Some("debug/echo"),
+                r#"{"op":"cancel","id":"r1"}"#,
+            )
+            .is_ok()
+    });
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &executable,
+            execution: AgentExecutableSocketExecution::Direct,
+        },
+    );
+    let cancelled = cancel.join();
+    assert!(
+        matches!(cancelled, Ok(true)),
+        "cancel={cancelled:?} outcome={outcome:?} ready={}",
+        root.join("tool-ready").exists()
+    );
+    let outcome = ok!(outcome);
+    assert!(!outcome.jsonl().contains("tool_result"));
+    assert!(!root.join("respawned").exists());
+    thread::sleep(Duration::from_millis(200));
+    assert!(!root.join("tool-leak").exists());
+    assert_file_text(&session_root.join("default/state"), "cancelled\n");
+}
+
+#[test]
 fn agent_executable_socket_runtime_preserves_jsonl_error_output() {
     let root = reference_tree("agent-executable-socket-runtime-error-output");
     let session_root = agent_session_root(&root, "coder");
@@ -278,6 +442,7 @@ exit 1
             execution: AgentExecutableSocketExecution::Bwrap {
                 program: &failing_program,
                 mount_table: view.mount_table(),
+                control_dir: None,
             },
         },
     );

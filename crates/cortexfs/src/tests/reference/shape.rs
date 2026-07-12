@@ -142,12 +142,7 @@ fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
 fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let root = clean_test_dir("reference-tree");
     let user_tool_dir = ctx_home(&root).join("tool");
-    for tool in [
-        "mcp.github.search_issues",
-        "agent.create",
-        "agent.start",
-        "agent.stop",
-    ] {
+    for tool in ["mcp.github.search_issues", "agent.start", "agent.stop"] {
         assert!(
             install_executable_object_wrapper(
                 &root,
@@ -212,7 +207,13 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         &root.join("tool").join("tsh"),
         "#!/bin/sh\n# CortexFS reference-tree tsh tool.\nexec /ctx/bin/tsh \"$@\"\n",
     );
-    for tool in ["fs.read", "fs.write", "shell.exec", "tsh.config"] {
+    for tool in [
+        "fs.read",
+        "fs.write",
+        "shell.exec",
+        "tsh.config",
+        "agent.create",
+    ] {
         assert!(root.join("tool").join(tool).is_file());
         assert!(root.join("tool").join(format!("{tool}.d")).is_dir());
         assert!(inspect_object_layout(&root, ObjectClass::Tool, tool).is_ok());
@@ -224,12 +225,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         assert!(!root.join("tool").join(tool).exists());
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }
-    for tool in [
-        "mcp.github.search_issues",
-        "agent.create",
-        "agent.start",
-        "agent.stop",
-    ] {
+    for tool in ["mcp.github.search_issues", "agent.start", "agent.stop"] {
         assert!(!root.join("tool").join(tool).exists());
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }

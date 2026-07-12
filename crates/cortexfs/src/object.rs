@@ -1,5 +1,6 @@
 pub mod bootstrap;
 pub(crate) mod executor;
+pub mod install;
 pub mod layout;
 pub mod metadata;
 pub(crate) mod runner;

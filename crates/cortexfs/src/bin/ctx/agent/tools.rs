@@ -27,16 +27,9 @@ pub(crate) fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<Str
         return Ok(Vec::new());
     }
     let mut tools = vec!["tsh".to_owned()];
-    let state_path = cortexfs::tsh_context_state_path(view.home());
-    let state = cortexfs::read_tsh_context_state(&state_path).map_err(|error| {
-        CliError::unavailable(format!("cannot read {}: {error}", state_path.display()))
-    })?;
-    for tool in state.tools {
-        if tool.name == "tsh" || tools.contains(&tool.name) {
-            continue;
-        }
-        if agent_tool_is_authorized(&view, &tool.name)? {
-            tools.push(tool.name);
+    for tool in view.declared_tools() {
+        if agent_tool_is_authorized(&view, tool)? {
+            tools.push(tool.clone());
         }
     }
     tools.sort();

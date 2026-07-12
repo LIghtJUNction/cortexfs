@@ -516,6 +516,7 @@ version = "0.1.7"
 dependencies = [
  "arrow-array",
  "arrow-schema",
+ "cortexfs-runtime-client",
  "cortexfs-tool-sdk",
  "fuser",
  "jsonschema",
@@ -533,6 +534,37 @@ dependencies = [
  "signal-hook",
  "tempfile",
  "xattr",
+]
+
+[[package]]
+name = "cortexfs-agent-sdk"
+version = "0.1.7"
+dependencies = [
+ "cortexfs",
+ "cortexfs-runtime-client",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "cortexfs-runtime-client"
+version = "0.1.7"
+dependencies = [
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "cortexfs-sdk-extension-fixture"
+version = "0.1.7"
+dependencies = [
+ "cortexfs",
+ "cortexfs-agent-sdk",
+ "cortexfs-tool-sdk",
+ "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]

@@ -97,6 +97,11 @@ symlink overlay:
 
 ## Exec Protocol
 
+Executable agents may select their launch protocol with the optional
+`agent/<name>.d/abi` control. The only v1 values are `argv-v1` and
+`sdk-envelope-v1`. Absence is exactly equivalent to `argv-v1`, preserving the
+legacy argv/stdin behavior without inference or content sniffing.
+
 `model/<provider>/<model>`, `agent/<name>`, and `tool/<name>` are executable
 files. They must accept argv or stdin input:
 
@@ -134,6 +139,12 @@ runner shebang:
 `tool/<name>` must not expose a per-tool shell script as file contents. Tool
 implementation dispatch is runtime behavior behind the common runner; `name.d/`
 remains the inspectable control surface.
+
+For installed executable plugins, the backing source keeps the verified
+artifact bytes needed for `execve`, while the FUSE read projection uses the
+object class and `.d` controls to return canonical inspectable metadata through
+`object_exec_metadata`. Reading `/ctx/tool/<name>` or `/ctx/agent/<name>`
+therefore does not reveal the plugin binary or source implementation.
 
 Exit codes:
 

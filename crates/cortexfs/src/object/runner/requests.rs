@@ -200,13 +200,9 @@ pub(crate) fn current_agent_openai_tools_for(agent: Option<&str>, root: &Path) -
     let Ok(view) = derive_agent_runtime_view(root, agent) else {
         return tools;
     };
-    let state_path = cortexfs::tsh_context_state_path(view.home());
-    let Ok(state) = cortexfs::read_tsh_context_state(&state_path) else {
-        return tools;
-    };
-    for tool in state.tools {
-        if provider_function_name_is_compatible(&tool.name) && !tools.contains(&tool.name) {
-            tools.push(tool.name);
+    for tool in view.declared_tools() {
+        if provider_function_name_is_compatible(tool) && !tools.contains(tool) {
+            tools.push(tool.clone());
         }
     }
     tools.sort();
@@ -306,7 +302,7 @@ mod requests_tests {
         clippy::expect_used,
         reason = "test fixture setup should fail loudly with the missing field name"
     )]
-    fn loaded_tools_extend_openai_tool_manifest() {
+    fn declared_tools_extend_openai_tool_manifest_and_cache_does_not() {
         let root = temp_path("provider-loaded-tools");
         let _ignored = fs::remove_dir_all(&root);
         let control = root.join("agent").join("coder.d");
@@ -338,6 +334,7 @@ mod requests_tests {
         .expect("mount");
         fs::write(control.join("model"), "main\n").expect("model");
         fs::write(control.join("policy"), "allow coder_t model:main use\n").expect("policy");
+        fs::write(control.join("tools"), "bash\nshell.exec\n").expect("tools");
         fs::write(control.join("status"), "idle\n").expect("status");
         fs::write(control.join("pid"), "\n").expect("pid");
         fs::write(control.join("log"), "\n").expect("log");

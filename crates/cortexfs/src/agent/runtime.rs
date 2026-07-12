@@ -1,4 +1,5 @@
 use crate::*;
+use std::collections::BTreeSet;
 
 /// Runtime Unix identity used for Linux permission checks.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,6 +34,7 @@ pub struct AgentRuntimeView {
     pub(crate) mount_table: MountTable,
     pub(crate) model: String,
     pub(crate) policy: PolicyV0,
+    pub(crate) declared_tools: BTreeSet<String>,
 }
 
 /// Error while deriving an agent runtime view from `agent/<name>.d/*`.
@@ -197,6 +199,12 @@ impl AgentRuntimeView {
     #[must_use]
     pub const fn policy(&self) -> &PolicyV0 {
         &self.policy
+    }
+
+    /// Returns the statically declared direct-native tools.
+    #[must_use]
+    pub const fn declared_tools(&self) -> &BTreeSet<String> {
+        &self.declared_tools
     }
 }
 

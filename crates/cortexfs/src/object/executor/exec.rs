@@ -1,11 +1,44 @@
 use super::*;
+use std::ffi::OsStr;
 use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::fs::FileTypeExt;
 
 pub(crate) fn execute_agent_tool_call(
     config: &AgentModelRunConfig,
     tool_call: &AgentToolCall,
 ) -> Result<String, String> {
-    let view = derive_agent_runtime_view(&config.ctx_root, &config.agent)
+    execute_agent_tool_call_with(&AgentToolExecutionConfig::from_model(config), tool_call)
+}
+
+pub(crate) struct AgentToolExecutionConfig<'a> {
+    pub(crate) agent: &'a str,
+    pub(crate) source: &'a Path,
+    pub(crate) ctx_root: &'a Path,
+    pub(crate) run: &'a str,
+    pub(crate) session: &'a str,
+    pub(crate) inherit_control: bool,
+    pub(crate) cancel: Option<(&'a Path, &'a str)>,
+}
+
+impl<'a> AgentToolExecutionConfig<'a> {
+    pub(crate) fn from_model(config: &'a AgentModelRunConfig) -> Self {
+        Self {
+            agent: &config.agent,
+            source: &config.source,
+            ctx_root: &config.ctx_root,
+            run: &config.run,
+            session: &config.session,
+            inherit_control: true,
+            cancel: None,
+        }
+    }
+}
+
+pub(crate) fn execute_agent_tool_call_with(
+    config: &AgentToolExecutionConfig<'_>,
+    tool_call: &AgentToolCall,
+) -> Result<String, String> {
+    let view = derive_agent_runtime_view(config.ctx_root, config.agent)
         .map_err(|error| format!("cannot derive agent authority: {}", error.errno()))?;
     let network_allowed = view.policy().allows(
         view.policy_subject(),
@@ -15,9 +48,9 @@ pub(crate) fn execute_agent_tool_call(
     );
     if tool_call.name == "tsh" {
         validate_agent_tsh_args(&tool_call.args)?;
-    } else if !agent_tool_is_loaded(&view, &tool_call.name)? {
+    } else if !view.declared_tools().contains(&tool_call.name) {
         return Err(format!(
-            "unsupported native tool {}; load it through tsh first",
+            "unsupported native tool {}; declare it in the agent tools control",
             tool_call.name
         ));
     }
@@ -53,7 +86,7 @@ pub(crate) fn execute_agent_tool_call(
     let sandbox = if git_write_declared {
         None
     } else {
-        prepare_agent_tool_sandbox(&view, &config.source)?
+        prepare_agent_tool_sandbox(&view, config.source)?
     };
     let owner = view.owner().to_string();
     let ctx_home_target = Path::new(DEFAULT_CTX_ROOT).join("home").join(&owner);
@@ -69,6 +102,14 @@ pub(crate) fn execute_agent_tool_call(
     crate::provider::name::files::clear_fd_cloexec(&home_dir)
         .map_err(|error| format!("cannot preserve agent home fd: {error:?}"))?;
     let mut command = Command::new(BWRAP_PROGRAM);
+    let control = if config.inherit_control {
+        nested_control_environment(
+            env::var_os("CTX_CONTROL_SOCKET"),
+            env::var_os("CTX_CONTROL_TOKEN"),
+        )?
+    } else {
+        None
+    };
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config,
         tool_executable: &proc_fd_path(&tool_executable),
@@ -81,12 +122,23 @@ pub(crate) fn execute_agent_tool_call(
         home_fd: home_dir.as_raw_fd(),
         home_target: &home_target,
         ctx_home_target: &ctx_home_target,
+        control: control.as_ref(),
     }));
-    let output = run_agent_tool_process(&mut command)
-        .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
+    let output = if let Some((session_dir, run)) = config.cancel {
+        run_agent_tool_process_cancellable(&mut command, || {
+            crate::agent_run_cancelled(session_dir, run)
+        })
+    } else {
+        run_agent_tool_process(&mut command)
+    }
+    .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
     drop(home_dir);
-    let mut result = String::new();
-    result.push_str(&String::from_utf8_lossy(&output.stdout));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed = parse_tool_stdout(&stdout).map_err(|error| trim_tool_result(&error))?;
+    let mut result = match parsed {
+        ToolStdout::Legacy(text) | ToolStdout::SdkSuccess(text) => text,
+        ToolStdout::SdkError(error) => return Err(trim_tool_result(&error)),
+    };
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.trim().is_empty() {
         if !result.is_empty() && !result.ends_with('\n') {
@@ -106,14 +158,93 @@ pub(crate) fn execute_agent_tool_call(
     Ok(trim_tool_result(&result))
 }
 
-pub(crate) fn agent_tool_is_loaded(
-    view: &cortexfs::AgentRuntimeView,
-    name: &str,
-) -> Result<bool, String> {
-    let state_path = cortexfs::tsh_context_state_path(view.home());
-    let state = cortexfs::read_tsh_context_state(&state_path)
-        .map_err(|error| format!("cannot read {}: {error}", state_path.display()))?;
-    Ok(state.tools.iter().any(|tool| tool.name == name))
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum ToolStdout {
+    Legacy(String),
+    SdkSuccess(String),
+    SdkError(String),
+}
+
+pub(crate) fn parse_tool_stdout(output: &str) -> Result<ToolStdout, String> {
+    let Some(first_line) = output.lines().find(|line| !line.is_empty()) else {
+        return Ok(ToolStdout::Legacy(output.to_owned()));
+    };
+    let Ok(first) = serde_json::from_str::<Value>(first_line) else {
+        return Ok(ToolStdout::Legacy(output.to_owned()));
+    };
+    if first.get("type").and_then(Value::as_str) != Some("start") {
+        return Ok(ToolStdout::Legacy(output.to_owned()));
+    }
+    let run = sdk_frame_string(&first, &["type", "run", "tool"], "run")?;
+    let mut text = String::new();
+    let mut error = None;
+    let mut done = None;
+    for line in output.lines().skip_while(|line| line.is_empty()).skip(1) {
+        if line.is_empty() || done.is_some() {
+            return Err("invalid CortexFS Tool SDK output after start".to_owned());
+        }
+        let frame = serde_json::from_str::<Value>(line)
+            .map_err(|_error| "invalid CortexFS Tool SDK JSONL after start".to_owned())?;
+        if frame.get("run").and_then(Value::as_str) != Some(run) {
+            return Err("CortexFS Tool SDK output run mismatch".to_owned());
+        }
+        match frame.get("type").and_then(Value::as_str) {
+            Some("message") if error.is_none() => {
+                sdk_exact_keys(&frame, &["type", "run", "role", "content"])?;
+                if frame.get("role").and_then(Value::as_str) != Some("tool") {
+                    return Err("invalid CortexFS Tool SDK message role".to_owned());
+                }
+                let items = frame
+                    .get("content")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| "invalid CortexFS Tool SDK message content".to_owned())?;
+                for item in items {
+                    sdk_exact_keys(item, &["type", "text"])?;
+                    if item.get("type").and_then(Value::as_str) != Some("text") {
+                        return Err("invalid CortexFS Tool SDK content item".to_owned());
+                    }
+                    text.push_str(sdk_frame_string(item, &["type", "text"], "text")?);
+                }
+            }
+            Some("error") if error.is_none() => {
+                sdk_exact_keys(&frame, &["type", "run", "code", "message"])?;
+                let code = sdk_frame_string(&frame, &["type", "run", "code", "message"], "code")?;
+                let message =
+                    sdk_frame_string(&frame, &["type", "run", "code", "message"], "message")?;
+                error = Some(format!("{code}: {message}"));
+            }
+            Some("done") => {
+                sdk_exact_keys(&frame, &["type", "run", "status"])?;
+                done = Some(
+                    sdk_frame_string(&frame, &["type", "run", "status"], "status")?.to_owned(),
+                );
+            }
+            _ => return Err("invalid CortexFS Tool SDK frame sequence".to_owned()),
+        }
+    }
+    match (error, done.as_deref()) {
+        (None, Some("ok")) => Ok(ToolStdout::SdkSuccess(text)),
+        (Some(error), Some("error")) => Ok(ToolStdout::SdkError(error)),
+        _ => Err("invalid CortexFS Tool SDK terminal status".to_owned()),
+    }
+}
+
+fn sdk_frame_string<'a>(frame: &'a Value, keys: &[&str], name: &str) -> Result<&'a str, String> {
+    sdk_exact_keys(frame, keys)?;
+    frame
+        .get(name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("invalid CortexFS Tool SDK {name}"))
+}
+
+fn sdk_exact_keys(frame: &Value, keys: &[&str]) -> Result<(), String> {
+    let object = frame
+        .as_object()
+        .ok_or_else(|| "CortexFS Tool SDK frame is not an object".to_owned())?;
+    if object.len() != keys.len() || !keys.iter().all(|key| object.contains_key(*key)) {
+        return Err("CortexFS Tool SDK frame has invalid fields".to_owned());
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -124,7 +255,7 @@ pub(crate) struct AgentToolSandbox {
 }
 
 pub(crate) struct AgentToolBwrapArgs<'a> {
-    pub(crate) config: &'a AgentModelRunConfig,
+    pub(crate) config: &'a AgentToolExecutionConfig<'a>,
     pub(crate) tool_executable: &'a Path,
     pub(crate) tool_args: &'a [OsString],
     pub(crate) env: &'a [(String, String)],
@@ -135,6 +266,44 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) home_fd: RawFd,
     pub(crate) home_target: &'a Path,
     pub(crate) ctx_home_target: &'a Path,
+    pub(crate) control: Option<&'a (PathBuf, OsString)>,
+}
+
+pub(crate) fn nested_control_environment(
+    socket: Option<OsString>,
+    token: Option<OsString>,
+) -> Result<Option<(PathBuf, OsString)>, String> {
+    match (socket, token) {
+        (None, None) => Ok(None),
+        (Some(socket), Some(token)) => {
+            validate_nested_control_values(&socket, &token)?;
+            let socket = PathBuf::from(socket);
+            let metadata = fs::symlink_metadata(&socket)
+                .map_err(|error| format!("cannot inspect CTX_CONTROL_SOCKET: {error}"))?;
+            if !nested_control_socket_is_plain(&metadata) {
+                return Err("CTX_CONTROL_SOCKET is not a plain socket".to_owned());
+            }
+            Ok(Some((socket, token)))
+        }
+        _ => Err("incomplete CTX_CONTROL_SOCKET/CTX_CONTROL_TOKEN pair".to_owned()),
+    }
+}
+
+pub(crate) fn nested_control_socket_is_plain(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_socket() && !metadata.file_type().is_symlink()
+}
+
+pub(crate) fn validate_nested_control_values(socket: &OsStr, token: &OsStr) -> Result<(), String> {
+    if socket != OsStr::new(crate::runtime::socket::SOCKET_RUN_CONTROL_PATH) {
+        return Err("CTX_CONTROL_SOCKET is not the fixed runtime control path".to_owned());
+    }
+    let token = token
+        .to_str()
+        .ok_or_else(|| "CTX_CONTROL_TOKEN is not ASCII hex".to_owned())?;
+    if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("CTX_CONTROL_TOKEN is not a 32-byte hex token".to_owned());
+    }
+    Ok(())
 }
 
 pub(crate) fn prepare_agent_tool_sandbox(
@@ -225,13 +394,22 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
     }
     args.extend(optional_dev_toolchain_bind_args());
     args.extend(agent_tool_env_bwrap_args(request));
-    args.extend(bwrap_source_root_bind_args(&request.config.source));
+    if let Some(control) = request.control {
+        let socket = &control.0;
+        args.extend(bwrap_dir_args_for_parent(&socket.display().to_string()));
+        args.extend([
+            OsString::from("--bind"),
+            socket.as_os_str().to_owned(),
+            socket.as_os_str().to_owned(),
+        ]);
+    }
+    args.extend(bwrap_source_root_bind_args(request.config.source));
     for mount in request.mount_table.entries() {
         if request.sandbox.is_some() && path_uses_workspace(mount.target()) {
             continue;
         }
         let Some(source) =
-            visible_mount_source(&request.config.source, mount.source(), mount.target())
+            visible_mount_source(request.config.source, mount.source(), mount.target())
         else {
             continue;
         };
@@ -283,6 +461,12 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from("CTX_AGENT"),
         OsString::from(&request.config.agent),
         OsString::from("--setenv"),
+        OsString::from("CTX_SESSION"),
+        OsString::from(&request.config.session),
+        OsString::from("--setenv"),
+        OsString::from("CTX_RUN_ID"),
+        OsString::from(&request.config.run),
+        OsString::from("--setenv"),
         OsString::from("CTX_ROOT"),
         OsString::from(DEFAULT_CTX_ROOT),
         OsString::from("--setenv"),
@@ -310,6 +494,18 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from("PATH"),
         OsString::from("/usr/bin:/bin"),
     ]);
+    if let Some(control) = request.control {
+        let socket = &control.0;
+        let token = &control.1;
+        args.extend([
+            OsString::from("--setenv"),
+            OsString::from("CTX_CONTROL_SOCKET"),
+            socket.as_os_str().to_owned(),
+            OsString::from("--setenv"),
+            OsString::from("CTX_CONTROL_TOKEN"),
+            token.clone(),
+        ]);
+    }
     if let Some(rustup_home) = rustup_home() {
         args.extend([
             OsString::from("--setenv"),
@@ -496,9 +692,29 @@ pub(crate) fn run_agent_tool_process(
     run_agent_tool_process_with_timeout(command, Duration::from_secs(agent_tool_timeout_seconds()))
 }
 
+pub(crate) fn run_agent_tool_process_cancellable(
+    command: &mut Command,
+    mut cancelled: impl FnMut() -> bool,
+) -> Result<std::process::Output, String> {
+    run_agent_tool_process_with_timeout_and_cancel(
+        command,
+        Duration::from_secs(agent_tool_timeout_seconds()),
+        &mut cancelled,
+    )
+}
+
+#[cfg_attr(not(test), expect(dead_code, reason = "focused timeout seam"))]
 pub(crate) fn run_agent_tool_process_with_timeout(
     command: &mut Command,
     timeout: Duration,
+) -> Result<std::process::Output, String> {
+    run_agent_tool_process_with_timeout_and_cancel(command, timeout, &mut || false)
+}
+
+fn run_agent_tool_process_with_timeout_and_cancel(
+    command: &mut Command,
+    timeout: Duration,
+    cancelled: &mut impl FnMut() -> bool,
 ) -> Result<std::process::Output, String> {
     command
         .stdin(Stdio::null())
@@ -573,6 +789,11 @@ pub(crate) fn run_agent_tool_process_with_timeout(
             terminate_process_group(&mut child);
             let _ignored = child.wait();
             return Err(format!("tool timed out after {}s", timeout.as_secs()));
+        }
+        if cancelled() {
+            terminate_process_group(&mut child);
+            let _ignored = child.wait();
+            return Err("tool cancelled".to_owned());
         }
         thread::sleep(Duration::from_millis(50));
     };

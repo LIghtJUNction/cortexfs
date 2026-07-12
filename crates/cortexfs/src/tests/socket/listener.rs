@@ -1,4 +1,12 @@
 #[test]
+fn system_socket_policy_allows_owner_or_root_only() {
+    let policy = SocketPeerPolicy::uid_or_root(1000);
+    assert!(policy.allows(PeerCredentials::new(Some(1), 1000, 1000)));
+    assert!(policy.allows(PeerCredentials::new(Some(2), 0, 0)));
+    assert!(!policy.allows(PeerCredentials::new(Some(3), 1001, 1000)));
+}
+
+#[test]
 fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
     let root = clean_test_dir("socket-stream-runtime");
     let session_root = root.join("session");

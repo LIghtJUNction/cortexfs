@@ -1,5 +1,5 @@
 #[test]
-fn loaded_native_tool_executes_directly_after_tsh_load_state()
+fn declared_native_tool_executes_and_tsh_cache_does_not_admit_it()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = short_unique_temp_path("loaded-native-tool");
     let _ignored = fs::remove_dir_all(&root);
@@ -55,8 +55,10 @@ fn loaded_native_tool_executes_directly_after_tsh_load_state()
         args: Vec::new(),
     };
 
-    let before_load = execute_agent_tool_call(&config, &call);
-    assert!(matches!(before_load, Err(ref error) if error.contains("load it through tsh first")));
+    let before_declaration = execute_agent_tool_call(&config, &call);
+    assert!(
+        matches!(before_declaration, Err(ref error) if error.contains("declare it in the agent tools control"))
+    );
 
     let view = cortexfs::derive_agent_runtime_view(&root, "coder")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
@@ -72,8 +74,58 @@ fn loaded_native_tool_executes_directly_after_tsh_load_state()
     }];
     cortexfs::write_tsh_context_state(&cortexfs::tsh_context_state_path(view.home()), &state)?;
 
-    let after_load = execute_agent_tool_call(&config, &call)?;
-    assert_eq!(after_load, "loaded-direct");
+    let after_cache_forgery = execute_agent_tool_call(&config, &call);
+    assert!(
+        matches!(after_cache_forgery, Err(ref error) if error.contains("declare it in the agent tools control"))
+    );
+
+    fs::write(control.join("tools"), "bash\n")?;
+    let after_declaration = execute_agent_tool_call(&config, &call)?;
+    assert_eq!(after_declaration, "loaded-direct");
+
+    cortexfs::write_tsh_context_state(
+        &cortexfs::tsh_context_state_path(view.home()),
+        &cortexfs::TshContextState::default(),
+    )?;
+    let after_tsh_unload = execute_agent_tool_call(&config, &call)?;
+    assert_eq!(after_tsh_unload, "loaded-direct");
+
+    let sdk_cases = [
+        (
+            concat!(
+                "#!/bin/sh\n",
+                "printf '%s\\n' '{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"bash\"}' ",
+                "'{\"type\":\"error\",\"run\":\"r1\",\"code\":\"EINVAL\",\"message\":\"bad input\"}' ",
+                "'{\"type\":\"done\",\"run\":\"r1\",\"status\":\"error\"}'\n",
+            ),
+            "EINVAL: bad input",
+        ),
+        (
+            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"bash\"}' 'not-json'\n",
+            "invalid CortexFS Tool SDK JSONL",
+        ),
+        (
+            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"bash\"}' '{\"type\":\"done\",\"run\":\"r2\",\"status\":\"ok\"}'\n",
+            "run mismatch",
+        ),
+        (
+            "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"bash\"}'\n",
+            "terminal status",
+        ),
+    ];
+    for (script, expected) in sdk_cases {
+        write_executable_script(&tool_dir.join("bash"), script)?;
+        let result = execute_agent_tool_call(&config, &call);
+        assert!(matches!(result, Err(ref error) if error.contains(expected)));
+    }
+    write_executable_script(&tool_dir.join("bash"), "#!/bin/sh\nprintf loaded-direct\n")?;
+
+    fs::write(control.join("policy"), "allow coder_t model:main use\n")?;
+    let declared_but_denied = execute_agent_tool_call(&config, &call);
+    assert_eq!(
+        declared_but_denied,
+        Err("cannot execute tool:bash: EACCES".to_owned())
+    );
 
     let _ignored = fs::remove_dir_all(root);
     Ok(())

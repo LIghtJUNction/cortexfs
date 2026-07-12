@@ -116,6 +116,23 @@ tool 是可执行能力端点。用户看到的是：
 tool SDK 走结构化 JSON 和进程内调用。两者共享同一个 `.d/schema`、`.d/policy` 和可见性
 规则。
 
+外部 executable plugin 使用严格的 `cortexfs.object/v1` manifest 安装：
+
+```bash
+ctx object install --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object install --source "$CTX_SOURCE" agent.manifest.json --tier system
+```
+
+`--source` 是唯一可写的 durable backing tree；`/ctx` 与 `--root` 只是 ABI projection，
+不能作为安装目标。tool 的 user tier 是 `home/<effective-uid>/tool`，system tier 是
+`tool`。v1
+installer 的 agent 只支持 system tier `/ctx/agent`；root ABI 保留了
+`/ctx/home/<effective-uid>/agent` user-agent tier，但在 socket runtime 能安全携带 tier
+identity 之前，`agent --tier user` 会明确拒绝。安装只新建对象、校验 executable
+SHA-256，不修改任何 agent policy；它初始化规范要求的 status/pid/log，但不创建
+socket。SDK 的 `DynamicTool` loader
+目前尚未被 core runtime 消费，不应把 metadata cache 描述成已完成的 dlopen 常驻实现。
+
 ## 扩展 agent
 
 agent 是 policy-bound orchestrator。稳定路径是：

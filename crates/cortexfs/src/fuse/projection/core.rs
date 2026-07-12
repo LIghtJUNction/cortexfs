@@ -749,7 +749,10 @@ impl FuseV1Projection {
             return None;
         };
         let agent = control.strip_suffix(".d")?;
-        (is_object_name(agent) && AGENT_CONTROL_FILES.contains(&file)).then_some((agent, file))
+        (is_object_name(agent)
+            && (AGENT_CONTROL_FILES.contains(&file)
+                || AGENT_OPTIONAL_CONTROL_FILES.contains(&file)))
+        .then_some((agent, file))
     }
 
     #[doc(hidden)]

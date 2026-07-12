@@ -15,11 +15,6 @@ fn agent_new_host_fallback_defaults_worker_to_spark_model() {
         fs::read_to_string(root.join("agent/worker-fast.d/policy")).unwrap_or_default(),
         "allow worker-fast_t model:api.lmm.best/gpt-5.3-codex-spark use\nallow worker-fast_t tool:tsh execute\nallow worker-fast_t network:default connect\n"
     );
-    assert!(
-        fs::read_to_string(root.join("agent/worker-fast"))
-            .unwrap_or_default()
-            .contains("model=\"api.lmm.best/gpt-5.3-codex-spark\"")
-    );
 }
 
 #[test]
@@ -48,7 +43,7 @@ fn agent_new_host_fallback_defaults_executor_to_spark_model() {
 }
 
 #[test]
-fn agent_new_host_fallback_keeps_non_worker_stub_default_on_main() {
+fn agent_new_host_fallback_keeps_non_worker_default_on_main() {
     let root = clean_test_dir("ctx-agent-new-host-coder-stub-default-model");
     let command = cmd!("agent", "new", "coder", "--parent", "agent:architect");
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
@@ -56,10 +51,9 @@ fn agent_new_host_fallback_keeps_non_worker_stub_default_on_main() {
     };
 
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
-    assert!(
-        fs::read_to_string(root.join("agent/coder"))
-            .unwrap_or_default()
-            .contains("model=\"main\"")
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/model")).unwrap_or_default(),
+        "main\n"
     );
 }
 

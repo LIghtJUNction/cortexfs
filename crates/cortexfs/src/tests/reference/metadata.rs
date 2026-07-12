@@ -196,7 +196,7 @@ fn reference_tree_bootstrap_installs_tsh_tools() {
     assert!(root.join("tool").join("tsh.d").join("config").is_file());
     assert!(root.join("tool").join("tsh.config").is_file());
     assert!(root.join("tool").join("tsh.config.d").is_dir());
-    for tool in ["fs.read", "fs.write", "shell.exec"] {
+    for tool in ["fs.read", "fs.write", "shell.exec", "agent.create"] {
         assert!(root.join("tool").join(tool).is_file());
         assert!(root.join("tool").join(format!("{tool}.d")).is_dir());
         assert!(root.join("tool").join(format!("{tool}.d/schema")).is_file());
@@ -213,11 +213,11 @@ fn reference_tree_bootstrap_does_not_remove_symlinked_deprecated_tool_control_di
     let root = clean_test_dir("ref-deprecated-tool-control-symlink");
     let outside = clean_test_dir("ref-deprecated-tool-control-symlink-outside");
     let tool_dir = root.join("tool");
-    let control_link = tool_dir.join("agent.create.d");
+    let control_link = tool_dir.join("agent.start.d");
     assert!(fs::create_dir_all(&tool_dir).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
     write_text_file(
-        &tool_dir.join("agent.create"),
+        &tool_dir.join("agent.start"),
         "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
     );
     write_text_file(
@@ -234,7 +234,7 @@ fn reference_tree_bootstrap_does_not_remove_symlinked_deprecated_tool_control_di
             .is_ok_and(|metadata| metadata.file_type().is_symlink())
     );
     assert_file_text(
-        &tool_dir.join("agent.create"),
+        &tool_dir.join("agent.start"),
         "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
     );
     assert_file_text(
@@ -247,10 +247,10 @@ fn reference_tree_bootstrap_does_not_remove_symlinked_deprecated_tool_control_di
 fn reference_tree_bootstrap_removes_exact_deprecated_placeholder_tool() {
     let root = clean_test_dir("reference-tree-deprecated-tool-exact");
     let tool_dir = root.join("tool");
-    let control_dir = tool_dir.join("agent.create.d");
+    let control_dir = tool_dir.join("agent.start.d");
     assert!(fs::create_dir_all(&control_dir).is_ok());
     write_text_file(
-        &tool_dir.join("agent.create"),
+        &tool_dir.join("agent.start"),
         "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
     );
     for file in TOOL_CONTROL_FILES {
@@ -266,7 +266,7 @@ fn reference_tree_bootstrap_removes_exact_deprecated_placeholder_tool() {
 
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
-    assert!(!tool_dir.join("agent.create").exists());
+    assert!(!tool_dir.join("agent.start").exists());
     assert!(!control_dir.exists());
 }
 
@@ -274,10 +274,10 @@ fn reference_tree_bootstrap_removes_exact_deprecated_placeholder_tool() {
 fn reference_tree_bootstrap_preserves_deprecated_placeholder_tool_with_unknown_control_file() {
     let root = clean_test_dir("reference-tree-deprecated-tool-extra-control");
     let tool_dir = root.join("tool");
-    let control_dir = tool_dir.join("agent.create.d");
+    let control_dir = tool_dir.join("agent.start.d");
     assert!(fs::create_dir_all(&control_dir).is_ok());
     write_text_file(
-        &tool_dir.join("agent.create"),
+        &tool_dir.join("agent.start"),
         "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
     );
     for file in TOOL_CONTROL_FILES {
@@ -295,7 +295,7 @@ fn reference_tree_bootstrap_preserves_deprecated_placeholder_tool_with_unknown_c
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
     assert_file_text(
-        &tool_dir.join("agent.create"),
+        &tool_dir.join("agent.start"),
         "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
     );
     assert_file_text(&control_dir.join("user-note"), "keep me\n");

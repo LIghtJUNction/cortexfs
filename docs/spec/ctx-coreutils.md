@@ -181,6 +181,41 @@ second submission namespace.
 
 Agent lifecycle conveniences exist as thin wrappers:
 
+Executable extension installation uses one host-side, new-object-only command:
+
+```text
+ctx object install --source PATH MANIFEST [--tier user|system]
+```
+
+`--source` is required and names the durable backing tree that may be written.
+`/ctx`, `CTX_ROOT`, and `--root` are ABI projections and are never inferred as
+installation targets. `MANIFEST` uses schema `cortexfs.object/v1`, names class `tool` or `agent`,
+binds one executable path to its SHA-256, and supplies class controls. Unknown
+fields and controls, symlinks, non-regular or non-executable artifacts, digest
+mismatches, and existing object names are rejected. Relative executable paths
+resolve against the manifest directory. The manifest cannot specify commands,
+arguments, wrappers, or install tier.
+
+Agent manifests may include the optional `abi` control with exactly `argv-v1`
+or `sdk-envelope-v1`. If it is absent, the installed agent uses the exact
+legacy `argv-v1` contract. Other values are rejected before publication.
+
+User-tier tools install under `home/<effective-uid>/tool`; system tiers use
+`tool` and `agent`. The root ABI retains `home/<effective-uid>/agent`, but
+`cortexfs.object/v1` cannot carry tier identity to the root socket runtime, so
+the v1 installer rejects user-tier agents and directs callers to system tier.
+Installation does not grant policy authority. It initializes canonical
+runtime-owned status/pid/log files but does not create socket state. The
+complete control directory is staged and synced,
+then published no-replace before the executable is published last as the
+visible object commit boundary. Both published receipts are checked again
+before success is reported. Success or failure may retain a hidden
+`.cortexfs-install-*` safety residue for explicit future cleanup.
+
+At runtime, `CTX_SOURCE` is only an ambient candidate path. Durable writers
+must authenticate the runtime capability receipt and match its nofollow source
+directory path, device, inode, and plain-directory type before writing.
+
 ```text
 ctx agent new NAME [--temp] [--parent PARENT] [--label LABEL] [--model MODEL] [--tool TOOL] [--shared NAME:read|write] [--mount SOURCE TARGET ro|rw]
 ctx agent new [NAME] --from PROFILE
@@ -194,8 +229,9 @@ ctx agent children NAME
 ctx agent wait NAME CHILD
 ```
 
-`ctx agent new` must call `/ctx/tool/agent.create` when that tool exists. If the
-tool is absent, host-side `ctx` may create a standard agent object directly by
+`ctx agent new` calls `/ctx/tool/agent.create` only from a complete agent
+runtime context (`CTX_AGENT`, `CTX_SESSION`, `CTX_RUN_ID`, and `CTX_SOURCE`).
+An ordinary human host invocation creates a standard agent object directly by
 writing `agent/<name>.d/*` controls and `home/<uid>/agent/<name>/` skeleton
 directories; this fallback is a supervisor operation, not an agent policy
 grant. `ctx agent new --temp` records `life=temp` in either path. `--parent`

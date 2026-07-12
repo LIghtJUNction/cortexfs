@@ -25,16 +25,12 @@ pub(crate) fn write_empty_shell_startup_stub(parent: &Path) -> io::Result<()> {
 }
 
 pub(crate) fn wait_for_agent_terminal_socket(socket: &Path) -> Result<(), CliError> {
-    for _ in 0..50 {
-        if terminal_socket_exists(socket) {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Err(CliError::unavailable(format!(
-        "agent terminal service started, but socket did not appear: {}",
-        socket.display()
-    )))
+    cortexfs::agent::launch::wait_socket(socket, 50, Duration::from_millis(100)).map_err(|_error| {
+        CliError::unavailable(format!(
+            "agent terminal service started, but socket did not appear: {}",
+            socket.display()
+        ))
+    })
 }
 
 pub(crate) fn agent_runtime_socket(

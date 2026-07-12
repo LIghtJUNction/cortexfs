@@ -99,7 +99,10 @@ fn tool_call_arguments_reject_excessive_limits() {
 fn runtime_contract_describes_native_tsh_without_prompt_heuristics() {
     let contract = agent_runtime_contract("coder");
 
-    assert!(contract.contains("native callable tool exposed by this runtime is `tsh`"));
+    assert!(contract.contains("The CortexFS tool shell `tsh` is always native"));
+    assert!(contract.contains(
+        "Tools statically declared by the agent `tools` control may also be exposed as direct-native calls."
+    ));
     assert!(contract.contains("hidden platform tools such as `image_gen`"));
     assert!(contract.contains("When tool execution is useful"));
     assert!(contract.contains("Tool results include the original `arguments.args`"));

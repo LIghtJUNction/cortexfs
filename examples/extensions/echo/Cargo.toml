@@ -1,0 +1,19 @@
+[workspace]
+
+[package]
+name = "cortexfs-extension-echo"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+cortexfs-agent-sdk = { path = "../../../crates/cortexfs-agent-sdk" }
+cortexfs-tool-sdk = { path = "../../../crates/cortexfs-tool-sdk" }
+
+[[bin]]
+name = "cortexfs-echo-tool"
+path = "src/tool.rs"
+
+[[bin]]
+name = "cortexfs-echo-agent"
+path = "src/agent.rs"

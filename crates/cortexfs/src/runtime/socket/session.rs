@@ -5,6 +5,7 @@ pub(crate) fn handle_socket_send(
     default_cwd: &str,
     model: Option<&str>,
     request: &SocketRequest,
+    preparation: Option<&OwnedSessionPreparation>,
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
     let &SocketRequest::Send {
         ref id,
@@ -41,7 +42,17 @@ pub(crate) fn handle_socket_send(
         workspace: None,
         input: input.to_owned(),
     };
-    let record = record_indexed_socket_send_to_session(session_root, &durable_request)
+    let record = preparation
+        .map_or_else(
+            || record_indexed_socket_send_to_session(session_root, &durable_request),
+            |preparation| {
+                record_prepared_indexed_socket_send_to_session(
+                    session_root,
+                    &durable_request,
+                    preparation,
+                )
+            },
+        )
         .map_err(SocketRuntimeError::IndexedRecord)?;
     Ok(SocketRuntimeResponse::new(record.events().to_vec()))
 }
@@ -133,6 +144,14 @@ pub(crate) fn socket_start_frame(run_id: &str, model: Option<&str>) -> String {
         object.insert("model".to_owned(), serde_json::json!(model));
     }
     value.to_string()
+}
+
+pub(crate) fn is_socket_start_frame(frame: &str, run_id: &str) -> bool {
+    serde_json::from_str::<Value>(frame).is_ok_and(|value| {
+        value.get("type").and_then(Value::as_str) == Some("start")
+            && value.get("id").and_then(Value::as_str) == Some(run_id)
+            && value.get("run").and_then(Value::as_str) == Some(run_id)
+    })
 }
 
 pub(crate) fn socket_pong_frame() -> String {

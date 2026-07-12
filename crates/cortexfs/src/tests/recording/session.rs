@@ -124,3 +124,42 @@ fn assistant_response_recorder_rejects_nul_content_without_recording() {
     assert_file_text(&session.join("latest.md"), "old\n");
 }
 use super::*;
+use crate::runtime::record::session::set_session_state;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+#[test]
+fn socket_record_replacements_preserve_session_file_metadata() {
+    let root = clean_test_dir("socket-record-preserves-metadata");
+    let session = root.join("default");
+    create_complete_session_layout(&session);
+    for file in ["state", "updated_at", "latest.md"] {
+        assert!(fs::set_permissions(session.join(file), fs::Permissions::from_mode(0o640)).is_ok());
+    }
+    let before = ["state", "updated_at", "latest.md"].map(|file| {
+        fs::metadata(session.join(file))
+            .map(|metadata| {
+                (
+                    metadata.uid(),
+                    metadata.gid(),
+                    metadata.permissions().mode() & 0o777,
+                )
+            })
+            .ok()
+    });
+
+    assert!(set_session_state(&session, "running").is_ok());
+    assert!(record_assistant_response_to_session(&session, "run-1", "done").is_ok());
+
+    let after = ["state", "updated_at", "latest.md"].map(|file| {
+        fs::metadata(session.join(file))
+            .map(|metadata| {
+                (
+                    metadata.uid(),
+                    metadata.gid(),
+                    metadata.permissions().mode() & 0o777,
+                )
+            })
+            .ok()
+    });
+    assert_eq!(after, before);
+}
