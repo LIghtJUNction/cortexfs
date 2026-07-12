@@ -256,6 +256,39 @@ fn legacy_agent_rejects_forged_approval_facts() {
     }
 }
 
+fn declare_native_echo_tool(root: &Path, allowed: bool) {
+    let tool = root.join("tool/example.echo");
+    write_text_file(&tool, "#!/bin/sh\nprintf 'echo:%s\\n' \"$*\"\n");
+    set_file_mode(&tool, 0o755);
+    let tool_control = root.join("tool/example.echo.d");
+    assert!(fs::create_dir_all(&tool_control).is_ok());
+    write_text_file(
+        &tool_control.join("policy"),
+        "allow coder_t tool:example.echo execute\n",
+    );
+
+    let agent_control = root.join("agent/coder.d");
+    write_text_file(
+        &agent_control.join("path"),
+        &format!("{}\n", root.join("tool").display()),
+    );
+    write_text_file(
+        &agent_control.join("mount"),
+        &format!(
+            "{root}\t{root}\tro\trbind,nosuid,nodev\n",
+            root = root.display()
+        ),
+    );
+    write_text_file(&agent_control.join("tools"), "example.echo\n");
+    if allowed {
+        let policy = ok!(fs::read_to_string(agent_control.join("policy")));
+        write_text_file(
+            &agent_control.join("policy"),
+            &format!("{policy}allow coder_t tool:example.echo execute\n"),
+        );
+    }
+}
+
 #[test]
 fn executable_agent_tool_yield_uses_host_allow_and_deny() {
     for allowed in [false, true] {
@@ -264,28 +297,13 @@ fn executable_agent_tool_yield_uses_host_allow_and_deny() {
         } else {
             "agent-executable-tool-deny"
         });
-        let control = root.join("agent/coder.d");
-        if !allowed {
-            let policy = ok!(fs::read_to_string(control.join("policy")));
-            write_text_file(
-                &control.join("policy"),
-                &policy
-                    .lines()
-                    .filter(|line| !line.contains("tool:tsh execute"))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            );
-        }
-        let tool = root.join("tool/tsh");
-        assert!(fs::remove_file(&tool).is_ok());
-        write_text_file(&tool, "#!/bin/sh\nprintf 'host echo %s\\n' \"$*\"\n");
-        set_file_mode(&tool, 0o755);
+        declare_native_echo_tool(&root, allowed);
         let agent_executable = root.join("agent/coder");
         write_text_file(
             &agent_executable,
             r#"#!/bin/sh
 printf '{"type":"start","run":"%s"}\n' "$CTX_RUN_ID"
-printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}\n' "$CTX_RUN_ID"
+printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID"
 "#,
         );
         set_file_mode(&agent_executable, 0o755);
@@ -328,6 +346,7 @@ printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"
 fn sdk_envelope_agent_runs_two_authoritative_tool_steps() {
     let root = reference_tree("sdk-envelope-two-step");
     write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+    declare_native_echo_tool(&root, true);
     let agent_executable = root.join("agent/coder");
     write_text_file(
         &agent_executable,
@@ -336,13 +355,13 @@ IFS= read -r envelope
 case "$CTX_AGENT_STEP" in
   0)
     printf '%s' "$envelope" | jq -e 'keys == ["history_messages","input","observation","run","schema","step","tool_context"] and .schema == "cortexfs.agent-invocation/v1" and .run == env.CTX_RUN_ID and .step == 0 and .input == "two" and .observation == null' >/dev/null || exit 3
-    printf '{"type":"tool_call","run":"%s","id":"call-1","name":"tsh","arguments":{"args":["tools"]}}\n' "$CTX_RUN_ID" ;;
+    printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID" ;;
   1)
-    printf '%s' "$envelope" | jq -e '.step == 1 and (.observation | keys == ["content","name","status","tool_call_id","truncated"]) and .observation.tool_call_id == "call-1" and .observation.name == "tsh" and .observation.status == "ok" and .observation.truncated == false' >/dev/null || exit 3
+    printf '%s' "$envelope" | jq -e '.step == 1 and (.observation | keys == ["content","name","status","tool_call_id","truncated"]) and .observation.tool_call_id == "call-1" and .observation.name == "example.echo" and .observation.status == "ok" and .observation.truncated == false' >/dev/null || exit 3
     printf '%s' "$envelope" | jq -j '.observation.content' > "$CTX_SOURCE/obs-1"
-    printf '{"type":"tool_call","run":"%s","id":"call-2","name":"tsh","arguments":{"args":["tools"]}}\n' "$CTX_RUN_ID" ;;
+    printf '{"type":"tool_call","run":"%s","id":"call-2","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID" ;;
   2)
-    printf '%s' "$envelope" | jq -e '.step == 2 and (.observation | keys == ["content","name","status","tool_call_id","truncated"]) and .observation.tool_call_id == "call-2" and .observation.name == "tsh" and .observation.status == "ok" and .observation.truncated == false' >/dev/null || exit 3
+    printf '%s' "$envelope" | jq -e '.step == 2 and (.observation | keys == ["content","name","status","tool_call_id","truncated"]) and .observation.tool_call_id == "call-2" and .observation.name == "example.echo" and .observation.status == "ok" and .observation.truncated == false' >/dev/null || exit 3
     printf '%s' "$envelope" | jq -j '.observation.content' > "$CTX_SOURCE/obs-2"
     printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"complete"}]}\n' "$CTX_RUN_ID" ;;
   *) exit 2 ;;

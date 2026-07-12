@@ -1,3 +1,4 @@
+use crate::agent::control::approval_abi_valid;
 use crate::*;
 
 /// Installs a v1 executable object wrapper plus required `.d` control files.
@@ -54,6 +55,9 @@ pub(crate) fn install_object_control_files(
     }
     if class == ObjectClass::Agent {
         for file in AGENT_OPTIONAL_CONTROL_FILES {
+            if AGENT_CONTROL_FILES.contains(file) {
+                continue;
+            }
             if let Some(value) = control_overrides
                 .iter()
                 .find_map(|&(name, value)| (name == *file).then_some(value))
@@ -89,6 +93,19 @@ pub(crate) fn validate_control_overrides(
             return Err(ObjectBootstrapError::InvalidControlFile);
         }
         validate_object_control_content(class, file, &ensure_trailing_newline(value))?;
+    }
+    if class == ObjectClass::Agent {
+        let abi = control_overrides
+            .iter()
+            .find_map(|&(file, value)| (file == "abi").then_some(value))
+            .map(str::trim);
+        let approval = control_overrides
+            .iter()
+            .find_map(|&(file, value)| (file == "approval").then_some(value))
+            .map(str::trim);
+        if !approval_abi_valid(abi, approval) {
+            return Err(ObjectBootstrapError::InvalidControlValue);
+        }
     }
     Ok(())
 }
@@ -146,23 +163,25 @@ pub(crate) fn validate_agent_bootstrap_control_content(
     file: &str,
     content: &str,
 ) -> Result<(), ObjectBootstrapError> {
-    if content.contains('\0') {
-        return Err(ObjectBootstrapError::InvalidControlValue);
-    }
-    if file == "tools" {
-        return inspect_agent_tools_control(content)
-            .is_ok()
-            .then_some(())
-            .ok_or(ObjectBootstrapError::InvalidControlValue);
-    }
-    let Some(kind) = AgentControlKind::parse(file) else {
-        return Ok(());
+    let valid = match file {
+        "abi" => matches!(
+            content,
+            "argv-v1" | "argv-v1\n" | "sdk-envelope-v1" | "sdk-envelope-v1\n"
+        ),
+        "tools" => inspect_agent_tools_control(content).is_ok(),
+        "meta.json" => serde_json::from_str::<Value>(content).is_ok_and(|value| value.is_object()),
+        "system.md" | "prompt.template.md" => !content.contains('\0'),
+        _ if content.contains('\0') => false,
+        _ => {
+            let Some(kind) = AgentControlKind::parse(file) else {
+                return Ok(());
+            };
+            inspect_agent_control(kind, content).is_ok()
+        }
     };
-    if inspect_agent_control(kind, content).is_ok() {
-        Ok(())
-    } else {
-        Err(ObjectBootstrapError::InvalidControlValue)
-    }
+    valid
+        .then_some(())
+        .ok_or(ObjectBootstrapError::InvalidControlValue)
 }
 
 pub(crate) fn validate_tool_control_content(

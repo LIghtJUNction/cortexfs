@@ -12,8 +12,9 @@ mod tests {
 
     use cortexfs::object::install::{InstallTier, install_object};
     use cortexfs::{
-        AgentExecutableSocketExecution, AgentExecutableSocketRuntime, derive_agent_runtime_view,
-        ensure_v1_reference_tree, serve_agent_executable_socket_stream_once,
+        AgentExecutableSocketExecution, AgentExecutableSocketRuntime, ObjectClass,
+        derive_agent_runtime_view, ensure_v1_reference_tree, inspect_object_layout,
+        serve_agent_executable_socket_stream_once,
     };
     use serde_json::{Value, json};
     use sha2::{Digest, Sha256};
@@ -72,6 +73,7 @@ mod tests {
         let agent_manifest = package.join("agent.json");
         write_manifest(&agent_manifest, "agent", "fixture-agent", agent, &controls)?;
         install_object(root.path(), &agent_manifest, InstallTier::System)?;
+        assert!(inspect_object_layout(root.path(), ObjectClass::Agent, "fixture-agent").is_ok());
 
         let view = derive_agent_runtime_view(root.path(), "fixture-agent").map_err(|error| {
             std::io::Error::other(format!("cannot derive fixture runtime view: {error:?}"))

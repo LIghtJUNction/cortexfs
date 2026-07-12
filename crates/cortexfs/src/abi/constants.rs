@@ -96,7 +96,7 @@ pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
     "native_stateless",
 ];
 
-/// Required agent control files.
+/// Canonical agent control-file set materialized by bootstrap.
 pub const AGENT_CONTROL_FILES: &[&str] = &[
     "owner",
     "uid",
@@ -122,7 +122,16 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
 ];
 
 /// Optional agent control files recognized by v1.
-pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &["abi", "tools"];
+///
+/// Entries may overlap [`AGENT_CONTROL_FILES`] to preserve canonical bootstrap materialization.
+pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &[
+    "abi",
+    "approval",
+    "tools",
+    "system.md",
+    "prompt.template.md",
+    "meta.json",
+];
 
 /// Default system prompt template for agent model calls.
 pub const DEFAULT_AGENT_PROMPT_TEMPLATE: &str = r"# CortexFS Agent System Prompt
