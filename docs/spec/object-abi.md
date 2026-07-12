@@ -228,6 +228,56 @@ process.
 Error frames use stable errno names such as `EACCES`, `EINVAL`, `ENOENT`,
 `EMSGSIZE`, and `EHOSTDOWN`. Clients must not parse natural language `message`.
 
+## Executable Object Manifests
+
+The legacy manifest schema remains strict:
+
+```text
+cortexfs.object/v1 accepts neither version nor compatibility
+```
+
+`version` and `compatibility` are rejected on v1 rather than ignored. A v2
+manifest must instead provide both fields:
+
+```json
+{
+  "schema": "cortexfs.object/v2",
+  "version": "0.1.0",
+  "compatibility": {
+    "cortexfs": ">=0.1.7, <0.2.0"
+  },
+  "class": "tool",
+  "name": "example.echo",
+  "executable": {
+    "path": "target/release/example-echo-tool",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "controls": {
+    "description": "Echo text.",
+    "schema": "{\"type\":\"object\"}",
+    "cap": "text",
+    "policy": ""
+  }
+}
+```
+
+`version` is an object SemVer. `compatibility.cortexfs` is a Cargo-style
+SemVer requirement. Both `ctx object check` and `ctx object install` match that
+requirement against the CortexFS package version compiled into the current
+`ctx`; a mismatch is invalid input, exits 2, and performs no writes. Unknown
+fields remain rejected for both schemas.
+
+A `cortexfs.object-install/v2` receipt records `object_version` and
+`cortexfs_requirement`; a `cortexfs.object-install/v1` receipt records neither.
+Inspection reports the recorded compatibility facts. They are
+installation-admission and audit facts, not authority grants, and do not start
+a runtime. If a later CortexFS build no longer satisfies the recorded
+requirement, that mismatch must not prevent receipt-managed uninstall.
+
+Manifest v2 does not define upgrade or replacement. Installation remains
+new-object-only; use a new object name until a separate replace contract is
+specified and implemented.
+
 ## Installed Object Inspection and Removal
 
 The host-side inspection and receipt-managed removal surfaces are:
@@ -248,7 +298,9 @@ no-follow descriptors through validation and does not modify the backing tree.
 Mutable control-file contents are outside this receipt claim and are not
 revalidated against their install-time values. An object with a missing or
 legacy receipt is unmanaged and is reported as unavailable; inspection does
-not adopt it.
+not adopt it. For a v2 receipt, inspection also prints the recorded object
+version and CortexFS requirement. Inspection does not re-run installation
+compatibility admission against a later CortexFS build.
 
 Uninstall accepts only one exact installer-receipt-managed `tool` or `agent`
 pair, with tier defaulting to `user`. It is a no-write receipt validation and
@@ -263,7 +315,9 @@ foreign replacement and may retain audit-visible safety residue. Before
 `--yes`, the caller must quiesce the matching agent runtime and every writer
 sharing the same Unix authority. Receipt checkpoints do not close Linux's final
 pathname syscall race against such a writer. Uninstall grants no authority,
-creates no socket, and does not start or stop a runtime.
+creates no socket, and does not start or stop a runtime. Uninstall validates
+the installed receipt and exact pair without rejecting an object merely because
+the current CortexFS build no longer matches its recorded v2 requirement.
 
 ## Durable Safety Residue
 

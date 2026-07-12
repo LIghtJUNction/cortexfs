@@ -213,12 +213,20 @@ validation used before publication by `install`; success prints
 
 `--source` is required and names the durable backing tree that may be written.
 `/ctx`, `CTX_ROOT`, and `--root` are ABI projections and are never inferred as
-installation targets. `MANIFEST` uses schema `cortexfs.object/v1`, names class `tool` or `agent`,
-binds one executable path to its SHA-256, and supplies class controls. Unknown
-fields and controls, symlinks, non-regular or non-executable artifacts, digest
+installation targets. `MANIFEST` names class `tool` or `agent`, binds one
+executable path to its SHA-256, and supplies class controls. Legacy schema
+`cortexfs.object/v1` strictly accepts neither `version` nor `compatibility`.
+Schema `cortexfs.object/v2` requires `version` as an object SemVer and
+`compatibility.cortexfs` as a Cargo-style SemVer requirement. Unknown fields
+and controls, symlinks, non-regular or non-executable artifacts, digest
 mismatches, and existing object names are rejected. Relative executable paths
 resolve against the manifest directory. The manifest cannot specify commands,
 arguments, wrappers, or install tier.
+
+Both `check` and `install` compare a v2 CortexFS requirement with the CortexFS
+package version compiled into the current `ctx`. A mismatch is invalid input,
+exits 2, and performs no writes. Version compatibility is not an authority
+grant and does not start a runtime.
 
 Agent manifests may include the optional `abi` control with exactly `argv-v1`
 or `sdk-envelope-v1`. If it is absent, the installed agent uses the exact
@@ -226,8 +234,8 @@ legacy `argv-v1` contract. Other values are rejected before publication.
 
 User-tier tools install under `home/<effective-uid>/tool`; system tiers use
 `tool` and `agent`. The root ABI retains `home/<effective-uid>/agent`, but
-`cortexfs.object/v1` cannot carry tier identity to the root socket runtime, so
-the v1 installer rejects user-tier agents and directs callers to system tier.
+neither manifest schema carries tier identity to the root socket runtime, so
+the installer rejects user-tier agents and directs callers to system tier.
 Installation does not grant policy authority. It initializes canonical
 runtime-owned status/pid/log files but does not create socket state. The
 complete control directory is staged and synced,
@@ -235,6 +243,11 @@ then published no-replace before the executable is published last as the
 visible object commit boundary. Both published receipts are checked again
 before success is reported. Success or failure may retain a hidden
 `.cortexfs-install-*` safety residue for explicit future cleanup.
+
+A `cortexfs.object-install/v2` receipt records `object_version` and
+`cortexfs_requirement`; a `cortexfs.object-install/v1` receipt records neither.
+Manifest v2 adds compatibility metadata only: installation remains
+new-object-only, and upgrade or replacement is not declared by this contract.
 
 `ctx object inspect` is a read-only check of one exact installer-managed `tool`
 or `agent`; the tier defaults to `user`. It validates the installer receipt and
@@ -245,12 +258,15 @@ length, mode, mtime, or ctime changes observed during inspection; the receipt
 does not bind the complete install-time mode. Success prints:
 
 ```text
-installed CLASS/NAME tier=T schema=SCHEMA sha256=HASH executable=DEV:INO control=DEV:INO
+installed CLASS/NAME tier=T schema=cortexfs.object/v1 sha256=HASH executable=DEV:INO control=DEV:INO
+installed CLASS/NAME tier=T schema=cortexfs.object/v2 version=VERSION requires-cortexfs=REQ sha256=HASH executable=DEV:INO control=DEV:INO
 ```
 
 Inspection does not claim that mutable control-file contents still match their
 install-time values. An object with a missing or legacy receipt is unmanaged
-and is reported as unavailable; inspection never adopts or modifies it.
+and is reported as unavailable; inspection never adopts or modifies it. For v2,
+the compatibility values are recorded facts: inspection does not reject an
+installed object merely because a later CortexFS build no longer matches them.
 
 `ctx object uninstall` accepts only one exact installer-receipt-managed `tool`
 or `agent` pair; the tier defaults to `user`. Its default dry-run performs the
@@ -271,7 +287,8 @@ Before `--yes`, the caller must quiesce the matching agent runtime and all other
 processes under the same Unix authority that can write the backing directory.
 Receipt checks do not close Linux's final pathname syscall race against such a
 writer. Uninstall grants no authority, creates no socket, and does not start or
-stop a runtime.
+stop a runtime. It does not re-run v2 compatibility admission, so a later
+CortexFS version mismatch cannot strand a receipt-managed object.
 
 Durable residue maintenance is explicit and separate from installation:
 

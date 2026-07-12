@@ -1,7 +1,12 @@
-use super::install::{InstallError, InstallTier, OBJECT_MANIFEST_SCHEMA_V1, install_class_path};
+use super::install::{
+    InstallError, InstallTier, OBJECT_MANIFEST_SCHEMA_V1, OBJECT_MANIFEST_SCHEMA_V2,
+    install_class_path,
+};
+use super::present;
 use crate::support::plain::{read_file_to_string, write_text_file_at};
 use crate::{ObjectClass, is_object_name};
 
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
@@ -12,6 +17,7 @@ use std::path::Path;
 
 const INSTALL_RECEIPT_FILE: &str = ".cortexfs-receipt.json";
 const INSTALL_RECEIPT_SCHEMA_V1: &str = "cortexfs.object-install/v1";
+const INSTALL_RECEIPT_SCHEMA_V2: &str = "cortexfs.object-install/v2";
 const MAX_INSTALL_RECEIPT_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,6 +57,18 @@ struct ExecutableReceipt {
 struct InstallReceipt {
     schema: String,
     object_schema: String,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    object_version: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    cortexfs_requirement: Option<String>,
     class: String,
     name: String,
     tier: String,
@@ -64,6 +82,8 @@ pub(crate) struct InstallReceiptData<'a> {
     pub(crate) name: &'a str,
     pub(crate) tier: InstallTier,
     pub(crate) object_schema: &'a str,
+    pub(crate) object_version: Option<&'a str>,
+    pub(crate) cortexfs_requirement: Option<&'a str>,
     pub(crate) sha256: &'a str,
     pub(crate) control: EntryReceipt,
     pub(crate) executable: EntryReceipt,
@@ -108,6 +128,18 @@ impl InspectedObject {
         &self.receipt.object_schema
     }
 
+    /// Returns the installed object `SemVer` when recorded by a v2 manifest.
+    #[must_use]
+    pub fn object_version(&self) -> Option<&str> {
+        self.receipt.object_version.as_deref()
+    }
+
+    /// Returns the recorded `CortexFS` version requirement for a v2 object.
+    #[must_use]
+    pub fn cortexfs_requirement(&self) -> Option<&str> {
+        self.receipt.cortexfs_requirement.as_deref()
+    }
+
     /// Returns the verified executable SHA-256.
     #[must_use]
     pub fn sha256(&self) -> &str {
@@ -143,9 +175,34 @@ pub(crate) fn write_install_receipt(
     control: &fs::File,
     data: &InstallReceiptData<'_>,
 ) -> Result<(), InstallError> {
+    let schema = match (
+        data.object_schema,
+        data.object_version,
+        data.cortexfs_requirement,
+    ) {
+        (OBJECT_MANIFEST_SCHEMA_V1, None, None) => INSTALL_RECEIPT_SCHEMA_V1,
+        (OBJECT_MANIFEST_SCHEMA_V2, Some(version), Some(requirement)) => {
+            Version::parse(version).map_err(|_error| {
+                InstallError::unavailable("cannot encode invalid object version in receipt")
+            })?;
+            VersionReq::parse(requirement).map_err(|_error| {
+                InstallError::unavailable(
+                    "cannot encode invalid CortexFS version requirement in receipt",
+                )
+            })?;
+            INSTALL_RECEIPT_SCHEMA_V2
+        }
+        _ => {
+            return Err(InstallError::unavailable(
+                "cannot encode inconsistent object install receipt version",
+            ));
+        }
+    };
     let receipt = InstallReceipt {
-        schema: INSTALL_RECEIPT_SCHEMA_V1.to_owned(),
+        schema: schema.to_owned(),
         object_schema: data.object_schema.to_owned(),
+        object_version: data.object_version.map(str::to_owned),
+        cortexfs_requirement: data.cortexfs_requirement.map(str::to_owned),
         class: data.class.as_str().to_owned(),
         name: data.name.to_owned(),
         tier: data.tier.as_str().to_owned(),
@@ -298,17 +355,51 @@ fn validate_receipt(
     name: &str,
     tier: InstallTier,
 ) -> Result<(), InstallError> {
-    if receipt.schema != INSTALL_RECEIPT_SCHEMA_V1 {
+    if !matches!(
+        receipt.schema.as_str(),
+        INSTALL_RECEIPT_SCHEMA_V1 | INSTALL_RECEIPT_SCHEMA_V2
+    ) {
         return Err(InstallError::unavailable(format!(
             "unsupported object install receipt schema: {}",
             receipt.schema
         )));
     }
-    if receipt.object_schema != OBJECT_MANIFEST_SCHEMA_V1 {
+    if !matches!(
+        receipt.object_schema.as_str(),
+        OBJECT_MANIFEST_SCHEMA_V1 | OBJECT_MANIFEST_SCHEMA_V2
+    ) {
         return Err(InstallError::unavailable(format!(
             "unsupported installed object schema: {}",
             receipt.object_schema
         )));
+    }
+    match (
+        receipt.schema.as_str(),
+        receipt.object_schema.as_str(),
+        receipt.object_version.as_deref(),
+        receipt.cortexfs_requirement.as_deref(),
+    ) {
+        (INSTALL_RECEIPT_SCHEMA_V1, OBJECT_MANIFEST_SCHEMA_V1, None, None) => {}
+        (
+            INSTALL_RECEIPT_SCHEMA_V2,
+            OBJECT_MANIFEST_SCHEMA_V2,
+            Some(version),
+            Some(requirement),
+        ) => {
+            Version::parse(version).map_err(|_error| {
+                InstallError::unavailable("object install receipt has invalid object version")
+            })?;
+            VersionReq::parse(requirement).map_err(|_error| {
+                InstallError::unavailable(
+                    "object install receipt has invalid CortexFS version requirement",
+                )
+            })?;
+        }
+        _ => {
+            return Err(InstallError::unavailable(
+                "object install receipt version fields are inconsistent",
+            ));
+        }
     }
     if receipt.class != class.as_str() || receipt.name != name || receipt.tier != tier.as_str() {
         return Err(InstallError::unavailable(

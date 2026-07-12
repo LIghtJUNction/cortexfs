@@ -1,6 +1,7 @@
 use crate::object::bootstrap::validate_object_control_content;
 #[cfg(test)]
 use crate::object::metadata::tool_exec_metadata;
+use crate::object::present;
 use crate::object::receipt::{
     EntryKind, EntryReceipt, InstallReceiptData, entry_matches, receipt_for, verify_executable,
     write_install_receipt,
@@ -9,6 +10,7 @@ use crate::support::plain::{open_plain_directory, open_plain_file, write_text_fi
 use crate::{
     MountTable, ObjectClass, PolicyV0, is_model_name, is_object_name, policy_subject_from_label,
 };
+use semver::{Version, VersionReq};
 use serde::Deserialize;
 use std::cell::Cell;
 use std::fs;
@@ -20,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 pub(crate) const OBJECT_MANIFEST_SCHEMA_V1: &str = "cortexfs.object/v1";
+pub(crate) const OBJECT_MANIFEST_SCHEMA_V2: &str = "cortexfs.object/v2";
 const MAX_OBJECT_MANIFEST_BYTES: u64 = 1024 * 1024;
 const TOOL_INSTALL_CONTROLS: &[&str] = &["description", "schema", "cap", "policy"];
 const AGENT_INSTALL_CONTROLS: &[&str] = &[
@@ -93,10 +96,20 @@ impl InstallTier {
 #[serde(deny_unknown_fields)]
 struct ObjectManifest {
     schema: String,
+    #[serde(default, deserialize_with = "present")]
+    version: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    compatibility: Option<ManifestCompatibility>,
     class: ManifestClass,
     name: String,
     executable: ManifestExecutable,
     controls: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestCompatibility {
+    cortexfs: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -240,9 +253,10 @@ pub fn install_object(
         ..
     } = check_object(manifest_path)?;
     if class == ObjectClass::Agent && tier == InstallTier::User {
-        return Err(InstallError::invalid(
-            "cortexfs.object/v1 cannot carry user-tier identity to the root socket runtime; install the agent with --tier system",
-        ));
+        return Err(InstallError::invalid(format!(
+            "{} cannot carry user-tier identity to the root socket runtime; install the agent with --tier system",
+            manifest.schema
+        )));
     }
     let class_dir = install_class_path(root, class, tier)?;
     let class_fd = open_plain_directory(&class_dir).map_err(|error| {
@@ -390,12 +404,7 @@ fn read_manifest(path: &Path) -> Result<ObjectManifest, InstallError> {
 }
 
 fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
-    if manifest.schema != OBJECT_MANIFEST_SCHEMA_V1 {
-        return Err(InstallError::invalid(format!(
-            "unsupported object manifest schema: {}",
-            manifest.schema
-        )));
-    }
+    validate_version(manifest)?;
     let class = manifest.class.object_class();
     if !is_object_name(&manifest.name) {
         return Err(InstallError::invalid("invalid object manifest name"));
@@ -496,6 +505,48 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
         return Err(InstallError::invalid(
             "approval ask requires abi sdk-envelope-v1",
         ));
+    }
+    Ok(())
+}
+
+fn validate_version(manifest: &ObjectManifest) -> Result<(), InstallError> {
+    match manifest.schema.as_str() {
+        OBJECT_MANIFEST_SCHEMA_V1 => {
+            if manifest.version.is_some() || manifest.compatibility.is_some() {
+                return Err(InstallError::invalid(
+                    "cortexfs.object/v1 does not accept version or compatibility",
+                ));
+            }
+        }
+        OBJECT_MANIFEST_SCHEMA_V2 => {
+            let version = manifest
+                .version
+                .as_deref()
+                .ok_or_else(|| InstallError::invalid("cortexfs.object/v2 requires version"))?;
+            Version::parse(version)
+                .map_err(|_error| InstallError::invalid("invalid object version"))?;
+            let compatibility = manifest.compatibility.as_ref().ok_or_else(|| {
+                InstallError::invalid("cortexfs.object/v2 requires compatibility.cortexfs")
+            })?;
+            let requirement = VersionReq::parse(&compatibility.cortexfs).map_err(|_error| {
+                InstallError::invalid("invalid compatibility.cortexfs version requirement")
+            })?;
+            let current = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_error| {
+                InstallError::unavailable("invalid compiled CortexFS package version")
+            })?;
+            if !requirement.matches(&current) {
+                return Err(InstallError::invalid(format!(
+                    "object requires CortexFS {}, current is {current}",
+                    compatibility.cortexfs
+                )));
+            }
+        }
+        _ => {
+            return Err(InstallError::invalid(format!(
+                "unsupported object manifest schema: {}",
+                manifest.schema
+            )));
+        }
     }
     Ok(())
 }
@@ -604,6 +655,11 @@ fn prepare_stage(
             name: &manifest.name,
             tier,
             object_schema: &manifest.schema,
+            object_version: manifest.version.as_deref(),
+            cortexfs_requirement: manifest
+                .compatibility
+                .as_ref()
+                .map(|compatibility| compatibility.cortexfs.as_str()),
             sha256: &manifest.executable.sha256,
             control: control_receipt,
             executable: executable_receipt,
@@ -963,12 +1019,8 @@ mod tests {
 
         let mut agent: ObjectManifest =
             serde_json::from_str(&agent_manifest(&executable, &digest))?;
-        agent.schema = "cortexfs.object/v2".to_owned();
-        assert!(validate_manifest(&agent).is_err_and(|error| {
-            error
-                .message()
-                .contains("unsupported object manifest schema")
-        }));
+        agent.schema = OBJECT_MANIFEST_SCHEMA_V2.to_owned();
+        assert!(validate_manifest(&agent).is_err_and(|error| error.message().contains("version")));
         agent.schema = OBJECT_MANIFEST_SCHEMA_V1.to_owned();
         agent
             .controls
@@ -1002,6 +1054,108 @@ mod tests {
             agent.controls.insert("tools".to_owned(), tools.to_owned());
             assert!(validate_manifest(&agent).is_err(), "{tools:?}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn manifest_versions_are_strict_and_compatible() -> Result<(), Box<dyn std::error::Error>> {
+        let (_root, executable, digest) = fixture()?;
+        let mut manifest: ObjectManifest =
+            serde_json::from_str(&tool_manifest(&executable, &digest))?;
+        manifest.version = Some("1.2.3".to_owned());
+        assert!(validate_manifest(&manifest).is_err_and(|error| {
+            error
+                .message()
+                .contains("v1 does not accept version or compatibility")
+        }));
+        manifest.version = None;
+        manifest.compatibility = Some(ManifestCompatibility {
+            cortexfs: format!("={}", env!("CARGO_PKG_VERSION")),
+        });
+        assert!(validate_manifest(&manifest).is_err_and(|error| {
+            error
+                .message()
+                .contains("v1 does not accept version or compatibility")
+        }));
+
+        manifest.version = Some("1.2.3".to_owned());
+        manifest.compatibility = None;
+        manifest.schema = OBJECT_MANIFEST_SCHEMA_V2.to_owned();
+        assert!(
+            validate_manifest(&manifest)
+                .is_err_and(|error| { error.message().contains("compatibility.cortexfs") })
+        );
+        manifest.compatibility = Some(ManifestCompatibility {
+            cortexfs: format!("={}", env!("CARGO_PKG_VERSION")),
+        });
+        assert!(validate_manifest(&manifest).is_ok());
+
+        manifest.version = Some("not-semver".to_owned());
+        assert!(
+            validate_manifest(&manifest)
+                .is_err_and(|error| { error.message().contains("invalid object version") })
+        );
+        manifest.version = Some("1.2.3".to_owned());
+        manifest.compatibility = Some(ManifestCompatibility {
+            cortexfs: "not-a-requirement".to_owned(),
+        });
+        assert!(
+            validate_manifest(&manifest)
+                .is_err_and(|error| { error.message().contains("version requirement") })
+        );
+        manifest.compatibility = Some(ManifestCompatibility {
+            cortexfs: ">=99.0.0".to_owned(),
+        });
+        assert!(
+            validate_manifest(&manifest)
+                .is_err_and(|error| { error.message().contains("object requires CortexFS") })
+        );
+
+        for body in [
+            r#"{"schema":"cortexfs.object/v1","version":null,"class":"tool","name":"x","executable":{"path":"x","sha256":"00"},"controls":{}}"#,
+            r#"{"schema":"cortexfs.object/v1","compatibility":null,"class":"tool","name":"x","executable":{"path":"x","sha256":"00"},"controls":{}}"#,
+        ] {
+            assert!(serde_yaml::from_str::<ObjectManifest>(body).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn versioned_install_records_compatibility() -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest_path = root.path().join("tool-v2.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&tool_manifest(&executable, &digest))?;
+        let fields = manifest.as_object_mut().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "manifest is not an object")
+        })?;
+        fields.insert(
+            "schema".to_owned(),
+            serde_json::Value::String(OBJECT_MANIFEST_SCHEMA_V2.to_owned()),
+        );
+        fields.insert(
+            "version".to_owned(),
+            serde_json::Value::String("1.2.3".to_owned()),
+        );
+        let requirement = format!("={}", env!("CARGO_PKG_VERSION"));
+        fields.insert(
+            "compatibility".to_owned(),
+            serde_json::json!({ "cortexfs": requirement }),
+        );
+        fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
+
+        let checked = check_object(&manifest_path)?;
+        assert_eq!(checked.class(), ObjectClass::Tool);
+        install_object(root.path(), &manifest_path, InstallTier::System)?;
+        let inspected = inspect_object(
+            root.path(),
+            ObjectClass::Tool,
+            "example.echo",
+            InstallTier::System,
+        )?;
+        assert_eq!(inspected.object_schema(), OBJECT_MANIFEST_SCHEMA_V2);
+        assert_eq!(inspected.object_version(), Some("1.2.3"));
+        assert_eq!(inspected.cortexfs_requirement(), Some(requirement.as_str()));
         Ok(())
     }
 
