@@ -31,7 +31,9 @@ provider special case, watcher, queue, or alternate orchestration path.
 6. Build the executable, calculate its SHA-256, and place the exact digest in
    the manifest. Do not put commands, arguments, wrappers, secrets, or policy
    grants for unrelated objects in the manifest.
-7. Validate source and manifest changes without installing first. Follow
+7. Validate source and manifest changes without installing first. Run
+   `ctx object check MANIFEST` for each rendered manifest; it requires no
+   source tree and performs no backing-tree writes. Follow
    `references/testing.md` for the staged test ladder.
 8. Perform installation only after an explicit mutation request. Invoke
    `ctx object install --source PATH MANIFEST --tier user|system`, where PATH

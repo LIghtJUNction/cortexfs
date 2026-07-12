@@ -46,6 +46,10 @@ pub(crate) fn parse_send(
     Ok((agent, Some(session), rest.join(" ")))
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "flat agent subcommand dispatch keeps accepted flags auditable"
+)]
 pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError> {
     let mut values = args.into_iter();
     let command = required_arg(
@@ -90,16 +94,26 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
                 session: parsed.session,
                 input: parsed.input,
                 raw: parsed.raw,
+                approvals: parsed.approvals,
             }))
         }
         "chat" | "repl" => {
             let command = format!("agent {command}");
-            let (name, session, raw) = parse_agent_session_raw_args(values, &command)?;
-            Ok(Command::Agent(AgentArgs::Repl { name, session, raw }))
+            let parsed = parse_agent_session_raw_args(values, &command, true)?;
+            Ok(Command::Agent(AgentArgs::Repl {
+                name: parsed.name,
+                session: parsed.session,
+                raw: parsed.raw,
+                approvals: parsed.approvals,
+            }))
         }
         "resume" => {
-            let (name, session, raw) = parse_agent_session_raw_args(values, "agent resume")?;
-            Ok(Command::Agent(AgentArgs::Resume { name, session, raw }))
+            let parsed = parse_agent_session_raw_args(values, "agent resume", false)?;
+            Ok(Command::Agent(AgentArgs::Resume {
+                name: parsed.name,
+                session: parsed.session,
+                raw: parsed.raw,
+            }))
         }
         "history" => {
             let (name, session) = parse_agent_session_option_args(values, "agent history")?;
@@ -263,10 +277,12 @@ pub(crate) fn parse_agent_wait_args(
 pub(crate) fn parse_agent_session_raw_args(
     mut values: impl Iterator<Item = String>,
     command: &str,
-) -> Result<(String, Option<String>, bool), CliError> {
+    allow_approval: bool,
+) -> Result<ParsedAgentSessionRaw, CliError> {
     let name = required_arg(&mut values, &format!("{command} requires an agent name"))?;
     let mut session = None;
     let mut raw = false;
+    let mut approvals = Vec::new();
     while let Some(value) = values.next() {
         match value.as_str() {
             "--session" | "-s" => {
@@ -276,10 +292,30 @@ pub(crate) fn parse_agent_session_raw_args(
                 )?);
             }
             "--raw" => raw = true,
+            "--approve" if allow_approval => {
+                let approval = required_arg(
+                    &mut values,
+                    &format!("{command} --approve requires a tool name"),
+                )?;
+                require_cli_name("approved tool name", &approval)?;
+                approvals.push(approval);
+            }
             _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
         }
     }
-    Ok((name, session, raw))
+    Ok(ParsedAgentSessionRaw {
+        name,
+        session,
+        raw,
+        approvals,
+    })
+}
+
+pub(crate) struct ParsedAgentSessionRaw {
+    pub(crate) name: String,
+    pub(crate) session: Option<String>,
+    pub(crate) raw: bool,
+    pub(crate) approvals: Vec<String>,
 }
 
 pub(crate) struct ParsedAgentSend {
@@ -287,6 +323,7 @@ pub(crate) struct ParsedAgentSend {
     pub(crate) session: Option<String>,
     pub(crate) raw: bool,
     pub(crate) input: String,
+    pub(crate) approvals: Vec<String>,
 }
 
 pub(crate) struct ParsedAgentCancel {
@@ -303,6 +340,7 @@ pub(crate) fn parse_agent_send_args(
     let mut session = None;
     let mut raw = false;
     let mut input = Vec::new();
+    let mut approvals = Vec::new();
     while let Some(value) = values.next() {
         match value.as_str() {
             "--session" | "-s" if input.is_empty() => {
@@ -312,6 +350,12 @@ pub(crate) fn parse_agent_send_args(
                 )?);
             }
             "--raw" if input.is_empty() => raw = true,
+            "--approve" if input.is_empty() => {
+                let approval =
+                    required_arg(&mut values, "agent send --approve requires a tool name")?;
+                require_cli_name("approved tool name", &approval)?;
+                approvals.push(approval);
+            }
             _ => {
                 input.push(value);
                 input.extend(values);
@@ -327,6 +371,7 @@ pub(crate) fn parse_agent_send_args(
         session,
         raw,
         input: input.join(" "),
+        approvals,
     })
 }
 
@@ -515,4 +560,44 @@ pub(crate) fn parse_agent_shared(value: &str) -> Result<AgentShared, CliError> {
         name: name.to_owned(),
         access: access.to_owned(),
     })
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::*;
+
+    #[test]
+    fn send_and_repl_parse_repeatable_explicit_approvals() {
+        let send = parse_agent_send_args(
+            [
+                "coder",
+                "--approve",
+                "example.echo",
+                "--approve",
+                "fs.read",
+                "go",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        );
+        assert!(send.is_ok());
+        let Ok(send) = send else {
+            return;
+        };
+        assert_eq!(send.approvals, ["example.echo", "fs.read"]);
+        assert_eq!(send.input, "go");
+        let parsed = parse_agent_session_raw_args(
+            ["coder", "--approve", "example.echo"]
+                .into_iter()
+                .map(str::to_owned),
+            "agent repl",
+            true,
+        );
+        assert!(parsed.is_ok());
+        let Ok(parsed) = parsed else {
+            return;
+        };
+        assert!(!parsed.raw);
+        assert_eq!(parsed.approvals, ["example.echo"]);
+    }
 }

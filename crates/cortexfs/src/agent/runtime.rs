@@ -35,6 +35,16 @@ pub struct AgentRuntimeView {
     pub(crate) model: String,
     pub(crate) policy: PolicyV0,
     pub(crate) declared_tools: BTreeSet<String>,
+    pub(crate) approval: AgentApprovalMode,
+}
+
+/// Hosted direct-native tool approval mode.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentApprovalMode {
+    /// Execute fully authorized calls without an interactive approval exchange.
+    Auto,
+    /// Require one same-socket approval for each fully authorized call.
+    Ask,
 }
 
 /// Error while deriving an agent runtime view from `agent/<name>.d/*`.
@@ -205,6 +215,12 @@ impl AgentRuntimeView {
     #[must_use]
     pub const fn declared_tools(&self) -> &BTreeSet<String> {
         &self.declared_tools
+    }
+
+    /// Returns the hosted direct-native approval mode.
+    #[must_use]
+    pub const fn approval(&self) -> AgentApprovalMode {
+        self.approval
     }
 }
 

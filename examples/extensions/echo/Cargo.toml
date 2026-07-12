@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 cortexfs-agent-sdk = { path = "../../../crates/cortexfs-agent-sdk" }
 cortexfs-tool-sdk = { path = "../../../crates/cortexfs-tool-sdk" }
+serde_json = "1.0.150"
 
 [[bin]]
 name = "cortexfs-echo-tool"

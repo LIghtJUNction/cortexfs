@@ -22,6 +22,7 @@
     "mount": "/ctx\t/ctx\tro\trbind,nosuid,nodev",
     "model": "main",
     "abi": "sdk-envelope-v1",
+    "approval": "auto",
     "tools": "example.echo",
     "policy": "allow example_t model:main use\nallow example_t tool:example.echo execute",
     "system.md": "Echo the requested input without adding authority."

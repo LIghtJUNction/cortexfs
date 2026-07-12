@@ -206,6 +206,38 @@ fn event_stream_accepts_stable_error_frames() {
 }
 
 #[test]
+fn event_stream_accepts_host_approval_frames() {
+    let report = inspect_event_stream_jsonl(
+        r#"{"type":"approval_request","run":"r1","id":"call-1","name":"example.echo","args":["one","two"]}
+{"type":"approval_result","run":"r1","id":"call-1","name":"example.echo","decision":"allow_once","reason":"approved once"}
+"#,
+    );
+    assert!(report.is_ok(), "{:?}", report.issues());
+}
+
+#[test]
+fn event_stream_rejects_invalid_approval_frames() {
+    let report = inspect_event_stream_jsonl(
+        r#"{"type":"approval_request","run":"r1","id":"call-1","name":"example.echo"}
+{"type":"approval_request","run":"r1","id":"call-1","name":"bad/name","args":[]}
+{"type":"approval_request","run":"r1","id":"call-1","name":"example.echo","args":["one",2]}
+{"type":"approval_result","run":"r1","id":"call-1","name":"example.echo","decision":"always","reason":"approved"}
+{"type":"approval_result","run":"r1","id":"call-1","name":"example.echo","decision":"deny","reason":""}
+"#,
+    );
+    assert_eq!(
+        report.issues(),
+        [
+            EventStreamIssue::InvalidApproval(1),
+            EventStreamIssue::InvalidApproval(2),
+            EventStreamIssue::InvalidApproval(3),
+            EventStreamIssue::InvalidApproval(4),
+            EventStreamIssue::InvalidApproval(5),
+        ]
+    );
+}
+
+#[test]
 fn event_stream_accepts_child_lifecycle_frames() {
     let report = inspect_event_stream_jsonl(
         r#"{"type":"agent.child.cancel","parent":"coder","child":"rev-123","reason":"parent_dead"}

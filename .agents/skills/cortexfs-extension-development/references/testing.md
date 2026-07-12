@@ -7,12 +7,15 @@ rtk cargo fmt --check
 rtk cargo test -p cortexfs-tool-sdk
 rtk cargo test -p cortexfs-agent-sdk
 rtk cargo check --manifest-path examples/extensions/echo/Cargo.toml
+ctx object check MANIFEST
 rtk git diff --check
 ```
 
-Use a temporary explicit `--root` fixture for installer integration tests.
-Cover strict parsing, unknown-field and unknown-control rejection, symlink and
-non-executable rejection, SHA-256 mismatch, absence of a visible executable on
+`ctx object check MANIFEST` needs no source fixture and performs no backing-tree
+writes. Cover strict parsing, unknown-field and unknown-control rejection,
+symlink and non-executable rejection, and SHA-256 mismatch through this
+read-only path. Installer integration tests separately use an explicit
+temporary durable `--source` tree and cover absence of a visible executable on
 failure, possible hidden `.cortexfs-install-*` safety residue, and collision
 preservation with byte-for-byte comparisons.
 

@@ -22,6 +22,7 @@ version = "0.1.0"
 dependencies = [
  "cortexfs-agent-sdk",
  "cortexfs-tool-sdk",
+ "serde_json",
 ]
 
 [[package]]

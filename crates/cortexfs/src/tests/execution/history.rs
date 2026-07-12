@@ -199,19 +199,7 @@ fn sdk_envelope_cancel_stops_active_step_before_respawn() {
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &executable),
     );
     let cancelled = cancel.join();
     assert!(
@@ -294,19 +282,7 @@ fn sdk_envelope_cancel_during_tool_has_no_result_or_respawn() {
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &executable),
     );
     let cancelled = cancel.join();
     assert!(

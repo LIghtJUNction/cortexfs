@@ -29,6 +29,7 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(view.iso(), "shared");
     assert_eq!(view.parent(), None);
     assert_eq!(view.lifecycle(), ChildLifecycle::Owned);
+    assert_eq!(view.approval(), crate::AgentApprovalMode::Auto);
     assert_eq!(view.root(), Path::new("/ctx/home/1000/agent/coder/root"));
     assert_eq!(view.cwd(), Path::new("/work"));
     assert_eq!(view.model(), "main");
@@ -67,6 +68,24 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(env_value(view.env(), "LD_PRELOAD"), None);
     assert_eq!(env_value(view.env(), "RUST_LOG"), None);
     assert_eq!(env_value(view.env(), "CTX_PROVIDER_SECRET_PATH"), None);
+}
+
+#[test]
+fn agent_runtime_view_requires_sdk_envelope_for_ask_approval() {
+    let root = clean_test_dir("agent-runtime-approval");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    write_text_file(&control.join("approval"), "ask\n");
+    write_text_file(&control.join("abi"), "argv-v1\n");
+    assert!(matches!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "approval"
+    ));
+    write_text_file(&control.join("abi"), "sdk-envelope-v1\n");
+    assert_eq!(
+        ok!(derive_agent_runtime_view(&root, "coder")).approval(),
+        crate::AgentApprovalMode::Ask
+    );
 }
 
 #[test]

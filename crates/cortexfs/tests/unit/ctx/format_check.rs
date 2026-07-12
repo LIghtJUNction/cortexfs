@@ -81,9 +81,10 @@ fn formats_event_stream_issues_for_file_check() {
                 event_type: "native_thread".to_owned(),
             },
             EventStreamIssue::InvalidUsage(3),
-            EventStreamIssue::InvalidAgentLifecycle(4),
+            EventStreamIssue::InvalidApproval(4),
+            EventStreamIssue::InvalidAgentLifecycle(5),
         ]),
-        "provider native field line 1 response_id, unknown type line 2 native_thread, invalid usage line 3, invalid agent lifecycle line 4"
+        "provider native field line 1 response_id, unknown type line 2 native_thread, invalid usage line 3, invalid approval line 4, invalid agent lifecycle line 5"
     );
 }
 

@@ -51,6 +51,7 @@ ctx agent status reviewer
 ctx agent env reviewer
 ctx agent ps
 ctx agent chat reviewer
+ctx agent send reviewer --approve example.echo "run the declared echo tool"
 
 ctx cat agent/coder.d/policy
 ctx set agent/coder.d/cwd /work
@@ -127,6 +128,13 @@ compatibility alias for the same socket UI and session defaults. It is not the a
 does not enter `tsh`; humans use `ctx agent watch` or `ctx agent attach` for the
 persistent terminal.
 
+`ctx agent send` and `ctx agent chat`/`repl` accept repeatable
+`--approve TOOL`. In non-raw mode the client answers a hosted SDK
+`approval_request` with `allow_once` only when its exact tool name is in this
+explicit list; every other name is denied. There is no blanket approval or TTY
+prompt in v1. Raw clients and clients without this handler close their write
+half and therefore fail closed for `approval=ask`.
+
 `ctx agent wait` is a non-blocking waitpid-shaped reader for a parent-owned
 child result channel. It reads `context/child/<child>/status`; `pending` and
 `active` fail with service unavailable, while terminal `done`, `error`, and
@@ -184,8 +192,14 @@ Agent lifecycle conveniences exist as thin wrappers:
 Executable extension installation uses one host-side, new-object-only command:
 
 ```text
+ctx object check MANIFEST
 ctx object install --source PATH MANIFEST [--tier user|system]
 ```
+
+`ctx object check` is read-only and requires no source tree. It performs the
+same strict manifest, control, artifact type, executable mode, and SHA-256
+validation used before publication by `install`; success prints
+`valid CLASS/NAME`. It accepts exactly one manifest path and no install flags.
 
 `--source` is required and names the durable backing tree that may be written.
 `/ctx`, `CTX_ROOT`, and `--root` are ABI projections and are never inferred as

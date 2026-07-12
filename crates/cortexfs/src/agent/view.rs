@@ -67,6 +67,7 @@ pub fn derive_agent_runtime_view(
     let policy = PolicyV0::parse(&policy_content)
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("policy".to_owned()))?;
     let declared_tools = parse_agent_tools_control(&control_dir)?;
+    let approval = parse_agent_approval_control(&control_dir)?;
 
     let ctx_home = ctx_root.join("home").join(owner.to_string());
     let home = ctx_home.join("agent").join(agent_name);
@@ -93,7 +94,33 @@ pub fn derive_agent_runtime_view(
         model,
         policy,
         declared_tools,
+        approval,
     })
+}
+
+pub(crate) fn parse_agent_approval_control(
+    control_dir: &Path,
+) -> Result<AgentApprovalMode, AgentRuntimeViewError> {
+    let approval = match read_required_agent_control_value(control_dir, "approval") {
+        Ok(value) if value == "auto" => AgentApprovalMode::Auto,
+        Ok(value) if value == "ask" => AgentApprovalMode::Ask,
+        Err(AgentRuntimeViewError::MissingControlFile(_)) => AgentApprovalMode::Auto,
+        Ok(_) => {
+            return Err(AgentRuntimeViewError::InvalidControlFile(
+                "approval".to_owned(),
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    if approval == AgentApprovalMode::Ask {
+        let abi = read_required_agent_control_value(control_dir, "abi")?;
+        if abi != "sdk-envelope-v1" {
+            return Err(AgentRuntimeViewError::InvalidControlFile(
+                "approval".to_owned(),
+            ));
+        }
+    }
+    Ok(approval)
 }
 
 pub(crate) fn parse_agent_tools_control(

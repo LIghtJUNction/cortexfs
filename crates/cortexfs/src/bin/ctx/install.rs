@@ -5,9 +5,27 @@ use std::path::{Path, PathBuf};
 pub(crate) fn parse_object_command(
     mut values: impl Iterator<Item = String>,
 ) -> Result<Command, CliError> {
-    let action = required_arg(&mut values, "object requires install")?;
+    let action = required_arg(&mut values, "object requires check or install")?;
+    if action == "check" {
+        let manifest = PathBuf::from(required_arg(
+            &mut values,
+            "object check requires a manifest path",
+        )?);
+        if manifest.as_os_str().to_string_lossy().starts_with('-') {
+            return Err(CliError::usage(format!(
+                "unexpected object check argument: {}",
+                manifest.display()
+            )));
+        }
+        if let Some(value) = values.next() {
+            return Err(CliError::usage(format!(
+                "unexpected object check argument: {value}"
+            )));
+        }
+        return Ok(Command::ObjectCheck { manifest });
+    }
     if action != "install" {
-        return Err(CliError::usage("object expects install"));
+        return Err(CliError::usage("object expects check or install"));
     }
     let mut manifest = None;
     let mut source = None;
@@ -56,6 +74,19 @@ pub(crate) fn parse_object_command(
     })
 }
 
+pub(crate) fn run_object_check(manifest: &Path) -> Result<(), CliError> {
+    let checked =
+        cortexfs::object::install::check_object(manifest).map_err(|error| match error {
+            InstallError::Invalid(message) => CliError::usage(message),
+            InstallError::Unavailable(message) => CliError::unavailable(message),
+        })?;
+    print_line(&format!(
+        "valid {}/{}",
+        checked.class().as_str(),
+        terminal_safe_text(checked.name())
+    ))
+}
+
 pub(crate) fn run_object_install(
     source: &Path,
     manifest: &Path,
@@ -98,6 +129,25 @@ mod tests {
                 )
             })
         );
+    }
+
+    #[test]
+    fn parses_read_only_check_without_source() {
+        assert!(parse(&["check", "tool.json"]).is_ok_and(|command| {
+            matches!(command, Command::ObjectCheck { manifest } if manifest == Path::new("tool.json"))
+        }));
+    }
+
+    #[test]
+    fn check_rejects_install_flags_and_extra_arguments() {
+        for args in [
+            &["check", "--source", "/source", "tool.json"][..],
+            &["check", "--tier", "system", "tool.json"][..],
+            &["check", "--unknown"][..],
+            &["check", "one.json", "two.json"][..],
+        ] {
+            assert!(parse(args).is_err_and(|error| error.message.contains("object check")));
+        }
     }
 
     #[test]
@@ -182,7 +232,10 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_action_or_flag() {
-        assert!(parse(&["remove"]).is_err_and(|error| error.message.contains("expects install")));
+        assert!(
+            parse(&["remove"])
+                .is_err_and(|error| error.message.contains("expects check or install"))
+        );
         assert!(
             parse(&["install", "--unknown"]).is_err_and(|error| {
                 error.message.contains("unexpected object install argument")
