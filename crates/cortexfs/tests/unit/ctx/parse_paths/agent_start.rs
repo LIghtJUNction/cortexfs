@@ -11,6 +11,40 @@ fn current_uid_for_test() -> String {
         .unwrap_or_else(|| "1000".to_owned())
 }
 
+#[test]
+fn system_agent_socket_uses_root_runtime_authority() {
+    assert_eq!(
+        system_agent_socket_unit("worker-1"),
+        "cortexfs-agent@worker-1.socket"
+    );
+    assert_eq!(
+        system_agent_runtime_socket("worker-1"),
+        PathBuf::from("/run/cortexfs/agent/worker-1.sock")
+    );
+    let command = system_agent_socket_command("start", "worker-1");
+    assert_eq!(command.get_program(), "/usr/bin/systemctl");
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        [
+            "--no-ask-password",
+            "start",
+            "cortexfs-agent@worker-1.socket"
+        ]
+    );
+}
+
+#[test]
+fn terminal_rollback_does_not_remove_system_agent_socket() {
+    let root = clean_test_dir("terminal-rollback-system-agent-socket");
+    let system_socket = root.join("agent.sock");
+    write_text_file(&system_socket, "system-authority\n");
+    rollback_agent_start_resources_with("terminal", None, &[], &[], |_unit| {}, |_unit| {});
+    assert_eq!(
+        fs::read_to_string(&system_socket).unwrap_or_default(),
+        "system-authority\n"
+    );
+}
+
 fn git_command(home: &Path) -> std::process::Command {
     let mut command = std::process::Command::new("/usr/bin/git");
     command
@@ -578,8 +612,16 @@ fn agent_start_records_ready_status_and_start_event() {
     };
 
     let facts = [("model", "main"), ("life", "owned"), ("role", "agent"), ("uid", "1000"), ("gid", "100"), ("groups", "10 20")];
+    let identity = AgentUnixIdentity::new(
+        nix::unistd::geteuid().as_raw(),
+        nix::unistd::getegid().as_raw(),
+        nix::unistd::getgroups()
+            .unwrap_or_default()
+            .into_iter()
+            .map(nix::unistd::Gid::as_raw),
+    );
     assert_eq!(
-        record_agent_start_state(&root, &args, "cortexfs-agent-scratch-default", &facts, Some("abc123")),
+        record_agent_start_state(&root, &args, &identity, "cortexfs-agent-scratch-default", &facts, Some("abc123")),
         Ok(())
     );
     assert_eq!(fs::read_to_string(control.join("status")).unwrap_or_default(), "ready\n");
@@ -801,19 +843,28 @@ fn agent_start_process_command_uses_clean_runtime_environment() {
         program: "/usr/bin/systemd-run".to_owned(),
         args: vec!["--user".to_owned(), "/usr/bin/env".to_owned()],
     };
-    let process = agent_start_process_command(&command);
-    let mut envs = process
-        .get_envs()
-        .map(|(name, value)| {
-            (
-                name.to_string_lossy().into_owned(),
-                value.map(|value| value.to_string_lossy().into_owned()),
-            )
-        })
+    let identity = AgentUnixIdentity::new(
+        nix::unistd::geteuid().as_raw(),
+        nix::unistd::getegid().as_raw(),
+        nix::unistd::getgroups()
+            .unwrap_or_default()
+            .into_iter()
+            .map(nix::unistd::Gid::as_raw),
+    );
+    let result = agent_start_process_command(&identity, &command);
+    assert!(result.is_ok(), "current user manager must be valid");
+    let process = result.unwrap_or_else(|_error| std::process::Command::new("/usr/bin/false"));
+    assert_eq!(process.get_program(), "/usr/bin/env");
+    let args = process
+        .get_args()
+        .map(|arg| arg.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    envs.sort();
-
-    assert_clean_user_systemd_env(&envs);
+    assert!(args.iter().any(|arg| arg == "PATH=/usr/bin:/bin"));
+    assert!(args.iter().any(|arg| arg.starts_with("XDG_RUNTIME_DIR=")));
+    assert!(
+        args.iter()
+            .any(|arg| arg.starts_with("DBUS_SESSION_BUS_ADDRESS=unix:path="))
+    );
 }
 
 #[test]
@@ -939,10 +990,10 @@ fn visible_chat_socket_verifies_expected_alias() {
     let runtime = root.join("runtime/coder.sock");
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
 
-    assert_eq!(
+    assert!(matches!(
         ensure_agent_chat_socket(&visible, &runtime),
         Ok(AgentChatAliasState::Created)
-    );
+    ));
     assert!(matches!(fs::read_link(visible), Ok(target) if target == runtime));
 }
 
@@ -1238,4 +1289,12 @@ fn exact_socket_alias_cleanup_restores_mismatched_alias_after_claim() {
                 .contains(".claim-")
         })
     }));
+}
+#[test]
+fn system_agent_visible_socket_matches_host_backing_path() {
+    let root = Path::new("/var/lib/cortexfs/storage/v1-root");
+    assert_eq!(
+        cortexfs::agent::launch::system_agent_visible_socket(root, "child"),
+        root.join("agent/child.sock")
+    );
 }

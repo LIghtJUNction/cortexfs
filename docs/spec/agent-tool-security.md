@@ -55,6 +55,8 @@ agent policy decides whether execution is allowed
     path
     mount
     model
+    tools
+    abi
     system.md
     prompt.template.md
     policy
@@ -80,7 +82,24 @@ parent  parent agent, session, or run that created this agent
 life    lifecycle ownership, default owned
 system.md user-editable agent instructions/persona. This is prompt text, not authority.
 prompt.template.md user-editable system prompt template. This is prompt text, not authority.
+abi     executable-agent launch ABI: argv-v1 or sdk-envelope-v1
 ```
+
+The `abi` control is optional. Its absence means the exact legacy `argv-v1`
+contract; it must not be inferred from executable contents or other controls.
+
+The optional `tools` control declares the agent's static direct-native tool set.
+It is empty when missing or empty and otherwise contains one canonical tool
+name per line with a final newline. Blank, whitespace-padded, duplicate,
+invalid, and reserved `tsh` entries are rejected. Declaration is not authority:
+
+```text
+direct execution = declared name AND CTX_PATH hit AND agent policy AND tool policy AND Linux/mount permission
+```
+
+Every call re-derives this intersection and opens the selected executable
+without following symlinks. `tsh` load/pin cache state is dynamic prompt
+context only and never admits a direct-native call.
 
 Multiple agents may share one Linux uid. The uid expresses the user boundary.
 The label expresses the agent security boundary.

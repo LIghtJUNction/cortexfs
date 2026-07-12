@@ -121,6 +121,9 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "meta.json",
 ];
 
+/// Optional agent control files recognized by v1.
+pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &["abi", "tools"];
+
 /// Default system prompt template for agent model calls.
 pub const DEFAULT_AGENT_PROMPT_TEMPLATE: &str = r"# CortexFS Agent System Prompt
 

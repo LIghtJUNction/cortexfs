@@ -293,7 +293,8 @@ fn agent_provider_messages_expose_only_tsh_as_native_tool() {
         .pointer("/0/content")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    assert!(system.contains("only native callable tool exposed by this runtime is `tsh`"));
+    assert!(system.contains("`tsh` is always native"));
+    assert!(system.contains("tsh cache state never makes a tool direct-native"));
     assert!(system.contains("## AGENT Instructions"));
     assert!(system.contains("Always answer tersely."));
     assert!(system.contains("Project rule"));

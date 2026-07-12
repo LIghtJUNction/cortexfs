@@ -69,6 +69,11 @@ pub enum SocketRequest {
         /// Run id to cancel.
         id: String,
     },
+    /// Stop an agent and its owned descendants through its authoritative runtime.
+    Stop {
+        /// Agent name; must match the socket runtime identity.
+        agent: String,
+    },
     /// Health check.
     Ping,
 }
@@ -159,6 +164,8 @@ enum SocketRequestFrame {
     },
     #[serde(rename = "cancel")]
     Cancel { id: String },
+    #[serde(rename = "stop")]
+    Stop { agent: String },
     #[serde(rename = "ping")]
     Ping,
 }
@@ -199,6 +206,16 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
                 parse_socket_resume_request(session, after)
             }
             SocketRequestFrame::Cancel { id } => parse_socket_cancel_request(id),
+            SocketRequestFrame::Stop { agent } => {
+                if is_object_name(&agent) {
+                    Ok(Self::Stop { agent })
+                } else {
+                    Err(SocketRequestError::InvalidField {
+                        field: "agent",
+                        value: agent,
+                    })
+                }
+            }
             SocketRequestFrame::Ping => Ok(Self::Ping),
         }
     }

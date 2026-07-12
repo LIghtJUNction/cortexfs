@@ -104,6 +104,10 @@ pub use reference::bootstrap::*;
 pub use reference::helpers::*;
 
 pub use agent::child::*;
+pub use agent::launch::{
+    AgentLaunchCommand, AgentLaunchRequest, chat_socket_command, invocation_id, launch_process_for,
+    parse_main_pid, reset_unit_for, set_user_systemd_client_env, unit_main_pid_for,
+};
 pub use agent::runtime::*;
 pub use agent::view::*;
 

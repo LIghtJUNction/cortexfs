@@ -26,6 +26,7 @@ fn socket_session_recorder_appends_send_to_durable_history() {
     assert!(messages.contains("\"content\":\"hello\""));
     assert!(events.contains("\"type\":\"start\""));
     assert_file_text(&session.join("state"), "active\n");
+    assert_file_text(&session.join("current_run"), "msg-1\n");
     assert_file_text(&session.join("cwd"), "/work/project\n");
 }
 

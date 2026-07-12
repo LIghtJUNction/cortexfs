@@ -144,6 +144,12 @@ mount subset
 output contract
 ```
 
+The default `agent.create` RPC intentionally keeps the child in the parent's
+security domain: it preserves the complete parent label and policy subject and
+attenuates the effective policy and mounts. A future supervisor that assigns a
+distinct child label must also provision the corresponding global capability
+grants explicitly; child creation never mutates global tool policy.
+
 Child to parent:
 
 ```text

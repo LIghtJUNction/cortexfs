@@ -13,6 +13,14 @@ pub fn record_socket_request_to_session(
     session_dir: &Path,
     request: &SocketRequest,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
+    record_socket_request(session_dir, request, None)
+}
+
+fn record_socket_request(
+    session_dir: &Path,
+    request: &SocketRequest,
+    preparation: Option<&OwnedSessionPreparation>,
+) -> Result<SocketSessionRecord, SocketSessionRecordError> {
     match *request {
         SocketRequest::Send {
             ref id,
@@ -21,9 +29,17 @@ pub fn record_socket_request_to_session(
             ref cwd,
             ref input,
             ..
-        } => record_socket_send_to_session(session_dir, id, session, scope, cwd.as_deref(), input),
+        } => record_socket_send_to_session(
+            session_dir,
+            id,
+            session,
+            scope,
+            cwd.as_deref(),
+            input,
+            preparation,
+        ),
         SocketRequest::Cancel { ref id } => record_socket_cancel_to_session(session_dir, id),
-        SocketRequest::Resume { .. } | SocketRequest::Ping => {
+        SocketRequest::Resume { .. } | SocketRequest::Stop { .. } | SocketRequest::Ping => {
             Err(SocketSessionRecordError::UnsupportedRequest)
         }
     }
@@ -39,6 +55,22 @@ pub fn record_indexed_socket_send_to_session(
     session_root: &Path,
     request: &SocketRequest,
 ) -> Result<SocketSessionRecord, IndexedSocketSessionRecordError> {
+    record_indexed_socket_send(session_root, request, None)
+}
+
+pub(crate) fn record_prepared_indexed_socket_send_to_session(
+    session_root: &Path,
+    request: &SocketRequest,
+    preparation: &OwnedSessionPreparation,
+) -> Result<SocketSessionRecord, IndexedSocketSessionRecordError> {
+    record_indexed_socket_send(session_root, request, Some(preparation))
+}
+
+fn record_indexed_socket_send(
+    session_root: &Path,
+    request: &SocketRequest,
+    preparation: Option<&OwnedSessionPreparation>,
+) -> Result<SocketSessionRecord, IndexedSocketSessionRecordError> {
     let (session, scope, cwd) = match *request {
         SocketRequest::Send {
             ref session,
@@ -46,7 +78,10 @@ pub fn record_indexed_socket_send_to_session(
             ref cwd,
             ..
         } => (session.as_str(), scope, cwd.as_deref()),
-        SocketRequest::Resume { .. } | SocketRequest::Cancel { .. } | SocketRequest::Ping => {
+        SocketRequest::Resume { .. }
+        | SocketRequest::Cancel { .. }
+        | SocketRequest::Stop { .. }
+        | SocketRequest::Ping => {
             return Err(IndexedSocketSessionRecordError::Session(
                 SocketSessionRecordError::UnsupportedRequest,
             ));
@@ -63,7 +98,7 @@ pub fn record_indexed_socket_send_to_session(
         .map_err(IndexedSocketSessionRecordError::Index)?;
 
     let session_dir = session_root.join(session);
-    let record = record_socket_request_to_session(&session_dir, request)
+    let record = record_socket_request(&session_dir, request, preparation)
         .map_err(IndexedSocketSessionRecordError::Session)?;
     update_session_index(session_root, session, by_cwd_key.as_deref())
         .map_err(IndexedSocketSessionRecordError::Index)?;

@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::{
-    ControlLineIssue, atomic_replace_text, is_object_name,
+    ControlLineIssue, atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
+    is_object_name,
     support::control::{inspect_control_line, inspect_control_lines},
     support::plain::read_small_text_file,
 };
@@ -150,17 +151,29 @@ pub fn update_session_index_with_keys(
             .filter(|existing| *existing != session_name)
             .map(str::to_owned),
     );
-    atomic_replace_text(&update.list_path, &format!("{}\n", sessions.join("\n")))
-        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-    atomic_replace_text(&update.current_path, &format!("{session_name}\n"))
+    atomic_replace_text_preserving_metadata(
+        &update.list_path,
+        &format!("{}\n", sessions.join("\n")),
+    )
+    .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    atomic_replace_text_preserving_metadata(&update.current_path, &format!("{session_name}\n"))
         .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
 
     for path in update.secondary_paths.into_iter().flatten() {
-        atomic_replace_text(&path, &format!("{session_name}\n"))
+        replace_secondary_index(&path, session_name)
             .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
     }
 
     Ok(())
+}
+
+fn replace_secondary_index(path: &Path, session_name: &str) -> std::io::Result<()> {
+    let content = format!("{session_name}\n");
+    if is_plain_file_path(path) {
+        atomic_replace_text_preserving_metadata(path, &content)
+    } else {
+        atomic_create_text_with_mode(path, &content, 0o600)
+    }
 }
 
 pub fn preflight_session_index_update(

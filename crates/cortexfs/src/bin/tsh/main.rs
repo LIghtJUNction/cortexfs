@@ -24,6 +24,7 @@ use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode, Stdio};
 
@@ -361,9 +362,63 @@ pub(crate) fn persistent_context_path(root: &Path) -> Result<Option<PathBuf>, Ts
     let Some(agent) = env::var("CTX_AGENT").ok() else {
         return Ok(None);
     };
-    let view =
-        derive_agent_runtime_view(root, &agent).map_err(|error| agent_view_error_to_tsh(&error))?;
+    let (socket, token) = tsh_control_environment_from_env()?.ok_or_else(|| {
+        TshError::unavailable("persistent cache requires authenticated runtime capability")
+    })?;
+    persistent_context_path_with_capability(root, &agent, &socket, &token)
+}
+
+fn persistent_context_path_with_capability(
+    root: &Path,
+    agent: &str,
+    socket: &std::ffi::OsStr,
+    token: &std::ffi::OsStr,
+) -> Result<Option<PathBuf>, TshError> {
+    let runtime = validated_tsh_runtime_context_from_env(root, agent)?;
+    let token = token
+        .to_str()
+        .ok_or_else(|| TshError::unavailable("invalid runtime token"))?;
+    let request_id = cortexfs_runtime_client::fresh_request_id("tsh-cache")
+        .map_err(|_error| TshError::unavailable("cannot create persistent cache request id"))?;
+    let receipt = cortexfs_runtime_client::ping(
+        Path::new(&socket),
+        token,
+        &request_id,
+        &runtime.agent,
+        &runtime.session,
+        &runtime.run,
+    )
+    .map_err(|_error| TshError::unavailable("persistent cache runtime receipt unavailable"))?
+    .ok_or_else(|| TshError::unavailable("persistent cache runtime receipt missing"))?;
+    validate_runtime_source_receipt(&runtime.source, &receipt)?;
+    let view = derive_agent_runtime_view(&runtime.source, agent)
+        .map_err(|error| agent_view_error_to_tsh(&error))?;
     Ok(Some(cortexfs::tsh_context_state_path(view.home())))
+}
+
+fn validate_runtime_source_receipt(
+    candidate: &Path,
+    receipt: &cortexfs_runtime_client::RuntimeSourceReceipt,
+) -> Result<(), TshError> {
+    if Path::new(&receipt.path) != candidate {
+        return Err(TshError::unavailable(
+            "persistent cache source receipt path mismatch",
+        ));
+    }
+    let source = cortexfs::support::plain::open_plain_directory(candidate).map_err(|_error| {
+        TshError::unavailable("persistent cache source is not a plain directory")
+    })?;
+    let metadata = source
+        .metadata()
+        .map_err(|_error| TshError::unavailable("persistent cache source receipt unreadable"))?;
+    if (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino)
+        || receipt.kind != cortexfs_runtime_client::RuntimeSourceKind::PlainDirectory
+    {
+        return Err(TshError::unavailable(
+            "persistent cache source receipt mismatch",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn restore_persistent_cache(cache: &mut DynamicToolCache, context: &ToolContext) {
@@ -378,6 +433,7 @@ pub(crate) fn restore_persistent_cache(cache: &mut DynamicToolCache, context: &T
 
 pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<ExitCode, TshError> {
     let (grant, env) = authorize_tsh_tool_execution(root, name)?;
+    let runtime = validated_tsh_runtime_context_from_env(root, &agent_name_from_env()?)?;
     let hit = grant.hit();
     if args.len() == 1
         && matches!(
@@ -389,24 +445,201 @@ pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<E
     }
     let tool_executable = open_executable_no_follow(hit.path())
         .map_err(|error| TshError::unavailable(format!("cannot run tool: {error}")))?;
-    let status = ProcessCommand::new(proc_fd_path(&tool_executable))
+    let control = tsh_control_environment_from_env()?;
+    let mut command = ProcessCommand::new(proc_fd_path(&tool_executable));
+    command
         .args(args)
         .env_clear()
         .envs(env.iter().map(|env| (env.0.as_str(), env.1.as_str())))
         .env("CTX_ROOT", root)
-        .env("CTX_AGENT", agent_name_from_env()?)
+        .env("CTX_AGENT", &runtime.agent)
+        .env("CTX_SESSION", &runtime.session)
+        .env("CTX_RUN_ID", &runtime.run)
+        .env("CTX_SOURCE", &runtime.source)
         .env("CTX_TOOL_MODE", "cli")
         .env("CTX_AUTHORIZED_OBJECT", format!("/ctx/tool/{name}"))
         .env("PATH", "/usr/bin:/bin")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Some((ref socket, ref token)) = control {
+        command
+            .env("CTX_CONTROL_SOCKET", socket)
+            .env("CTX_CONTROL_TOKEN", token);
+    }
+    if validated_tsh_runtime_context_from_env(root, &runtime.agent)? != runtime
+        || tsh_control_environment_from_env()? != control
+    {
+        return Err(TshError::unavailable(
+            "agent runtime context changed before tool spawn",
+        ));
+    }
+    let status = command
         .status()
         .map_err(|error| TshError::unavailable(format!("cannot run tool: {error}")))?;
     Ok(status
         .code()
         .and_then(|code| u8::try_from(code).ok())
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
+}
+
+pub(crate) fn tsh_control_environment_from_env() -> Result<Option<(OsString, OsString)>, TshError> {
+    validate_tsh_control_environment(
+        env::var_os("CTX_CONTROL_SOCKET"),
+        env::var_os("CTX_CONTROL_TOKEN"),
+    )
+}
+
+pub(crate) fn validate_tsh_control_environment(
+    socket: Option<OsString>,
+    token: Option<OsString>,
+) -> Result<Option<(OsString, OsString)>, TshError> {
+    match (socket, token) {
+        (None, None) => Ok(None),
+        (Some(socket), Some(token)) => {
+            if socket
+                != std::ffi::OsStr::new(cortexfs::runtime::socket::bwrap::SOCKET_RUN_CONTROL_PATH)
+            {
+                return Err(TshError::unavailable(
+                    "CTX_CONTROL_SOCKET is not the fixed runtime control path",
+                ));
+            }
+            let Some(token_text) = token.to_str() else {
+                return Err(TshError::unavailable("CTX_CONTROL_TOKEN is not ASCII hex"));
+            };
+            if token_text.len() != 64 || !token_text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(TshError::unavailable(
+                    "CTX_CONTROL_TOKEN is not a 32-byte hex token",
+                ));
+            }
+            Ok(Some((socket, token)))
+        }
+        _ => Err(TshError::unavailable(
+            "incomplete CTX_CONTROL_SOCKET/CTX_CONTROL_TOKEN runtime capability",
+        )),
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct TshRuntimeContext {
+    agent: String,
+    session: String,
+    run: String,
+    source: PathBuf,
+}
+
+pub(crate) fn validated_tsh_runtime_context_from_env(
+    root: &Path,
+    agent: &str,
+) -> Result<TshRuntimeContext, TshError> {
+    validate_tsh_runtime_context_values(
+        root,
+        agent,
+        env::var("CTX_SESSION").ok(),
+        env::var("CTX_RUN_ID").ok(),
+        env::var_os("CTX_SOURCE").map(PathBuf::from),
+    )
+}
+
+pub(crate) fn validate_tsh_runtime_context_values(
+    root: &Path,
+    agent: &str,
+    session: Option<String>,
+    run: Option<String>,
+    source: Option<PathBuf>,
+) -> Result<TshRuntimeContext, TshError> {
+    let session =
+        session.ok_or_else(|| TshError::unavailable("missing CTX_SESSION runtime context"))?;
+    let run = run.ok_or_else(|| TshError::unavailable("missing CTX_RUN_ID runtime context"))?;
+    let source =
+        source.ok_or_else(|| TshError::unavailable("missing CTX_SOURCE runtime context"))?;
+    validate_tsh_runtime_context(root, agent, &session, &run, &source)
+}
+
+pub(crate) fn validate_tsh_runtime_context(
+    root: &Path,
+    agent: &str,
+    session: &str,
+    run: &str,
+    source: &Path,
+) -> Result<TshRuntimeContext, TshError> {
+    if !cortexfs::is_object_name(agent)
+        || !cortexfs::is_object_name(session)
+        || !cortexfs::is_object_name(run)
+        || !source.is_absolute()
+    {
+        return Err(TshError::usage("invalid agent runtime context"));
+    }
+    let projected =
+        derive_agent_runtime_view(root, agent).map_err(|error| agent_view_error_to_tsh(&error))?;
+    let backing = derive_agent_runtime_view(source, agent)
+        .map_err(|_error| TshError::unavailable("agent runtime context source mismatch"))?;
+    macro_rules! require_same {
+        ($field:literal, $left:expr, $right:expr) => {
+            if $left != $right {
+                return Err(TshError::unavailable(concat!(
+                    "agent runtime context source mismatch: ",
+                    $field
+                )));
+            }
+        };
+    }
+    require_same!("owner", projected.owner(), backing.owner());
+    require_same!("identity", projected.identity(), backing.identity());
+    require_same!("label", projected.label(), backing.label());
+    require_same!("iso", projected.iso(), backing.iso());
+    require_same!("model", projected.model(), backing.model());
+    require_same!(
+        "policy subject",
+        projected.policy_subject(),
+        backing.policy_subject()
+    );
+    require_same!("policy", projected.policy(), backing.policy());
+    require_same!("parent", projected.parent(), backing.parent());
+    require_same!("lifecycle", projected.lifecycle(), backing.lifecycle());
+    require_same!("root", projected.root(), backing.root());
+    require_same!("cwd", projected.cwd(), backing.cwd());
+    let projected_env = read_small_plain_text_file(
+        &projected.control_dir().join("env"),
+        MAX_TSH_CONTROL_BYTES,
+        "tsh",
+    )
+    .map_err(|_error| TshError::unavailable("agent runtime context projection env unreadable"))?;
+    let backing_env = read_small_plain_text_file(
+        &backing.control_dir().join("env"),
+        MAX_TSH_CONTROL_BYTES,
+        "tsh",
+    )
+    .map_err(|_error| TshError::unavailable("agent runtime context backing env unreadable"))?;
+    require_same!("env", projected_env, backing_env);
+    require_same!("tool path", projected.tool_path(), backing.tool_path());
+    require_same!(
+        "mount table",
+        projected.mount_table(),
+        backing.mount_table()
+    );
+    let current_run = source
+        .join("home")
+        .join(backing.owner().to_string())
+        .join("agent")
+        .join(agent)
+        .join("session")
+        .join(session)
+        .join("current_run");
+    let recorded = read_small_plain_text_file(&current_run, MAX_TSH_CONTROL_BYTES, "tsh")
+        .map_err(|_error| TshError::unavailable("agent runtime context session mismatch"))?;
+    if recorded.trim() != run {
+        return Err(TshError::unavailable(format!(
+            "agent runtime context session mismatch: recorded={} runtime={run}",
+            recorded.trim()
+        )));
+    }
+    Ok(TshRuntimeContext {
+        agent: agent.to_owned(),
+        session: session.to_owned(),
+        run: run.to_owned(),
+        source: source.to_owned(),
+    })
 }
 
 pub(crate) fn run_tool_with_context(

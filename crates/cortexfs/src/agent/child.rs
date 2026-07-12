@@ -208,6 +208,22 @@ pub enum ChildContextRecordError {
     CannotRecord,
 }
 
+/// Receipt for one exclusively published parent-side child handoff.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChildHandoffReceipt {
+    pub(crate) path: PathBuf,
+    pub(crate) dev: u64,
+    pub(crate) ino: u64,
+}
+
+impl ChildHandoffReceipt {
+    /// Returns the published child channel directory.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 impl ChildContextRecordError {
     /// Returns a stable errno name for this child context recording failure.
     #[must_use]

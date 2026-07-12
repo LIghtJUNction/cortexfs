@@ -1,0 +1,1102 @@
+use crate::object::bootstrap::validate_object_control_content;
+#[cfg(test)]
+use crate::object::metadata::tool_exec_metadata;
+use crate::support::plain::{open_plain_directory, open_plain_file, write_text_file_at};
+use crate::{
+    MountTable, ObjectClass, PolicyV0, is_model_name, is_object_name, policy_subject_from_label,
+};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::cell::Cell;
+use std::fmt::Write as _;
+use std::fs;
+use std::io::{self, Read, Write};
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+const OBJECT_MANIFEST_SCHEMA_V1: &str = "cortexfs.object/v1";
+const MAX_OBJECT_MANIFEST_BYTES: u64 = 1024 * 1024;
+const TOOL_INSTALL_CONTROLS: &[&str] = &["description", "schema", "cap", "policy"];
+const AGENT_INSTALL_CONTROLS: &[&str] = &[
+    "owner",
+    "uid",
+    "gid",
+    "groups",
+    "label",
+    "iso",
+    "parent",
+    "life",
+    "root",
+    "cwd",
+    "env",
+    "path",
+    "mount",
+    "model",
+    "abi",
+    "tools",
+    "system.md",
+    "prompt.template.md",
+    "policy",
+    "meta.json",
+];
+const AGENT_AUTHORITY_CONTROLS: &[&str] = &[
+    "owner", "uid", "gid", "groups", "label", "iso", "parent", "life", "root", "cwd", "env",
+    "path", "mount", "model", "policy",
+];
+
+thread_local! {
+    static INSTALL_FAULT: Cell<u8> = const { Cell::new(0) };
+}
+
+fn take_install_fault() -> u8 {
+    INSTALL_FAULT.with(|fault| fault.replace(0))
+}
+
+static STAGE_ID: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Copy)]
+struct ControlReceipt {
+    dev: u64,
+    ino: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InstallTier {
+    /// Installs into the effective user's private object tree.
+    User,
+    /// Installs into the system-wide object tree.
+    System,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObjectManifest {
+    schema: String,
+    class: ManifestClass,
+    name: String,
+    executable: ManifestExecutable,
+    controls: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum ManifestClass {
+    Tool,
+    Agent,
+}
+
+impl ManifestClass {
+    const fn object_class(self) -> ObjectClass {
+        match self {
+            Self::Tool => ObjectClass::Tool,
+            Self::Agent => ObjectClass::Agent,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManifestExecutable {
+    path: PathBuf,
+    sha256: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum InstallError {
+    /// The manifest or requested installation is invalid.
+    Invalid(String),
+    /// The durable installation target is unavailable.
+    Unavailable(String),
+}
+
+impl InstallError {
+    fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid(message.into())
+    }
+
+    fn unavailable(message: impl Into<String>) -> Self {
+        Self::Unavailable(message.into())
+    }
+
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match *self {
+            Self::Invalid(ref message) | Self::Unavailable(ref message) => message,
+        }
+    }
+}
+
+impl std::fmt::Display for InstallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for InstallError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InstalledObject {
+    /// Installed object class.
+    pub class: ObjectClass,
+    /// Installed object name.
+    pub name: String,
+}
+
+/// Installs one manifest-bound executable into a durable object tree.
+pub fn install_object(
+    root: &Path,
+    manifest_path: &Path,
+    tier: InstallTier,
+) -> Result<InstalledObject, InstallError> {
+    let manifest = read_manifest(manifest_path)?;
+    validate_manifest(&manifest)?;
+    let class = manifest.class.object_class();
+    if class == ObjectClass::Agent && tier == InstallTier::User {
+        return Err(InstallError::invalid(
+            "cortexfs.object/v1 cannot carry user-tier identity to the root socket runtime; install the agent with --tier system",
+        ));
+    }
+    let class_dir = install_class_dir(root, class, tier)?;
+    let artifact = resolve_artifact(manifest_path, &manifest.executable.path)?;
+    let mut source = open_plain_file(&artifact).map_err(|error| {
+        InstallError::invalid(format!(
+            "cannot open executable {}: {error}",
+            artifact.display()
+        ))
+    })?;
+    let source_meta = source.metadata().map_err(|error| {
+        InstallError::invalid(format!(
+            "cannot inspect executable {}: {error}",
+            artifact.display()
+        ))
+    })?;
+    if !source_meta.is_file() || source_meta.permissions().mode() & 0o111 == 0 {
+        return Err(InstallError::invalid(format!(
+            "executable is not a regular executable file: {}",
+            artifact.display()
+        )));
+    }
+
+    let class_fd = open_plain_directory(&class_dir).map_err(|error| {
+        InstallError::unavailable(format!("cannot open object install tier: {error}"))
+    })?;
+    let executable_name = manifest.name.as_str();
+    let control_name = format!("{}.d", manifest.name);
+    require_install_target_absent(&class_fd, executable_name, &control_name)?;
+    let (_stage_name, stage_fd, _stage_receipt) = create_stage(&class_fd)?;
+    let staged_control_fd = create_stage_control(&stage_fd)?;
+    write_manifest_controls(&staged_control_fd, &manifest)?;
+    let control_receipt = file_receipt(&staged_control_fd, true)?;
+    let staged_executable =
+        copy_verified_executable(&mut source, &stage_fd, &manifest.executable.sha256)?;
+    let executable_receipt = file_receipt(&staged_executable, false)?;
+    staged_control_fd.sync_all().map_err(|error| {
+        InstallError::unavailable(format!("cannot sync install controls: {error}"))
+    })?;
+    stage_fd.sync_all().map_err(|error| {
+        InstallError::unavailable(format!("cannot sync install stage: {error}"))
+    })?;
+
+    rename_noreplace(&stage_fd, "control", &class_fd, &control_name)
+        .map_err(|error| install_collision(&error))?;
+    let fault = take_install_fault();
+    if fault == 1 {
+        #[cfg(test)]
+        replace_published_control_for_test(&class_fd, &control_name)?;
+    }
+    if !leaf_matches(&class_fd, &control_name, control_receipt, true) {
+        return Err(InstallError::unavailable(
+            "object install publish conflict: control receipt changed",
+        ));
+    }
+    if fault == 5 {
+        #[cfg(test)]
+        replace_published_control_for_test(&class_fd, &control_name)?;
+    }
+    let exec_result = if matches!(fault, 0 | 1 | 5 | 6 | 7) {
+        rename_noreplace(&stage_fd, "executable", &class_fd, executable_name)
+    } else {
+        Err(io::Error::from(io::ErrorKind::AlreadyExists))
+    };
+    if let Err(error) = exec_result {
+        return match rollback_control(&class_fd, &stage_fd, &control_name, control_receipt, fault) {
+            Ok(()) => Err(install_collision(&error)),
+            Err(conflict) => Err(conflict),
+        };
+    }
+    if matches!(fault, 6 | 7) {
+        #[cfg(test)]
+        replace_published_executable_for_test(&class_fd, executable_name)?;
+    }
+    if !leaf_matches(&class_fd, executable_name, executable_receipt, false) {
+        let executable_rollback = rollback_executable(
+            &class_fd,
+            &stage_fd,
+            executable_name,
+            executable_receipt,
+            fault,
+        );
+        let control_rollback =
+            rollback_control(&class_fd, &stage_fd, &control_name, control_receipt, fault);
+        return Err(control_rollback
+            .err()
+            .or_else(|| executable_rollback.err())
+            .unwrap_or_else(|| {
+                InstallError::unavailable(
+                    "object install publish conflict: executable receipt changed",
+                )
+            }));
+    }
+    if !leaf_matches(&class_fd, &control_name, control_receipt, true) {
+        rollback_executable(
+            &class_fd,
+            &stage_fd,
+            executable_name,
+            executable_receipt,
+            fault,
+        )?;
+        return match rollback_control(&class_fd, &stage_fd, &control_name, control_receipt, fault) {
+            Ok(()) => Err(InstallError::unavailable(
+                "object install publish conflict: control receipt changed",
+            )),
+            Err(conflict) => Err(conflict),
+        };
+    }
+    class_fd.sync_all().map_err(|error| {
+        InstallError::unavailable(format!("cannot sync installed object: {error}"))
+    })?;
+    Ok(InstalledObject {
+        class,
+        name: manifest.name,
+    })
+}
+
+#[expect(
+    clippy::verbose_file_reads,
+    reason = "manifest is read through a verified no-follow file descriptor"
+)]
+fn read_manifest(path: &Path) -> Result<ObjectManifest, InstallError> {
+    let mut file = open_plain_file(path).map_err(|error| {
+        InstallError::invalid(format!(
+            "cannot open object manifest {}: {error}",
+            path.display()
+        ))
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        InstallError::invalid(format!(
+            "cannot inspect object manifest {}: {error}",
+            path.display()
+        ))
+    })?;
+    if !metadata.is_file() || metadata.len() > MAX_OBJECT_MANIFEST_BYTES {
+        return Err(InstallError::invalid(
+            "object manifest must be a regular file no larger than 1 MiB",
+        ));
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|error| InstallError::invalid(format!("cannot read object manifest: {error}")))?;
+    serde_yaml::from_str(&text)
+        .map_err(|error| InstallError::invalid(format!("invalid object manifest: {error}")))
+}
+
+fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
+    if manifest.schema != OBJECT_MANIFEST_SCHEMA_V1 {
+        return Err(InstallError::invalid(format!(
+            "unsupported object manifest schema: {}",
+            manifest.schema
+        )));
+    }
+    let class = manifest.class.object_class();
+    if !is_object_name(&manifest.name) {
+        return Err(InstallError::invalid("invalid object manifest name"));
+    }
+    if manifest.executable.path.as_os_str().is_empty()
+        || manifest.executable.sha256.len() != 64
+        || !manifest
+            .executable
+            .sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(InstallError::invalid("invalid executable path or sha256"));
+    }
+    let allowed = if class == ObjectClass::Tool {
+        TOOL_INSTALL_CONTROLS
+    } else {
+        AGENT_INSTALL_CONTROLS
+    };
+    for (name, value) in &manifest.controls {
+        if !allowed.contains(&name.as_str()) {
+            return Err(InstallError::invalid(format!(
+                "unknown or runtime-owned control: {name}"
+            )));
+        }
+        if value
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
+        {
+            return Err(InstallError::invalid(format!(
+                "control contains forbidden characters: {name}"
+            )));
+        }
+        let validated_value =
+            if class == ObjectClass::Agent && name == "tools" && !value.ends_with('\n') {
+                format!("{value}\n")
+            } else {
+                value.clone()
+            };
+        validate_object_control_content(class, name, &validated_value)
+            .map_err(|_error| InstallError::invalid(format!("invalid control value: {name}")))?;
+        match (class, name.as_str()) {
+            (ObjectClass::Agent, "abi")
+                if !matches!(value.as_str(), "argv-v1" | "sdk-envelope-v1") =>
+            {
+                return Err(InstallError::invalid("invalid control value: abi"));
+            }
+            (_, "policy") if PolicyV0::parse(value).is_err() => {
+                return Err(InstallError::invalid("invalid control value: policy"));
+            }
+            (ObjectClass::Agent, "mount") if MountTable::parse(value).is_err() => {
+                return Err(InstallError::invalid("invalid control value: mount"));
+            }
+            (ObjectClass::Agent, "label") if policy_subject_from_label(value.trim()).is_none() => {
+                return Err(InstallError::invalid("invalid control value: label"));
+            }
+            (ObjectClass::Agent, "model")
+                if !(is_model_name(value.trim()) || matches!(value.trim(), "main" | "helper")) =>
+            {
+                return Err(InstallError::invalid("invalid control value: model"));
+            }
+            (ObjectClass::Agent, "root" | "cwd") if !Path::new(value.trim()).is_absolute() => {
+                return Err(InstallError::invalid(format!(
+                    "invalid control value: {name}"
+                )));
+            }
+            (ObjectClass::Agent, "meta.json")
+                if serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(value)
+                    .is_err() =>
+            {
+                return Err(InstallError::invalid("invalid control value: meta.json"));
+            }
+            _ => {}
+        }
+    }
+    let required = if class == ObjectClass::Tool {
+        TOOL_INSTALL_CONTROLS
+    } else {
+        AGENT_AUTHORITY_CONTROLS
+    };
+    for name in required {
+        if !manifest.controls.contains_key(*name) {
+            return Err(InstallError::invalid(format!(
+                "missing required control: {name}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn install_class_dir(
+    root: &Path,
+    class: ObjectClass,
+    tier: InstallTier,
+) -> Result<PathBuf, InstallError> {
+    let directory = match (class, tier) {
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::User) => root
+            .join("home")
+            .join(nix::unistd::Uid::effective().as_raw().to_string())
+            .join(class.as_str()),
+        (ObjectClass::Tool | ObjectClass::Agent, InstallTier::System) => root.join(class.as_str()),
+        (ObjectClass::Model, _) => {
+            return Err(InstallError::invalid(
+                "model object installation is unsupported",
+            ));
+        }
+    };
+    open_plain_directory(&directory).map_err(|error| {
+        InstallError::unavailable(format!("object install tier is unavailable: {error}"))
+    })?;
+    Ok(directory)
+}
+
+fn resolve_artifact(manifest: &Path, artifact: &Path) -> Result<PathBuf, InstallError> {
+    if artifact.is_absolute() {
+        return Ok(artifact.to_path_buf());
+    }
+    let parent = manifest
+        .parent()
+        .ok_or_else(|| InstallError::invalid("object manifest has no parent directory"))?;
+    Ok(parent.join(artifact))
+}
+
+fn require_install_target_absent(
+    class: &fs::File,
+    executable: &str,
+    control: &str,
+) -> Result<(), InstallError> {
+    for name in [executable, control] {
+        match nix::sys::stat::fstatat(class, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
+            Ok(_stat) => return Err(InstallError::unavailable("object already exists")),
+            Err(nix::errno::Errno::ENOENT) => {}
+            Err(error) => {
+                return Err(InstallError::unavailable(format!(
+                    "cannot inspect object install target: {error}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_manifest_controls(
+    control: &fs::File,
+    manifest: &ObjectManifest,
+) -> Result<(), InstallError> {
+    let class = manifest.class.object_class();
+    if class == ObjectClass::Tool {
+        write_text_file_at(control, "name", &format!("{}\n", manifest.name), 0o644).map_err(
+            |error| InstallError::unavailable(format!("cannot write tool name: {error}")),
+        )?;
+    }
+    for (name, value) in &manifest.controls {
+        let content = if value.ends_with('\n') {
+            value.clone()
+        } else {
+            format!("{value}\n")
+        };
+        write_text_file_at(control, name, &content, 0o644).map_err(|error| {
+            InstallError::unavailable(format!("cannot write object control {name}: {error}"))
+        })?;
+    }
+    let runtime: &[(&str, &str)] = if class == ObjectClass::Tool {
+        &[("status", "idle\n"), ("log", "")]
+    } else {
+        &[("status", "idle\n"), ("pid", ""), ("log", "")]
+    };
+    for &(name, content) in runtime {
+        write_text_file_at(control, name, content, 0o644).map_err(|error| {
+            InstallError::unavailable(format!("cannot initialize runtime control {name}: {error}"))
+        })?;
+    }
+    mkdirat(control, "hooks", 0o755)?;
+    let hooks = openat_dir(control, "hooks")?;
+    mkdirat(&hooks, "pre.d", 0o755)?;
+    mkdirat(&hooks, "post.d", 0o755)
+}
+
+fn copy_verified_executable(
+    source: &mut fs::File,
+    stage: &fs::File,
+    expected: &str,
+) -> Result<fs::File, InstallError> {
+    let fd = nix::fcntl::openat(
+        stage,
+        "executable",
+        nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_EXCL
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(0o755),
+    )
+    .map_err(|error| InstallError::unavailable(format!("cannot stage executable: {error}")))?;
+    let mut target_file = fs::File::from(fd);
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        let count = source
+            .read(&mut buffer)
+            .map_err(|error| InstallError::invalid(format!("cannot read executable: {error}")))?;
+        if count == 0 {
+            break;
+        }
+        let chunk = buffer
+            .get(..count)
+            .ok_or_else(|| InstallError::invalid("invalid executable read size"))?;
+        hasher.update(chunk);
+        target_file.write_all(chunk).map_err(|error| {
+            InstallError::unavailable(format!("cannot stage executable: {error}"))
+        })?;
+    }
+    let actual = hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut output, byte| {
+            let _ignored = write!(output, "{byte:02x}");
+            output
+        });
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(InstallError::invalid(format!(
+            "executable sha256 mismatch: expected {expected}, got {actual}"
+        )));
+    }
+    target_file
+        .sync_all()
+        .map_err(|error| InstallError::unavailable(format!("cannot sync executable: {error}")))?;
+    Ok(target_file)
+}
+
+fn create_stage(class: &fs::File) -> Result<(String, fs::File, ControlReceipt), InstallError> {
+    for _attempt in 0..32 {
+        let id = STAGE_ID.fetch_add(1, AtomicOrdering::Relaxed);
+        let name = format!(".cortexfs-install-{}-{id}", std::process::id());
+        match nix::sys::stat::mkdirat(
+            class,
+            name.as_str(),
+            nix::sys::stat::Mode::from_bits_truncate(0o700),
+        ) {
+            Ok(()) => {
+                let stage = openat_dir(class, &name)?;
+                let receipt = file_receipt(&stage, true)?;
+                return Ok((name, stage, receipt));
+            }
+            Err(nix::errno::Errno::EEXIST) => {}
+            Err(error) => {
+                return Err(InstallError::unavailable(format!(
+                    "cannot create install stage: {error}"
+                )));
+            }
+        }
+    }
+    Err(InstallError::unavailable(
+        "cannot allocate unique install stage",
+    ))
+}
+
+fn create_stage_control(stage: &fs::File) -> Result<fs::File, InstallError> {
+    mkdirat(stage, "control", 0o700)?;
+    openat_dir(stage, "control")
+}
+
+fn mkdirat(parent: &fs::File, name: &str, mode: u32) -> Result<(), InstallError> {
+    nix::sys::stat::mkdirat(parent, name, nix::sys::stat::Mode::from_bits_truncate(mode)).map_err(
+        |error| InstallError::unavailable(format!("cannot create staged directory: {error}")),
+    )
+}
+
+fn openat_dir(parent: &fs::File, name: &str) -> Result<fs::File, InstallError> {
+    nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_DIRECTORY
+            | nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(|error| InstallError::unavailable(format!("cannot open staged directory: {error}")))
+}
+
+fn rename_noreplace(
+    from_dir: &fs::File,
+    from: &str,
+    to_dir: &fs::File,
+    to: &str,
+) -> io::Result<()> {
+    nix::fcntl::renameat2(
+        from_dir,
+        from,
+        to_dir,
+        to,
+        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(io::Error::from)
+}
+
+fn file_receipt(file: &fs::File, directory: bool) -> Result<ControlReceipt, InstallError> {
+    let metadata = file.metadata().map_err(|error| {
+        InstallError::unavailable(format!("cannot receipt staged entry: {error}"))
+    })?;
+    if metadata.is_dir() != directory || metadata.file_type().is_symlink() {
+        return Err(InstallError::unavailable("staged entry has wrong type"));
+    }
+    Ok(ControlReceipt {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    })
+}
+
+fn leaf_matches(
+    directory: &fs::File,
+    name: &str,
+    receipt: ControlReceipt,
+    expected_directory: bool,
+) -> bool {
+    nix::sys::stat::fstatat(directory, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW).is_ok_and(
+        |stat| {
+            let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
+            (stat.st_dev, stat.st_ino) == (receipt.dev, receipt.ino)
+                && if expected_directory {
+                    kind.contains(nix::sys::stat::SFlag::S_IFDIR)
+                } else {
+                    kind.contains(nix::sys::stat::SFlag::S_IFREG)
+                }
+        },
+    )
+}
+
+fn rollback_control(
+    class: &fs::File,
+    stage: &fs::File,
+    name: &str,
+    receipt: ControlReceipt,
+    fault: u8,
+) -> Result<(), InstallError> {
+    if fault == 2 {
+        #[cfg(test)]
+        replace_published_control_for_test(class, name)?;
+    }
+    rename_noreplace(class, name, stage, "rolled-back-control").map_err(|error| {
+        InstallError::unavailable(format!(
+            "object install rollback conflict: park failed: {error}"
+        ))
+    })?;
+    if fault == 3 {
+        #[cfg(test)]
+        replace_parked_control_for_test(stage)?;
+    }
+    if leaf_matches(stage, "rolled-back-control", receipt, true) {
+        return Ok(());
+    }
+    let _restored = rename_noreplace(stage, "rolled-back-control", class, name);
+    Err(InstallError::unavailable(
+        "object install rollback conflict: parked control receipt changed",
+    ))
+}
+
+fn rollback_executable(
+    class: &fs::File,
+    stage: &fs::File,
+    name: &str,
+    receipt: ControlReceipt,
+    fault: u8,
+) -> Result<(), InstallError> {
+    rename_noreplace(class, name, stage, "rolled-back-executable").map_err(|error| {
+        InstallError::unavailable(format!(
+            "object install rollback conflict: executable park failed: {error}"
+        ))
+    })?;
+    if fault == 7 {
+        #[cfg(test)]
+        create_test_executable(class, name)?;
+        #[cfg(test)]
+        rename_noreplace(class, name, stage, "recreated-executable").map_err(|error| {
+            InstallError::unavailable(format!(
+                "object install rollback conflict: recreated executable park failed: {error}"
+            ))
+        })?;
+    }
+    if leaf_matches(stage, "rolled-back-executable", receipt, false) {
+        return Ok(());
+    }
+    Err(InstallError::unavailable(
+        "object install rollback conflict: parked executable receipt changed",
+    ))
+}
+
+#[cfg(test)]
+fn create_test_executable(class: &fs::File, name: &str) -> Result<(), InstallError> {
+    let fd = nix::fcntl::openat(
+        class,
+        name,
+        nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_EXCL
+            | nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW,
+        nix::sys::stat::Mode::from_bits_truncate(0o755),
+    )
+    .map_err(|error| {
+        InstallError::unavailable(format!("cannot create test executable: {error}"))
+    })?;
+    let mut file = fs::File::from(fd);
+    file.write_all(b"#!/bin/sh\nprintf replacement\n")
+        .map_err(|error| {
+            InstallError::unavailable(format!("cannot write test executable: {error}"))
+        })
+}
+
+#[cfg(test)]
+fn replace_published_executable_for_test(class: &fs::File, name: &str) -> Result<(), InstallError> {
+    rename_noreplace(class, name, class, ".captured-executable").map_err(|error| {
+        InstallError::unavailable(format!("cannot capture test executable: {error}"))
+    })?;
+    create_test_executable(class, name)
+}
+
+#[cfg(test)]
+fn replace_published_control_for_test(class: &fs::File, name: &str) -> Result<(), InstallError> {
+    rename_noreplace(class, name, class, ".captured-controls").map_err(|error| {
+        InstallError::unavailable(format!("cannot capture test controls: {error}"))
+    })?;
+    nix::sys::stat::mkdirat(class, name, nix::sys::stat::Mode::from_bits_truncate(0o755)).map_err(
+        |error| InstallError::unavailable(format!("cannot create test replacement: {error}")),
+    )
+}
+
+#[cfg(test)]
+fn replace_parked_control_for_test(stage: &fs::File) -> Result<(), InstallError> {
+    rename_noreplace(
+        stage,
+        "rolled-back-control",
+        stage,
+        "captured-rolled-back-control",
+    )
+    .map_err(|error| {
+        InstallError::unavailable(format!("cannot capture parked controls: {error}"))
+    })?;
+    mkdirat(stage, "rolled-back-control", 0o700)
+}
+
+fn install_collision(error: &io::Error) -> InstallError {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        InstallError::unavailable("object already exists")
+    } else {
+        InstallError::unavailable(format!("cannot publish installed object: {error}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> Result<(tempfile::TempDir, PathBuf, String), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        fs::create_dir_all(root.path().join("tool"))?;
+        fs::create_dir_all(root.path().join("agent"))?;
+        fs::create_dir_all(
+            root.path()
+                .join("home")
+                .join(nix::unistd::Uid::effective().as_raw().to_string())
+                .join("tool"),
+        )?;
+        fs::create_dir_all(
+            root.path()
+                .join("home")
+                .join(nix::unistd::Uid::effective().as_raw().to_string())
+                .join("agent"),
+        )?;
+        let executable = root.path().join("echo-tool");
+        fs::write(&executable, b"#!/bin/sh\nprintf ok\n")?;
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755))?;
+        let digest = Sha256::digest(fs::read(&executable)?).iter().fold(
+            String::with_capacity(64),
+            |mut output, byte| {
+                let _ignored = write!(output, "{byte:02x}");
+                output
+            },
+        );
+        Ok((root, executable, digest))
+    }
+
+    fn agent_manifest(executable: &Path, digest: &str) -> String {
+        let uid = nix::unistd::Uid::effective().as_raw().to_string();
+        serde_json::json!({
+            "schema": OBJECT_MANIFEST_SCHEMA_V1,
+            "class": "agent",
+            "name": "example-agent",
+            "executable": { "path": executable, "sha256": digest },
+            "controls": {
+                "owner": uid,
+                "uid": uid,
+                "gid": "0",
+                "groups": "0",
+                "label": "user_u:agent_r:example_t:s0",
+                "iso": "shared",
+                "parent": "",
+                "life": "owned",
+                "root": "/",
+                "cwd": "/workspace",
+                "env": "CTX_ROOT=/ctx",
+                "path": "/ctx/tool",
+                "mount": "/ctx\t/ctx\tro\trbind,nosuid,nodev",
+                "model": "main",
+                "policy": "allow example_t model:main use"
+            }
+        })
+        .to_string()
+    }
+
+    fn tool_manifest(executable: &Path, digest: &str) -> String {
+        serde_json::json!({
+            "schema": OBJECT_MANIFEST_SCHEMA_V1,
+            "class": "tool",
+            "name": "example.echo",
+            "executable": { "path": executable, "sha256": digest },
+            "controls": {
+                "description": "echo",
+                "schema": r#"{"type":"object"}"#,
+                "cap": "text",
+                "policy": "allow example_t tool:example.echo execute"
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn manifest_rejects_unknown_fields_and_runtime_controls()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unknown_top = serde_yaml::from_str::<ObjectManifest>(
+            r#"{"schema":"cortexfs.object/v1","class":"tool","name":"x","executable":{"path":"x","sha256":"00"},"controls":{},"extra":true}"#,
+        );
+        assert!(unknown_top.is_err());
+        let unknown = serde_yaml::from_str::<ObjectManifest>(
+            r#"{"schema":"cortexfs.object/v1","class":"tool","name":"x","executable":{"path":"x","sha256":"00","args":[]},"controls":{}}"#,
+        );
+        assert!(unknown.is_err());
+
+        let (_root, executable, digest) = fixture()?;
+        let mut value: serde_json::Value =
+            serde_json::from_str(&tool_manifest(&executable, &digest))?;
+        value
+            .get_mut("controls")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing controls"))?
+            .insert(
+                "status".to_owned(),
+                serde_json::Value::String("idle".to_owned()),
+            );
+        let manifest: ObjectManifest = serde_json::from_value(value)?;
+        assert!(validate_manifest(&manifest).is_err());
+
+        let mut missing: ObjectManifest =
+            serde_json::from_str(&tool_manifest(&executable, &digest))?;
+        missing.controls.remove("description");
+        assert!(validate_manifest(&missing).is_err());
+        missing
+            .controls
+            .insert("description".to_owned(), "echo".to_owned());
+        missing
+            .controls
+            .insert("policy".to_owned(), "allow malformed".to_owned());
+        assert!(validate_manifest(&missing).is_err());
+
+        let mut agent: ObjectManifest =
+            serde_json::from_str(&agent_manifest(&executable, &digest))?;
+        agent
+            .controls
+            .insert("abi".to_owned(), "sdk-envelope-v2".to_owned());
+        assert!(validate_manifest(&agent).is_err());
+        for abi in ["argv-v1", "sdk-envelope-v1"] {
+            agent.controls.insert("abi".to_owned(), abi.to_owned());
+            assert!(validate_manifest(&agent).is_ok());
+        }
+        for tools in ["", "example.echo", "example.echo\nfs.read"] {
+            agent.controls.insert("tools".to_owned(), tools.to_owned());
+            assert!(validate_manifest(&agent).is_ok(), "{tools:?}");
+        }
+        for tools in [
+            "tsh",
+            " example.echo",
+            "example.echo\nexample.echo",
+            "bad/name",
+        ] {
+            agent.controls.insert("tools".to_owned(), tools.to_owned());
+            assert!(validate_manifest(&agent).is_err(), "{tools:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn install_publishes_executable_last_and_preserves_collision()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest_path = root.path().join("tool.json");
+        fs::write(&manifest_path, tool_manifest(&executable, &digest))?;
+        assert!(install_object(root.path(), &manifest_path, InstallTier::System).is_ok());
+        let installed = root.path().join("tool/example.echo");
+        let control = root.path().join("tool/example.echo.d");
+        assert!(installed.is_file());
+        assert!(control.join("schema").is_file());
+        assert_eq!(fs::read_to_string(control.join("status"))?, "idle\n");
+        assert!(control.join("log").is_file());
+        let metadata = tool_exec_metadata("example.echo", &control).map_err(|error| {
+            io::Error::other(format!("cannot inspect tool metadata: {error:?}"))
+        })?;
+        assert!(metadata.contains("# cortexfs.object=tool"));
+        assert!(!metadata.contains("printf ok"));
+        let executable_before = fs::read(&installed)?;
+        let control_before = fs::read(control.join("policy"))?;
+
+        assert!(install_object(root.path(), &manifest_path, InstallTier::System).is_err());
+        assert_eq!(fs::read(installed)?, executable_before);
+        assert_eq!(fs::read(control.join("policy"))?, control_before);
+        assert!(
+            fs::read_dir(root.path().join("tool"))?
+                .filter_map(Result::ok)
+                .any(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".cortexfs-install-"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hash_mismatch_leaves_no_visible_object() -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, _digest) = fixture()?;
+        let manifest_path = root.path().join("tool.json");
+        fs::write(&manifest_path, tool_manifest(&executable, &"0".repeat(64)))?;
+        assert!(install_object(root.path(), &manifest_path, InstallTier::System).is_err());
+        assert!(!root.path().join("tool/example.echo").exists());
+        assert!(!root.path().join("tool/example.echo.d").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn user_agent_install_is_rejected_by_v1_installer() -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("user-agent.json");
+        fs::write(&manifest, agent_manifest(&executable, &digest))?;
+        let Err(error) = install_object(root.path(), &manifest, InstallTier::User) else {
+            return Err(io::Error::other("expected install rejection").into());
+        };
+        assert!(error.message().contains("root socket runtime"));
+        assert!(!root.path().join("agent/example-agent").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_failure_rolls_back_without_visible_executable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        INSTALL_FAULT.with(|fault| fault.set(4));
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+        assert!(!root.path().join("tool/example.echo").exists());
+        assert!(!root.path().join("tool/example.echo.d").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn rollback_conflict_preserves_replacement_and_never_publishes_exec()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        INSTALL_FAULT.with(|fault| fault.set(2));
+        let Err(error) = install_object(root.path(), &manifest, InstallTier::System) else {
+            return Err(io::Error::other("expected install rejection").into());
+        };
+        assert!(error.message().contains("rollback conflict"));
+        assert!(root.path().join("tool/example.echo.d").is_dir());
+        assert!(!root.path().join("tool/example.echo").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_postcheck_replacement_is_preserved_without_exec()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        INSTALL_FAULT.with(|fault| fault.set(1));
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+        assert!(root.path().join("tool/example.echo.d").is_dir());
+        assert!(!root.path().join("tool/example.echo").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn control_replacement_around_executable_publish_cannot_succeed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        INSTALL_FAULT.with(|fault| fault.set(5));
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+        assert!(root.path().join("tool/example.echo.d").is_dir());
+        assert!(!root.path().join("tool/example.echo").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn executable_replacement_is_parked_without_visible_pair()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for fault in [6, 7] {
+            let (root, executable, digest) = fixture()?;
+            let manifest = root.path().join("tool.json");
+            fs::write(&manifest, tool_manifest(&executable, &digest))?;
+            INSTALL_FAULT.with(|value| value.set(fault));
+            assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+            let class = root.path().join("tool");
+            assert!(!class.join("example.echo").exists());
+            assert!(!class.join("example.echo.d").exists());
+            let stage = fs::read_dir(&class)?
+                .filter_map(Result::ok)
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".cortexfs-install-")
+                })
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "retained stage not found"))?
+                .path();
+            assert!(
+                fs::read_to_string(stage.join("rolled-back-executable"))?.contains("replacement")
+            );
+            if fault == 7 {
+                assert!(stage.join("recreated-executable").is_file());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn parked_postcheck_replacement_is_restored_and_preserved()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        INSTALL_FAULT.with(|fault| fault.set(3));
+        let Err(error) = install_object(root.path(), &manifest, InstallTier::System) else {
+            return Err(io::Error::other("expected install rejection").into());
+        };
+        assert!(error.message().contains("rollback conflict"));
+        assert!(root.path().join("tool/example.echo.d").is_dir());
+        assert!(!root.path().join("tool/example.echo").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn artifact_and_half_object_rejections_leave_existing_state()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let manifest = root.path().join("tool.json");
+        fs::write(&manifest, tool_manifest(&executable, &digest))?;
+        fs::write(root.path().join("tool/example.echo"), b"old")?;
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+        assert_eq!(fs::read(root.path().join("tool/example.echo"))?, b"old");
+
+        fs::remove_file(root.path().join("tool/example.echo"))?;
+        fs::create_dir_all(root.path().join("tool/example.echo.d"))?;
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+        fs::remove_dir(root.path().join("tool/example.echo.d"))?;
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o644))?;
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+
+        fs::remove_file(&executable)?;
+        fs::create_dir_all(&executable)?;
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+        fs::remove_dir(&executable)?;
+        std::os::unix::fs::symlink("missing", &executable)?;
+        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
+
+        fs::remove_file(&executable)?;
+        let real = root.path().join("real");
+        fs::create_dir_all(&real)?;
+        fs::write(real.join("tool"), b"#!/bin/sh\n")?;
+        fs::set_permissions(real.join("tool"), fs::Permissions::from_mode(0o755))?;
+        std::os::unix::fs::symlink(&real, root.path().join("linked"))?;
+        let linked_manifest = root.path().join("linked.json");
+        fs::write(
+            &linked_manifest,
+            tool_manifest(&root.path().join("linked/tool"), &digest),
+        )?;
+        assert!(install_object(root.path(), &linked_manifest, InstallTier::System).is_err());
+        Ok(())
+    }
+}

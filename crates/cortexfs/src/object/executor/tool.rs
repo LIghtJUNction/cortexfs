@@ -76,6 +76,8 @@ pub(crate) fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), 
 pub(crate) fn passthrough_tool_runtime_env_keys() -> &'static [&'static str] {
     &[
         "CTX_AGENT",
+        "CTX_SESSION",
+        "CTX_RUN_ID",
         "CTX_ROOT",
         "CTX_SOURCE",
         "CTX_TOOL_MODE",

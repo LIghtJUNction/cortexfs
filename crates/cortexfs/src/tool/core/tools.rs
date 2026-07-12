@@ -1,4 +1,5 @@
 use crate::CTX_ROOT;
+use crate::agent::createop::AgentCreateTool;
 use cortexfs_tool_sdk::{
     Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
 };
@@ -48,6 +49,7 @@ pub fn core_tool_specs() -> Vec<ToolSpec> {
         FsReplaceTool.spec(),
         ShellExecTool.spec(),
         TshConfigTool.spec(),
+        AgentCreateTool.spec(),
     ]
 }
 
@@ -62,6 +64,7 @@ pub fn run_core_tool(
         "fs.replace" => run_tool(&FsReplaceTool, invocation, writer).map(|()| true),
         "shell.exec" => run_tool(&ShellExecTool, invocation, writer).map(|()| true),
         "tsh.config" => run_tool(&TshConfigTool, invocation, writer).map(|()| true),
+        "agent.create" => run_tool(&AgentCreateTool, invocation, writer).map(|()| true),
         _ => Ok(false),
     }
 }
@@ -86,6 +89,16 @@ pub fn run_core_tool_cli_with_root(
         "fs.replace" => run_fs_replace_cli(args, writer).map(Some),
         "shell.exec" => run_shell_exec_cli(args, writer).map(Some),
         "tsh.config" => run_tsh_config_cli(root, args, writer).map(Some),
+        "agent.create" => {
+            let input = args
+                .iter()
+                .map(|value| value.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let run = std::env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+            let invocation = ToolInvocation::new(run, input);
+            run_tool(&AgentCreateTool, &invocation, writer).map(|()| Some(ExitCode::SUCCESS))
+        }
         _ => Ok(None),
     }
 }

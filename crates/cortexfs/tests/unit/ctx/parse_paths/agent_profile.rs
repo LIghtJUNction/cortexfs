@@ -354,6 +354,47 @@ fn agent_apply_preserves_controls_omitted_from_profile() {
 }
 
 #[test]
+fn agent_apply_tools_failure_rolls_back_matching_policy_receipt() {
+    let root = clean_test_dir("ctx-agent-apply-tools-failure");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let Ok(Command::Agent(AgentArgs::New(args))) =
+        cmd!("agent", "new", "coder", "--model", "openai/gpt-4o")
+    else {
+        return;
+    };
+    assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
+    let control = root.join("agent/coder.d");
+    let old_policy = fs::read_to_string(control.join("policy")).unwrap_or_default();
+    let old_tools = fs::read_to_string(control.join("tools")).unwrap_or_default();
+    let profile = root.join("tools-failure.yaml");
+    assert!(fs::write(&profile, "tools:\n  - fs.read\n").is_ok());
+    set_profile_tools_policy_fault(1);
+    assert!(agent_apply(&root, "coder", &profile).is_err());
+    assert_eq!(fs::read_to_string(control.join("policy")).unwrap_or_default(), old_policy);
+    assert_eq!(fs::read_to_string(control.join("tools")).unwrap_or_default(), old_tools);
+}
+
+#[test]
+fn agent_apply_tools_race_never_overwrites_foreign_policy() {
+    let root = clean_test_dir("ctx-agent-apply-tools-race");
+    assert!(fs::create_dir_all(&root).is_ok());
+    let Ok(Command::Agent(AgentArgs::New(args))) =
+        cmd!("agent", "new", "coder", "--model", "openai/gpt-4o")
+    else {
+        return;
+    };
+    assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
+    let control = root.join("agent/coder.d");
+    let old_tools = fs::read_to_string(control.join("tools")).unwrap_or_default();
+    let profile = root.join("tools-race.yaml");
+    assert!(fs::write(&profile, "tools:\n  - fs.read\n").is_ok());
+    set_profile_tools_policy_fault(2);
+    assert!(agent_apply(&root, "coder", &profile).is_err());
+    assert_eq!(fs::read_to_string(control.join("policy")).unwrap_or_default(), "foreign policy\n");
+    assert_eq!(fs::read_to_string(control.join("tools")).unwrap_or_default(), old_tools);
+}
+
+#[test]
 fn agent_apply_rejects_symlinked_control_directory_without_external_write() {
     let root = clean_test_dir("ctx-agent-apply-profile-symlink-control");
     let external = clean_test_dir("ctx-agent-apply-profile-external");

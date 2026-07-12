@@ -16,6 +16,7 @@ pub(super) fn test_agent_run_config() -> AgentModelRunConfig {
         source: PathBuf::from("/tmp/cortexfs-test-source"),
         ctx_root: PathBuf::from("/tmp/cortexfs-test-ctx"),
         run: "r1".to_owned(),
+        session: "default".to_owned(),
         model: "main".to_owned(),
         model_path: PathBuf::from("/tmp/cortexfs-test-ctx/model/main"),
         system_prompt: String::new(),

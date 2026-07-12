@@ -76,6 +76,27 @@ fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
 }
 
 #[test]
+fn agent_tools_control_is_canonical_and_rejects_reserved_or_duplicate_names() {
+    assert!(crate::inspect_agent_tools_control("").is_ok());
+    assert!(crate::inspect_agent_tools_control("\n").is_ok());
+    assert!(crate::inspect_agent_tools_control("fs.read\nexample.echo\n").is_ok());
+    for invalid in [
+        "fs.read",
+        "\nfs.read\n",
+        " fs.read\n",
+        "fs.read \n",
+        "fs.read\nfs.read\n",
+        "tsh\n",
+        "bad/name\n",
+    ] {
+        assert!(
+            !crate::inspect_agent_tools_control(invalid).is_ok(),
+            "{invalid:?}"
+        );
+    }
+}
+
+#[test]
 fn agent_object_layout_rejects_invalid_control_values() {
     let root = clean_test_dir("object-layout-agent-controls");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");

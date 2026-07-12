@@ -75,7 +75,10 @@ inst={{agent_instructions}}
         Ok(ref prompt) if prompt.contains("agent=coder")
             && prompt.contains("time=123")
             && prompt.contains("inst=Be precise.")
-            && prompt.contains("native callable tool exposed by this runtime is `tsh`")
+            && prompt.contains("The CortexFS tool shell `tsh` is always native")
+            && prompt.contains(
+                "Tools statically declared by the agent `tools` control may also be exposed as direct-native calls."
+            )
             && prompt.contains("When tool execution is useful")
             && prompt.contains("Tool results include the original `arguments.args`")
             && prompt.contains("If no concrete file path is provided")

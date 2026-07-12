@@ -31,12 +31,17 @@ pub fn handle_socket_request(
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
     match *request {
         SocketRequest::Ping => Ok(SocketRuntimeResponse::new(vec![socket_pong_frame()])),
-        SocketRequest::Send { .. } => handle_socket_send(session_root, default_cwd, model, request),
+        SocketRequest::Send { .. } => {
+            handle_socket_send(session_root, default_cwd, model, request, None)
+        }
         SocketRequest::Resume {
             ref session,
             ref after,
         } => handle_socket_resume(session_root, session, after.as_deref()),
         SocketRequest::Cancel { ref id } => handle_socket_cancel(session_root, id),
+        SocketRequest::Stop { .. } => Err(SocketRuntimeError::Record(
+            SocketSessionRecordError::UnsupportedRequest,
+        )),
     }
 }
 
@@ -80,10 +85,20 @@ pub fn serve_agent_executable_socket_listener_once(
     peer_policy: Option<SocketPeerPolicy>,
     runtime: AgentExecutableSocketRuntime<'_>,
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    serve_agent_executable_socket_listener_once_with_stop(listener, peer_policy, runtime, None)
+}
+
+/// Accepts one agent connection with an optional privileged stop handler.
+pub fn serve_agent_executable_socket_listener_once_with_stop(
+    listener: &UnixListener,
+    peer_policy: Option<SocketPeerPolicy>,
+    runtime: AgentExecutableSocketRuntime<'_>,
+    stop: Option<&dyn AgentStopHandler>,
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
     let (mut stream, _addr) = listener
         .accept()
         .map_err(|_error| SocketRuntimeError::CannotAcceptConnection)?;
-    serve_agent_executable_socket_stream_once(&mut stream, peer_policy, runtime)
+    serve_agent_executable_socket_stream_once_with_stop(&mut stream, peer_policy, runtime, stop)
 }
 
 /// Serves one connected stream and dispatches `send` to an agent executable.
@@ -92,8 +107,23 @@ pub fn serve_agent_executable_socket_stream_once(
     peer_policy: Option<SocketPeerPolicy>,
     runtime: AgentExecutableSocketRuntime<'_>,
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    serve_agent_executable_socket_stream_once_with_stop(stream, peer_policy, runtime, None)
+}
+
+/// Serves one connected agent stream with an optional privileged stop handler.
+pub fn serve_agent_executable_socket_stream_once_with_stop(
+    stream: &mut UnixStream,
+    peer_policy: Option<SocketPeerPolicy>,
+    runtime: AgentExecutableSocketRuntime<'_>,
+    stop: Option<&dyn AgentStopHandler>,
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
     serve_socket_stream_with(stream, peer_policy, |stream, frame| {
-        handle_agent_executable_socket_request_frame_streaming(stream, runtime, frame)
+        let peer_uid = peer_credentials(stream)
+            .map_err(SocketRuntimeError::PeerCredential)?
+            .uid();
+        handle_agent_executable_socket_request_frame_streaming(
+            stream, runtime, stop, peer_uid, frame,
+        )
     })
 }
 
@@ -142,9 +172,10 @@ pub(crate) fn serve_socket_stream_with(
     };
     match dispatch(stream, &frame) {
         Ok(response) => Ok(response),
+        Err(error @ SocketRuntimeError::PostAcceptStop) => Err(error),
         Err(error) => {
             let response = socket_runtime_error_response(&error);
-            write_socket_runtime_response(stream, &response)?;
+            let _ignored = write_socket_runtime_response(stream, &response);
             Err(error)
         }
     }
@@ -161,3 +192,180 @@ pub(crate) use events::*;
 pub(crate) use exec::*;
 pub(crate) use session::*;
 pub(crate) use stream::*;
+
+#[cfg(test)]
+mod stop_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::sync::{Arc, Mutex};
+
+    struct StopHandler {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        peer_uids: Arc<Mutex<Vec<u32>>>,
+        client: Mutex<Option<UnixStream>>,
+        fail: bool,
+    }
+
+    struct Prepared {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        client: Option<UnixStream>,
+        fail: bool,
+    }
+
+    impl AgentStopHandler for StopHandler {
+        fn preflight(
+            &self,
+            _agent: &str,
+            peer_uid: u32,
+        ) -> Result<Box<dyn PreparedAgentStop>, SocketRuntimeError> {
+            self.calls
+                .lock()
+                .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+                .push("preflight");
+            self.peer_uids
+                .lock()
+                .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+                .push(peer_uid);
+            Ok(Box::new(Prepared {
+                calls: Arc::clone(&self.calls),
+                client: self
+                    .client
+                    .lock()
+                    .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+                    .take(),
+                fail: self.fail,
+            }))
+        }
+    }
+
+    impl PreparedAgentStop for Prepared {
+        fn execute(mut self: Box<Self>) -> Result<(), SocketRuntimeError> {
+            if let Some(client) = self.client.as_mut() {
+                let mut response = String::new();
+                BufReader::new(client)
+                    .read_line(&mut response)
+                    .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+                assert!(response.contains("\"type\":\"accepted\""));
+            }
+            self.calls
+                .lock()
+                .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+                .push("execute");
+            if self.fail {
+                Err(SocketRuntimeError::CannotRunAgent)
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn runtime(identity: &AgentUnixIdentity) -> AgentExecutableSocketRuntime<'_> {
+        AgentExecutableSocketRuntime {
+            ctx_root: Path::new("/source"),
+            source_root: Path::new("/source"),
+            identity,
+            env: &[],
+            session_root: Path::new("/session"),
+            default_cwd: "/",
+            model: None,
+            network_allowed: false,
+            agent_name: "parent",
+            agent_executable: Path::new("/agent"),
+            execution: AgentExecutableSocketExecution::Direct,
+        }
+    }
+
+    #[test]
+    fn stop_flushes_accepted_before_synchronous_execute() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (mut client, mut server) = UnixStream::pair()?;
+        let observer = client.try_clone()?;
+        client.write_all(b"{\"op\":\"stop\",\"agent\":\"parent\"}\n")?;
+        client.shutdown(std::net::Shutdown::Write)?;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let peer_uids = Arc::new(Mutex::new(Vec::new()));
+        let handler = StopHandler {
+            calls: Arc::clone(&calls),
+            peer_uids: Arc::clone(&peer_uids),
+            client: Mutex::new(Some(observer)),
+            fail: false,
+        };
+        let identity = AgentUnixIdentity::new(1000, 1000, []);
+        let result = serve_agent_executable_socket_stream_once_with_stop(
+            &mut server,
+            None,
+            runtime(&identity),
+            Some(&handler),
+        );
+        assert!(result.is_ok());
+        assert!(
+            calls
+                .lock()
+                .is_ok_and(|calls| *calls == ["preflight", "execute"])
+        );
+        assert!(
+            peer_uids
+                .lock()
+                .is_ok_and(|peer_uids| *peer_uids == [nix::unistd::geteuid().as_raw()])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn stop_rejects_wrong_runtime_agent_before_preflight() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (mut client, mut server) = UnixStream::pair()?;
+        client.write_all(b"{\"op\":\"stop\",\"agent\":\"child\"}\n")?;
+        client.shutdown(std::net::Shutdown::Write)?;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let handler = StopHandler {
+            calls: Arc::clone(&calls),
+            peer_uids: Arc::new(Mutex::new(Vec::new())),
+            client: Mutex::new(None),
+            fail: false,
+        };
+        let identity = AgentUnixIdentity::new(1000, 1000, []);
+        assert_eq!(
+            serve_agent_executable_socket_stream_once_with_stop(
+                &mut server,
+                None,
+                runtime(&identity),
+                Some(&handler),
+            ),
+            Err(SocketRuntimeError::PeerDenied)
+        );
+        assert!(calls.lock().is_ok_and(|calls| calls.is_empty()));
+        Ok(())
+    }
+
+    #[test]
+    fn stop_execution_failure_after_accept_does_not_write_second_frame()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (mut client, mut server) = UnixStream::pair()?;
+        client.write_all(b"{\"op\":\"stop\",\"agent\":\"parent\"}\n")?;
+        client.shutdown(std::net::Shutdown::Write)?;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let handler = StopHandler {
+            calls,
+            peer_uids: Arc::new(Mutex::new(Vec::new())),
+            client: Mutex::new(None),
+            fail: true,
+        };
+        let identity = AgentUnixIdentity::new(1000, 1000, []);
+        assert_eq!(
+            serve_agent_executable_socket_stream_once_with_stop(
+                &mut server,
+                None,
+                runtime(&identity),
+                Some(&handler),
+            ),
+            Err(SocketRuntimeError::PostAcceptStop)
+        );
+        drop(server);
+        let mut response = String::new();
+        client.read_to_string(&mut response)?;
+        assert_eq!(response.lines().count(), 1);
+        assert!(response.contains("\"type\":\"accepted\""));
+        Ok(())
+    }
+}

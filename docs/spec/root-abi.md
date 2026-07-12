@@ -117,6 +117,7 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
       path
       mount
       model
+      abi
       policy
       status
       pid

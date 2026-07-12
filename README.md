@@ -412,11 +412,19 @@ tsh> pin bash
 tsh> loads
 ```
 
-Native dynamic tool artifacts are loaded on demand. The SDK keeps resident
-dynamic tools under a W-TinyLFU cache, so hot tools can stay in memory while cold
-unpinned tools are admitted or evicted by use. `tsh.config` controls the visible
-tool context size with `max_loaded_tools`; pinned tools are protected from
-automatic context eviction.
+Executable tool plugins can be installed from a hash-bound
+`cortexfs.object/v1` manifest and run through the normal `CTX_PATH` and policy
+path. Installation requires the durable backing tree explicitly:
+
+```bash
+ctx object install --source "$CTX_SOURCE" tool.manifest.json --tier user
+```
+
+`/ctx`, `CTX_ROOT`, and `--root` describe the ABI projection, not a writable
+installation target. `tsh.config` controls the visible tool metadata context size; pinned
+entries are protected from automatic context eviction. The Tool SDK also
+defines a `DynamicTool` loader, but the core runtime does not yet consume that
+loader or keep native libraries resident.
 
 Tool metadata printed to a terminal is escaped so untrusted descriptions and
 schemas cannot inject terminal control sequences.

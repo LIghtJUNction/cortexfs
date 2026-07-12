@@ -81,6 +81,58 @@ Assistant text is derived from stable event frames and recorded back to the
 durable session. Raw messages and events remain ordinary files; context packs
 are rebuildable views.
 
+Executable agents select their launch ABI through the optional
+`agent/<name>.d/abi` control. Absence means the exact legacy `argv-v1`
+contract. `sdk-envelope-v1` opts into a host-written, bounded typed invocation
+envelope on stdin and permits the host to restart the executable with the
+authoritative result of a yielded tool call. `argv-v1` and `sdk-envelope-v1`
+are the only v1 values.
+
+The `sdk-envelope-v1` stdin body is exactly one UTF-8 JSON object followed by
+one newline, with no other bytes, and is at most 1 MiB including that newline:
+
+```json
+{
+  "schema": "cortexfs.agent-invocation/v1",
+  "run": "run-1",
+  "step": 1,
+  "input": "original user input",
+  "history_messages": "[]",
+  "tool_context": "",
+  "observation": {
+    "tool_call_id": "call-1",
+    "name": "example.echo",
+    "status": "ok",
+    "content": "authoritative normalized result",
+    "truncated": false
+  }
+}
+```
+
+Unknown or missing fields are invalid. `run` and `step` must equal the
+host-owned launch environment. Step 0 requires null `observation`; later steps
+require exactly the immediately preceding host result. Context strings are at
+most 64 KiB each and observation content at most 16 KiB. The host permits at
+most eight calls and nine process starts, rejects replayed call ids before
+authorization, rechecks policy for every call, and checks cancellation before,
+during, and after each SDK/tool process. Only the host writes tool results and
+the logical run's lifecycle frames. It records the original user message once,
+each normalized result once, and one final assistant/error outcome; a process
+crash cannot resume from agent-provided state.
+
+An executable Agent SDK step may terminate by yielding exactly one typed
+`tool_call`. The process emits no `done` frame and exits. The socket host
+validates and executes the request through the existing agent tool authority,
+policy, and sandbox path, emits the matching `tool_result`, and, for
+`sdk-envelope-v1`, may start the next bounded step with that result in the
+typed envelope. The host alone emits the logical run's final `done`.
+Agent-originated results, malformed or multiple calls, and frames after a
+yielded call are invalid output.
+
+The root-authoritative system socket accepts the agent owner UID or UID 0 for
+internal child dispatch and stop. This UID 0 exception does not apply to the
+receipt-bound per-run capability socket, which remains owner-UID only.
+
 Before invoking an executable agent for a durable `send`, the socket runtime
 sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
 `messages.jsonl` history. This is prompt context only; it does not grant
@@ -204,13 +256,18 @@ Both the filesystem layer and the CortexFS policy layer must allow an action.
 
 ## Tool Shell Contract
 
-Agents should see one native callable tool by default:
+Agents see one native callable tool by default:
 
 ```text
 tsh
 ```
 
-Other tools are discovered, loaded, pinned, and invoked through `tsh`.
+An agent's optional `.d/tools` control may statically declare additional
+direct-native tool names. Those names remain subject to fresh path, agent
+policy, tool policy, mount, Linux permission, schema, and nofollow checks on
+every call. Other tools are dynamically discovered, loaded, pinned, and
+invoked through `tsh`; dynamic tsh cache state never expands the direct-native
+set.
 
 `tsh` resolves tools by `CTX_PATH`. For standalone human sessions, it reads the
 data-only startup file before inherited process `CTX_PATH` when the file exists:

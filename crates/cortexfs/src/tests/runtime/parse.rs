@@ -55,6 +55,12 @@ fn socket_request_parser_accepts_stable_request_frames() {
         })
     );
     assert_eq!(
+        parse_socket_request_frame(r#"{"op":"stop","agent":"parent"}"#),
+        Ok(SocketRequest::Stop {
+            agent: "parent".to_owned()
+        })
+    );
+    assert_eq!(
         parse_socket_request_frame(r#"{"op":"ping"}"#),
         Ok(SocketRequest::Ping)
     );

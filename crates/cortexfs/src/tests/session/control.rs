@@ -185,6 +185,48 @@ fn session_index_update_sets_current_and_deduplicated_list() {
 }
 
 #[test]
+fn session_index_update_preserves_existing_file_metadata() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let root = clean_test_dir("session-index-update-metadata");
+    let session_root = root.join("session");
+    let index = session_root.join("index");
+    let secondary = index.join("by-cwd/cwd-hash-1");
+    assert!(fs::create_dir_all(index.join("by-cwd")).is_ok());
+    assert!(fs::create_dir_all(session_root.join("default")).is_ok());
+    write_text_file(&index.join("list"), "default\n");
+    write_text_file(&index.join("current"), "default\n");
+    write_text_file(&secondary, "old\n");
+    for path in [&index.join("list"), &index.join("current"), &secondary] {
+        assert!(fs::set_permissions(path, fs::Permissions::from_mode(0o640)).is_ok());
+    }
+    let metadata = |path: &Path| {
+        fs::metadata(path)
+            .map(|value| (value.uid(), value.gid(), value.permissions().mode() & 0o777))
+            .ok()
+    };
+    let before = [
+        metadata(&index.join("list")),
+        metadata(&index.join("current")),
+        metadata(&secondary),
+    ];
+
+    assert_eq!(
+        update_session_index(&session_root, "default", Some("cwd-hash-1")),
+        Ok(())
+    );
+
+    assert_eq!(
+        [
+            metadata(&index.join("list")),
+            metadata(&index.join("current")),
+            metadata(&secondary),
+        ],
+        before
+    );
+}
+
+#[test]
 fn session_index_update_rejects_missing_and_invalid_index_state() {
     let root = clean_test_dir("session-index-update-bad");
     let session_root = root.join("session");

@@ -17,8 +17,14 @@ pub(crate) fn agent_new_request_json(args: &AgentNewArgs) -> Result<String, CliE
             return Err(CliError::usage(format!("invalid model name: {model}")));
         }
     }
+    let mut seen_tools = std::collections::BTreeSet::new();
     for tool in &args.tools {
         require_cli_name("tool name", tool)?;
+        if tool == "tsh" || !seen_tools.insert(tool) {
+            return Err(CliError::usage(format!(
+                "invalid or duplicate direct tool: {tool}"
+            )));
+        }
     }
     for shared in &args.shared {
         require_cli_name("shared name", &shared.name)?;

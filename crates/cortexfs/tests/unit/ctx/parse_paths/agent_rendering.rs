@@ -37,7 +37,7 @@ fn debug_tool_names_report_native_agent_tools_only() {
 }
 
 #[test]
-fn debug_tool_names_include_loaded_agent_tools() {
+fn debug_tool_names_include_declared_agent_tools() {
     let root = clean_test_dir("ctx-agent-debug-loaded-tools");
     assert!(ensure_v1_reference_tree(&root).is_ok());
     let tool = root.join("tool").join("bash");
@@ -76,26 +76,11 @@ fn debug_tool_names_include_loaded_agent_tools() {
     permissions.set_mode(0o755);
     assert!(fs::set_permissions(&tool, permissions).is_ok());
     assert!(fs::write(tool_control.join("policy"), "allow coder_t tool:bash execute\n").is_ok());
+    assert!(fs::write(root.join("agent/coder.d/tools"), "bash\n").is_ok());
     let agent_policy = root.join("agent").join("coder.d").join("policy");
     let mut policy = fs::read_to_string(&agent_policy).unwrap_or_default();
     policy.push_str("\nallow coder_t tool:bash execute\n");
     assert!(fs::write(&agent_policy, policy).is_ok());
-
-    let view = derive_agent_runtime_view(&root, "coder");
-    assert!(view.is_ok());
-    let Ok(view) = view else { return };
-    let state_path = cortexfs::tsh_context_state_path(view.home());
-    let mut state = cortexfs::TshContextState::default();
-    state.tools = vec![cortexfs::TshLoadedToolState {
-        name: "bash".to_owned(),
-        path: tool,
-        description: "shell".to_owned(),
-        schema: None,
-        dynamic_resident: true,
-        pinned: true,
-        last_used: 1,
-    }];
-    assert!(cortexfs::write_tsh_context_state(&state_path, &state).is_ok());
 
     let tools = agent_native_tool_names(&root, "coder");
 

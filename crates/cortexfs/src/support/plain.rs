@@ -5,7 +5,7 @@
 
 use std::fs;
 
-use std::io::{Read, Result};
+use std::io::{Read, Result, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixListener;
@@ -79,7 +79,7 @@ pub(crate) fn path_metadata_no_follow(path: &Path) -> Result<fs::Metadata> {
     fs::File::from(file_fd).metadata()
 }
 
-pub(crate) fn open_plain_file(path: &Path) -> Result<fs::File> {
+pub fn open_plain_file(path: &Path) -> Result<fs::File> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let parent_dir = open_plain_directory(parent)?;
     let file_name = plain_file_name(path)?;
@@ -140,14 +140,21 @@ pub fn create_plain_dir_exclusive(path: &Path, mode: u32) -> Result<fs::File> {
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     let parent_dir = open_plain_directory(parent)?;
     let name = plain_file_name(path)?;
+    create_plain_dir_at(&parent_dir, name, mode)
+}
+
+pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> Result<fs::File> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
     nix::sys::stat::mkdirat(
-        &parent_dir,
+        parent,
         name,
         nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
     )
     .map_err(std::io::Error::from)?;
     let created = nix::fcntl::openat(
-        &parent_dir,
+        parent,
         name,
         nix::fcntl::OFlag::O_DIRECTORY
             | nix::fcntl::OFlag::O_RDONLY
@@ -160,16 +167,37 @@ pub fn create_plain_dir_exclusive(path: &Path, mode: u32) -> Result<fs::File> {
     let created = match created {
         Ok(created) => created,
         Err(error) => {
-            let _ignored = remove_plain_dir_at(&parent_dir, name);
+            let _ignored = remove_plain_dir_at(parent, name);
             return Err(error);
         }
     };
-    if let Err(error) = created.sync_all().and_then(|()| parent_dir.sync_all()) {
+    if let Err(error) = created.sync_all().and_then(|()| parent.sync_all()) {
         drop(created);
-        let _ignored = remove_plain_dir_at(&parent_dir, name);
+        let _ignored = remove_plain_dir_at(parent, name);
         return Err(error);
     }
     Ok(created)
+}
+
+pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u32) -> Result<()> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    let fd = nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_EXCL
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut file = fs::File::from(fd);
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    parent.sync_all()
 }
 
 pub(crate) fn remove_plain_dir(path: &Path) -> Result<()> {

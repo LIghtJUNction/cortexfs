@@ -1,6 +1,8 @@
 use super::*;
 
 pub(crate) fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
+    crate::runtime::control::ping_from_environment(name)
+        .map_err(|error| format!("run capability handshake failed: {error:?}"))?;
     let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
@@ -352,6 +354,7 @@ pub(crate) struct AgentModelRunConfig {
     pub(crate) source: PathBuf,
     pub(crate) ctx_root: PathBuf,
     pub(crate) run: String,
+    pub(crate) session: String,
     pub(crate) model: String,
     pub(crate) model_path: PathBuf,
     pub(crate) system_prompt: String,
@@ -380,6 +383,7 @@ impl AgentModelRunConfig {
         ctx_root: PathBuf,
     ) -> Result<Self, String> {
         let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+        let session = env::var("CTX_SESSION").unwrap_or_else(|_error| "default".to_owned());
         let agent_dir = agent_model_control_dir(&source, agent);
         let model_path = agent_dir.join("model");
         let configured_model =
@@ -433,6 +437,7 @@ impl AgentModelRunConfig {
             source,
             ctx_root,
             run,
+            session,
             model,
             model_path,
             system_prompt,
