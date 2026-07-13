@@ -606,7 +606,13 @@ pub fn create_child(
         return Err(cortexfs_runtime_client::RuntimeClientError::InvalidEnvironment);
     }
     let request_id = cortexfs_runtime_client::fresh_request_id("agent-create")?;
-    cortexfs_runtime_client::create_child_from_environment(&request_id, child, child_session, input)
+    cortexfs_runtime_client::create_child_from_environment(
+        &request_id,
+        child,
+        child_session,
+        input,
+        "owned",
+    )
 }
 
 fn is_object_name(name: &str) -> bool {
@@ -779,7 +785,11 @@ mod tests {
                 || Some("run-1".to_owned()),
                 |request| {
                     handoff_tx
-                        .send((request.child.clone(), request.input.clone()))
+                        .send((
+                            request.child.clone(),
+                            request.input.clone(),
+                            request.life.clone(),
+                        ))
                         .map_err(|_error| {
                             cortexfs::runtime::control::RunCapabilityError::CannotCreate
                         })?;
@@ -806,8 +816,16 @@ mod tests {
         assert_eq!(
             handoffs,
             [
-                ("worker-a".to_owned(), "first handoff".to_owned()),
-                ("worker-b".to_owned(), "second handoff".to_owned())
+                (
+                    "worker-a".to_owned(),
+                    "first handoff".to_owned(),
+                    "owned".to_owned()
+                ),
+                (
+                    "worker-b".to_owned(),
+                    "second handoff".to_owned(),
+                    "owned".to_owned()
+                )
             ]
         );
         shutdown.store(true, Ordering::Release);

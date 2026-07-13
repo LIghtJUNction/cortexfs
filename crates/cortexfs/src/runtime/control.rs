@@ -80,6 +80,7 @@ pub struct CreateChildRequest {
     pub child: String,
     pub child_session: String,
     pub input: String,
+    pub life: String,
 }
 
 /// Stable successful child creation response.
@@ -329,6 +330,7 @@ impl RunCapability {
                 child,
                 child_session,
                 input,
+                life,
             } => {
                 if !constant_time_eq(token.as_bytes(), self.token.as_bytes()) {
                     return Err(RunCapabilityError::TokenDenied);
@@ -344,6 +346,10 @@ impl RunCapability {
                     let _ignored = write_error_frame(stream, request_id, "EINVAL");
                     return Err(RunCapabilityError::InvalidFrame);
                 }
+                if crate::ChildLifecycle::parse_exact(&life).is_err() {
+                    let _ignored = write_error_frame(stream, request_id, "EINVAL");
+                    return Err(RunCapabilityError::InvalidFrame);
+                }
                 let result = create_child(CreateChildRequest {
                     agent,
                     session,
@@ -351,6 +357,7 @@ impl RunCapability {
                     child,
                     child_session,
                     input,
+                    life,
                 });
                 return match result {
                     Ok(result) => {
@@ -409,6 +416,7 @@ impl RunCapability {
         child: &str,
         child_session: &str,
         input: &str,
+        life: &str,
     ) -> Result<CreateChildResult, RunCapabilityError> {
         cortexfs_runtime_client::create_child(
             &self.socket,
@@ -420,6 +428,7 @@ impl RunCapability {
             child,
             child_session,
             input,
+            life,
         )
         .map_err(client_error)
     }
@@ -457,9 +466,16 @@ pub fn create_child_from_environment(
     child: &str,
     child_session: &str,
     input: &str,
+    life: &str,
 ) -> Result<CreateChildResult, RunCapabilityError> {
-    cortexfs_runtime_client::create_child_from_environment(request_id, child, child_session, input)
-        .map_err(client_error)
+    cortexfs_runtime_client::create_child_from_environment(
+        request_id,
+        child,
+        child_session,
+        input,
+        life,
+    )
+    .map_err(client_error)
 }
 
 /// Performs the optional one-shot runner handshake from reserved environment.
@@ -1054,6 +1070,7 @@ mod tests {
                 child: "child".to_owned(),
                 child_session: "child-session".to_owned(),
                 input: "work".to_owned(),
+                life: "owned".to_owned(),
             },
         )?;
         let error: ResponseFrame = read_json_line(&mut stream)?;
@@ -1066,7 +1083,7 @@ mod tests {
         send_raw(
             capability.socket(),
             format!(
-                "{{\"op\":\"agent.create\",\"token\":\"{}\",\"request_id\":\"create-2\",\"uid\":0}}\n",
+                "{{\"op\":\"agent.create\",\"token\":\"{}\",\"request_id\":\"create-2\",\"agent\":\"parent\",\"session\":\"session-1\",\"run\":\"run-1\",\"child\":\"child\",\"child_session\":\"child-session\",\"input\":\"work\"}}\n",
                 capability.token
             )
             .as_bytes(),
@@ -1111,8 +1128,18 @@ mod tests {
         });
         capability.ping("startup-run-1")?;
         assert_eq!(startup_receiver.recv()?, Ok(()));
+        for (request_id, life) in [
+            ("create-padded-life", " temp "),
+            ("create-unknown-life", "detached"),
+        ] {
+            assert_eq!(
+                capability.create_child(request_id, "invalid", "invalid", "work", life),
+                Err(RunCapabilityError::InvalidFrame)
+            );
+        }
+        assert_eq!(calls.load(Ordering::Acquire), 0);
         assert_eq!(
-            capability.create_child("create-1", "child-a", "session-a", "work")?,
+            capability.create_child("create-1", "child-a", "session-a", "work", "owned")?,
             CreateChildResult {
                 child: "child-a".to_owned(),
                 child_session: "session-a".to_owned(),
@@ -1120,12 +1147,12 @@ mod tests {
             }
         );
         assert_eq!(
-            capability.create_child("create-1", "child-a", "session-a", "work"),
+            capability.create_child("create-1", "child-a", "session-a", "work", "owned"),
             Err(RunCapabilityError::Replayed)
         );
         assert_eq!(
             capability
-                .create_child("create-2", "child-b", "session-b", "other")?
+                .create_child("create-2", "child-b", "session-b", "other", "temp")?
                 .pid,
             42
         );

@@ -161,11 +161,8 @@ impl Tool for AgentCreateTool {
                 .as_str()
                 .ok_or_else(|| ToolError::invalid("life must be a string"))
         })?;
-        if life != "owned" {
-            return Err(ToolError::invalid(
-                "agent.create RPC supports owned children",
-            ));
-        }
+        crate::ChildLifecycle::parse_exact(life)
+            .map_err(|_error| ToolError::invalid("life must be owned or temp"))?;
         let run = runtime_field("CTX_RUN_ID")
             .map_err(|error| ToolError::new(error.errno(), error.message()))?;
         let child_session = format!("{name}-{run}");
@@ -174,6 +171,7 @@ impl Tool for AgentCreateTool {
             name,
             &child_session,
             handoff,
+            life,
         )
         .map_err(|error| ToolError::new(error.errno(), error.to_string()))?;
         output
@@ -279,7 +277,7 @@ fn create_child_context_inner(
     let view = crate::derive_agent_runtime_view(source, parent)
         .map_err(|error| child_error(error.errno(), "cannot derive parent authority"))?;
     require_child_lifecycle_authority(&view, name)?;
-    let lifecycle = crate::ChildLifecycle::parse(life)
+    let lifecycle = crate::ChildLifecycle::parse_exact(life)
         .map_err(|_error| child_error("EINVAL", "life must be owned or temp"))?;
     let child_subject = view.policy_subject();
     let parent_ref = format!("agent:{parent} session:{session} run:{run}");
@@ -1492,7 +1490,7 @@ mod d_tests {
             &child,
             Some(&session),
             "claim conflict",
-            "owned",
+            "temp",
         );
         assert!(
             matches!(result, Err(ref error) if error.message() == "forced child claim conflict"),
@@ -1506,6 +1504,10 @@ mod d_tests {
         assert_eq!(
             fs::read_to_string(source.join("agent").join(format!("{child}.d/policy"))).ok(),
             Some(policy.clone())
+        );
+        assert_eq!(
+            fs::read_to_string(source.join("agent").join(format!("{child}.d/life"))).ok(),
+            Some("temp\n".to_owned())
         );
         assert!(
             !parent_sessions

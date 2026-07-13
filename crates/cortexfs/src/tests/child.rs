@@ -265,7 +265,11 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
         Err(ChildAgentDenial::InvalidParentRef)
     );
 
-    assert_eq!(ChildLifecycle::parse("temp"), Ok(ChildLifecycle::Temp));
+    assert_eq!(ChildLifecycle::parse(" temp\n"), Ok(ChildLifecycle::Temp));
+    assert_eq!(
+        ChildLifecycle::parse_exact(" temp "),
+        Err(ChildAgentDenial::UnsupportedLifecycle)
+    );
     assert_eq!(
         ChildLifecycle::parse("detached"),
         Err(ChildAgentDenial::UnsupportedLifecycle)
