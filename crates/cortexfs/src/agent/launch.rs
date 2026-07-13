@@ -1151,7 +1151,7 @@ pub(crate) fn complete_child_launch(
             return Err(AgentLaunchTransactionError::Launch(error));
         }
     };
-    if let Err(error) = claim_child_handoff_active(handoff, child_agent, child_session) {
+    if let Err(error) = claim_child_handoff_active(handoff, child_agent, child_session, None) {
         if stop(&launched).is_err() {
             return Err(AgentLaunchTransactionError::StopConflict);
         }

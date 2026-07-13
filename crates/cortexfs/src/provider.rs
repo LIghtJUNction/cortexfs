@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod discovery;
 pub mod model;
 pub mod name;

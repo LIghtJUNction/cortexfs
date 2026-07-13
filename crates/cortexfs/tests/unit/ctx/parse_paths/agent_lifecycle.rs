@@ -560,6 +560,7 @@ fn agent_session_update_atomically_creates_missing_workspace() {
 fn agent_runtime_gate_requires_matching_projection_session_and_run() {
     let source = clean_test_dir("agent-runtime-gate-source");
     assert!(ensure_v1_reference_tree(&source).is_ok());
+    ensure_runtime_model_fixture(&source);
     let projection = clean_test_dir("agent-runtime-gate-projection");
     let source_control = source.join("agent/coder.d");
     let projected_control = projection.join("agent/coder.d");
@@ -570,6 +571,7 @@ fn agent_runtime_gate_requires_matching_projection_session_and_run() {
     ] {
         assert!(fs::copy(source_control.join(file), projected_control.join(file)).is_ok());
     }
+    ensure_runtime_model_fixture(&projection);
     let session = source.join("home/1000/agent/coder/session/runtime-test");
     assert!(fs::create_dir_all(&session).is_ok());
     write_text_file(&session.join("current_run"), "run-1\n");
@@ -662,6 +664,7 @@ fn agent_new_selects_runtime_tool_or_host_fallback_in_isolated_processes() -> st
     let source = clean_test_dir("agent-new-selection-source");
     ensure_v1_reference_tree(&source)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    ensure_runtime_model_fixture(&source);
     let projection = clean_test_dir("agent-new-selection-projection");
     let projected_control = projection.join("agent/coder.d");
     fs::create_dir_all(&projected_control)?;
@@ -671,6 +674,7 @@ fn agent_new_selects_runtime_tool_or_host_fallback_in_isolated_processes() -> st
     ] {
         fs::copy(source.join("agent/coder.d").join(file), projected_control.join(file))?;
     }
+    ensure_runtime_model_fixture(&projection);
     let session = source.join("home/1000/agent/coder/session/runtime-test");
     fs::create_dir_all(&session)?;
     write_text_file(&session.join("current_run"), "run-1\n");

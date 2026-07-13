@@ -167,11 +167,13 @@ pub fn authorize_session_access(
 ///
 /// v1 supports owned and temporary children. This check keeps child creation in
 /// the ordinary agent object/control-file ABI while proving that the child
-/// cannot expand identity, groups, policy, or mount visibility.
+/// cannot expand identity, groups, policy, mount visibility, or tool lookup.
+/// The returned tool path is the exact centrally authorized value to
+/// materialize for the child.
 pub fn authorize_child_agent(
     request: ChildAgentRequest<'_>,
     authority: ChildAgentAuthority<'_>,
-) -> Result<(), ChildAgentDenial> {
+) -> Result<ToolPath, ChildAgentDenial> {
     if !is_object_name(request.child_name) {
         return Err(ChildAgentDenial::InvalidChildName);
     }
@@ -215,8 +217,16 @@ pub fn authorize_child_agent(
     {
         return Err(ChildAgentDenial::MountExpansion);
     }
-
-    Ok(())
+    match request.controls.tool_path {
+        None => Ok(authority.tool_path.clone()),
+        Some(tool_path)
+            if !tool_path.dirs().is_empty()
+                && tool_path.is_ordered_subset_of(authority.tool_path) =>
+        {
+            Ok(tool_path.clone())
+        }
+        Some(_tool_path) => Err(ChildAgentDenial::ToolPathExpansion),
+    }
 }
 
 /// Builds the canonical event pair for owned child cancellation caused by

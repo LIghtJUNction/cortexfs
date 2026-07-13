@@ -8,7 +8,8 @@ use crate::object::receipt::{
 };
 use crate::support::plain::{open_plain_directory, open_plain_file, write_text_file_at};
 use crate::{
-    MountTable, ObjectClass, PolicyV0, is_model_name, is_object_name, policy_subject_from_label,
+    AgentWindowSetting, MountTable, ObjectClass, PolicyV0, is_model_name, is_object_name,
+    policy_subject_from_label,
 };
 use semver::{Version, VersionReq};
 use serde::Deserialize;
@@ -40,6 +41,7 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "path",
     "mount",
     "model",
+    "window",
     "abi",
     "approval",
     "tools",
@@ -435,12 +437,14 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
                 "control contains forbidden characters: {name}"
             )));
         }
-        let validated_value =
-            if class == ObjectClass::Agent && name == "tools" && !value.ends_with('\n') {
-                format!("{value}\n")
-            } else {
-                value.clone()
-            };
+        let validated_value = if class == ObjectClass::Agent
+            && matches!(name.as_str(), "tools" | "window")
+            && !value.ends_with('\n')
+        {
+            format!("{value}\n")
+        } else {
+            value.clone()
+        };
         validate_object_control_content(class, name, &validated_value)
             .map_err(|_error| InstallError::invalid(format!("invalid control value: {name}")))?;
         match (class, name.as_str()) {
@@ -465,6 +469,11 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
                 if !(is_model_name(value.trim()) || matches!(value.trim(), "main" | "helper")) =>
             {
                 return Err(InstallError::invalid("invalid control value: model"));
+            }
+            (ObjectClass::Agent, "window")
+                if AgentWindowSetting::parse_control(&validated_value).is_none() =>
+            {
+                return Err(InstallError::invalid("invalid control value: window"));
             }
             (ObjectClass::Agent, "root" | "cwd") if !Path::new(value.trim()).is_absolute() => {
                 return Err(InstallError::invalid(format!(
@@ -628,6 +637,11 @@ fn write_manifest_controls(
         };
         write_text_file_at(control, name, &content, 0o644).map_err(|error| {
             InstallError::unavailable(format!("cannot write object control {name}: {error}"))
+        })?;
+    }
+    if class == ObjectClass::Agent && !manifest.controls.contains_key("window") {
+        write_text_file_at(control, "window", "auto\n", 0o644).map_err(|error| {
+            InstallError::unavailable(format!("cannot write object control window: {error}"))
         })?;
     }
     let runtime: &[(&str, &str)] = if class == ObjectClass::Tool {
@@ -1070,6 +1084,41 @@ mod tests {
     }
 
     #[test]
+    fn agent_manifest_window_is_strict_and_unknown_controls_remain_rejected()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (_root, executable, digest) = fixture()?;
+        let base: ObjectManifest = serde_json::from_str(&agent_manifest(&executable, &digest))?;
+
+        for value in ["auto", "auto\n", "8192", "8192\n"] {
+            let mut manifest: ObjectManifest =
+                serde_json::from_str(&agent_manifest(&executable, &digest))?;
+            manifest
+                .controls
+                .insert("window".to_owned(), value.to_owned());
+            assert!(validate_manifest(&manifest).is_ok(), "{value:?}");
+        }
+        for value in ["0", " 8192", "8192 ", "+8192", "auto\n\n"] {
+            let mut manifest: ObjectManifest =
+                serde_json::from_str(&agent_manifest(&executable, &digest))?;
+            manifest
+                .controls
+                .insert("window".to_owned(), value.to_owned());
+            assert!(validate_manifest(&manifest).is_err(), "{value:?}");
+        }
+
+        let mut unknown = base;
+        unknown
+            .controls
+            .insert("window.extra".to_owned(), "auto".to_owned());
+        assert!(validate_manifest(&unknown).is_err_and(|error| {
+            error
+                .message()
+                .contains("unknown or runtime-owned control: window.extra")
+        }));
+        Ok(())
+    }
+
+    #[test]
     fn manifest_versions_are_strict_and_compatible() -> Result<(), Box<dyn std::error::Error>> {
         let (_root, executable, digest) = fixture()?;
         let mut manifest: ObjectManifest =
@@ -1284,6 +1333,62 @@ mod tests {
         };
         assert!(error.message().contains("root socket runtime"));
         assert!(!root.path().join("agent/example-agent").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn agent_install_creates_default_and_preserves_explicit_window()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for (supplied, expected) in [(None, "auto\n"), (Some("8192"), "8192\n")] {
+            let (root, executable, digest) = fixture()?;
+            let manifest_path = root.path().join("agent.json");
+            let mut manifest: serde_json::Value =
+                serde_json::from_str(&agent_manifest(&executable, &digest))?;
+            if let Some(window) = supplied {
+                manifest
+                    .get_mut("controls")
+                    .and_then(serde_json::Value::as_object_mut)
+                    .ok_or_else(|| io::Error::other("missing controls"))?
+                    .insert("window".to_owned(), serde_json::json!(window));
+            }
+            fs::write(&manifest_path, serde_json::to_vec(&manifest)?)?;
+
+            install_object(root.path(), &manifest_path, InstallTier::System)?;
+
+            assert_eq!(
+                fs::read_to_string(root.path().join("agent/example-agent.d/window"))?,
+                expected
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn staged_agent_window_precedes_executable_verification_failure()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (root, executable, digest) = fixture()?;
+        let mut manifest: ObjectManifest =
+            serde_json::from_str(&agent_manifest(&executable, &digest))?;
+        manifest.executable.sha256 = "0".repeat(64);
+        let class = open_plain_directory(&root.path().join("agent"))?;
+        let mut source = fs::File::open(&executable)?;
+
+        assert!(prepare_stage(&class, &mut source, &manifest, InstallTier::System).is_err());
+
+        let stage = fs::read_dir(root.path().join("agent"))?
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".cortexfs-install-")
+            })
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "retained stage not found"))?
+            .path();
+        assert_eq!(fs::read_to_string(stage.join("control/window"))?, "auto\n");
+        assert!(stage.join("executable").is_file());
+        assert!(!root.path().join("agent/example-agent").exists());
+        assert!(!root.path().join("agent/example-agent.d").exists());
         Ok(())
     }
 

@@ -61,6 +61,228 @@ fn fuse_v1_projection_reads_and_writes_control_files() {
 }
 
 #[test]
+fn fuse_v1_projection_validates_agent_model_window_pair_atomically() {
+    let root = reference_tree("fuse-v1-agent-window-pair");
+    let uid = 1000;
+    let gid = 1000;
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large","tiny","unknown"],"model_limits":{"large":64,"tiny":16}}"#,
+    );
+    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
+    let session = root.join("home/1000/agent/coder/session/default/messages.jsonl");
+    let session_before = fs::read(&session).ok();
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"32\n", uid, gid)
+            .is_ok()
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(
+            "agent/coder.d/model",
+            0,
+            b"local/tiny\n",
+            uid,
+            gid,
+        ),
+        Err(FuseV1Error::InvalidContent)
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(
+            "agent/coder.d/model",
+            0,
+            b"local/unknown\n",
+            uid,
+            gid,
+        ),
+        Err(FuseV1Error::InvalidContent)
+    );
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"auto\n", uid, gid)
+            .is_ok()
+    );
+    assert_eq!(
+        projection.read_to_string("agent/coder.d/window"),
+        Ok("auto\n".to_owned())
+    );
+    assert_eq!(fs::read(&session).ok(), session_before);
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/coder.d/model", 0, b"local/tiny\n", uid, gid,)
+            .is_ok()
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"17\n", uid, gid,),
+        Err(FuseV1Error::InvalidContent)
+    );
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"auto\n", uid, gid)
+            .is_ok()
+    );
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/coder.d/model", 0, b"local/unknown\n", uid, gid,)
+            .is_ok()
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner("agent/coder.d/window", 0, b"1\n", uid, gid,),
+        Err(FuseV1Error::InvalidContent)
+    );
+}
+
+#[test]
+fn fuse_v1_projection_serializes_concurrent_model_and_window_commits() -> Result<(), String> {
+    let root = reference_tree("fuse-v1-agent-window-concurrent");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large","tiny"],"model_limits":{"large":64,"tiny":32}}"#,
+    );
+    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
+    write_text_file(&root.join("agent/coder.d/window"), "64\n");
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let model_projection = projection.clone();
+    let model_barrier = std::sync::Arc::clone(&barrier);
+    let model = std::thread::spawn(move || {
+        model_barrier.wait();
+        model_projection.write_fuse_file_at_for_owner(
+            "agent/coder.d/model",
+            0,
+            b"local/tiny\n",
+            1000,
+            1000,
+        )
+    });
+    let window_projection = projection.clone();
+    let window_barrier = std::sync::Arc::clone(&barrier);
+    let window = std::thread::spawn(move || {
+        window_barrier.wait();
+        window_projection.write_fuse_file_at_for_owner(
+            "agent/coder.d/window",
+            0,
+            b"auto\n",
+            1000,
+            1000,
+        )
+    });
+    barrier.wait();
+    let model_result = model
+        .join()
+        .map_err(|_panic| "model commit thread should not panic".to_owned())?;
+    let window_result = window
+        .join()
+        .map_err(|_panic| "window commit thread should not panic".to_owned())?;
+    assert_eq!(window_result, Ok(()));
+
+    let model = projection.read_to_string("agent/coder.d/model");
+    let window = projection.read_to_string("agent/coder.d/window");
+    match model_result {
+        Ok(()) => {
+            assert_eq!(model.as_deref(), Ok("local/tiny\n"));
+            assert_eq!(window.as_deref(), Ok("auto\n"));
+        }
+        Err(FuseV1Error::InvalidContent) => {
+            assert_eq!(model.as_deref(), Ok("local/large\n"));
+            assert_eq!(window.as_deref(), Ok("auto\n"));
+        }
+        Err(other) => return Err(format!("unexpected model commit result: {other:?}")),
+    }
+    Ok(())
+}
+
+#[test]
+fn fuse_v1_projection_temp_window_write_uses_agent_pair_lock() {
+    let root = reference_tree("fuse-v1-agent-window-temp-lock");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large"],"model_limits":{"large":64}}"#,
+    );
+    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let temp = "agent/coder.d/.window.tmp-2-2-0";
+    assert!(
+        projection
+            .create_layout_file(temp, 1000, 1000, 0o600)
+            .is_ok()
+    );
+    let control_dir = fs::File::open(root.join("agent/coder.d"));
+    assert!(control_dir.is_ok());
+    let lock = control_dir.and_then(|dir| {
+        nix::fcntl::Flock::lock(dir, nix::fcntl::FlockArg::LockExclusive)
+            .map_err(|(_dir, error)| std::io::Error::from(error))
+    });
+    assert!(lock.is_ok());
+    let (reached_sent, reached) = std::sync::mpsc::channel();
+    let (completed_sent, completed) = std::sync::mpsc::channel();
+    let writer = projection.clone();
+    let thread = std::thread::spawn(move || {
+        FuseV1Projection::set_agent_window_lock_hook(reached_sent);
+        let result = writer.write_fuse_file_at_for_owner(temp, 0, b"48\n", 1000, 1000);
+        let _ignored = completed_sent.send(result);
+    });
+    assert_eq!(
+        reached.recv_timeout(std::time::Duration::from_secs(2)),
+        Ok(())
+    );
+    assert_eq!(
+        completed.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    );
+    drop(lock);
+    assert_eq!(
+        completed.recv_timeout(std::time::Duration::from_secs(2)),
+        Ok(Ok(()))
+    );
+    assert!(thread.join().is_ok());
+    assert_eq!(
+        projection.rename_atomic_temp(temp, "agent/coder.d/window", 1000),
+        Ok(())
+    );
+    assert_eq!(
+        projection.read_to_string("agent/coder.d/window"),
+        Ok("48\n".to_owned())
+    );
+}
+
+#[test]
+fn fuse_v1_projection_revalidates_window_temp_at_rename_time() {
+    let root = reference_tree("fuse-v1-agent-window-rename");
+    let uid = 1000;
+    let gid = 1000;
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large","tiny"],"model_limits":{"large":64,"tiny":32}}"#,
+    );
+    write_text_file(&root.join("agent/coder.d/model"), "local/large\n");
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let temp = "agent/coder.d/.window.tmp-1-1-0";
+    assert!(projection.create_layout_file(temp, uid, gid, 0o600).is_ok());
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner(temp, 0, b"48\n", uid, gid)
+            .is_ok()
+    );
+    write_text_file(&root.join("agent/coder.d/model"), "local/tiny\n");
+
+    assert_eq!(
+        projection.rename_atomic_temp(temp, "agent/coder.d/window", uid),
+        Err(FuseV1Error::InvalidContent)
+    );
+    assert_eq!(
+        projection.read_to_string("agent/coder.d/window"),
+        Ok("auto\n".to_owned())
+    );
+}
+
+#[test]
 fn fuse_v1_projection_refuses_to_read_symlink_as_file() {
     let root = clean_test_dir("fuse-v1-projection-read-symlink");
     let outside = clean_test_dir("fuse-v1-projection-read-symlink-outside");

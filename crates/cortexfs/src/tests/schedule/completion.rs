@@ -59,6 +59,13 @@ allow planner_t agent:worker create
         ),
         Ok(())
     );
+    let receipt = ok!(crate::child_handoff_receipt(
+        &session.join("context").join("child").join("rev-123")
+    ));
+    assert_eq!(
+        claim_child_handoff_active(&receipt, "reviewer", "default", None),
+        Ok(())
+    );
     assert_eq!(
         record_child_result_to_parent_context(
             &session,
@@ -267,6 +274,13 @@ fn agent_schedule_completion_rejects_done_status_from_conflicting_child_channel(
             "default",
             "Different handoff\n",
         ),
+        Ok(())
+    );
+    let receipt = ok!(crate::child_handoff_receipt(
+        &session.join("context").join("child").join("rev-123")
+    ));
+    assert_eq!(
+        claim_child_handoff_active(&receipt, "reviewer", "default", None),
         Ok(())
     );
     assert_eq!(

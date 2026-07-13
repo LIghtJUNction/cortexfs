@@ -27,7 +27,7 @@ fn child_handoff_claim_is_receipt_and_identity_bound() {
     let before = ok!(fs::metadata(receipt.path().join("status")));
 
     assert_eq!(
-        claim_child_handoff_active(&receipt, "worker", "dedicated"),
+        claim_child_handoff_active(&receipt, "worker", "dedicated", None),
         Ok(())
     );
     assert_file_text(&receipt.path().join("status"), "active\n");
@@ -37,7 +37,7 @@ fn child_handoff_claim_is_receipt_and_identity_bound() {
         (before.uid(), before.gid(), before.mode() & 0o7777)
     );
     assert_eq!(
-        claim_child_handoff_active(&receipt, "worker", "dedicated"),
+        claim_child_handoff_active(&receipt, "worker", "dedicated", None),
         Err(ChildContextRecordError::InvalidStatus)
     );
 }
@@ -53,8 +53,8 @@ fn stop_lease_linearizes_cancel_before_completion() {
         "dedicated",
         "task"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "dedicated").is_ok());
-    let lease = ok!(crate::runtime::record::child::acquire_child_finish_lease(
+    assert!(claim_child_handoff_active(&receipt, "worker", "dedicated", None).is_ok());
+    let lease = ok!(crate::runtime::record::child::acquire_child_context_lease(
         &receipt
     ));
     let (sent, received) = std::sync::mpsc::channel();
@@ -81,6 +81,7 @@ fn stop_lease_linearizes_cancel_before_completion() {
                 &receipt,
                 "worker",
                 "dedicated",
+                None,
                 ChildContextStatus::Cancelled,
                 "cancelled",
                 ""
@@ -106,7 +107,7 @@ fn stop_lease_preserves_completion_that_committed_first() {
         "dedicated",
         "task"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "dedicated").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "dedicated", None).is_ok());
     assert!(
         crate::finish_child_result(
             &receipt,
@@ -118,11 +119,11 @@ fn stop_lease_preserves_completion_that_committed_first() {
         )
         .is_ok()
     );
-    let lease = ok!(crate::runtime::record::child::acquire_child_finish_lease(
+    let lease = ok!(crate::runtime::record::child::acquire_child_context_lease(
         &receipt
     ));
     assert_eq!(
-        crate::runtime::record::child::child_finish_lease_status(&lease),
+        crate::runtime::record::child::child_context_lease_status(&lease),
         Ok(ChildContextStatus::Done)
     );
     drop(lease);
@@ -141,7 +142,7 @@ fn child_handoff_claim_rejects_wrong_identity_and_replacement() {
             "dedicated",
             "task"
         ));
-        assert!(claim_child_handoff_active(&receipt, agent, session_name).is_err());
+        assert!(claim_child_handoff_active(&receipt, agent, session_name, None).is_err());
         assert_file_text(&receipt.path().join("status"), "pending\n");
     }
 
@@ -158,7 +159,7 @@ fn child_handoff_claim_rejects_wrong_identity_and_replacement() {
     assert!(fs::create_dir_all(receipt.path()).is_ok());
     write_text_file(&receipt.path().join("status"), "pending\n");
     write_text_file(&receipt.path().join("third-party"), "keep\n");
-    assert!(claim_child_handoff_active(&receipt, "worker", "dedicated").is_err());
+    assert!(claim_child_handoff_active(&receipt, "worker", "dedicated", None).is_err());
     assert_file_text(&receipt.path().join("third-party"), "keep\n");
 }
 
@@ -174,14 +175,19 @@ fn child_handoff_claim_faults_leave_pending_status() {
             "dedicated",
             "task"
         ));
-        let result =
-            claim_child_handoff_active_with_hook(&receipt, "worker", "dedicated", |current| {
+        let result = claim_child_handoff_active_with_hook(
+            &receipt,
+            "worker",
+            "dedicated",
+            None,
+            |current| {
                 if current == stage {
                     Err(ChildContextRecordError::CannotRecord)
                 } else {
                     Ok(())
                 }
-            });
+            },
+        );
         assert!(result.is_err());
         assert_file_text(&receipt.path().join("status"), "pending\n");
     }
@@ -794,7 +800,7 @@ fn finish_child_result_is_ordered_idempotent_and_terminal_safe() {
     let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
     assert!(receipt.is_some());
     let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
 
     assert!(
         crate::finish_child_result(
@@ -842,7 +848,7 @@ fn exclusive_finish_rejects_same_owner_without_mutation() {
     let receipt = ok!(publish_child_handoff(
         &session, "worker", "worker", "run", "work"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     assert_eq!(
         crate::runtime::record::child::finish_child_result_exclusive(
             &receipt,
@@ -868,7 +874,7 @@ fn exclusive_cancelled_finish_is_payload_bound_and_idempotent() {
     let receipt = ok!(publish_child_handoff(
         &session, "worker", "worker", "run", "work"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     assert!(
         nix::unistd::chown(
             receipt.path(),
@@ -919,7 +925,7 @@ fn finish_child_result_preserves_non_root_artifact_metadata() {
         let receipt = ok!(publish_child_handoff(
             &session, "worker", "worker", "run", "work"
         ));
-        assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+        assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
         assert!(fs::set_permissions(receipt.path(), fs::Permissions::from_mode(0o751)).is_ok());
         let channel_metadata = ok!(fs::symlink_metadata(receipt.path()));
         for (file, mode) in [
@@ -966,7 +972,7 @@ fn finish_child_result_rejects_target_replacement_and_cleans_temporary() {
     let receipt = ok!(publish_child_handoff(
         &session, "worker", "worker", "run", "work"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1004,7 +1010,7 @@ fn finish_child_result_exchange_conflict_preserves_unowned_artifacts() {
     let receipt = ok!(publish_child_handoff(
         &session, "worker", "worker", "run", "work"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1044,7 +1050,7 @@ fn finish_child_result_does_not_unlink_replaced_displaced_name() {
     let receipt = ok!(publish_child_handoff(
         &session, "worker", "worker", "run", "work"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1099,7 +1105,7 @@ fn finish_child_result_surfaces_quarantine_unlink_failure() {
     let receipt = ok!(publish_child_handoff(
         &session, "worker", "worker", "run", "work"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1127,7 +1133,7 @@ fn finish_child_result_surfaces_quarantine_unlink_failure() {
                     .file_name()
                     .to_string_lossy()
                     .starts_with(".finish-quarantine-")
-            })
+            },)
     );
     assert_file_text(&channel.join("status"), "active\n");
 }
@@ -1139,7 +1145,7 @@ fn finish_child_result_rejects_replaced_channel_and_metadata() {
     let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
     assert!(receipt.is_some());
     let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     let channel = receipt.path().to_path_buf();
     assert!(fs::remove_file(channel.join("agent")).is_ok());
     assert!(symlink("/dev/null", channel.join("agent")).is_ok());
@@ -1186,7 +1192,7 @@ fn finish_child_faults_never_publish_terminal_status() {
         let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
         assert!(receipt.is_some());
         let Some(receipt) = receipt else { return };
-        assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+        assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
         assert!(fs::set_permissions(receipt.path(), fs::Permissions::from_mode(0o751)).is_ok());
         let before = ok!(fs::symlink_metadata(receipt.path()));
         let result = finish_child_result_with_hook(
@@ -1223,7 +1229,7 @@ fn finish_child_result_surfaces_channel_restore_path_conflict() {
     let receipt = ok!(publish_child_handoff(
         &session, "worker", "worker", "run", "work"
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     assert!(fs::set_permissions(receipt.path(), fs::Permissions::from_mode(0o751)).is_ok());
     let before = ok!(fs::symlink_metadata(receipt.path()));
     let channel = receipt.path().to_path_buf();
@@ -1261,7 +1267,7 @@ fn finish_child_cancelled_race_is_not_overwritten() {
     let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
     assert!(receipt.is_some());
     let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1291,7 +1297,7 @@ fn concurrent_finishers_never_mix_terminal_payloads() {
     let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
     assert!(receipt.is_some());
     let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
     let mut joins = Vec::new();
     for (status, text) in [
@@ -1326,7 +1332,7 @@ fn terminal_status_read_is_receipt_bound_to_channel_fields_and_status() {
     let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
     assert!(receipt.is_some());
     let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     assert!(
         crate::finish_child_result(
             &receipt,
@@ -1359,7 +1365,7 @@ fn terminal_status_read_rejects_replaced_agent_or_channel() {
     let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
     assert!(receipt.is_some());
     let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
     assert!(
         crate::finish_child_result(
             &receipt,

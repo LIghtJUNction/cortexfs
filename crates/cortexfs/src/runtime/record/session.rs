@@ -41,7 +41,7 @@ pub(crate) fn prepare_owned_durable_session(
     uid: u32,
     gid: u32,
 ) -> Result<OwnedSessionPreparation, String> {
-    ensure_durable_session_layout(session_root, session, cwd, model, scope)
+    let _receipts = ensure_durable_session_layout(session_root, session, cwd, model, scope)
         .map_err(|error| format!("cannot prepare durable session: {}", error.errno()))?;
     let session_dir = session_root.join(session);
     let current_run = session_dir.join("current_run");
@@ -183,6 +183,9 @@ fn preflight_session(
         let name = name
             .to_str()
             .ok_or_else(|| "session path contains invalid component".to_owned())?;
+        if root == PreflightRoot::Store && name == ".archive" {
+            continue;
+        }
         let stat = fstatat(directory, name, AtFlags::AT_SYMLINK_NOFOLLOW).map_err(|error| {
             format!(
                 "cannot inspect session path {}/{name}: {error}",
@@ -793,6 +796,7 @@ mod permission_tests {
             record_socket_send_to_session(
                 &session,
                 "run",
+                "run",
                 "fresh",
                 SocketSessionScope::Private,
                 Some("/workspace"),
@@ -938,7 +942,18 @@ mod permission_tests {
             workspace: None,
             input: "input".to_owned(),
         };
-        assert!(handle_socket_request(&session_root, "/workspace", None, &request).is_ok());
+        let response = handle_socket_request(&session_root, "/workspace", None, &request);
+        assert!(response.is_ok());
+        let run = response.ok().and_then(|response| {
+            response.frames().first().and_then(|frame| {
+                serde_json::from_str::<Value>(frame)
+                    .ok()?
+                    .get("run")?
+                    .as_str()
+                    .map(ToOwned::to_owned)
+            })
+        });
+        assert!(run.as_deref().is_some_and(|run| run != "run"));
 
         assert_eq!(
             fs::metadata(&marker)
@@ -950,7 +965,7 @@ mod permission_tests {
             fs::read_to_string(session.join("current_run"))
                 .ok()
                 .as_deref(),
-            Some("run\n")
+            run.as_ref().map(|run| format!("{run}\n")).as_deref()
         );
         let _ignored = fs::remove_dir_all(session_root);
     }
@@ -994,5 +1009,36 @@ mod permission_tests {
             write_current_run_session_file(&root.join("one"), "run\n", Some(&preparation)).is_err()
         );
         let _ignored = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn session_store_repair_keeps_archive_sentinel_mode() {
+        let base = root("session-store-archive-sentinel");
+        let _ignored = fs::remove_dir_all(&base);
+        assert!(fs::create_dir_all(base.join("index")).is_ok());
+        let archive = base.join(".archive");
+        assert!(fs::create_dir_all(archive.join("old-session")).is_ok());
+        let archive_sentinel = archive.join("old-session/sentinel");
+        assert!(fs::write(&archive_sentinel, "old").is_ok());
+        assert!(fs::set_permissions(&archive_sentinel, fs::Permissions::from_mode(0o644)).is_ok());
+        let selected = base.join("selected");
+        assert!(fs::create_dir_all(&selected).is_ok());
+        assert!(fs::write(selected.join("state"), "state").is_ok());
+        let uid = nix::unistd::geteuid().as_raw();
+        let gid = nix::unistd::getegid().as_raw();
+        assert!(repair_agent_session_root_permissions(&base, uid, gid).is_ok());
+        assert_eq!(
+            fs::metadata(selected.join("state"))
+                .map(|metadata| metadata.permissions().mode() & 0o777)
+                .ok(),
+            Some(0o600)
+        );
+        assert_eq!(
+            fs::metadata(&archive_sentinel)
+                .map(|metadata| metadata.permissions().mode() & 0o777)
+                .ok(),
+            Some(0o644)
+        );
+        let _ignored = fs::remove_dir_all(base);
     }
 }

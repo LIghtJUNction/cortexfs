@@ -42,7 +42,7 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
         Some("main"),
         SocketSessionScope::Private,
     );
-    assert_eq!(ensured, Ok(()));
+    assert!(ensured.is_ok());
     assert!(inspect_session_layout(&session).is_ok());
 
     let meta = fs::read_to_string(session.join("meta.json"));
@@ -87,7 +87,7 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
         Some("openai/gpt-4o"),
         SocketSessionScope::Private,
     );
-    assert_eq!(updated, Ok(()));
+    assert!(updated.is_ok());
     let meta = fs::read_to_string(session.join("meta.json"));
     assert!(matches!(meta, Ok(ref meta) if meta.contains("\"model\":\"main\"")));
 

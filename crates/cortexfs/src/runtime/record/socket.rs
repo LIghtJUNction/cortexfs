@@ -14,12 +14,13 @@ pub(crate) fn record_unindexed_socket_request_for_test(
     session_dir: &Path,
     request: &SocketRequest,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
-    record_socket_request(session_dir, request, None, None)
+    record_socket_request(session_dir, request, None, None, None)
 }
 
 fn record_socket_request(
     session_dir: &Path,
     request: &SocketRequest,
+    run_id: Option<&str>,
     preparation: Option<&OwnedSessionPreparation>,
     history: Option<&columnar::HistoryGuard<'_>>,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
@@ -34,6 +35,7 @@ fn record_socket_request(
         } => record_socket_send_to_session(
             session_dir,
             id,
+            run_id.unwrap_or(id),
             session,
             scope,
             cwd.as_deref(),
@@ -110,13 +112,17 @@ fn record_indexed_socket_send(
     let history = columnar::HistoryGuard::exclusive(&session_dir).map_err(|_error| {
         IndexedSocketSessionRecordError::Session(SocketSessionRecordError::CannotRecord)
     })?;
-    match history
+    let by_cwd_key = cwd.and_then(session_index_key_for_cwd);
+    let pending = match history
         .lookup_send(id, input, scope.as_str(), cwd)
         .map_err(|_error| {
             IndexedSocketSessionRecordError::Session(SocketSessionRecordError::CorruptHistory)
         })? {
-        columnar::SendClaim::Vacant => {}
+        columnar::SendClaim::Vacant => None,
+        columnar::SendClaim::Pending(send) => Some(send),
         columnar::SendClaim::Replay(frame) => {
+            update_session_index(session_root, session, by_cwd_key.as_deref())
+                .map_err(IndexedSocketSessionRecordError::Index)?;
             return Ok(SocketSendOutcome::Replayed(SocketSessionRecord::new(
                 Vec::new(),
                 vec![frame],
@@ -132,14 +138,29 @@ fn record_indexed_socket_send(
                 SocketSessionRecordError::CorruptHistory,
             ));
         }
-    }
+    };
 
-    let by_cwd_key = cwd.and_then(session_index_key_for_cwd);
     preflight_session_index_update(session_root, session, by_cwd_key.as_deref(), None, None)
         .map_err(IndexedSocketSessionRecordError::Index)?;
 
-    let record = record_socket_request(&session_dir, request, preparation, Some(&history))
-        .map_err(IndexedSocketSessionRecordError::Session)?;
+    let run_id = if let Some(send) = pending.as_ref() {
+        send.run_id().to_owned()
+    } else {
+        format!(
+            "ctx-{}",
+            runtime::control::random_hex::<16>().map_err(|_error| {
+                IndexedSocketSessionRecordError::Session(SocketSessionRecordError::CannotRecord)
+            })?
+        )
+    };
+    let record = record_socket_request(
+        &session_dir,
+        request,
+        Some(&run_id),
+        preparation,
+        Some(&history),
+    )
+    .map_err(IndexedSocketSessionRecordError::Session)?;
     update_session_index(session_root, session, by_cwd_key.as_deref())
         .map_err(IndexedSocketSessionRecordError::Index)?;
 

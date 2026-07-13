@@ -21,7 +21,8 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
     let send = ok!(send);
     assert_eq!(send.frames().len(), 1);
     assert!(send.jsonl().contains("\"type\":\"start\""));
-    assert!(send.jsonl().contains("\"run\":\"msg-1\""));
+    let run_1 = ok!(canonical_run(&send.jsonl()).ok_or("missing first canonical run"));
+    assert_ne!(run_1, "msg-1");
     assert!(inspect_session_layout(&session_root.join("default")).is_ok());
 
     let second = handle_socket_request_frame(
@@ -30,7 +31,9 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
         Some("debug/echo"),
         r#"{"op":"send","id":"msg-2","session":"default","input":"again"}"#,
     );
-    assert!(second.is_ok());
+    let second = ok!(second);
+    let run_2 = ok!(canonical_run(&second.jsonl()).ok_or("missing second canonical run"));
+    assert_ne!(run_2, "msg-2");
 
     let resume_all = handle_socket_request_frame(
         &session_root,
@@ -40,19 +43,27 @@ fn socket_runtime_handles_ping_send_resume_and_cancel() {
     );
     let resume_all = ok!(resume_all);
     assert_eq!(resume_all.frames().len(), 2);
-    assert!(resume_all.jsonl().contains("\"run\":\"msg-1\""));
-    assert!(resume_all.jsonl().contains("\"run\":\"msg-2\""));
+    assert!(resume_all.jsonl().contains(&format!("\"run\":\"{run_1}\"")));
+    assert!(resume_all.jsonl().contains(&format!("\"run\":\"{run_2}\"")));
 
     let resume_after = handle_socket_request_frame(
         &session_root,
         "/work",
         Some("debug/echo"),
-        r#"{"op":"resume","session":"default","after":"msg-1"}"#,
+        &format!(r#"{{"op":"resume","session":"default","after":"{run_1}"}}"#),
     );
     let resume_after = ok!(resume_after);
     assert_eq!(resume_after.frames().len(), 1);
-    assert!(!resume_after.jsonl().contains("\"run\":\"msg-1\""));
-    assert!(resume_after.jsonl().contains("\"run\":\"msg-2\""));
+    assert!(
+        !resume_after
+            .jsonl()
+            .contains(&format!("\"run\":\"{run_1}\""))
+    );
+    assert!(
+        resume_after
+            .jsonl()
+            .contains(&format!("\"run\":\"{run_2}\""))
+    );
 
     let cancel = handle_socket_request_frame(
         &session_root,

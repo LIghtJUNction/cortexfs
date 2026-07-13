@@ -21,6 +21,7 @@ fn agent_tool_call_executes_visible_tsh_for_search_and_load()
     fs::write(control.join("cwd"), "/workspace\n")?;
     fs::write(control.join("env"), "\n")?;
     fs::write(control.join("model"), "main\n")?;
+    write_agent_window_fixture(&root, &control)?;
     fs::write(control.join("status"), "idle\n")?;
     fs::write(control.join("pid"), "\n")?;
     fs::write(control.join("log"), "\n")?;
@@ -406,6 +407,7 @@ fn agent_tool_call_refuses_symlinked_tsh_policy() -> Result<(), Box<dyn std::err
     fs::write(control.join("cwd"), "/workspace\n")?;
     fs::write(control.join("env"), "\n")?;
     fs::write(control.join("model"), "main\n")?;
+    write_agent_window_fixture(&root, &control)?;
     fs::write(control.join("status"), "idle\n")?;
     fs::write(control.join("pid"), "\n")?;
     fs::write(control.join("log"), "\n")?;
@@ -778,6 +780,7 @@ fn execute_agent_tsh_call_rejects_empty_args() -> Result<(), Box<dyn std::error:
     fs::write(control.join("cwd"), "/workspace\n")?;
     fs::write(control.join("env"), "\n")?;
     fs::write(control.join("model"), "main\n")?;
+    write_agent_window_fixture(&root, &control)?;
     fs::write(control.join("status"), "idle\n")?;
     fs::write(control.join("pid"), "\n")?;
     fs::write(control.join("log"), "\n")?;

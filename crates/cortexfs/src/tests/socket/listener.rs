@@ -45,7 +45,8 @@ fn socket_stream_runtime_serves_one_frame_with_peer_credentials() {
     };
     let response = String::from_utf8_lossy(bytes);
     assert!(response.contains("\"type\":\"start\""));
-    assert!(response.contains("\"run\":\"msg-1\""));
+    let run = ok!(canonical_run(&response).ok_or("missing canonical run"));
+    assert_ne!(run, "msg-1");
     assert!(inspect_session_layout(&session_root.join("default")).is_ok());
 }
 
@@ -179,7 +180,8 @@ fn socket_listener_runtime_accepts_and_serves_one_connection() {
     };
     let response = String::from_utf8_lossy(bytes);
     assert!(response.contains("\"type\":\"start\""));
-    assert!(response.contains("\"run\":\"msg-1\""));
+    let run = ok!(canonical_run(&response).ok_or("missing canonical run"));
+    assert_ne!(run, "msg-1");
     assert!(inspect_session_layout(&session_root.join("default")).is_ok());
 }
 use super::*;

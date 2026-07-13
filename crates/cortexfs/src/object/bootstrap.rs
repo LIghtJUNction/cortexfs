@@ -231,6 +231,7 @@ pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> Stri
         "env" => "CTX_ROOT=/ctx".to_owned(),
         "path" => "/ctx/tool".to_owned(),
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
+        "window" => "auto".to_owned(),
         "status" => "idle".to_owned(),
         "system.md" => format!("You are CortexFS agent `{object_name}`."),
         "prompt.template.md" => DEFAULT_AGENT_PROMPT_TEMPLATE.to_owned(),

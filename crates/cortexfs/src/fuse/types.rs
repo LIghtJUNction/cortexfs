@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::*;
 
 /// File kind exposed by the v1 FUSE projection layer.
@@ -94,6 +96,8 @@ pub(crate) struct ProviderConfig {
     pub(crate) default_model: Option<String>,
     #[serde(default)]
     pub(crate) models: Vec<String>,
+    #[serde(default)]
+    pub(crate) model_limits: HashMap<String, u32>,
     #[serde(default = "default_provider_enabled")]
     pub(crate) enabled: bool,
     #[serde(default)]
@@ -116,6 +120,7 @@ pub(crate) struct ProjectedProviderModel {
     pub(crate) cap: String,
     pub(crate) effort: String,
     pub(crate) fallback: String,
+    pub(crate) limit: ModelContextLimit,
 }
 
 impl FuseV1Attr {

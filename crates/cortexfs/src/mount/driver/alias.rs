@@ -12,6 +12,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
         ) {
             let file_type = mode & S_IFMT;
             if file_type == S_IFREG || file_type == 0 {
+                let permissions = (mode & 0o7777) & !umask;
                 let path = create_session_layout_child_or_reply!(
                     self,
                     req,
@@ -19,9 +20,9 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     name,
                     reply,
                     create_layout_file,
-                    (mode & 0o7777) & !umask
+                    permissions
                 );
-                match self.projected_node_for_path(&path) {
+                match self.created_layout_node(&path, permissions, req.uid(), req.gid()) {
                     Ok(node) => self.reply_entry(&node, reply),
                     Err(error) => reply.error(errno(error)),
                 }

@@ -364,6 +364,8 @@ pub(crate) struct AgentModelRunConfig {
     pub(crate) current_time_unix: String,
     pub(crate) tool_context: String,
     pub(crate) history_messages: String,
+    pub(crate) window_setting: AgentWindowSetting,
+    pub(crate) context_budget: Option<AgentWindowBudget>,
     pub(crate) suppress_model_error_events: bool,
     pub(crate) debug_timing_start_unix_ms: Option<u128>,
 }
@@ -409,11 +411,39 @@ impl AgentModelRunConfig {
         };
         let primary_model = resolved_model_name(&ctx_root, &requested_model)?;
         let candidates = model_candidates(&ctx_root, &requested_model)?;
-        let selected = candidates
-            .iter()
-            .find(|candidate| is_regular_file_no_follow(&candidate.path))
-            .or_else(|| candidates.first())
-            .ok_or_else(|| format!("invalid model reference: {requested_model}"))?;
+        let window_content = read_small_plain_text_file(
+            &agent_dir.join("window"),
+            MAX_RUNNER_CONTROL_BYTES,
+            "runner",
+        )
+        .map_err(|error| format!("cannot read agent window control: {error}"))?;
+        let window_setting = AgentWindowSetting::parse_control(&window_content)
+            .ok_or_else(|| "invalid agent window control".to_owned())?;
+        let _inherited_budget = parse_agent_context_budget(
+            env::var("CTX_CONTEXT_WINDOW_TOKENS").ok().as_deref(),
+            env::var("CTX_CONTEXT_WINDOW_CHARS").ok().as_deref(),
+        )?;
+        let mut rejected = Vec::new();
+        let mut selected = None;
+        for candidate in &candidates {
+            if !is_regular_file_no_follow(&candidate.path) {
+                rejected.push(format!("{}: missing executable", candidate.name));
+                continue;
+            }
+            match candidate_window_budget(&ctx_root, &candidate.name, window_setting) {
+                Ok(budget) => {
+                    selected = Some((candidate, budget));
+                    break;
+                }
+                Err(error) => rejected.push(format!("{}: {error}", candidate.name)),
+            }
+        }
+        let (selected, context_budget) = selected.ok_or_else(|| {
+            format!(
+                "no eligible model candidate for {requested_model}: {}",
+                rejected.join("; ")
+            )
+        })?;
         let model_path = selected.path.clone();
         let model = selected.name.clone();
         authorize_agent_model_use(&agent_dir, &requested_model, &primary_model, &model)?;
@@ -448,6 +478,8 @@ impl AgentModelRunConfig {
             tool_context: env::var("CTX_AGENT_TOOL_CONTEXT").unwrap_or_default(),
             history_messages: env::var("CTX_AGENT_HISTORY_MESSAGES")
                 .unwrap_or_else(|_error| "(no historical messages injected)".to_owned()),
+            window_setting,
+            context_budget,
             suppress_model_error_events: false,
             debug_timing_start_unix_ms: agent_debug_timing_start_unix_ms(),
         })
@@ -467,6 +499,94 @@ impl AgentModelRunConfig {
         self.tool_context.push_str(result);
         trim_tool_context_to_limit(&mut self.tool_context);
     }
+}
+
+pub(crate) fn candidate_window_budget(
+    ctx_root: &Path,
+    model: &str,
+    setting: AgentWindowSetting,
+) -> Result<Option<AgentWindowBudget>, String> {
+    let (provider, name) = model
+        .split_once('/')
+        .ok_or_else(|| "invalid model candidate".to_owned())?;
+    let content = read_small_plain_text_file(
+        &ctx_root
+            .join("model")
+            .join(provider)
+            .join(format!("{name}.d/limit")),
+        MAX_RUNNER_CONTROL_BYTES,
+        "runner",
+    )
+    .map_err(|error| format!("cannot read model context limit: {error}"))?;
+    let limit = ModelContextLimit::parse_control(&content)
+        .ok_or_else(|| "invalid model context limit".to_owned())?;
+    let effective = setting
+        .resolve(limit)
+        .map_err(|error| format!("ineligible context limit: {error:?}"))?;
+    Ok(AgentWindowBudget::from_effective(effective))
+}
+
+pub(crate) fn parse_agent_context_budget(
+    tokens: Option<&str>,
+    chars: Option<&str>,
+) -> Result<Option<AgentWindowBudget>, String> {
+    let (Some(tokens), Some(chars)) = (tokens, chars) else {
+        return if tokens.is_none() && chars.is_none() {
+            Ok(None)
+        } else {
+            Err(
+                "invalid context window environment: token and character values must be paired"
+                    .to_owned(),
+            )
+        };
+    };
+    let token_value = tokens.parse::<u32>().map_err(|_error| {
+        "invalid context window environment: token value is not canonical decimal".to_owned()
+    })?;
+    if token_value == 0 || tokens != token_value.to_string() {
+        return Err(
+            "invalid context window environment: token value is not canonical decimal".to_owned(),
+        );
+    }
+    let window = ModelContextLimit::known(token_value)
+        .and_then(AgentWindowBudget::from_effective)
+        .ok_or_else(|| "invalid context window environment: token value is zero".to_owned())?;
+    let char_value = chars.parse::<usize>().map_err(|_error| {
+        "invalid context window environment: character value is not canonical decimal".to_owned()
+    })?;
+    if chars != char_value.to_string() || char_value != window.total_chars() {
+        return Err(
+            "invalid context window environment: character value does not match tokens".to_owned(),
+        );
+    }
+    Ok(Some(window))
+}
+
+pub(crate) fn serialized_agent_messages(
+    config: &AgentModelRunConfig,
+    input: &str,
+) -> Result<Vec<u8>, String> {
+    let context = AgentPromptContext {
+        template: config.prompt_template.clone(),
+        rules: config.rules.clone(),
+        skills: config.skills.clone(),
+        tool_injection: config.tool_context.clone(),
+        history_messages: config.history_messages.clone(),
+        current_time_unix: config.current_time_unix.clone(),
+    };
+    let messages = agent_provider_messages(input, &config.agent, &config.system_prompt, &context);
+    serde_json::to_vec(&messages).map_err(|error| format!("cannot serialize agent prompt: {error}"))
+}
+
+pub(crate) fn admit_agent_prompt(
+    config: &AgentModelRunConfig,
+    input: &str,
+) -> Result<bool, String> {
+    let Some(budget) = config.context_budget else {
+        return Ok(true);
+    };
+    let messages = serialized_agent_messages(config, input)?;
+    Ok(messages.len() <= budget.input_chars())
 }
 
 pub(crate) fn agent_model_control_dir(source: &Path, agent: &str) -> PathBuf {

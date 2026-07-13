@@ -33,6 +33,9 @@ pub struct AgentRuntimeView {
     pub(crate) tool_path: ToolPath,
     pub(crate) mount_table: MountTable,
     pub(crate) model: String,
+    pub(crate) model_limit: ModelContextLimit,
+    pub(crate) window_setting: AgentWindowSetting,
+    pub(crate) effective_window: AgentEffectiveWindow,
     pub(crate) policy: PolicyV0,
     pub(crate) declared_tools: BTreeSet<String>,
     pub(crate) approval: AgentApprovalMode,
@@ -203,6 +206,25 @@ impl AgentRuntimeView {
     #[must_use]
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// Returns the trusted hard limit for the selected model independently of
+    /// the Agent's durable and effective window selections.
+    #[must_use]
+    pub const fn model_limit(&self) -> ModelContextLimit {
+        self.model_limit
+    }
+
+    /// Returns the durable Agent window setting.
+    #[must_use]
+    pub const fn window_setting(&self) -> AgentWindowSetting {
+        self.window_setting
+    }
+
+    /// Returns the effective token window after model-limit resolution.
+    #[must_use]
+    pub const fn effective_window(&self) -> AgentEffectiveWindow {
+        self.effective_window
     }
 
     /// Returns the parsed v0 policy.

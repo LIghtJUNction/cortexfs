@@ -209,5 +209,59 @@ fn agent_model_output_rejects_too_many_frames() -> Result<(), Box<dyn std::error
     let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
+
+#[test]
+fn oversized_prompt_returns_e2big_before_opening_model() -> Result<(), String> {
+    let mut config = test_agent_run_config();
+    config.model_path = PathBuf::from("/definitely/not/a/model");
+    config.context_budget = AgentWindowBudget::from_effective(
+        ModelContextLimit::known(1).unwrap_or(ModelContextLimit::Unknown),
+    );
+    config.suppress_model_error_events = true;
+    let mut output = Vec::new();
+
+    let outcome = run_agent_model_once(&config, "too large", &mut output)?;
+
+    assert!(!outcome.success);
+    assert!(
+        outcome
+            .frames
+            .iter()
+            .any(|frame| frame.contains(r#""code":"E2BIG""#))
+    );
+    assert!(output.is_empty());
+    Ok(())
+}
+
+#[test]
+fn model_child_receives_context_window_pair_only_when_known()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("model-context-env")?;
+    let model = root.join("model");
+    write_executable_script(
+        &model,
+        r#"#!/bin/sh
+if [ "$1" = known ]; then
+  [ "$CTX_CONTEXT_WINDOW_TOKENS" = 4096 ] && [ "$CTX_CONTEXT_WINDOW_CHARS" = 16384 ] && [ "$CTX_AGENT_WINDOW_SETTING" = auto ] || exit 2
+else
+  [ -z "${CTX_CONTEXT_WINDOW_TOKENS+x}" ] && [ -z "${CTX_CONTEXT_WINDOW_CHARS+x}" ] && [ "$CTX_AGENT_WINDOW_SETTING" = auto ] || exit 3
+fi
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+"#,
+    )?;
+    let mut config = AgentModelRunConfig {
+        model_path: model,
+        ..test_agent_run_config()
+    };
+    config.context_budget = AgentWindowBudget::from_effective(
+        ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
+    );
+    let mut output = Vec::new();
+    assert!(run_agent_model_once(&config, "known", &mut output)?.success);
+    config.context_budget = None;
+    assert!(run_agent_model_once(&config, "unknown", &mut output)?.success);
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
 use super::runtime::test_agent_run_config;
 use super::*;

@@ -14,7 +14,7 @@ pub(crate) fn debug_model_metadata(id: &str, description: &str, cap: &str) -> St
         "# cortexfs.type=debug".to_owned(),
         "# cortexfs.created_at=".to_owned(),
         "# cortexfs.owned_by=cortexfs".to_owned(),
-        "# cortexfs.context_length=0".to_owned(),
+        "# cortexfs.context_length=unknown".to_owned(),
         "# cortexfs.driver=debug".to_owned(),
         "# cortexfs.driver.default=debug".to_owned(),
         "# cortexfs.driver.exec=debug".to_owned(),
@@ -34,6 +34,7 @@ pub(crate) fn debug_model_control_content(model: &str, file: &str) -> Option<Str
         "driver" => Some("default=debug\nexec=debug\nagent=debug\n".to_owned()),
         "cap" => Some("chat\nstream\n".to_owned()),
         "effort" => Some("auto\n".to_owned()),
+        "limit" => Some("unknown\n".to_owned()),
         "default" | "fallback" | "log" => Some("\n".to_owned()),
         "session" => Some("none\n".to_owned()),
         "status" => Some("idle\n".to_owned()),
@@ -52,6 +53,7 @@ pub(crate) fn projected_provider_models(
     cache_dir: &Path,
 ) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
     let configs = read_provider_configs(config_dir)?;
+    let catalog_limits = provider::catalog::cached_model_limits(cache_dir);
     let mut projected = Vec::new();
     let mut seen = HashSet::new();
     for entry in configs {
@@ -65,6 +67,18 @@ pub(crate) fn projected_provider_models(
         for model in provider_config_models(&config, cache_dir, &provider) {
             let key = format!("{provider}/{model}");
             if seen.insert(key) {
+                let limit = config
+                    .model_limits
+                    .get(&model)
+                    .copied()
+                    .and_then(ModelContextLimit::known)
+                    .or_else(|| {
+                        catalog_limits
+                            .get(&format!("{provider}/{model}"))
+                            .copied()
+                            .and_then(ModelContextLimit::known)
+                    })
+                    .unwrap_or(ModelContextLimit::Unknown);
                 projected.push(ProjectedProviderModel {
                     provider: provider.clone(),
                     model,
@@ -76,6 +90,7 @@ pub(crate) fn projected_provider_models(
                         &provider,
                         config.default_model.as_deref(),
                     ),
+                    limit,
                 });
             }
         }
@@ -132,9 +147,19 @@ pub(crate) fn read_provider_configs(
         let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
             continue;
         };
+        if !valid_provider_model_limits(&config) {
+            continue;
+        }
         configs.push(ProviderConfigEntry { config });
     }
     Ok(configs)
+}
+
+fn valid_provider_model_limits(config: &ProviderConfig) -> bool {
+    config.model_limits.iter().all(|(model, limit)| {
+        *limit > 0
+            && (config.default_model.as_ref() == Some(model) || config.models.contains(model))
+    })
 }
 
 pub(crate) fn projected_provider_models_for_provider(
@@ -317,7 +342,7 @@ pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String 
          # cortexfs.type=chat\n\
          # cortexfs.created_at=\n\
          # cortexfs.owned_by={}\n\
-         # cortexfs.context_length=0\n\
+         # cortexfs.context_length={}\n\
          # cortexfs.driver={driver}\n\
          # cortexfs.driver.default={}\n\
          # cortexfs.driver.exec={}\n\
@@ -327,6 +352,7 @@ pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String 
          # cortexfs.status=configured\n\
          # cortexfs.cap={}\n",
         model.provider,
+        model.limit,
         routes.route_value(ModelDriverUseCase::Default),
         routes.route_value(ModelDriverUseCase::Exec),
         routes.route_value(ModelDriverUseCase::Socket),
@@ -345,6 +371,7 @@ pub(crate) fn provider_model_control_content(
         "cap" => Some(model.cap.clone()),
         "effort" => Some(format!("{}\n", model.effort)),
         "fallback" => Some(model.fallback.clone()),
+        "limit" => Some(format!("{}\n", model.limit)),
         "default" => Some(format!("base_url={}\n", model.base_url)),
         "session" => Some("none\n".to_owned()),
         "status" => Some("configured\n".to_owned()),

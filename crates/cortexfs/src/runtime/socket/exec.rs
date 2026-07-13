@@ -3,6 +3,14 @@ use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(test)]
+thread_local! {
+    static CAPTURE_SOCKET_CHILD_WINDOW: std::cell::RefCell<Vec<Option<u32>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    static CAPTURE_SOCKET_CHILD_WINDOW_ENABLED: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
+
 struct RunControlServer {
     shutdown: Arc<AtomicBool>,
     startup: mpsc::Receiver<Result<(), runtime::control::RunCapabilityError>>,
@@ -29,6 +37,65 @@ impl Drop for RunControlServer {
     }
 }
 
+fn handle_agent_stop_request(
+    stream: &mut UnixStream,
+    runtime_agent: &str,
+    stop: Option<&dyn AgentStopHandler>,
+    peer_uid: u32,
+    agent: &str,
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    if agent != runtime_agent {
+        return Err(SocketRuntimeError::PeerDenied);
+    }
+    let handler = stop.ok_or(SocketRuntimeError::Record(
+        SocketSessionRecordError::UnsupportedRequest,
+    ))?;
+    let prepared = handler.preflight(agent, peer_uid)?;
+    let response = SocketRuntimeResponse::new(vec![
+        serde_json::json!({ "type": "accepted", "op": "stop", "agent": agent }).to_string(),
+    ]);
+    write_socket_runtime_response(stream, &response)?;
+    prepared
+        .execute()
+        .map_err(|_error| SocketRuntimeError::PostAcceptStop)?;
+    Ok(response)
+}
+
+fn create_socket_child(
+    source_root: &Path,
+    ctx_root: &Path,
+    request: runtime::control::CreateChildRequest,
+) -> Result<runtime::control::CreateChildResult, runtime::control::RunCapabilityError> {
+    #[cfg(test)]
+    if CAPTURE_SOCKET_CHILD_WINDOW_ENABLED.with(std::cell::Cell::get) {
+        CAPTURE_SOCKET_CHILD_WINDOW.with(|capture| capture.borrow_mut().push(request.window));
+        return Err(runtime::control::RunCapabilityError::CannotCreate);
+    }
+    agent::createop::create_child_context(
+        source_root,
+        ctx_root,
+        &request.agent,
+        &request.session,
+        &request.run,
+        &request.child,
+        Some(&request.child_session),
+        request.path.as_deref(),
+        request.window,
+        &request.input,
+        &request.life,
+    )
+    .map(|(child_session, pid)| runtime::control::CreateChildResult {
+        child: request.child,
+        child_session,
+        pid,
+    })
+    .map_err(|error| match error.errno() {
+        "EACCES" => runtime::control::RunCapabilityError::PeerDenied,
+        "EINVAL" => runtime::control::RunCapabilityError::InvalidFrame,
+        _ => runtime::control::RunCapabilityError::CannotCreate,
+    })
+}
+
 pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     stream: &mut UnixStream,
     runtime: AgentExecutableSocketRuntime<'_>,
@@ -39,21 +106,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     let debug = socket_debug_timing_from_frame(frame);
     let request = parse_socket_request_frame(frame).map_err(SocketRuntimeError::Request)?;
     if let SocketRequest::Stop { ref agent } = request {
-        if agent != runtime.agent_name {
-            return Err(SocketRuntimeError::PeerDenied);
-        }
-        let handler = stop.ok_or(SocketRuntimeError::Record(
-            SocketSessionRecordError::UnsupportedRequest,
-        ))?;
-        let prepared = handler.preflight(agent, peer_uid)?;
-        let response = SocketRuntimeResponse::new(vec![
-            serde_json::json!({ "type": "accepted", "op": "stop", "agent": agent }).to_string(),
-        ]);
-        write_socket_runtime_response(stream, &response)?;
-        prepared
-            .execute()
-            .map_err(|_error| SocketRuntimeError::PostAcceptStop)?;
-        return Ok(response);
+        return handle_agent_stop_request(stream, runtime.agent_name, stop, peer_uid, agent);
     }
     let SocketRequest::Send {
         ref id,
@@ -106,6 +159,16 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
             return Ok(response);
         }
     };
+    let start = recorder_response
+        .frames()
+        .first()
+        .and_then(|frame| serde_json::from_str::<Value>(frame).ok())
+        .ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let run_id = start
+        .get("run")
+        .and_then(Value::as_str)
+        .ok_or(SocketRuntimeError::CannotRunAgent)?
+        .to_owned();
     let tool_context = agent_tool_context_for_request(cwd.as_deref())?;
     let mut client_connected = true;
     write_while_connected(&mut client_connected, || {
@@ -122,7 +185,8 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     })?;
 
     let run_request = AgentExecutableRunRequest {
-        run_id: id,
+        run_id: &run_id,
+        cancellation_id: id,
         session,
         cwd: cwd.as_deref(),
         input,
@@ -137,17 +201,18 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     } else {
         run_agent_executable_streaming(stream, runtime, run_request)?
     };
-    record_owned_child_completion(runtime, session, id, &agent_outcome)?;
+    record_owned_child_completion(runtime, session, &run_id, &agent_outcome)?;
     let agent_frames = agent_outcome.frames;
     if scope != SocketSessionScope::Temp {
-        record_approval_frames(&session_dir, id, &agent_frames)
+        record_approval_frames(&session_dir, &run_id, &agent_frames)
             .map_err(SocketRuntimeError::Record)?;
-        record_tool_results_from_event_frames(&session_dir, id, &agent_frames)
+        record_tool_results_from_event_frames(&session_dir, &run_id, &agent_frames)
             .map_err(SocketRuntimeError::Record)?;
-        let terminal_error = record_agent_error_from_event_frames(&session_dir, id, &agent_frames)
-            .map_err(SocketRuntimeError::Record)?;
+        let terminal_error =
+            record_agent_error_from_event_frames(&session_dir, &run_id, &agent_frames)
+                .map_err(SocketRuntimeError::Record)?;
         if !terminal_error && let Some(text) = assistant_text_from_event_frames(&agent_frames) {
-            record_assistant_response_to_session(&session_dir, id, &text)
+            record_assistant_response_to_session(&session_dir, &run_id, &text)
                 .map_err(SocketRuntimeError::Record)?;
         }
     }
@@ -187,7 +252,10 @@ fn run_agent_envelope_loop(
     let mut seen = HashSet::new();
     let mut observation = Value::Null;
     for step in 0..=MAX_CALLS {
-        if agent_run_cancelled(&runtime.session_root.join(request.session), request.run_id) {
+        if agent_run_cancelled(
+            &runtime.session_root.join(request.session),
+            request.cancellation_id,
+        ) {
             return Ok(AgentRunOutcome {
                 frames,
                 process: AgentProcessOutcome::Cancelled,
@@ -261,7 +329,10 @@ fn run_agent_envelope_loop(
                 process: AgentProcessOutcome::Error,
             });
         }
-        if agent_run_cancelled(&runtime.session_root.join(request.session), request.run_id) {
+        if agent_run_cancelled(
+            &runtime.session_root.join(request.session),
+            request.cancellation_id,
+        ) {
             return Ok(AgentRunOutcome {
                 frames,
                 process: AgentProcessOutcome::Cancelled,
@@ -275,7 +346,7 @@ fn run_agent_envelope_loop(
             run: request.run_id,
             session: request.session,
             inherit_control: false,
-            cancel: Some((&cancel_dir, request.run_id)),
+            cancel: Some((&cancel_dir, request.cancellation_id)),
         };
         let (content, status) =
             match object::executor::exec::prepare_agent_tool_call(&config, &call) {
@@ -284,7 +355,7 @@ fn run_agent_envelope_loop(
                     let [request_frame, result_frame] = approval.frames;
                     frames.extend([request_frame, result_frame]);
                     if approval.allowed {
-                        if agent_run_cancelled(&cancel_dir, request.run_id) {
+                        if agent_run_cancelled(&cancel_dir, request.cancellation_id) {
                             return Ok(AgentRunOutcome {
                                 frames,
                                 process: AgentProcessOutcome::Cancelled,
@@ -304,7 +375,7 @@ fn run_agent_envelope_loop(
                 },
                 Err(error) => (format!("ERROR: {error}\n"), "error"),
             };
-        if agent_run_cancelled(&cancel_dir, request.run_id) {
+        if agent_run_cancelled(&cancel_dir, request.cancellation_id) {
             return Ok(AgentRunOutcome {
                 frames,
                 process: AgentProcessOutcome::Cancelled,
@@ -662,29 +733,7 @@ pub(crate) fn run_agent_executable_streaming(
                 &server_shutdown,
                 &startup_sender,
                 || Some(request_run.clone()),
-                |request| {
-                    agent::createop::create_child_context(
-                        &source_root,
-                        &ctx_root,
-                        &request.agent,
-                        &request.session,
-                        &request.run,
-                        &request.child,
-                        Some(&request.child_session),
-                        &request.input,
-                        &request.life,
-                    )
-                    .map(|(child_session, pid)| runtime::control::CreateChildResult {
-                        child: request.child,
-                        child_session,
-                        pid,
-                    })
-                    .map_err(|error| match error.errno() {
-                        "EACCES" => runtime::control::RunCapabilityError::PeerDenied,
-                        "EINVAL" => runtime::control::RunCapabilityError::InvalidFrame,
-                        _ => runtime::control::RunCapabilityError::CannotCreate,
-                    })
-                },
+                |request| create_socket_child(&source_root, &ctx_root, request),
             );
             if let Err(ref error) = result {
                 let _ignored = error_sender.try_send(Err(error.clone()));
@@ -846,7 +895,7 @@ pub(crate) fn run_agent_executable_streaming(
                 }
             },
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if agent_run_cancelled(&session_dir, request.run_id) {
+                if agent_run_cancelled(&session_dir, request.cancellation_id) {
                     cancelled = true;
                     terminate_agent_process_group(&mut child);
                     break;
@@ -1066,6 +1115,7 @@ pub(crate) fn read_agent_executable_frame_line(
 #[derive(Clone, Copy)]
 pub(crate) struct AgentExecutableRunRequest<'a> {
     pub(crate) run_id: &'a str,
+    pub(crate) cancellation_id: &'a str,
     pub(crate) session: &'a str,
     pub(crate) cwd: Option<&'a str>,
     pub(crate) input: &'a str,
@@ -1111,11 +1161,12 @@ mod completion_tests {
     }
 
     #[test]
-    fn approval_response_denies_eof_malformed_mismatch_and_timeout()
+    fn approval_response_accepts_only_emitted_run_and_exact_call()
     -> Result<(), Box<dyn std::error::Error>> {
         for response in [
             "",
             "not-json\n",
+            "{\"op\":\"approve\",\"run\":\"client-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
             "{\"op\":\"approve\",\"run\":\"wrong\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
             "{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"wrong\",\"decision\":\"allow_once\"}\n",
             "{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"deny\"}\n",
@@ -1132,6 +1183,15 @@ mod completion_tests {
         let approval = request_tool_approval(&mut server, "run-1", &approval_call())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         assert!(!approval.allowed);
+
+        let (mut client, mut server) = UnixStream::pair()?;
+        client.write_all(
+            b"{\"op\":\"approve\",\"run\":\"run-1\",\"id\":\"call-1\",\"decision\":\"allow_once\"}\n",
+        )?;
+        client.shutdown(Shutdown::Write)?;
+        let approval = request_tool_approval(&mut server, "run-1", &approval_call())
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        assert!(approval.allowed);
         Ok(())
     }
 
@@ -1202,6 +1262,7 @@ mod completion_tests {
         let root = completion_root("canonical-child-channel");
         let _ignored = fs::remove_dir_all(&root);
         assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_v1_runtime_models(&root).is_ok());
         let parent = derive_agent_runtime_view(&root, "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
@@ -1224,6 +1285,7 @@ mod completion_tests {
         let root = completion_root("child-channel-owner-mismatch");
         let _ignored = fs::remove_dir_all(&root);
         assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_v1_runtime_models(&root).is_ok());
         let parent = derive_agent_runtime_view(&root, "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
@@ -1324,6 +1386,38 @@ mod completion_tests {
         assert_eq!(
             compact_child_outcome("run", &cancelled).0,
             ChildContextStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn socket_child_helper_forwards_some_and_none_windows_exactly() {
+        CAPTURE_SOCKET_CHILD_WINDOW.with(|capture| capture.borrow_mut().clear());
+        CAPTURE_SOCKET_CHILD_WINDOW_ENABLED.with(|enabled| enabled.set(true));
+        for (child, window) in [("known", Some(2048)), ("auto", None)] {
+            let result = create_socket_child(
+                Path::new("/source"),
+                Path::new("/ctx"),
+                runtime::control::CreateChildRequest {
+                    agent: "parent".to_owned(),
+                    session: "session".to_owned(),
+                    run: "run".to_owned(),
+                    child: child.to_owned(),
+                    child_session: format!("{child}-session"),
+                    path: None,
+                    window,
+                    input: "work".to_owned(),
+                    life: "owned".to_owned(),
+                },
+            );
+            assert_eq!(
+                result,
+                Err(runtime::control::RunCapabilityError::CannotCreate)
+            );
+        }
+        CAPTURE_SOCKET_CHILD_WINDOW_ENABLED.with(|enabled| enabled.set(false));
+        assert_eq!(
+            CAPTURE_SOCKET_CHILD_WINDOW.with(|capture| capture.borrow().clone()),
+            [Some(2048), None]
         );
     }
 }

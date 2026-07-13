@@ -26,7 +26,8 @@ use crate::authority::helpers::generated_sibling_name;
 use crate::support::jsonl::read_jsonl_line;
 use crate::support::plain::{
     CreatePlainDirMessages, create_plain_dir_exclusive, create_plain_dir_with,
-    open_plain_directory, open_plain_file, plain_file_name, read_small_text_file, sync_plain_dir,
+    open_plain_directory, open_plain_file, plain_file_name, read_file_to_string,
+    read_small_text_file, sync_plain_dir,
 };
 use crate::{atomic_create_text_with_mode, atomic_replace_text_with_mode};
 
@@ -39,6 +40,8 @@ const INDEX_DIR: &str = "index";
 const CLAIM_DIR: &str = "claim";
 const CLAIM_CURSOR_FILE: &str = ".cursor.json";
 const CLAIM_VERSION: u32 = 1;
+const SEND_DIR: &str = "send";
+const SEND_VERSION: u32 = 1;
 const MAX_SHARD_ROWS: usize = 128;
 const MAX_SHARD_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
@@ -48,6 +51,7 @@ const MAX_WAL_FRAME_BYTES: usize = MAX_PAYLOAD_BYTES * 2 + MAX_WAL_OVERHEAD_BYTE
 const INDEX_RECORD_BYTES: usize = 48;
 const MAX_CLAIM_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CLAIM_CURSOR_BYTES: u64 = 16 * 1024;
+const MAX_SEND_RECEIPT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[cfg(test)]
 type TestBarrierPair = (Arc<Barrier>, Arc<Barrier>);
@@ -74,6 +78,8 @@ thread_local! {
     static SHARD_OPENS: Cell<usize> = const { Cell::new(0) };
     static CLAIM_SCAN_BYTES: Cell<usize> = const { Cell::new(0) };
     static CLAIM_CURSOR_FAILURE: Cell<bool> = const { Cell::new(false) };
+    static SEND_PAIR_EVENT_FAILURE: Cell<bool> = const { Cell::new(false) };
+    static SEND_RECEIPT_REPLACEMENT: Cell<bool> = const { Cell::new(false) };
 }
 
 /// One projected session JSONL stream.
@@ -331,15 +337,42 @@ impl<'a> HistoryGuard<'a> {
         scope: &str,
         cwd: Option<&str>,
     ) -> std::io::Result<SendClaim> {
+        let receipt = read_send_receipt(self.session, id)?;
+        if let Some(receipt) = receipt.as_ref() {
+            self.repair_send(receipt)?;
+        }
         self.refresh_claims()?;
         let claim_dir = self.session.join(STORE_DIR).join(CLAIM_DIR);
+        if let Some(receipt) = receipt {
+            if receipt.input != input || receipt.scope != scope || receipt.cwd.as_deref() != cwd {
+                return Ok(SendClaim::Conflict);
+            }
+            return self.prepared_claim(&claim_dir, receipt);
+        }
         let Some(claim) = read_claim(&claim_dir, id)? else {
             return Ok(SendClaim::Vacant);
         };
-        let (Some(user), Some(start)) = (claim.user.as_ref(), claim.start.as_ref()) else {
+        let Some(start) = claim.start.as_ref() else {
             return Ok(SendClaim::Corrupt);
         };
         if claim.corrupt || !claim.seen || !start.canonical {
+            return Ok(SendClaim::Corrupt);
+        }
+        let run = start.run.as_deref().unwrap_or(claim.id.as_str());
+        let linked_claim;
+        let facts = if run == claim.id {
+            &claim
+        } else {
+            let Some(found) = read_claim(&claim_dir, run)? else {
+                return Ok(SendClaim::Corrupt);
+            };
+            linked_claim = found;
+            &linked_claim
+        };
+        let Some(user) = facts.user.as_ref() else {
+            return Ok(SendClaim::Corrupt);
+        };
+        if facts.corrupt || !facts.seen {
             return Ok(SendClaim::Corrupt);
         }
         if user.content.as_deref() != Some(input)
@@ -348,10 +381,319 @@ impl<'a> HistoryGuard<'a> {
         {
             return Ok(SendClaim::Conflict);
         }
-        Ok(SendClaim::Replay(claim.done.as_ref().map_or_else(
+        Ok(SendClaim::Replay(facts.done.as_ref().map_or_else(
             || start.source.line.clone(),
             |done| done.source.line.clone(),
         )))
+    }
+
+    /// Persists a crash-recoverable client-id to durable-run reservation.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send preparation keeps the receipt fields and canonical pair explicit"
+    )]
+    pub(crate) fn prepare_send(
+        &self,
+        id: &str,
+        run: &str,
+        input: &str,
+        scope: &str,
+        cwd: Option<&str>,
+        message: &str,
+        start: &str,
+    ) -> std::io::Result<PreparedSend> {
+        if !crate::is_object_name(id)
+            || !is_durable_run_id(run)
+            || !matches!(scope, "private" | "shared")
+            || cwd.is_some_and(|cwd| !crate::is_stable_chroot_absolute_path(cwd))
+            || input.contains('\0')
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "invalid durable send receipt",
+            ));
+        }
+        let claim_dir = self.session.join(STORE_DIR).join(CLAIM_DIR);
+        if read_claim(&claim_dir, run)?.is_some() {
+            return Err(Error::new(
+                ErrorKind::AlreadyExists,
+                "durable run id already exists",
+            ));
+        }
+        let receipt = SendReceipt {
+            version: SEND_VERSION,
+            id: id.to_owned(),
+            run: run.to_owned(),
+            input: input.to_owned(),
+            scope: scope.to_owned(),
+            cwd: cwd.map(str::to_owned),
+            messages: self.send_position(Stream::Messages)?,
+            events: self.send_position(Stream::Events)?,
+        };
+        validate_send_lines(&receipt, message, start)?;
+        write_send_receipt(self.session, &receipt)?;
+        Ok(PreparedSend {
+            receipt,
+            message: false,
+            start: false,
+        })
+    }
+
+    /// Appends only the missing halves of one prepared durable send.
+    pub(crate) fn append_prepared_send(
+        &self,
+        send: &PreparedSend,
+        message: &str,
+        start: &str,
+    ) -> std::io::Result<()> {
+        validate_send_lines(&send.receipt, message, start)?;
+        if !send.message {
+            self.append(Stream::Messages, &[message])?;
+            #[cfg(test)]
+            fail_send_pair_after_message()?;
+        }
+        if !send.start {
+            self.append(Stream::Events, &[start])?;
+        }
+        match self.lookup_send(
+            &send.receipt.id,
+            &send.receipt.input,
+            &send.receipt.scope,
+            send.receipt.cwd.as_deref(),
+        )? {
+            SendClaim::Replay(_) => Ok(()),
+            SendClaim::Vacant
+            | SendClaim::Pending(_)
+            | SendClaim::Conflict
+            | SendClaim::Corrupt => Err(Error::new(
+                ErrorKind::InvalidData,
+                "durable send did not commit both history facts",
+            )),
+        }
+    }
+
+    fn send_position(&self, stream: Stream) -> std::io::Result<SendPosition> {
+        Ok(SendPosition {
+            length: self.len(stream)?,
+            raw: match self.view {
+                HistoryView::Legacy(ref snapshot) => Some(snapshot.marker(stream).receipt),
+                HistoryView::Columnar => None,
+            },
+        })
+    }
+
+    fn repair_send(&self, receipt: &SendReceipt) -> std::io::Result<()> {
+        match self.view {
+            HistoryView::Legacy(ref snapshot)
+                if receipt.messages.raw.is_some() && receipt.events.raw.is_some() =>
+            {
+                repair_marker_tail(
+                    &self.session.join(Stream::Messages.marker()),
+                    snapshot.marker(Stream::Messages),
+                    receipt.messages,
+                )?;
+                repair_marker_tail(
+                    &self.session.join(Stream::Events.marker()),
+                    snapshot.marker(Stream::Events),
+                    receipt.events,
+                )?;
+            }
+            HistoryView::Columnar
+                if receipt.messages.raw.is_none() && receipt.events.raw.is_none() =>
+            {
+                let wal = self.session.join(STORE_DIR).join(WAL_FILE);
+                repair_wal(&wal)?;
+                let file = OpenOptions::new()
+                    .write(true)
+                    .custom_flags(libc::O_NOFOLLOW)
+                    .open(wal)?;
+                if !file.metadata()?.is_file() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "session WAL is not a plain file",
+                    ));
+                }
+                file.sync_all()?;
+                if self.len(Stream::Messages)? < receipt.messages.length
+                    || self.len(Stream::Events)? < receipt.events.length
+                {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "durable send history shrank before recovery",
+                    ));
+                }
+            }
+            HistoryView::Legacy(_) | HistoryView::Columnar => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "durable send history backend changed before recovery",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn scan_prepared_facts(&self, receipt: &SendReceipt) -> std::io::Result<PreparedFactState> {
+        let (expected_message, expected_start) = expected_send_values(receipt);
+        let mut facts = PreparedFactState::default();
+        for stream in [Stream::Messages, Stream::Events] {
+            let position = match stream {
+                Stream::Messages => receipt.messages,
+                Stream::Events => receipt.events,
+            };
+            let end = self.len(stream)?;
+            if position.length > end {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "durable send history shrank before exact recovery",
+                ));
+            }
+            let reader = ProjectedReader {
+                guard: self,
+                stream,
+                offset: position.length,
+                end,
+            };
+            let mut reader = BufReader::new(reader);
+            while let Some(line) = read_jsonl_line(&mut reader, MAX_PAYLOAD_BYTES)? {
+                let value = serde_json::from_str::<Value>(&line).map_err(|_error| {
+                    Error::new(ErrorKind::InvalidData, "invalid durable send history fact")
+                })?;
+                match stream {
+                    Stream::Messages
+                        if value.get("run").and_then(Value::as_str)
+                            == Some(receipt.run.as_str()) =>
+                    {
+                        if facts.message || value != expected_message {
+                            return Err(Error::new(
+                                ErrorKind::InvalidData,
+                                "durable send message does not match receipt",
+                            ));
+                        }
+                        facts.message = true;
+                    }
+                    Stream::Events => {
+                        let same_run =
+                            value.get("run").and_then(Value::as_str) == Some(receipt.run.as_str());
+                        let same_client = value.get("client_id").and_then(Value::as_str)
+                            == Some(receipt.id.as_str());
+                        let same_event_id =
+                            value.get("id").and_then(Value::as_str) == Some(receipt.run.as_str());
+                        if same_run || same_client || same_event_id {
+                            if facts.start || value != expected_start {
+                                return Err(Error::new(
+                                    ErrorKind::InvalidData,
+                                    "durable send event does not match receipt",
+                                ));
+                            }
+                            facts.start = true;
+                        }
+                    }
+                    Stream::Messages => {}
+                }
+            }
+        }
+        Ok(facts)
+    }
+
+    fn prepared_claim(&self, claim_dir: &Path, receipt: SendReceipt) -> std::io::Result<SendClaim> {
+        let facts = self.scan_prepared_facts(&receipt)?;
+        let (expected_message, expected_start) = expected_send_values(&receipt);
+        let run_claim = read_claim(claim_dir, &receipt.run)?;
+        let client_claim = if receipt.id == receipt.run {
+            None
+        } else {
+            read_claim(claim_dir, &receipt.id)?
+        };
+        let start_claim = if receipt.id == receipt.run {
+            run_claim.as_ref()
+        } else {
+            client_claim.as_ref()
+        };
+        if run_claim.as_ref().is_some_and(|claim| claim.corrupt)
+            || client_claim.as_ref().is_some_and(|claim| claim.corrupt)
+        {
+            return Ok(SendClaim::Corrupt);
+        }
+        let expected_run_seen = facts.message || facts.start;
+        let run_claim_matches = run_claim
+            .as_ref()
+            .map_or(!expected_run_seen, |claim| claim.seen == expected_run_seen);
+        if !run_claim_matches {
+            return Ok(SendClaim::Corrupt);
+        }
+        if receipt.id != receipt.run
+            && (run_claim
+                .as_ref()
+                .is_some_and(|claim| claim.start.is_some())
+                || client_claim
+                    .as_ref()
+                    .is_some_and(|claim| claim.user.is_some() || claim.done.is_some()))
+        {
+            return Ok(SendClaim::Corrupt);
+        }
+        if run_claim.as_ref().is_some_and(|claim| claim.done.is_some()) {
+            return Ok(SendClaim::Corrupt);
+        }
+        let message = match (
+            facts.message,
+            run_claim.as_ref().and_then(|claim| claim.user.as_ref()),
+        ) {
+            (true, Some(user))
+                if claim_source_matches(&user.source, &expected_message)
+                    && user.content.as_deref() == Some(receipt.input.as_str()) =>
+            {
+                true
+            }
+            (false, None) => false,
+            _ => {
+                return Ok(SendClaim::Corrupt);
+            }
+        };
+        let start = match (
+            facts.start,
+            start_claim.and_then(|claim| claim.start.as_ref()),
+        ) {
+            (true, Some(start))
+                if start.canonical
+                    && start.run.as_deref() == Some(receipt.run.as_str())
+                    && start.scope.as_deref() == Some(receipt.scope.as_str())
+                    && start.cwd.matches(receipt.cwd.as_deref())
+                    && claim_source_matches(&start.source, &expected_start) =>
+            {
+                Some(start)
+            }
+            (false, None) => None,
+            _ => {
+                return Ok(SendClaim::Corrupt);
+            }
+        };
+        if receipt.id != receipt.run {
+            let client_claim_matches = client_claim
+                .as_ref()
+                .map_or(!facts.start, |claim| facts.start && claim.seen);
+            if !client_claim_matches {
+                return Ok(SendClaim::Corrupt);
+            }
+        }
+        let prepared = PreparedSend {
+            receipt,
+            message,
+            start: start.is_some(),
+        };
+        if let (true, Some(start)) = (prepared.message, start) {
+            let frame = run_claim
+                .as_ref()
+                .and_then(|claim| claim.done.as_ref())
+                .map_or_else(
+                    || start.source.line.clone(),
+                    |done| done.source.line.clone(),
+                );
+            remove_send_receipt(self.session, &prepared.receipt)?;
+            Ok(SendClaim::Replay(frame))
+        } else {
+            Ok(SendClaim::Pending(prepared))
+        }
     }
 
     fn scan_claim_stream(
@@ -467,12 +809,247 @@ fn read_committed_manifest(store: &Path) -> std::io::Result<Manifest> {
 pub(crate) enum SendClaim {
     /// No fact exists for the requested id after both cursors reached EOF.
     Vacant,
+    /// A durable prepare receipt exists and its missing history facts must be completed.
+    Pending(PreparedSend),
     /// The canonical request already exists; return its terminal or start frame.
     Replay(String),
     /// The id exists with different request fields.
     Conflict,
     /// The indexed history for the id is incomplete or contradictory.
     Corrupt,
+}
+
+/// One durable send prepare receipt plus its proven history state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PreparedSend {
+    receipt: SendReceipt,
+    message: bool,
+    start: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PreparedFactState {
+    message: bool,
+    start: bool,
+}
+
+impl PreparedSend {
+    /// Returns the runtime-owned durable run id reserved by this receipt.
+    pub(crate) fn run_id(&self) -> &str {
+        &self.receipt.run
+    }
+}
+
+fn is_durable_run_id(run: &str) -> bool {
+    run.strip_prefix("ctx-").is_some_and(|suffix| {
+        suffix.len() == 32
+            && suffix
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+fn validate_send_receipt(receipt: &SendReceipt, id: &str) -> std::io::Result<()> {
+    if receipt.version != SEND_VERSION
+        || receipt.id != id
+        || !crate::is_object_name(&receipt.id)
+        || !is_durable_run_id(&receipt.run)
+        || !matches!(receipt.scope.as_str(), "private" | "shared")
+        || receipt
+            .cwd
+            .as_deref()
+            .is_some_and(|cwd| !crate::is_stable_chroot_absolute_path(cwd))
+        || receipt.input.contains('\0')
+        || receipt.messages.raw.is_some() != receipt.events.raw.is_some()
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "invalid durable send receipt",
+        ));
+    }
+    Ok(())
+}
+
+struct OpenSendReceipt {
+    directory: File,
+    file: File,
+    receipt: SendReceipt,
+    identity: FileReceipt,
+}
+
+fn open_send_receipt(session: &Path, id: &str) -> std::io::Result<Option<OpenSendReceipt>> {
+    if !crate::is_object_name(id) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "invalid durable send receipt id",
+        ));
+    }
+    let directory = match open_plain_directory(&session.join(STORE_DIR).join(SEND_DIR)) {
+        Ok(directory) => directory,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let file_fd = match nix::fcntl::openat(
+        &directory,
+        id,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    ) {
+        Ok(file) => file,
+        Err(nix::errno::Errno::ENOENT) => return Ok(None),
+        Err(error) => return Err(Error::from(error)),
+    };
+    let file = File::from(file_fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file()
+        || metadata.permissions().mode() & 0o7777 != 0o600
+        || metadata.len() > MAX_SEND_RECEIPT_BYTES
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "durable send receipt is not a bounded private plain file",
+        ));
+    }
+    let identity = FileReceipt {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+    };
+    let content = read_file_to_string(file.try_clone()?, metadata.len())?;
+    let receipt = serde_json::from_str::<SendReceipt>(&content)
+        .map_err(|_error| Error::new(ErrorKind::InvalidData, "invalid durable send receipt"))?;
+    validate_send_receipt(&receipt, id)?;
+    Ok(Some(OpenSendReceipt {
+        directory,
+        file,
+        receipt,
+        identity,
+    }))
+}
+
+fn read_send_receipt(session: &Path, id: &str) -> std::io::Result<Option<SendReceipt>> {
+    Ok(open_send_receipt(session, id)?.map(|opened| opened.receipt))
+}
+
+fn write_send_receipt(session: &Path, receipt: &SendReceipt) -> std::io::Result<()> {
+    validate_send_receipt(receipt, &receipt.id)?;
+    let send_dir = session.join(STORE_DIR).join(SEND_DIR);
+    create_store_dir(&send_dir)?;
+    let mut content = serde_json::to_string(receipt).map_err(Error::other)?;
+    content.push('\n');
+    if u64::try_from(content.len()).map_or(true, |len| len > MAX_SEND_RECEIPT_BYTES) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "durable send receipt exceeds size limit",
+        ));
+    }
+    atomic_create_text_with_mode(&send_dir.join(&receipt.id), &content, 0o600)
+}
+
+fn remove_send_receipt(session: &Path, expected: &SendReceipt) -> std::io::Result<()> {
+    let opened = open_send_receipt(session, &expected.id)?.ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidData,
+            "durable send receipt disappeared before commit",
+        )
+    })?;
+    if opened.receipt != *expected {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "durable send receipt changed before commit",
+        ));
+    }
+
+    #[cfg(test)]
+    replace_send_receipt_before_removal(session, &expected.id)?;
+    let opened_metadata = opened.file.metadata()?;
+    let current = nix::sys::stat::fstatat(
+        &opened.directory,
+        expected.id.as_str(),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(Error::from)?;
+    let kind = nix::sys::stat::SFlag::from_bits_truncate(current.st_mode);
+    if !opened_metadata.is_file()
+        || opened_metadata.permissions().mode() & 0o7777 != 0o600
+        || (opened_metadata.dev(), opened_metadata.ino())
+            != (opened.identity.dev, opened.identity.ino)
+        || !kind.contains(nix::sys::stat::SFlag::S_IFREG)
+        || current.st_mode & 0o7777 != 0o600
+        || (current.st_dev, current.st_ino) != (opened.identity.dev, opened.identity.ino)
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "durable send receipt changed before removal",
+        ));
+    }
+    nix::unistd::unlinkat(
+        &opened.directory,
+        expected.id.as_str(),
+        nix::unistd::UnlinkatFlags::NoRemoveDir,
+    )
+    .map_err(Error::from)?;
+    opened.directory.sync_all()
+}
+
+fn expected_send_values(receipt: &SendReceipt) -> (Value, Value) {
+    (
+        serde_json::json!({
+            "role": "user",
+            "run": receipt.run,
+            "content": receipt.input
+        }),
+        serde_json::json!({
+            "type": "start",
+            "id": receipt.run,
+            "run": receipt.run,
+            "client_id": receipt.id,
+            "scope": receipt.scope,
+            "cwd": receipt.cwd
+        }),
+    )
+}
+
+fn claim_source_matches(source: &ClaimSource, expected: &Value) -> bool {
+    serde_json::from_str::<Value>(&source.line).is_ok_and(|value| value == *expected)
+}
+
+fn validate_send_lines(receipt: &SendReceipt, message: &str, start: &str) -> std::io::Result<()> {
+    validate_payloads(&[message, start], ErrorKind::InvalidData)?;
+    let message_value = serde_json::from_str::<Value>(message)
+        .map_err(|_error| Error::new(ErrorKind::InvalidData, "invalid durable send message"))?;
+    let start_value = serde_json::from_str::<Value>(start)
+        .map_err(|_error| Error::new(ErrorKind::InvalidData, "invalid durable send start"))?;
+    let (expected_message, expected_start) = expected_send_values(receipt);
+    if message_value != expected_message || start_value != expected_start {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "durable send lines do not match receipt",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SendReceipt {
+    version: u32,
+    id: String,
+    run: String,
+    input: String,
+    scope: String,
+    cwd: Option<String>,
+    messages: SendPosition,
+    events: SendPosition,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SendPosition {
+    length: u64,
+    raw: Option<FileReceipt>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -482,6 +1059,7 @@ struct ClaimStreamCursor {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 struct FileReceipt {
     dev: u64,
     ino: u64,
@@ -537,6 +1115,8 @@ struct UserClaim {
 struct StartClaim {
     source: ClaimSource,
     canonical: bool,
+    #[serde(default)]
+    run: Option<String>,
     scope: Option<String>,
     cwd: ClaimCwd,
 }
@@ -722,21 +1302,19 @@ fn index_event_claim(claim_dir: &Path, value: &Value, source: ClaimSource) -> st
     }
     let event_type = value.get("type").and_then(Value::as_str);
     if event_type == Some("start") {
-        let id = value
+        let event_id = value
             .get("id")
             .and_then(Value::as_str)
             .filter(|id| crate::is_object_name(id));
-        if let Some(id) = id {
-            index_start_claim(claim_dir, id, id, run, value, source.clone())?;
-        }
-        if let Some(run) = run
-            && Some(run) != id
-        {
+        let client_id = value.get("client_id").map_or(event_id, |value| {
+            value.as_str().filter(|id| crate::is_object_name(id))
+        });
+        if let Some(client_id) = client_id {
             index_start_claim(
                 claim_dir,
+                client_id,
+                event_id.unwrap_or_default(),
                 run,
-                id.unwrap_or_default(),
-                Some(run),
                 value,
                 source,
             )?;
@@ -774,14 +1352,15 @@ fn index_start_claim(
         .and_then(Value::as_str)
         .map(str::to_owned);
     let cwd = ClaimCwd::from_value(value.get("cwd"));
-    let canonical =
-        event_id == claim_id && run == Some(claim_id) && scope.is_some() && cwd.is_canonical();
+    let canonical = run == Some(event_id) && scope.is_some() && cwd.is_canonical();
     update_claim(claim_dir, claim_id, |claim| {
+        claim.seen = true;
         claim.corrupt |= merge_claim_fact(
             &mut claim.start,
             StartClaim {
                 source,
                 canonical,
+                run: run.map(str::to_owned),
                 scope,
                 cwd,
             },
@@ -903,6 +1482,44 @@ pub(crate) fn set_claim_cursor_failure(fail: bool) {
     CLAIM_CURSOR_FAILURE.with(|value| value.set(fail));
 }
 
+#[cfg(test)]
+pub(crate) fn fail_send_pair_after_message() -> std::io::Result<()> {
+    if SEND_PAIR_EVENT_FAILURE.with(|value| value.replace(false)) {
+        return Err(Error::other("injected send start append failure"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn set_send_pair_event_failure(fail: bool) {
+    SEND_PAIR_EVENT_FAILURE.with(|value| value.set(fail));
+}
+
+#[cfg(test)]
+pub(crate) fn set_send_receipt_replacement(fail: bool) {
+    SEND_RECEIPT_REPLACEMENT.with(|value| value.set(fail));
+}
+
+#[cfg(test)]
+fn replace_send_receipt_before_removal(session: &Path, id: &str) -> std::io::Result<()> {
+    if !SEND_RECEIPT_REPLACEMENT.with(|value| value.replace(false)) {
+        return Ok(());
+    }
+    let send_path = session.join(STORE_DIR).join(SEND_DIR);
+    let send_dir = open_plain_directory(&send_path)?;
+    let captured = format!(".{id}.captured");
+    nix::fcntl::renameat2(
+        &send_dir,
+        id,
+        &send_dir,
+        captured.as_str(),
+        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(Error::from)?;
+    send_dir.sync_all()?;
+    atomic_create_text_with_mode(&send_path.join(id), "replacement\n", 0o600)
+}
+
 fn append_marker_locked(
     path: &Path,
     expected: &MarkerSnapshot,
@@ -951,6 +1568,79 @@ fn append_marker_locked(
     }
     expected.length.set(after_length);
     Ok(())
+}
+
+fn repair_marker_tail(
+    path: &Path,
+    snapshot: &MarkerSnapshot,
+    position: SendPosition,
+) -> std::io::Result<()> {
+    let raw = position.raw.ok_or_else(|| {
+        Error::new(
+            ErrorKind::InvalidData,
+            "legacy durable send receipt has no marker identity",
+        )
+    })?;
+    let current_length = snapshot.length.get();
+    if raw != snapshot.receipt || current_length < position.length {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "legacy durable send marker does not match receipt",
+        ));
+    }
+    let growth = current_length - position.length;
+    if growth == 0 {
+        return snapshot.verify_current(path);
+    }
+    let mut final_byte = [0_u8; 1];
+    snapshot
+        .file
+        .read_exact_at(&mut final_byte, current_length.saturating_sub(1))?;
+    if final_byte == [b'\n'] {
+        return snapshot.verify_current(path);
+    }
+
+    let tail_limit = u64::try_from(MAX_PAYLOAD_BYTES)
+        .map_err(|_error| Error::other("session payload limit overflow"))?
+        .saturating_add(1);
+    let scan_start = current_length
+        .saturating_sub(tail_limit)
+        .max(position.length);
+    let size = usize::try_from(current_length.saturating_sub(scan_start))
+        .map_err(|_error| Error::other("legacy durable send tail is too large"))?;
+    let mut tail = vec![0_u8; size];
+    snapshot.file.read_exact_at(&mut tail, scan_start)?;
+    let repaired_length = if let Some(offset) = tail.iter().rposition(|byte| *byte == b'\n') {
+        scan_start
+            .checked_add(
+                u64::try_from(offset.saturating_add(1))
+                    .map_err(|_error| Error::other("legacy durable send repair overflow"))?,
+            )
+            .ok_or_else(|| Error::other("legacy durable send repair overflow"))?
+    } else if scan_start == position.length {
+        position.length
+    } else {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "legacy durable send torn tail exceeds one history fact",
+        ));
+    };
+
+    snapshot.verify_current(path)?;
+    let file = OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    if !snapshot.metadata_matches(&file.metadata()?, current_length) {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "legacy durable send marker changed before repair",
+        ));
+    }
+    file.set_len(repaired_length)?;
+    file.sync_all()?;
+    snapshot.length.set(repaired_length);
+    snapshot.verify_current(path)
 }
 
 /// Reads one projected stream as bounded UTF-8 text.

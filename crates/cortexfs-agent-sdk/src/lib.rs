@@ -592,9 +592,14 @@ fn startup_handshake(agent: &str) -> Result<(), cortexfs_runtime_client::Runtime
 }
 
 /// Creates an owned child through the receipt-bound runtime capability.
+///
+/// `path` is an optional attenuated `CTX_PATH`; `None` inherits the parent's
+/// path exactly. `window` may only attenuate the inherited context window.
 pub fn create_child(
     child: &str,
     child_session: &str,
+    path: Option<&str>,
+    window: Option<u32>,
     input: &str,
 ) -> Result<cortexfs_runtime_client::CreateChildResult, cortexfs_runtime_client::RuntimeClientError>
 {
@@ -602,16 +607,21 @@ pub fn create_child(
         || !is_object_name(child_session)
         || input.contains('\0')
         || input.len() > MAX_CHILD_INPUT_BYTES
+        || window == Some(0)
     {
         return Err(cortexfs_runtime_client::RuntimeClientError::InvalidEnvironment);
     }
     let request_id = cortexfs_runtime_client::fresh_request_id("agent-create")?;
     cortexfs_runtime_client::create_child_from_environment(
-        &request_id,
-        child,
-        child_session,
-        input,
-        "owned",
+        cortexfs_runtime_client::CreateChildEnvironmentRequest {
+            request_id: &request_id,
+            child,
+            child_session,
+            path,
+            window,
+            input,
+            life: "owned",
+        },
     )
 }
 
@@ -698,8 +708,17 @@ mod tests {
     #[test]
     #[ignore = "subprocess entrypoint for child capability test"]
     fn create_child_subprocess() {
-        assert!(create_child("worker-a", "child-a", "first handoff").is_ok());
-        assert!(create_child("worker-b", "child-b", "second handoff").is_ok());
+        assert!(create_child("worker-a", "child-a", None, None, "first handoff").is_ok());
+        assert!(
+            create_child(
+                "worker-b",
+                "child-b",
+                Some("/ctx/home/1000/tool"),
+                Some(2048),
+                "second handoff",
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -787,6 +806,8 @@ mod tests {
                     handoff_tx
                         .send((
                             request.child.clone(),
+                            request.path.clone(),
+                            request.window,
                             request.input.clone(),
                             request.life.clone(),
                         ))
@@ -818,11 +839,15 @@ mod tests {
             [
                 (
                     "worker-a".to_owned(),
+                    None,
+                    None,
                     "first handoff".to_owned(),
                     "owned".to_owned()
                 ),
                 (
                     "worker-b".to_owned(),
+                    Some("/ctx/home/1000/tool".to_owned()),
+                    Some(2048),
                     "second handoff".to_owned(),
                     "owned".to_owned()
                 )
@@ -864,6 +889,14 @@ mod tests {
                 .any(|bytes| bytes == b"\"type\":\"start\"")
         );
         Ok(())
+    }
+
+    #[test]
+    fn sdk_rejects_zero_child_window_before_connect() {
+        assert_eq!(
+            create_child("worker", "child", None, Some(0), "handoff"),
+            Err(cortexfs_runtime_client::RuntimeClientError::InvalidEnvironment)
+        );
     }
 
     #[derive(Debug)]

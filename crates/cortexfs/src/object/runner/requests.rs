@@ -253,15 +253,7 @@ pub(crate) fn provider_messages_for_agent(
 ) -> Value {
     agent.map_or_else(
         || json!([{"role": "user", "content": input}]),
-        |agent| {
-            json!([
-                {
-                    "role": "system",
-                    "content": cortexfs::render_agent_system_prompt(agent, agent_system, prompt_context)
-                },
-                {"role": "user", "content": input}
-            ])
-        },
+        |agent| cortexfs::agent_provider_messages(input, agent, agent_system, prompt_context),
     )
 }
 #[cfg(test)]
@@ -332,8 +324,16 @@ mod requests_tests {
             ),
         )
         .expect("mount");
-        fs::write(control.join("model"), "main\n").expect("model");
-        fs::write(control.join("policy"), "allow coder_t model:main use\n").expect("policy");
+        fs::write(control.join("model"), "local/chat\n").expect("model");
+        fs::write(control.join("window"), "auto\n").expect("window");
+        let model_control = root.join("model/local/chat.d");
+        fs::create_dir_all(&model_control).expect("model control");
+        fs::write(model_control.join("limit"), "unknown\n").expect("limit");
+        fs::write(
+            control.join("policy"),
+            "allow coder_t model:local/chat use\n",
+        )
+        .expect("policy");
         fs::write(control.join("tools"), "bash\nshell.exec\n").expect("tools");
         fs::write(control.join("status"), "idle\n").expect("status");
         fs::write(control.join("pid"), "\n").expect("pid");

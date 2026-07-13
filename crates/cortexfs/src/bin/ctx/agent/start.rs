@@ -320,7 +320,7 @@ pub(crate) fn ensure_agent_start_session(
         .join("agent")
         .join(&args.name)
         .join("session");
-    ensure_durable_session_layout(
+    let _receipts = ensure_durable_session_layout(
         &session_root,
         &args.session,
         cwd,

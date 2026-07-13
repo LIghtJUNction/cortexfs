@@ -362,9 +362,17 @@ pub(crate) fn persistent_context_path(root: &Path) -> Result<Option<PathBuf>, Ts
     let Some(agent) = env::var("CTX_AGENT").ok() else {
         return Ok(None);
     };
-    let (socket, token) = tsh_control_environment_from_env()?.ok_or_else(|| {
-        TshError::unavailable("persistent cache requires authenticated runtime capability")
-    })?;
+    let Some((socket, token)) = tsh_control_environment_from_env()? else {
+        if env::var_os("CTX_SESSION").is_none()
+            && env::var_os("CTX_RUN_ID").is_none()
+            && env::var_os("CTX_SOURCE").is_none()
+        {
+            return Ok(None);
+        }
+        return Err(TshError::unavailable(
+            "persistent cache requires authenticated runtime capability",
+        ));
+    };
     persistent_context_path_with_capability(root, &agent, &socket, &token)
 }
 

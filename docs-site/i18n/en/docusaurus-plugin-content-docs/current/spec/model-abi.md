@@ -6,8 +6,8 @@ There is only one model ABI:
 /ctx/model/<provider>/<model>       one-shot inference executable
 /ctx/model/<provider>/<model>.sock  optional CortexFS session socket
 /ctx/model/<provider>/<model>.d/    control files
-/ctx/model/main                     default model symlink
-/ctx/model/helper                   helper model symlink
+/ctx/model/main                     default coder model symlink
+/ctx/model/helper                   default reviewer model symlink
 ```
 
 `<provider>/<model>` is represented as two path components. For native model
@@ -19,13 +19,30 @@ providers, `<provider>` is the original provider identity:
 /ctx/model/google/gemini-2.5-pro
 ```
 
-For a custom base URL without a declared original provider mapping,
+For a custom domain base URL without a declared original provider mapping,
 `<provider>` is the normalized host name. For example,
 `https://api.lmm.best:9000/` projects models under:
 
 ```text
 /ctx/model/api.lmm.best/gpt-5.4-mini
 ```
+
+Address-like endpoints such as `127.0.0.1`, `::1`, or `localhost` MUST set an
+explicit provider `name` in the host-side provider config. Without that name,
+the config is invalid because `/ctx/model/<provider>` must be a stable object
+name, not a transport address. For example:
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "default_model": "gpt-5.4-mini",
+  "enabled": true,
+  "formats": ["openai.chat", "openai.responses"]
+}
+```
+
+This projects as `/ctx/model/local/gpt-5.4-mini`.
 
 The custom base URL is provider-adapter configuration, not a root ABI namespace.
 It may be shown in `model/<provider>/<model>.d/default` for inspection, but
@@ -42,15 +59,18 @@ Example:
 
 ```text
 /ctx/model/
-  main -> /ctx/model/debug/echo
-  helper -> /ctx/model/debug/echo
+  main -> /ctx/model/openai/gpt-5.5
+  helper -> /ctx/model/openai/codex-auto-review
   debug/
     echo
     echo.d/
       id
       driver
       cap
+      effort
       default
+      fallback
+      limit
       session
       status
       log
@@ -60,7 +80,9 @@ Example:
       id
       driver
       cap
+      effort
       default
+      fallback
       session
       status
       log
@@ -72,11 +94,111 @@ Control files:
 id       provider-native model id or runtime-internal model id
 driver   driver route table; see below
 cap      capability list, one per line
+effort   provider-neutral reasoning effort: auto, low, medium, high, or xhigh
 default  default parameters, KEY=VALUE, one per line
+fallback ordered fallback model chain, one provider/model name per line
+limit    maximum hard context size in tokens, or unknown
 session  none or socket
 status   dynamic status
 log      short call log or pointer to log location
 ```
+
+## Hard Context Limit
+
+Every model control directory contains a read-only `limit` file:
+
+```text
+/ctx/model/<provider>/<model>.d/limit
+```
+
+The file contains exactly one canonical LF-terminated line. Its value is
+either `unknown` or a positive base-10 `u32` token count. Numeric values use no
+sign, surrounding whitespace, or leading zeroes. Zero, overflow, extra lines,
+and non-canonical decimal text are invalid. The number is the provider/model's
+hard combined context limit; it is not an output-token setting and must not be
+used as one.
+
+Examples:
+
+```text
+272000
+unknown
+```
+
+`unknown` means CortexFS has no trusted maximum. It must not be rendered as
+zero or replaced with a guessed value. The executable model metadata field
+`context_length` contains the same canonical value as `limit`.
+
+`limit` is an inspectable projection, never an Agent-writable control. FUSE
+opens and writes that request mutation must fail with `EROFS`, including for
+uid 0. Updating a limit happens only when host configuration changes or during
+the existing synchronous mount-start catalog refresh; there is no watcher,
+poller, or hot-reload path.
+
+The resolver uses this precedence:
+
+```text
+1. model_limits in the selected host provider config
+2. a valid CortexFS-owned models.dev cache entry
+3. unknown
+```
+
+A provider config may declare explicit limits for locally configured models
+without changing the backward-compatible string `models` list:
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "models": ["custom-model"],
+  "model_limits": {
+    "custom-model": 32768
+  }
+}
+```
+
+Each `model_limits` key must be a model listed by `default_model` or `models`,
+and each value must be in `1..=4294967295`. Invalid local limit declarations
+make that provider config invalid; they are not silently ignored. A local
+entry overrides catalog data for the same projected model.
+
+CortexFS obtains catalog limits through the external `models-dev` library.
+Catalog provider and model map keys are matched exactly to the projected
+`<provider>/<model>` identity; transport hosts and aggregator names are not
+guessed as original providers. Only stable CortexFS provider/model names and
+positive limits enter the cache.
+
+The host cache is bounded, versioned data with this shape:
+
+```json
+{
+  "schema": "cortexfs.model-limits/v1",
+  "models": {
+    "openai/gpt-5.5": 272000
+  }
+}
+```
+
+The cache is atomically replaced only after a complete successful online
+response has been parsed and validated. A timeout, network error, invalid or
+oversized response, empty validated result, or failed durable write preserves
+the last valid cache unchanged. A missing, malformed, oversized, wrong-schema,
+or unsafe cache supplies no limit. Catalog cache content contains no provider
+credentials and is backend state, not a new `/ctx` namespace.
+
+`fallback` is a model fallback chain, not a transport route. It lives next to
+the selected model in `model/<provider>/<model>.d/fallback`; each non-comment
+line is another stable provider/model reference, for example:
+
+```text
+openai/codex-auto-review
+api.lmm.best/gpt-5.3-codex-spark
+```
+
+When the selected model is unavailable or fails before producing a successful
+answer, the runtime tries fallback models in order. Each candidate still uses
+the normal provider registry, secret lookup, and `/ctx/model/route` egress
+rules.
 
 `driver` may be a legacy single driver name:
 
@@ -111,14 +233,16 @@ Secrets are never stored in model files or `.d/` control files. Provider
 credentials use this priority:
 
 ```text
-environment variable
-system keychain
+root-owned CortexFS system secret store
 unconfigured
 ```
 
-For example, a provider adapter may first read `LMM_API_KEY`, then look up a
-system keychain item such as `service=cortexfs:lmm account=default`. If both
-are absent, the model is not configured and must return a stable error.
+The API key is read from
+`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`. Provider JSON must not
+declare API-key environment variable names, and API keys must not be placed in
+process environments. If the system secret is absent, the model is not
+configured and must return a stable error unless the endpoint supports
+unauthenticated requests.
 
 OAuth providers use the same rule: access tokens are bearer credentials and
 remain provider-runtime state, not model ABI state. A provider config may
@@ -132,18 +256,19 @@ declare OAuth Authorization Code + PKCE metadata:
     "auth_url": "https://auth.example.com/oauth/authorize",
     "token_url": "https://auth.example.com/oauth/token",
     "redirect_uri": "http://127.0.0.1:8765/callback",
-    "scopes": ["model.read", "offline_access"],
-    "access_token_env": "EXAMPLE_OAUTH_ACCESS_TOKEN",
-    "refresh_token_env": "EXAMPLE_OAUTH_REFRESH_TOKEN"
+    "scopes": ["model.read", "offline_access"]
   }
 }
 ```
 
-`access_token_env` is checked before the system keychain. If it is absent or
-empty, the runtime looks up `service=cortexfs:<provider> account=oauth:access`.
-Refresh tokens, when used by a future provider adapter or CLI wrapper, use
-`account=oauth:refresh` by default. PKCE uses `S256`; the verifier and callback
-state are short-lived local flow state and must not be written into `/ctx/model`.
+OAuth token environment names are generated from provider identity, for example
+`CTX_EXAMPLE_OAUTH_ACCESS_TOKEN` and `CTX_EXAMPLE_OAUTH_REFRESH_TOKEN`; users do
+not configure those names in provider JSON. If the generated access-token
+variable is absent or empty, the runtime looks up
+`service=cortexfs:<provider> account=oauth:access`. Refresh tokens, when used by
+a provider adapter or CLI wrapper, use `account=oauth:refresh` by default. PKCE
+uses `S256`; the verifier and callback state are short-lived local flow state
+and must not be written into `/ctx/model`.
 `ctx provider oauth login PROVIDER` is the host-side helper that performs this
 PKCE login flow and writes tokens to the system keychain.
 
@@ -232,8 +357,10 @@ made; if the file is absent, the projected default is `fallback: direct`.
 
 Rules are evaluated top to bottom. A rule selects a group; a group selects both
 transport and an optional credential slot. Secrets are never written into the
-route file. `key(NAME)` selects `service=cortexfs:<provider> account=NAME` from
-the system keychain, with environment variables checked first.
+route file or provider JSON. `key(NAME)` selects
+`/var/lib/cortexfs/secrets/provider/<provider>/NAME` from the CortexFS system
+secret store. API keys are not placed in process environments. Without
+`key(...)`, the default credential slot is `default`.
 
 ```text
 group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)

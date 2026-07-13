@@ -33,6 +33,8 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(view.root(), Path::new("/ctx/home/1000/agent/coder/root"));
     assert_eq!(view.cwd(), Path::new("/work"));
     assert_eq!(view.model(), "main");
+    assert_eq!(view.window_setting(), AgentWindowSetting::Auto);
+    assert_eq!(view.effective_window(), ModelContextLimit::Unknown);
     assert_eq!(
         view.tool_path().dirs(),
         [
@@ -68,6 +70,78 @@ fn agent_runtime_view_derives_identity_environment_policy_and_view() {
     assert_eq!(env_value(view.env(), "LD_PRELOAD"), None);
     assert_eq!(env_value(view.env(), "RUST_LOG"), None);
     assert_eq!(env_value(view.env(), "CTX_PROVIDER_SECRET_PATH"), None);
+    assert_eq!(env_value(view.env(), "CTX_CONTEXT_WINDOW_TOKENS"), None);
+    assert_eq!(env_value(view.env(), "CTX_CONTEXT_WINDOW_CHARS"), None);
+}
+
+#[test]
+fn agent_runtime_view_resolves_auto_and_explicit_windows() {
+    let root = clean_test_dir("agent-runtime-window-resolution");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    write_text_file(&control.join("model"), "local/chat\n");
+    write_text_file(&root.join("model/local/chat.d/limit"), "64\n");
+
+    let auto = ok!(derive_agent_runtime_view(&root, "coder"));
+    assert_eq!(auto.window_setting(), AgentWindowSetting::Auto);
+    assert_eq!(auto.effective_window().tokens(), Some(64));
+    assert_eq!(
+        env_value(auto.env(), "CTX_CONTEXT_WINDOW_TOKENS"),
+        Some("64")
+    );
+    assert_eq!(
+        env_value(auto.env(), "CTX_CONTEXT_WINDOW_CHARS"),
+        Some("256")
+    );
+    for value in ["1\n", "64\n"] {
+        write_text_file(&control.join("window"), value);
+        assert!(
+            derive_agent_runtime_view(&root, "coder").is_ok(),
+            "{value:?}"
+        );
+    }
+    write_text_file(&control.join("window"), "65\n");
+    assert!(matches!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "window"
+    ));
+    write_text_file(&root.join("model/local/chat.d/limit"), "unknown\n");
+    write_text_file(&control.join("window"), "32\n");
+    assert!(matches!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "window"
+    ));
+    write_text_file(&control.join("window"), "auto\n");
+    assert_eq!(
+        ok!(derive_agent_runtime_view(&root, "coder")).effective_window(),
+        ModelContextLimit::Unknown
+    );
+}
+
+#[test]
+fn agent_runtime_view_rejects_malformed_alias_and_limit() {
+    let root = clean_test_dir("agent-runtime-window-invalid-model-state");
+    create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
+    let control = root.join("agent/coder.d");
+    write_text_file(&control.join("model"), "main\n");
+    assert!(fs::remove_file(root.join("model/main")).is_ok());
+    assert!(symlink("../escape", root.join("model/main")).is_ok());
+    assert!(matches!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "model"
+    ));
+    assert!(fs::remove_file(root.join("model/main")).is_ok());
+    assert!(symlink("/ctx/model/local/chat", root.join("model/main")).is_ok());
+    write_text_file(&root.join("model/local/chat.d/limit"), "0\n");
+    assert!(matches!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::InvalidControlFile(ref file)) if file == "limit"
+    ));
+    assert!(fs::remove_file(root.join("model/local/chat.d/limit")).is_ok());
+    assert!(matches!(
+        derive_agent_runtime_view(&root, "coder"),
+        Err(AgentRuntimeViewError::MissingControlFile(ref file)) if file == "limit"
+    ));
 }
 
 #[test]
@@ -116,6 +190,7 @@ fn agent_runtime_view_prefers_current_user_agent_control() {
         ("path", tool_path.as_str()),
         ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev"),
         ("model", "debug/echo"),
+        ("window", "auto"),
         ("policy", "allow usercoder_t model:debug/echo use"),
     ] {
         write_text_file(&user_control.join(file), &format!("{value}\n"));

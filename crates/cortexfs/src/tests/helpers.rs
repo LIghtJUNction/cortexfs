@@ -283,6 +283,8 @@ pub(super) fn create_complete_object_layout(
             "auto"
         } else if class == ObjectClass::Model && *file == "fallback" {
             ""
+        } else if class == ObjectClass::Model && *file == "limit" {
+            "unknown"
         } else if class == ObjectClass::Tool && *file == "schema" {
             "{\"type\":\"object\"}"
         } else if class == ObjectClass::Agent {
@@ -291,6 +293,21 @@ pub(super) fn create_complete_object_layout(
             "ok"
         };
         write_text_file(&control_dir.join(file), &format!("{value}\n"));
+    }
+    if class == ObjectClass::Agent {
+        let model_control = root.join("model/debug/echo.d");
+        assert!(fs::create_dir_all(&model_control).is_ok());
+        write_text_file(&model_control.join("limit"), "unknown\n");
+        let worker_control = root.join("model/api.lmm.best/gpt-5.3-codex-spark.d");
+        assert!(fs::create_dir_all(&worker_control).is_ok());
+        write_text_file(&worker_control.join("limit"), "unknown\n");
+        assert!(fs::create_dir_all(root.join("model")).is_ok());
+        for alias in ["main", "helper"] {
+            let path = root.join("model").join(alias);
+            if !path.exists() {
+                assert!(std::os::unix::fs::symlink("/ctx/model/debug/echo", path).is_ok());
+            }
+        }
     }
     if class != ObjectClass::Model {
         let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
@@ -316,6 +333,7 @@ pub(super) fn agent_control_fixture_value(file: &str) -> &'static str {
         "path" => "/ctx/tool:/ctx/home/1000/tool",
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev",
         "model" => "debug/echo",
+        "window" => "auto",
         "policy" => "allow coder_t model:debug/echo use",
         "status" => "idle",
         "log" => "agent/coder/log",

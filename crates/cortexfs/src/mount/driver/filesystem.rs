@@ -288,6 +288,7 @@ impl Filesystem for CortexFuse {
         _flags: i32,
         reply: ReplyCreate,
     ) {
+        let permissions = (mode & 0o7777) & !umask;
         let path = create_session_layout_child_or_reply!(
             self,
             req,
@@ -295,9 +296,9 @@ impl Filesystem for CortexFuse {
             name,
             reply,
             create_layout_file,
-            (mode & 0o7777) & !umask
+            permissions
         );
-        match self.projected_node_for_path(&path) {
+        match self.created_layout_node(&path, permissions, req.uid(), req.gid()) {
             Ok(node) => {
                 if let Err(error) = self.remember(&node) {
                     reply.error(errno(error));

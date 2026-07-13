@@ -20,7 +20,7 @@ pub const MAX_OBJECT_NAME_LEN: usize = 64;
 
 /// Required model control files.
 pub const MODEL_CONTROL_FILES: &[&str] = &[
-    "id", "driver", "cap", "effort", "default", "fallback", "session", "status", "log",
+    "id", "driver", "cap", "effort", "default", "fallback", "limit", "session", "status", "log",
 ];
 /// Required hook directory inside every executable object's `.d/` control tree.
 pub const OBJECT_HOOK_DIR: &str = "hooks";
@@ -112,6 +112,7 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "path",
     "mount",
     "model",
+    "window",
     "system.md",
     "prompt.template.md",
     "policy",

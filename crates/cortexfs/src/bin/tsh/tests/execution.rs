@@ -2,6 +2,31 @@ use super::*;
 use crate::*;
 
 #[test]
+pub(crate) fn tsh_terminal_without_run_capability_uses_ephemeral_context()
+-> Result<(), Box<dyn std::error::Error>> {
+    const CHILD: &str = "CORTEXFS_TSH_TERMINAL_EPHEMERAL_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        assert_eq!(persistent_context_path(Path::new("/ctx")), Ok(None));
+        return Ok(());
+    }
+    let output = std::process::Command::new(std::env::current_exe()?)
+        .arg("--exact")
+        .arg("tests::execution::tsh_terminal_without_run_capability_uses_ephemeral_context")
+        .arg("--nocapture")
+        .env_clear()
+        .env(CHILD, "1")
+        .env("CTX_AGENT", "coder")
+        .env_remove("CTX_SESSION")
+        .env_remove("CTX_RUN_ID")
+        .env_remove("CTX_SOURCE")
+        .env_remove("CTX_CONTROL_SOCKET")
+        .env_remove("CTX_CONTROL_TOKEN")
+        .output()?;
+    assert!(output.status.success(), "{output:?}");
+    Ok(())
+}
+
+#[test]
 fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn std::error::Error>> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::sync::Arc;
@@ -57,11 +82,15 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
             ("env", "\n"),
             ("path", "/ctx/tool\n"),
             ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev\n"),
-            ("model", "main\n"),
-            ("policy", "allow coder_t model:main use\n"),
+            ("model", "local/chat\n"),
+            ("window", "auto\n"),
+            ("policy", "allow coder_t model:local/chat use\n"),
         ] {
             assert!(fs::write(control.join(name), value).is_ok());
         }
+        let model_control = tree.join("model/local/chat.d");
+        assert!(fs::create_dir_all(&model_control).is_ok());
+        assert!(fs::write(model_control.join("limit"), "unknown\n").is_ok());
     }
     let session = source.join("home/1000/agent/coder/session/live");
     assert!(fs::create_dir_all(&session).is_ok());
@@ -277,6 +306,11 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
     assert!(fs::write(control.join("cwd"), "/workspace\n").is_ok());
     assert!(fs::write(control.join("env"), "\n").is_ok());
     assert!(fs::write(control.join("model"), "main\n").is_ok());
+    assert!(fs::write(control.join("window"), "auto\n").is_ok());
+    let model_control = root.join("model/local/chat.d");
+    assert!(fs::create_dir_all(&model_control).is_ok());
+    assert!(fs::write(model_control.join("limit"), "unknown\n").is_ok());
+    assert!(std::os::unix::fs::symlink("/ctx/model/local/chat", root.join("model/main")).is_ok());
     assert!(fs::write(control.join("status"), "idle\n").is_ok());
     assert!(fs::write(control.join("pid"), "\n").is_ok());
     assert!(fs::write(control.join("log"), "\n").is_ok());

@@ -123,6 +123,19 @@ mod permission_tests {
     }
 
     #[test]
+    fn fuse_open_and_write_reject_model_limit_mutation() {
+        let attr = FuseV1Attr::new(
+            "model/local/custom.d/limit".to_owned(),
+            FuseV1FileType::Regular,
+            0,
+            0o444,
+        );
+
+        assert_readonly(fuse_open_error(&attr, OpenFlags(nix::libc::O_WRONLY)));
+        assert_readonly(fuse_write_error(&attr));
+    }
+
+    #[test]
     fn fuse_open_and_write_allow_profile_control_files_to_projection() {
         let attr = FuseV1Attr::new(
             "agent/worker.d/system.md".to_owned(),

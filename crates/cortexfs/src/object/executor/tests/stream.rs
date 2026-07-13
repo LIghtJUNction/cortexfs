@@ -28,12 +28,14 @@ fn cli_tool_mode_outputs_plain_text() {
 
 #[test]
 fn openai_stream_event_extracts_chat_tool_call_delta() {
-    let event = openai_stream_event(r#"data: {"choices":[{"delta":{"content":"hel"}}]}"#);
+    let event = openai_stream_event(r#"data: {"choices":[{"delta":{"content":"hel"}}]}"#)
+        .map(|frame| frame.event);
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
 
     let event = openai_stream_event(
         r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\""}}]}}]}"#,
-    );
+    )
+    .map(|frame| frame.event);
     assert!(matches!(
         event,
         Ok(OpenAiStreamEvent::ToolCallDelta(delta))
@@ -43,7 +45,8 @@ fn openai_stream_event_extracts_chat_tool_call_delta() {
     ));
 
     assert!(matches!(
-        openai_stream_event(r#"data: {"choices":[{"finish_reason":"tool_calls"}]}"#),
+        openai_stream_event(r#"data: {"choices":[{"finish_reason":"tool_calls"}]}"#)
+            .map(|frame| frame.event),
         Ok(OpenAiStreamEvent::ToolCallsDone)
     ));
 }
@@ -54,10 +57,12 @@ fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
     let mut stream = OpenAiToolCallStream::default();
     let first = openai_stream_event(
         r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\""}}]}}]}"#,
-    )?;
+    )?
+    .event;
     let second = openai_stream_event(
         r#"data: {"choices":[{"delta":{"tool_calls":[{"type":"function","function":{"arguments":":[\"tools\"]}"}}]}}]}"#,
-    )?;
+    )?
+    .event;
 
     if let OpenAiStreamEvent::ToolCallDelta(delta) = first {
         stream.push(delta);
@@ -79,7 +84,8 @@ fn openai_stream_tool_call_stream_accumulates_canonical_tool_call()
 #[test]
 fn openai_stream_event_extracts_usage() {
     let event =
-        openai_stream_event(r#"data: {"usage":{"prompt_tokens":12,"completion_tokens":5}}"#);
+        openai_stream_event(r#"data: {"usage":{"prompt_tokens":12,"completion_tokens":5}}"#)
+            .map(|frame| frame.event);
     assert!(matches!(
         event,
         Ok(OpenAiStreamEvent::Usage(TokenUsage {
@@ -92,7 +98,7 @@ fn openai_stream_event_extracts_usage() {
 #[test]
 fn openai_stream_event_accepts_done_marker() {
     assert!(matches!(
-        openai_stream_event("data: [DONE]"),
+        openai_stream_event("data: [DONE]").map(|frame| frame.event),
         Ok(OpenAiStreamEvent::Done)
     ));
 }
@@ -109,31 +115,37 @@ fn provider_stream_reader_rejects_oversized_line() {
 
 #[test]
 fn openai_stream_event_extracts_responses_delta_text() {
-    let event = openai_stream_event(r#"data: {"type":"response.output_text.delta","delta":"hel"}"#);
+    let event = openai_stream_event(r#"data: {"type":"response.output_text.delta","delta":"hel"}"#)
+        .map(|frame| frame.event);
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text == "hel"));
 }
 
 #[test]
 fn openai_stream_event_extracts_responses_done_text() {
-    let event = openai_stream_event(r#"data: {"type":"response.output_text.done","text":"hel"}"#);
+    let event = openai_stream_event(r#"data: {"type":"response.output_text.done","text":"hel"}"#)
+        .map(|frame| frame.event);
     assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "hel"));
 
     let event = openai_stream_event(
         r#"data: {"type":"response.content_part.done","part":{"type":"output_text","text":"lo"}}"#,
-    );
+    )
+    .map(|frame| frame.event);
     assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "lo"));
 
     let event = openai_stream_event(
         r#"data: {"type":"response.output_item.done","item":{"content":[{"type":"output_text","text":"ok"}]}}"#,
-    );
+    )
+    .map(|frame| frame.event);
     assert!(matches!(event, Ok(OpenAiStreamEvent::FinalText(text)) if text == "ok"));
 }
 
 #[test]
 fn responses_done_text_is_not_treated_as_stream_delta() -> Result<(), Box<dyn std::error::Error>> {
     let events = [
-        openai_stream_event(r#"data: {"type":"response.output_text.delta","delta":"Hi!"}"#),
-        openai_stream_event(r#"data: {"type":"response.output_text.done","text":"Hi!"}"#),
+        openai_stream_event(r#"data: {"type":"response.output_text.delta","delta":"Hi!"}"#)
+            .map(|frame| frame.event),
+        openai_stream_event(r#"data: {"type":"response.output_text.done","text":"Hi!"}"#)
+            .map(|frame| frame.event),
     ];
     let mut output = Vec::new();
     let mut emitter = OpenAiStreamTextEmitter::new("run-1");
@@ -162,7 +174,15 @@ fn responses_done_text_is_not_treated_as_stream_delta() -> Result<(), Box<dyn st
 #[test]
 fn openai_stream_event_accepts_responses_completed_marker() {
     assert!(matches!(
-        openai_stream_event(r#"data: {"type":"response.completed"}"#),
+        openai_stream_event(r#"data: {"type":"response.completed"}"#).map(|frame| frame.event),
+        Ok(OpenAiStreamEvent::Done)
+    ));
+}
+
+#[test]
+fn openai_stream_event_accepts_responses_done_marker() {
+    assert!(matches!(
+        openai_stream_event(r#"data: {"type":"response.done"}"#).map(|frame| frame.event),
         Ok(OpenAiStreamEvent::Done)
     ));
 }
@@ -173,7 +193,7 @@ fn openai_stream_event_reports_responses_failed_marker() {
         openai_stream_event(
             r#"data: {"type":"response.failed","error":{"message":"quota exceeded"}}"#
         )
-        .map(|event| matches!(event, OpenAiStreamEvent::Ignore)),
+        .map(|frame| matches!(frame.event, OpenAiStreamEvent::Ignore)),
         Err("quota exceeded".to_owned())
     );
 }
@@ -181,7 +201,8 @@ fn openai_stream_event_reports_responses_failed_marker() {
 #[test]
 fn openai_stream_event_does_not_mix_reasoning_into_answer_text() {
     let event =
-        openai_stream_event(r#"data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}"#);
+        openai_stream_event(r#"data: {"choices":[{"delta":{"reasoning_content":"hidden"}}]}"#)
+            .map(|frame| frame.event);
     assert!(matches!(event, Ok(OpenAiStreamEvent::Delta(text)) if text.is_empty()));
 }
 
@@ -346,5 +367,282 @@ fn agent_prompt_template_controls_rendered_system_message() {
     assert!(prompt.contains("contract=You are CortexFS agent `coder`."));
     assert!(!prompt.contains("## Rules"));
 }
+
+#[cfg(unix)]
+#[test]
+fn provider_partial_eof_is_nonfallback_without_retry() -> Result<(), Box<dyn std::error::Error>> {
+    const CHILD_ENV: &str = "CORTEXFS_TEST_PROVIDER_PARTIAL_EOF";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let mut output = Vec::new();
+        let result =
+            runner::provider_chat_completion("fixture/model", "hello", "run-1", &mut output);
+        let Err(error) = result else {
+            return Err(
+                std::io::Error::other("partial provider stream unexpectedly succeeded").into(),
+            );
+        };
+        assert!(!error.can_fallback, "{}", error.message);
+        return Ok(());
+    }
+
+    let (base_url, stop, server) = spawn_provider_sse(concat!(
+        r#"data: {"choices":[{"delta":{"content":"partial"}}]}"#,
+        "\n\n"
+    ))?;
+    let root = unique_temp_dir("runner-provider-partial-eof")?;
+    let providers = root.join("providers.d");
+    fs::create_dir_all(&providers)?;
+    fs::write(
+        providers.join("fixture.json"),
+        format!(
+            "{{\"name\":\"fixture\",\"base_url\":\"{base_url}/v1\",\"formats\":[\"openai.chat\"]}}\n"
+        ),
+    )?;
+    let status = std::process::Command::new(std::env::current_exe()?)
+        .arg("provider_partial_eof_is_nonfallback_without_retry")
+        .arg("--nocapture")
+        .env(CHILD_ENV, "1")
+        .env("CTX_PROVIDER_CONFIG_DIR", &providers)
+        .env("CTX_ROOT", &root)
+        .env_remove("CTX_AGENT")
+        .status()?;
+    let _ignored = stop.send(());
+    let requests = server
+        .join()
+        .map_err(|_panic| std::io::Error::other("provider test server panicked"))??;
+    let _ignored = fs::remove_dir_all(root);
+
+    assert_eq!(requests, 1, "partial EOF must not trigger a second request");
+    assert!(status.success(), "partial EOF child assertion failed");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_chat_finish_reason_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
+    let (result, requests, _output) = call_test_provider_sse(concat!(
+        r#"data: {"choices":[{"delta":{"content":"complete"}}]}"#,
+        "\n\n",
+        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        "\n\n"
+    ))?;
+    assert_eq!(requests, 1);
+    if let Err(error) = result {
+        return Err(std::io::Error::other(error.message).into());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_chat_terminal_chunk_preserves_content() -> Result<(), Box<dyn std::error::Error>> {
+    let (result, requests, output) = call_test_provider_sse(concat!(
+        r#"data: {"choices":[{"delta":{"content":"complete"},"finish_reason":"stop"}]}"#,
+        "\n\n"
+    ))?;
+    if let Err(error) = result {
+        return Err(std::io::Error::other(error.message).into());
+    }
+    let frames = output
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(requests, 1);
+    assert_eq!(
+        frames,
+        [serde_json::json!({
+            "type": "delta",
+            "run": "run-1",
+            "text": "complete"
+        })]
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_chat_terminal_chunk_preserves_tool_call() -> Result<(), Box<dyn std::error::Error>> {
+    let (result, requests, output) = call_test_provider_sse(concat!(
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"call-abc","type":"function","function":{"name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}]},"finish_reason":"tool_calls"}]}"#,
+        "\n\n"
+    ))?;
+    if let Err(error) = result {
+        return Err(std::io::Error::other(error.message).into());
+    }
+    let frames = output
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(requests, 1);
+    assert_eq!(
+        frames,
+        [serde_json::json!({
+            "type": "tool_call",
+            "run": "run-1",
+            "id": "call-abc",
+            "name": "tsh",
+            "arguments": { "args": ["tools"] }
+        })]
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_responses_completed_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
+    let (result, requests, _output) = call_test_provider_sse(concat!(
+        r#"data: {"type":"response.output_text.delta","delta":"complete"}"#,
+        "\n\n",
+        r#"data: {"type":"response.completed"}"#,
+        "\n\n"
+    ))?;
+    assert_eq!(requests, 1);
+    if let Err(error) = result {
+        return Err(std::io::Error::other(error.message).into());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_done_marker_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
+    let (result, requests, _output) = call_test_provider_sse(concat!(
+        r#"data: {"choices":[{"delta":{"content":"complete"}}]}"#,
+        "\n\n",
+        "data: [DONE]\n\n"
+    ))?;
+    assert_eq!(requests, 1);
+    if let Err(error) = result {
+        return Err(std::io::Error::other(error.message).into());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_responses_text_done_without_completion_is_rejected()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (result, requests, _output) = call_test_provider_sse(concat!(
+        r#"data: {"type":"response.output_text.delta","delta":"partial"}"#,
+        "\n\n",
+        r#"data: {"type":"response.output_text.done","text":"partial"}"#,
+        "\n\n"
+    ))?;
+    let Err(error) = result else {
+        return Err(std::io::Error::other("non-terminal Responses stream succeeded").into());
+    };
+    assert_eq!(requests, 1);
+    assert!(!error.can_fallback, "{}", error.message);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_responses_rejects_chat_finish_reason_without_completion()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (result, requests, _output) = call_test_provider_sse_at(
+        "/v1/responses",
+        runner::OpenAiStreamApi::Responses,
+        concat!(
+            r#"data: {"type":"response.output_text.delta","delta":"partial"}"#,
+            "\n\n",
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "\n\n"
+        ),
+    )?;
+    let Err(error) = result else {
+        return Err(std::io::Error::other("Chat finish_reason completed Responses stream").into());
+    };
+    assert_eq!(requests, 1);
+    assert!(!error.can_fallback, "{}", error.message);
+    Ok(())
+}
+
+#[cfg(unix)]
+type ProviderSseOutcome = (Result<(), runner::StreamFailure>, usize, String);
+
+#[cfg(unix)]
+type ProviderSseServer = (
+    String,
+    std::sync::mpsc::Sender<()>,
+    thread::JoinHandle<std::io::Result<usize>>,
+);
+
+#[cfg(unix)]
+fn call_test_provider_sse(body: &str) -> Result<ProviderSseOutcome, Box<dyn std::error::Error>> {
+    call_test_provider_sse_at("/v1/chat/completions", runner::OpenAiStreamApi::Chat, body)
+}
+
+#[cfg(unix)]
+fn call_test_provider_sse_at(
+    path: &str,
+    api: runner::OpenAiStreamApi,
+    body: &str,
+) -> Result<ProviderSseOutcome, Box<dyn std::error::Error>> {
+    let (base_url, stop, server) = spawn_provider_sse(body)?;
+    let target = runner::CurlJsonTarget {
+        url: format!("{base_url}{path}"),
+        unix_socket: None,
+    };
+    let mut output = Vec::new();
+    let result = runner::call_openai_sse_streaming(&target, None, "{}", api, "run-1", &mut output);
+    let _ignored = stop.send(());
+    let requests = server
+        .join()
+        .map_err(|_panic| std::io::Error::other("provider test server panicked"))??;
+    Ok((result, requests, String::from_utf8(output)?))
+}
+
+#[cfg(unix)]
+fn spawn_provider_sse(first_body: &str) -> Result<ProviderSseServer, Box<dyn std::error::Error>> {
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::mpsc::TryRecvError;
+
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let address = listener.local_addr()?;
+    let first_body = first_body.to_owned();
+    let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let mut requests = 0;
+        loop {
+            match stop_receiver.try_recv() {
+                Ok(()) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {}
+            }
+            let (mut stream, _peer) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+            let mut request = [0_u8; 8 * 1024];
+            let _read = stream.read(&mut request)?;
+            requests += 1;
+            let (content_type, body) = if requests == 1 {
+                ("text/event-stream", first_body.as_str())
+            } else {
+                (
+                    "application/json",
+                    r#"{"choices":[{"message":{"content":"fallback"}}]}"#,
+                )
+            };
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes())?;
+            stream.write_all(body.as_bytes())?;
+            stream.flush()?;
+        }
+        Ok(requests)
+    });
+    Ok((format!("http://{address}"), stop_sender, server))
+}
 use super::runtime::test_prompt_context;
 use super::*;
+use crate::object::runner;

@@ -23,7 +23,8 @@ pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, Fus
     let description = model_metadata_description(name, driver);
     let model_type = model_metadata_type(driver);
     let owned_by = model_metadata_owner(name, driver);
-    let context_length = model_metadata_context_length(name, driver);
+    let limit = read_object_control_body_for_metadata(control_dir, "limit")?;
+    let context_length = model_metadata_context_length(&limit)?;
     Ok(exec_metadata(&[
         ("object", "model".to_owned()),
         ("id", id),
@@ -32,7 +33,7 @@ pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, Fus
         ("type", model_type.to_owned()),
         ("created_at", String::new()),
         ("owned_by", owned_by.to_owned()),
-        ("context_length", context_length.to_string()),
+        ("context_length", context_length),
         ("driver", driver.to_owned()),
         (
             "driver.default",
@@ -150,8 +151,10 @@ pub(crate) fn model_metadata_owner(name: &str, driver: &str) -> &'static str {
     }
 }
 
-pub(crate) fn model_metadata_context_length(_name: &str, _driver: &str) -> u64 {
-    0
+pub(crate) fn model_metadata_context_length(limit: &str) -> Result<String, FuseV1Error> {
+    ModelContextLimit::parse_control(limit)
+        .map(|limit| limit.to_string())
+        .ok_or(FuseV1Error::InvalidContent)
 }
 
 /// Runs the built-in debug echo model and writes canonical JSONL.
@@ -206,6 +209,14 @@ pub(crate) fn read_object_control_for_metadata(
     control_dir: &Path,
     file: &str,
 ) -> Result<String, FuseV1Error> {
+    read_object_control_body_for_metadata(control_dir, file)
+        .map(|content| content.trim_end_matches('\n').to_owned())
+}
+
+fn read_object_control_body_for_metadata(
+    control_dir: &Path,
+    file: &str,
+) -> Result<String, FuseV1Error> {
     let path = control_dir.join(file);
     let metadata =
         plain::path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
@@ -217,9 +228,7 @@ pub(crate) fn read_object_control_for_metadata(
     let mut content = vec![0; len];
     file.read_exact(&mut content)
         .map_err(|error| fuse_metadata_error(&error))?;
-    String::from_utf8(content)
-        .map(|content| content.trim_end_matches('\n').to_owned())
-        .map_err(|_error| FuseV1Error::InvalidContent)
+    String::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)
 }
 
 pub(crate) fn is_valid_env_key(value: &str) -> bool {

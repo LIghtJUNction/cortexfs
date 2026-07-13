@@ -61,9 +61,24 @@ pub enum RequestFrame {
         run: String,
         child: String,
         child_session: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present_u32",
+            skip_serializing_if = "Option::is_none"
+        )]
+        window: Option<u32>,
         input: String,
         life: String,
     },
+}
+
+fn deserialize_present_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    u32::deserialize(deserializer).map(Some)
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -72,6 +87,18 @@ pub struct CreateChildResult {
     pub child: String,
     pub child_session: String,
     pub pid: u32,
+}
+
+/// Child creation fields supplied by an agent running under a host capability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CreateChildEnvironmentRequest<'a> {
+    pub request_id: &'a str,
+    pub child: &'a str,
+    pub child_session: &'a str,
+    pub path: Option<&'a str>,
+    pub window: Option<u32>,
+    pub input: &'a str,
+    pub life: &'a str,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -203,9 +230,14 @@ pub fn create_child(
     run: &str,
     child: &str,
     child_session: &str,
+    path: Option<&str>,
+    window: Option<u32>,
     input: &str,
     life: &str,
 ) -> Result<CreateChildResult, RuntimeClientError> {
+    if window == Some(0) {
+        return Err(RuntimeClientError::InvalidEnvironment);
+    }
     match request(
         socket,
         &RequestFrame::CreateChild {
@@ -216,6 +248,8 @@ pub fn create_child(
             run: run.to_owned(),
             child: child.to_owned(),
             child_session: child_session.to_owned(),
+            path: path.map(str::to_owned),
+            window,
             input: input.to_owned(),
             life: life.to_owned(),
         },
@@ -227,12 +261,11 @@ pub fn create_child(
 }
 
 pub fn create_child_from_environment(
-    request_id: &str,
-    child: &str,
-    child_session: &str,
-    input: &str,
-    life: &str,
+    request: CreateChildEnvironmentRequest<'_>,
 ) -> Result<CreateChildResult, RuntimeClientError> {
+    if request.window == Some(0) {
+        return Err(RuntimeClientError::InvalidEnvironment);
+    }
     let socket = env::var_os("CTX_CONTROL_SOCKET").ok_or(RuntimeClientError::InvalidEnvironment)?;
     let token =
         env::var("CTX_CONTROL_TOKEN").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
@@ -243,14 +276,16 @@ pub fn create_child_from_environment(
     create_child(
         &PathBuf::from(socket),
         &token,
-        request_id,
+        request.request_id,
         &agent,
         &session,
         &run,
-        child,
-        child_session,
-        input,
-        life,
+        request.child,
+        request.child_session,
+        request.path,
+        request.window,
+        request.input,
+        request.life,
     )
 }
 
@@ -402,7 +437,8 @@ mod tests {
             let frame = serde_json::from_slice::<RequestFrame>(&bytes);
             assert!(matches!(
                 frame,
-                Ok(RequestFrame::CreateChild { life, .. }) if life == "temp"
+                Ok(RequestFrame::CreateChild { life, path, .. })
+                    if life == "temp" && path.as_deref() == Some("/ctx/home/1000/tool")
             ));
             let _ignored = stream.write_all(b"{\"type\":\"agent.created\",\"request_id\":\"request-1\",\"result\":{\"child\":\"c\",\"child_session\":\"s\",\"pid\":42}}\n");
         });
@@ -415,6 +451,8 @@ mod tests {
             "run",
             "c",
             "s",
+            Some("/ctx/home/1000/tool"),
+            Some(2048),
             "input",
             "temp",
         );
@@ -426,6 +464,78 @@ mod tests {
                 child_session: "s".to_owned(),
                 pid: 42
             })
+        );
+    }
+
+    #[test]
+    fn create_child_window_wire_is_numeric_optional_and_strict()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let frame = RequestFrame::CreateChild {
+            token: "token".to_owned(),
+            request_id: "request-1".to_owned(),
+            agent: "agent".to_owned(),
+            session: "session".to_owned(),
+            run: "run".to_owned(),
+            child: "child".to_owned(),
+            child_session: "child-session".to_owned(),
+            path: None,
+            window: Some(2048),
+            input: "work".to_owned(),
+            life: "owned".to_owned(),
+        };
+        let encoded = serde_json::to_value(&frame)?;
+        assert_eq!(
+            encoded.get("window").and_then(serde_json::Value::as_u64),
+            Some(2048)
+        );
+        let mut absent = encoded;
+        if let Some(object) = absent.as_object_mut() {
+            object.remove("window");
+        }
+        assert!(matches!(
+            serde_json::from_value::<RequestFrame>(absent),
+            Ok(RequestFrame::CreateChild { window: None, .. })
+        ));
+        let mut omitted = frame.clone();
+        if let RequestFrame::CreateChild { ref mut window, .. } = omitted {
+            *window = None;
+        }
+        assert!(serde_json::to_value(omitted)?.get("window").is_none());
+        for value in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("1"),
+            serde_json::Value::Null,
+            serde_json::json!(4_294_967_296_u64),
+        ] {
+            let mut invalid = serde_json::to_value(&frame)?;
+            invalid
+                .as_object_mut()
+                .ok_or("serialized create child request should be an object")?
+                .insert("window".to_owned(), value);
+            assert!(serde_json::from_value::<RequestFrame>(invalid).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn zero_window_fails_before_connect() {
+        assert_eq!(
+            create_child(
+                Path::new("/definitely/missing.sock"),
+                "token",
+                "request-1",
+                "agent",
+                "session",
+                "run",
+                "child",
+                "child-session",
+                None,
+                Some(0),
+                "work",
+                "owned",
+            ),
+            Err(RuntimeClientError::InvalidEnvironment)
         );
     }
 

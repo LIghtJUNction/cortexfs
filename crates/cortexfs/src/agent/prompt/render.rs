@@ -74,6 +74,23 @@ pub fn render_agent_system_prompt(
     prompt
 }
 
+/// Builds the canonical provider message array for an Agent call.
+#[must_use]
+pub fn agent_provider_messages(
+    input: &str,
+    agent: &str,
+    agent_system: &str,
+    prompt_context: &AgentPromptContext,
+) -> Value {
+    serde_json::json!([
+        {
+            "role": "system",
+            "content": render_agent_system_prompt(agent, agent_system, prompt_context)
+        },
+        {"role": "user", "content": input}
+    ])
+}
+
 pub(crate) fn normalized_or_empty(value: &str) -> &str {
     let trimmed = value.trim();
     if trimmed.is_empty() {

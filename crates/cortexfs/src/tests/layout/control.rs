@@ -23,6 +23,34 @@ fn agent_controls_accept_fixed_v1_values() {
 }
 
 #[test]
+fn agent_window_accepts_auto_or_a_positive_canonical_token_count() {
+    assert!(inspect_agent_control(AgentControlKind::Window, "auto\n").is_ok());
+    assert!(inspect_agent_control(AgentControlKind::Window, "32768\n").is_ok());
+}
+
+#[test]
+fn agent_window_rejects_noncanonical_or_out_of_range_values() {
+    for invalid in [
+        "",
+        "0\n",
+        "-1\n",
+        "+1\n",
+        "01\n",
+        " 1\n",
+        "1 \n",
+        "1.0\n",
+        "4294967296\n",
+        "auto",
+        "auto\nextra\n",
+    ] {
+        assert!(
+            !inspect_agent_control(AgentControlKind::Window, invalid).is_ok(),
+            "accepted {invalid:?}"
+        );
+    }
+}
+
+#[test]
 fn agent_controls_reject_invalid_identity_lifecycle_and_parent() {
     assert_eq!(
         inspect_agent_control(AgentControlKind::Uid, "not-a-uid\n").issues(),

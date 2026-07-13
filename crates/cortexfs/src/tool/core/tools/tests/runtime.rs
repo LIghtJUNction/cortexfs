@@ -138,6 +138,14 @@ pub(crate) fn agent_create_lifecycle_subprocess() {
             "worker-temp",
             r#"{"name":"worker-temp","handoff":"temp handoff","life":"temp"}"#,
         ),
+        "path" => (
+            "worker-path",
+            r#"{"name":"worker-path","handoff":"path handoff","path":"/ctx/home/1000/tool"}"#,
+        ),
+        "window" => (
+            "worker-window",
+            r#"{"name":"worker-window","handoff":"window handoff","window":2048}"#,
+        ),
         _ => return,
     };
     let invocation = ToolInvocation::new(request_id, input);
@@ -151,7 +159,7 @@ pub(crate) fn agent_create_lifecycle_subprocess() {
 }
 
 #[test]
-pub(crate) fn agent_create_passes_default_and_temp_lifecycle_to_runtime()
+pub(crate) fn agent_create_passes_lifecycle_and_tool_path_to_runtime()
 -> Result<(), Box<dyn std::error::Error>> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::sync::Arc;
@@ -181,7 +189,12 @@ pub(crate) fn agent_create_passes_default_and_temp_lifecycle_to_runtime()
             || Some("run-1".to_owned()),
             |request| {
                 request_sender
-                    .send((request.child.clone(), request.life.clone()))
+                    .send((
+                        request.child.clone(),
+                        request.life.clone(),
+                        request.path.clone(),
+                        request.window,
+                    ))
                     .map_err(|_error| crate::runtime::control::RunCapabilityError::CannotCreate)?;
                 Ok(crate::runtime::control::CreateChildResult {
                     child: request.child,
@@ -191,7 +204,12 @@ pub(crate) fn agent_create_passes_default_and_temp_lifecycle_to_runtime()
             },
         )
     });
-    for (mode, request_id) in [("default", "create-default"), ("temp", "create-temp")] {
+    for (mode, request_id) in [
+        ("default", "create-default"),
+        ("temp", "create-temp"),
+        ("path", "create-path"),
+        ("window", "create-window"),
+    ] {
         let output = std::process::Command::new(std::env::current_exe()?)
             .arg("--exact")
             .arg("tool::core::tools::tests::runtime::agent_create_lifecycle_subprocess")
@@ -207,10 +225,27 @@ pub(crate) fn agent_create_passes_default_and_temp_lifecycle_to_runtime()
         assert!(output.status.success(), "{output:?}");
     }
     assert_eq!(
-        [request_receiver.recv()?, request_receiver.recv()?],
         [
-            ("worker-default".to_owned(), "owned".to_owned()),
-            ("worker-temp".to_owned(), "temp".to_owned())
+            request_receiver.recv()?,
+            request_receiver.recv()?,
+            request_receiver.recv()?,
+            request_receiver.recv()?,
+        ],
+        [
+            ("worker-default".to_owned(), "owned".to_owned(), None, None),
+            ("worker-temp".to_owned(), "temp".to_owned(), None, None),
+            (
+                "worker-path".to_owned(),
+                "owned".to_owned(),
+                Some("/ctx/home/1000/tool".to_owned()),
+                None,
+            ),
+            (
+                "worker-window".to_owned(),
+                "owned".to_owned(),
+                None,
+                Some(2048)
+            )
         ]
     );
     shutdown.store(true, Ordering::Release);
@@ -229,6 +264,20 @@ pub(crate) fn agent_create_rejects_invalid_lifecycle() {
             Ok(true)
         ));
         assert!(String::from_utf8_lossy(&output).contains("life must be owned or temp"));
+    }
+}
+
+#[test]
+pub(crate) fn agent_create_rejects_invalid_window_before_runtime() {
+    for window in ["0", "-1", "1.5", "\"1\"", "4294967296"] {
+        let input = format!(r#"{{"name":"worker","handoff":"task","window":{window}}}"#);
+        let invocation = ToolInvocation::new("invalid-window", input);
+        let mut output = Vec::new();
+        assert!(matches!(
+            run_core_tool("agent.create", &invocation, &mut output),
+            Ok(true)
+        ));
+        assert!(String::from_utf8_lossy(&output).contains("window must be a positive u32 integer"));
     }
 }
 

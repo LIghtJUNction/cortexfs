@@ -19,7 +19,7 @@
 #![expect(clippy::module_inception, reason = "allow submodule self name")]
 
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -30,9 +30,10 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
-    DEFAULT_AGENT_PROMPT_TEMPLATE, PolicyObjectClass, PolicyPermission, PolicyV0,
-    ToolExecutionAuthority, ToolExecutionDenial, authorize_tool_execution, collect_agent_rules,
-    collect_skill_metadata, current_time_unix, derive_agent_runtime_view,
+    AgentPromptContext, AgentWindowBudget, AgentWindowSetting, DEFAULT_AGENT_PROMPT_TEMPLATE,
+    MAX_SKILL_METADATA_CHARS, ModelContextLimit, PolicyObjectClass, PolicyPermission, PolicyV0,
+    ToolExecutionAuthority, ToolExecutionDenial, agent_provider_messages, authorize_tool_execution,
+    collect_agent_rules, collect_skill_metadata, current_time_unix, derive_agent_runtime_view,
     inspect_event_stream_jsonl, is_model_name, is_object_name, parse_model_fallback, run_core_tool,
     run_core_tool_cli, run_echo_model, skill_metadata_budget_from_env, write_run_snapshot,
 };

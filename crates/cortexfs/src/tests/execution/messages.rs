@@ -293,6 +293,7 @@ fn executable_agent_rejects_non_authoritative_tool_frames() {
             },
             AgentExecutableRunRequest {
                 run_id: "r1",
+                cancellation_id: "r1",
                 session: "default",
                 cwd: None,
                 input: "",
@@ -764,9 +765,14 @@ esac
         )),
     );
     controls.insert(
+        "model".to_owned(),
+        serde_json::Value::String("debug/echo\n".to_owned()),
+    );
+    controls.insert(
         "policy".to_owned(),
         serde_json::Value::String(
-            "allow coder_t model:main use\nallow coder_t tool:example.echo execute\n".to_owned(),
+            "allow coder_t model:debug/echo use\nallow coder_t tool:example.echo execute\n"
+                .to_owned(),
         ),
     );
     controls.insert(
@@ -789,13 +795,15 @@ esac
         })
         .to_string(),
     );
-    assert!(
-        crate::object::install::install_object(
-            &root,
-            &agent_manifest,
-            crate::object::install::InstallTier::System,
-        )
-        .is_ok()
+    let installed = crate::object::install::install_object(
+        &root,
+        &agent_manifest,
+        crate::object::install::InstallTier::System,
+    );
+    assert!(installed.is_ok(), "{installed:?}");
+    assert_eq!(
+        fs::read_to_string(root.join("agent/example-agent.d/window")).unwrap_or_default(),
+        "auto\n"
     );
     let session_root = agent_session_root(&root, "example-agent");
     assert!(fs::create_dir_all(&session_root).is_ok());
@@ -994,6 +1002,23 @@ esac
     assert!(durable.contains(&serde_json::to_string(&observation).unwrap_or_default()));
 }
 
+fn approval_allow_once(request: &str, call_id: &str) -> std::io::Result<String> {
+    let value: serde_json::Value = serde_json::from_str(request)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let run = value
+        .get("run")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| std::io::Error::other("approval request missing run"))?;
+    Ok(serde_json::json!({
+        "op": "approve",
+        "run": run,
+        "id": call_id,
+        "decision": "allow_once"
+    })
+    .to_string()
+        + "\n")
+}
+
 #[test]
 fn sdk_envelope_ask_allows_one_authorized_call_and_records_facts() {
     use std::io::{BufRead, BufReader};
@@ -1025,9 +1050,7 @@ esac
         for line in lines.by_ref() {
             let line = line?;
             if line.contains("\"type\":\"approval_request\"") {
-                client.write_all(
-                    b"{\"op\":\"approve\",\"run\":\"r1\",\"id\":\"approved-1\",\"decision\":\"allow_once\"}\n",
-                )?;
+                client.write_all(approval_allow_once(&line, "approved-1")?.as_bytes())?;
                 client.shutdown(Shutdown::Write)?;
                 approved = true;
             }
@@ -1133,9 +1156,7 @@ esac
                     },
                 )
                 .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-                client.write_all(
-                    b"{\"op\":\"approve\",\"run\":\"r1\",\"id\":\"marker-1\",\"decision\":\"allow_once\"}\n",
-                )?;
+                client.write_all(approval_allow_once(&line, "marker-1")?.as_bytes())?;
                 client.shutdown(Shutdown::Write)?;
             }
             if line.contains("\"type\":\"approval_result\"") {
@@ -1208,9 +1229,7 @@ esac
                         client.shutdown(Shutdown::Both)?;
                         return Ok(());
                     }
-                    client.write_all(
-                        b"{\"op\":\"approve\",\"run\":\"r1\",\"id\":\"disconnect-1\",\"decision\":\"allow_once\"}\n",
-                    )?;
+                    client.write_all(approval_allow_once(&line, "disconnect-1")?.as_bytes())?;
                     if stage == "result" {
                         client.shutdown(Shutdown::Both)?;
                         return Ok(());
@@ -1349,7 +1368,7 @@ fn owned_bwrap_completion_survives_client_disconnect() {
         "child-run",
         "handoff",
     ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "child-run").is_ok());
+    assert!(claim_child_handoff_active(&receipt, "worker", "child-run", None).is_ok());
     assert!(
         nix::unistd::chown(
             receipt.path(),
@@ -1455,18 +1474,19 @@ printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
         },
     );
     let outcome = ok!(outcome);
+    let run = ok!(response_run(&outcome));
     assert!(outcome.jsonl().contains(r#""type":"error""#));
     assert!(outcome.jsonl().contains(r#""status":"error""#));
     let session = session_root.join("default");
     let events = fs::read_to_string(session.join("events.jsonl")).unwrap_or_default();
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"error""#)
-            && line.contains(r#""run":"provider-error-1""#)
+            && line.contains(&format!(r#""run":"{run}""#))
             && line.contains("502")
     }));
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"done""#)
-            && line.contains(r#""run":"provider-error-1""#)
+            && line.contains(&format!(r#""run":"{run}""#))
             && line.contains(r#""status":"error""#)
     }));
     assert_file_text(&session.join("state"), "error\n");
@@ -1518,22 +1538,23 @@ printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
         },
     );
     let outcome = ok!(outcome);
+    let run = ok!(response_run(&outcome));
     assert!(outcome.jsonl().contains(r#""text":"partial""#));
     let session = session_root.join("default");
     let events = fs::read_to_string(session.join("events.jsonl")).unwrap_or_default();
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"error""#)
-            && line.contains(r#""run":"partial-error-1""#)
+            && line.contains(&format!(r#""run":"{run}""#))
             && line.contains("502")
     }));
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"done""#)
-            && line.contains(r#""run":"partial-error-1""#)
+            && line.contains(&format!(r#""run":"{run}""#))
             && line.contains(r#""status":"error""#)
     }));
     assert!(!events.lines().any(|line| {
         line.contains(r#""type":"done""#)
-            && line.contains(r#""run":"partial-error-1""#)
+            && line.contains(&format!(r#""run":"{run}""#))
             && line.contains(r#""status":"ok""#)
     }));
     assert_file_text(&session.join("state"), "error\n");
