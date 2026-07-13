@@ -4,7 +4,8 @@ use cortexfs_agent_sdk::{
     Agent, AgentEmitter, AgentInvocation, AgentOutcome, AgentResult, cortexfs_agent_main,
 };
 
-// Also accepts stdin: `echo hello | cargo run -p cortexfs-agent-sdk --example echo`.
+// Argv: `CTX_AGENT=echo CTX_RUN_ID=example-run cargo run -p cortexfs-agent-sdk --example echo -- hello`.
+// Stdin: `printf 'hello\n' | CTX_AGENT=echo CTX_RUN_ID=example-run cargo run -p cortexfs-agent-sdk --example echo`.
 #[derive(Debug)]
 struct EchoAgent;
 
