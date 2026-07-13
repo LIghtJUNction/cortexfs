@@ -1,0 +1,438 @@
+.cortexReel {
+  --reel-ink: #111312;
+  --reel-muted: #66716c;
+  --reel-line: #d8d1c2;
+  --reel-paper: #f7f5f1;
+  --reel-panel: #fffdfa;
+  --reel-coal: #181b19;
+  --reel-mint: #2a8f73;
+  background: var(--reel-paper);
+  color: var(--reel-ink);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  height: 100dvh;
+  inset: 0;
+  overflow: hidden;
+  position: fixed;
+  width: 100vw;
+}
+
+.cortexReel *,
+.cortexReel *::before,
+.cortexReel *::after {
+  box-sizing: border-box;
+}
+
+.cortexReelGrain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.74' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+  inset: 0;
+  mix-blend-mode: multiply;
+  opacity: 0.025;
+  pointer-events: none;
+  position: fixed;
+  z-index: 4;
+}
+
+.cortexReelHeader {
+  align-items: center;
+  border-bottom: 1px solid var(--reel-line);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  left: 4.5vw;
+  min-height: 8vh;
+  position: absolute;
+  right: 4.5vw;
+  top: 0;
+  z-index: 3;
+}
+
+.cortexReelHeader strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(20px, 2vw, 36px);
+}
+
+.cortexReelHeader i {
+  color: var(--reel-mint);
+  font-style: italic;
+}
+
+.cortexReelHeader span,
+.cortexReelHeader code {
+  background: transparent;
+  border: 0;
+  color: var(--reel-muted);
+  font-size: clamp(10px, 0.72vw, 14px);
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  padding: 0;
+}
+
+.cortexReelHeader code {
+  justify-self: end;
+}
+
+.cortexReelStage {
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}
+
+.cortexReel [data-reel-animate] {
+  animation-duration: 20s;
+  animation-fill-mode: both;
+  animation-iteration-count: infinite;
+  animation-play-state: paused;
+  animation-timing-function: cubic-bezier(0.45, 0, 0.15, 1);
+}
+
+html[data-cortex-reel='play'] .cortexReel [data-reel-animate] {
+  animation-play-state: running;
+}
+
+.cortexReelAssembly {
+  animation-name: cortexReelAssembly;
+  height: 62vh;
+  left: 38vw;
+  position: absolute;
+  top: 8vh;
+  width: 56vw;
+}
+
+.cortexReelLongShadow {
+  background: rgba(39, 32, 23, 0.13);
+  clip-path: polygon(0 0, 100% 14%, 68% 100%, 14% 88%);
+  height: 53vh;
+  left: 48%;
+  position: absolute;
+  top: 10vh;
+  transform: rotate(-34deg) skewX(-10deg);
+  transform-origin: top left;
+  width: 19vw;
+}
+
+.cortexReelPlate {
+  align-items: center;
+  background: var(--reel-coal);
+  border: 1px solid rgba(255, 253, 250, 0.16);
+  border-radius: 8px;
+  box-shadow: 0 2.2vh 5vh rgba(30, 24, 14, 0.2);
+  color: #fffdfa;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  left: 50%;
+  min-height: 10vh;
+  padding: 1.8vh 2.2vw;
+  position: absolute;
+  top: 3vh;
+  transform: translateX(-50%);
+  width: min(30vw, 520px);
+  z-index: 2;
+}
+
+.cortexReelPlate::before,
+.cortexReelPlate::after {
+  background: rgba(255, 253, 250, 0.25);
+  border: 1px solid rgba(255, 253, 250, 0.24);
+  border-radius: 50%;
+  content: "";
+  height: 8px;
+  position: absolute;
+  top: 12px;
+  width: 8px;
+}
+
+.cortexReelPlate::before { left: 12px; }
+.cortexReelPlate::after { right: 12px; }
+
+.cortexReelPlate > span,
+.cortexReelPlate code {
+  background: transparent;
+  border: 0;
+  color: rgba(255, 253, 250, 0.7);
+  font-size: clamp(10px, 0.7vw, 14px);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  padding: 0;
+}
+
+.cortexReelPlate code {
+  color: #d8ff66;
+  justify-self: end;
+}
+
+.cortexReelPlate strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(34px, 3.2vw, 62px);
+  line-height: 1;
+}
+
+.cortexReelCurtain {
+  align-items: flex-start;
+  display: flex;
+  gap: clamp(5px, 0.7vw, 14px);
+  justify-content: center;
+  left: 5%;
+  position: absolute;
+  right: 5%;
+  top: 12.6vh;
+}
+
+.cortexReelCurtain span {
+  animation-name: cortexReelCurtain;
+  border-left: 1px solid rgba(17, 19, 18, 0.18);
+  color: rgba(17, 19, 18, 0.78);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(9px, 0.68vw, 13px);
+  font-weight: 850;
+  height: var(--reel-height);
+  overflow: hidden;
+  padding-left: 4px;
+  text-orientation: mixed;
+  transform-origin: top center;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+}
+
+.cortexReelPhase {
+  left: 5vw;
+  margin: 0;
+  position: absolute;
+  width: min(58vw, 1050px);
+  z-index: 2;
+}
+
+.cortexReelPhase > p:first-child {
+  color: var(--reel-muted);
+  font-size: clamp(11px, 0.8vw, 15px);
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  margin: 0 0 2vh;
+}
+
+.cortexReelPhase h1,
+.cortexReelPhase h2 {
+  color: var(--reel-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 0.9;
+  margin: 0;
+}
+
+.cortexReelPhaseOne {
+  animation-name: cortexReelPhaseOne;
+  bottom: 8vh;
+}
+
+.cortexReelPhaseOne h1 {
+  font-size: clamp(66px, 8.4vw, 160px);
+}
+
+.cortexReelPhaseOne code {
+  background: transparent;
+  border: 0;
+  color: var(--reel-muted);
+  display: block;
+  font-size: clamp(11px, 0.9vw, 17px);
+  margin-top: 2.4vh;
+  padding: 0;
+}
+
+.cortexReelPhaseTwo {
+  animation-name: cortexReelPhaseTwo;
+  bottom: 12vh;
+}
+
+.cortexReelPhaseTwo h2 {
+  font-size: clamp(58px, 7.2vw, 138px);
+}
+
+.cortexReelPhaseTwo strong,
+.cortexReelPhaseFour strong {
+  border-top: 1px solid var(--reel-line);
+  display: inline-block;
+  font-size: clamp(14px, 1.25vw, 24px);
+  margin-top: 2.6vh;
+  padding-top: 1.5vh;
+}
+
+.cortexReelPhaseThree {
+  animation-name: cortexReelPhaseThree;
+  bottom: 10vh;
+}
+
+.cortexReelCommand {
+  background: var(--reel-coal);
+  border: 1px solid rgba(255, 253, 250, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 2vh 6vh rgba(30, 24, 14, 0.18);
+  display: grid;
+  overflow: hidden;
+}
+
+.cortexReelCommand code {
+  background: transparent;
+  border: 0;
+  color: #fffdfa;
+  font-size: clamp(13px, 1.15vw, 22px);
+  overflow-wrap: anywhere;
+  padding: 1.8vh 1.5vw;
+}
+
+.cortexReelCommand code + code {
+  border-top: 1px solid rgba(255, 253, 250, 0.12);
+}
+
+.cortexReelCommand span {
+  color: #d8ff66;
+  font-weight: 900;
+}
+
+.cortexReelPhaseFour {
+  animation-name: cortexReelPhaseFour;
+  bottom: 12vh;
+  width: min(74vw, 1380px);
+}
+
+.cortexReelPhaseFour h2 {
+  font-size: clamp(48px, 6vw, 114px);
+  overflow-wrap: anywhere;
+}
+
+.cortexReelPhaseFive {
+  animation-name: cortexReelPhaseFive;
+  bottom: 8vh;
+  width: min(64vw, 1200px);
+}
+
+.cortexReelPhaseFive h2 {
+  font-size: clamp(46px, 5.7vw, 110px);
+  line-height: 0.94;
+  margin-top: 3.2vh;
+}
+
+.cortexReelPhaseFive > p {
+  color: var(--reel-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(12px, 1vw, 19px);
+  font-weight: 900;
+  margin: 2.4vh 0 0;
+}
+
+.cortexReelSpecimens {
+  border-bottom: 1px solid var(--reel-line);
+  border-top: 1px solid var(--reel-line);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cortexReelSpecimens div {
+  display: grid;
+  gap: 0.5vh;
+  padding: 1.2vh 1vw;
+}
+
+.cortexReelSpecimens div + div {
+  border-left: 1px solid var(--reel-line);
+}
+
+.cortexReelSpecimens code {
+  background: transparent;
+  border: 0;
+  color: var(--reel-ink);
+  font-size: clamp(11px, 0.85vw, 16px);
+  font-weight: 900;
+  padding: 0;
+}
+
+.cortexReelSpecimens span {
+  color: var(--reel-muted);
+  font-size: clamp(10px, 0.7vw, 14px);
+}
+
+.cortexReelProgress {
+  background: var(--reel-line);
+  bottom: 3.5vh;
+  height: 2px;
+  left: 4.5vw;
+  overflow: hidden;
+  position: absolute;
+  right: 4.5vw;
+  z-index: 3;
+}
+
+.cortexReelProgress span {
+  animation-name: cortexReelProgress;
+  background: var(--reel-mint);
+  display: block;
+  height: 100%;
+  transform-origin: left center;
+  width: 100%;
+}
+
+@keyframes cortexReelAssembly {
+  0% { opacity: 1; transform: translate3d(0, -1.5vh, 0) scale(1); }
+  5%, 76% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  84%, 100% { opacity: 0.48; transform: translate3d(23vw, -5vh, 0) scale(0.7); }
+}
+
+@keyframes cortexReelCurtain {
+  0%, 19% { opacity: 0.9; transform: translate3d(0, 0, 0) rotate(0); }
+  25%, 35% {
+    opacity: 0.78;
+    transform: translate3d(var(--reel-peel-x), var(--reel-peel-y), 0) rotate(var(--reel-peel-r));
+  }
+  43%, 76% { opacity: 0.86; transform: translate3d(0, 0, 0) rotate(0); }
+  84%, 100% { opacity: 0.22; transform: translate3d(0, 1.5vh, 0) rotate(0); }
+}
+
+@keyframes cortexReelPhaseOne {
+  0%, 16% { opacity: 1; transform: translate3d(0, 0, 0); }
+  20%, 100% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+}
+
+@keyframes cortexReelPhaseTwo {
+  0%, 18% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+  22%, 36% { opacity: 1; transform: translate3d(0, 0, 0); }
+  40%, 100% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+}
+
+@keyframes cortexReelPhaseThree {
+  0%, 38% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+  42%, 56% { opacity: 1; transform: translate3d(0, 0, 0); }
+  60%, 100% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+}
+
+@keyframes cortexReelPhaseFour {
+  0%, 58% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+  62%, 76% { opacity: 1; transform: translate3d(0, 0, 0); }
+  80%, 100% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+}
+
+@keyframes cortexReelPhaseFive {
+  0%, 79% { opacity: 0; transform: translate3d(0, 3vh, 0); }
+  84%, 100% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes cortexReelProgress {
+  0% { opacity: 1; transform: scaleX(0.01); }
+  100% { opacity: 1; transform: scaleX(1); }
+}
+
+@media (max-aspect-ratio: 4 / 3) {
+  .cortexReelAssembly {
+    left: 28vw;
+    width: 68vw;
+  }
+
+  .cortexReelPhase {
+    width: 78vw;
+  }
+
+  .cortexReelHeader span {
+    display: none;
+  }
+
+  .cortexReelHeader {
+    grid-template-columns: 1fr 1fr;
+  }
+}
