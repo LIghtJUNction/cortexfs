@@ -36,6 +36,7 @@ A child is still an ordinary agent object:
   path
   mount
   model
+  window
   policy
   status
   pid
@@ -120,8 +121,8 @@ necessary artifacts. It should not include the child's full `messages.jsonl`.
 CLI inspection may join this coordination table with the backing agent process
 controls. For example, `ctx agent children coder` reports each child channel's
 stable `status` plus the backing `agent/<agent>.d/parent`, `model`, `status`,
-and `pid`, giving a `ps`-like view of worker task state and its parent-session
-attachment without adding fields to `context/child/<child>/`.
+and `pid`, giving a `ps`-like view of worker task state and its parent
+session/run attachment without adding fields to `context/child/<child>/`.
 If `ctx agent wait` sees an `active` child whose backing agent's effective
 state is `dead`, has no live `pid`, and still points back to the same parent
 agent/session, it may synchronously reap that child channel as `cancelled`. A
@@ -131,6 +132,46 @@ observing child process death; it does not introduce a watcher or polling
 runtime.
 When parent stop cancels a child result channel, the compact `result.md` should
 name the backing child agent that was cancelled.
+
+## Child Context Window
+
+Authenticated dynamic child creation carries an optional `window` token count
+through the Agent SDK, runtime client, per-run capability frame, and compensated
+creation transaction. It is a positive `u32`, not control-file text. Absence
+means inherit; zero is invalid.
+
+The child inherits the parent's selected model. Window materialization follows
+these rules:
+
+```text
+request absent, parent effective known    child window = parent effective number
+request absent, parent effective unknown  child window = auto
+request number                            child window = requested number
+```
+
+An explicit request must not exceed the parent effective window and must not
+exceed the inherited model's known hard limit. If either required upper bound
+is unknown, explicit creation fails closed. A child can therefore retain or
+reduce a known parent window but cannot expand it. The exact canonical value is
+written into `agent/<child>.d/window` inside the existing compensated child
+creation transaction before executable publication.
+
+Failed validation creates no child object, private home, session, result
+channel, runtime unit, or executable wrapper. Failure after preparation uses
+the existing receipt-checked compensation path. The SDK, runtime-client, and
+host must use one shared wire field definition; unknown fields and a numeric
+zero are protocol errors.
+
+## Child Tool Path
+
+Dynamic `agent.create` accepts an optional `path` string using the canonical
+colon-separated `agent/<name>.d/path` syntax. Absence means exact inheritance
+of the parent's current canonical tool path. An explicit value may only remove
+parent tiers while preserving their first-hit order. Added tiers, duplicate
+tiers, reordered tiers, empty components, and an empty path are invalid. The
+validated canonical value is written to the child `path` control inside the
+existing compensated creation transaction; materialization must not substitute
+`/ctx/tool` or re-derive a different path.
 
 ## Handoff Protocol
 
@@ -143,6 +184,12 @@ policy subset
 mount subset
 output contract
 ```
+
+The default `agent.create` RPC intentionally keeps the child in the parent's
+security domain: it preserves the complete parent label and policy subject and
+attenuates the effective policy and mounts. A future supervisor that assigns a
+distinct child label must also provision the corresponding global capability
+grants explicitly; child creation never mutates global tool policy.
 
 Child to parent:
 
@@ -162,8 +209,15 @@ ctx agent wait coder work-123 --session default
 This is a non-blocking waitpid-shaped read of the parent-owned result channel:
 `pending` and `active` are not terminal, while `done`, `error`, and `cancelled`
 return the child status and compact result. The process exit status is 0 for
-`done`, 1 for `error`, and 130 for `cancelled`. It does not poll, reap history,
-or delete child state.
+`done`, 1 for `error`, and 130 for `cancelled`. It does not poll or reap
+history. The parent result channel remains durable. For a dedicated temp
+`worker-*` or `executor-*` backing agent, `wait` may also reap the temp
+`agent/<name>`, `agent/<name>.sock`, and `agent/<name>.d/` object after the
+terminal result is recorded; the canonical shared `worker` and `executor`
+objects remain reusable worker entries.
+The same distinction applies when parent stop cancellation reaches children:
+dedicated temp `worker-*` and `executor-*` objects may be removed, while the
+canonical shared worker objects stay present.
 
 Example `handoff.md`:
 
@@ -289,6 +343,11 @@ the parent coordinator and should prefer delegated `react` nodes for independent
 implementation work. The reference `worker` agent runs on the spark model path
 and should execute bounded handoffs without making architecture decisions beyond
 the parent-provided scope.
+Agent names `worker`, `worker-*`, `executor`, and `executor-*` are the v1
+worker-role naming convention. If such an agent object omits `agent/<name>.d/model`,
+the runtime and schedule views use the spark worker model by default. Other
+agent names must keep an explicit model control file or use the normal `main`
+default only in non-runtime display contexts.
 
 The thin CLI entrypoint for the single transition is:
 
@@ -311,10 +370,12 @@ paths so the parent and worker can treat the handoff as an inspectable file
 boundary. These commands are not a daemon, watcher, queue worker, or hot-reload
 boundary.
 When a worker is launched from this output, the parent should hand over the
-existing `model=`, `life=`, `parent=`, `child_parent=`, `plan=`, `handoff=`,
-`result=`, and `refs=` fields; the
+existing `model=`, `life=`, `role=`, `parent=`, `child_parent=`, `plan=`,
+`handoff=`, `result=`, and `refs=` fields; the
 worker should claim and finish through the same `ctx schedule` commands rather
 than creating another coordination file, queue, or runtime abstraction.
+`ctx schedule status` exposes the same `child_parent` value in its read-only
+table so parent and worker views agree before claim/result transitions.
 
 The parent uses DAG edges for known ordering and uses ReAct only inside a node's
 bounded execution loop. ReAct steps may decide tool calls and child handoffs,
@@ -333,6 +394,7 @@ Child authority is attenuated from the parent:
 child policy must be a subset of parent effective policy
 child mounts must be a subset of parent visible mounts
 child groups must be a subset of parent groups
+child tool path must be an ordered tier subset of the parent tool path
 child context must be the handoff context, not the full parent context
 ```
 

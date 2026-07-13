@@ -31,12 +31,20 @@ allow reviewer_t shared:project-a read
 ",
     );
     let child_mounts = ok!(child_mounts);
+    let parent_tool_path = ToolPath::parse("/ctx/tool:/ctx/home/1000/tool");
+    let child_tool_path = ToolPath::parse("/ctx/home/1000/tool");
 
     let request = ChildAgentRequest::new(
         "reviewer",
         "agent:coder session:default run:r123",
         ChildLifecycle::Owned,
-        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+        ChildAgentControls::new(
+            &child_identity,
+            "reviewer_t",
+            &child_policy,
+            &child_mounts,
+            Some(&child_tool_path),
+        ),
     );
     let authority = ChildAgentAuthority::new(
         "coder",
@@ -44,16 +52,123 @@ allow reviewer_t shared:project-a read
         "coder_t",
         &parent_policy,
         &parent_mounts,
+        &parent_tool_path,
     );
-    assert_eq!(authorize_child_agent(request, authority), Ok(()));
+    assert_eq!(
+        authorize_child_agent(request, authority),
+        Ok(child_tool_path.clone())
+    );
 
     let temp_request = ChildAgentRequest::new(
         "scratch",
         "agent:coder session:default run:r124",
         ChildLifecycle::Temp,
-        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+        ChildAgentControls::new(
+            &child_identity,
+            "reviewer_t",
+            &child_policy,
+            &child_mounts,
+            Some(&child_tool_path),
+        ),
     );
-    assert_eq!(authorize_child_agent(temp_request, authority), Ok(()));
+    assert_eq!(
+        authorize_child_agent(temp_request, authority),
+        Ok(child_tool_path.clone())
+    );
+}
+
+fn authorize_child_tool_path(
+    parent_path: &str,
+    child_path: Option<&str>,
+) -> Result<ToolPath, ChildAgentDenial> {
+    let identity = AgentUnixIdentity::new(1000, 100, []);
+    let policy = PolicyV0::default();
+    let mounts = MountTable::default();
+    let parent_tool_path = ToolPath::parse(parent_path);
+    let child_tool_path = child_path.map(ToolPath::parse);
+    let request = ChildAgentRequest::new(
+        "reviewer",
+        "agent:coder",
+        ChildLifecycle::Owned,
+        ChildAgentControls::new(
+            &identity,
+            "coder_t",
+            &policy,
+            &mounts,
+            child_tool_path.as_ref(),
+        ),
+    );
+    let authority = ChildAgentAuthority::new(
+        "coder",
+        &identity,
+        "coder_t",
+        &policy,
+        &mounts,
+        &parent_tool_path,
+    );
+    authorize_child_agent(request, authority)
+}
+
+#[test]
+fn child_agent_tool_path_inherits_duplicate_parent_exactly() {
+    assert_eq!(
+        authorize_child_tool_path("/ctx/home/1000/tool:/ctx/home/1000/tool", None,),
+        Ok(ToolPath::parse("/ctx/home/1000/tool:/ctx/home/1000/tool"))
+    );
+}
+
+#[test]
+fn child_agent_tool_path_rejects_explicit_empty_path() {
+    assert_eq!(
+        authorize_child_tool_path("/ctx/home/1000/tool", Some("")),
+        Err(ChildAgentDenial::ToolPathExpansion)
+    );
+}
+
+#[test]
+fn child_agent_tool_path_may_delete_parent_tiers_in_order() {
+    assert_eq!(
+        authorize_child_tool_path(
+            "/ctx/tool:/ctx/home/1000/tool:/ctx/shared/team/tool",
+            Some("/ctx/home/1000/tool:/ctx/shared/team/tool"),
+        ),
+        Ok(ToolPath::parse("/ctx/home/1000/tool:/ctx/shared/team/tool"))
+    );
+}
+
+#[test]
+fn child_agent_tool_path_rejects_added_tier() {
+    assert_eq!(
+        authorize_child_tool_path("/ctx/home/1000/tool", Some("/ctx/home/1000/tool:/ctx/tool"),),
+        Err(ChildAgentDenial::ToolPathExpansion)
+    );
+}
+
+#[test]
+fn child_agent_tool_path_rejects_duplicate_tier() {
+    assert_eq!(
+        authorize_child_tool_path("/ctx/tool:/ctx/home/1000/tool", Some("/ctx/tool:/ctx/tool"),),
+        Err(ChildAgentDenial::ToolPathExpansion)
+    );
+}
+
+#[test]
+fn child_agent_tool_path_rejects_reordered_tiers() {
+    assert_eq!(
+        authorize_child_tool_path(
+            "/ctx/tool:/ctx/home/1000/tool",
+            Some("/ctx/home/1000/tool:/ctx/tool"),
+        ),
+        Err(ChildAgentDenial::ToolPathExpansion)
+    );
+}
+
+#[test]
+fn child_agent_without_global_tier_cannot_add_ctx_tool() {
+    assert_eq!(
+        authorize_child_tool_path("/ctx/home/1000/tool", Some("/ctx/tool")),
+        Err(ChildAgentDenial::ToolPathExpansion)
+    );
 }
 
 #[test]
@@ -85,12 +200,15 @@ allow worker-fast_t tool:fs.read execute
     let parent_mounts = ok!(parent_mounts);
     let child_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
     let child_mounts = ok!(child_mounts);
+    let parent_tool_path = ToolPath::parse("/ctx/tool:/ctx/home/1000/tool");
+    let child_tool_path = ToolPath::parse("/ctx/home/1000/tool");
     let authority = ChildAgentAuthority::new(
         "coder",
         &parent_identity,
         "coder_t",
         &parent_policy,
         &parent_mounts,
+        &parent_tool_path,
     );
 
     let worker = ChildAgentRequest::new(
@@ -102,9 +220,13 @@ allow worker-fast_t tool:fs.read execute
             "worker-fast_t",
             &child_policy,
             &child_mounts,
+            Some(&child_tool_path),
         ),
     );
-    assert_eq!(authorize_child_agent(worker, authority), Ok(()));
+    assert_eq!(
+        authorize_child_agent(worker, authority),
+        Ok(child_tool_path.clone())
+    );
 
     let expanded = ChildAgentRequest::new(
         "worker-fast",
@@ -115,6 +237,7 @@ allow worker-fast_t tool:fs.read execute
             "worker-fast_t",
             &expanded_policy,
             &child_mounts,
+            Some(&child_tool_path),
         ),
     );
     assert_eq!(
@@ -138,21 +261,33 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
     let child_mounts = ok!(child_mounts);
     let expanded_mounts = MountTable::parse("/work\t/work\trw\tbind,nosuid,nodev,noexec\n");
     let expanded_mounts = ok!(expanded_mounts);
+    let parent_tool_path = ToolPath::parse("/ctx/tool:/ctx/home/1000/tool");
+    let child_tool_path = ToolPath::parse("/ctx/home/1000/tool");
     let authority = ChildAgentAuthority::new(
         "coder",
         &parent_identity,
         "coder_t",
         &parent_policy,
         &parent_mounts,
+        &parent_tool_path,
     );
 
     let base = ChildAgentRequest::new(
         "reviewer",
         "agent:coder",
         ChildLifecycle::Owned,
-        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+        ChildAgentControls::new(
+            &child_identity,
+            "reviewer_t",
+            &child_policy,
+            &child_mounts,
+            Some(&child_tool_path),
+        ),
     );
-    assert_eq!(authorize_child_agent(base, authority), Ok(()));
+    assert_eq!(
+        authorize_child_agent(base, authority),
+        Ok(child_tool_path.clone())
+    );
 
     let identity_request = ChildAgentRequest::new(
         "reviewer",
@@ -163,6 +298,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
             "reviewer_t",
             &child_policy,
             &child_mounts,
+            Some(&child_tool_path),
         ),
     );
     assert_eq!(
@@ -174,7 +310,13 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
         "reviewer",
         "agent:coder",
         ChildLifecycle::Owned,
-        ChildAgentControls::new(&expanded_groups, "reviewer_t", &child_policy, &child_mounts),
+        ChildAgentControls::new(
+            &expanded_groups,
+            "reviewer_t",
+            &child_policy,
+            &child_mounts,
+            Some(&child_tool_path),
+        ),
     );
     assert_eq!(
         authorize_child_agent(group_request, authority),
@@ -190,6 +332,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
             "reviewer_t",
             &expanded_policy,
             &child_mounts,
+            Some(&child_tool_path),
         ),
     );
     assert_eq!(
@@ -206,6 +349,7 @@ fn child_agent_authority_rejects_identity_group_policy_and_mount_expansion() {
             "reviewer_t",
             &child_policy,
             &expanded_mounts,
+            Some(&child_tool_path),
         ),
     );
     assert_eq!(
@@ -224,19 +368,28 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
     let parent_mounts = ok!(parent_mounts);
     let child_mounts = MountTable::parse("/work\t/work\tro\tbind,nosuid,nodev,noexec\n");
     let child_mounts = ok!(child_mounts);
+    let parent_tool_path = ToolPath::parse("/ctx/tool:/ctx/home/1000/tool");
+    let child_tool_path = ToolPath::parse("/ctx/home/1000/tool");
     let authority = ChildAgentAuthority::new(
         "coder",
         &parent_identity,
         "coder_t",
         &parent_policy,
         &parent_mounts,
+        &parent_tool_path,
     );
 
     let mismatch = ChildAgentRequest::new(
         "reviewer",
         "agent:planner",
         ChildLifecycle::Owned,
-        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+        ChildAgentControls::new(
+            &child_identity,
+            "reviewer_t",
+            &child_policy,
+            &child_mounts,
+            Some(&child_tool_path),
+        ),
     );
     assert_eq!(
         authorize_child_agent(mismatch, authority),
@@ -247,7 +400,13 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
         "reviewer",
         "parent:coder",
         ChildLifecycle::Owned,
-        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+        ChildAgentControls::new(
+            &child_identity,
+            "reviewer_t",
+            &child_policy,
+            &child_mounts,
+            Some(&child_tool_path),
+        ),
     );
     assert_eq!(
         authorize_child_agent(bad_ref, authority),
@@ -258,7 +417,13 @@ fn child_agent_authority_rejects_bad_parent_reference_and_lifecycle() {
         "reviewer",
         "agent:coder session:default run:r1 run:r2",
         ChildLifecycle::Owned,
-        ChildAgentControls::new(&child_identity, "reviewer_t", &child_policy, &child_mounts),
+        ChildAgentControls::new(
+            &child_identity,
+            "reviewer_t",
+            &child_policy,
+            &child_mounts,
+            Some(&child_tool_path),
+        ),
     );
     assert_eq!(
         authorize_child_agent(duplicate_run, authority),
@@ -458,6 +623,16 @@ fn child_context_recorder_creates_handoff_and_result_channel() {
     assert_file_text(&child.join("status"), "pending\n");
     assert_file_text(&child.join("handoff.md"), "Task: review mount ABI\n");
     assert!(validate_context_pack_source("context/child/rev-2/handoff.md").is_ok());
+    let receipt = ok!(crate::child_handoff_receipt(&child));
+    assert_eq!(
+        claim_child_handoff_active(
+            &receipt,
+            "reviewer",
+            "default",
+            Some("Task: review mount ABI\n"),
+        ),
+        Ok(())
+    );
 
     let refs =
         r#"{"id":"r1","path":"artifact/report.md","kind":"artifact","summary":"review report"}"#;

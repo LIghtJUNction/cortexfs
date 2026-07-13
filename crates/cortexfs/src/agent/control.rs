@@ -4,7 +4,10 @@ use crate::{
     ChildLifecycle, ControlLineIssue,
     abi::path::is_object_name,
     authority::parent_ref_agent_name,
-    support::control::{inspect_control_line, inspect_control_lines},
+    support::control::{
+        inspect_control_line, inspect_control_lines, parse_canonical_control_value,
+        parse_canonical_positive_u32,
+    },
 };
 
 /// Stable agent control file kind with fixed v1 value syntax.
@@ -30,6 +33,8 @@ pub enum AgentControlKind {
     Pid,
     /// `agent/<name>.d/approval`: hosted direct-native approval mode.
     Approval,
+    /// `agent/<name>.d/window`: context-window setting in tokens.
+    Window,
 }
 
 impl AgentControlKind {
@@ -47,6 +52,7 @@ impl AgentControlKind {
             "status" => Some(Self::Status),
             "pid" => Some(Self::Pid),
             "approval" => Some(Self::Approval),
+            "window" => Some(Self::Window),
             _ => None,
         }
     }
@@ -70,6 +76,7 @@ pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentCont
         AgentControlKind::Groups => inspect_agent_groups_control(content),
         AgentControlKind::Parent => inspect_optional_agent_parent_control(content),
         AgentControlKind::Pid => inspect_optional_agent_number_control(content),
+        AgentControlKind::Window => inspect_agent_window_control(content),
         AgentControlKind::Owner | AgentControlKind::Uid | AgentControlKind::Gid => {
             inspect_required_agent_number_control(content)
         }
@@ -78,6 +85,24 @@ pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentCont
         | AgentControlKind::Status
         | AgentControlKind::Approval => inspect_agent_vocab_control(kind, content),
     }
+}
+
+pub(crate) fn inspect_agent_window_control(content: &str) -> AgentControlReport {
+    let mut issues = inspect_control_line(content, true, |line, value, issues| {
+        if value != "auto" && parse_canonical_positive_u32(value).is_none() {
+            issues.push(ControlLineIssue::InvalidNumber {
+                line,
+                value: value.to_owned(),
+            });
+        }
+    });
+    if parse_canonical_control_value(content).is_none() && issues.is_empty() {
+        issues.push(ControlLineIssue::InvalidValue {
+            line: 1,
+            value: content.to_owned(),
+        });
+    }
+    AgentControlReport::new(issues)
 }
 
 /// Inspects the optional direct-native tool declaration control.
@@ -200,6 +225,7 @@ pub(crate) fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
         | AgentControlKind::Gid
         | AgentControlKind::Groups
         | AgentControlKind::Parent
-        | AgentControlKind::Pid => false,
+        | AgentControlKind::Pid
+        | AgentControlKind::Window => false,
     }
 }

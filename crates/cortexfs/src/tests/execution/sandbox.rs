@@ -76,7 +76,6 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
         "value-canary",
         "provider-canary",
         "slot-canary",
-        "42",
         "/secret/path-canary",
     ] {
         assert!(!outcome.jsonl().contains(canary));
@@ -239,6 +238,7 @@ fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
     };
     let request = AgentExecutableRunRequest {
         run_id: "run-1",
+        cancellation_id: "run-1",
         session: "default",
         cwd: Some("/"),
         input: "hi",
@@ -302,6 +302,7 @@ fn agent_executable_socket_bwrap_preserves_provider_secret_env()
     };
     let request = AgentExecutableRunRequest {
         run_id: "run-1",
+        cancellation_id: "run-1",
         session: "default",
         cwd: Some("/"),
         input: "hi",
@@ -536,6 +537,7 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
     };
     let request = AgentExecutableRunRequest {
         run_id: "msg-1",
+        cancellation_id: "msg-1",
         session: "default",
         cwd: None,
         input: "ignored",

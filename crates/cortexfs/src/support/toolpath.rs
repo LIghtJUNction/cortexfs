@@ -1,5 +1,6 @@
 use crate::*;
 
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -84,6 +85,28 @@ impl ToolPath {
     #[must_use]
     pub fn dirs(&self) -> &[PathBuf] {
         &self.dirs
+    }
+
+    /// Returns whether this path only removes parent search tiers while
+    /// preserving their first-hit order.
+    #[must_use]
+    pub(crate) fn is_ordered_subset_of(&self, parent: &Self) -> bool {
+        let mut parent_offset = 0;
+        let mut seen = HashSet::new();
+        for dir in &self.dirs {
+            if !seen.insert(dir) {
+                return false;
+            }
+            let Some(offset) = parent
+                .dirs
+                .get(parent_offset..)
+                .and_then(|dirs| dirs.iter().position(|parent_dir| parent_dir == dir))
+            else {
+                return false;
+            };
+            parent_offset += offset + 1;
+        }
+        true
     }
 
     /// Finds the first executable file matching `name`.

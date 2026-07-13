@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use crate::{
     ControlLineIssue, atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
     is_object_name,
@@ -8,6 +11,11 @@ use crate::{
 };
 
 const MAX_SESSION_INDEX_FILE_BYTES: u64 = 64 * 1024;
+
+#[cfg(test)]
+thread_local! {
+    static SESSION_INDEX_UPDATE_FAILURE: Cell<bool> = const { Cell::new(false) };
+}
 
 /// Stable session index file kind.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -143,6 +151,11 @@ pub fn update_session_index_with_keys(
         by_uuid_key,
     )?;
 
+    #[cfg(test)]
+    if SESSION_INDEX_UPDATE_FAILURE.with(|value| value.replace(false)) {
+        return Err(SessionIndexUpdateError::CannotRecord);
+    }
+
     let mut sessions = vec![session_name.to_owned()];
     sessions.extend(
         update
@@ -165,6 +178,11 @@ pub fn update_session_index_with_keys(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn set_session_index_update_failure(fail: bool) {
+    SESSION_INDEX_UPDATE_FAILURE.with(|value| value.set(fail));
 }
 
 fn replace_secondary_index(path: &Path, session_name: &str) -> std::io::Result<()> {

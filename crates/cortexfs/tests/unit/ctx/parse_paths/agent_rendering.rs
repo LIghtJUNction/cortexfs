@@ -16,6 +16,7 @@ fn debug_timing_diagnostic_is_readable() {
 fn debug_tool_names_report_native_agent_tools_only() {
     let root = clean_test_dir("ctx-agent-debug-native-tools");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    ensure_runtime_model_fixture(&root);
     assert!(
         fs::write(
             root.join("agent").join("coder.d").join("path"),
@@ -40,6 +41,7 @@ fn debug_tool_names_report_native_agent_tools_only() {
 fn debug_tool_names_include_declared_agent_tools() {
     let root = clean_test_dir("ctx-agent-debug-loaded-tools");
     assert!(ensure_v1_reference_tree(&root).is_ok());
+    ensure_runtime_model_fixture(&root);
     let tool = root.join("tool").join("bash");
     let tool_control = root.join("tool").join("bash.d");
     assert!(

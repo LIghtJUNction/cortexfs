@@ -137,7 +137,7 @@ fn reference_tree_model_exec_is_readonly_metadata() {
     assert!(metadata.contains("# cortexfs.type=debug\n"));
     assert!(metadata.contains("# cortexfs.created_at=\n"));
     assert!(metadata.contains("# cortexfs.owned_by=cortexfs\n"));
-    assert!(metadata.contains("# cortexfs.context_length=0\n"));
+    assert!(metadata.contains("# cortexfs.context_length=unknown\n"));
     assert!(metadata.contains("# cortexfs.driver=debug\n"));
     assert!(metadata.contains("# cortexfs.driver.default=debug\n"));
     assert!(metadata.contains("# cortexfs.driver.exec=debug\n"));

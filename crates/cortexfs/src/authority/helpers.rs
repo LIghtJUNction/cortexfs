@@ -50,12 +50,21 @@ pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result
     atomic_replace_text_with_mode(path, content, 0o600)
 }
 
+pub(crate) fn atomic_replace_text_outcome(
+    path: &Path,
+    content: &str,
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
+    atomic_replace_text_inner(path, content, AtomicReplaceMetadata::mode(0o600), None)
+}
+
 pub fn atomic_replace_text_with_mode(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
     atomic_replace_text_inner(path, content, AtomicReplaceMetadata::mode(mode), None)
+        .and_then(AtomicReplaceOutcome::into_result)
 }
 
 pub fn atomic_create_text_with_mode(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
     atomic_replace_text_inner(path, content, AtomicReplaceMetadata::create(mode), None)
+        .and_then(AtomicReplaceOutcome::into_result)
 }
 
 pub fn atomic_replace_text_preserving_metadata(path: &Path, content: &str) -> std::io::Result<()> {
@@ -108,6 +117,7 @@ fn atomic_replace_text_preserving_metadata_inner(
     };
     drop(existing);
     atomic_replace_text_in_parent(&parent_dir, file_name, content, replacement, before_commit)
+        .and_then(AtomicReplaceOutcome::into_result)
 }
 
 #[cfg(test)]
@@ -131,6 +141,42 @@ struct AtomicReplaceMetadata {
 enum AtomicCommit {
     Replace,
     NoReplace,
+}
+
+#[derive(Debug)]
+pub(crate) enum AtomicReplaceOutcome {
+    Synced,
+    PublishedUnsynced(std::io::Error),
+}
+
+impl AtomicReplaceOutcome {
+    fn into_result(self) -> std::io::Result<()> {
+        match self {
+            Self::Synced => Ok(()),
+            Self::PublishedUnsynced(error) => Err(error),
+        }
+    }
+}
+
+fn publish_outcome(result: std::io::Result<()>) -> AtomicReplaceOutcome {
+    match result {
+        Ok(()) => AtomicReplaceOutcome::Synced,
+        Err(error) => AtomicReplaceOutcome::PublishedUnsynced(error),
+    }
+}
+
+#[cfg(test)]
+mod atomic_publish_tests {
+    use super::{AtomicReplaceOutcome, publish_outcome};
+
+    #[test]
+    fn sync_failure_is_reported_as_published() {
+        let outcome = publish_outcome(Err(std::io::Error::other("sync failed")));
+        assert!(matches!(
+            outcome,
+            AtomicReplaceOutcome::PublishedUnsynced(_)
+        ));
+    }
 }
 
 impl AtomicReplaceMetadata {
@@ -158,7 +204,7 @@ fn atomic_replace_text_inner(
     content: &str,
     metadata: AtomicReplaceMetadata,
     before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
-) -> std::io::Result<()> {
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let parent_dir = open_plain_directory(parent)?;
     let file_name = plain_file_name(path)?;
@@ -171,7 +217,7 @@ fn atomic_replace_text_in_parent(
     content: &str,
     metadata: AtomicReplaceMetadata,
     mut before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
-) -> std::io::Result<()> {
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
     for attempt in 0..16 {
         let temp_name = generated_sibling_name(file_name, "tmp", attempt);
         let file_fd = match nix::fcntl::openat(
@@ -256,7 +302,7 @@ fn atomic_replace_text_in_parent(
             remove_atomic_temp(parent_dir, &temp_name);
             return Err(nix_errno_to_io(error));
         }
-        return parent_dir.sync_all();
+        return Ok(publish_outcome(parent_dir.sync_all()));
     }
     Err(std::io::Error::new(
         std::io::ErrorKind::AlreadyExists,
@@ -293,7 +339,7 @@ fn commit_preserving_atomic_temp(
     file_name: &str,
     expected: (u64, u64),
     replacement: (u64, u64),
-) -> std::io::Result<()> {
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
     if support::plain::is_fuse(parent_dir)? {
         // CortexFS synthetic inodes are path-derived, so a cross-path exchange
         // cannot compare the temporary inode with the target inode. The mount
@@ -306,7 +352,7 @@ fn commit_preserving_atomic_temp(
             remove_atomic_temp(parent_dir, temp_name);
             return Err(nix_errno_to_io(error));
         }
-        return parent_dir.sync_all();
+        return Ok(publish_outcome(parent_dir.sync_all()));
     }
 
     nix::fcntl::renameat2(
@@ -319,7 +365,7 @@ fn commit_preserving_atomic_temp(
     .map_err(nix_errno_to_io)?;
     if atomic_target_matches(parent_dir, temp_name, expected) {
         remove_atomic_temp(parent_dir, temp_name);
-        return parent_dir.sync_all();
+        return Ok(publish_outcome(parent_dir.sync_all()));
     }
     if !atomic_target_matches(parent_dir, file_name, replacement) {
         return Err(std::io::Error::other(

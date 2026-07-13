@@ -20,7 +20,7 @@ pub(crate) fn main() -> ExitCode {
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     let config = MountConfig::parse(args)?;
-    let fs = CortexFuse::new(config.source)?;
+    let fs = CortexFuse::new(config.source.clone())?;
     let mut options = Config::default();
     options.acl = SessionACL::All;
     options.mount_options = vec![
@@ -28,11 +28,29 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         MountOption::FSName("cortexfs".to_owned()),
         MountOption::DefaultPermissions,
     ];
-    let session = fuser::spawn_mount2(fs, config.mountpoint, &options)
-        .map_err(|error| format!("mount failed: {error}"))?;
+    let session = mount_before_refresh(
+        || {
+            fuser::spawn_mount2(fs, config.mountpoint, &options)
+                .map_err(|error| format!("mount failed: {error}"))
+        },
+        || {
+            FuseV1Projection::new(config.source)
+                .refresh_provider_model_cache()
+                .map_err(|error| format!("refresh failed: {error:?}"))
+        },
+    )?;
     session
         .join()
         .map_err(|error| format!("mount failed: {error}"))
+}
+
+fn mount_before_refresh<T>(
+    mount: impl FnOnce() -> Result<T, String>,
+    refresh: impl FnOnce() -> Result<(), String>,
+) -> Result<T, String> {
+    let session = mount()?;
+    let _ignored = refresh();
+    Ok(session)
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -76,6 +94,69 @@ pub(crate) fn usage() -> String {
     "usage: cortexfs-mount [--source CTX_ROOT] MOUNTPOINT".to_owned()
 }
 
+fn session_append_create_receipt(path: &str, mode: u32, uid: u32, gid: u32) -> Option<FuseV1Node> {
+    FuseV1Projection::is_session_append_path(path).then(|| {
+        FuseV1Node::new(
+            crate::fuse_v1_inode_for_path(path),
+            path.to_owned(),
+            FuseV1Attr::with_owner(path.to_owned(), FuseV1FileType::Regular, 0, mode, uid, gid),
+        )
+    })
+}
+
+#[cfg(test)]
+mod session_append_create_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn mount_is_available_before_blocked_nonfatal_refresh() -> Result<(), String> {
+        let (mounted_tx, mounted_rx) = std::sync::mpsc::sync_channel(1);
+        let (refresh_tx, refresh_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let worker = std::thread::spawn(move || {
+            mount_before_refresh(
+                || {
+                    mounted_tx.send(()).map_err(|error| error.to_string())?;
+                    Ok("session")
+                },
+                || {
+                    refresh_tx.send(()).map_err(|error| error.to_string())?;
+                    release_rx.recv().map_err(|error| error.to_string())?;
+                    Err("refresh unavailable".to_owned())
+                },
+            )
+        });
+
+        mounted_rx.recv().map_err(|error| error.to_string())?;
+        refresh_rx.recv().map_err(|error| error.to_string())?;
+        assert!(!worker.is_finished());
+        release_tx.send(()).map_err(|error| error.to_string())?;
+        assert_eq!(
+            worker
+                .join()
+                .map_err(|_panic| "mount ordering worker panicked".to_owned())?,
+            Ok("session")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn first_history_marker_has_an_independent_create_receipt() -> Result<(), String> {
+        let path = "home/1000/agent/coder/session/one/messages.jsonl";
+        let node = session_append_create_receipt(path, 0o640, 1000, 1001)
+            .ok_or_else(|| "session append path should have a create receipt".to_owned())?;
+
+        assert_eq!(node.inode(), crate::fuse_v1_inode_for_path(path));
+        assert_eq!(node.attr().abi_path(), path);
+        assert_eq!(node.attr().file_type(), FuseV1FileType::Regular);
+        assert_eq!(node.attr().size(), 0);
+        assert_eq!(node.attr().mode(), 0o640);
+        assert_eq!(node.attr().uid(), 1000);
+        assert_eq!(node.attr().gid(), 1001);
+        Ok(())
+    }
+}
+
 impl CortexFuse {
     pub(crate) fn projected_getattr(&self, path: &str) -> Result<FuseV1Attr, FuseV1Error> {
         match self.projection.getattr(path) {
@@ -96,6 +177,21 @@ impl CortexFuse {
                 .map(|overlay| socket_node(path, overlay.mode, overlay.uid, overlay.gid))
                 .ok_or(FuseV1Error::NotFound),
             Err(error) => Err(error),
+        }
+    }
+
+    pub(crate) fn created_layout_node(
+        &self,
+        path: &str,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+    ) -> Result<FuseV1Node, FuseV1Error> {
+        match self.projected_node_for_path(path) {
+            Err(FuseV1Error::NotFound) => {
+                session_append_create_receipt(path, mode, uid, gid).ok_or(FuseV1Error::NotFound)
+            }
+            result => result,
         }
     }
 

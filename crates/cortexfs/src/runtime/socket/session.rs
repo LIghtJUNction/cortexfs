@@ -32,8 +32,9 @@ pub(crate) fn handle_socket_send(
         )));
     }
 
-    ensure_durable_session_layout(session_root, session, effective_cwd, model, scope)
-        .map_err(SocketRuntimeError::SessionLayout)?;
+    let _receipts =
+        ensure_durable_session_layout(session_root, session, effective_cwd, model, scope)
+            .map_err(SocketRuntimeError::SessionLayout)?;
     let durable_request = SocketRequest::Send {
         id: id.to_owned(),
         session: session.to_owned(),
@@ -149,14 +150,6 @@ pub(crate) fn socket_start_frame(run_id: &str, model: Option<&str>) -> String {
         object.insert("model".to_owned(), serde_json::json!(model));
     }
     value.to_string()
-}
-
-pub(crate) fn is_socket_start_frame(frame: &str, run_id: &str) -> bool {
-    serde_json::from_str::<Value>(frame).is_ok_and(|value| {
-        value.get("type").and_then(Value::as_str) == Some("start")
-            && value.get("id").and_then(Value::as_str) == Some(run_id)
-            && value.get("run").and_then(Value::as_str) == Some(run_id)
-    })
 }
 
 pub(crate) fn socket_pong_frame() -> String {

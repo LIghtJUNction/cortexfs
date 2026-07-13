@@ -249,7 +249,7 @@ pub(crate) fn agent_repl_new_session(
 ) -> Result<(), CliError> {
     let next = agent_repl_new_session_name(command)?;
     let session_root = ctx_home(root)?.join("agent").join(name).join("session");
-    ensure_durable_session_layout(
+    let _receipts = ensure_durable_session_layout(
         &session_root,
         &next,
         &agent_cwd(root, name)?,

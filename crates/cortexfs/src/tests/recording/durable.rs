@@ -36,7 +36,7 @@ fn durable_session_layout_uses_private_modes_for_session_state() {
 }
 
 #[test]
-fn durable_session_layout_preserves_existing_meta_json() {
+fn durable_session_layout_preserves_existing_meta_json() -> Result<(), String> {
     let root = clean_test_dir("durable-session-preserve-meta");
 
     assert!(
@@ -55,21 +55,133 @@ fn durable_session_layout_preserves_existing_meta_json() {
         "{\"client\":\"ctx\",\"model\":\"custom/model\",\"scope\":\"private\"}\n",
     );
 
+    let receipts = ensure_durable_session_layout(
+        &root,
+        "default",
+        "/work/project",
+        Some("debug/echo"),
+        SocketSessionScope::Private,
+    )
+    .map_err(|error| format!("existing layout should remain valid: {error:?}"))?;
+    assert!(!receipts.entries.iter().any(|receipt| receipt.path == meta));
+
+    assert_eq!(
+        fs::read_to_string(meta).ok().as_deref(),
+        Some("{\"client\":\"ctx\",\"model\":\"custom/model\",\"scope\":\"private\"}\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn durable_session_receipts_roll_back_exact_created_objects() -> Result<(), String> {
+    let root = clean_test_dir("durable-session-receipt-rollback");
+    let receipts = ensure_durable_session_layout(
+        &root,
+        "default",
+        "/work/project",
+        Some("debug/echo"),
+        SocketSessionScope::Private,
+    )
+    .map_err(|error| format!("layout should be created: {error:?}"))?;
+    assert!(receipts.entries.iter().all(|receipt| {
+        fs::symlink_metadata(&receipt.path)
+            .is_ok_and(|metadata| metadata.dev() == receipt.dev && metadata.ino() == receipt.ino)
+    }));
+
+    assert!(crate::agent::create::rollback_session_layout(receipts).is_ok());
+    assert!(!root.exists());
+    Ok(())
+}
+
+#[test]
+fn durable_session_race_loser_never_claims_concurrent_file() -> Result<(), String> {
+    let root = clean_test_dir("durable-session-race-loser");
+    let concurrent = root.join("default/messages.jsonl");
+    assert!(fs::create_dir_all(root.join("default")).is_ok());
+    crate::set_session_layout_file_race(|path| {
+        assert!(path.ends_with("messages.jsonl"));
+        assert!(fs::write(path, "concurrent\n").is_ok());
+    });
+    let receipts = ensure_durable_session_layout(
+        &root,
+        "default",
+        "/work/project",
+        Some("debug/echo"),
+        SocketSessionScope::Private,
+    )
+    .map_err(|error| format!("layout should accept race winner: {error:?}"))?;
     assert!(
+        !receipts
+            .entries
+            .iter()
+            .any(|receipt| receipt.path == concurrent)
+    );
+
+    assert!(crate::agent::create::rollback_session_layout(receipts).is_ok());
+    assert_eq!(
+        fs::read_to_string(&concurrent).ok().as_deref(),
+        Some("concurrent\n")
+    );
+    Ok(())
+}
+
+#[test]
+fn durable_session_parent_fault_rolls_back_parent_receipt() {
+    let root = clean_test_dir("durable-session-parent-fault");
+    crate::set_session_layout_dir_fault({
+        let root = root.to_path_buf();
+        move |path| assert_eq!(path, root)
+    });
+
+    assert_eq!(
         ensure_durable_session_layout(
             &root,
             "default",
             "/work/project",
             Some("debug/echo"),
             SocketSessionScope::Private,
-        )
-        .is_ok()
+        ),
+        Err(DurableSessionLayoutError::CannotCreate)
     );
+    assert!(!root.exists());
+}
+
+#[test]
+fn durable_session_directory_fault_rolls_back_bound_directory() {
+    let root = clean_test_dir("durable-session-directory-fault");
+    assert!(fs::create_dir_all(&root).is_ok());
+    crate::set_session_layout_dir_fault(|path| assert!(path.ends_with("default")));
 
     assert_eq!(
-        fs::read_to_string(meta).ok().as_deref(),
-        Some("{\"client\":\"ctx\",\"model\":\"custom/model\",\"scope\":\"private\"}\n")
+        ensure_durable_session_layout(
+            &root,
+            "default",
+            "/work/project",
+            Some("debug/echo"),
+            SocketSessionScope::Private,
+        ),
+        Err(DurableSessionLayoutError::CannotCreate)
     );
+    assert!(root.exists());
+    assert!(!root.join("default").exists());
+}
+
+#[test]
+fn durable_session_file_fault_rolls_back_bound_file_and_parents() {
+    let root = clean_test_dir("durable-session-file-fault");
+    crate::set_session_layout_file_fault(|path| assert!(path.ends_with("messages.jsonl")));
+
+    assert_eq!(
+        ensure_durable_session_layout(
+            &root,
+            "default",
+            "/work/project",
+            Some("debug/echo"),
+            SocketSessionScope::Private,
+        ),
+        Err(DurableSessionLayoutError::CannotCreate)
+    );
+    assert!(!root.exists());
 }
 
 #[test]

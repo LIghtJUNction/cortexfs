@@ -24,17 +24,20 @@ pub use agent::control::{
 };
 pub use agent::prompt::{
     AgentPromptContext, MAX_HISTORY_MESSAGES_CHARS, MAX_SKILL_METADATA_CHARS, SkillMetadata,
-    agent_runtime_contract, collect_agent_rules, collect_agent_rules_from_paths,
-    collect_history_messages_from_session, collect_skill_metadata, current_time_unix,
-    default_agent_tool_context, format_history_messages_jsonl, format_skill_metadata_with_budget,
-    render_agent_system_prompt, skill_metadata_budget_from_env, snapshot_dirs, write_run_snapshot,
-    write_snapshot,
+    agent_provider_messages, agent_runtime_contract, collect_agent_rules,
+    collect_agent_rules_from_paths, collect_history_messages_from_session, collect_skill_metadata,
+    current_time_unix, default_agent_tool_context, format_history_messages_jsonl,
+    format_skill_metadata_with_budget, render_agent_system_prompt, skill_metadata_budget_from_env,
+    snapshot_dirs, write_run_snapshot, write_snapshot,
 };
 pub use agent::schedule::{
     AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNode,
     AgentScheduleNodeKind, AgentScheduleRecordError, AgentScheduleReport, MAX_AGENT_SCHEDULE_NODES,
     agent_schedule_nodes, inspect_agent_schedule_json, ready_agent_schedule_child_handoffs,
     ready_agent_schedule_nodes,
+};
+pub use agent::window::{
+    AgentEffectiveWindow, AgentWindowBudget, AgentWindowError, AgentWindowSetting,
 };
 pub use context::pack::{
     ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,
@@ -45,9 +48,10 @@ pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTabl
 pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
 pub use provider::model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
-    ModelCapabilityReport, ModelDriverRouteError, ModelDriverRoutingTable, ModelDriverUseCase,
-    ModelEffort, ModelFallbackIssue, ModelFallbackReport, ModelFallbackTable, ModelRegistryError,
-    inspect_model_capabilities, parse_model_driver_routes, parse_model_fallback,
+    ModelCapabilityReport, ModelContextLimit, ModelDriverRouteError, ModelDriverRoutingTable,
+    ModelDriverUseCase, ModelEffort, ModelFallbackIssue, ModelFallbackReport, ModelFallbackTable,
+    ModelRegistryError, inspect_model_capabilities, parse_model_driver_routes,
+    parse_model_fallback,
 };
 pub use provider::name::{
     ProviderNameError, ProviderSystemSecret, ProviderSystemSecretError, ProviderSystemSecretHandle,

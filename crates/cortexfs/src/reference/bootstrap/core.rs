@@ -8,6 +8,7 @@ use super::*;
 /// It does not start agents, models, MCP servers, providers, or a supervisor.
 pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
     let plan = plan_reference_tree_upgrade(root);
+    let agent_groups = reference_agent_groups(1000, 1000);
     create_reference_root(root)?;
     ensure_reference_bin(root)?;
     for agent in REFERENCE_AGENTS {
@@ -19,7 +20,7 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
         }) {
             continue;
         }
-        ensure_reference_agent(root, agent.name, agent.parent)?;
+        ensure_reference_agent(root, agent.name, agent.parent, &agent_groups)?;
     }
     remove_deprecated_reference_placeholder_tools(root)?;
     ensure_reference_global_tools(root)?;
@@ -93,6 +94,7 @@ pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceT
             ("driver", "default=debug\nexec=debug\nagent=debug"),
             ("cap", "chat\nstream"),
             ("effort", "auto"),
+            ("limit", "unknown"),
             ("default", ""),
             ("fallback", ""),
             ("session", "none"),
@@ -250,6 +252,7 @@ pub(crate) fn ensure_reference_agent(
     root: &Path,
     name: &str,
     parent: Option<&str>,
+    groups: &str,
 ) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(root, ObjectClass::Agent, name, "/bin/false", &[])
         .map_err(ReferenceTreeError::Object)?;
@@ -265,7 +268,7 @@ pub(crate) fn ensure_reference_agent(
         ("owner", "1000\n".to_owned()),
         ("uid", "1000\n".to_owned()),
         ("gid", "1000\n".to_owned()),
-        ("groups", "1000\n".to_owned()),
+        ("groups", groups.to_owned()),
         ("label", label),
         ("iso", "shared\n".to_owned()),
         (
@@ -279,6 +282,7 @@ pub(crate) fn ensure_reference_agent(
         ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
         ("model", format!("{}\n", reference_agent_model(name))),
+        ("window", "auto\n".to_owned()),
         ("system.md", reference_agent_system_prompt(name)),
         (
             "prompt.template.md",
@@ -302,6 +306,83 @@ pub(crate) fn ensure_reference_agent(
     let gid = read_reference_owner_id(&control.join("gid"))?;
     ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")), uid, gid)?;
     ensure_reference_agent_control_ownership(&control)
+}
+
+fn reference_agent_groups(uid: u32, primary_gid: u32) -> String {
+    let primary = nix::unistd::Gid::from_raw(primary_gid);
+    let groups = active_user_manager_groups(uid, primary_gid)
+        .or_else(|| {
+            nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid))
+                .ok()
+                .flatten()
+                .and_then(|user| std::ffi::CString::new(user.name).ok())
+                .and_then(|name| nix::unistd::getgrouplist(&name, primary).ok())
+                .map(|groups| groups.into_iter().map(nix::unistd::Gid::as_raw).collect())
+        })
+        .unwrap_or_else(|| vec![primary_gid]);
+    format_reference_agent_groups(groups)
+}
+
+fn active_user_manager_groups(uid: u32, gid: u32) -> Option<Vec<u32>> {
+    let unit = format!("user@{uid}.service");
+    let output = Command::new("systemctl")
+        .args(["show", "--property=MainPID", "--value", unit.as_str()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let pid = std::str::from_utf8(&output.stdout)
+        .ok()?
+        .trim()
+        .parse::<u32>()
+        .ok()?;
+    if pid == 0 {
+        return None;
+    }
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    parse_user_manager_groups(&status, uid, gid)
+}
+
+fn parse_user_manager_groups(status: &str, uid: u32, gid: u32) -> Option<Vec<u32>> {
+    let parse_ids = |label: &str| {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(label))?
+            .split_whitespace()
+            .map(str::parse::<u32>)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()
+    };
+    let uids = parse_ids("Uid:")?;
+    let gids = parse_ids("Gid:")?;
+    if uids.len() != 4
+        || gids.len() != 4
+        || uids.iter().any(|value| *value != uid)
+        || gids.iter().any(|value| *value != gid)
+    {
+        return None;
+    }
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("Groups:"))?
+        .split_whitespace()
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+}
+
+fn format_reference_agent_groups(groups: impl IntoIterator<Item = u32>) -> String {
+    let mut groups = groups.into_iter().collect::<Vec<_>>();
+    groups.sort_unstable();
+    groups.dedup();
+    let mut content = groups
+        .into_iter()
+        .map(|group| group.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    content.push('\n');
+    content
 }
 
 pub(crate) fn reference_agent_wrapper_script(name: &str) -> String {
@@ -723,6 +804,26 @@ mod reference_model_tests {
     use super::*;
 
     #[test]
+    fn user_manager_status_groups_require_matching_identity() {
+        let status = "Name:\tsystemd\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nGroups:\t1000 985 998\n";
+
+        assert_eq!(
+            parse_user_manager_groups(status, 1000, 1000),
+            Some(vec![1000, 985, 998])
+        );
+        assert_eq!(parse_user_manager_groups(status, 1001, 1000), None);
+        assert_eq!(parse_user_manager_groups(status, 1000, 1001), None);
+    }
+
+    #[test]
+    fn reference_agent_groups_are_sorted_deduplicated_and_terminated() {
+        assert_eq!(
+            format_reference_agent_groups([1002, 1000, 1001, 1002]),
+            "1000\n1001\n1002\n"
+        );
+    }
+
+    #[test]
     fn provider_models_are_materialized_into_reference_tree()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
@@ -784,6 +885,7 @@ mod reference_model_tests {
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
             },
             ProjectedProviderModel {
                 provider: "api.test".to_owned(),
@@ -793,6 +895,7 @@ mod reference_model_tests {
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
             },
         ];
         for model in &models {

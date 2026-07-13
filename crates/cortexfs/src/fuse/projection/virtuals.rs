@@ -188,7 +188,10 @@ impl FuseV1Projection {
         object_exec_metadata(object.class, &object.name, &object.control_dir).map(Some)
     }
 
-    fn virtual_model_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
+    pub(crate) fn virtual_model_content(
+        &self,
+        abi_path: &str,
+    ) -> Result<Option<String>, FuseV1Error> {
         if abi_path == format!("model/{MODEL_ROUTE_FILE}") {
             let path = self.resolve(abi_path)?;
             return match read_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {

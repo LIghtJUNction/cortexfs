@@ -81,6 +81,7 @@ fn model_exec_metadata_exposes_driver_route_table() {
         "default=openai-chat\nexec=openai-chat\nagent=openai-responses,openai-chat\n",
     );
     write_text_file(&control.join("cap"), "chat\nstream\ntool_call_syntax\n");
+    write_text_file(&control.join("limit"), "32768\n");
     write_text_file(&control.join("session"), "socket\n");
     write_text_file(&control.join("status"), "idle\n");
 
@@ -91,6 +92,25 @@ fn model_exec_metadata_exposes_driver_route_table() {
     assert!(metadata.contains("# cortexfs.driver.exec=openai-chat\n"));
     assert!(metadata.contains("# cortexfs.driver.socket=\n"));
     assert!(metadata.contains("# cortexfs.driver.agent=openai-responses,openai-chat\n"));
+    assert!(metadata.contains("# cortexfs.context_length=32768\n"));
+}
+
+#[test]
+fn model_exec_metadata_rejects_extra_limit_line() {
+    let root = clean_test_dir("model-limit-metadata-extra-line");
+    let control = root.join("model").join("openai").join("gpt-4o.d");
+
+    write_text_file(&control.join("id"), "openai/gpt-4o\n");
+    write_text_file(&control.join("driver"), "default=openai-chat\n");
+    write_text_file(&control.join("cap"), "chat\n");
+    write_text_file(&control.join("limit"), "32768\n\n");
+    write_text_file(&control.join("session"), "none\n");
+    write_text_file(&control.join("status"), "idle\n");
+
+    assert_eq!(
+        model_exec_metadata("openai/gpt-4o", &control),
+        Err(FuseV1Error::InvalidContent)
+    );
 }
 
 #[test]

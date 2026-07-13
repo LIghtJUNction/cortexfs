@@ -199,6 +199,47 @@ fn fuse_v1_projection_empty_history_write_preserves_offset_semantics() {
 }
 
 #[test]
+fn fuse_v1_projection_first_history_marker_survives_mode_change() {
+    let root = reference_tree("fuse-v1-first-history-marker-mode");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+
+    for (session_name, marker, peer) in [
+        ("messages-first", "messages.jsonl", "events.jsonl"),
+        ("events-first", "events.jsonl", "messages.jsonl"),
+    ] {
+        let session = format!("home/{uid}/agent/coder/session/{session_name}");
+        let session_dir = root.join(&session);
+        assert!(fs::create_dir_all(&session_dir).is_ok());
+        let marker_path = format!("{session}/{marker}");
+
+        assert_eq!(
+            projection.create_layout_file(&marker_path, uid, gid, 0o640),
+            Ok(())
+        );
+        assert!(matches!(
+            fs::symlink_metadata(session_dir.join(peer)),
+            Err(ref error) if error.kind() == std::io::ErrorKind::NotFound
+        ));
+        assert_eq!(projection.set_layout_mode(&marker_path, 0o600, uid), Ok(()));
+        let attr = ok!(projection.getattr(&marker_path));
+        assert_eq!(
+            (
+                attr.file_type(),
+                attr.size(),
+                attr.mode() & 0o7777,
+                attr.uid(),
+                attr.gid(),
+            ),
+            (FuseV1FileType::Regular, 0, 0o600, uid, gid)
+        );
+    }
+}
+
+#[test]
 fn fuse_v1_projection_projects_migrated_history_and_hides_store() {
     let root = reference_tree("fuse-v1-columnar-session-history");
     let session_root = root.join("home/1000/agent/coder/session");

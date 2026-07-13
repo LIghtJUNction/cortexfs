@@ -320,7 +320,14 @@ impl<'a> AbiPathKind<'a> {
         matches!(
             self,
             Self::ObjectControl {
-                class: ObjectClass::Model | ObjectClass::Agent | ObjectClass::Tool,
+                class: ObjectClass::Model,
+                file,
+                ..
+            } if file != "limit"
+        ) || matches!(
+            self,
+            Self::ObjectControl {
+                class: ObjectClass::Agent | ObjectClass::Tool,
                 ..
             } | Self::SharedToolControl { .. }
         )
@@ -380,6 +387,7 @@ mod tests {
     #[test]
     fn writable_control_path_classification() {
         assert!(parse_abi_path("model/debug/echo.d/cap").is_writable_control_path());
+        assert!(!parse_abi_path("model/debug/echo.d/limit").is_writable_control_path());
         assert!(parse_abi_path("agent/coder.d/cwd").is_writable_control_path());
         assert!(parse_abi_path("tool/fs.read.d/schema").is_writable_control_path());
         assert!(parse_abi_path("shared/team/tool/repo.d/schema").is_writable_control_path());

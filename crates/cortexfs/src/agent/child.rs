@@ -32,23 +32,27 @@ pub struct ChildAgentControls<'a> {
     pub(crate) subject: &'a str,
     pub(crate) policy: &'a PolicyV0,
     pub(crate) mounts: &'a MountTable,
+    pub(crate) tool_path: Option<&'a ToolPath>,
 }
 
 impl<'a> ChildAgentControls<'a> {
     /// Creates child control values from `uid/gid/groups`, `label`, `policy`,
-    /// and `mount`.
+    /// `mount`, and an optional explicit tool-path attenuation. `None` keeps
+    /// the parent's canonical path unchanged.
     #[must_use]
     pub const fn new(
         identity: &'a AgentUnixIdentity,
         subject: &'a str,
         policy: &'a PolicyV0,
         mounts: &'a MountTable,
+        tool_path: Option<&'a ToolPath>,
     ) -> Self {
         Self {
             identity,
             subject,
             policy,
             mounts,
+            tool_path,
         }
     }
 }
@@ -88,6 +92,7 @@ pub struct ChildAgentAuthority<'a> {
     pub(crate) subject: &'a str,
     pub(crate) effective_policy: &'a PolicyV0,
     pub(crate) visible_mounts: &'a MountTable,
+    pub(crate) tool_path: &'a ToolPath,
 }
 
 impl<'a> ChildAgentAuthority<'a> {
@@ -99,6 +104,7 @@ impl<'a> ChildAgentAuthority<'a> {
         subject: &'a str,
         effective_policy: &'a PolicyV0,
         visible_mounts: &'a MountTable,
+        tool_path: &'a ToolPath,
     ) -> Self {
         Self {
             parent_agent,
@@ -106,6 +112,7 @@ impl<'a> ChildAgentAuthority<'a> {
             subject,
             effective_policy,
             visible_mounts,
+            tool_path,
         }
     }
 }
@@ -133,6 +140,8 @@ pub enum ChildAgentDenial {
     PolicyExpansion,
     /// Child mount table exposes paths or permissions outside the parent view.
     MountExpansion,
+    /// Child tool path adds, duplicates, or reorders parent search tiers.
+    ToolPathExpansion,
 }
 
 /// Runtime-owned child cancellation failure.

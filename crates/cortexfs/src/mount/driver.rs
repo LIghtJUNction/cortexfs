@@ -67,7 +67,6 @@ struct SocketOverlay {
 impl CortexFuse {
     fn new(root: PathBuf) -> Result<Self, String> {
         let projection = FuseV1Projection::new(root);
-        if let Err(_error) = projection.refresh_provider_model_cache() {}
         let root_node = projection
             .root_node()
             .map_err(|error| format!("invalid source root: {}", error.errno()))?;

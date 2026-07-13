@@ -26,6 +26,8 @@ pub(super) fn test_agent_run_config() -> AgentModelRunConfig {
         current_time_unix: "123".to_owned(),
         tool_context: String::new(),
         history_messages: "previous message".to_owned(),
+        window_setting: AgentWindowSetting::Auto,
+        context_budget: None,
         suppress_model_error_events: false,
         debug_timing_start_unix_ms: None,
     }
@@ -143,6 +145,108 @@ fn provider_curl_output_kills_child_after_oversized_stdout()
     assert!(matches!(result, Err(ref error) if error.contains("provider response exceeds")));
     assert!(started.elapsed() < Duration::from_secs(2));
     Ok(())
+}
+
+#[test]
+fn context_budget_parser_accepts_only_a_coherent_canonical_pair() {
+    let parsed = parse_agent_context_budget(Some("16384"), Some("65536"));
+    assert!(
+        matches!(parsed, Ok(Some(value)) if value.tokens() == 16_384 && value.total_chars() == 65_536)
+    );
+    assert_eq!(parse_agent_context_budget(None, None), Ok(None));
+    for (tokens, chars) in [
+        (Some("1"), None),
+        (None, Some("4")),
+        (Some("01"), Some("4")),
+        (Some("x"), Some("4")),
+        (Some("1"), Some("04")),
+        (Some("1"), Some("5")),
+    ] {
+        assert!(parse_agent_context_budget(tokens, chars).is_err());
+    }
+}
+
+#[test]
+fn prompt_admission_accepts_exact_boundary_and_rejects_one_more_byte() {
+    let mut config = test_agent_run_config();
+    config.context_budget = AgentWindowBudget::from_effective(
+        ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
+    );
+    let base = serialized_agent_messages(&config, "")
+        .unwrap_or_default()
+        .len();
+    let input_budget = config
+        .context_budget
+        .map_or(0, AgentWindowBudget::input_chars);
+    assert!(base < input_budget);
+    let exact = "x".repeat(input_budget - base);
+    assert_eq!(admit_agent_prompt(&config, &exact), Ok(true));
+    assert_eq!(admit_agent_prompt(&config, &format!("{exact}x")), Ok(false));
+}
+
+#[test]
+fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth() {
+    let mut config = test_agent_run_config();
+    let budget = AgentWindowBudget::from_effective(
+        ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
+    );
+    config.context_budget = budget;
+    assert!(
+        matches!(budget, Some(value) if value.output_tokens() == 1_024 && value.input_chars() == 12_288)
+    );
+    assert_eq!(admit_agent_prompt(&config, "hello"), Ok(true));
+    let call = AgentToolCall {
+        id: "call-1".to_owned(),
+        name: "tsh".to_owned(),
+        args: vec![OsString::from("status")],
+    };
+    config.push_tool_result(&call, &"x".repeat(16_384));
+    assert_eq!(admit_agent_prompt(&config, "hello"), Ok(false));
+}
+
+#[test]
+fn unknown_window_preserves_legacy_prompt_admission() {
+    let config = test_agent_run_config();
+    assert_eq!(
+        admit_agent_prompt(&config, &"x".repeat(128 * 1024)),
+        Ok(true)
+    );
+}
+
+#[test]
+fn host_admission_serializes_the_shared_provider_messages_byte_for_byte() {
+    let mut config = test_agent_run_config();
+    config.system_prompt = "quote: \"雪\"".to_owned();
+    config.tool_context = "tool\\result\n二".to_owned();
+    let context = AgentPromptContext {
+        template: config.prompt_template.clone(),
+        rules: config.rules.clone(),
+        skills: config.skills.clone(),
+        tool_injection: config.tool_context.clone(),
+        history_messages: config.history_messages.clone(),
+        current_time_unix: config.current_time_unix.clone(),
+    };
+    let expected = provider_messages_for_agent(
+        "user \"input\" 雪",
+        Some(&config.agent),
+        &config.system_prompt,
+        &context,
+    );
+    assert_eq!(
+        serialized_agent_messages(&config, "user \"input\" 雪"),
+        serde_json::to_vec(&expected).map_err(|error| error.to_string())
+    );
+}
+
+#[test]
+fn recoverable_candidate_error_does_not_make_later_success_terminal() {
+    let frames = vec![
+        serde_json::json!({"type":"error", "code":"E2BIG", "recoverable":true}).to_string(),
+        serde_json::json!({"type":"message", "role":"assistant", "content":[]}).to_string(),
+    ];
+    assert!(!frames_have_error(&frames));
+    let terminal = vec![serde_json::json!({"type":"error", "code":"EIO"}).to_string()];
+    assert!(frames_have_error(&terminal));
 }
 use super::config::test_provider_config_with_formats;
 use super::*;

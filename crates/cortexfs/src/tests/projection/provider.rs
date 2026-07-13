@@ -124,6 +124,116 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 }
 
 #[test]
+fn fuse_v1_projection_uses_the_explicit_custom_model_context_limit() {
+    let root = reference_tree("fuse-v1-provider-model-limit");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "models": ["custom-model"],
+  "model_limits": {"custom-model": 32768},
+  "enabled": true,
+  "formats": ["openai.chat"]
+}
+"#,
+    );
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    assert_eq!(
+        projection.read_to_string("model/local/custom-model.d/limit"),
+        Ok("32768\n".to_owned())
+    );
+    assert!(matches!(
+        projection.read_to_string("model/local/custom-model"),
+        Ok(ref metadata) if metadata.contains("# cortexfs.context_length=32768\n")
+    ));
+}
+
+#[test]
+fn fuse_v1_projection_prefers_local_limit_over_catalog_cache() {
+    let root = reference_tree("fuse-v1-provider-local-limit-priority");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"],"model_limits":{"chat":32768}}"#,
+    );
+    write_text_file(
+        &cache.join("model-limits.json"),
+        r#"{"schema":"cortexfs.model-limits/v1","models":{"local/chat":65536}}"#,
+    );
+    let projection = FuseV1Projection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    assert_eq!(
+        projection.read_to_string("model/local/chat.d/limit"),
+        Ok("32768\n".to_owned())
+    );
+}
+
+#[test]
+fn fuse_v1_projection_uses_catalog_limit_without_local_override() {
+    let root = reference_tree("fuse-v1-provider-catalog-limit");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"]}"#,
+    );
+    write_text_file(
+        &cache.join("model-limits.json"),
+        r#"{"schema":"cortexfs.model-limits/v1","models":{"local/chat":65536}}"#,
+    );
+    let projection = FuseV1Projection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    assert_eq!(
+        projection.read_to_string("model/local/chat.d/limit"),
+        Ok("65536\n".to_owned())
+    );
+}
+
+#[test]
+fn fuse_v1_projection_uses_unknown_limit_without_catalog_cache() {
+    let root = reference_tree("fuse-v1-provider-unknown-limit");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"]}"#,
+    );
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    assert_eq!(
+        projection.read_to_string("model/local/chat.d/limit"),
+        Ok("unknown\n".to_owned())
+    );
+}
+
+#[test]
+fn fuse_v1_projection_skips_provider_with_invalid_local_limits() {
+    for (case, limits) in [("zero", r#"{"chat":0}"#), ("foreign", r#"{"other":32768}"#)] {
+        let root = reference_tree(&format!("fuse-v1-provider-invalid-limit-{case}"));
+        let providers = root.join("providers.d");
+        write_text_file(
+            &providers.join("local.json"),
+            &format!(
+                r#"{{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"],"model_limits":{limits}}}"#
+            ),
+        );
+        let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+        assert_eq!(
+            projection.getattr("model/local"),
+            Err(FuseV1Error::NotFound)
+        );
+    }
+}
+
+#[test]
 fn fuse_v1_projection_keeps_debug_hook_dirs_disk_backed() {
     let root = reference_tree("fuse-v1-debug-model-hooks");
     assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/pre.d")).is_ok());

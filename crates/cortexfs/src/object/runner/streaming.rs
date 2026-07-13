@@ -8,6 +8,11 @@ pub(crate) struct StreamFailure {
     pub(crate) message: String,
     pub(crate) can_fallback: bool,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OpenAiStreamApi {
+    Chat,
+    Responses,
+}
 pub(crate) fn call_openai_chat_streaming(
     transport: &ResolvedTransport,
     request: &OpenAiProviderRequest<'_>,
@@ -16,7 +21,14 @@ pub(crate) fn call_openai_chat_streaming(
 ) -> Result<(), StreamFailure> {
     let target = chat_completions_target(transport);
     let body = openai_chat_body(request.model, request.input, true, request.effort);
-    call_openai_sse_streaming(&target, request.api_key, &body, run, stdout)
+    call_openai_sse_streaming(
+        &target,
+        request.api_key,
+        &body,
+        OpenAiStreamApi::Chat,
+        run,
+        stdout,
+    )
 }
 pub(crate) fn call_openai_responses_streaming(
     transport: &ResolvedTransport,
@@ -26,7 +38,14 @@ pub(crate) fn call_openai_responses_streaming(
 ) -> Result<(), StreamFailure> {
     let target = responses_target(transport);
     let body = openai_responses_body(request.model, request.input, true, request.effort);
-    call_openai_sse_streaming(&target, request.api_key, &body, run, stdout)
+    call_openai_sse_streaming(
+        &target,
+        request.api_key,
+        &body,
+        OpenAiStreamApi::Responses,
+        run,
+        stdout,
+    )
 }
 #[expect(
     clippy::too_many_lines,
@@ -36,6 +55,7 @@ pub(crate) fn call_openai_sse_streaming(
     target: &CurlJsonTarget,
     api_key: Option<&str>,
     body: &str,
+    api: OpenAiStreamApi,
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
@@ -61,8 +81,19 @@ pub(crate) fn call_openai_sse_streaming(
                 });
             }
         };
-        match openai_stream_event(&line) {
-            Ok(OpenAiStreamEvent::Delta(text)) if !text.is_empty() => {
+        let frame = match openai_stream_event(&line) {
+            Ok(frame) => frame,
+            Err(message) => {
+                cleanup_curl_child(&mut child);
+                return Err(StreamFailure {
+                    message,
+                    can_fallback: !emitted,
+                });
+            }
+        };
+        let terminal = frame.terminal && (!frame.chat_terminal || api == OpenAiStreamApi::Chat);
+        match frame.event {
+            OpenAiStreamEvent::Delta(text) if !text.is_empty() => {
                 if let Err(error) = text_emitter
                     .push(stdout, &text)
                     .and_then(|()| stdout.flush())
@@ -75,8 +106,8 @@ pub(crate) fn call_openai_sse_streaming(
                 }
                 emitted = true;
             }
-            Ok(OpenAiStreamEvent::Delta(_empty)) => {}
-            Ok(OpenAiStreamEvent::FinalText(text)) if !emitted && !text.is_empty() => {
+            OpenAiStreamEvent::Delta(_empty) => {}
+            OpenAiStreamEvent::FinalText(text) if !emitted && !text.is_empty() => {
                 if let Err(error) = text_emitter
                     .push(stdout, &text)
                     .and_then(|()| stdout.flush())
@@ -89,8 +120,8 @@ pub(crate) fn call_openai_sse_streaming(
                 }
                 emitted = true;
             }
-            Ok(OpenAiStreamEvent::FinalText(_text)) => {}
-            Ok(OpenAiStreamEvent::Usage(usage)) => {
+            OpenAiStreamEvent::FinalText(_text) => {}
+            OpenAiStreamEvent::Usage(usage) => {
                 if let Err(error) =
                     write_model_usage(stdout, run, usage).and_then(|()| stdout.flush())
                 {
@@ -101,28 +132,10 @@ pub(crate) fn call_openai_sse_streaming(
                     });
                 }
             }
-            Ok(OpenAiStreamEvent::ToolCallDelta(delta)) => {
+            OpenAiStreamEvent::ToolCallDelta(delta) => {
                 tool_call_stream.push(delta);
             }
-            Ok(OpenAiStreamEvent::ToolCallsDone) => {
-                match emit_openai_stream_tool_call(
-                    stdout,
-                    run,
-                    &mut text_emitter,
-                    &mut tool_call_stream,
-                ) {
-                    Ok(true) => emitted = true,
-                    Ok(false) => {}
-                    Err(error) => {
-                        cleanup_curl_child(&mut child);
-                        return Err(StreamFailure {
-                            message: format!("cannot write output: {error}"),
-                            can_fallback: false,
-                        });
-                    }
-                }
-            }
-            Ok(OpenAiStreamEvent::ToolCall(tool_call)) => {
+            OpenAiStreamEvent::ToolCall(tool_call) => {
                 if let Err(error) = text_emitter
                     .finish(stdout)
                     .and_then(|()| write_model_text_or_tool_call(stdout, run, &tool_call))
@@ -136,33 +149,28 @@ pub(crate) fn call_openai_sse_streaming(
                 }
                 emitted = true;
             }
-            Ok(OpenAiStreamEvent::Done) => {
-                match emit_openai_stream_tool_call(
-                    stdout,
-                    run,
-                    &mut text_emitter,
-                    &mut tool_call_stream,
-                ) {
-                    Ok(true) => emitted = true,
-                    Ok(false) => {}
-                    Err(error) => {
-                        cleanup_curl_child(&mut child);
-                        return Err(StreamFailure {
-                            message: format!("cannot write output: {error}"),
-                            can_fallback: false,
-                        });
-                    }
+            OpenAiStreamEvent::ToolCallsDone
+            | OpenAiStreamEvent::Done
+            | OpenAiStreamEvent::Ignore => {}
+        }
+        if terminal {
+            match emit_openai_stream_tool_call(
+                stdout,
+                run,
+                &mut text_emitter,
+                &mut tool_call_stream,
+            ) {
+                Ok(true) => emitted = true,
+                Ok(false) => {}
+                Err(error) => {
+                    cleanup_curl_child(&mut child);
+                    return Err(StreamFailure {
+                        message: format!("cannot write output: {error}"),
+                        can_fallback: false,
+                    });
                 }
-                done = true;
             }
-            Ok(OpenAiStreamEvent::Ignore) => {}
-            Err(message) => {
-                cleanup_curl_child(&mut child);
-                return Err(StreamFailure {
-                    message,
-                    can_fallback: !emitted,
-                });
-            }
+            done = true;
         }
     }
     let status = child.wait().map_err(|error| StreamFailure {
@@ -181,7 +189,7 @@ pub(crate) fn call_openai_sse_streaming(
                     can_fallback: false,
                 })?;
             return Err(StreamFailure {
-                can_fallback: stderr.contains("Operation timed out"),
+                can_fallback: false,
                 message,
             });
         }
@@ -206,16 +214,18 @@ pub(crate) fn call_openai_sse_streaming(
             can_fallback: false,
         });
     }
-    if emitted {
+    if emitted && done {
         Ok(())
     } else {
         Err(StreamFailure {
             message: if done {
                 "provider stream produced no answer text".to_owned()
+            } else if emitted {
+                "provider stream ended without a terminal event".to_owned()
             } else {
                 "provider stream produced no content".to_owned()
             },
-            can_fallback: true,
+            can_fallback: !emitted,
         })
     }
 }
@@ -411,60 +421,145 @@ pub(crate) enum OpenAiStreamEvent {
     Done,
     Ignore,
 }
-pub(crate) fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, String> {
+pub(crate) struct OpenAiStreamFrame {
+    pub(crate) event: OpenAiStreamEvent,
+    pub(crate) terminal: bool,
+    pub(crate) chat_terminal: bool,
+}
+pub(crate) fn openai_stream_event(line: &str) -> Result<OpenAiStreamFrame, String> {
     let line = line.trim();
     if line.is_empty() || line.starts_with(':') || !line.starts_with("data:") {
-        return Ok(OpenAiStreamEvent::Ignore);
+        return Ok(OpenAiStreamFrame {
+            event: OpenAiStreamEvent::Ignore,
+            terminal: false,
+            chat_terminal: false,
+        });
     }
     let data = line.trim_start_matches("data:").trim();
     if data == "[DONE]" {
-        return Ok(OpenAiStreamEvent::Done);
+        return Ok(OpenAiStreamFrame {
+            event: OpenAiStreamEvent::Done,
+            terminal: true,
+            chat_terminal: false,
+        });
     }
     let value = serde_json::from_str::<Value>(data)
         .map_err(|error| format!("invalid provider stream json: {error}"))?;
+    if let Some(frame) = openai_responses_stream_event(&value)? {
+        return Ok(frame);
+    }
+    let finish_reason = value
+        .pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        .filter(|finish_reason| !finish_reason.trim().is_empty());
+    let terminal = finish_reason.is_some();
+    if let Some(usage) = token_usage_from_value(&value) {
+        return Ok(OpenAiStreamFrame {
+            event: OpenAiStreamEvent::Usage(usage),
+            terminal,
+            chat_terminal: terminal,
+        });
+    }
+    if let Some(tool_call) = value.pointer("/choices/0/delta/tool_calls/0") {
+        return Ok(OpenAiStreamFrame {
+            event: OpenAiStreamEvent::ToolCallDelta(openai_stream_tool_call_delta(tool_call)),
+            terminal,
+            chat_terminal: terminal,
+        });
+    }
+    let text = value
+        .pointer("/choices/0/delta/content")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("delta").and_then(Value::as_str))
+        .or_else(|| value.get("output_text").and_then(Value::as_str))
+        .unwrap_or_default();
+    Ok(OpenAiStreamFrame {
+        event: if text.is_empty() && terminal {
+            if finish_reason == Some("tool_calls") {
+                OpenAiStreamEvent::ToolCallsDone
+            } else {
+                OpenAiStreamEvent::Done
+            }
+        } else {
+            OpenAiStreamEvent::Delta(text.to_owned())
+        },
+        terminal,
+        chat_terminal: terminal,
+    })
+}
+
+fn openai_responses_stream_event(value: &Value) -> Result<Option<OpenAiStreamFrame>, String> {
     match value.get("type").and_then(Value::as_str) {
         Some("response.output_text.delta") => {
-            return Ok(OpenAiStreamEvent::Delta(
-                value
-                    .get("delta")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            ));
+            return Ok(Some(OpenAiStreamFrame {
+                event: OpenAiStreamEvent::Delta(
+                    value
+                        .get("delta")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
+                terminal: false,
+                chat_terminal: false,
+            }));
         }
         Some("response.output_text.done") => {
-            return Ok(OpenAiStreamEvent::FinalText(
-                value
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            ));
+            return Ok(Some(OpenAiStreamFrame {
+                event: OpenAiStreamEvent::FinalText(
+                    value
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
+                terminal: false,
+                chat_terminal: false,
+            }));
         }
         Some("response.content_part.done") => {
-            return Ok(OpenAiStreamEvent::FinalText(
-                value
-                    .pointer("/part/text")
-                    .or_else(|| value.get("text"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            ));
+            return Ok(Some(OpenAiStreamFrame {
+                event: OpenAiStreamEvent::FinalText(
+                    value
+                        .pointer("/part/text")
+                        .or_else(|| value.get("text"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
+                terminal: false,
+                chat_terminal: false,
+            }));
         }
         Some(
             "response.function_call_arguments.delta" | "response.function_call_arguments.done",
         ) => {
-            return Ok(OpenAiStreamEvent::Ignore);
+            return Ok(Some(OpenAiStreamFrame {
+                event: OpenAiStreamEvent::Ignore,
+                terminal: false,
+                chat_terminal: false,
+            }));
         }
         Some("response.output_item.done") => {
             if let Some(tool_call) = response_output_item_tool_call(value.get("item")) {
-                return Ok(OpenAiStreamEvent::ToolCall(tool_call));
+                return Ok(Some(OpenAiStreamFrame {
+                    event: OpenAiStreamEvent::ToolCall(tool_call),
+                    terminal: false,
+                    chat_terminal: false,
+                }));
             }
-            return Ok(OpenAiStreamEvent::FinalText(response_output_item_text(
-                value.get("item"),
-            )));
+            return Ok(Some(OpenAiStreamFrame {
+                event: OpenAiStreamEvent::FinalText(response_output_item_text(value.get("item"))),
+                terminal: false,
+                chat_terminal: false,
+            }));
         }
-        Some("response.completed" | "response.done") => return Ok(OpenAiStreamEvent::Done),
+        Some("response.completed" | "response.done") => {
+            return Ok(Some(OpenAiStreamFrame {
+                event: OpenAiStreamEvent::Done,
+                terminal: true,
+                chat_terminal: false,
+            }));
+        }
         Some("response.failed" | "response.incomplete" | "error") => {
             let message = value
                 .pointer("/error/message")
@@ -475,28 +570,7 @@ pub(crate) fn openai_stream_event(line: &str) -> Result<OpenAiStreamEvent, Strin
         }
         _ => {}
     }
-    if let Some(usage) = token_usage_from_value(&value) {
-        return Ok(OpenAiStreamEvent::Usage(usage));
-    }
-    if value
-        .pointer("/choices/0/finish_reason")
-        .and_then(Value::as_str)
-        == Some("tool_calls")
-    {
-        return Ok(OpenAiStreamEvent::ToolCallsDone);
-    }
-    if let Some(tool_call) = value.pointer("/choices/0/delta/tool_calls/0") {
-        return Ok(OpenAiStreamEvent::ToolCallDelta(
-            openai_stream_tool_call_delta(tool_call),
-        ));
-    }
-    let text = value
-        .pointer("/choices/0/delta/content")
-        .and_then(Value::as_str)
-        .or_else(|| value.get("delta").and_then(Value::as_str))
-        .or_else(|| value.get("output_text").and_then(Value::as_str))
-        .unwrap_or_default();
-    Ok(OpenAiStreamEvent::Delta(text.to_owned()))
+    Ok(None)
 }
 pub(crate) fn response_output_item_tool_call(item: Option<&Value>) -> Option<String> {
     openai_response_tool_call_content(item?)
@@ -546,7 +620,7 @@ mod streaming_tests {
             "data: ",
             r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}}"#
         );
-        let OpenAiStreamEvent::ToolCall(frame) = openai_stream_event(line)? else {
+        let OpenAiStreamEvent::ToolCall(frame) = openai_stream_event(line)?.event else {
             return Err("expected tool call event".to_owned());
         };
         let value = serde_json::from_str::<Value>(&frame).map_err(|error| error.to_string())?;
@@ -562,7 +636,7 @@ mod streaming_tests {
             "data: ",
             r#"{"type":"response.function_call_arguments.delta","delta":"{\"args\":[\"tools\"]}"}"#
         );
-        let event = openai_stream_event(line)?;
+        let event = openai_stream_event(line)?.event;
         assert!(matches!(event, OpenAiStreamEvent::Ignore));
         Ok(())
     }

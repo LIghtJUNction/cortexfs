@@ -22,13 +22,26 @@ pub(crate) const AGENT_CREATE_SCHEMA: &str = r#"{
   "properties": {
     "name": { "type": "string" },
     "handoff": { "type": "string" },
-    "life": { "enum": ["owned", "temp"] }
+    "life": { "enum": ["owned", "temp"] },
+    "path": { "type": "string" },
+    "window": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
   }
 }"#;
 const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
 #[cfg(test)]
 static FORCE_PRODUCTION_CLAIM_CONFLICT: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+thread_local! {
+    static CAPTURE_AUTHORIZED_CHILD_TOOL_PATH: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+    static CAPTURE_AUTHORIZED_CHILD_TOOL_PATH_ENABLED: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+    static CAPTURE_MATERIALIZED_CHILD_WINDOW: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+    static CAPTURE_MATERIALIZED_CHILD_WINDOW_ENABLED: std::cell::Cell<bool> =
+        const { std::cell::Cell::new(false) };
+}
 
 #[derive(Debug)]
 pub(crate) struct AgentCreateTool;
@@ -105,12 +118,20 @@ fn coordinate_child_phases<O: ChildCreateOps>(ops: &mut O) -> ChildCreateResult<
     if let Err(error) = ops.claim(&agent, &handoff, &launch) {
         let stop_conflict = ops.stop(&launch).err();
         let handoff_conflict = ops.rollback_handoff(&handoff).err();
-        return Err(stop_conflict.or(handoff_conflict).unwrap_or(error));
+        let agent_conflict = ops.rollback_agent(agent).err();
+        return Err(stop_conflict
+            .or(handoff_conflict)
+            .or(agent_conflict)
+            .unwrap_or(error));
     }
     if let Err(error) = ops.dispatch(&launch) {
         let stop_conflict = ops.stop(&launch).err();
         let terminal_conflict = ops.fail_dispatch(&handoff).err();
-        return Err(stop_conflict.or(terminal_conflict).unwrap_or(error));
+        let agent_conflict = ops.rollback_agent(agent).err();
+        return Err(stop_conflict
+            .or(terminal_conflict)
+            .or(agent_conflict)
+            .unwrap_or(error));
     }
     Ok(launch)
 }
@@ -127,6 +148,15 @@ fn coordinate_authorized_child<O: ChildCreateOps>(
 
 fn child_error(errno: &'static str, message: impl Into<String>) -> AgentChildCreateError {
     AgentChildCreateError::new(errno, message.into())
+}
+
+#[cfg(test)]
+fn capture_authorized_child_tool_path(path: &str) -> bool {
+    if !CAPTURE_AUTHORIZED_CHILD_TOOL_PATH_ENABLED.with(|enabled| enabled.replace(false)) {
+        return false;
+    }
+    CAPTURE_AUTHORIZED_CHILD_TOOL_PATH.with(|capture| capture.replace(Some(path.to_owned())));
+    true
 }
 
 impl Tool for AgentCreateTool {
@@ -148,10 +178,12 @@ impl Tool for AgentCreateTool {
         let object = value
             .as_object()
             .ok_or_else(|| ToolError::invalid("input must be a json object"))?;
-        if object
-            .keys()
-            .any(|key| !matches!(key.as_str(), "name" | "handoff" | "life"))
-        {
+        if object.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "name" | "handoff" | "life" | "path" | "window"
+            )
+        }) {
             return Err(ToolError::invalid("unknown agent.create field"));
         }
         let name = required_string(object, "name")?;
@@ -163,15 +195,37 @@ impl Tool for AgentCreateTool {
         })?;
         crate::ChildLifecycle::parse_exact(life)
             .map_err(|_error| ToolError::invalid("life must be owned or temp"))?;
+        let path = object
+            .get("path")
+            .map(|value| {
+                value
+                    .as_str()
+                    .ok_or_else(|| ToolError::invalid("path must be a string"))
+            })
+            .transpose()?;
+        let window = object
+            .get("window")
+            .map(|value| {
+                value
+                    .as_u64()
+                    .and_then(|value| u32::try_from(value).ok())
+                    .filter(|value| *value != 0)
+                    .ok_or_else(|| ToolError::invalid("window must be a positive u32 integer"))
+            })
+            .transpose()?;
         let run = runtime_field("CTX_RUN_ID")
             .map_err(|error| ToolError::new(error.errno(), error.message()))?;
         let child_session = format!("{name}-{run}");
         let launched = crate::runtime::control::create_child_from_environment(
-            invocation.run_id(),
-            name,
-            &child_session,
-            handoff,
-            life,
+            crate::runtime::control::CreateChildEnvironmentRequest {
+                request_id: invocation.run_id(),
+                child: name,
+                child_session: &child_session,
+                path,
+                window,
+                input: handoff,
+                life,
+            },
         )
         .map_err(|error| ToolError::new(error.errno(), error.to_string()))?;
         output
@@ -209,7 +263,7 @@ pub(crate) fn create_child(
     let source = PathBuf::from(runtime_field("CTX_SOURCE")?);
     let root = PathBuf::from(runtime_field("CTX_ROOT")?);
     create_child_context_inner(
-        &source, &root, &parent, &session, &run, name, None, handoff, life,
+        &source, &root, &parent, &session, &run, name, None, None, None, handoff, life,
     )
 }
 
@@ -225,6 +279,8 @@ pub(crate) fn create_child_context(
     run: &str,
     name: &str,
     requested_child_session: Option<&str>,
+    requested_tool_path: Option<&str>,
+    requested_window: Option<u32>,
     handoff: &str,
     life: &str,
 ) -> ChildCreateResult<(String, u32)> {
@@ -236,6 +292,8 @@ pub(crate) fn create_child_context(
         run,
         name,
         requested_child_session,
+        requested_tool_path,
+        requested_window,
         handoff,
         life,
     )
@@ -258,6 +316,8 @@ fn create_child_context_inner(
     run: &str,
     name: &str,
     requested_child_session: Option<&str>,
+    requested_tool_path: Option<&str>,
+    requested_window: Option<u32>,
     handoff: &str,
     life: &str,
 ) -> ChildCreateResult<(String, u32)> {
@@ -276,6 +336,39 @@ fn create_child_context_inner(
     }
     let view = crate::derive_agent_runtime_view(source, parent)
         .map_err(|error| child_error(error.errno(), "cannot derive parent authority"))?;
+    let child_window = crate::agent::window::attenuate_child_window(
+        view.effective_window(),
+        view.model_limit(),
+        requested_window,
+    )
+    .map_err(|error| match error {
+        crate::agent::window::ChildWindowError::Zero => {
+            child_error("EINVAL", "child window must be positive")
+        }
+        crate::agent::window::ChildWindowError::UnknownParent => {
+            child_error("EACCES", "parent effective window is unknown")
+        }
+        crate::agent::window::ChildWindowError::UnknownModel => {
+            child_error("EACCES", "child model window is unknown")
+        }
+        crate::agent::window::ChildWindowError::ExceedsParent => {
+            child_error("EACCES", "child window exceeds parent")
+        }
+        crate::agent::window::ChildWindowError::ExceedsModel => {
+            child_error("EACCES", "child window exceeds model")
+        }
+    })?;
+    let requested_tool_path = match requested_tool_path {
+        Some(path)
+            if path.is_empty()
+                || path.split(':').any(str::is_empty)
+                || crate::agent::view::validate_agent_ctx_path(path).is_err() =>
+        {
+            return Err(child_error("EINVAL", "invalid child tool path"));
+        }
+        Some(path) => Some(crate::ToolPath::parse(path)),
+        None => None,
+    };
     require_child_lifecycle_authority(&view, name)?;
     let lifecycle = crate::ChildLifecycle::parse_exact(life)
         .map_err(|_error| child_error("EINVAL", "life must be owned or temp"))?;
@@ -292,7 +385,7 @@ fn create_child_context_inner(
         .map_err(|_error| child_error("EINVAL", "invalid derived child policy"))?;
     let child_mounts = crate::MountTable::parse(&mount_text)
         .map_err(|_error| child_error("EINVAL", "invalid derived child mounts"))?;
-    crate::authorize_child_agent(
+    let child_tool_path = crate::authorize_child_agent(
         crate::ChildAgentRequest::new(
             name,
             &parent_ref,
@@ -302,6 +395,7 @@ fn create_child_context_inner(
                 child_subject,
                 &child_policy,
                 &child_mounts,
+                requested_tool_path.as_ref(),
             ),
         ),
         crate::ChildAgentAuthority::new(
@@ -310,9 +404,24 @@ fn create_child_context_inner(
             view.policy_subject(),
             view.policy(),
             view.mount_table(),
+            view.tool_path(),
         ),
     )
     .map_err(|_error| child_error("EACCES", "child authority exceeds parent"))?;
+    let path = child_tool_path
+        .dirs()
+        .iter()
+        .map(|dir| {
+            dir.to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| child_error("EINVAL", "invalid child tool path"))
+        })
+        .collect::<ChildCreateResult<Vec<_>>>()?
+        .join(":");
+    #[cfg(test)]
+    if capture_authorized_child_tool_path(&path) {
+        return Err(child_error("EAGAIN", "captured authorized child tool path"));
+    }
 
     let uid = view.identity().uid().to_string();
     let groups = view
@@ -336,9 +445,10 @@ fn create_child_context_inner(
         ("root".to_owned(), "/ctx".to_owned()),
         ("cwd".to_owned(), cwd.to_owned()),
         ("env".to_owned(), "CTX_ROOT=/ctx".to_owned()),
-        ("path".to_owned(), "/ctx/tool".to_owned()),
+        ("path".to_owned(), path),
         ("mount".to_owned(), mount_text),
         ("model".to_owned(), view.model().to_owned()),
+        ("window".to_owned(), child_window.value()),
         ("policy".to_owned(), policy_text),
         ("status".to_owned(), "idle".to_owned()),
     ];
@@ -411,7 +521,7 @@ impl ChildCreateOps for ProductionOps<'_> {
             .iter()
             .map(|entry| (entry.0.as_str(), entry.1.as_str()))
             .collect::<Vec<_>>();
-        let paths = crate::agent::create::create_agent_files(
+        let mut paths = crate::agent::create::create_agent_files(
             self.source,
             self.uid,
             self.name,
@@ -419,33 +529,41 @@ impl ChildCreateOps for ProductionOps<'_> {
             &overrides,
         )
         .map_err(child_create_error)?;
-        let session_result = crate::ensure_durable_session_layout(
-            &self.child_session_root,
-            self.child_session,
-            self.cwd,
-            Some(self.model),
-            crate::SocketSessionScope::Private,
-        );
-        self.durable_agent =
-            session_layout_materialized(&self.child_session_root, self.child_session);
-        if session_result.is_ok()
-            && crate::runtime::record::session::repair_agent_session_permissions(
+        paths = finish_session_layout(
+            paths,
+            crate::ensure_durable_session_layout(
                 &self.child_session_root,
-                self.owner_uid,
-                self.owner_gid,
-            )
-            .is_err()
+                self.child_session,
+                self.cwd,
+                Some(self.model),
+                crate::SocketSessionScope::Private,
+            ),
+        )?;
+        if crate::runtime::record::session::repair_agent_session_permissions(
+            &self.child_session_root,
+            self.owner_uid,
+            self.owner_gid,
+        )
+        .is_err()
         {
-            return finish_session_layout(
-                paths,
-                Err(crate::DurableSessionLayoutError::CannotCreate),
-                self.durable_agent,
-            );
+            return rollback_create(paths, child_error("EIO", "cannot secure child session"));
         }
-        finish_session_layout(paths, session_result, self.durable_agent)
+        self.durable_agent = false;
+        Ok(paths)
     }
 
     fn publish_handoff(&mut self, _agent: &Self::Agent) -> ChildCreateResult<Self::Handoff> {
+        #[cfg(test)]
+        if CAPTURE_MATERIALIZED_CHILD_WINDOW_ENABLED.with(std::cell::Cell::get) {
+            let content = fs::read_to_string(
+                self.source
+                    .join("agent")
+                    .join(format!("{}.d/window", self.name)),
+            )
+            .map_err(|_error| child_error("EIO", "cannot capture child window"))?;
+            CAPTURE_MATERIALIZED_CHILD_WINDOW.with(|capture| capture.replace(Some(content)));
+            return Err(child_error("EAGAIN", "captured materialized child window"));
+        }
         let receipt = crate::publish_child_handoff(
             &self.parent_session,
             self.name,
@@ -499,8 +617,13 @@ impl ChildCreateOps for ProductionOps<'_> {
         if FORCE_PRODUCTION_CLAIM_CONFLICT.swap(false, std::sync::atomic::Ordering::AcqRel) {
             return Err(child_error("EIO", "forced child claim conflict"));
         }
-        crate::claim_child_handoff_active(handoff, self.name, self.child_session)
-            .map_err(|error| child_error(error.errno(), "cannot activate child handoff"))
+        crate::claim_child_handoff_active(
+            handoff,
+            self.name,
+            self.child_session,
+            Some(self.handoff),
+        )
+        .map_err(|error| child_error(error.errno(), "cannot activate child handoff"))
     }
 
     fn stop(&mut self, launch: &Self::Launch) -> ChildCreateResult<()> {
@@ -538,40 +661,32 @@ impl ChildCreateOps for ProductionOps<'_> {
         if self.durable_agent {
             return Ok(());
         }
-        match crate::agent::create::rollback_agent_files(agent) {
-            Ok(()) => Ok(()),
-            Err(crate::agent::create::AgentRollbackError::Conflict(conflict)) => Err(child_error(
+        crate::agent::create::rollback_agent_files(agent).map_err(|error| match error {
+            crate::agent::create::AgentRollbackError::Conflict(conflict) => child_error(
                 "EIO",
                 format!(
                     "agent create rollback conflict: {}",
                     crate::agent::create::format_agent_rollback_conflict(&conflict)
                 ),
-            )),
-        }
+            ),
+        })
     }
 }
 
 fn finish_session_layout(
-    paths: crate::agent::create::AgentCreatePaths,
-    result: Result<(), crate::DurableSessionLayoutError>,
-    materialized: bool,
+    mut paths: crate::agent::create::AgentCreatePaths,
+    result: Result<crate::SessionLayoutReceipts, crate::DurableSessionLayoutError>,
 ) -> ChildCreateResult<crate::agent::create::AgentCreatePaths> {
     match result {
-        Ok(()) => Ok(paths),
-        Err(error) if materialized => Err(child_error(
-            "EIO",
-            format!("cannot prepare child session: {error:?}; durable history preserved"),
-        )),
+        Ok(receipts) => {
+            paths.own_session_layout(receipts);
+            Ok(paths)
+        }
         Err(error) => rollback_create(
             paths,
             child_error("EIO", format!("cannot prepare child session: {error:?}")),
         ),
     }
-}
-
-fn session_layout_materialized(session_root: &Path, session: &str) -> bool {
-    fs::symlink_metadata(session_root.join(session))
-        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
 }
 
 #[derive(Clone, Copy)]
@@ -845,7 +960,15 @@ fn dispatch_child_handoff(
     BufReader::new(&stream)
         .read_line(&mut response)
         .map_err(|_error| child_error("EIO", "cannot confirm child handoff"))?;
-    if !crate::runtime::socket::is_socket_start_frame(&response, &run) {
+    let accepted = serde_json::from_str::<serde_json::Value>(&response).is_ok_and(|value| {
+        value.get("type").and_then(serde_json::Value::as_str) == Some("start")
+            && value.get("client_id").and_then(serde_json::Value::as_str) == Some(run.as_str())
+            && value
+                .get("run")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+    });
+    if !accepted {
         return Err(child_error("EIO", "child handoff was not durably recorded"));
     }
     Ok(())
@@ -1211,6 +1334,267 @@ mod d_tests {
         }
     }
 
+    fn capture_production_child_tool_path(
+        parent_path: &str,
+        requested_path: Option<&str>,
+    ) -> (Option<(String, String)>, Option<String>) {
+        let source = tempfile::tempdir();
+        assert!(source.is_ok(), "tempdir: {source:?}");
+        let Ok(source) = source else {
+            return (None, None);
+        };
+        let ensured = crate::ensure_v1_reference_tree(source.path());
+        assert!(ensured.is_ok(), "{ensured:?}");
+        let control = source.path().join("agent/coder.d");
+        assert!(fs::write(control.join("path"), format!("{parent_path}\n")).is_ok());
+        assert!(fs::write(control.join("model"), "debug/echo\n").is_ok());
+        assert!(fs::write(control.join("window"), "auto\n").is_ok());
+        let model_control = source.path().join("model/debug/echo.d");
+        assert!(fs::create_dir_all(&model_control).is_ok());
+        assert!(fs::write(model_control.join("limit"), "unknown\n").is_ok());
+        assert!(
+            fs::write(
+                control.join("policy"),
+                "allow coder_t tool:agent.create execute\n\
+allow coder_t agent:worker create\n\
+allow coder_t agent:worker start\n",
+            )
+            .is_ok()
+        );
+        CAPTURE_AUTHORIZED_CHILD_TOOL_PATH.with(|capture| {
+            capture.take();
+        });
+        CAPTURE_AUTHORIZED_CHILD_TOOL_PATH_ENABLED.with(|enabled| enabled.set(true));
+        let result = create_child_context(
+            source.path(),
+            Path::new("/ctx"),
+            "coder",
+            "default",
+            "path-run",
+            "worker",
+            Some("worker-path-run"),
+            requested_path,
+            None,
+            "path test",
+            "owned",
+        );
+        CAPTURE_AUTHORIZED_CHILD_TOOL_PATH_ENABLED.with(|enabled| enabled.set(false));
+        let captured = CAPTURE_AUTHORIZED_CHILD_TOOL_PATH.with(std::cell::RefCell::take);
+        let error = result
+            .err()
+            .map(|error| (error.errno().to_owned(), error.message().to_owned()));
+        (error, captured)
+    }
+
+    fn capture_production_child_window(
+        parent_window: &str,
+        model_limit: &str,
+        requested: Option<u32>,
+    ) -> (Option<(String, String)>, Option<String>) {
+        let source = tempfile::tempdir();
+        assert!(source.is_ok(), "tempdir: {source:?}");
+        let Ok(source) = source else {
+            return (None, None);
+        };
+        assert!(crate::ensure_v1_reference_tree(source.path()).is_ok());
+        let control = source.path().join("agent/coder.d");
+        assert!(fs::write(control.join("model"), "debug/echo\n").is_ok());
+        assert!(fs::write(control.join("window"), parent_window).is_ok());
+        assert!(
+            fs::write(
+                control.join("policy"),
+                "allow coder_t tool:agent.create execute\n\
+allow coder_t agent:window-child create\n\
+allow coder_t agent:window-child start\n",
+            )
+            .is_ok()
+        );
+        let model_control = source.path().join("model/debug/echo.d");
+        assert!(fs::create_dir_all(&model_control).is_ok());
+        assert!(fs::write(model_control.join("limit"), model_limit).is_ok());
+        CAPTURE_MATERIALIZED_CHILD_WINDOW.with(|capture| {
+            capture.take();
+        });
+        CAPTURE_MATERIALIZED_CHILD_WINDOW_ENABLED.with(|enabled| enabled.set(true));
+        let result = create_child_context(
+            source.path(),
+            Path::new("/ctx"),
+            "coder",
+            "default",
+            "window-run",
+            "window-child",
+            Some("window-child-run"),
+            None,
+            requested,
+            "window test",
+            "owned",
+        );
+        CAPTURE_MATERIALIZED_CHILD_WINDOW_ENABLED.with(|enabled| enabled.set(false));
+        let captured = CAPTURE_MATERIALIZED_CHILD_WINDOW.with(std::cell::RefCell::take);
+        assert!(!source.path().join("agent/window-child").exists());
+        assert!(!source.path().join("agent/window-child.d").exists());
+        let error = result
+            .err()
+            .map(|error| (error.errno().to_owned(), error.message().to_owned()));
+        (error, captured)
+    }
+
+    #[test]
+    fn production_child_without_request_materializes_known_parent_window() {
+        let (error, window) = capture_production_child_window("auto\n", "64\n", None);
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EAGAIN"));
+        assert_eq!(window.as_deref(), Some("64\n"));
+    }
+
+    #[test]
+    fn production_child_without_request_materializes_auto_for_unknown_parent() {
+        let (error, window) = capture_production_child_window("auto\n", "unknown\n", None);
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EAGAIN"));
+        assert_eq!(window.as_deref(), Some("auto\n"));
+    }
+
+    #[test]
+    fn production_child_materializes_equal_explicit_window_canonically() {
+        let (error, window) = capture_production_child_window("auto\n", "64\n", Some(64));
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EAGAIN"));
+        assert_eq!(window.as_deref(), Some("64\n"));
+    }
+
+    #[test]
+    fn production_child_materializes_smaller_explicit_window_canonically() {
+        let (error, window) = capture_production_child_window("auto\n", "64\n", Some(32));
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EAGAIN"));
+        assert_eq!(window.as_deref(), Some("32\n"));
+    }
+
+    #[test]
+    fn production_child_tool_path_inherits_duplicate_parent_exactly() {
+        let (error, captured) =
+            capture_production_child_tool_path("/ctx/home/1000/tool:/ctx/home/1000/tool", None);
+        assert_eq!(
+            error,
+            Some((
+                "EAGAIN".to_owned(),
+                "captured authorized child tool path".to_owned()
+            ))
+        );
+        assert_eq!(
+            captured.as_deref(),
+            Some("/ctx/home/1000/tool:/ctx/home/1000/tool")
+        );
+    }
+
+    #[test]
+    fn invalid_child_window_is_rejected_before_materialization() {
+        let source = tempfile::tempdir();
+        assert!(source.is_ok(), "tempdir: {source:?}");
+        let Ok(source) = source else { return };
+        assert!(crate::ensure_v1_reference_tree(source.path()).is_ok());
+        assert!(fs::write(source.path().join("agent/coder.d/model"), "debug/echo\n").is_ok());
+        let model_control = source.path().join("model/debug/echo.d");
+        assert!(fs::create_dir_all(&model_control).is_ok());
+        assert!(fs::write(model_control.join("limit"), "unknown\n").is_ok());
+        let parent_view = crate::derive_agent_runtime_view(source.path(), "coder");
+        assert!(parent_view.is_ok(), "{parent_view:?}");
+        let agent = source.path().join("agent/window-child.d");
+        let home = source.path().join("home/1000/agent/window-child");
+
+        let zero = create_child_context(
+            source.path(),
+            Path::new("/ctx"),
+            "coder",
+            "default",
+            "window-run",
+            "window-child",
+            Some("window-child-session"),
+            None,
+            Some(0),
+            "handoff",
+            "owned",
+        );
+        assert!(matches!(zero, Err(ref error) if error.errno() == "EINVAL"));
+        assert!(!agent.exists());
+        assert!(!home.exists());
+
+        let unknown = create_child_context(
+            source.path(),
+            Path::new("/ctx"),
+            "coder",
+            "default",
+            "window-run",
+            "window-child",
+            Some("window-child-session"),
+            None,
+            Some(1),
+            "handoff",
+            "owned",
+        );
+        assert!(
+            matches!(unknown, Err(ref error) if error.errno() == "EACCES"),
+            "{unknown:?}"
+        );
+        assert!(!agent.exists());
+        assert!(!home.exists());
+    }
+
+    #[test]
+    fn production_child_tool_path_accepts_ordered_tier_deletion() {
+        let (error, captured) = capture_production_child_tool_path(
+            "/ctx/tool:/ctx/home/1000/tool:/ctx/shared/team/tool",
+            Some("/ctx/home/1000/tool:/ctx/shared/team/tool"),
+        );
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EAGAIN"));
+        assert_eq!(
+            captured.as_deref(),
+            Some("/ctx/home/1000/tool:/ctx/shared/team/tool")
+        );
+    }
+
+    #[test]
+    fn production_child_tool_path_rejects_explicit_empty_path() {
+        let (error, captured) = capture_production_child_tool_path("/ctx/home/1000/tool", Some(""));
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EINVAL"));
+        assert_eq!(captured, None);
+    }
+
+    #[test]
+    fn production_child_tool_path_rejects_duplicate_tier() {
+        let (error, captured) = capture_production_child_tool_path(
+            "/ctx/tool:/ctx/home/1000/tool",
+            Some("/ctx/tool:/ctx/tool"),
+        );
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EACCES"));
+        assert_eq!(captured, None);
+    }
+
+    #[test]
+    fn production_child_tool_path_rejects_added_tier() {
+        let (error, captured) = capture_production_child_tool_path(
+            "/ctx/home/1000/tool",
+            Some("/ctx/home/1000/tool:/ctx/shared/team/tool"),
+        );
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EACCES"));
+        assert_eq!(captured, None);
+    }
+
+    #[test]
+    fn production_child_tool_path_rejects_reordered_tiers() {
+        let (error, captured) = capture_production_child_tool_path(
+            "/ctx/tool:/ctx/home/1000/tool",
+            Some("/ctx/home/1000/tool:/ctx/tool"),
+        );
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EACCES"));
+        assert_eq!(captured, None);
+    }
+
+    #[test]
+    fn production_child_tool_path_rejects_ctx_tool_escalation() {
+        let (error, captured) =
+            capture_production_child_tool_path("/ctx/home/1000/tool", Some("/ctx/tool"));
+        assert_eq!(error.as_ref().map(|error| error.0.as_str()), Some("EACCES"));
+        assert_eq!(captured, None);
+    }
+
     #[test]
     fn d_fault_matrix_has_exact_compensation_order_and_no_residue() {
         for (stage, expected) in [
@@ -1232,16 +1616,16 @@ mod d_tests {
             ..TestOps::default()
         };
         assert!(coordinate_child_phases(&mut claim).is_err());
-        assert_eq!(claim.compensation, ["stop", "handoff"]);
-        assert_eq!(claim.resources, BTreeSet::from(["agent"]));
+        assert_eq!(claim.compensation, ["stop", "handoff", "agent"]);
+        assert!(claim.resources.is_empty());
 
         let mut dispatch = TestOps {
             fault: FaultStage::BeforeDispatch,
             ..TestOps::default()
         };
         assert!(coordinate_child_phases(&mut dispatch).is_err());
-        assert_eq!(dispatch.compensation, ["stop", "terminal"]);
-        assert_eq!(dispatch.resources, BTreeSet::from(["agent", "channel"]));
+        assert_eq!(dispatch.compensation, ["stop", "terminal", "agent"]);
+        assert_eq!(dispatch.resources, BTreeSet::from(["channel"]));
     }
 
     #[test]
@@ -1296,26 +1680,25 @@ mod d_tests {
                 &frame,
             )
             .map_err(|error| format!("{error:?}"))?;
+            let response_jsonl = response.jsonl();
             stream
-                .write_all(response.jsonl().as_bytes())
+                .write_all(response_jsonl.as_bytes())
                 .map_err(|error| error.to_string())?;
-            Ok::<String, String>(frame)
+            Ok::<(String, String), String>((frame, response_jsonl))
         });
-        assert!(
-            dispatch_child_handoff(
-                &source,
-                "worker",
-                "worker-run",
-                "/workspace",
-                "Review the parent plan",
-            )
-            .is_ok()
+        let dispatched = dispatch_child_handoff(
+            &source,
+            "worker",
+            "worker-run",
+            "/workspace",
+            "Review the parent plan",
         );
-        let frame = server.join().ok().and_then(Result::ok);
+        let exchange = server.join().ok().and_then(Result::ok);
+        assert!(dispatched.is_ok(), "{dispatched:?}; exchange={exchange:?}");
+        let frame = exchange.as_ref().map(|exchange| exchange.0.as_str());
         assert!(frame.is_some());
-        let value = frame
-            .as_deref()
-            .and_then(|frame| serde_json::from_str::<serde_json::Value>(frame.trim()).ok());
+        let value =
+            frame.and_then(|frame| serde_json::from_str::<serde_json::Value>(frame.trim()).ok());
         assert_eq!(
             value,
             Some(serde_json::json!({
@@ -1489,6 +1872,8 @@ mod d_tests {
             "claim-run",
             &child,
             Some(&session),
+            None,
+            None,
             "claim conflict",
             "temp",
         );
@@ -1496,19 +1881,9 @@ mod d_tests {
             matches!(result, Err(ref error) if error.message() == "forced child claim conflict"),
             "{result:?}"
         );
-        assert!(source.join("agent").join(&child).exists());
-        assert_eq!(
-            fs::read_to_string(source.join("agent").join(format!("{child}.d/label"))).ok(),
-            Some(format!("{parent_label}\n"))
-        );
-        assert_eq!(
-            fs::read_to_string(source.join("agent").join(format!("{child}.d/policy"))).ok(),
-            Some(policy.clone())
-        );
-        assert_eq!(
-            fs::read_to_string(source.join("agent").join(format!("{child}.d/life"))).ok(),
-            Some("temp\n".to_owned())
-        );
+        assert!(!source.join("agent").join(&child).exists());
+        assert!(!source.join("agent").join(format!("{child}.d")).exists());
+        assert!(!home_agent_root.join(&child).exists());
         assert!(
             !parent_sessions
                 .join("default/context/child")
@@ -1577,15 +1952,15 @@ mod d_tests {
                 "stop",
                 FaultStage::BeforeDispatch,
                 "stop conflict",
-                &["stop", "terminal"][..],
-                BTreeSet::from(["agent", "channel"]),
+                &["stop", "terminal", "agent"][..],
+                BTreeSet::from(["channel"]),
             ),
             (
                 "handoff",
                 FaultStage::BeforeClaim,
                 "handoff conflict",
-                &["stop", "handoff"][..],
-                BTreeSet::from(["agent"]),
+                &["stop", "handoff", "agent"][..],
+                BTreeSet::new(),
             ),
             (
                 "agent",
@@ -1624,7 +1999,6 @@ mod d_tests {
             finish_session_layout(
                 receipt,
                 Err(crate::DurableSessionLayoutError::InvalidSessionName),
-                false,
             )
             .is_err()
         );
@@ -1802,7 +2176,7 @@ mod d_tests {
     }
 
     #[test]
-    fn d_partial_session_layout_failure_preserves_history_and_primary_error() {
+    fn d_partial_session_layout_failure_rolls_back_created_paths_only() {
         let root = tempfile::tempdir();
         let Ok(root) = root else { return };
         let receipt = crate::agent::create::create_agent_files(
@@ -1823,22 +2197,14 @@ mod d_tests {
             crate::SocketSessionScope::Private,
         );
         assert_eq!(result, Err(crate::DurableSessionLayoutError::CannotCreate));
-        let error = finish_session_layout(
-            receipt,
-            result,
-            session_layout_materialized(&session_root, "dedicated"),
-        )
-        .err();
+        assert!(!session_root.join("dedicated").exists());
+        assert!(session_root.join("index/list").is_dir());
+        let error = finish_session_layout(receipt, result).err();
         assert!(error.is_some());
         let Some(error) = error else { return };
         assert!(error.message().contains("CannotCreate"));
-        assert!(error.message().contains("durable history preserved"));
-        assert!(root.path().join("agent/child").exists());
-        assert!(session_root.join("dedicated/messages.jsonl").exists());
-        assert!(
-            fs::read_to_string(root.path().join("agent/child.d/status"))
-                .is_ok_and(|status| status.trim() != "active")
-        );
+        assert!(!root.path().join("agent/child").exists());
+        assert!(!session_root.join("dedicated").exists());
         let quarantines = fs::read_dir(root.path().join("agent"))
             .ok()
             .into_iter()

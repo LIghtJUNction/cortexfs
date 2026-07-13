@@ -15,6 +15,12 @@ pub(crate) fn normalize_agent_model_frame(frame: &str, run: &str) -> String {
 }
 
 pub(crate) fn should_write_streamed_model_frame(frame: &str, suppress_error: bool) -> bool {
+    if serde_json::from_str::<Value>(frame)
+        .ok()
+        .is_some_and(|value| value.get("recoverable").and_then(Value::as_bool) == Some(true))
+    {
+        return true;
+    }
     match event_type(frame).as_deref() {
         Some("delta" | "reasoning_delta" | "usage") => true,
         Some("error") => !suppress_error,
@@ -23,9 +29,13 @@ pub(crate) fn should_write_streamed_model_frame(frame: &str, suppress_error: boo
 }
 
 pub(crate) fn frames_have_error(frames: &[String]) -> bool {
-    frames
-        .iter()
-        .any(|frame| event_type(frame).as_deref() == Some("error"))
+    frames.iter().any(|frame| {
+        let Ok(value) = serde_json::from_str::<Value>(frame) else {
+            return false;
+        };
+        value.get("type").and_then(Value::as_str) == Some("error")
+            && value.get("recoverable").and_then(Value::as_bool) != Some(true)
+    })
 }
 
 pub(crate) fn frames_have_visible_assistant_response(frames: &[String]) -> bool {

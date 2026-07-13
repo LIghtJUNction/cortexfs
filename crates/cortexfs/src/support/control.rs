@@ -107,6 +107,22 @@ pub fn inspect_control_line(
     issues
 }
 
+/// Parses an unsigned decimal control value in its canonical positive form.
+#[must_use]
+pub fn parse_canonical_positive_u32(value: &str) -> Option<u32> {
+    if value.starts_with('0') || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse::<u32>().ok().filter(|parsed| *parsed > 0)
+}
+
+/// Returns the one non-empty value from an exactly LF-terminated control body.
+#[must_use]
+pub fn parse_canonical_control_value(content: &str) -> Option<&str> {
+    let value = content.strip_suffix('\n')?;
+    (!value.is_empty() && !value.bytes().any(|byte| matches!(byte, b'\n' | b'\r'))).then_some(value)
+}
+
 /// Inspects each non-structural multi-line entry with the same empty/whitespace rules.
 pub fn inspect_control_lines(
     content: &str,

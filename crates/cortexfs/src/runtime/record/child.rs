@@ -251,7 +251,7 @@ fn replace_child_file(
     publish
 }
 
-struct ChildChannelLease<'a> {
+struct ChildPrivilegeLease<'a> {
     directory: &'a fs::File,
     parent: &'a fs::File,
     name: &'a str,
@@ -259,7 +259,7 @@ struct ChildChannelLease<'a> {
     restored: bool,
 }
 
-impl<'a> ChildChannelLease<'a> {
+impl<'a> ChildPrivilegeLease<'a> {
     fn acquire(
         directory: &'a fs::File,
         parent: &'a fs::File,
@@ -368,7 +368,7 @@ impl<'a> ChildChannelLease<'a> {
     }
 }
 
-impl Drop for ChildChannelLease<'_> {
+impl Drop for ChildPrivilegeLease<'_> {
     fn drop(&mut self) {
         if !self.restored {
             match self.restore(Err(ChildContextRecordError::CannotRecord)) {
@@ -507,6 +507,7 @@ pub(crate) fn finish_child_result_exclusive(
         receipt,
         child_agent,
         child_session,
+        None,
         status,
         result,
         refs_jsonl,
@@ -516,13 +517,14 @@ pub(crate) fn finish_child_result_exclusive(
     )
 }
 
+/// Exclusive lock retained for one receipt-bound child context channel.
 #[derive(Debug)]
-pub struct ChildFinishLease {
+pub struct ChildContextLease {
     child: nix::fcntl::Flock<fs::File>,
 }
 
-pub fn child_finish_lease_status(
-    lease: &ChildFinishLease,
+pub fn child_context_lease_status(
+    lease: &ChildContextLease,
 ) -> Result<ChildContextStatus, ChildContextRecordError> {
     let value =
         support::plain::read_small_text_file_at(&lease.child, "status", 64, "invalid child status")
@@ -530,9 +532,9 @@ pub fn child_finish_lease_status(
     ChildContextStatus::parse(value.trim()).ok_or(ChildContextRecordError::InvalidStatus)
 }
 
-pub fn acquire_child_finish_lease(
+pub fn acquire_child_context_lease(
     receipt: &ChildHandoffReceipt,
-) -> Result<ChildFinishLease, ChildContextRecordError> {
+) -> Result<ChildContextLease, ChildContextRecordError> {
     let child = open_plain_directory(&receipt.path)
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     let metadata = child
@@ -543,7 +545,107 @@ pub fn acquire_child_finish_lease(
     }
     let child = nix::fcntl::Flock::lock(child, nix::fcntl::FlockArg::LockExclusive)
         .map_err(|(_file, _error)| ChildContextRecordError::CannotRecord)?;
-    Ok(ChildFinishLease { child })
+    Ok(ChildContextLease { child })
+}
+
+struct ChildFieldReceipt {
+    file: &'static str,
+    dev: u64,
+    ino: u64,
+}
+
+fn child_context_field_receipts(
+    child: &fs::File,
+    child_agent: &str,
+    child_session: &str,
+    expected_handoff: Option<&str>,
+) -> Result<Vec<ChildFieldReceipt>, ChildContextRecordError> {
+    let expected_handoff = expected_handoff.map(ensure_trailing_newline);
+    let mut fields = vec![
+        ("agent", child_agent, true),
+        ("session", child_session, true),
+    ];
+    if let Some(handoff) = expected_handoff.as_deref() {
+        fields.push(("handoff.md", handoff, false));
+    }
+    fields
+        .into_iter()
+        .map(|(file, expected, trimmed)| {
+            let before =
+                nix::sys::stat::fstatat(child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+                    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+            let value = support::plain::read_small_text_file_at(
+                child,
+                file,
+                65_537,
+                "invalid child context field",
+            )
+            .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+            let after =
+                nix::sys::stat::fstatat(child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+                    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+            let matches = if trimmed {
+                value.trim() == expected
+            } else {
+                value == expected
+            };
+            if !matches || !same_file(&before, &after) {
+                return Err(ChildContextRecordError::InvalidStatus);
+            }
+            Ok(ChildFieldReceipt {
+                file,
+                dev: after.st_dev,
+                ino: after.st_ino,
+            })
+        })
+        .collect()
+}
+
+fn verify_child_context_lease(
+    lease: &ChildContextLease,
+    receipt: &ChildHandoffReceipt,
+) -> Result<(), ChildContextRecordError> {
+    let child = nix::sys::stat::fstat(&*lease.child)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let parent_path = receipt
+        .path
+        .parent()
+        .ok_or(ChildContextRecordError::CannotRecord)?;
+    let parent = open_plain_directory(parent_path)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let name = receipt
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or(ChildContextRecordError::CannotRecord)?;
+    let current = nix::sys::stat::fstatat(&parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    if !is_plain_channel_directory(&child)
+        || (child.st_dev, child.st_ino) != (receipt.dev, receipt.ino)
+        || (current.st_dev, current.st_ino) != (receipt.dev, receipt.ino)
+    {
+        return Err(ChildContextRecordError::CannotRecord);
+    }
+    Ok(())
+}
+
+/// Validates immutable child identity and handoff fields under an exact channel lease.
+pub fn validate_child_context_lease(
+    lease: &ChildContextLease,
+    receipt: &ChildHandoffReceipt,
+    child_agent: &str,
+    child_session: &str,
+    expected_handoff: &str,
+) -> Result<(), ChildContextRecordError> {
+    validate_child_context_names("lease", child_agent, child_session)?;
+    verify_child_context_lease(lease, receipt)?;
+    child_context_field_receipts(
+        &lease.child,
+        child_agent,
+        child_session,
+        Some(expected_handoff),
+    )?;
+    verify_child_context_lease(lease, receipt)
 }
 
 #[expect(
@@ -551,10 +653,11 @@ pub fn acquire_child_finish_lease(
     reason = "receipt-bound completion keeps lease and result fields explicit"
 )]
 pub fn finish_child_result_with_lease(
-    lease: ChildFinishLease,
+    lease: ChildContextLease,
     receipt: &ChildHandoffReceipt,
     child_agent: &str,
     child_session: &str,
+    expected_handoff: Option<&str>,
     status: ChildContextStatus,
     result: &str,
     refs_jsonl: &str,
@@ -564,6 +667,7 @@ pub fn finish_child_result_with_lease(
         receipt,
         child_agent,
         child_session,
+        expected_handoff,
         status,
         result,
         refs_jsonl,
@@ -591,6 +695,7 @@ pub(crate) fn finish_child_result_with_hook(
         receipt,
         child_agent,
         child_session,
+        None,
         status,
         result,
         refs_jsonl,
@@ -609,11 +714,12 @@ fn finish_child_result_with_mode_hook(
     receipt: &ChildHandoffReceipt,
     child_agent: &str,
     child_session: &str,
+    expected_handoff: Option<&str>,
     status: ChildContextStatus,
     result: &str,
     refs_jsonl: &str,
     exclusive: bool,
-    locked: Option<ChildFinishLease>,
+    locked: Option<ChildContextLease>,
     mut hook: impl FnMut(ChildFinishStage) -> Result<(), ChildContextRecordError>,
 ) -> Result<(), ChildContextRecordError> {
     validate_child_context_names("finish", child_agent, child_session)?;
@@ -664,26 +770,11 @@ fn finish_child_result_with_mode_hook(
     };
     let child_dir = &*child_fd;
     let mut lease = exclusive
-        .then(|| ChildChannelLease::acquire(child_dir, &parent, name, receipt))
+        .then(|| ChildPrivilegeLease::acquire(child_dir, &parent, name, receipt))
         .transpose()?;
     let operation = (|| {
-        let mut field_receipts = Vec::new();
-        for (file, expected) in [("agent", child_agent), ("session", child_session)] {
-            let value = support::plain::read_small_text_file_at(
-                child_dir,
-                file,
-                4096,
-                "invalid child result field",
-            )
-            .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-            if value.trim() != expected {
-                return Err(ChildContextRecordError::InvalidStatus);
-            }
-            let stat =
-                nix::sys::stat::fstatat(child_dir, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-                    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-            field_receipts.push((file, stat.st_dev, stat.st_ino));
-        }
+        let field_receipts =
+            child_context_field_receipts(child_dir, child_agent, child_session, expected_handoff)?;
         let current = support::plain::read_small_text_file_at(
             &child_fd,
             "status",
@@ -736,14 +827,14 @@ fn finish_child_result_with_mode_hook(
         ] {
             if file == "status" {
                 hook(ChildFinishStage::BeforeStatus)?;
-                for &(field, dev, ino) in &field_receipts {
+                for receipt in &field_receipts {
                     let current = nix::sys::stat::fstatat(
                         child_dir,
-                        field,
+                        receipt.file,
                         nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
                     )
                     .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-                    if (current.st_dev, current.st_ino) != (dev, ino) {
+                    if (current.st_dev, current.st_ino) != (receipt.dev, receipt.ino) {
                         return Err(ChildContextRecordError::CannotRecord);
                     }
                 }
@@ -1004,65 +1095,100 @@ pub fn claim_child_handoff_active(
     receipt: &ChildHandoffReceipt,
     child_agent: &str,
     child_session: &str,
+    expected_handoff: Option<&str>,
 ) -> Result<(), ChildContextRecordError> {
-    claim_child_handoff_active_with_hook(receipt, child_agent, child_session, |_stage| Ok(()))
+    let lease = acquire_child_context_lease(receipt)?;
+    claim_child_handoff_active_with_lease_hook(
+        &lease,
+        receipt,
+        child_agent,
+        child_session,
+        expected_handoff,
+        |_stage| Ok(()),
+    )
 }
 
+#[cfg(test)]
 pub(crate) fn claim_child_handoff_active_with_hook(
     receipt: &ChildHandoffReceipt,
     child_agent: &str,
     child_session: &str,
+    expected_handoff: Option<&str>,
+    hook: impl FnMut(ChildClaimStage) -> Result<(), ChildContextRecordError>,
+) -> Result<(), ChildContextRecordError> {
+    let lease = acquire_child_context_lease(receipt)?;
+    claim_child_handoff_active_with_lease_hook(
+        &lease,
+        receipt,
+        child_agent,
+        child_session,
+        expected_handoff,
+        hook,
+    )
+}
+
+/// Claims one pending child while retaining the caller's exact channel lease.
+pub fn claim_child_handoff_active_with_lease(
+    lease: &ChildContextLease,
+    receipt: &ChildHandoffReceipt,
+    child_agent: &str,
+    child_session: &str,
+    expected_handoff: Option<&str>,
+) -> Result<(), ChildContextRecordError> {
+    claim_child_handoff_active_with_lease_hook(
+        lease,
+        receipt,
+        child_agent,
+        child_session,
+        expected_handoff,
+        |_stage| Ok(()),
+    )
+}
+
+fn claim_child_handoff_active_with_lease_hook(
+    lease: &ChildContextLease,
+    receipt: &ChildHandoffReceipt,
+    child_agent: &str,
+    child_session: &str,
+    expected_handoff: Option<&str>,
     mut hook: impl FnMut(ChildClaimStage) -> Result<(), ChildContextRecordError>,
 ) -> Result<(), ChildContextRecordError> {
     validate_child_context_names("claim", child_agent, child_session)?;
-    let parent_path = receipt
-        .path
-        .parent()
-        .ok_or(ChildContextRecordError::CannotRecord)?;
-    let parent = open_plain_directory(parent_path)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let name = receipt
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ChildContextRecordError::CannotRecord)?;
-    let child_fd = nix::fcntl::openat(
-        &parent,
-        name,
-        nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
+    verify_child_context_lease(lease, receipt)?;
+    let child_fd = &lease.child;
+    let fields =
+        child_context_field_receipts(child_fd, child_agent, child_session, expected_handoff)?;
+    let status_before = nix::sys::stat::fstatat(
+        &**child_fd,
+        "status",
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
     )
-    .map(fs::File::from)
     .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let metadata = child_fd
-        .metadata()
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    if (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino) {
+    let status = support::plain::read_small_text_file_at(
+        child_fd,
+        "status",
+        64,
+        "invalid child claim status",
+    )
+    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let status_after = nix::sys::stat::fstatat(
+        &**child_fd,
+        "status",
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    if !same_file(&status_before, &status_after) {
         return Err(ChildContextRecordError::CannotRecord);
     }
-    let mut fields = Vec::new();
-    for (file, expected) in [
-        ("agent", child_agent),
-        ("session", child_session),
-        ("status", ChildContextStatus::Pending.as_str()),
-    ] {
-        let value = support::plain::read_small_text_file_at(
-            &child_fd,
-            file,
-            4096,
-            "invalid child claim field",
+    match ChildContextStatus::parse(status.trim()) {
+        Some(ChildContextStatus::Pending) => {}
+        Some(
+            ChildContextStatus::Active
+            | ChildContextStatus::Done
+            | ChildContextStatus::Error
+            | ChildContextStatus::Cancelled,
         )
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-        if value.trim() != expected {
-            return Err(ChildContextRecordError::InvalidStatus);
-        }
-        let stat =
-            nix::sys::stat::fstatat(&child_fd, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-                .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-        fields.push((file, stat.st_dev, stat.st_ino));
+        | None => return Err(ChildContextRecordError::InvalidStatus),
     }
     let temporary = format!(
         ".status.claim-{}-{}",
@@ -1070,7 +1196,7 @@ pub(crate) fn claim_child_handoff_active_with_hook(
         CHILD_STAGE_ID.fetch_add(1, Ordering::Relaxed)
     );
     replace_child_file(
-        &child_fd,
+        child_fd,
         "status",
         &temporary,
         "active\n",
@@ -1078,31 +1204,23 @@ pub(crate) fn claim_child_handoff_active_with_hook(
             ReplacePoint::Prepared => hook(ChildClaimStage::Staging),
             ReplacePoint::Rechecked => {
                 hook(ChildClaimStage::Publish)?;
-                for &(file, dev, ino) in &fields {
+                for receipt in &fields {
                     let current = nix::sys::stat::fstatat(
-                        &child_fd,
-                        file,
+                        &**child_fd,
+                        receipt.file,
                         nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
                     )
                     .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-                    if (current.st_dev, current.st_ino) != (dev, ino) {
+                    if (current.st_dev, current.st_ino) != (receipt.dev, receipt.ino) {
                         return Err(ChildContextRecordError::CannotRecord);
                     }
                 }
-                let channel = nix::sys::stat::fstatat(
-                    &parent,
-                    name,
-                    nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-                )
-                .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-                if (channel.st_dev, channel.st_ino) != (receipt.dev, receipt.ino) {
-                    return Err(ChildContextRecordError::CannotRecord);
-                }
-                Ok(())
+                verify_child_context_lease(lease, receipt)
             }
             ReplacePoint::Exchanged | ReplacePoint::Quarantined => Ok(()),
         },
-    )
+    )?;
+    verify_child_context_lease(lease, receipt)
 }
 
 /// Creates or replaces the parent-owned child handoff channel.
@@ -1159,30 +1277,24 @@ pub fn record_child_result_to_parent_context(
     if !is_object_name(child_name) {
         return Err(ChildContextRecordError::InvalidChildName);
     }
-    if matches!(
-        status,
-        ChildContextStatus::Pending | ChildContextStatus::Active
-    ) {
-        return Err(ChildContextRecordError::InvalidStatus);
-    }
-    if result.contains('\0') || refs_jsonl.contains('\0') {
-        return Err(ChildContextRecordError::InvalidText);
-    }
-    if !inspect_context_jsonl(ContextJsonlKind::Refs, refs_jsonl).is_ok() {
-        return Err(ChildContextRecordError::InvalidRefs);
-    }
-
     let child_dir = parent_session_dir.join("context/child").join(child_name);
     require_child_context_files(&child_dir)?;
-    write_child_context_file(&child_dir, "status", &format!("{}\n", status.as_str()))?;
-    write_child_context_file(&child_dir, "result.md", &ensure_trailing_newline(result))?;
-    write_child_context_file(
-        &child_dir,
-        "refs.jsonl",
-        &ensure_trailing_newline(refs_jsonl),
-    )?;
-
-    Ok(())
+    let child_agent = fs::read_to_string(child_dir.join("agent"))
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let child_session = fs::read_to_string(child_dir.join("session"))
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let child_agent = child_agent.trim();
+    let child_session = child_session.trim();
+    validate_child_context_names(child_name, child_agent, child_session)?;
+    let receipt = child_handoff_receipt(&child_dir)?;
+    finish_child_result(
+        &receipt,
+        child_agent,
+        child_session,
+        status,
+        result,
+        refs_jsonl,
+    )
 }
 
 /// Validates and records a parent-owned hybrid DAG/ReAct schedule.
@@ -1398,7 +1510,8 @@ pub fn session_index_key_for_cwd(cwd: &str) -> Option<String> {
 )]
 pub(crate) fn record_socket_send_to_session(
     session_dir: &Path,
-    id: &str,
+    client_id: &str,
+    run_id: &str,
     session: &str,
     scope: SocketSessionScope,
     cwd: Option<&str>,
@@ -1406,24 +1519,28 @@ pub(crate) fn record_socket_send_to_session(
     preparation: Option<&OwnedSessionPreparation>,
     locked_history: Option<&columnar::HistoryGuard<'_>>,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
-    validate_socket_send(session_dir, id, session, scope, input)?;
+    validate_socket_send(session_dir, client_id, session, scope, input)?;
+    validate_socket_object_field("run", run_id)
+        .map_err(|_error| SocketSessionRecordError::InvalidField("run"))?;
 
     let message = serde_json::json!({
         "role": "user",
-        "run": id,
+        "run": run_id,
         "content": input
     })
     .to_string();
     let event = serde_json::json!({
         "type": "start",
-        "id": id,
-        "run": id,
+        "id": run_id,
+        "run": run_id,
+        "client_id": client_id,
         "scope": scope.as_str(),
         "cwd": cwd
     })
     .to_string();
 
     let owned_history;
+    let indexed = locked_history.is_some();
     let history = if let Some(history) = locked_history {
         history
     } else {
@@ -1431,14 +1548,43 @@ pub(crate) fn record_socket_send_to_session(
             .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
         &owned_history
     };
-    history
-        .refresh_claims()
-        .and_then(|()| history.append(columnar::Stream::Messages, &[&message]))
-        .and_then(|()| history.append(columnar::Stream::Events, &[&event]))
-        .and_then(|()| history.refresh_claims())
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    if indexed {
+        let send = match history
+            .lookup_send(client_id, input, scope.as_str(), cwd)
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?
+        {
+            columnar::SendClaim::Vacant => history
+                .prepare_send(
+                    client_id,
+                    run_id,
+                    input,
+                    scope.as_str(),
+                    cwd,
+                    &message,
+                    &event,
+                )
+                .map_err(|_error| SocketSessionRecordError::CannotRecord)?,
+            columnar::SendClaim::Pending(send) if send.run_id() == run_id => send,
+            columnar::SendClaim::Pending(_)
+            | columnar::SendClaim::Replay(_)
+            | columnar::SendClaim::Conflict
+            | columnar::SendClaim::Corrupt => {
+                return Err(SocketSessionRecordError::CannotRecord);
+            }
+        };
+        history
+            .append_prepared_send(&send, &message, &event)
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    } else {
+        history
+            .refresh_claims()
+            .and_then(|()| history.append(columnar::Stream::Messages, &[&message]))
+            .and_then(|()| history.append(columnar::Stream::Events, &[&event]))
+            .and_then(|()| history.refresh_claims())
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    }
     set_session_state(session_dir, "active")?;
-    write_current_run_session_file(session_dir, &format!("{id}\n"), preparation)?;
+    write_current_run_session_file(session_dir, &format!("{run_id}\n"), preparation)?;
     if let Some(cwd) = cwd {
         write_session_file(session_dir, "cwd", &format!("{cwd}\n"))?;
     }
@@ -1448,7 +1594,7 @@ pub(crate) fn record_socket_send_to_session(
 
 pub(crate) fn validate_socket_send(
     session_dir: &Path,
-    id: &str,
+    client_id: &str,
     session: &str,
     scope: SocketSessionScope,
     input: &str,
@@ -1456,7 +1602,7 @@ pub(crate) fn validate_socket_send(
     if scope == SocketSessionScope::Temp {
         return Err(SocketSessionRecordError::TempSessionNotDurable);
     }
-    validate_socket_object_field("id", id)
+    validate_socket_object_field("id", client_id)
         .map_err(|_error| SocketSessionRecordError::InvalidField("id"))?;
     if input.contains('\0') {
         return Err(SocketSessionRecordError::InvalidField("input"));

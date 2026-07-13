@@ -21,6 +21,7 @@ fn declared_native_tool_executes_and_tsh_cache_does_not_admit_it()
     fs::write(control.join("cwd"), "/workspace\n")?;
     fs::write(control.join("env"), "\n")?;
     fs::write(control.join("model"), "main\n")?;
+    write_agent_window_fixture(&root, &control)?;
     fs::write(control.join("status"), "idle\n")?;
     fs::write(control.join("pid"), "\n")?;
     fs::write(control.join("log"), "\n")?;

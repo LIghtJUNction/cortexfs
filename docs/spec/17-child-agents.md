@@ -36,6 +36,7 @@ A child is still an ordinary agent object:
   path
   mount
   model
+  window
   policy
   status
   pid
@@ -131,6 +132,46 @@ observing child process death; it does not introduce a watcher or polling
 runtime.
 When parent stop cancels a child result channel, the compact `result.md` should
 name the backing child agent that was cancelled.
+
+## Child Context Window
+
+Authenticated dynamic child creation carries an optional `window` token count
+through the Agent SDK, runtime client, per-run capability frame, and compensated
+creation transaction. It is a positive `u32`, not control-file text. Absence
+means inherit; zero is invalid.
+
+The child inherits the parent's selected model. Window materialization follows
+these rules:
+
+```text
+request absent, parent effective known    child window = parent effective number
+request absent, parent effective unknown  child window = auto
+request number                            child window = requested number
+```
+
+An explicit request must not exceed the parent effective window and must not
+exceed the inherited model's known hard limit. If either required upper bound
+is unknown, explicit creation fails closed. A child can therefore retain or
+reduce a known parent window but cannot expand it. The exact canonical value is
+written into `agent/<child>.d/window` inside the existing compensated child
+creation transaction before executable publication.
+
+Failed validation creates no child object, private home, session, result
+channel, runtime unit, or executable wrapper. Failure after preparation uses
+the existing receipt-checked compensation path. The SDK, runtime-client, and
+host must use one shared wire field definition; unknown fields and a numeric
+zero are protocol errors.
+
+## Child Tool Path
+
+Dynamic `agent.create` accepts an optional `path` string using the canonical
+colon-separated `agent/<name>.d/path` syntax. Absence means exact inheritance
+of the parent's current canonical tool path. An explicit value may only remove
+parent tiers while preserving their first-hit order. Added tiers, duplicate
+tiers, reordered tiers, empty components, and an empty path are invalid. The
+validated canonical value is written to the child `path` control inside the
+existing compensated creation transaction; materialization must not substitute
+`/ctx/tool` or re-derive a different path.
 
 ## Handoff Protocol
 
@@ -353,6 +394,7 @@ Child authority is attenuated from the parent:
 child policy must be a subset of parent effective policy
 child mounts must be a subset of parent visible mounts
 child groups must be a subset of parent groups
+child tool path must be an ordered tier subset of the parent tool path
 child context must be the handoff context, not the full parent context
 ```
 

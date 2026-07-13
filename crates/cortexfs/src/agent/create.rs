@@ -62,6 +62,20 @@ impl AgentCreatePaths {
         });
         Ok(())
     }
+
+    pub(crate) fn own_session_layout(&mut self, receipts: crate::SessionLayoutReceipts) {
+        self.owned.extend(
+            receipts
+                .into_entries()
+                .into_iter()
+                .map(|receipt| OwnedPath {
+                    path: receipt.path,
+                    dev: receipt.dev,
+                    ino: receipt.ino,
+                    directory: receipt.directory,
+                }),
+        );
+    }
 }
 
 fn own_control_children(
@@ -150,6 +164,14 @@ pub(crate) fn rollback_agent_files(
     mut receipt: AgentCreatePaths,
 ) -> Result<(), AgentRollbackError> {
     rollback(&mut receipt, |_stage, _path| {})
+}
+
+pub(crate) fn rollback_session_layout(
+    receipts: crate::SessionLayoutReceipts,
+) -> Result<(), AgentRollbackError> {
+    let mut paths = AgentCreatePaths::new(Path::new("/"), "0", "receipt");
+    paths.own_session_layout(receipts);
+    rollback(&mut paths, |_stage, _path| {})
 }
 
 #[cfg(test)]

@@ -5,6 +5,22 @@ use crate::support::plain::{
     plain_file_name, read_symlink_target,
 };
 
+#[cfg(test)]
+thread_local! {
+    static AGENT_WINDOW_LOCK_HOOK: std::cell::RefCell<Option<mpsc::Sender<()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn refresh_provider_caches<D, C>(discovery: D, catalog: C) -> Result<(), FuseV1Error>
+where
+    D: FnOnce() -> Result<(), FuseV1Error>,
+    C: FnOnce() -> Result<(), FuseV1Error>,
+{
+    let discovery = discovery();
+    let catalog = catalog();
+    discovery.and(catalog)
+}
+
 impl FuseV1Projection {
     /// Creates a local projection over a `/ctx`-shaped root.
     #[must_use]
@@ -30,9 +46,17 @@ impl FuseV1Projection {
         self
     }
 
-    /// Refreshes the provider model-list cache used by this projection.
+    /// Refreshes the provider model-list and catalog caches used by this projection.
     pub fn refresh_provider_model_cache(&self) -> Result<(), FuseV1Error> {
-        refresh_provider_model_cache(&self.provider_config_dir, &self.provider_model_cache_dir)
+        refresh_provider_caches(
+            || {
+                refresh_provider_model_cache(
+                    &self.provider_config_dir,
+                    &self.provider_model_cache_dir,
+                )
+            },
+            || provider::catalog::refresh_model_limit_cache(&self.provider_model_cache_dir),
+        )
     }
 
     /// Returns the backing root.
@@ -53,7 +77,27 @@ impl FuseV1Projection {
         let size = if metadata.is_file() {
             if let Some(stream) = columnar::Stream::from_abi_path(&normalized) {
                 let session = path.parent().ok_or(FuseV1Error::InvalidPath)?;
-                columnar::len(session, stream).map_err(|error| fuse_metadata_error(&error))?
+                match columnar::len(session, stream) {
+                    Ok(size) => size,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::NotFound && metadata.len() == 0 =>
+                    {
+                        let peer = match stream {
+                            columnar::Stream::Messages => "events.jsonl",
+                            columnar::Stream::Events => "messages.jsonl",
+                        };
+                        match fs::symlink_metadata(session.join(peer)) {
+                            Err(peer_error)
+                                if peer_error.kind() == std::io::ErrorKind::NotFound =>
+                            {
+                                0
+                            }
+                            Ok(_metadata) => return Err(fuse_metadata_error(&error)),
+                            Err(peer_error) => return Err(fuse_metadata_error(&peer_error)),
+                        }
+                    }
+                    Err(error) => return Err(fuse_metadata_error(&error)),
+                }
             } else {
                 metadata.len()
             }
@@ -390,6 +434,12 @@ impl FuseV1Projection {
             }
             self.authorize_layout_path(&normalized, uid)?;
             Self::validate_agent_layout_content(&target, content, uid)?;
+            let _lock = self.lock_agent_window_target(&target)?;
+            if let Some((agent, control)) = Self::agent_control_target(&target)
+                && matches!(control, "model" | "window")
+            {
+                self.validate_agent_window_pair(agent, control, content)?;
+            }
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
         if Self::is_agent_wrapper_path(&normalized)
@@ -397,6 +447,12 @@ impl FuseV1Projection {
         {
             self.authorize_layout_path(&normalized, uid)?;
             Self::validate_agent_layout_content(&normalized, content, uid)?;
+            let _lock = self.lock_agent_window_target(&normalized)?;
+            if let Some((agent, control)) = Self::agent_control_target(&normalized)
+                && matches!(control, "model" | "window")
+            {
+                self.validate_agent_window_pair(agent, control, content)?;
+            }
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
         self.write_control_file_at(&normalized, 0, content)?;
@@ -614,6 +670,7 @@ impl FuseV1Projection {
             return Err(FuseV1Error::InvalidPath);
         }
         let parent_dir = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
+        let _agent_lock = self.lock_agent_window_target(&to)?;
         let from_name = plain_file_name(&from_path).map_err(|_error| FuseV1Error::Io)?;
         let to_name = plain_file_name(&to_path).map_err(|_error| FuseV1Error::Io)?;
         let stat = nix::sys::stat::fstatat(
@@ -626,6 +683,17 @@ impl FuseV1Projection {
             .contains(nix::sys::stat::SFlag::S_IFREG)
         {
             return Err(FuseV1Error::InvalidPath);
+        }
+        if let Some((agent, control)) = Self::agent_control_target(&to)
+            && matches!(control, "model" | "window")
+        {
+            let content = support::plain::read_small_text_file(
+                &from_path,
+                u64::try_from(MAX_FUSE_V1_SMALL_WRITE_BYTES).unwrap_or(u64::MAX),
+            )
+            .map_err(|_error| FuseV1Error::Io)?;
+            Self::validate_agent_layout_content(&to, content.as_bytes(), uid)?;
+            self.validate_agent_window_pair(agent, control, content.as_bytes())?;
         }
         let renamed = if no_replace {
             nix::fcntl::renameat2(
@@ -771,6 +839,93 @@ impl FuseV1Projection {
         }
         validate_agent_bootstrap_control_content(control, content)
             .map_err(|_error| FuseV1Error::InvalidContent)
+    }
+
+    fn validate_agent_window_pair(
+        &self,
+        agent: &str,
+        candidate_control: &str,
+        candidate: &[u8],
+    ) -> Result<(), FuseV1Error> {
+        let candidate =
+            std::str::from_utf8(candidate).map_err(|_error| FuseV1Error::InvalidContent)?;
+        let control_dir = self.root.join("agent").join(format!("{agent}.d"));
+        let read_peer = |file: &str| {
+            support::plain::read_small_text_file(
+                &control_dir.join(file),
+                MAX_FUSE_V1_SMALL_READ_BYTES,
+            )
+            .map_err(|_error| FuseV1Error::InvalidContent)
+        };
+        let model_content = if candidate_control == "model" {
+            candidate.to_owned()
+        } else {
+            read_peer("model")?
+        };
+        let window_content = if candidate_control == "window" {
+            candidate.to_owned()
+        } else {
+            read_peer("window")?
+        };
+        let model = support::control::parse_canonical_control_value(&model_content)
+            .filter(|model| abi::path::is_model_reference(model))
+            .ok_or(FuseV1Error::InvalidContent)?;
+        let setting = AgentWindowSetting::parse_control(&window_content)
+            .ok_or(FuseV1Error::InvalidContent)?;
+        let model_name = if matches!(model, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS) {
+            let target = self.default_model_alias_target(model)?;
+            target
+                .to_str()
+                .and_then(|target| target.strip_prefix("/ctx/model/"))
+                .filter(|target| is_model_name(target))
+                .ok_or(FuseV1Error::InvalidContent)?
+                .to_owned()
+        } else {
+            model.to_owned()
+        };
+        let (provider, model) = model_name
+            .split_once('/')
+            .ok_or(FuseV1Error::InvalidContent)?;
+        let limit_path = format!("model/{provider}/{model}.d/limit");
+        let limit_content = self
+            .virtual_model_content(&limit_path)?
+            .ok_or(FuseV1Error::InvalidContent)?;
+        let limit =
+            ModelContextLimit::parse_control(&limit_content).ok_or(FuseV1Error::InvalidContent)?;
+        setting
+            .resolve(limit)
+            .map(|_effective| ())
+            .map_err(|_error| FuseV1Error::InvalidContent)
+    }
+
+    fn lock_agent_window_target(
+        &self,
+        normalized_target: &str,
+    ) -> Result<Option<nix::fcntl::Flock<fs::File>>, FuseV1Error> {
+        let Some((agent, control)) = Self::agent_control_target(normalized_target) else {
+            return Ok(None);
+        };
+        if !matches!(control, "model" | "window") {
+            return Ok(None);
+        }
+        let control_dir = open_plain_directory(&self.root.join("agent").join(format!("{agent}.d")))
+            .map_err(|_error| FuseV1Error::Io)?;
+        #[cfg(test)]
+        AGENT_WINDOW_LOCK_HOOK.with(|hook| {
+            if let Some(sender) = hook.borrow_mut().take() {
+                let _ignored = sender.send(());
+            }
+        });
+        nix::fcntl::Flock::lock(control_dir, nix::fcntl::FlockArg::LockExclusive)
+            .map(Some)
+            .map_err(|(_dir, _error)| FuseV1Error::Io)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_agent_window_lock_hook(sender: mpsc::Sender<()>) {
+        AGENT_WINDOW_LOCK_HOOK.with(|hook| {
+            hook.replace(Some(sender));
+        });
     }
 
     pub(crate) fn authorize_agent_owner(&self, agent: &str, uid: u32) -> Result<(), FuseV1Error> {
@@ -1131,5 +1286,27 @@ pub(crate) fn is_removable_durable_dir_path(normalized: &str) -> bool {
                 )
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod provider_cache_refresh_tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[test]
+    fn catalog_refresh_runs_when_discovery_fails() {
+        let catalog_ran = Cell::new(false);
+        let result = refresh_provider_caches(
+            || Err(FuseV1Error::Io),
+            || {
+                catalog_ran.set(true);
+                Ok(())
+            },
+        );
+
+        assert_eq!(result, Err(FuseV1Error::Io));
+        assert!(catalog_ran.get());
     }
 }

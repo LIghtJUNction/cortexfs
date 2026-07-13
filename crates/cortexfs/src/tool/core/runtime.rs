@@ -63,6 +63,8 @@ pub enum DurableSessionLayoutError {
     TempSessionNotDurable,
     /// Required files or directories could not be created.
     CannotCreate,
+    /// A newly created entry could not be identity-bound and was retained.
+    RetainedResidue,
 }
 
 /// Error while materializing the documented v1 reference tree.
@@ -93,7 +95,7 @@ impl DurableSessionLayoutError {
         match self {
             Self::InvalidSessionName | Self::InvalidCwd | Self::InvalidModelName => "EINVAL",
             Self::TempSessionNotDurable => "ENOENT",
-            Self::CannotCreate => "EIO",
+            Self::CannotCreate | Self::RetainedResidue => "EIO",
         }
     }
 }
@@ -116,7 +118,10 @@ impl ReferenceTreeError {
                 | ObjectBootstrapError::CannotRecord
                 | ObjectBootstrapError::CannotChmod,
             )
-            | Self::Session(DurableSessionLayoutError::CannotCreate)
+            | Self::Session(
+                DurableSessionLayoutError::CannotCreate
+                | DurableSessionLayoutError::RetainedResidue,
+            )
             | Self::Child(ChildContextRecordError::CannotRecord)
             | Self::CannotLink
             | Self::CannotSocket(_)

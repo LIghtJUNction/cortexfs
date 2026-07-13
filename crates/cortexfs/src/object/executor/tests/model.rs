@@ -217,12 +217,15 @@ fn agent_model_config_prefers_current_user_agent_control() -> Result<(), Box<dyn
     let user_agent = root.join("home").join(uid).join("agent").join("coder.d");
     fs::create_dir_all(&user_agent)?;
     fs::write(user_agent.join("model"), "debug/echo\n")?;
+    fs::write(user_agent.join("window"), "auto\n")?;
     fs::write(user_agent.join("label"), "user_u:agent_r:usercoder_t:s0\n")?;
     fs::write(
         user_agent.join("policy"),
         "allow usercoder_t model:debug/echo use\n",
     )?;
     fs::create_dir_all(root.join("model/debug"))?;
+    fs::create_dir_all(root.join("model/debug/echo.d"))?;
+    fs::write(root.join("model/debug/echo.d/limit"), "unknown\n")?;
     write_executable_script(&root.join("model/debug/echo"), "#!/bin/sh\nexit 0\n")?;
 
     let config = AgentModelRunConfig::new_with_paths("coder", root.clone(), root.clone());
@@ -308,6 +311,9 @@ fn agent_model_config_allows_primary_selected_through_alias_policy()
     symlink("/ctx/model/debug/echo", root.join("model/main"))?;
     write_executable_script(&root.join("model/debug/echo"), "#!/bin/sh\nexit 0\n")?;
     fs::write(agent_dir.join("model"), "main\n")?;
+    fs::write(agent_dir.join("window"), "auto\n")?;
+    fs::create_dir_all(root.join("model/debug/echo.d"))?;
+    fs::write(root.join("model/debug/echo.d/limit"), "unknown\n")?;
     fs::write(agent_dir.join("label"), " user_u:agent_r:coder_t:s0\n")?;
     fs::write(agent_dir.join("policy"), "allow coder_t model:main use\n")?;
 
@@ -332,6 +338,9 @@ fn agent_model_config_denies_fallback_without_selected_model_policy()
     )?;
     write_executable_script(&root.join("model/evil/leak"), "#!/bin/sh\nexit 0\n")?;
     fs::write(agent_dir.join("model"), "primary/approved\n")?;
+    fs::write(agent_dir.join("window"), "auto\n")?;
+    fs::create_dir_all(root.join("model/evil/leak.d"))?;
+    fs::write(root.join("model/evil/leak.d/limit"), "unknown\n")?;
     fs::write(agent_dir.join("label"), "user_u:agent_r:coder_t:s0\n")?;
     fs::write(
         agent_dir.join("policy"),
@@ -362,6 +371,156 @@ fn runner_control_reader_refuses_symlink() -> Result<(), Box<dyn std::error::Err
     assert!(result.is_err());
     let _ignored = fs::remove_dir_all(root);
     Ok(())
+}
+
+fn empty_prompt_context() -> AgentPromptContext {
+    AgentPromptContext {
+        template: String::new(),
+        rules: String::new(),
+        skills: String::new(),
+        tool_injection: String::new(),
+        history_messages: String::new(),
+        current_time_unix: "0".to_owned(),
+    }
+}
+
+fn candidate_admission<'a>(
+    root: &'a Path,
+    setting: AgentWindowSetting,
+    context: &'a AgentPromptContext,
+    skills: &'a str,
+) -> ProviderCandidateAdmission<'a> {
+    ProviderCandidateAdmission {
+        ctx_root: root,
+        setting,
+        agent: "coder",
+        system: "",
+        context,
+        skills,
+        input: "x",
+    }
+}
+
+#[test]
+fn provider_candidate_uses_its_own_limit_for_auto_and_explicit_windows()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("candidate-own-window")?;
+    for (model, limit) in [
+        ("small/model", "16\n"),
+        ("fit/model", "64\n"),
+        ("unknown/model", "unknown\n"),
+    ] {
+        let (provider, name) = model.split_once('/').unwrap_or_default();
+        let control = root.join("model").join(provider).join(format!("{name}.d"));
+        fs::create_dir_all(&control)?;
+        fs::write(control.join("limit"), limit)?;
+    }
+    let context = empty_prompt_context();
+    assert!(matches!(
+        admit_provider_candidate(
+            "small/model",
+            &candidate_admission(&root, AgentWindowSetting::Auto, &context, "")
+        ),
+        Err(("E2BIG", _))
+    ));
+    assert!(
+        admit_provider_candidate(
+            "fit/model",
+            &candidate_admission(&root, AgentWindowSetting::Auto, &context, "")
+        )
+        .is_ok()
+    );
+    let explicit = AgentWindowSetting::parse_value("32").unwrap_or(AgentWindowSetting::Auto);
+    assert!(matches!(
+        admit_provider_candidate(
+            "small/model",
+            &candidate_admission(&root, explicit, &context, "")
+        ),
+        Err(("EINVAL", _))
+    ));
+    assert!(matches!(
+        admit_provider_candidate(
+            "unknown/model",
+            &candidate_admission(&root, explicit, &context, "")
+        ),
+        Err(("EINVAL", _))
+    ));
+    assert!(
+        admit_provider_candidate(
+            "fit/model",
+            &candidate_admission(&root, explicit, &context, "")
+        )
+        .is_ok()
+    );
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn unknown_candidate_keeps_legacy_skill_cap() -> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("candidate-unknown-skills")?;
+    fs::create_dir_all(root.join("model/local/chat.d"))?;
+    fs::write(root.join("model/local/chat.d/limit"), "unknown\n")?;
+    let context = empty_prompt_context();
+    assert!(
+        admit_provider_candidate(
+            "local/chat",
+            &candidate_admission(
+                &root,
+                AgentWindowSetting::Auto,
+                &context,
+                &"x".repeat(8_000)
+            )
+        )
+        .is_ok()
+    );
+    assert!(matches!(
+        admit_provider_candidate(
+            "local/chat",
+            &candidate_admission(
+                &root,
+                AgentWindowSetting::Auto,
+                &context,
+                &"x".repeat(8_001)
+            )
+        ),
+        Err(("E2BIG", _))
+    ));
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+#[test]
+fn agent_window_environment_fails_closed_on_missing_or_noncanonical_setting() {
+    let agent = OsStr::new("coder");
+    for setting in [
+        None,
+        Some(""),
+        Some("auto\n"),
+        Some("01"),
+        Some("0"),
+        Some("+1"),
+        Some("4294967296"),
+        Some("junk"),
+    ] {
+        assert!(
+            parse_agent_window_environment(agent.into(), setting.map(OsStr::new)).is_err(),
+            "{setting:?}"
+        );
+    }
+    assert!(matches!(
+        parse_agent_window_environment(Some(agent), Some(OsStr::new("auto"))),
+        Ok(Some((ref name, AgentWindowSetting::Auto))) if name == "coder"
+    ));
+}
+
+#[test]
+fn direct_model_call_does_not_require_agent_window_setting() {
+    assert_eq!(parse_agent_window_environment(None, None), Ok(None));
+    assert_eq!(
+        parse_agent_window_environment(None, Some(OsStr::new("junk"))),
+        Ok(None)
+    );
 }
 
 #[test]

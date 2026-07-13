@@ -79,12 +79,14 @@ pub struct CreateChildRequest {
     pub run: String,
     pub child: String,
     pub child_session: String,
+    pub path: Option<String>,
+    pub window: Option<u32>,
     pub input: String,
     pub life: String,
 }
 
 /// Stable successful child creation response.
-pub use cortexfs_runtime_client::CreateChildResult;
+pub use cortexfs_runtime_client::{CreateChildEnvironmentRequest, CreateChildResult};
 
 impl RunCapability {
     #[expect(
@@ -135,7 +137,7 @@ impl RunCapability {
         {
             return Err(RunCapabilityError::CannotCreate);
         }
-        let token = random_token()?;
+        let token = random_hex::<TOKEN_BYTES>()?;
         let socket = directory.join(format!(
             "control-{}.sock",
             token.get(..24).unwrap_or(&token)
@@ -329,6 +331,8 @@ impl RunCapability {
                 run,
                 child,
                 child_session,
+                path,
+                window,
                 input,
                 life,
             } => {
@@ -350,12 +354,18 @@ impl RunCapability {
                     let _ignored = write_error_frame(stream, request_id, "EINVAL");
                     return Err(RunCapabilityError::InvalidFrame);
                 }
+                if window == Some(0) {
+                    let _ignored = write_error_frame(stream, request_id, "EINVAL");
+                    return Err(RunCapabilityError::InvalidFrame);
+                }
                 let result = create_child(CreateChildRequest {
                     agent,
                     session,
                     run,
                     child,
                     child_session,
+                    path,
+                    window,
                     input,
                     life,
                 });
@@ -410,11 +420,17 @@ impl RunCapability {
         .map_err(client_error)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "wire helper keeps capability and requested child controls explicit"
+    )]
     pub fn create_child(
         &self,
         request_id: &str,
         child: &str,
         child_session: &str,
+        path: Option<&str>,
+        window: Option<u32>,
         input: &str,
         life: &str,
     ) -> Result<CreateChildResult, RunCapabilityError> {
@@ -427,6 +443,8 @@ impl RunCapability {
             &self.run,
             child,
             child_session,
+            path,
+            window,
             input,
             life,
         )
@@ -462,20 +480,9 @@ fn error_from_errno(errno: &str) -> RunCapabilityError {
 }
 
 pub fn create_child_from_environment(
-    request_id: &str,
-    child: &str,
-    child_session: &str,
-    input: &str,
-    life: &str,
+    request: CreateChildEnvironmentRequest<'_>,
 ) -> Result<CreateChildResult, RunCapabilityError> {
-    cortexfs_runtime_client::create_child_from_environment(
-        request_id,
-        child,
-        child_session,
-        input,
-        life,
-    )
-    .map_err(client_error)
+    cortexfs_runtime_client::create_child_from_environment(request).map_err(client_error)
 }
 
 /// Performs the optional one-shot runner handshake from reserved environment.
@@ -593,7 +600,8 @@ fn isolate_unidentified_socket(parent: &File, name: &str) -> Result<(), RunCapab
 }
 
 fn quarantine_name(name: &str) -> Result<String, RunCapabilityError> {
-    let suffix = random_token().map_err(|_error| RunCapabilityError::CleanupConflict)?;
+    let suffix =
+        random_hex::<TOKEN_BYTES>().map_err(|_error| RunCapabilityError::CleanupConflict)?;
     Ok(format!(
         ".{name}.rollback-{}",
         suffix.get(..16).unwrap_or(&suffix)
@@ -634,12 +642,12 @@ fn require_socket_identity(
     }
 }
 
-fn random_token() -> Result<String, RunCapabilityError> {
-    let mut bytes = [0_u8; TOKEN_BYTES];
+pub(crate) fn random_hex<const N: usize>() -> Result<String, RunCapabilityError> {
+    let mut bytes = [0_u8; N];
     File::open("/dev/urandom")
         .and_then(|mut file| file.read_exact(&mut bytes))
         .map_err(|_error| RunCapabilityError::CannotCreate)?;
-    let mut token = String::with_capacity(TOKEN_BYTES * 2);
+    let mut token = String::with_capacity(N * 2);
     for byte in bytes {
         write!(&mut token, "{byte:02x}").map_err(|_error| RunCapabilityError::CannotCreate)?;
     }
@@ -1069,6 +1077,8 @@ mod tests {
                 run: "run-1".to_owned(),
                 child: "child".to_owned(),
                 child_session: "child-session".to_owned(),
+                path: None,
+                window: None,
                 input: "work".to_owned(),
                 life: "owned".to_owned(),
             },
@@ -1100,6 +1110,33 @@ mod tests {
         Ok(())
     }
 
+    fn assert_zero_window_create_rejected(
+        capability: &RunCapability,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut zero_stream = UnixStream::connect(capability.socket())?;
+        write_frame(
+            &mut zero_stream,
+            &RequestFrame::CreateChild {
+                token: capability.token.clone(),
+                request_id: "create-zero".to_owned(),
+                agent: "parent".to_owned(),
+                session: "session-1".to_owned(),
+                run: "run-1".to_owned(),
+                child: "child-zero".to_owned(),
+                child_session: "session-zero".to_owned(),
+                path: None,
+                window: Some(0),
+                input: "work".to_owned(),
+                life: "owned".to_owned(),
+            },
+        )?;
+        assert!(matches!(
+            read_json_line::<ResponseFrame>(&mut zero_stream)?,
+            ResponseFrame::Error { errno, .. } if errno == "EINVAL"
+        ));
+        Ok(())
+    }
+
     #[test]
     fn create_handler_runs_once_per_unique_request() -> Result<(), Box<dyn std::error::Error>> {
         use std::sync::atomic::AtomicUsize;
@@ -1108,6 +1145,8 @@ mod tests {
         let server_shutdown = Arc::clone(&shutdown);
         let calls = Arc::new(AtomicUsize::new(0));
         let server_calls = Arc::clone(&calls);
+        let windows = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let server_windows = Arc::clone(&windows);
         let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
         let server_capability = Arc::clone(&capability);
         let server = thread::spawn(move || {
@@ -1118,6 +1157,10 @@ mod tests {
                 || Some("run-1".to_owned()),
                 move |request| {
                     server_calls.fetch_add(1, Ordering::AcqRel);
+                    server_windows
+                        .lock()
+                        .map_err(|_error| RunCapabilityError::CannotCreate)?
+                        .push(request.window);
                     Ok(CreateChildResult {
                         child: request.child,
                         child_session: request.child_session,
@@ -1128,18 +1171,28 @@ mod tests {
         });
         capability.ping("startup-run-1")?;
         assert_eq!(startup_receiver.recv()?, Ok(()));
+        assert_zero_window_create_rejected(&capability)?;
+        assert_eq!(calls.load(Ordering::Acquire), 0);
         for (request_id, life) in [
             ("create-padded-life", " temp "),
             ("create-unknown-life", "detached"),
         ] {
             assert_eq!(
-                capability.create_child(request_id, "invalid", "invalid", "work", life),
+                capability.create_child(request_id, "invalid", "invalid", None, None, "work", life),
                 Err(RunCapabilityError::InvalidFrame)
             );
         }
         assert_eq!(calls.load(Ordering::Acquire), 0);
         assert_eq!(
-            capability.create_child("create-1", "child-a", "session-a", "work", "owned")?,
+            capability.create_child(
+                "create-1",
+                "child-a",
+                "session-a",
+                None,
+                None,
+                "work",
+                "owned",
+            )?,
             CreateChildResult {
                 child: "child-a".to_owned(),
                 child_session: "session-a".to_owned(),
@@ -1147,16 +1200,52 @@ mod tests {
             }
         );
         assert_eq!(
-            capability.create_child("create-1", "child-a", "session-a", "work", "owned"),
+            capability.create_child(
+                "create-1",
+                "child-a",
+                "session-a",
+                None,
+                None,
+                "work",
+                "owned",
+            ),
             Err(RunCapabilityError::Replayed)
         );
         assert_eq!(
             capability
-                .create_child("create-2", "child-b", "session-b", "other", "temp")?
+                .create_child(
+                    "create-2",
+                    "child-b",
+                    "session-b",
+                    None,
+                    None,
+                    "other",
+                    "temp",
+                )?
                 .pid,
             42
         );
-        assert_eq!(calls.load(Ordering::Acquire), 2);
+        assert_eq!(
+            capability
+                .create_child(
+                    "create-3",
+                    "child-c",
+                    "session-c",
+                    None,
+                    Some(2048),
+                    "windowed",
+                    "owned",
+                )?
+                .pid,
+            42
+        );
+        assert_eq!(calls.load(Ordering::Acquire), 3);
+        assert_eq!(
+            *windows
+                .lock()
+                .map_err(|_error| std::io::Error::other("window capture poisoned"))?,
+            [None, None, Some(2048)]
+        );
         shutdown.store(true, Ordering::Release);
         assert_eq!(
             server

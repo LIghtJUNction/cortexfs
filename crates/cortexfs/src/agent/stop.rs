@@ -67,7 +67,7 @@ pub struct PlannedCancellation {
     pub child_session: String,
     pub child_session_dir: PathBuf,
     pub receipt: ChildHandoffReceipt,
-    pub lease: crate::runtime::record::child::ChildFinishLease,
+    pub lease: crate::runtime::record::child::ChildContextLease,
     pub record_events: bool,
     pub history: Option<CancellationHistoryReceipts>,
 }
@@ -699,9 +699,9 @@ fn plan_parent_child_cancellations(
             };
             let receipt = crate::runtime::record::child_handoff_receipt(&channel)
                 .map_err(|_error| StopError::new("cannot bind child handoff"))?;
-            let lease = crate::runtime::record::child::acquire_child_finish_lease(&receipt)
+            let lease = crate::runtime::record::child::acquire_child_context_lease(&receipt)
                 .map_err(|_error| StopError::new("cannot lock child handoff"))?;
-            let locked_status = crate::runtime::record::child::child_finish_lease_status(&lease)
+            let locked_status = crate::runtime::record::child::child_context_lease_status(&lease)
                 .map_err(|_error| StopError::new("cannot inspect child handoff"))?;
             if matches!(
                 locked_status,
@@ -802,6 +802,7 @@ fn stop_concrete_agent(agent: PlannedStop) -> Result<(), StopError> {
             &cancellation.receipt,
             &cancellation.child_agent,
             &cancellation.child_session,
+            None,
             crate::ChildContextStatus::Cancelled,
             &format!(
                 "Child agent `{}` cancelled because the parent agent stopped.\n",

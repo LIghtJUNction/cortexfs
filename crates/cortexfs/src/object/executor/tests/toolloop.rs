@@ -800,3 +800,39 @@ fn agent_tool_loop_hands_off_when_tool_iteration_limit_is_exceeded() {
 }
 use super::runtime::test_agent_run_config;
 use super::*;
+
+#[test]
+fn tool_context_growth_rejects_second_iteration_before_model_spawn()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = unique_temp_dir("tool-loop-window-spawn-count")?;
+    let count = root.join("count");
+    let model = root.join("model");
+    write_executable_script(
+        &model,
+        format!(
+            "#!/bin/sh\nprintf x >> '{}'\nprintf '{{\"type\":\"tool_call\",\"run\":\"%s\",\"id\":\"call-1\",\"name\":\"tsh\",\"arguments\":{{\"args\":[\"status\"]}}}}\\n' \"$CTX_RUN_ID\"\n",
+            count.display()
+        ),
+    )?;
+    let mut config = AgentModelRunConfig {
+        model_path: model,
+        context_budget: AgentWindowBudget::from_effective(
+            ModelContextLimit::known(4_096).unwrap_or(ModelContextLimit::Unknown),
+        ),
+        ..test_agent_run_config()
+    };
+    let mut output = Vec::new();
+
+    run_agent_tool_loop(
+        &mut config,
+        "hello",
+        &mut output,
+        run_agent_model_once,
+        |_config, _call| Ok("x".repeat(16_384)),
+    )?;
+
+    assert_eq!(fs::read_to_string(&count)?, "x");
+    assert!(!String::from_utf8(output)?.contains(r#""code":"E2BIG""#));
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
