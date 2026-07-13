@@ -2,10 +2,14 @@ import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
+import CortexCurtain, {
+  type CortexCurtainCopy,
+  type CortexCurtainMode,
+} from '../components/CortexCurtain';
 import type {ReactElement} from 'react';
 
 type CoreObject = {
-  name: string;
+  name: CortexCurtainMode;
   title: string;
   text: string;
   code: string;
@@ -29,6 +33,7 @@ type Copy = {
   proofs: string[];
   rootLabel: string;
   rootAria: string;
+  curtain: CortexCurtainCopy;
   demoLabel: string;
   demoTitle: string;
   demoCaption: string;
@@ -79,6 +84,18 @@ const zh: Copy = {
   proofs: ['7 个稳定根名称', '通过 FUSE 挂载', '受策略约束', '持久 JSONL'],
   rootLabel: '冻结的 v1 根 ABI',
   rootAria: 'CortexFS 稳定根名称',
+  curtain: {
+    sceneLabel: '交互式 CortexFS 挂载对象视图',
+    selectorLabel: '选择 CortexFS 对象视图',
+    mountLabel: 'FUSE MOUNT',
+    rootLabel: '7 个稳定根名称',
+    captions: {
+      model: 'model 是纯推理文件：读取元数据，执行一次推理。',
+      agent: 'agent 是可执行对象与 socket，也是受 policy 约束的编排者。',
+      tool: 'tool 是能力端点，由 tsh 沿 CTX_PATH 发现并执行。',
+      session: 'session 是普通文件：原始 JSONL 持久，prompt context 可重建。',
+    },
+  },
   demoLabel: '真实运行，而非概念图',
   demoTitle: '看 runtime 真正在工作。',
   demoCaption:
@@ -110,15 +127,13 @@ const zh: Copy = {
     {
       name: 'tool',
       title: 'Tool 是可执行能力端点',
-      text:
-        'Agent 通过 tsh 调用 tool。tsh 只沿 CTX_PATH 查找能力，不会回退到 host PATH。',
+      text: 'Agent 通过 tsh 调用 tool。tsh 只沿 CTX_PATH 查找能力，不会回退到 host PATH。',
       code: 'CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool',
     },
     {
       name: 'session',
       title: 'Session 保存原始历史',
-      text:
-        'messages.jsonl 与 events.jsonl 持久追加；prompt context 是可丢弃、可重建的工作集。',
+      text: 'messages.jsonl 与 events.jsonl 持久追加；prompt context 是可丢弃、可重建的工作集。',
       code: 'session/default/{messages,events}.jsonl',
     },
   ],
@@ -139,11 +154,7 @@ const zh: Copy = {
   quickTitle: '三步，从安装包到真实对话。',
   quickLead: '下面就是当前 README 使用的安装、挂载与交互命令。',
   steps: [
-    {
-      title: '安装',
-      text: '从 AUR 安装 CortexFS。',
-      code: 'paru -S cortexfs-git',
-    },
+    {title: '安装', text: '从 AUR 安装 CortexFS。', code: 'paru -S cortexfs-git'},
     {
       title: '挂载并验证',
       text: '启动 systemd FUSE 挂载，然后检查有效状态。',
@@ -158,8 +169,7 @@ const zh: Copy = {
   quickLink: '阅读完整安装文档',
   closingLabel: '让 runtime 回到 Unix',
   closingTitle: '小到足以审计，实用到足以构建。',
-  closingText:
-    '从 v1 spec 理解稳定边界，在 GitHub 查看实现，或直接挂载 /ctx 开始使用。',
+  closingText: '从 v1 spec 理解稳定边界，在 GitHub 查看实现，或直接挂载 /ctx 开始使用。',
   readSpec: '阅读 v1 Spec',
 };
 
@@ -177,6 +187,18 @@ const en: Copy = {
   proofs: ['7 stable root names', 'FUSE mounted', 'policy-bound', 'durable JSONL'],
   rootLabel: 'Frozen v1 root ABI',
   rootAria: 'CortexFS stable root names',
+  curtain: {
+    sceneLabel: 'Interactive CortexFS mount object view',
+    selectorLabel: 'Select a CortexFS object view',
+    mountLabel: 'FUSE MOUNT',
+    rootLabel: '7 STABLE ROOT NAMES',
+    captions: {
+      model: 'A model is a pure inference file: read metadata, execute one inference.',
+      agent: 'An agent is an executable object and socket: a policy-bound orchestrator.',
+      tool: 'A tool is a capability endpoint resolved and executed by tsh through CTX_PATH.',
+      session: 'A session is ordinary files: raw JSONL stays durable; prompt context rebuilds.',
+    },
+  },
   demoLabel: 'Running product, not a diagram',
   demoTitle: 'Watch the runtime while it works.',
   demoCaption:
@@ -237,11 +259,7 @@ const en: Copy = {
   quickTitle: 'From package to a live chat in three steps.',
   quickLead: 'These are the install, mount, and interaction commands from the current README.',
   steps: [
-    {
-      title: 'Install',
-      text: 'Install CortexFS from the AUR.',
-      code: 'paru -S cortexfs-git',
-    },
+    {title: 'Install', text: 'Install CortexFS from the AUR.', code: 'paru -S cortexfs-git'},
     {
       title: 'Mount and verify',
       text: 'Start the systemd FUSE mount, then inspect effective health.',
@@ -263,13 +281,10 @@ const en: Copy = {
 
 function BrandLockup(): ReactElement {
   const logoSrc = useBaseUrl('/img/cortexfs-logo.jpg');
-
   return (
     <div className="cortexBrandLockup" aria-label="CortexFS">
       <img src={logoSrc} alt="" />
-      <span>
-        Cor<i>TeX</i>fs
-      </span>
+      <span>Cor<i>TeX</i>fs</span>
     </div>
   );
 }
@@ -280,9 +295,9 @@ function ProductVideo({copy}: {copy: Copy}): ReactElement {
   const posterSrc = useBaseUrl('/video/cortexfs-demo-poster.jpg');
 
   return (
-    <figure className="cortexDemoFrame">
+    <figure className="cortexFilmFrame">
       <video
-        aria-describedby="cortex-demo-caption"
+        aria-describedby="cortex-film-caption"
         aria-label={copy.demoAria}
         controls
         muted
@@ -294,35 +309,11 @@ function ProductVideo({copy}: {copy: Copy}): ReactElement {
         <source src={mp4Src} type="video/mp4" />
         <a href={mp4Src}>{copy.demoFallback}</a>
       </video>
-      <figcaption id="cortex-demo-caption">
-        <span className="cortexLiveDot" aria-hidden="true" />
-        <span>{copy.demoCaption}</span>
+      <figcaption id="cortex-film-caption">
+        <span aria-hidden="true" />
+        {copy.demoCaption}
       </figcaption>
     </figure>
-  );
-}
-
-function HeroDemo({copy}: {copy: Copy}): ReactElement {
-  return (
-    <section className="cortexHeroDemo" id="demo" aria-labelledby="cortex-demo-title">
-      <div className="cortexDemoHeading">
-        <p className="cortexSectionLabel">{copy.demoLabel}</p>
-        <h2 id="cortex-demo-title">{copy.demoTitle}</h2>
-      </div>
-      <ProductVideo copy={copy} />
-      <div className="cortexEvidenceRail">
-        <div>
-          <span>{copy.evidenceLabel}</span>
-          <strong>{copy.evidenceCommand}</strong>
-          <code>$ ctx agent start coder{`\n`}$ ctx agent chat coder</code>
-        </div>
-        <div>
-          <span>{copy.evidencePath}</span>
-          <strong>/ctx/agent/coder</strong>
-          <code>/ctx/home/&lt;uid&gt;/agent/coder/session/default/messages.jsonl</code>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -336,12 +327,8 @@ function Hero({copy}: {copy: Copy}): ReactElement {
           <h1 id="cortex-hero-title">{copy.title}</h1>
           <p className="cortexLead">{copy.lead}</p>
           <div className="cortexActions">
-            <a className="cortexButton cortexButtonPrimary" href="#demo">
-              {copy.watchDemo}
-            </a>
-            <Link className="cortexButton" to="/docs/getting-started">
-              {copy.install}
-            </Link>
+            <a className="cortexButton cortexButtonPrimary" href="#demo">{copy.watchDemo}</a>
+            <Link className="cortexButton" to="/docs/getting-started">{copy.install}</Link>
             <a
               className="cortexTextLink cortexExternal"
               href="https://github.com/LIghtJUNction/cortexfs"
@@ -351,45 +338,73 @@ function Hero({copy}: {copy: Copy}): ReactElement {
               {copy.github}<span aria-hidden="true"> ↗</span>
             </a>
           </div>
-          <div className="cortexProofStrip" aria-label={copy.proofLabel}>
-            {copy.proofs.map((proof) => (
-              <span key={proof}>{proof}</span>
+          <div className="cortexProofLedger" aria-label={copy.proofLabel}>
+            {copy.proofs.map((proof, index) => (
+              <span key={proof}><b>{String(index + 1).padStart(2, '0')}</b>{proof}</span>
             ))}
           </div>
-          <div className="cortexRootShelf">
+          <div className="cortexRootLine" aria-label={copy.rootAria}>
             <span>{copy.rootLabel}</span>
-            <div aria-label={copy.rootAria}>
-              <code>$ ls /ctx</code>
-              {roots.map((root) => (
-                <code key={root}>{root}</code>
-              ))}
-            </div>
+            <code>$ ls /ctx</code>
+            <div>{roots.map((root) => <code key={root}>{root}</code>)}</div>
           </div>
         </div>
-        <HeroDemo copy={copy} />
+        <CortexCurtain copy={copy.curtain} />
       </div>
     </section>
   );
 }
 
-function CoreObjects({copy}: {copy: Copy}): ReactElement {
+function DemoFilm({copy}: {copy: Copy}): ReactElement {
   return (
-    <section className="cortexSection cortexCore" aria-labelledby="cortex-core-title">
+    <section className="cortexFilm" id="demo" aria-labelledby="cortex-demo-title">
       <div className="container">
-        <div className="cortexSectionIntro">
-          <p className="cortexSectionLabel">{copy.coreLabel}</p>
-          <h2 id="cortex-core-title">{copy.coreTitle}</h2>
-          <p>{copy.coreLead}</p>
+        <header className="cortexFilmHeader">
+          <p className="cortexSectionLabel">{copy.demoLabel}</p>
+          <h2 id="cortex-demo-title">{copy.demoTitle}</h2>
+        </header>
+        <div className="cortexFilmGrid">
+          <ProductVideo copy={copy} />
+          <aside className="cortexFilmEvidence" aria-label={copy.proofLabel}>
+            <div>
+              <span>01 / {copy.evidenceLabel}</span>
+              <strong>{copy.evidenceCommand}</strong>
+              <code>$ ctx agent start coder{`\n`}$ ctx agent chat coder</code>
+            </div>
+            <div>
+              <span>02 / {copy.evidencePath}</span>
+              <strong>/ctx/agent/coder</strong>
+              <code>/ctx/home/&lt;uid&gt;/agent/coder/session/default/messages.jsonl</code>
+            </div>
+            <div>
+              <span>03 / tsh</span>
+              <strong>CTX_PATH</strong>
+              <code>tsh → fs.read</code>
+            </div>
+          </aside>
         </div>
-        <div className="cortexObjectGrid">
-          {copy.objects.map((object) => (
-            <article className={`cortexObject cortexObject-${object.name}`} key={object.name}>
-              <div className="cortexObjectIndex">
-                <span>{String(copy.objects.indexOf(object) + 1).padStart(2, '0')}</span>
-                <code>{object.name}</code>
-              </div>
-              <h3>{object.title}</h3>
-              <p>{object.text}</p>
+      </div>
+    </section>
+  );
+}
+
+function Specimens({copy}: {copy: Copy}): ReactElement {
+  return (
+    <section className="cortexSpecimens" aria-labelledby="cortex-core-title">
+      <div className="container">
+        <header className="cortexEditorialHeader">
+          <div>
+            <p className="cortexSectionLabel">{copy.coreLabel}</p>
+            <h2 id="cortex-core-title">{copy.coreTitle}</h2>
+          </div>
+          <p>{copy.coreLead}</p>
+        </header>
+        <div className="cortexSpecimenList">
+          {copy.objects.map((object, index) => (
+            <article key={object.name}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <code>{object.name}</code>
+              <div><h3>{object.title}</h3><p>{object.text}</p></div>
               <pre><code>{object.code}</code></pre>
             </article>
           ))}
@@ -401,29 +416,28 @@ function CoreObjects({copy}: {copy: Copy}): ReactElement {
 
 function Boundaries({copy}: {copy: Copy}): ReactElement {
   return (
-    <section className="cortexSection cortexBoundaries" aria-labelledby="cortex-boundary-title">
-      <div className="container cortexBoundaryGrid">
-        <article className="cortexAuthority">
-          <p className="cortexSectionLabel">{copy.authorityLabel}</p>
-          <h2 id="cortex-boundary-title">{copy.authorityTitle}</h2>
-          <p>{copy.authorityText}</p>
-          <div className="cortexAuthorityTable">
-            <div><span>{copy.see}</span><code>mount ∩ uid/gid/mode</code></div>
-            <div><span>{copy.resolve}</span><code>CTX_PATH</code></div>
-            <div><span>{copy.execute}</span><code>policy ∩ noexec</code></div>
-            <strong>{copy.intersection}</strong>
-          </div>
-        </article>
-        <article className="cortexNeutral">
-          <p className="cortexSectionLabel">{copy.neutralLabel}</p>
-          <h2>{copy.neutralTitle}</h2>
-          <p>{copy.neutralText}</p>
-          <div className="cortexNeutralTerminal">
-            <span>$ ls /ctx</span>
-            <code>{roots.join('  ')}</code>
-            <small>{copy.neutralFootnote}</small>
-          </div>
-        </article>
+    <section className="cortexBoundaries" aria-labelledby="cortex-authority-title">
+      <div className="container">
+        <div className="cortexEquationGrid">
+          <article>
+            <p className="cortexSectionLabel">{copy.authorityLabel}</p>
+            <h2 id="cortex-authority-title">{copy.authorityTitle}</h2>
+            <strong>mount ∩ uid/gid/mode ∩ policy ∩ CTX_PATH ∩ noexec</strong>
+            <p>{copy.authorityText}</p>
+          </article>
+          <article>
+            <p className="cortexSectionLabel">{copy.neutralLabel}</p>
+            <h2>{copy.neutralTitle}</h2>
+            <strong>one ABI / changing APIs</strong>
+            <p>{copy.neutralText}</p>
+          </article>
+        </div>
+        <div className="cortexInstrumentStrip">
+          <div><span>{copy.see}</span><code>mount ∩ uid/gid/mode</code></div>
+          <div><span>{copy.resolve}</span><code>CTX_PATH</code></div>
+          <div><span>{copy.execute}</span><code>policy ∩ noexec</code></div>
+          <div><span>{copy.intersection}</span><code>{copy.neutralFootnote}</code></div>
+        </div>
       </div>
     </section>
   );
@@ -431,20 +445,18 @@ function Boundaries({copy}: {copy: Copy}): ReactElement {
 
 function QuickStart({copy}: {copy: Copy}): ReactElement {
   return (
-    <section className="cortexSection cortexQuick" aria-labelledby="cortex-quick-title">
+    <section className="cortexQuick" aria-labelledby="cortex-quick-title">
       <div className="container">
-        <div className="cortexQuickHeader">
+        <header className="cortexEditorialHeader cortexQuickHeader">
           <div>
             <p className="cortexSectionLabel">{copy.quickLabel}</p>
             <h2 id="cortex-quick-title">{copy.quickTitle}</h2>
           </div>
           <div>
             <p>{copy.quickLead}</p>
-            <Link className="cortexInlineLink" to="/docs/getting-started">
-              {copy.quickLink} →
-            </Link>
+            <Link className="cortexInlineLink" to="/docs/getting-started">{copy.quickLink} →</Link>
           </div>
-        </div>
+        </header>
         <ol className="cortexSteps">
           {copy.steps.map((step, index) => (
             <li key={step.title}>
@@ -470,9 +482,7 @@ function Closing({copy}: {copy: Copy}): ReactElement {
           <p>{copy.closingText}</p>
         </div>
         <div className="cortexClosingActions">
-          <Link className="cortexButton cortexButtonLight" to="/docs/spec/root-abi">
-            {copy.readSpec}
-          </Link>
+          <Link className="cortexButton cortexButtonLight" to="/docs/spec/root-abi">{copy.readSpec}</Link>
           <a
             className="cortexButton cortexButtonCoal cortexExternal"
             href="https://github.com/LIghtJUNction/cortexfs"
@@ -481,9 +491,7 @@ function Closing({copy}: {copy: Copy}): ReactElement {
           >
             {copy.github}<span aria-hidden="true"> ↗</span>
           </a>
-          <Link className="cortexButton cortexButtonCoal" to="/docs/getting-started">
-            {copy.install}
-          </Link>
+          <Link className="cortexButton cortexButtonCoal" to="/docs/getting-started">{copy.install}</Link>
         </div>
       </div>
     </section>
@@ -498,7 +506,8 @@ export default function Home(): ReactElement {
     <Layout title={copy.eyebrow} description={copy.description}>
       <main className="cortexHome">
         <Hero copy={copy} />
-        <CoreObjects copy={copy} />
+        <DemoFilm copy={copy} />
+        <Specimens copy={copy} />
         <Boundaries copy={copy} />
         <QuickStart copy={copy} />
         <Closing copy={copy} />
