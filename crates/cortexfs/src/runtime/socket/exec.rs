@@ -92,7 +92,6 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     };
     let history_messages =
         collect_history_messages_from_session(&session_dir, MAX_HISTORY_MESSAGES_CHARS);
-    let tool_context = agent_tool_context_for_request(cwd.as_deref());
     let recorder_response = handle_socket_send(
         runtime.session_root,
         runtime.default_cwd,
@@ -100,6 +99,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         &request,
         preparation.as_ref(),
     )?;
+    let tool_context = agent_tool_context_for_request(cwd.as_deref())?;
     if let Some(debug) = debug {
         write_socket_debug_timing_frame(stream, debug, "socket_send_received")?;
         write_socket_debug_timing_frame(stream, debug, "history_collected")?;
@@ -1074,14 +1074,20 @@ pub(crate) struct AgentExecutableRunRequest<'a> {
     pub(crate) step: u8,
 }
 
-pub(crate) fn agent_tool_context_for_request(cwd: Option<&str>) -> String {
+pub(crate) fn agent_tool_context_for_request(
+    cwd: Option<&str>,
+) -> Result<String, SocketRuntimeError> {
     let mut context = default_agent_tool_context();
     context.push_str("\n\nCurrent request context:\n");
     context.push_str("- Sandbox cwd: ");
     context.push_str(&prompt_quoted(cwd.unwrap_or("/workspace")));
     context.push('\n');
     context.push_str("- Host workspace configuration: determined by agent policy\n");
-    context
+    if context.len() > object::executor::MAX_AGENT_TOOL_CONTEXT_BYTES {
+        Err(SocketRuntimeError::CannotRunAgent)
+    } else {
+        Ok(context)
+    }
 }
 
 pub(crate) fn prompt_quoted(value: &str) -> String {
