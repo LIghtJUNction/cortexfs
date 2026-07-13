@@ -1,63 +1,66 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
-  <title id="title">CortexFS social card</title>
-  <desc id="desc">CortexFS brand card with logo, CTX initials, and agent runtime file ABI message.</desc>
-  <defs>
-    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#181b19"/>
-      <stop offset="1" stop-color="#0f1110"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="72%" cy="24%" r="52%">
-      <stop offset="0" stop-color="#64c8a9" stop-opacity="0.24"/>
-      <stop offset="1" stop-color="#64c8a9" stop-opacity="0"/>
-    </radialGradient>
-    <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse">
-      <path d="M38 0H0V38" fill="none" stroke="#d8ff66" stroke-opacity="0.08"/>
-    </pattern>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="24" stdDeviation="28" flood-color="#000" flood-opacity="0.32"/>
-    </filter>
-  </defs>
+  <title id="title">CortexFS — Filesystem as Agent OS</title>
+  <desc id="desc">CortexFS social card stating that agent runtimes should not hide inside a database, with a terminal listing the seven stable CortexFS root names.</desc>
 
-  <rect width="1200" height="630" fill="#111211"/>
-  <rect width="1200" height="630" fill="url(#glow)"/>
-  <rect x="570" y="72" width="540" height="420" rx="8" fill="url(#grid)" opacity="0.8"/>
+  <rect width="1200" height="630" fill="#f7f5f1"/>
+  <path d="M0 1h1200M0 629h1200" stroke="#ded8ca"/>
+  <path d="M650 54v522" stroke="#ded8ca"/>
 
-  <g transform="translate(86 70)">
-    <path fill="#d8ff66" d="M46.5 5.7c.4-.2.9-.2 1.4 0l34.4 19.8c.5.3.8.8.8 1.4v39.6c0 .6-.3 1.1-.8 1.4L47.9 87.7c-.5.2-1 .2-1.4 0L12.1 67.9c-.5-.3-.8-.8-.8-1.4V26.9c0-.6.3-1.1.8-1.4L46.5 5.7Z"/>
-    <path fill="#111312" d="M52.2 21h10.5L42.1 73.6H31.6L52.2 21Z"/>
-    <path fill="#111312" fill-rule="evenodd" d="M22.2 27.8h16.5c1 0 1.9.4 2.5 1.2l3 3.5h12.5c1.8 0 3.1 1.3 3.1 3.1V47c0 1.8-1.3 3.1-3.1 3.1H22.2c-1.8 0-3.1-1.3-3.1-3.1V30.9c0-1.8 1.3-3.1 3.1-3.1Zm0 33.1c0-1.6 1.3-3 3-3h9.7c1.6 0 3 1.4 3 3v9.7c0 1.6-1.4 3-3 3h-9.7c-1.7 0-3-1.4-3-3v-9.7Zm42 3.5a6.6 6.6 0 1 1 10.5 5.5v6.4h6.8v6.2H62.3v-6.2h6.3v-6.2a6.6 6.6 0 0 1-4.4-5.7Z" clip-rule="evenodd"/>
-    <path fill="#fffdfa" d="M25.9 61.8h8.3v8.3h-8.3z"/>
-    <text x="116" y="56" fill="#fffdfa" font-family="Georgia, 'Times New Roman', serif" font-size="46" font-weight="700">Cor</text>
-    <text x="194" y="56" fill="#64c8a9" font-family="Georgia, 'Times New Roman', serif" font-size="46" font-weight="700" font-style="italic">TeX</text>
-    <text x="270" y="56" fill="#fffdfa" font-family="Georgia, 'Times New Roman', serif" font-size="46" font-weight="700">fs</text>
+  <g transform="translate(70 54)">
+    <rect width="62" height="62" rx="6" fill="#ffffff" stroke="#ded8ca"/>
+    <path fill="#d8ff66" d="M30.5 8.2c.4-.2.9-.2 1.3 0l21.5 12.4c.4.3.7.7.7 1.2v24.8c0 .5-.3.9-.7 1.2L31.8 60.2c-.4.2-.9.2-1.3 0L9 47.8c-.4-.3-.7-.7-.7-1.2V21.8c0-.5.3-.9.7-1.2L30.5 8.2Z"/>
+    <path fill="#111312" d="M34.1 17.7h7L27.5 52.6h-7l13.6-34.9Z"/>
+    <path fill="#111312" fill-rule="evenodd" d="M14.1 22.2h10.7c.7 0 1.3.3 1.7.8l2 2.3h8c1.2 0 2 .8 2 2v7.4c0 1.2-.8 2-2 2H14.1c-1.2 0-2-.8-2-2V24.2c0-1.2.8-2 2-2Zm0 21.5c0-1 .9-1.9 1.9-1.9h6.3c1.1 0 2 .9 2 1.9V50c0 1.1-.9 2-2 2H16c-1 0-1.9-.9-1.9-2v-6.3Zm27.3 2.3a4.3 4.3 0 1 1 6.8 3.6v4.1h4.4v4H40.2v-4h4v-4a4.3 4.3 0 0 1-2.8-3.7Z" clip-rule="evenodd"/>
+    <path fill="#fffdfa" d="M16.5 44.4h5.3v5.3h-5.3z"/>
+    <text x="82" y="43" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="36" font-weight="700">Cor</text>
+    <text x="143" y="43" fill="#2a8f73" font-family="Georgia, 'Times New Roman', serif" font-size="36" font-style="italic" font-weight="700">TeX</text>
+    <text x="202" y="43" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="36" font-weight="700">fs</text>
   </g>
 
-  <g transform="translate(86 196)">
-    <text x="0" y="0" fill="#64c8a9" font-family="Inter, Arial, sans-serif" font-size="20" font-weight="900" letter-spacing="4">FILESYSTEM AS AGENT OS</text>
-    <text x="0" y="76" fill="#fffdfa" font-family="Georgia, 'Times New Roman', serif" font-size="66" font-weight="650">Agent runtime</text>
-    <text x="0" y="148" fill="#fffdfa" font-family="Georgia, 'Times New Roman', serif" font-size="66" font-weight="650">as a Unix file ABI</text>
-    <text x="0" y="216" fill="#bfb6a8" font-family="Inter, Arial, sans-serif" font-size="24">ls, cat, exec, and audit agent runtimes.</text>
+  <g transform="translate(70 154)">
+    <text x="0" y="0" fill="#2a8f73" font-family="Inter, ui-sans-serif, sans-serif" font-size="15" font-weight="900" letter-spacing="2.6">FILESYSTEM AS AGENT OS</text>
+    <text x="0" y="78" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="55" font-weight="600">Your agent runtime</text>
+    <text x="0" y="140" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="55" font-weight="600">shouldn’t hide inside</text>
+    <text x="0" y="202" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="55" font-weight="600">a database.</text>
+    <path d="M0 240h510" stroke="#ded8ca"/>
+    <text x="0" y="282" fill="#66716c" font-family="Inter, ui-sans-serif, sans-serif" font-size="21">Models, agents, tools, and durable sessions</text>
+    <text x="0" y="312" fill="#66716c" font-family="Inter, ui-sans-serif, sans-serif" font-size="21">under <tspan fill="#111312" font-family="ui-monospace, monospace" font-weight="800">/ctx</tspan>.</text>
   </g>
 
-  <g transform="translate(660 162)" filter="url(#shadow)">
-    <rect width="392" height="290" rx="8" fill="url(#panel)" stroke="#fffdfa" stroke-opacity="0.12"/>
-    <rect width="392" height="52" rx="8" fill="#101210"/>
-    <rect width="54" height="52" rx="8" fill="#d8ff66"/>
-    <text x="18" y="33" fill="#111312" font-family="monospace" font-size="14" font-weight="900">ctx</text>
-    <text x="76" y="33" fill="#fffdfa" fill-opacity="0.86" font-family="monospace" font-size="14" font-weight="800">/ctx/agent/coder</text>
-    <text x="320" y="33" fill="#fffdfa" fill-opacity="0.52" font-family="monospace" font-size="13" font-weight="800">repl</text>
-    <text x="30" y="84" fill="#d8ff66" font-family="monospace" font-size="16" font-weight="900">$</text>
-    <text x="54" y="84" fill="#fffdfa" font-family="monospace" font-size="16" font-weight="900">ctx agent repl coder</text>
-    <g font-family="monospace" font-size="14" font-weight="850">
-      <rect x="28" y="112" width="336" height="44" rx="6" fill="#fffdfa" fill-opacity="0.06" stroke="#fffdfa" stroke-opacity="0.09"/>
-      <text x="46" y="140" fill="#64c8a9">USER</text>
-      <text x="112" y="140" fill="#fffdfa" fill-opacity="0.82">review docs/DESIGN.md</text>
-      <rect x="28" y="166" width="336" height="44" rx="6" fill="#fffdfa" fill-opacity="0.06" stroke="#fffdfa" stroke-opacity="0.09"/>
-      <text x="46" y="194" fill="#64c8a9">TOOL</text>
-      <text x="112" y="194" fill="#fffdfa" fill-opacity="0.82">tsh fs.read</text>
-      <rect x="28" y="220" width="336" height="44" rx="6" fill="#d8ff66" fill-opacity="0.08" stroke="#d8ff66" stroke-opacity="0.18"/>
-      <text x="46" y="248" fill="#d8ff66">AUDIT</text>
-      <text x="112" y="248" fill="#fffdfa" fill-opacity="0.82">*.req.json -> outbox</text>
+  <g transform="translate(70 564)">
+    <rect width="8" height="8" rx="2" fill="#2a8f73"/>
+    <text x="20" y="10" fill="#66716c" font-family="ui-monospace, monospace" font-size="14" font-weight="800">lightjunction.github.io/cortexfs</text>
+  </g>
+
+  <g transform="translate(690 76)">
+    <rect width="440" height="478" rx="8" fill="#181b19" stroke="#111312"/>
+    <path d="M0 54h440" stroke="#fffdfa" stroke-opacity="0.12"/>
+    <circle cx="24" cy="27" r="5" fill="#b65348"/>
+    <circle cx="42" cy="27" r="5" fill="#d28a28"/>
+    <circle cx="60" cy="27" r="5" fill="#2a8f73"/>
+    <text x="86" y="33" fill="#fffdfa" fill-opacity="0.72" font-family="ui-monospace, monospace" font-size="14" font-weight="800">cortexfs · /ctx</text>
+
+    <text x="28" y="94" fill="#d8ff66" font-family="ui-monospace, monospace" font-size="17" font-weight="900">$</text>
+    <text x="54" y="94" fill="#fffdfa" font-family="ui-monospace, monospace" font-size="17" font-weight="900">ls /ctx</text>
+
+    <g fill="#fffdfa" fill-opacity="0.86" font-family="ui-monospace, monospace" font-size="18" font-weight="800">
+      <text x="54" y="140">status</text>
+      <text x="238" y="140">bin/</text>
+      <text x="54" y="178">model/</text>
+      <text x="238" y="178">agent/</text>
+      <text x="54" y="216">tool/</text>
+      <text x="238" y="216">home/</text>
+      <text x="54" y="254">shared/</text>
     </g>
+
+    <path d="M28 286h384" stroke="#fffdfa" stroke-opacity="0.12"/>
+    <text x="28" y="330" fill="#d8ff66" font-family="ui-monospace, monospace" font-size="17" font-weight="900">$</text>
+    <text x="54" y="330" fill="#fffdfa" font-family="ui-monospace, monospace" font-size="17" font-weight="900">ctx agent chat coder</text>
+
+    <rect x="28" y="362" width="384" height="80" rx="8" fill="#fffdfa" fill-opacity="0.045" stroke="#fffdfa" stroke-opacity="0.1"/>
+    <text x="48" y="394" fill="#64c8a9" font-family="ui-monospace, monospace" font-size="13" font-weight="900">AGENT</text>
+    <text x="120" y="394" fill="#fffdfa" fill-opacity="0.82" font-family="ui-monospace, monospace" font-size="13" font-weight="800">/ctx/agent/coder</text>
+    <text x="48" y="421" fill="#64c8a9" font-family="ui-monospace, monospace" font-size="13" font-weight="900">STATE</text>
+    <text x="120" y="421" fill="#fffdfa" fill-opacity="0.82" font-family="ui-monospace, monospace" font-size="13" font-weight="800">policy-bound · durable JSONL</text>
   </g>
 </svg>

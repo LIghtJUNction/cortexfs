@@ -4,7 +4,14 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import type {ReactElement} from 'react';
 
-type Feature = {
+type CoreObject = {
+  name: string;
+  title: string;
+  text: string;
+  code: string;
+};
+
+type QuickStep = {
   title: string;
   text: string;
   code: string;
@@ -15,328 +22,471 @@ type Copy = {
   eyebrow: string;
   title: string;
   lead: string;
-  primary: string;
-  secondary: string;
-  developer: string;
-  trusted: string;
-  commandOne: string;
-  commandTwo: string;
-  commandThree: string;
-  inspectTitle: string;
-  inspectText: string;
-  virtualFileTitle: string;
-  virtualFileText: string;
-  terminalTitle: string;
-  terminalText: string;
-  contextTitle: string;
-  contextText: string;
-  apiTitle: string;
-  apiText: string;
+  watchDemo: string;
+  install: string;
+  github: string;
+  proofLabel: string;
+  proofs: string[];
+  rootLabel: string;
+  rootAria: string;
+  demoLabel: string;
+  demoTitle: string;
+  demoCaption: string;
+  demoAria: string;
+  demoFallback: string;
+  evidenceLabel: string;
+  evidenceCommand: string;
+  evidencePath: string;
+  coreLabel: string;
+  coreTitle: string;
+  coreLead: string;
+  objects: CoreObject[];
+  authorityLabel: string;
   authorityTitle: string;
   authorityText: string;
-  agentTreeTitle: string;
-  agentTreeText: string;
-  performanceTitle: string;
-  performanceText: string;
-  developerTitle: string;
-  developerText: string;
-  developerSteps: Feature[];
-  architectureTitle: string;
-  architectureText: string;
-  manifestTitle: string;
-  manifestText: string;
-  model: string;
-  agent: string;
-  tool: string;
-  session: string;
+  see: string;
+  resolve: string;
+  execute: string;
+  intersection: string;
+  neutralLabel: string;
+  neutralTitle: string;
+  neutralText: string;
+  neutralFootnote: string;
+  quickLabel: string;
+  quickTitle: string;
+  quickLead: string;
+  steps: QuickStep[];
+  quickLink: string;
+  closingLabel: string;
+  closingTitle: string;
+  closingText: string;
+  readSpec: string;
 };
 
+const roots = ['status', 'bin', 'model', 'agent', 'tool', 'home', 'shared'];
+
 const zh: Copy = {
-  description: 'CortexFS 把 AI agent runtime 投影成稳定、可脚本化、可审计的 Linux 文件系统 ABI。',
+  description:
+    'CortexFS 在 /ctx 挂载模型、agent、tool 与持久 session，形成可查看、执行、安全控制和审计的小型 Unix ABI。',
   eyebrow: 'Filesystem as Agent OS',
-  title: '直接与模型文件、agent 文件和工具文件对话',
+  title: 'Agent runtime 不该藏在数据库里。',
   lead:
-    'CortexFS 把模型、agent、tool、session 和运行状态投影到 /ctx。你可以进入 agent REPL，对模型文件发起推理，把工具动态加载进内存，并随时 attach 到 agent 终端观察内部发生了什么。',
-  primary: '从安装开始',
-  secondary: '日常使用',
-  developer: '开发指南',
-  trusted: '模型文件、agent 文件、tool shell、轻量沙箱',
-  commandOne: '直接对话模型文件',
-  commandTwo: '进入 agent REPL',
-  commandThree: 'attach 到 ctxterm',
-  inspectTitle: '一眼可见',
-  inspectText:
-    '模型是文件，agent 是可执行对象和 socket，tool 是能力端点，session 是普通历史目录。隐藏状态变成可 inspect 的事实。',
-  virtualFileTitle: '此文件，非彼文件',
-  virtualFileText:
-    '你看到的文件很可能不在硬盘上，而是 CortexFS 按需投影出的内存视图。不开、不读，就不生成；需要调试时直接 cat。',
-  terminalTitle: 'tsh 跑在 ctxterm 上',
-  terminalText:
-    'ctxterm 拥有 PTY 生命周期，tsh 是 agent 唯一默认 shell。它只按 CTX_PATH 找 CortexFS tool，不回退到 host PATH。',
-  contextTitle: '上下文窗口是工作集',
-  contextText:
-    'raw messages 持久保存，context pack 可重建。skill 元数据有预算，工具注入和历史消息按窗口动态裁剪。',
-  apiTitle: '多 AI API 兼容',
-  apiText:
-    'provider 差异留在 model driver 和 route 内部。/ctx 根目录不出现 openai、ollama、mcp 这类供应商命名空间。',
-  authorityTitle: '权限是交集',
-  authorityText:
-    'mount/chroot、Linux uid/gid/mode bits、CortexFS label policy、CTX_PATH 和 noexec 共同决定 agent 能看见和执行什么。',
-  agentTreeTitle: 'agent 树是普通状态',
-  agentTreeText:
-    'base agent 派生 coder、reviewer 等子 agent。父子关系、生命周期、handoff 和 child result 都落在 agent/session 文件里。',
-  performanceTitle: '为什么高效',
-  performanceText:
-    '稳定 ABI 小，发现靠目录遍历，执行走文件或 Unix socket。tool 元数据可 load/pin，未 pin 的上下文由 W-TinyLFU 回收。',
-  developerTitle: '一条命令启动 agent',
-  developerText:
-    '不用接新框架，不用写 glue service。进入 agent REPL 后，模型、tool、上下文和审计仍然走同一套 CortexFS 文件 ABI。',
-  developerSteps: [
+    'CortexFS 在 /ctx 挂载模型、agent、tool 和持久 session——一个可用 ls、cat、执行、安全控制和审计的小型 Unix ABI。',
+  watchDemo: '观看真实 Demo',
+  install: '开始安装',
+  github: 'GitHub',
+  proofLabel: 'CortexFS 运行时证据',
+  proofs: ['7 个稳定根名称', '通过 FUSE 挂载', '受策略约束', '持久 JSONL'],
+  rootLabel: '冻结的 v1 根 ABI',
+  rootAria: 'CortexFS 稳定根名称',
+  demoLabel: '真实运行，而非概念图',
+  demoTitle: '看 runtime 真正在工作。',
+  demoCaption:
+    '真实 CortexFS CLI 与 coder agent 交互；命令、tool 调用和 session 路径仍然直接可见。',
+  demoAria: 'CortexFS coder agent 真实运行演示',
+  demoFallback: '打开 CortexFS 演示视频',
+  evidenceLabel: '命令',
+  evidenceCommand: '启动并进入人类聊天界面',
+  evidencePath: '持久消息路径',
+  coreLabel: '三类可执行对象，一份持久历史',
+  coreTitle: 'Runtime 的关键部分都能被直接操作。',
+  coreLead:
+    'CortexFS 只提供三类可执行对象，并用普通文件保存 session 历史，让 shell、权限和普通文件承担它们已经擅长的工作。',
+  objects: [
     {
-      title: '启动 REPL',
-      text: '选择一个 agent 名称进入会话。coder 的模型、policy、可见目录和工具边界从现有 agent 配置加载。',
-      code: 'ctx agent repl coder',
+      name: 'model',
+      title: '模型是纯推理文件',
+      text:
+        '读取文件得到元数据，执行文件完成一次推理。供应商连接与 API 格式差异留在统一模型 ABI 之后。',
+      code: '/ctx/model/main',
     },
     {
-      title: '直接输入任务',
-      text: '在 REPL 里像普通对话一样输入需求。文本、路径和说明进入同一条会话流，tool 调用仍受 CTX_PATH 和 policy 约束。',
-      code: '> review /workspace/docs/DESIGN.md',
+      name: 'agent',
+      title: 'Agent 是受策略约束的编排者',
+      text:
+        'Agent 以可执行对象和 socket 暴露；Linux 身份、mount、cwd、model 与 policy 共同限定它能看见和执行什么。',
+      code: '/ctx/agent/coder  +  coder.sock',
     },
     {
-      title: '需要时观察',
-      text: '运行状态仍是普通文件。需要调试时查看 prompt、history、latest output 和 audit，而不是接入另一套 dashboard。',
-      code: 'ctx agent output coder',
+      name: 'tool',
+      title: 'Tool 是可执行能力端点',
+      text:
+        'Agent 通过 tsh 调用 tool。tsh 只沿 CTX_PATH 查找能力，不会回退到 host PATH。',
+      code: 'CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool',
+    },
+    {
+      name: 'session',
+      title: 'Session 保存原始历史',
+      text:
+        'messages.jsonl 与 events.jsonl 持久追加；prompt context 是可丢弃、可重建的工作集。',
+      code: 'session/default/{messages,events}.jsonl',
     },
   ],
-  architectureTitle: '高层抽象',
-  architectureText:
-    'CortexFS 是一层薄 ABI：它让模型、agent、tool、session 以同一种 Unix 形状组合，而不是把每个供应商或框架的内部状态变成新根目录。',
-  manifestTitle: '不要把 runtime 藏在数据库里',
-  manifestText:
-    'CortexFS 的判断很简单：可见状态应该是普通文件，可执行能力应该有明确边界，agent 内部发生的事应该能被直接看见。',
-  model: '纯推理入口',
-  agent: '策略约束的编排者',
-  tool: '可执行能力',
-  session: '持久历史',
+  authorityLabel: '可审计的权限边界',
+  authorityTitle: 'Linux 权限与 runtime policy 在路径上相交。',
+  authorityText:
+    '可见性不是 prompt 里的承诺。mount、uid/gid/mode bits、CortexFS policy、CTX_PATH 与 noexec 共同形成 agent 的实际权限。',
+  see: '看见',
+  resolve: '发现',
+  execute: '执行',
+  intersection: '最终权限 = 所有边界的交集',
+  neutralLabel: '供应商中立',
+  neutralTitle: '变化的 API 之上，保持一个稳定 ABI。',
+  neutralText:
+    'CortexFS 负责路径、对象生命周期、权限与 session 语义；Rig 负责供应商连接和 API 事件适配。供应商细节不会膨胀成新的根目录。',
+  neutralFootnote: 'root 只包含稳定对象类别',
+  quickLabel: '快速开始',
+  quickTitle: '三步，从安装包到真实对话。',
+  quickLead: '下面就是当前 README 使用的安装、挂载与交互命令。',
+  steps: [
+    {
+      title: '安装',
+      text: '从 AUR 安装 CortexFS。',
+      code: 'paru -S cortexfs-git',
+    },
+    {
+      title: '挂载并验证',
+      text: '启动 systemd FUSE 挂载，然后检查有效状态。',
+      code: 'sudo systemctl enable --now cortexfs.service\nctx doctor',
+    },
+    {
+      title: '初始化并聊天',
+      text: '生成默认对象，启动 coder，再进入首选人类聊天界面。',
+      code: 'ctx bootstrap\nctx agent start coder\nctx agent chat coder',
+    },
+  ],
+  quickLink: '阅读完整安装文档',
+  closingLabel: '让 runtime 回到 Unix',
+  closingTitle: '小到足以审计，实用到足以构建。',
+  closingText:
+    '从 v1 spec 理解稳定边界，在 GitHub 查看实现，或直接挂载 /ctx 开始使用。',
+  readSpec: '阅读 v1 Spec',
 };
 
 const en: Copy = {
   description:
-    'CortexFS projects an AI agent runtime as a stable, scriptable, inspectable Linux filesystem ABI.',
+    'CortexFS mounts models, agents, tools, and durable sessions at /ctx as a small Unix ABI you can inspect, execute, secure, and audit.',
   eyebrow: 'Filesystem as Agent OS',
-  title: 'Talk directly to model files, agent files, and tool files',
+  title: 'Your agent runtime shouldn’t hide inside a database.',
   lead:
-    'CortexFS projects models, agents, tools, sessions, and runtime state into /ctx. Enter an agent REPL, call model files, load tools into memory, and attach to the agent terminal whenever you need to see what is happening inside.',
-  primary: 'Install first',
-  secondary: 'Daily usage',
-  developer: 'Developer guide',
-  trusted: 'Model files, agent files, tool shell, lightweight sandbox',
-  commandOne: 'talk to model files',
-  commandTwo: 'enter the agent REPL',
-  commandThree: 'attach to ctxterm',
-  inspectTitle: 'Visible by default',
-  inspectText:
-    'Models are files, agents are executables and sockets, tools are capability endpoints, and sessions are ordinary history directories.',
-  virtualFileTitle: 'A file, but not that kind of file',
-  virtualFileText:
-    'The file you see may not live on disk. CortexFS can project it from memory on demand: if nobody opens it, nothing has to be materialized.',
-  terminalTitle: 'tsh runs on ctxterm',
-  terminalText:
-    'ctxterm owns the PTY lifecycle. tsh is the only default agent shell, resolving tools through CTX_PATH and never through host PATH.',
-  contextTitle: 'Context is a working set',
-  contextText:
-    'Raw messages are durable. Context packs are rebuildable. Skill metadata has a budget; tool injection and history are trimmed to the window.',
-  apiTitle: 'Many AI APIs, one ABI',
-  apiText:
-    'Provider differences stay behind model drivers and routes. The /ctx root does not grow openai, ollama, or mcp namespaces.',
-  authorityTitle: 'Authority is intersection',
-  authorityText:
-    'mount/chroot visibility, Linux uid/gid/mode bits, CortexFS policy, CTX_PATH, and noexec all decide what an agent can see or run.',
-  agentTreeTitle: 'Agent trees are files',
-  agentTreeText:
-    'A base agent can spawn coder or reviewer children. Parentage, lifecycle, handoff, and child results are stored in agent/session files.',
-  performanceTitle: 'Why it stays fast',
-  performanceText:
-    'The ABI is small, discovery is directory traversal, execution is file or Unix socket I/O, and loaded tool metadata is bounded by W-TinyLFU.',
-  developerTitle: 'Start an agent with one command',
-  developerText:
-    'No new framework or glue service is required. Once you enter the agent REPL, models, tools, context, and audit still flow through the same CortexFS file ABI.',
-  developerSteps: [
+    'CortexFS mounts models, agents, tools, and durable sessions at /ctx — a small Unix ABI you can ls, cat, execute, secure, and audit.',
+  watchDemo: 'Watch the real demo',
+  install: 'Install CortexFS',
+  github: 'GitHub',
+  proofLabel: 'CortexFS runtime proof',
+  proofs: ['7 stable root names', 'FUSE mounted', 'policy-bound', 'durable JSONL'],
+  rootLabel: 'Frozen v1 root ABI',
+  rootAria: 'CortexFS stable root names',
+  demoLabel: 'Running product, not a diagram',
+  demoTitle: 'Watch the runtime while it works.',
+  demoCaption:
+    'The real CortexFS CLI talking to a coder agent; commands, tool calls, and session paths remain directly visible.',
+  demoAria: 'Live CortexFS coder agent demonstration',
+  demoFallback: 'Open the CortexFS demo video',
+  evidenceLabel: 'Command',
+  evidenceCommand: 'Start and enter the human chat UI',
+  evidencePath: 'Durable message path',
+  coreLabel: 'Three executable objects, one durable history',
+  coreTitle: 'The important parts of the runtime stay directly operable.',
+  coreLead:
+    'CortexFS exposes three executable object classes and keeps session history in ordinary files, letting shells and permissions do the jobs they already understand.',
+  objects: [
     {
-      title: 'Start the REPL',
-      text: 'Pick an agent name and enter its session. The coder model, policy, visible files, and tool boundary load from the existing agent configuration.',
-      code: 'ctx agent repl coder',
+      name: 'model',
+      title: 'Models are pure inference files',
+      text:
+        'Read the file for metadata; execute it for one-shot inference. Provider connections and API formats stay behind the unified model ABI.',
+      code: '/ctx/model/main',
     },
     {
-      title: 'Type the task',
-      text: 'Use the REPL like a normal conversation. Text, paths, and instructions share one stream while tool calls remain bounded by CTX_PATH and policy.',
-      code: '> review /workspace/docs/DESIGN.md',
+      name: 'agent',
+      title: 'Agents orchestrate under policy',
+      text:
+        'An agent is exposed as an executable object and socket. Its Linux identity, mounts, cwd, model, and policy bound what it can see and run.',
+      code: '/ctx/agent/coder  +  coder.sock',
     },
     {
-      title: 'Inspect when needed',
-      text: 'Runtime state remains ordinary files. When debugging, inspect prompt, history, latest output, and audit instead of wiring another dashboard.',
-      code: 'ctx agent output coder',
+      name: 'tool',
+      title: 'Tools are executable capability endpoints',
+      text:
+        'Agents invoke tools through tsh. tsh resolves capabilities only through CTX_PATH and never falls back to the host PATH.',
+      code: 'CTX_PATH=/ctx/tool:/ctx/home/<uid>/tool',
+    },
+    {
+      name: 'session',
+      title: 'Sessions preserve raw history',
+      text:
+        'messages.jsonl and events.jsonl remain durable and append-only; prompt context is a disposable, rebuildable working set.',
+      code: 'session/default/{messages,events}.jsonl',
     },
   ],
-  architectureTitle: 'High-level abstraction',
-  architectureText:
-    'CortexFS is a thin ABI that gives models, agents, tools, and sessions one Unix shape instead of turning every vendor or framework detail into a new root directory.',
-  manifestTitle: 'Do not hide the runtime in a database',
-  manifestText:
-    'CortexFS takes a simple position: visible state should be ordinary files, executable capability should have clear boundaries, and agent internals should be directly observable.',
-  model: 'pure inference',
-  agent: 'policy-bound orchestration',
-  tool: 'executable capability',
-  session: 'durable history',
+  authorityLabel: 'Inspectable authority',
+  authorityTitle: 'Linux permissions and runtime policy meet at the path.',
+  authorityText:
+    'Visibility is not a promise in a prompt. Mounts, uid/gid/mode bits, CortexFS policy, CTX_PATH, and noexec combine into the authority an agent actually receives.',
+  see: 'See',
+  resolve: 'Resolve',
+  execute: 'Execute',
+  intersection: 'Effective authority = the intersection of every boundary',
+  neutralLabel: 'Provider-neutral by design',
+  neutralTitle: 'One stable ABI above changing APIs.',
+  neutralText:
+    'CortexFS owns paths, object lifecycle, permissions, and session semantics. Rig owns provider connections and API event adaptation. Provider details never expand into new root directories.',
+  neutralFootnote: 'root contains stable object classes only',
+  quickLabel: 'Quick start',
+  quickTitle: 'From package to a live chat in three steps.',
+  quickLead: 'These are the install, mount, and interaction commands from the current README.',
+  steps: [
+    {
+      title: 'Install',
+      text: 'Install CortexFS from the AUR.',
+      code: 'paru -S cortexfs-git',
+    },
+    {
+      title: 'Mount and verify',
+      text: 'Start the systemd FUSE mount, then inspect effective health.',
+      code: 'sudo systemctl enable --now cortexfs.service\nctx doctor',
+    },
+    {
+      title: 'Bootstrap and chat',
+      text: 'Materialize the defaults, start coder, and enter the preferred human chat UI.',
+      code: 'ctx bootstrap\nctx agent start coder\nctx agent chat coder',
+    },
+  ],
+  quickLink: 'Read the full installation guide',
+  closingLabel: 'Bring the runtime back to Unix',
+  closingTitle: 'Small enough to audit. Useful enough to build on.',
+  closingText:
+    'Read the v1 spec for the stable boundary, inspect the implementation on GitHub, or mount /ctx and start using it.',
+  readSpec: 'Read the v1 spec',
 };
 
-function FeatureRail({copy}: {copy: Copy}): ReactElement {
-  const features = [
-    [copy.inspectTitle, copy.inspectText, 'model/main'],
-    [copy.virtualFileTitle, copy.virtualFileText, 'origin=virtual'],
-    [copy.terminalTitle, copy.terminalText, 'ctxterm -> tsh'],
-    [copy.contextTitle, copy.contextText, 'context/pack.md'],
-    [copy.apiTitle, copy.apiText, 'model/<provider>/<id>'],
-    [copy.authorityTitle, copy.authorityText, 'policy + mode bits'],
-    [copy.agentTreeTitle, copy.agentTreeText, 'base -> coder'],
-  ];
+function BrandLockup(): ReactElement {
+  const logoSrc = useBaseUrl('/img/cortexfs-logo.jpg');
 
   return (
-    <div className="cortexFeatureRail">
-      {features.map(([title, text, tag]) => (
-        <article className="cortexFeature" key={title}>
-          <code>{tag}</code>
-          <h3>{title}</h3>
-          <p>{text}</p>
-        </article>
-      ))}
+    <div className="cortexBrandLockup" aria-label="CortexFS">
+      <img src={logoSrc} alt="" />
+      <span>
+        Cor<i>TeX</i>fs
+      </span>
     </div>
   );
 }
 
-function AgentConsole({copy}: {copy: Copy}): ReactElement {
-  return (
-    <div className="cortexStage" aria-label="CortexFS working product mockup">
-      <div className="cortexStageGlow" aria-hidden="true" />
-      <div className="cortexWorkbench">
-        <div className="cortexWorkbenchTop">
-          <span>ctx</span>
-          <strong>/ctx/agent/coder</strong>
-          <em>live repl</em>
-        </div>
-        <div className="cortexShellLine">
-          <span>$</span>
-          <strong>ctx agent repl coder</strong>
-        </div>
-        <div className="cortexTranscript">
-          <article>
-            <span>user</span>
-            <p>review /workspace/docs/DESIGN.md</p>
-          </article>
-          <article>
-            <span>tool</span>
-            <p>tsh fs.read docs/DESIGN.md</p>
-          </article>
-          <article>
-            <span>usage</span>
-            <p>input 912 / output 184</p>
-          </article>
-        </div>
-        <div className="cortexCommitRail">
-          {[copy.commandOne, copy.commandTwo, copy.commandThree].map((item, index) => (
-            <span key={item}>
-              <strong>{String(index + 1).padStart(2, '0')}</strong>
-              {item}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="cortexStageCaption">
-        <span>{copy.trusted}</span>
-      </div>
-    </div>
-  );
-}
-
-function ProductDemo(): ReactElement {
+function ProductVideo({copy}: {copy: Copy}): ReactElement {
   const mp4Src = useBaseUrl('/video/cortexfs-demo.mp4');
   const webmSrc = useBaseUrl('/video/cortexfs-demo.webm');
   const posterSrc = useBaseUrl('/video/cortexfs-demo-poster.jpg');
 
   return (
-    <figure className="cortexDemo">
+    <figure className="cortexDemoFrame">
       <video
-        aria-label="CortexFS live agent demo"
-        autoPlay
+        aria-describedby="cortex-demo-caption"
+        aria-label={copy.demoAria}
         controls
-        loop
         muted
         playsInline
         preload="metadata"
         poster={posterSrc}
       >
-        <source src={mp4Src} type="video/mp4" />
         <source src={webmSrc} type="video/webm" />
-        <a href={mp4Src}>Open the CortexFS demo video</a>
+        <source src={mp4Src} type="video/mp4" />
+        <a href={mp4Src}>{copy.demoFallback}</a>
       </video>
-      <figcaption>
-        <span>ctx agent repl coder</span>
-        <strong>/ctx/agent/coder</strong>
+      <figcaption id="cortex-demo-caption">
+        <span className="cortexLiveDot" aria-hidden="true" />
+        <span>{copy.demoCaption}</span>
       </figcaption>
     </figure>
   );
 }
 
-function HeroBrand(): ReactElement {
-  const logoSrc = useBaseUrl('/img/cortexfs-logo.jpg');
-
+function HeroDemo({copy}: {copy: Copy}): ReactElement {
   return (
-    <div className="cortexHeroBrand" aria-label="CorTeXfs">
-      <span className="cortexBrandStage cortexBrandFull" aria-hidden="true">
-        <span className="cortexBrandAccent">C</span>
-        <span>or</span>
-        <span className="cortexBrandAccent">T</span>
-        <span>e</span>
-        <span className="cortexBrandAccent">X</span>
-        <span>fs</span>
-      </span>
-      <span className="cortexBrandStage cortexBrandInitials" aria-hidden="true">
-        <span>C</span>
-        <span>T</span>
-        <span>X</span>
-      </span>
-      <span className="cortexBrandStage cortexBrandLogo" aria-hidden="true">
-        <img className="cortexLogoMark" src={logoSrc} alt="" />
-        <span>ctx</span>
-      </span>
-    </div>
-  );
-}
-
-function RootTicker(): ReactElement {
-  const roots = ['status', 'bin', 'model', 'agent', 'tool', 'home', 'shared'];
-  const loopedRoots = Array.from({length: 8}, () => roots).flat();
-
-  return (
-    <div className="cortexTicker" aria-label="CortexFS root ABI ticker">
-      <div>
-        {loopedRoots.map((root, index) => (
-          <span key={`${root}-${index}`}>{root}</span>
-        ))}
+    <section className="cortexHeroDemo" id="demo" aria-labelledby="cortex-demo-title">
+      <div className="cortexDemoHeading">
+        <p className="cortexSectionLabel">{copy.demoLabel}</p>
+        <h2 id="cortex-demo-title">{copy.demoTitle}</h2>
       </div>
-    </div>
+      <ProductVideo copy={copy} />
+      <div className="cortexEvidenceRail">
+        <div>
+          <span>{copy.evidenceLabel}</span>
+          <strong>{copy.evidenceCommand}</strong>
+          <code>$ ctx agent start coder{`\n`}$ ctx agent chat coder</code>
+        </div>
+        <div>
+          <span>{copy.evidencePath}</span>
+          <strong>/ctx/agent/coder</strong>
+          <code>/ctx/home/&lt;uid&gt;/agent/coder/session/default/messages.jsonl</code>
+        </div>
+      </div>
+    </section>
   );
 }
 
-function TrustDots(): ReactElement {
+function Hero({copy}: {copy: Copy}): ReactElement {
   return (
-    <div className="cortexTrustDots" aria-hidden="true">
-      {['/ctx', 'ABI', 'tsh', 'req'].map((label) => (
-        <div key={label}>
-          <span>{label}</span>
+    <section className="cortexHero" aria-labelledby="cortex-hero-title">
+      <div className="container cortexHeroGrid">
+        <div className="cortexHeroCopy">
+          <BrandLockup />
+          <p className="cortexEyebrow">{copy.eyebrow}</p>
+          <h1 id="cortex-hero-title">{copy.title}</h1>
+          <p className="cortexLead">{copy.lead}</p>
+          <div className="cortexActions">
+            <a className="cortexButton cortexButtonPrimary" href="#demo">
+              {copy.watchDemo}
+            </a>
+            <Link className="cortexButton" to="/docs/getting-started">
+              {copy.install}
+            </Link>
+            <a
+              className="cortexTextLink cortexExternal"
+              href="https://github.com/LIghtJUNction/cortexfs"
+              rel="noreferrer"
+              target="_blank"
+            >
+              {copy.github}<span aria-hidden="true"> ↗</span>
+            </a>
+          </div>
+          <div className="cortexProofStrip" aria-label={copy.proofLabel}>
+            {copy.proofs.map((proof) => (
+              <span key={proof}>{proof}</span>
+            ))}
+          </div>
+          <div className="cortexRootShelf">
+            <span>{copy.rootLabel}</span>
+            <div aria-label={copy.rootAria}>
+              <code>$ ls /ctx</code>
+              {roots.map((root) => (
+                <code key={root}>{root}</code>
+              ))}
+            </div>
+          </div>
         </div>
-      ))}
-    </div>
+        <HeroDemo copy={copy} />
+      </div>
+    </section>
+  );
+}
+
+function CoreObjects({copy}: {copy: Copy}): ReactElement {
+  return (
+    <section className="cortexSection cortexCore" aria-labelledby="cortex-core-title">
+      <div className="container">
+        <div className="cortexSectionIntro">
+          <p className="cortexSectionLabel">{copy.coreLabel}</p>
+          <h2 id="cortex-core-title">{copy.coreTitle}</h2>
+          <p>{copy.coreLead}</p>
+        </div>
+        <div className="cortexObjectGrid">
+          {copy.objects.map((object) => (
+            <article className={`cortexObject cortexObject-${object.name}`} key={object.name}>
+              <div className="cortexObjectIndex">
+                <span>{String(copy.objects.indexOf(object) + 1).padStart(2, '0')}</span>
+                <code>{object.name}</code>
+              </div>
+              <h3>{object.title}</h3>
+              <p>{object.text}</p>
+              <pre><code>{object.code}</code></pre>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Boundaries({copy}: {copy: Copy}): ReactElement {
+  return (
+    <section className="cortexSection cortexBoundaries" aria-labelledby="cortex-boundary-title">
+      <div className="container cortexBoundaryGrid">
+        <article className="cortexAuthority">
+          <p className="cortexSectionLabel">{copy.authorityLabel}</p>
+          <h2 id="cortex-boundary-title">{copy.authorityTitle}</h2>
+          <p>{copy.authorityText}</p>
+          <div className="cortexAuthorityTable">
+            <div><span>{copy.see}</span><code>mount ∩ uid/gid/mode</code></div>
+            <div><span>{copy.resolve}</span><code>CTX_PATH</code></div>
+            <div><span>{copy.execute}</span><code>policy ∩ noexec</code></div>
+            <strong>{copy.intersection}</strong>
+          </div>
+        </article>
+        <article className="cortexNeutral">
+          <p className="cortexSectionLabel">{copy.neutralLabel}</p>
+          <h2>{copy.neutralTitle}</h2>
+          <p>{copy.neutralText}</p>
+          <div className="cortexNeutralTerminal">
+            <span>$ ls /ctx</span>
+            <code>{roots.join('  ')}</code>
+            <small>{copy.neutralFootnote}</small>
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function QuickStart({copy}: {copy: Copy}): ReactElement {
+  return (
+    <section className="cortexSection cortexQuick" aria-labelledby="cortex-quick-title">
+      <div className="container">
+        <div className="cortexQuickHeader">
+          <div>
+            <p className="cortexSectionLabel">{copy.quickLabel}</p>
+            <h2 id="cortex-quick-title">{copy.quickTitle}</h2>
+          </div>
+          <div>
+            <p>{copy.quickLead}</p>
+            <Link className="cortexInlineLink" to="/docs/getting-started">
+              {copy.quickLink} →
+            </Link>
+          </div>
+        </div>
+        <ol className="cortexSteps">
+          {copy.steps.map((step, index) => (
+            <li key={step.title}>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <h3>{step.title}</h3>
+              <p>{step.text}</p>
+              <pre><code>{step.code}</code></pre>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+function Closing({copy}: {copy: Copy}): ReactElement {
+  return (
+    <section className="cortexClosing" aria-labelledby="cortex-closing-title">
+      <div className="container cortexClosingGrid">
+        <div>
+          <p className="cortexSectionLabel">{copy.closingLabel}</p>
+          <h2 id="cortex-closing-title">{copy.closingTitle}</h2>
+          <p>{copy.closingText}</p>
+        </div>
+        <div className="cortexClosingActions">
+          <Link className="cortexButton cortexButtonLight" to="/docs/spec/root-abi">
+            {copy.readSpec}
+          </Link>
+          <a
+            className="cortexButton cortexButtonCoal cortexExternal"
+            href="https://github.com/LIghtJUNction/cortexfs"
+            rel="noreferrer"
+            target="_blank"
+          >
+            {copy.github}<span aria-hidden="true"> ↗</span>
+          </a>
+          <Link className="cortexButton cortexButtonCoal" to="/docs/getting-started">
+            {copy.install}
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -345,124 +495,13 @@ export default function Home(): ReactElement {
   const copy = i18n.currentLocale === 'en' ? en : zh;
 
   return (
-    <Layout title="CortexFS" description={copy.description}>
+    <Layout title={copy.eyebrow} description={copy.description}>
       <main className="cortexHome">
-        <section className="cortexHero">
-          <div className="container cortexHeroInner">
-            <div className="cortexHeroCopy">
-              <HeroBrand />
-              <p className="cortexEyebrow">{copy.eyebrow}</p>
-              <h1>{copy.title}</h1>
-              <p className="cortexLead">{copy.lead}</p>
-              <div className="cortexActions">
-                <Link className="cortexButton cortexButtonPrimary" to="/docs/getting-started">
-                  {copy.primary}
-                </Link>
-              </div>
-              <TrustDots />
-              <div className="cortexProofRow" aria-label="CortexFS root ABI">
-                <span>status</span>
-                <span>bin</span>
-                <span>model</span>
-                <span>agent</span>
-                <span>tool</span>
-                <span>home</span>
-                <span>shared</span>
-              </div>
-            </div>
-            <div className="cortexHeroVisual">
-              <ProductDemo />
-            </div>
-          </div>
-          <RootTicker />
-        </section>
-
-        <section className="cortexBand cortexArchitecture">
-          <div className="container cortexSplit">
-            <div>
-              <p className="cortexSectionLabel">{copy.architectureTitle}</p>
-              <h2>{copy.inspectTitle}</h2>
-              <p>{copy.architectureText}</p>
-            </div>
-            <div className="cortexObjectMap" aria-label="CortexFS object model">
-              <div><strong>model</strong><span>{copy.model}</span></div>
-              <div><strong>agent</strong><span>{copy.agent}</span></div>
-              <div><strong>tool</strong><span>{copy.tool}</span></div>
-              <div><strong>session</strong><span>{copy.session}</span></div>
-            </div>
-          </div>
-        </section>
-
-        <section className="cortexBand">
-          <div className="container">
-            <FeatureRail copy={copy} />
-          </div>
-        </section>
-
-        <section className="cortexBand cortexSystem">
-          <div className="container cortexSystemGrid">
-            <div className="cortexTerminal">
-              <div className="cortexTerminalBar">
-                <span />
-                <span />
-                <span />
-              </div>
-              <pre>{`$ ctx agent ps
-base
-└─ coder
-   └─ reviewer
-
-$ ctx agent prompt coder
-native_tool=tsh
-skills_budget=2%
-history=bounded
-
-$ tsh tools
-tsh
-fs.read
-tsh.config`}</pre>
-            </div>
-            <div>
-              <p className="cortexSectionLabel">{copy.performanceTitle}</p>
-              <h2>{copy.performanceTitle}</h2>
-              <p>{copy.performanceText}</p>
-              <div className="cortexFlow" aria-label="CortexFS performance path">
-                <span>file ABI</span>
-                <span>Unix socket</span>
-                <span>bounded context</span>
-                <span>W-TinyLFU</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="cortexManifest">
-          <div className="container">
-            <p>{copy.manifestTitle}</p>
-            <h2>{copy.manifestText}</h2>
-            <Link to="/docs/DESIGN">{copy.architectureTitle}</Link>
-          </div>
-        </section>
-
-        <section className="cortexBand cortexDeveloper">
-          <div className="container">
-            <div className="cortexDeveloperIntro">
-              <p className="cortexSectionLabel">{copy.developerTitle}</p>
-              <h2>{copy.developerTitle}</h2>
-              <p>{copy.developerText}</p>
-            </div>
-            <div className="cortexSteps">
-              {copy.developerSteps.map((step, index) => (
-                <Link className="cortexStep" to="/docs/developing-cortexfs" key={step.title}>
-                  <span>{String(index + 1).padStart(2, '0')}</span>
-                  <h3>{step.title}</h3>
-                  <p>{step.text}</p>
-                  <pre>{step.code}</pre>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
+        <Hero copy={copy} />
+        <CoreObjects copy={copy} />
+        <Boundaries copy={copy} />
+        <QuickStart copy={copy} />
+        <Closing copy={copy} />
       </main>
     </Layout>
   );

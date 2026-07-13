@@ -6,7 +6,7 @@ const baseUrl = process.env.DOCUSAURUS_BASE_URL ?? '/cortexfs/';
 
 const config: Config = {
   title: 'CortexFS',
-  tagline: 'A small Linux filesystem ABI for agent runtimes',
+  tagline: 'Models, agents, tools, and durable sessions under /ctx',
   url: 'https://lightjunction.github.io',
   baseUrl,
   favicon: 'img/cortexfs-logo.jpg',

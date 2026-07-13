@@ -1,27 +1,32 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: durable agents, one Unix ABI" width="900">
+  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: filesystem as Agent OS" width="900">
 </p>
 
-**CortexFS makes AI runtimes feel like Unix.**
+**Your agent runtime shouldn’t hide inside a database.**
 
-It mounts a small, scriptable FUSE filesystem at `/ctx`. Models are files you
-can talk to. Agents are files you can inspect, resume, and attach to. Tools are
-files that an agent can load into context, keep resident in memory, or call like
-CLI commands.
+CortexFS is a FUSE Agent OS. It mounts models, agents, tools, and durable
+sessions at `/ctx` — a small Unix ABI you can `ls`, `cat`, execute, secure, and
+audit.
 
-Durable sessions keep raw `messages.jsonl` and `events.jsonl` history while
-treating prompt context as rebuildable. Within one session, retrying the same
-client ID with the same payload replays the recorded run instead of executing
-it again; conflicting payloads are rejected. Session GC archives by default,
-and permanent deletion requires `--delete --yes`.
+CortexFS exposes exactly three executable object classes: `model` is pure
+inference, `agent` is a policy-bound orchestrator, and `tool` is an executable
+capability endpoint. Sessions are ordinary files, not a fourth executable
+object class. Raw `messages.jsonl` and `events.jsonl` history is durable; prompt
+context is disposable and rebuildable.
 
-CortexFS is built for the moment when you want to look inside an agent runtime
-while it is running: which model it is using, which files it can see, which tools
-are loaded, what its terminal is doing, and what state will survive the session.
-Agents wake through systemd socket activation, so idle agents do not need a
-polling loop just to be reachable.
+Within one session, retrying the same client ID with the same payload replays the
+recorded run instead of executing it again; conflicting payloads are rejected.
+Session GC archives by default, and permanent deletion requires
+`--delete --yes`.
+
+The runtime stays directly inspectable while it works: see which model it is
+using, which files it can access, which tools it can execute, what its terminal
+is doing, and which state survives the session. Agents wake through systemd
+socket activation, so idle agents remain reachable without a polling loop.
+
+[Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [v1 spec](docs/spec/README.md)
 
 The v1 shape is intentionally small:
 
