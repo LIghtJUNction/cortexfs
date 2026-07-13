@@ -59,12 +59,12 @@ pub fn run_core_tool(
     writer: &mut dyn Write,
 ) -> Result<bool, io::Error> {
     match name {
-        "fs.read" => run_tool(&FsReadTool, invocation, writer).map(|()| true),
-        "fs.write" => run_tool(&FsWriteTool, invocation, writer).map(|()| true),
-        "fs.replace" => run_tool(&FsReplaceTool, invocation, writer).map(|()| true),
-        "shell.exec" => run_tool(&ShellExecTool, invocation, writer).map(|()| true),
-        "tsh.config" => run_tool(&TshConfigTool, invocation, writer).map(|()| true),
-        "agent.create" => run_tool(&AgentCreateTool, invocation, writer).map(|()| true),
+        "fs.read" => run_tool(&FsReadTool, invocation, writer).map(|_code| true),
+        "fs.write" => run_tool(&FsWriteTool, invocation, writer).map(|_code| true),
+        "fs.replace" => run_tool(&FsReplaceTool, invocation, writer).map(|_code| true),
+        "shell.exec" => run_tool(&ShellExecTool, invocation, writer).map(|_code| true),
+        "tsh.config" => run_tool(&TshConfigTool, invocation, writer).map(|_code| true),
+        "agent.create" => run_tool(&AgentCreateTool, invocation, writer).map(|_code| true),
         _ => Ok(false),
     }
 }
@@ -97,7 +97,7 @@ pub fn run_core_tool_cli_with_root(
                 .join(" ");
             let run = std::env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
             let invocation = ToolInvocation::new(run, input);
-            run_tool(&AgentCreateTool, &invocation, writer).map(|()| Some(ExitCode::SUCCESS))
+            run_tool(&AgentCreateTool, &invocation, writer).map(Some)
         }
         _ => Ok(None),
     }

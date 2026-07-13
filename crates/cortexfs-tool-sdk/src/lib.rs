@@ -373,7 +373,9 @@ impl<'a> Registry<'a> {
         let Some(tool) = self.find(name) else {
             return Err(RegistryError::NotFound);
         };
-        run_tool(tool, invocation, writer).map_err(RegistryError::Io)
+        run_tool(tool, invocation, writer)
+            .map(|_code| ())
+            .map_err(RegistryError::Io)
     }
 }
 
@@ -482,18 +484,26 @@ extern "C" fn abi_write(ctx: *mut c_void, ptr: *const u8, len: usize) -> i32 {
 }
 
 /// Runs a tool invocation and emits `CortexFS` JSONL frames.
+///
+/// Returns success after a canonical `done(ok)` frame, status `1` after a
+/// [`ToolError`] and canonical error frames, or an I/O error when frames cannot
+/// be written.
 pub fn run_tool(
     tool: &dyn Tool,
     invocation: &ToolInvocation,
     writer: &mut dyn Write,
-) -> io::Result<()> {
+) -> io::Result<ExitCode> {
     let mut output = ToolEmitter::new(invocation.run_id().to_owned(), writer);
     output.start(tool.spec().name)?;
     match tool.call(invocation, &mut output) {
-        Ok(()) => output.done("ok"),
+        Ok(()) => {
+            output.done("ok")?;
+            Ok(ExitCode::SUCCESS)
+        }
         Err(error) => {
             output.error(&error)?;
-            output.done("error")
+            output.done("error")?;
+            Ok(ExitCode::from(1))
         }
     }
 }
@@ -513,12 +523,12 @@ where
     I: IntoIterator<Item = OsString>,
 {
     match run_cli_inner(tool, args) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(_error) => ExitCode::from(1),
     }
 }
 
-fn run_cli_inner<I>(tool: &dyn Tool, args: I) -> io::Result<()>
+fn run_cli_inner<I>(tool: &dyn Tool, args: I) -> io::Result<ExitCode>
 where
     I: IntoIterator<Item = OsString>,
 {
@@ -642,6 +652,7 @@ mod tests {
     use std::ffi::OsString;
     use std::ffi::c_void;
     use std::io::{self, Cursor, Write};
+    use std::process::ExitCode;
 
     #[derive(Debug)]
     struct EchoTool;
@@ -690,7 +701,10 @@ mod tests {
         let tool = EchoTool;
         let invocation = ToolInvocation::new("r-test", r#"{"text":"hello"}"#);
         let mut output = Vec::new();
-        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+        assert_eq!(
+            run_tool(&tool, &invocation, &mut output).expect("tool should run"),
+            ExitCode::SUCCESS
+        );
         let output = String::from_utf8(output).unwrap_or_default();
         let frames = parse_jsonl_frames(&output).expect("valid jsonl output");
         assert_eq!(frames[0]["type"], "start");
@@ -706,7 +720,10 @@ mod tests {
         let tool = EchoTool;
         let invocation = ToolInvocation::new("r-test", "");
         let mut output = Vec::new();
-        assert!(run_tool(&tool, &invocation, &mut output).is_ok());
+        assert_eq!(
+            run_tool(&tool, &invocation, &mut output).expect("tool should emit error frames"),
+            ExitCode::from(1)
+        );
         let output = String::from_utf8(output).unwrap_or_default();
         let frames = parse_jsonl_frames(&output).expect("valid jsonl output");
         assert_eq!(frames[0]["type"], "start");

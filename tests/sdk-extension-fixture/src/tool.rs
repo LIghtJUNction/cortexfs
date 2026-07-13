@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use cortexfs_tool_sdk::{
-    Tool, ToolEmitter, ToolInvocation, ToolResult, ToolSpec, cortexfs_tool_main,
+    Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, cortexfs_tool_main,
 };
 
 #[derive(Debug)]
@@ -21,9 +21,12 @@ impl Tool for FixtureTool {
         invocation: &ToolInvocation,
         output: &mut ToolEmitter<&mut dyn Write>,
     ) -> ToolResult<()> {
+        if invocation.input() == "__error__" {
+            return Err(ToolError::invalid("fixture failure"));
+        }
         output
             .message(&format!("native:{}", invocation.input()))
-            .map_err(|error| cortexfs_tool_sdk::ToolError::new("EIO", error.to_string()))
+            .map_err(|error| ToolError::new("EIO", error.to_string()))
     }
 }
 

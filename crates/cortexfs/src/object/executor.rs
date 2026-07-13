@@ -122,7 +122,7 @@ pub(crate) use std::fmt::Write as _;
 #[must_use]
 pub(crate) fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             let _ignored = write_error(&format!("cortexfs-object-runner: {error}"));
             ExitCode::from(2)
@@ -130,12 +130,12 @@ pub(crate) fn main() -> ExitCode {
     }
 }
 
-pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
+pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, String> {
     let (object_path, input) = split_object_args(args)?;
     let object = ObjectPath::parse(&object_path)?;
     match (object.class.as_str(), object.name.as_str()) {
-        ("model", name) => run_model(name, &input),
-        ("agent", name) => run_agent(name, &input),
+        ("model", name) => run_model(name, &input).map(|()| ExitCode::SUCCESS),
+        ("agent", name) => run_agent(name, &input).map(|()| ExitCode::SUCCESS),
         ("tool", name) => run_tool(name, &input),
         (class, _name) => Err(format!(
             "object class {class} is not handled by this runner"
