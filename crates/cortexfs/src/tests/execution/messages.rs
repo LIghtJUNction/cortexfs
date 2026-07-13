@@ -446,6 +446,134 @@ esac
     );
 }
 
+fn cwd_for_tool_context_len(target: usize, chunk: &str) -> String {
+    assert!(!chunk.is_empty());
+    let mut cwd = "/".to_owned();
+    let base = crate::runtime::socket::exec::agent_tool_context_for_request(Some(&cwd))
+        .map(|context| context.len())
+        .unwrap_or_default();
+    assert!(base > 0);
+    assert!(target >= base);
+    let remaining = target.saturating_sub(base);
+    cwd.push_str(&chunk.repeat(remaining / chunk.len()));
+    cwd.push_str(&"x".repeat(remaining % chunk.len()));
+    assert_eq!(base + cwd.len() - 1, target);
+    cwd
+}
+
+#[test]
+fn sdk_envelope_accepts_maximum_tool_context() {
+    let root = reference_tree("sdk-envelope-maximum-tool-context");
+    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+    let marker = root.join("agent-spawned");
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        &format!(
+            "#!/bin/sh\nIFS= read -r envelope\nprintf spawned > {}\nprintf '{{\"type\":\"message\",\"run\":\"%s\",\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"accepted\"}}]}}\\n' \"$CTX_RUN_ID\"\n",
+            marker.display()
+        ),
+    );
+    set_file_mode(&executable, 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let cwd = cwd_for_tool_context_len(64 * 1024, "x");
+    assert_eq!(
+        crate::runtime::socket::exec::agent_tool_context_for_request(Some(&cwd))
+            .map(|context| context.len()),
+        Ok(64 * 1024)
+    );
+    let frame = serde_json::json!({
+        "op": "send",
+        "id": "r1",
+        "session": "default",
+        "cwd": cwd,
+        "input": "maximum"
+    })
+    .to_string()
+        + "\n";
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(client.write_all(frame.as_bytes()).is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    );
+
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert!(marker.exists());
+}
+
+#[test]
+fn sdk_envelope_rejects_oversized_tool_context_before_agent_spawn() {
+    let root = reference_tree("sdk-envelope-oversized-tool-context");
+    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+    let marker = root.join("agent-spawned");
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        &format!(
+            "#!/bin/sh\nprintf spawned > {}\nprintf '{{\"type\":\"message\",\"run\":\"%s\",\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"unexpected\"}}]}}\\n' \"$CTX_RUN_ID\"\n",
+            marker.display()
+        ),
+    );
+    set_file_mode(&executable, 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let cwd = cwd_for_tool_context_len(64 * 1024 + 1, "界");
+    assert!(cwd.len() > cwd.chars().count());
+    assert_eq!(
+        crate::runtime::socket::exec::agent_tool_context_for_request(Some(&cwd)),
+        Err(SocketRuntimeError::CannotRunAgent)
+    );
+    let frame = serde_json::json!({
+        "op": "send",
+        "id": "r1",
+        "session": "default",
+        "cwd": cwd,
+        "input": "oversized"
+    })
+    .to_string()
+        + "\n";
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(client.write_all(frame.as_bytes()).is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let result = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    );
+
+    assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
+    assert!(!marker.exists());
+    let mut response = [0_u8; 512];
+    let read = ok!(client.read(&mut response));
+    assert!(
+        String::from_utf8_lossy(response.get(..read).unwrap_or_default())
+            .contains(r#""code":"EIO""#)
+    );
+    let messages = ok!(fs::read_to_string(
+        session_root.join("default/messages.jsonl")
+    ));
+    assert_eq!(
+        messages
+            .lines()
+            .filter(|line| line.contains(r#""role":"user""#))
+            .count(),
+        1
+    );
+    assert_eq!(messages.matches("oversized").count(), 1, "{messages}");
+    assert!(!messages.contains(r#""role":"tool""#), "{messages}");
+    assert!(!messages.contains("tool_result"), "{messages}");
+    let events = ok!(fs::read_to_string(
+        session_root.join("default/events.jsonl")
+    ));
+    assert!(!events.contains("tool_result"), "{events}");
+}
+
 #[test]
 #[expect(
     clippy::too_many_lines,
