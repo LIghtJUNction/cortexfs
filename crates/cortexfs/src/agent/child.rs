@@ -12,7 +12,12 @@ pub enum ChildLifecycle {
 impl ChildLifecycle {
     /// Parses `agent/<child>.d/life`.
     pub fn parse(value: &str) -> Result<Self, ChildAgentDenial> {
-        match value.trim() {
+        Self::parse_exact(value.trim())
+    }
+
+    /// Parses an exact wire or tool lifecycle literal without trimming.
+    pub(crate) fn parse_exact(value: &str) -> Result<Self, ChildAgentDenial> {
+        match value {
             "owned" => Ok(Self::Owned),
             "temp" => Ok(Self::Temp),
             _ => Err(ChildAgentDenial::UnsupportedLifecycle),

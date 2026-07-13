@@ -125,6 +125,114 @@ pub(crate) fn agent_create_is_consistent_across_public_dispatch() {
 }
 
 #[test]
+#[ignore = "subprocess entrypoint for agent.create lifecycle test"]
+pub(crate) fn agent_create_lifecycle_subprocess() {
+    let mode = std::env::var("CORTEXFS_TEST_CHILD_LIFE").unwrap_or_default();
+    let request_id = std::env::var("CORTEXFS_TEST_REQUEST_ID").unwrap_or_default();
+    let (name, input) = match mode.as_str() {
+        "default" => (
+            "worker-default",
+            r#"{"name":"worker-default","handoff":"default handoff"}"#,
+        ),
+        "temp" => (
+            "worker-temp",
+            r#"{"name":"worker-temp","handoff":"temp handoff","life":"temp"}"#,
+        ),
+        _ => return,
+    };
+    let invocation = ToolInvocation::new(request_id, input);
+    let mut output = Vec::new();
+    assert!(matches!(
+        run_core_tool("agent.create", &invocation, &mut output),
+        Ok(true)
+    ));
+    let output = String::from_utf8_lossy(&output);
+    assert!(output.contains(&format!("child {name} active")), "{output}");
+}
+
+#[test]
+pub(crate) fn agent_create_passes_default_and_temp_lifecycle_to_runtime()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let root = tempfile::tempdir()?;
+    std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o711))?;
+    let identity = std::fs::metadata(root.path())?;
+    let (capability, listener) = crate::runtime::control::RunCapability::create(
+        root.path(),
+        "parent",
+        "default",
+        "run-1",
+        identity.uid(),
+        identity.gid(),
+    )?;
+    let environment = capability.environment(capability.socket());
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let server_shutdown = Arc::clone(&shutdown);
+    let (startup_sender, _startup_receiver) = std::sync::mpsc::sync_channel(1);
+    let (request_sender, request_receiver) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        capability.serve_run_with_handler(
+            &listener,
+            &server_shutdown,
+            &startup_sender,
+            || Some("run-1".to_owned()),
+            |request| {
+                request_sender
+                    .send((request.child.clone(), request.life.clone()))
+                    .map_err(|_error| crate::runtime::control::RunCapabilityError::CannotCreate)?;
+                Ok(crate::runtime::control::CreateChildResult {
+                    child: request.child,
+                    child_session: request.child_session,
+                    pid: 42,
+                })
+            },
+        )
+    });
+    for (mode, request_id) in [("default", "create-default"), ("temp", "create-temp")] {
+        let output = std::process::Command::new(std::env::current_exe()?)
+            .arg("--exact")
+            .arg("tool::core::tools::tests::runtime::agent_create_lifecycle_subprocess")
+            .arg("--ignored")
+            .env("CORTEXFS_TEST_CHILD_LIFE", mode)
+            .env("CORTEXFS_TEST_REQUEST_ID", request_id)
+            .env("CTX_AGENT", "parent")
+            .env("CTX_SESSION", "default")
+            .env("CTX_RUN_ID", "run-1")
+            .env(&environment[0].0, &environment[0].1)
+            .env(&environment[1].0, &environment[1].1)
+            .output()?;
+        assert!(output.status.success(), "{output:?}");
+    }
+    assert_eq!(
+        [request_receiver.recv()?, request_receiver.recv()?],
+        [
+            ("worker-default".to_owned(), "owned".to_owned()),
+            ("worker-temp".to_owned(), "temp".to_owned())
+        ]
+    );
+    shutdown.store(true, Ordering::Release);
+    assert!(matches!(server.join(), Ok(Ok(()))));
+    Ok(())
+}
+
+#[test]
+pub(crate) fn agent_create_rejects_invalid_lifecycle() {
+    for life in ["detached", " temp "] {
+        let input = format!(r#"{{"name":"worker","handoff":"task","life":"{life}"}}"#);
+        let invocation = ToolInvocation::new("invalid-life", input);
+        let mut output = Vec::new();
+        assert!(matches!(
+            run_core_tool("agent.create", &invocation, &mut output),
+            Ok(true)
+        ));
+        assert!(String::from_utf8_lossy(&output).contains("life must be owned or temp"));
+    }
+}
+
+#[test]
 #[ignore = "requires an explicitly authorized live parent runtime"]
 pub(crate) fn live_withheld_agent_create_reaches_active_with_real_pid() {
     let Ok(name) = std::env::var("CORTEXFS_LIVE_CHILD") else {

@@ -62,6 +62,7 @@ pub enum RequestFrame {
         child: String,
         child_session: String,
         input: String,
+        life: String,
     },
 }
 
@@ -203,6 +204,7 @@ pub fn create_child(
     child: &str,
     child_session: &str,
     input: &str,
+    life: &str,
 ) -> Result<CreateChildResult, RuntimeClientError> {
     match request(
         socket,
@@ -215,6 +217,7 @@ pub fn create_child(
             child: child.to_owned(),
             child_session: child_session.to_owned(),
             input: input.to_owned(),
+            life: life.to_owned(),
         },
     )? {
         ResponseFrame::ChildCreated { result, .. } => Ok(result),
@@ -228,6 +231,7 @@ pub fn create_child_from_environment(
     child: &str,
     child_session: &str,
     input: &str,
+    life: &str,
 ) -> Result<CreateChildResult, RuntimeClientError> {
     let socket = env::var_os("CTX_CONTROL_SOCKET").ok_or(RuntimeClientError::InvalidEnvironment)?;
     let token =
@@ -246,6 +250,7 @@ pub fn create_child_from_environment(
         child,
         child_session,
         input,
+        life,
     )
 }
 
@@ -394,6 +399,11 @@ mod tests {
             };
             let mut bytes = Vec::new();
             let _ignored = BufReader::new(&mut stream).read_until(b'\n', &mut bytes);
+            let frame = serde_json::from_slice::<RequestFrame>(&bytes);
+            assert!(matches!(
+                frame,
+                Ok(RequestFrame::CreateChild { life, .. }) if life == "temp"
+            ));
             let _ignored = stream.write_all(b"{\"type\":\"agent.created\",\"request_id\":\"request-1\",\"result\":{\"child\":\"c\",\"child_session\":\"s\",\"pid\":42}}\n");
         });
         let result = create_child(
@@ -406,8 +416,9 @@ mod tests {
             "c",
             "s",
             "input",
+            "temp",
         );
-        let _ignored = server.join();
+        assert!(server.join().is_ok());
         assert_eq!(
             result,
             Ok(CreateChildResult {

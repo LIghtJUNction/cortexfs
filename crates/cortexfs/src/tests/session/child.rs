@@ -364,9 +364,10 @@ fn agent_create_home_skeleton_is_child_owned() {
         &uid_text,
         "worker-1",
         "#!/bin/sh\nexit 0\n",
-        &[("gid", &gid_text)],
+        &[("gid", &gid_text), ("life", "temp")],
     );
     assert!(result.is_ok());
+    assert_file_text(&root.join("agent/worker-1.d/life"), "temp\n");
     let home = root.join(format!("home/{uid}/agent/worker-1"));
     for relative in [
         "",

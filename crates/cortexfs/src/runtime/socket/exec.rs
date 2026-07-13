@@ -672,7 +672,7 @@ pub(crate) fn run_agent_executable_streaming(
                         &request.child,
                         Some(&request.child_session),
                         &request.input,
-                        "owned",
+                        &request.life,
                     )
                     .map(|(child_session, pid)| runtime::control::CreateChildResult {
                         child: request.child,
