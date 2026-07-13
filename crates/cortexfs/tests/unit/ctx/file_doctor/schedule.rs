@@ -17,6 +17,7 @@ fn file_check_validates_message_stream_files() {
         &messages,
         "{\"role\":\"assistant\",\"response_id\":\"resp_1\",\"content\":\"hello\"}\n"
     );
+    write_text_file(&messages.with_file_name("events.jsonl"), "");
 
     assert_file_check_error_contains(
         &root,

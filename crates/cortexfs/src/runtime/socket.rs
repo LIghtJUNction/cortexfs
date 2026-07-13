@@ -32,7 +32,12 @@ pub fn handle_socket_request(
     match *request {
         SocketRequest::Ping => Ok(SocketRuntimeResponse::new(vec![socket_pong_frame()])),
         SocketRequest::Send { .. } => {
-            handle_socket_send(session_root, default_cwd, model, request, None)
+            handle_socket_send(session_root, default_cwd, model, request, None).map(|outcome| {
+                match outcome {
+                    SocketSendOutcome::Recorded(response)
+                    | SocketSendOutcome::Replayed(response) => response,
+                }
+            })
         }
         SocketRequest::Resume {
             ref session,

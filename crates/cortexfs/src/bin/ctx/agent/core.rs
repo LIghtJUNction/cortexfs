@@ -116,6 +116,7 @@ pub(crate) struct AgentSessionGcArgs {
     pub(crate) name: String,
     pub(crate) dry_run: bool,
     pub(crate) yes: bool,
+    pub(crate) delete: bool,
     pub(crate) keep: Vec<String>,
     pub(crate) patterns: Vec<String>,
     pub(crate) older_than_days: Option<u64>,

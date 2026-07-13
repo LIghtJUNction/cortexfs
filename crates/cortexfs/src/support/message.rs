@@ -8,6 +8,7 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageStreamIssue {
     InvalidJson(usize),
+    MissingFinalNewline(usize),
     MessageNotObject(usize),
     MissingRole(usize),
     InvalidRole { line: usize, role: String },
@@ -29,6 +30,11 @@ pub fn inspect_message_stream_jsonl(content: &str) -> MessageStreamReport {
     for_each_jsonl_line(content, |line_number, line| {
         inspect_message_stream_line(line_number, line, &mut issues);
     });
+    if !content.is_empty() && !content.ends_with('\n') {
+        issues.push(MessageStreamIssue::MissingFinalNewline(
+            content.lines().count(),
+        ));
+    }
     MessageStreamReport::new(issues)
 }
 

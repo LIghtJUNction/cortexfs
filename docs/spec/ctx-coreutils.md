@@ -608,6 +608,9 @@ runtime, or another authorized execution path.
 `ctx set` updates by same-directory atomic replacement. `ctx append`
 is only for appendable ABI files such as newline lists. `ctx file check`
 validates path shape and file syntax where the ABI defines it.
+Neither `ctx set` nor `ctx append` modifies session `messages.jsonl` or
+`events.jsonl`; session history is maintained by the runtime or an authorized
+FUSE writer.
 
 `ctx file` inspects CortexFS paths using path shape, `stat`, `readlink`, and
 read-only `user.cortexfs.*` extended attributes. It prints stable type strings,

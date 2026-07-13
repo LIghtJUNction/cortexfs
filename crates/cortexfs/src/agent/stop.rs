@@ -2,7 +2,7 @@ use crate::agent::launch::{
     AgentLaunchError, AgentLaunchReceipt, SystemAgentSocketReceipt, stop_launch,
     stop_system_agent_socket,
 };
-use crate::support::plain::open_plain_directory;
+use crate::support::{columnar, plain::open_plain_directory};
 use crate::{ChildHandoffReceipt, agent::runtime::AgentUnixIdentity};
 use nix::libc;
 use std::collections::{HashMap, HashSet};
@@ -189,6 +189,24 @@ pub fn append_file(receipt: &StopFileReceipt, line: &str) -> Result<(), StopErro
     file.write_all(line.as_bytes())
         .and_then(|()| file.write_all(b"\n"))
         .and_then(|()| file.sync_all())
+        .map_err(|error| {
+            StopError::new(format!("cannot append {}: {error}", receipt.path.display()))
+        })
+}
+
+fn append_history_file(
+    receipt: &StopFileReceipt,
+    session: &std::path::Path,
+    line: &str,
+) -> Result<(), StopError> {
+    let history = columnar::HistoryGuard::exclusive(session).map_err(|error| {
+        StopError::new(format!("cannot lock {}: {error}", receipt.path.display()))
+    })?;
+    verify_file(receipt, true)?;
+    history
+        .refresh_claims()
+        .and_then(|()| history.append(columnar::Stream::Events, &[line]))
+        .and_then(|()| history.refresh_claims())
         .map_err(|error| {
             StopError::new(format!("cannot append {}: {error}", receipt.path.display()))
         })
@@ -809,8 +827,16 @@ fn stop_concrete_agent(agent: PlannedStop) -> Result<(), StopError> {
             .map_err(|_error| StopError::new("cannot build child cancellation events"))?;
             verify_read_file(&history.child_messages)?;
             replace_file(&history.child_state, "cancelled\n")?;
-            append_file(&history.parent_events, events.parent_event())?;
-            append_file(&history.child_events, events.child_event())?;
+            append_history_file(
+                &history.parent_events,
+                &cancellation.parent_session,
+                events.parent_event(),
+            )?;
+            append_history_file(
+                &history.child_events,
+                &cancellation.child_session_dir,
+                events.child_event(),
+            )?;
         }
     }
     replace_file(&agent.control.status, "dead\n")?;
@@ -1162,6 +1188,36 @@ mod tests {
         assert_eq!(fs::read_to_string(root.join("child.d/pid"))?, "42\n");
         assert_eq!(fs::read_to_string(root.join("child.d/log"))?, "");
         fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn cancellation_history_append_accepts_empty_migrated_marker_receipt()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let session = test_root("columnar-history");
+        fs::create_dir_all(&session)?;
+        fs::write(session.join("messages.jsonl"), "")?;
+        let marker = session.join("events.jsonl");
+        let legacy = r#"{"type":"usage","run":"legacy","input_tokens":1,"output_tokens":0}"#;
+        let migrated = r#"{"type":"usage","run":"migrated","input_tokens":1,"output_tokens":0}"#;
+        fs::write(&marker, format!("{legacy}\n"))?;
+        columnar::append(&session, columnar::Stream::Events, &[migrated])?;
+        assert_eq!(fs::metadata(&marker)?.len(), 0);
+
+        let receipt = bind_file(&marker, true)?;
+        let events = crate::owned_child_cancellation_events("parent", "child")
+            .map_err(|error| format!("{error:?}"))?;
+        verify_file(&receipt, true)?;
+        append_history_file(&receipt, &session, events.child_event())?;
+
+        let projected = columnar::read_text(&session, columnar::Stream::Events, 4096)?;
+        assert_eq!(
+            projected,
+            format!("{legacy}\n{migrated}\n{}\n", events.child_event())
+        );
+        assert!(crate::inspect_event_stream_jsonl(&projected).is_ok());
+        assert_eq!(fs::metadata(&marker)?.len(), 0);
+        fs::remove_dir_all(session)?;
         Ok(())
     }
 

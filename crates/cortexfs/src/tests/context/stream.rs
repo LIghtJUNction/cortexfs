@@ -12,6 +12,19 @@ fn message_stream_accepts_canonical_role_content_frames() {
 }
 
 #[test]
+fn message_stream_reports_missing_final_newline() {
+    let complete =
+        "{\"role\":\"user\",\"content\":\"one\"}\n{\"role\":\"assistant\",\"content\":\"two\"}\n";
+    assert!(inspect_message_stream_jsonl(complete).is_ok());
+
+    let report = inspect_message_stream_jsonl(complete.trim_end_matches('\n'));
+    assert_eq!(
+        report.issues(),
+        [MessageStreamIssue::MissingFinalNewline(2)]
+    );
+}
+
+#[test]
 fn message_stream_rejects_native_state_and_bad_shape() {
     let report = inspect_message_stream_jsonl(
         r#"not-json
@@ -193,6 +206,15 @@ fn event_stream_accepts_canonical_model_jsonl() {
     );
     assert!(report.is_ok());
     assert!(report.issues().is_empty());
+}
+
+#[test]
+fn event_stream_reports_missing_final_newline() {
+    let complete = "{\"type\":\"start\",\"run\":\"r1\"}\n{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}\n";
+    assert!(inspect_event_stream_jsonl(complete).is_ok());
+
+    let report = inspect_event_stream_jsonl(complete.trim_end_matches('\n'));
+    assert_eq!(report.issues(), [EventStreamIssue::MissingFinalNewline(2)]);
 }
 
 #[test]

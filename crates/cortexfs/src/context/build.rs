@@ -5,7 +5,11 @@ use serde_json::Value;
 use crate::{
     CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES, ContextJsonlKind, ContextPackBuild,
     ContextPackBuiltItem, SESSION_REQUIRED_FILES, atomic_replace_text, inspect_context_jsonl,
-    is_object_name, support::stream::inspect_message_stream_jsonl,
+    is_object_name,
+    support::{
+        columnar::{self, Stream},
+        stream::inspect_message_stream_jsonl,
+    },
 };
 
 pub(crate) const MAX_CONTEXT_PACK_SOURCE_BYTES: u64 = 1024 * 1024;
@@ -77,8 +81,9 @@ pub fn rebuild_context_pack(
 
     let context = session_dir.join("context");
     let budget = read_context_budget(&context.join("budget"))?;
-    let messages = read_plain_text_file(&session_dir.join("messages.jsonl"))
-        .map_err(|_error| ContextPackBuildError::CannotRead)?;
+    let messages =
+        columnar::read_text(session_dir, Stream::Messages, MAX_CONTEXT_PACK_SOURCE_BYTES)
+            .map_err(|_error| ContextPackBuildError::CannotRead)?;
     if !inspect_message_stream_jsonl(&messages).is_ok() {
         return Err(ContextPackBuildError::InvalidMessages);
     }

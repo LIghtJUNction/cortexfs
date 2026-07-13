@@ -137,4 +137,55 @@ fn context_pack_rebuild_writes_inspectable_sources_without_child_history() {
             && item.source() != "context/child/rev-1/messages.jsonl"
     }));
 }
+
+#[test]
+fn context_pack_rebuild_preserves_raw_history_bytes() {
+    let root = clean_test_dir("context-pack-rebuild-preserves-history");
+    let session = root.join("default");
+    let context = session.join("context");
+    let messages_path = session.join("messages.jsonl");
+    let events_path = session.join("events.jsonl");
+
+    create_complete_session_layout(&session);
+    write_text_file(
+        &messages_path,
+        "{\"role\":\"user\",\"content\":\"first\"}\n{\"role\":\"assistant\",\"content\":\"second\"}\n",
+    );
+    write_text_file(
+        &events_path,
+        "{\"type\":\"start\",\"id\":\"run-1\",\"run\":\"run-1\"}\n{\"type\":\"done\",\"run\":\"run-1\",\"status\":\"ok\"}\n",
+    );
+    write_text_file(&context.join("budget"), "0\n");
+    write_text_file(
+        &context.join("facts.jsonl"),
+        "{\"id\":\"f1\",\"text\":\"fact\",\"source\":\"messages:1\"}\n",
+    );
+    write_text_file(
+        &context.join("decisions.jsonl"),
+        "{\"id\":\"d1\",\"decision\":\"keep history\",\"source\":\"messages:1\"}\n",
+    );
+    write_text_file(
+        &context.join("refs.jsonl"),
+        "{\"id\":\"r1\",\"path\":\"messages.jsonl\",\"kind\":\"file\",\"summary\":\"history\"}\n",
+    );
+    write_text_file(
+        &context.join("child").join("rev-1").join("refs.jsonl"),
+        "{\"id\":\"r2\",\"path\":\"result.md\",\"kind\":\"file\",\"summary\":\"child\"}\n",
+    );
+    let messages_before = ok!(fs::read(&messages_path));
+    let events_before = ok!(fs::read(&events_path));
+
+    let built = ok!(rebuild_context_pack(&session, Some("coder"), 2));
+
+    assert_eq!(ok!(fs::read(&messages_path)), messages_before);
+    assert_eq!(ok!(fs::read(&events_path)), events_before);
+    assert_eq!(
+        ok!(fs::read_to_string(context.join("pack.json"))),
+        built.pack_json()
+    );
+    assert_eq!(
+        ok!(fs::read_to_string(context.join("pack.md"))),
+        built.pack_md()
+    );
+}
 use super::*;

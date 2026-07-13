@@ -1,7 +1,7 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: four agents, one Unix ABI" width="900">
+  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: durable agents, one Unix ABI" width="900">
 </p>
 
 **CortexFS makes AI runtimes feel like Unix.**
@@ -10,6 +10,12 @@ It mounts a small, scriptable FUSE filesystem at `/ctx`. Models are files you
 can talk to. Agents are files you can inspect, resume, and attach to. Tools are
 files that an agent can load into context, keep resident in memory, or call like
 CLI commands.
+
+Durable sessions keep raw `messages.jsonl` and `events.jsonl` history while
+treating prompt context as rebuildable. Within one session, retrying the same
+client ID with the same payload replays the recorded run instead of executing
+it again; conflicting payloads are rejected. Session GC archives by default,
+and permanent deletion requires `--delete --yes`.
 
 CortexFS is built for the moment when you want to look inside an agent runtime
 while it is running: which model it is using, which files it can see, which tools
@@ -491,11 +497,19 @@ Durable agent sessions live in the owning user's CortexFS home:
   index/
 ```
 
+`messages.jsonl` and `events.jsonl` are the durable raw history. `context/` is
+a rebuildable prompt working set, not a replacement history store.
+
 Socket requests are JSONL frames:
 
 ```jsonl
 {"op":"send","id":"client-msg-id","session":"default","scope":"private","cwd":"/work","input":"hello"}
 ```
+
+Within one session, retrying the same client `id` with the same input, scope,
+and effective `cwd` replays the original `start` or final `done` without
+running the agent again. Reusing that `id` with a conflicting payload is
+rejected.
 
 Scopes:
 
@@ -508,18 +522,24 @@ temp     temporary, no durable resume requirement
 Clients should read `session/index/current`, `session/index/list`, and
 `session/index/by-cwd/*` instead of maintaining a second hidden history store.
 
-Session garbage collection is dry-run by default. `default`, the current
-session, and every explicit `--keep` name are always protected:
+Session garbage collection is dry-run by default. `--yes` archives matching
+live sessions under the backing store's internal `.archive/` directory;
+permanent deletion requires the explicit `--delete --yes` combination.
+`default`, the current session, every session whose plain bounded `state` is
+`active`, and every explicit `--keep` name are always protected:
 
 ```bash
 ctx agent session gc coder --dry-run
 ctx agent session gc coder --dry-run --match '*' --keep release-investigation
 ctx agent session gc coder --yes --match '*smoke*' --older-than-days 7 --keep release-investigation
+ctx agent session gc coder --delete --dry-run --match '*'
+ctx agent session gc coder --delete --yes --match '*smoke*' --older-than-days 30
 ```
 
-Review the complete dry-run list before adding `--yes`. Without `--match`, GC
-uses conservative test-session patterns rather than treating every session as
-disposable.
+Review the complete mode-specific dry-run list before adding `--yes`. Without
+`--match`, GC uses conservative test-session patterns rather than treating
+every session as disposable. `.archive/` is backing-store internals, not a new
+`/ctx` root ABI namespace. There is no restore command.
 
 Provider failures are durable session facts. When a run terminates with an
 error, CortexFS records the original provider `error` frame followed by

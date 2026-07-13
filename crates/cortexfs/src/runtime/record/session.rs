@@ -331,10 +331,18 @@ pub(crate) fn append_session_lines(
     file: &str,
     lines: &[&str],
 ) -> SocketRecordResult<()> {
-    for line in lines {
-        append_jsonl_line(&dir.join(file), line)
-            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    }
+    let stream = match file {
+        "messages.jsonl" => columnar::Stream::Messages,
+        "events.jsonl" => columnar::Stream::Events,
+        _ => return Err(SocketSessionRecordError::CannotRecord),
+    };
+    let history = columnar::HistoryGuard::exclusive(dir)
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    history
+        .refresh_claims()
+        .and_then(|()| history.append(stream, lines))
+        .and_then(|()| history.refresh_claims())
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
     Ok(())
 }
 
@@ -790,6 +798,7 @@ mod permission_tests {
                 Some("/workspace"),
                 "input",
                 Some(&preparation),
+                None,
             )
             .is_ok()
         );

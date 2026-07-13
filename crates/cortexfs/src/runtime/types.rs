@@ -20,6 +20,10 @@ pub enum SocketSessionRecordError {
     MissingSessionFile(&'static str),
     /// A supplied stable field is malformed.
     InvalidField(&'static str),
+    /// The client id is already bound to a different durable send payload.
+    RequestConflict,
+    /// Durable history cannot prove one complete send claim.
+    CorruptHistory,
     /// Session files could not be updated.
     CannotRecord,
 }
@@ -70,6 +74,15 @@ pub struct SocketSessionRecord {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SocketRuntimeResponse {
     frames: Vec<String>,
+}
+
+/// Whether a durable socket send was newly recorded or replayed from history.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SocketSendOutcome<T> {
+    /// The send claimed its client id and appended durable facts.
+    Recorded(T),
+    /// The client id was already durably claimed with the same payload.
+    Replayed(T),
 }
 
 /// Error while recording a socket send and updating the session index.
@@ -186,9 +199,12 @@ impl SocketSessionRecordError {
     #[must_use]
     pub const fn errno(self) -> &'static str {
         match self {
-            Self::UnsupportedRequest | Self::SessionMismatch | Self::InvalidField(_) => "EINVAL",
+            Self::UnsupportedRequest
+            | Self::SessionMismatch
+            | Self::InvalidField(_)
+            | Self::RequestConflict => "EINVAL",
             Self::TempSessionNotDurable | Self::MissingSessionFile(_) => "ENOENT",
-            Self::CannotRecord => "EIO",
+            Self::CorruptHistory | Self::CannotRecord => "EIO",
         }
     }
 }

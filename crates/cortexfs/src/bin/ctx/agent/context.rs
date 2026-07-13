@@ -151,7 +151,7 @@ pub(crate) fn agent_pack(root: &Path, name: &str, session: Option<&str>) -> Resu
             .symlink_metadata()
             .is_ok_and(|metadata| metadata.is_file())
         {
-            return cat_path(&path);
+            return cat_path(&path, None);
         }
     }
     Err(CliError::unavailable(format!(

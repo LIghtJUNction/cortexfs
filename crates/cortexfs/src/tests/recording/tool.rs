@@ -133,14 +133,14 @@ fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
     );
     let temp = ok!(temp);
     assert_eq!(
-        record_socket_request_to_session(&session, &temp),
+        record_unindexed_socket_request_for_test(&session, &temp),
         Err(SocketSessionRecordError::TempSessionNotDurable)
     );
 
     let resume = parse_socket_request_frame(r#"{"op":"resume","session":"default"}"#);
     let resume = ok!(resume);
     assert_eq!(
-        record_socket_request_to_session(&session, &resume),
+        record_unindexed_socket_request_for_test(&session, &resume),
         Err(SocketSessionRecordError::UnsupportedRequest)
     );
 
@@ -149,7 +149,7 @@ fn socket_session_recorder_rejects_temp_resume_and_mismatched_sessions() {
     );
     let mismatch = ok!(mismatch);
     assert_eq!(
-        record_socket_request_to_session(&session, &mismatch),
+        record_unindexed_socket_request_for_test(&session, &mismatch),
         Err(SocketSessionRecordError::SessionMismatch)
     );
     assert_eq!(SocketSessionRecordError::SessionMismatch.errno(), "EINVAL");

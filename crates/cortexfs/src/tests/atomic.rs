@@ -341,6 +341,37 @@ fn append_jsonl_line_appends_newline_to_plain_file() -> std::io::Result<()> {
 }
 
 #[test]
+fn append_jsonl_line_refuses_torn_tail_without_writing() -> std::io::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("events.jsonl");
+    fs::write(&path, b"torn")?;
+    let before = fs::read(&path)?;
+
+    assert!(
+        append_jsonl_line(&path, "new")
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert_eq!(fs::read(path)?, before);
+    Ok(())
+}
+
+#[test]
+fn append_jsonl_line_rejects_embedded_line_breaks() -> std::io::Result<()> {
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("events.jsonl");
+    fs::write(&path, b"")?;
+
+    for line in ["first\nsecond", "first\rsecond"] {
+        assert!(
+            append_jsonl_line(&path, line)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidInput)
+        );
+    }
+    assert_eq!(fs::read(path)?, b"");
+    Ok(())
+}
+
+#[test]
 fn append_jsonl_line_rejects_symlink_parent_without_writing_target() -> std::io::Result<()> {
     let temp = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;

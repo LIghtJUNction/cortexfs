@@ -68,32 +68,103 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
 }
 
 #[test]
-fn agent_execution_completes_after_client_closes_on_durable_start() {
-    use std::io::BufRead;
+fn agent_executable_socket_retry_replays_done_without_second_execution() {
+    let root = reference_tree("agent-executable-exactly-once");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent/coder");
+    let counter = root.join("execution-count");
+    write_text_file(&counter, "");
+    let quoted_counter = crate::shell_single_quote(&counter.display().to_string());
+    write_text_file(
+        &agent_executable,
+        &format!(
+            r#"#!/bin/sh
+printf x >> {quoted_counter}
+printf '{{"type":"start","run":"%s","model":"debug/echo"}}\n' "$CTX_RUN_ID"
+printf '{{"type":"delta","run":"%s","text":"once"}}\n' "$CTX_RUN_ID"
+printf '{{"type":"done","run":"%s","status":"ok"}}\n' "$CTX_RUN_ID"
+"#
+        ),
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let frame =
+        b"{\"op\":\"send\",\"id\":\"retry-1\",\"session\":\"default\",\"input\":\"run once\"}\n";
+
+    let (mut first_client, mut first_socket) = ok!(UnixStream::pair());
+    assert!(first_client.write_all(frame).is_ok());
+    assert!(first_client.shutdown(Shutdown::Write).is_ok());
+    let first = serve_agent_executable_socket_stream_once(
+        &mut first_socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
+    );
+    assert!(first.is_ok(), "{first:?}");
+    let session = session_root.join("default");
+    let before_messages = ok!(fs::read(session.join("messages.jsonl")));
+    let before_events = ok!(fs::read(session.join("events.jsonl")));
+
+    let (mut retry_client, mut retry_socket) = ok!(UnixStream::pair());
+    assert!(retry_client.write_all(frame).is_ok());
+    assert!(retry_client.shutdown(Shutdown::Write).is_ok());
+    let replay = serve_agent_executable_socket_stream_once(
+        &mut retry_socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
+    );
+    let replay = ok!(replay);
+
+    assert_eq!(replay.frames().len(), 1);
+    assert!(replay.jsonl().contains("\"type\":\"done\""));
+    assert_file_text(&counter, "x");
+    assert_eq!(
+        ok!(fs::read(session.join("messages.jsonl"))),
+        before_messages
+    );
+    assert_eq!(ok!(fs::read(session.join("events.jsonl"))), before_events);
+    let messages = String::from_utf8_lossy(&before_messages);
+    let roles = messages
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter_map(|value| {
+            value
+                .get("role")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(roles, ["user", "assistant"]);
+}
+
+#[test]
+fn agent_execution_completes_after_client_closes_before_durable_start_read() {
     let root = reference_tree("agent-executable-client-disconnect");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
+    let counter = root.join("disconnect-execution-count");
+    write_text_file(&counter, "");
+    let quoted_counter = crate::shell_single_quote(&counter.display().to_string());
     write_text_file(
         &agent_executable,
-        r#"#!/bin/sh
+        &format!(
+            r#"#!/bin/sh
+printf x >> {quoted_counter}
 sleep 0.1
-printf '{"type":"start","run":"%s","model":"debug/echo"}\n' "$CTX_RUN_ID"
-printf '{"type":"delta","run":"%s","text":"late"}\n' "$CTX_RUN_ID"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
-"#,
+printf '{{"type":"start","run":"%s","model":"debug/echo"}}\n' "$CTX_RUN_ID"
+printf '{{"type":"delta","run":"%s","text":"late"}}\n' "$CTX_RUN_ID"
+printf '{{"type":"done","run":"%s","status":"ok"}}\n' "$CTX_RUN_ID"
+"#
+        ),
     );
     set_file_mode(&agent_executable, 0o755);
+    let frame = b"{\"op\":\"send\",\"id\":\"disconnect-1\",\"session\":\"default\",\"input\":\"handoff\"}\n";
     let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(client
-        .write_all(b"{\"op\":\"send\",\"id\":\"disconnect-1\",\"session\":\"default\",\"input\":\"handoff\"}\n")
-        .is_ok());
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-    let closer = std::thread::spawn(move || {
-        let mut first = String::new();
-        let read = std::io::BufReader::new(&client).read_line(&mut first);
-        (read, first)
-    });
+    // Keep the request direction usable while making every server response fail with EPIPE.
+    assert!(client.shutdown(Shutdown::Read).is_ok());
+    assert!(client.write_all(frame).is_ok());
+    drop(client);
+
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
@@ -111,14 +182,39 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
             execution: AgentExecutableSocketExecution::Direct,
         },
     );
-    let ack = closer.join().ok();
-    assert!(
-        matches!(ack, Some((Ok(bytes), ref frame)) if bytes > 0 && frame.contains("\"type\":\"start\""))
-    );
     let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("\"text\":\"late\""));
     assert!(outcome.jsonl().contains("\"type\":\"done\""));
-    assert_file_text(&session_root.join("default/latest.md"), "late\n");
+    let session = session_root.join("default");
+    assert_file_text(&session.join("latest.md"), "late\n");
+    assert_file_text(&counter, "x");
+
+    let messages = ok!(crate::support::columnar::read_text(
+        &session,
+        crate::support::columnar::Stream::Messages,
+        1024 * 1024,
+    ));
+    let events = ok!(crate::support::columnar::read_text(
+        &session,
+        crate::support::columnar::Stream::Events,
+        1024 * 1024,
+    ));
+    assert!(messages.contains("\"role\":\"assistant\""));
+    assert!(messages.contains("\"text\":\"late\""));
+    assert!(events.contains("\"type\":\"done\""));
+
+    let (mut retry_client, mut retry_socket) = ok!(UnixStream::pair());
+    assert!(retry_client.write_all(frame).is_ok());
+    assert!(retry_client.shutdown(Shutdown::Write).is_ok());
+    let replay = serve_agent_executable_socket_stream_once(
+        &mut retry_socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
+    );
+    let replay = ok!(replay);
+    assert_eq!(replay.frames().len(), 1);
+    assert!(replay.jsonl().contains("\"type\":\"done\""));
+    assert_file_text(&counter, "x");
 }
 
 #[test]
@@ -1030,7 +1126,7 @@ esac
         for line in BufReader::new(&mut reader).lines() {
             let line = line?;
             if line.contains("\"type\":\"approval_request\"") {
-                record_socket_request_to_session(
+                record_unindexed_socket_request_for_test(
                     &session,
                     &SocketRequest::Cancel {
                         id: "r1".to_owned(),

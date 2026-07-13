@@ -6,7 +6,8 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::agent::prompt::message_content_text;
-use crate::support::plain::read_small_text_file;
+use crate::support::columnar::{HistoryGuard, Stream};
+use crate::support::plain::{path_metadata_no_follow, read_small_text_file};
 use crate::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
 
 use super::types::{
@@ -34,13 +35,28 @@ pub enum TrajectoryMapError {
 /// Reads `messages.jsonl`, `events.jsonl`, and optional `meta.json`. Does not
 /// write files and does not mutate session history.
 pub fn trajectory_from_session_dir(session_dir: &Path) -> Result<Trajectory, TrajectoryMapError> {
+    for (file, missing) in [
+        ("messages.jsonl", TrajectoryMapError::MissingMessages),
+        ("events.jsonl", TrajectoryMapError::MissingEvents),
+    ] {
+        match path_metadata_no_follow(&session_dir.join(file)) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => return Err(missing),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(missing),
+            Err(_error) => return Err(TrajectoryMapError::CannotRead(file)),
+        }
+    }
+    let history = HistoryGuard::shared(session_dir)
+        .map_err(|_error| TrajectoryMapError::CannotRead("messages.jsonl"))?;
     let messages = read_session_text(
-        session_dir,
+        &history,
+        Stream::Messages,
         "messages.jsonl",
         TrajectoryMapError::MissingMessages,
     )?;
     let events = read_session_text(
-        session_dir,
+        &history,
+        Stream::Events,
         "events.jsonl",
         TrajectoryMapError::MissingEvents,
     )?;
@@ -126,12 +142,12 @@ struct RunToolCall {
 }
 
 fn read_session_text(
-    session_dir: &Path,
+    history: &HistoryGuard<'_>,
+    stream: Stream,
     file: &'static str,
     missing: TrajectoryMapError,
 ) -> Result<String, TrajectoryMapError> {
-    let path = session_dir.join(file);
-    match read_small_text_file(&path, MAX_TRAJECTORY_SESSION_FILE_BYTES) {
+    match history.read_text(stream, MAX_TRAJECTORY_SESSION_FILE_BYTES) {
         Ok(content) => Ok(content),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(missing),
         Err(_error) => Err(TrajectoryMapError::CannotRead(file)),

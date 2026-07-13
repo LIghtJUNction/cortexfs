@@ -92,25 +92,34 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     };
     let history_messages =
         collect_history_messages_from_session(&session_dir, MAX_HISTORY_MESSAGES_CHARS);
-    let recorder_response = handle_socket_send(
+    let recorder_outcome = handle_socket_send(
         runtime.session_root,
         runtime.default_cwd,
         runtime.model,
         &request,
         preparation.as_ref(),
     )?;
+    let recorder_response = match recorder_outcome {
+        SocketSendOutcome::Recorded(response) => response,
+        SocketSendOutcome::Replayed(response) => {
+            write_socket_runtime_response(stream, &response)?;
+            return Ok(response);
+        }
+    };
     let tool_context = agent_tool_context_for_request(cwd.as_deref())?;
-    if let Some(debug) = debug {
-        write_socket_debug_timing_frame(stream, debug, "socket_send_received")?;
-        write_socket_debug_timing_frame(stream, debug, "history_collected")?;
-    }
-    write_socket_runtime_response(stream, &recorder_response)?;
-    if let Some(debug) = debug {
-        let mut client_connected = true;
-        write_while_connected(&mut client_connected, || {
-            write_socket_debug_timing_frame(stream, debug, "session_recorded")
-        })?;
-    }
+    let mut client_connected = true;
+    write_while_connected(&mut client_connected, || {
+        write_optional_socket_debug_timing_frame(stream, debug, "socket_send_received")
+    })?;
+    write_while_connected(&mut client_connected, || {
+        write_optional_socket_debug_timing_frame(stream, debug, "history_collected")
+    })?;
+    write_while_connected(&mut client_connected, || {
+        write_socket_runtime_response(stream, &recorder_response)
+    })?;
+    write_while_connected(&mut client_connected, || {
+        write_optional_socket_debug_timing_frame(stream, debug, "session_recorded")
+    })?;
 
     let run_request = AgentExecutableRunRequest {
         run_id: id,
@@ -177,7 +186,6 @@ fn run_agent_envelope_loop(
     let mut frames = Vec::new();
     let mut seen = HashSet::new();
     let mut observation = Value::Null;
-    let mut approval_delivery_best_effort = false;
     for step in 0..=MAX_CALLS {
         if agent_run_cancelled(&runtime.session_root.join(request.session), request.run_id) {
             return Ok(AgentRunOutcome {
@@ -215,7 +223,7 @@ fn run_agent_envelope_loop(
         if outcome.process == AgentProcessOutcome::Error {
             let terminal = agent_process_failed_frames(request.run_id, "agent process failed");
             for frame in &terminal {
-                deliver_host_frame(stream, frame, approval_delivery_best_effort)?;
+                deliver_host_frame(stream, frame)?;
             }
             frames.extend(terminal);
             return Ok(AgentRunOutcome {
@@ -228,7 +236,7 @@ fn run_agent_envelope_loop(
         let Some(call) = call else {
             let done =
                 serde_json::json!({"type":"done", "run":request.run_id, "status":"ok"}).to_string();
-            deliver_host_frame(stream, &done, approval_delivery_best_effort)?;
+            deliver_host_frame(stream, &done)?;
             frames.push(done);
             return Ok(AgentRunOutcome {
                 frames,
@@ -245,7 +253,7 @@ fn run_agent_envelope_loop(
                 },
             );
             for frame in &terminal {
-                deliver_host_frame(stream, frame, approval_delivery_best_effort)?;
+                deliver_host_frame(stream, frame)?;
             }
             frames.extend(terminal);
             return Ok(AgentRunOutcome {
@@ -272,7 +280,6 @@ fn run_agent_envelope_loop(
         let (content, status) =
             match object::executor::exec::prepare_agent_tool_call(&config, &call) {
                 Ok(prepared) if prepared.approval() == AgentApprovalMode::Ask => {
-                    approval_delivery_best_effort = true;
                     let approval = request_tool_approval(stream, request.run_id, &call)?;
                     let [request_frame, result_frame] = approval.frames;
                     frames.extend([request_frame, result_frame]);
@@ -316,7 +323,7 @@ fn run_agent_envelope_loop(
             .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
             .trim_end()
             .to_owned();
-        deliver_host_frame(stream, &result, approval_delivery_best_effort)?;
+        deliver_host_frame(stream, &result)?;
         frames.push(result);
         observation = serde_json::json!({
             "tool_call_id": call.id, "name": call.name,
@@ -326,14 +333,9 @@ fn run_agent_envelope_loop(
     Err(SocketRuntimeError::InvalidAgentOutput)
 }
 
-fn deliver_host_frame(
-    stream: &mut UnixStream,
-    frame: &str,
-    best_effort: bool,
-) -> Result<(), SocketRuntimeError> {
+fn deliver_host_frame(stream: &mut UnixStream, frame: &str) -> Result<(), SocketRuntimeError> {
     match write_socket_frame(stream, frame) {
-        Ok(()) => Ok(()),
-        Err(_) if best_effort => Ok(()),
+        Ok(()) | Err(SocketRuntimeError::CannotWriteResponse) => Ok(()),
         Err(error) => Err(error),
     }
 }
@@ -775,7 +777,7 @@ pub(crate) fn run_agent_executable_streaming(
                     })?;
                     saw_agent_frame = true;
                 }
-                if !inspect_event_stream_jsonl(&line).is_ok() {
+                if !inspect_event_stream_jsonl(&format!("{line}\n")).is_ok() {
                     if request.envelope.is_some() {
                         terminate_agent_process_group(&mut child);
                         let _ignored = child.wait();
@@ -1152,6 +1154,42 @@ mod completion_tests {
         let replayed = request_tool_approval(&mut server, "run-1", &second_call)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         assert!(!replayed.allowed);
+        Ok(())
+    }
+
+    #[test]
+    fn disconnected_response_disables_later_delivery() {
+        let mut connected = true;
+        assert_eq!(
+            write_while_connected(&mut connected, || {
+                Err(SocketRuntimeError::CannotWriteResponse)
+            }),
+            Ok(())
+        );
+        assert!(!connected);
+
+        let mut attempted = false;
+        assert_eq!(
+            write_while_connected(&mut connected, || {
+                attempted = true;
+                Ok(())
+            }),
+            Ok(())
+        );
+        assert!(!attempted);
+    }
+
+    #[test]
+    fn closed_client_read_half_rejects_socket_response() -> Result<(), Box<dyn std::error::Error>> {
+        let (client, mut server) = UnixStream::pair()?;
+        client.shutdown(Shutdown::Read)?;
+        let response = SocketRuntimeResponse::new(vec![
+            serde_json::json!({"type":"start", "run":"run-1"}).to_string(),
+        ]);
+        assert_eq!(
+            write_socket_runtime_response(&mut server, &response),
+            Err(SocketRuntimeError::CannotWriteResponse)
+        );
         Ok(())
     }
 

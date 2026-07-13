@@ -18,6 +18,9 @@ pub(crate) fn format_message_stream_issues(issues: &[MessageStreamIssue]) -> Str
     format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             MessageStreamIssue::InvalidJson(line) => write!(output, "invalid json line {line}"),
+            MessageStreamIssue::MissingFinalNewline(line) => {
+                write!(output, "missing final newline line {line}")
+            }
             MessageStreamIssue::MessageNotObject(line) => {
                 write!(output, "message not object line {line}")
             }
@@ -84,6 +87,9 @@ pub(crate) fn format_event_stream_issues(issues: &[EventStreamIssue]) -> String 
     format_issue_list(issues, |output, issue| {
         let _ignored = match *issue {
             EventStreamIssue::InvalidJson(line) => write!(output, "invalid json line {line}"),
+            EventStreamIssue::MissingFinalNewline(line) => {
+                write!(output, "missing final newline line {line}")
+            }
             EventStreamIssue::EventNotObject(line) => {
                 write!(output, "event not object line {line}")
             }

@@ -243,6 +243,7 @@ fn agent_prompt_history_session_reads_only_bounded_recent_tail() {
         &session.join("messages.jsonl"),
         &format!("{old}\n{recent}\n"),
     );
+    write_text_file(&session.join("events.jsonl"), "");
 
     let history = collect_history_messages_from_session(&session, 10_000);
 
@@ -272,6 +273,7 @@ fn agent_prompt_history_messages_read_session_file() {
         &session.join("messages.jsonl"),
         "{\"role\":\"user\",\"content\":\"hello\"}\n",
     );
+    write_text_file(&session.join("events.jsonl"), "");
 
     let history = collect_history_messages_from_session(&session, 10_000);
 

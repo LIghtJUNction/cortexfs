@@ -134,7 +134,16 @@ pub(crate) fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<St
         return Ok(run);
     }
     let events = session_dir.join("events.jsonl");
-    let content = read_file_to_string(&events)?;
+    let max_bytes = usize::try_from(MAX_CTX_FILE_CHECK_BYTES).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", events.display()))
+    })?;
+    let bytes =
+        columnar::tail(&session_dir, columnar::Stream::Events, max_bytes).map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", events.display()))
+        })?;
+    let content = String::from_utf8(bytes).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", events.display()))
+    })?;
     let mut latest = None;
     for line in content.lines() {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {

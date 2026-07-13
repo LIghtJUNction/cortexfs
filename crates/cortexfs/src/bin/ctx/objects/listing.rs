@@ -170,12 +170,15 @@ pub(crate) fn path_shared(root: &Path, name: &str) -> Result<(), CliError> {
 
 pub(crate) fn history(root: &Path, agent: &str, session: Option<&str>) -> Result<(), CliError> {
     let session_dir = agent_session_dir(root, agent, session)?;
-    cat_path(&session_dir.join("messages.jsonl"))
+    cat_path(
+        &session_dir.join("messages.jsonl"),
+        Some(columnar::Stream::Messages),
+    )
 }
 
 pub(crate) fn latest(root: &Path, agent: &str, session: Option<&str>) -> Result<(), CliError> {
     let session_dir = agent_session_dir(root, agent, session)?;
-    cat_path(&session_dir.join("latest.md"))
+    cat_path(&session_dir.join("latest.md"), None)
 }
 
 /// Projects the agent session into ATIF and prints pretty JSON on stdout.

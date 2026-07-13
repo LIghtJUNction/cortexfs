@@ -26,6 +26,37 @@ fn ctx_latest_run_id_refuses_symlink_events() {
 }
 
 #[test]
+fn ctx_latest_run_id_reads_projected_columnar_events() {
+    let root = clean_test_dir("ctx-latest-run-columnar");
+    let session = root
+        .join("home")
+        .join("1000")
+        .join("agent/coder/session/default");
+    write_text_file(&session.join("messages.jsonl"), "");
+    write_text_file(&session.join("events.jsonl"), "");
+    assert!(
+        columnar::append(
+            &session,
+            columnar::Stream::Events,
+            &[
+                r#"{"type":"start","run":"older"}"#,
+                r#"{"type":"done","run":"latest","status":"ok"}"#,
+            ],
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("events.jsonl")).unwrap_or_default(),
+        ""
+    );
+
+    assert_eq!(
+        latest_run_id(&root, "coder", "default"),
+        Ok("latest".to_owned())
+    );
+}
+
+#[test]
 fn agent_terminal_runtime_dir_refuses_symlink_parent() {
     let root = clean_test_dir("ctx-agent-terminal-runtime-dir-symlink");
     let outside = clean_test_dir("ctx-agent-terminal-runtime-dir-outside");

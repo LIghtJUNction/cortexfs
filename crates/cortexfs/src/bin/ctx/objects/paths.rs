@@ -1,11 +1,7 @@
 use crate::*;
 
 pub(crate) fn request_id() -> Result<String, CliError> {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| CliError::unavailable(format!("system clock before epoch: {error}")))?
-        .as_millis();
-    Ok(format!("ctx-{millis}"))
+    Ok(format!("ctx-{}", hex_bytes(&read_system_entropy(16)?)))
 }
 
 pub(crate) fn agent_session_dir(
@@ -121,6 +117,38 @@ pub(crate) fn ctx_home(root: &Path) -> Result<PathBuf, CliError> {
     Ok(root
         .join("home")
         .join(current_uid_text().map_err(CliError::unavailable)?))
+}
+
+#[cfg(test)]
+mod request_id_tests {
+    use std::collections::HashSet;
+
+    use super::request_id;
+
+    #[test]
+    fn production_ids_have_128_bit_hex_format_and_no_sample_collisions() {
+        let mut ids = HashSet::new();
+
+        for _ in 0..128 {
+            let id = request_id();
+            assert!(id.is_ok(), "system entropy should be available");
+            let Ok(id) = id else {
+                return;
+            };
+            assert_eq!(id.len(), 36);
+            assert!(id.starts_with("ctx-"), "id should start with ctx-");
+            let Some(suffix) = id.strip_prefix("ctx-") else {
+                return;
+            };
+            assert_eq!(suffix.len(), 32);
+            assert!(
+                suffix
+                    .bytes()
+                    .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+            );
+            assert!(ids.insert(id), "generated duplicate request id");
+        }
+    }
 }
 
 #[cfg(test)]

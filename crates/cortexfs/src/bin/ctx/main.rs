@@ -45,6 +45,7 @@ use nix::libc;
 pub(crate) use cortexfs::LayoutPathRole;
 pub(crate) use cortexfs::authority::helpers::{
     atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
+    atomic_replace_text_preserving_metadata_if_matches,
 };
 pub(crate) use cortexfs::{
     AbiPathKind, AgentControlIssue, AgentLaunchCommand, AgentPromptContext, AgentRuntimeView,
@@ -59,13 +60,13 @@ pub(crate) use cortexfs::{
     ToolPath, ToolSchemaIssue, TrajectoryIssue, TrajectoryMapError,
     advance_agent_schedule_from_parent_context, agent_schedule_nodes, authorize_tool_execution,
     bootstrap_state_matches_target, classify_abi_path, collect_agent_rules, collect_skill_metadata,
-    completed_agent_schedule_nodes_from_parent_context, cortexfs_manual, current_time_unix,
-    default_agent_model_for_name, default_agent_tool_context, derive_agent_runtime_view,
-    ensure_durable_session_layout, ensure_v1_reference_tree, ensure_v1_runtime_models,
-    format_bootstrap_plan_lines, inspect_agent_control, inspect_agent_schedule_json,
-    inspect_context_jsonl, inspect_context_pack_json, inspect_event_stream_jsonl,
-    inspect_message_stream_jsonl, inspect_model_capabilities, inspect_object_layout,
-    inspect_session_control, inspect_session_index, inspect_session_layout,
+    columnar, completed_agent_schedule_nodes_from_parent_context, cortexfs_manual,
+    current_time_unix, default_agent_model_for_name, default_agent_tool_context,
+    derive_agent_runtime_view, ensure_durable_session_layout, ensure_v1_reference_tree,
+    ensure_v1_runtime_models, format_bootstrap_plan_lines, inspect_agent_control,
+    inspect_agent_schedule_json, inspect_context_jsonl, inspect_context_pack_json,
+    inspect_event_stream_jsonl, inspect_message_stream_jsonl, inspect_model_capabilities,
+    inspect_object_layout, inspect_session_control, inspect_session_index, inspect_session_layout,
     inspect_shared_queue_layout, inspect_tool_schema_json, invocation_id,
     is_dedicated_worker_agent_name, is_executable_file, is_managed_reference_agent_wrapper,
     is_model_name, is_object_name, is_worker_agent_name, launch_process_for,

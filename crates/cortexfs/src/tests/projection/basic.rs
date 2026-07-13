@@ -119,6 +119,444 @@ fn fuse_v1_projection_allows_durable_session_record_writes() {
 }
 
 #[test]
+fn fuse_v1_projection_rejects_invalid_pristine_history_before_creating_store() {
+    let invalid = [
+        b"\xff\n".as_slice(),
+        b"{}".as_slice(),
+        b"{}\r\n".as_slice(),
+        b"not-json\n".as_slice(),
+    ];
+    for (index, content) in invalid.into_iter().enumerate() {
+        let root = reference_tree(&format!("fuse-v1-pristine-history-invalid-{index}"));
+        let session_root = root.join("home/1000/agent/coder/session");
+        ok!(ensure_durable_session_layout(
+            &session_root,
+            "default",
+            "/work",
+            Some("main"),
+            SocketSessionScope::Private,
+        ));
+        let session = session_root.join("default");
+        let messages = session.join("messages.jsonl");
+        let events = session.join("events.jsonl");
+        let before = (
+            fs::symlink_metadata(&messages)
+                .map(|metadata| (metadata.dev(), metadata.ino(), metadata.len()))
+                .ok(),
+            fs::read(&messages).ok(),
+            fs::symlink_metadata(&events)
+                .map(|metadata| (metadata.dev(), metadata.ino(), metadata.len()))
+                .ok(),
+            fs::read(&events).ok(),
+        );
+        let projection =
+            FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+        let result = projection.write_control_file_at(
+            "home/1000/agent/coder/session/default/messages.jsonl",
+            0,
+            content,
+        );
+
+        assert_eq!(result, Err(FuseV1Error::InvalidContent));
+        assert!(!session.join(".store").exists());
+        assert_eq!(
+            (
+                fs::symlink_metadata(&messages)
+                    .map(|metadata| (metadata.dev(), metadata.ino(), metadata.len()))
+                    .ok(),
+                fs::read(&messages).ok(),
+                fs::symlink_metadata(&events)
+                    .map(|metadata| (metadata.dev(), metadata.ino(), metadata.len()))
+                    .ok(),
+                fs::read(&events).ok(),
+            ),
+            before,
+        );
+    }
+}
+
+#[test]
+fn fuse_v1_projection_empty_history_write_preserves_offset_semantics() {
+    let root = reference_tree("fuse-v1-empty-history-write");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let path = "home/1000/agent/coder/session/default/messages.jsonl";
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    assert_eq!(projection.write_control_file_at(path, 0, b""), Ok(()));
+    assert_eq!(
+        projection.write_control_file_at(path, 1, b""),
+        Err(FuseV1Error::InvalidOffset),
+    );
+}
+
+#[test]
+fn fuse_v1_projection_projects_migrated_history_and_hides_store() {
+    let root = reference_tree("fuse-v1-columnar-session-history");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let session_path = "home/1000/agent/coder/session/default";
+    let messages_path = format!("{session_path}/messages.jsonl");
+    let events_path = format!("{session_path}/events.jsonl");
+    let old_message = r#"{"role":"user","run":"old","content":"legacy"}"#;
+    let old_event = r#"{"type":"start","id":"old","run":"old","scope":"private","cwd":"/work"}"#;
+    let usage = r#"{"type":"usage","run":"old","input_tokens":1}"#;
+    assert!(fs::write(session.join("messages.jsonl"), format!("{old_message}\n")).is_ok());
+    assert!(fs::write(session.join("events.jsonl"), format!("{old_event}\n")).is_ok());
+    ok!(super::columnar::append(
+        &session,
+        super::columnar::Stream::Events,
+        &[usage],
+    ));
+
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let expected_messages = format!("{old_message}\n");
+    let expected_events = format!("{old_event}\n{usage}\n");
+    let attr = ok!(projection.getattr(&events_path));
+    assert_eq!(
+        attr.size(),
+        u64::try_from(expected_events.len()).unwrap_or(u64::MAX)
+    );
+    assert_eq!(
+        ok!(projection.read_to_string(&messages_path)),
+        expected_messages
+    );
+    assert_eq!(
+        ok!(projection.read_at(&events_path, 0, expected_events.len())),
+        expected_events.as_bytes()
+    );
+
+    let entries = ok!(projection.readdir(session_path));
+    assert!(entries.iter().all(|entry| entry.name() != ".store"));
+    let session_node = ok!(projection.node_for_path(session_path));
+    assert_eq!(
+        projection.lookup(&session_node, ".store"),
+        Err(FuseV1Error::NotFound)
+    );
+    assert_eq!(
+        projection.getattr(&format!("{session_path}/.store")),
+        Err(FuseV1Error::NotFound)
+    );
+    assert_eq!(
+        projection.read_at(&format!("{session_path}/.store/wal.jsonl"), 0, 16),
+        Err(FuseV1Error::NotFound)
+    );
+    assert_eq!(
+        projection.write_control_file_at(&format!("{session_path}/.store/wal.jsonl"), 0, b"{}\n",),
+        Err(FuseV1Error::NotFound)
+    );
+
+    let done = r#"{"type":"done","run":"old","status":"ok"}"#;
+    assert!(
+        projection
+            .write_control_file_at(&events_path, attr.size(), format!("{done}\n").as_bytes(),)
+            .is_ok()
+    );
+    assert_eq!(
+        ok!(projection.read_to_string(&events_path)),
+        format!("{expected_events}{done}\n")
+    );
+    assert_eq!(
+        fs::metadata(session.join("events.jsonl")).map_or(u64::MAX, |metadata| metadata.len()),
+        0
+    );
+}
+
+#[test]
+fn fuse_v1_projection_rejects_cr_batch_before_history_or_claim_mutation() {
+    let root = reference_tree("fuse-v1-columnar-cr-batch");
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let session_root = root.join(format!("home/{uid}/agent/coder/session"));
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "fuse",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("fuse");
+    let message = r#"{"role":"user","run":"claim-1","content":"first"}"#;
+    let start =
+        r#"{"type":"start","id":"claim-1","run":"claim-1","scope":"private","cwd":"/work"}"#;
+    assert!(fs::write(session.join("messages.jsonl"), format!("{message}\n")).is_ok());
+    assert!(fs::write(session.join("events.jsonl"), format!("{start}\n")).is_ok());
+    ok!(super::columnar::append(
+        &session,
+        super::columnar::Stream::Events,
+        &[r#"{"type":"usage","run":"claim-1","input_tokens":1}"#],
+    ));
+    {
+        let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+        ok!(guard.refresh_claims());
+    }
+    ok!(super::columnar::append(
+        &session,
+        super::columnar::Stream::Messages,
+        &[r#"{"role":"user","run":"claim-2","content":"pending"}"#],
+    ));
+    ok!(super::columnar::append(
+        &session,
+        super::columnar::Stream::Events,
+        &[r#"{"type":"start","id":"claim-2","run":"claim-2","scope":"private","cwd":"/work"}"#],
+    ));
+
+    let claim_dir = session.join(".store/claim");
+    let claim_snapshot = || {
+        let mut entries = fs::read_dir(&claim_dir)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name() != ".cursor.json")
+            .map(|entry| {
+                (
+                    entry.file_name(),
+                    fs::read(entry.path()).unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        entries
+    };
+    let path = format!("home/{uid}/agent/coder/session/fuse/events.jsonl");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let projected_before = ok!(projection.read_to_string(&path));
+    let wal_before = fs::read(session.join(".store/wal.jsonl")).unwrap_or_default();
+    let cursor_before = fs::read(claim_dir.join(".cursor.json")).unwrap_or_default();
+    let claims_before = claim_snapshot();
+
+    let result = projection.write_fuse_file_at_for_owner(
+        &path,
+        u64::try_from(projected_before.len()).unwrap_or(u64::MAX),
+        b"{}\n{}\r\n",
+        uid,
+        gid,
+    );
+
+    assert_eq!(
+        (
+            result,
+            projection.read_to_string(&path),
+            fs::read(session.join(".store/wal.jsonl")).unwrap_or_default(),
+            fs::read(claim_dir.join(".cursor.json")).unwrap_or_default(),
+            claim_snapshot(),
+        ),
+        (
+            Err(FuseV1Error::InvalidContent),
+            Ok(projected_before),
+            wal_before,
+            cursor_before,
+            claims_before,
+        ),
+    );
+}
+
+#[test]
+fn fuse_v1_projection_history_rename_preserves_existing_raw_marker() {
+    let root = reference_tree("fuse-v1-history-rename-raw");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let session = format!("home/{uid}/agent/coder/session/fuse");
+    assert!(fs::create_dir_all(root.join(&session)).is_ok());
+    let target = format!("{session}/messages.jsonl");
+    let temp = format!("{session}/.messages.jsonl.tmp-1-1-0");
+    let original = "{\"role\":\"user\",\"content\":\"original\"}\n";
+    let replacement = "{\"role\":\"user\",\"content\":\"replacement\"}\n";
+    assert!(fs::write(root.join(&target), original).is_ok());
+    assert_eq!(
+        projection.create_layout_file(&temp, uid, gid, 0o600),
+        Ok(())
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(&temp, 0, replacement.as_bytes(), uid, gid,),
+        Ok(())
+    );
+
+    assert_eq!(
+        projection.rename_atomic_temp(&temp, &target, uid),
+        Err(FuseV1Error::AlreadyExists)
+    );
+    assert_eq!(
+        (
+            fs::read_to_string(root.join(&target)).unwrap_or_default(),
+            fs::read_to_string(root.join(&temp)).unwrap_or_default(),
+        ),
+        (original.to_owned(), replacement.to_owned())
+    );
+}
+
+#[test]
+fn fuse_v1_projection_history_rename_preserves_columnar_history_and_claims() {
+    let root = reference_tree("fuse-v1-history-rename-columnar");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let session_root = root.join(format!("home/{uid}/agent/coder/session"));
+    assert!(fs::create_dir_all(&session_root).is_ok());
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "fuse",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("fuse");
+    let session_path = format!("home/{uid}/agent/coder/session/fuse");
+    let target = format!("{session_path}/messages.jsonl");
+    let temp = format!("{session_path}/.messages.jsonl.tmp-1-1-0");
+    let message = "{\"role\":\"user\",\"run\":\"claim-1\",\"content\":\"hello\"}\n";
+    let start = "{\"type\":\"start\",\"id\":\"claim-1\",\"run\":\"claim-1\",\"scope\":\"private\",\"cwd\":\"/work\"}\n";
+    let usage = "{\"type\":\"usage\",\"run\":\"claim-1\",\"input_tokens\":1}";
+    assert!(fs::write(session.join("messages.jsonl"), message).is_ok());
+    assert!(fs::write(session.join("events.jsonl"), start).is_ok());
+    {
+        let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+        assert!(matches!(
+            guard.lookup_send("claim-1", "hello", "private", Some("/work")),
+            Ok(super::columnar::SendClaim::Replay(_))
+        ));
+    }
+    ok!(super::columnar::append(
+        &session,
+        super::columnar::Stream::Events,
+        &[usage],
+    ));
+    let expected_events = format!("{start}{usage}\n");
+    let claim_dir = session.join(".store/claim");
+    let claim_before = (
+        fs::read(claim_dir.join(".cursor.json")).unwrap_or_default(),
+        fs::read(claim_dir.join("claim-1")).unwrap_or_default(),
+    );
+    assert_eq!(
+        projection.create_layout_file(&temp, uid, gid, 0o600),
+        Ok(())
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(
+            &temp,
+            0,
+            b"{\"role\":\"user\",\"content\":\"replacement\"}\n",
+            uid,
+            gid,
+        ),
+        Ok(())
+    );
+
+    assert_eq!(
+        projection.rename_atomic_temp(&temp, &target, uid),
+        Err(FuseV1Error::AlreadyExists)
+    );
+    assert_eq!(
+        (
+            projection.read_to_string(&target),
+            projection.read_to_string(&format!("{session_path}/events.jsonl")),
+            fs::metadata(session.join("messages.jsonl"))
+                .map_or(u64::MAX, |metadata| metadata.len()),
+            fs::read(claim_dir.join(".cursor.json")).unwrap_or_default(),
+            fs::read(claim_dir.join("claim-1")).unwrap_or_default(),
+        ),
+        (
+            Ok(message.to_owned()),
+            Ok(expected_events),
+            0,
+            claim_before.0,
+            claim_before.1,
+        )
+    );
+}
+
+#[test]
+fn fuse_v1_projection_history_rename_publishes_missing_marker_once() {
+    let root = reference_tree("fuse-v1-history-rename-first-publish");
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let session = format!("home/{uid}/agent/coder/session/fuse");
+    assert!(fs::create_dir_all(root.join(&session)).is_ok());
+    let target = format!("{session}/events.jsonl");
+    let temp = format!("{session}/.events.jsonl.tmp-1-1-0");
+    let content = b"{\"type\":\"start\",\"run\":\"first\"}\n";
+    assert_eq!(
+        projection.create_layout_file(&temp, uid, gid, 0o600),
+        Ok(())
+    );
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner(&temp, 0, content, uid, gid),
+        Ok(())
+    );
+
+    assert_eq!(projection.rename_atomic_temp(&temp, &target, uid), Ok(()));
+    assert_eq!(fs::read(root.join(&target)).unwrap_or_default(), content);
+    assert!(!root.join(&temp).exists());
+}
+
+#[test]
+fn fuse_v1_projection_history_create_is_exclusive_under_race() {
+    let root = reference_tree("fuse-v1-history-create-race");
+    let uid = nix::unistd::Uid::current().as_raw();
+    let gid = nix::unistd::Gid::current().as_raw();
+    assert!(fs::write(root.join("agent/coder.d/owner"), format!("{uid}\n")).is_ok());
+    let session = format!("home/{uid}/agent/coder/session/fuse");
+    assert!(fs::create_dir_all(root.join(&session)).is_ok());
+    let target = format!("{session}/messages.jsonl");
+    let projection = std::sync::Arc::new(
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d")),
+    );
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let spawn = |mode| {
+        let projection = std::sync::Arc::clone(&projection);
+        let barrier = std::sync::Arc::clone(&barrier);
+        let target = target.clone();
+        thread::spawn(move || {
+            barrier.wait();
+            (mode, projection.create_layout_file(&target, uid, gid, mode))
+        })
+    };
+    let first = spawn(0o600);
+    let second = spawn(0o640);
+    barrier.wait();
+    let first = first.join().unwrap_or((0, Err(FuseV1Error::Io)));
+    let second = second.join().unwrap_or((0, Err(FuseV1Error::Io)));
+    let winner_mode = match (first, second) {
+        ((mode, Ok(())), (_, Err(FuseV1Error::AlreadyExists)))
+        | ((_, Err(FuseV1Error::AlreadyExists)), (mode, Ok(()))) => mode,
+        _ => 0,
+    };
+
+    assert_ne!(winner_mode, 0);
+    assert_eq!(
+        fs::metadata(root.join(&target))
+            .map_or(0, |metadata| metadata.permissions().mode() & 0o777),
+        winner_mode
+    );
+}
+
+#[test]
 fn fuse_v1_projection_allows_durable_session_layout_creation() {
     let root = reference_tree("fuse-v1-session-layout-create");
     let projection =

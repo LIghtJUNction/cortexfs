@@ -20,7 +20,7 @@ fn socket_session_recorder_rejects_symlink_required_files() {
     let request = ok!(request);
 
     assert_eq!(
-        record_socket_request_to_session(&session, &request),
+        record_unindexed_socket_request_for_test(&session, &request),
         Err(SocketSessionRecordError::MissingSessionFile(
             "messages.jsonl"
         ))
@@ -42,7 +42,7 @@ fn socket_session_recorder_cancels_without_deleting_history() {
 
     let request = parse_socket_request_frame(r#"{"op":"cancel","id":"run-1"}"#);
     let request = ok!(request);
-    let recorded = record_socket_request_to_session(&session, &request);
+    let recorded = record_unindexed_socket_request_for_test(&session, &request);
     let recorded = ok!(recorded);
     assert!(recorded.messages().is_empty());
     assert_eq!(recorded.events().len(), 1);
