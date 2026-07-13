@@ -5,11 +5,13 @@ mod tests {
     use std::fs;
     use std::io;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, ExitStatus};
 
     use serde_json::json;
     use sha2::{Digest, Sha256};
+
+    use cortexfs::object::residue::{audit_residue, cleanup_residue};
 
     type State = Vec<(OsString, u8, u32, u64, u64, Vec<u8>)>;
 
@@ -70,6 +72,22 @@ mod tests {
         Ok(state)
     }
 
+    fn object_tree_state(
+        source: &Path,
+        tool: &Path,
+        control: &Path,
+    ) -> io::Result<(State, State, State)> {
+        Ok((state(source)?, state(tool)?, state(control)?))
+    }
+
+    fn entry_names(directory: &Path) -> io::Result<Vec<OsString>> {
+        let mut names = fs::read_dir(directory)?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        names.sort();
+        Ok(names)
+    }
+
     fn run_ctx_single_line(
         command: &mut Command,
     ) -> Result<(ExitStatus, String, String), Box<dyn std::error::Error>> {
@@ -79,6 +97,77 @@ mod tests {
         assert!(stdout.lines().count() <= 1);
         assert!(stderr.lines().count() <= 1);
         Ok((output.status, stdout, stderr))
+    }
+
+    fn write_versioned_tool_manifest(
+        root: &Path,
+        stem: &str,
+        version: Option<&str>,
+        artifact_bytes: &[u8],
+        requirement: &str,
+    ) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let artifact = root.join(format!("{stem}.sh"));
+        fs::write(&artifact, artifact_bytes)?;
+        fs::set_permissions(&artifact, fs::Permissions::from_mode(0o755))?;
+        let mut manifest = tool_manifest(&artifact, &sha256(artifact_bytes));
+        if let Some(version) = version {
+            let fields = manifest.as_object_mut().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "manifest is not an object")
+            })?;
+            fields.insert("schema".to_owned(), json!("cortexfs.object/v2"));
+            fields.insert("version".to_owned(), json!(version));
+            fields.insert(
+                "compatibility".to_owned(),
+                json!({ "cortexfs": requirement }),
+            );
+        }
+        let path = root.join(format!("{stem}.json"));
+        fs::write(&path, serde_json::to_vec(&manifest)?)?;
+        Ok(path)
+    }
+
+    fn run_object_transition(
+        action: &str,
+        source: &Path,
+        manifest: &Path,
+        apply: bool,
+        expected: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_ctx"));
+        command
+            .args(["object", action, "--source"])
+            .arg(source)
+            .arg(manifest)
+            .args(["--tier", "system"]);
+        if apply {
+            command.arg("--yes");
+        }
+        let (status, stdout, stderr) = run_ctx_single_line(&mut command)?;
+        assert!(status.success(), "ctx object {action} failed: {stderr}");
+        assert_eq!(stdout, expected);
+        assert!(stderr.is_empty());
+        Ok(())
+    }
+
+    fn assert_v2_inspect(
+        source: &Path,
+        version: &str,
+        requirement: &str,
+        artifact_bytes: &[u8],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "inspect", "--source"])
+                .arg(source)
+                .args(["tool", "example.echo", "--tier", "system"]),
+        )?;
+        assert!(status.success(), "ctx object inspect failed: {stderr}");
+        assert!(stdout.contains(&format!(
+            "schema=cortexfs.object/v2 version={version} requires-cortexfs={requirement}"
+        )));
+        assert!(stdout.contains(&format!("sha256={}", sha256(artifact_bytes))));
+        assert!(stderr.is_empty());
+        Ok(())
     }
 
     #[test]
@@ -310,6 +399,129 @@ mod tests {
             .args(["tool", "example.echo", "--tier", "system"])
             .output()?;
         assert_eq!(output.status.code(), Some(69));
+        Ok(())
+    }
+
+    #[test]
+    fn replace_upgrade_and_rollback_cli_preserve_dry_runs_and_apply_candidates()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("source");
+        let tool_dir = source.join("tool");
+        let installed = tool_dir.join("example.echo");
+        let control = tool_dir.join("example.echo.d");
+        fs::create_dir_all(&tool_dir)?;
+        let requirement = format!("={}", env!("CARGO_PKG_VERSION"));
+        let legacy_bytes = b"#!/bin/sh\nprintf legacy\n";
+        let v1_bytes = b"#!/bin/sh\nprintf 1.0.0\n";
+        let v2_bytes = b"#!/bin/sh\nprintf 2.0.0\n";
+        let root_path = root.path();
+        let legacy_manifest =
+            write_versioned_tool_manifest(root_path, "legacy", None, legacy_bytes, &requirement)?;
+        let v1_manifest = write_versioned_tool_manifest(
+            root_path,
+            "candidate-1",
+            Some("1.0.0"),
+            v1_bytes,
+            &requirement,
+        )?;
+        let v2_manifest = write_versioned_tool_manifest(
+            root_path,
+            "candidate-2",
+            Some("2.0.0"),
+            v2_bytes,
+            &requirement,
+        )?;
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "install", "--source"])
+                .arg(&source)
+                .arg(&legacy_manifest)
+                .args(["--tier", "system"]),
+        )?;
+        assert!(status.success(), "ctx object install failed: {stderr}");
+        assert_eq!(stdout, "installed tool/example.echo\n");
+        assert!(stderr.is_empty());
+        for residue in audit_residue(&source)? {
+            cleanup_residue(&source, &residue.path, residue.dev, residue.ino, true)?;
+        }
+
+        let expected_pair = [
+            OsString::from("example.echo"),
+            OsString::from("example.echo.d"),
+        ];
+
+        let before = object_tree_state(&source, &tool_dir, &control)?;
+        run_object_transition(
+            "replace",
+            &source,
+            &v1_manifest,
+            false,
+            "would-replace tool/example.echo tier=system from=legacy to=1.0.0\n",
+        )?;
+        assert_eq!(object_tree_state(&source, &tool_dir, &control)?, before);
+
+        run_object_transition(
+            "replace",
+            &source,
+            &v1_manifest,
+            true,
+            "replaced tool/example.echo tier=system from=legacy to=1.0.0\n",
+        )?;
+        assert_eq!(fs::read(&installed)?, v1_bytes);
+        assert_eq!(entry_names(&tool_dir)?.as_slice(), expected_pair.as_slice());
+        assert_v2_inspect(&source, "1.0.0", &requirement, v1_bytes)?;
+
+        let before = object_tree_state(&source, &tool_dir, &control)?;
+        run_object_transition(
+            "upgrade",
+            &source,
+            &v2_manifest,
+            false,
+            "would-upgrade tool/example.echo tier=system from=1.0.0 to=2.0.0\n",
+        )?;
+        assert_eq!(object_tree_state(&source, &tool_dir, &control)?, before);
+
+        run_object_transition(
+            "upgrade",
+            &source,
+            &v2_manifest,
+            true,
+            "upgraded tool/example.echo tier=system from=1.0.0 to=2.0.0\n",
+        )?;
+        assert_eq!(fs::read(&installed)?, v2_bytes);
+        assert_eq!(entry_names(&tool_dir)?.as_slice(), expected_pair.as_slice());
+        assert_v2_inspect(&source, "2.0.0", &requirement, v2_bytes)?;
+
+        let before = object_tree_state(&source, &tool_dir, &control)?;
+        run_object_transition(
+            "rollback",
+            &source,
+            &v1_manifest,
+            false,
+            "would-rollback tool/example.echo tier=system from=2.0.0 to=1.0.0\n",
+        )?;
+        assert_eq!(object_tree_state(&source, &tool_dir, &control)?, before);
+
+        run_object_transition(
+            "rollback",
+            &source,
+            &v1_manifest,
+            true,
+            "rolled-back tool/example.echo tier=system from=2.0.0 to=1.0.0\n",
+        )?;
+        assert_eq!(fs::read(&installed)?, v1_bytes);
+        assert_eq!(entry_names(&tool_dir)?.as_slice(), expected_pair.as_slice());
+        assert_v2_inspect(&source, "1.0.0", &requirement, v1_bytes)?;
+
+        let source_entries = state(&source)?;
+        assert_eq!(source_entries.len(), 1);
+        let source_entry = source_entries
+            .first()
+            .ok_or_else(|| io::Error::other("source tree is empty"))?;
+        assert_eq!(source_entry.0, OsString::from("tool"));
+        assert_eq!(entry_names(&tool_dir)?.as_slice(), expected_pair.as_slice());
         Ok(())
     }
 

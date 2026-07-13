@@ -138,10 +138,25 @@ control、artifact 类型、可执行权限和 SHA-256 校验。对 v2，`check`
 `tool`。两种 manifest schema 的 agent 都只支持 system tier
 `/ctx/agent`；root ABI 保留了
 `/ctx/home/<effective-uid>/agent` user-agent tier，但在 socket runtime 能安全携带 tier
-identity 之前，`agent --tier user` 会明确拒绝。安装只新建对象；v2 不定义
-upgrade/replace，需要升级时应使用新对象名，直到独立的 replace contract 落地。安装会校验
-executable SHA-256，不修改任何 agent policy；它初始化规范要求的 status/pid/log，但不创建
-socket。SDK 的 `DynamicTool` loader
+identity 之前，`agent --tier user` 会明确拒绝。安装只新建对象；已有 receipt-managed 对象
+使用独立的 lifecycle 命令，candidate 必须是 v2：
+
+```bash
+ctx object replace --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object upgrade --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object rollback --source "$CTX_SOURCE" old-tool.manifest.json --tier user
+```
+
+三条命令默认 dry-run，只有 `--yes` 才应用。`replace` 可迁移 v1/v2 receipt 且不限制版本
+方向；`upgrade` 只接受更高的 v2；`rollback` 只接受更低的 v2，并要求调用者提供旧 manifest
+和 hash-bound artifact，因为 CortexFS 不保存版本历史。应用时先在同一文件系统 stage 完整
+candidate，先隐藏旧 executable，最后发布新 executable；commit 前失败会在 receipt 仍精确
+匹配时自动恢复旧 pair。协议不宣称 pair atomicity，冲突时不故意覆盖或删除 foreign inode，
+并可能保留可审计 safety residue。
+
+调用者必须在 `--yes` 前自行停稳对应 runtime 与同 authority writer；命令本身不负责
+stop/start runtime，也不授予 policy、创建 socket。安装与替换都会校验 executable SHA-256，
+不修改任何 agent policy；安装初始化规范要求的 status/pid/log，但不创建 socket。SDK 的 `DynamicTool` loader
 目前尚未被 core runtime 消费，不应把 metadata cache 描述成已完成的 dlopen 常驻实现。
 
 ## 扩展 agent

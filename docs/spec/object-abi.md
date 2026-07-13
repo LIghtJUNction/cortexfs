@@ -274,11 +274,42 @@ installation-admission and audit facts, not authority grants, and do not start
 a runtime. If a later CortexFS build no longer satisfies the recorded
 requirement, that mismatch must not prevent receipt-managed uninstall.
 
-Manifest v2 does not define upgrade or replacement. Installation remains
-new-object-only; use a new object name until a separate replace contract is
-specified and implemented.
+Installation remains new-object-only. Receipt-managed replacement is a separate
+lifecycle operation with a mandatory v2 candidate:
 
-## Installed Object Inspection and Removal
+```text
+ctx object replace --source PATH MANIFEST [--tier user|system] [--yes]
+ctx object upgrade --source PATH MANIFEST [--tier user|system] [--yes]
+ctx object rollback --source PATH MANIFEST [--tier user|system] [--yes]
+```
+
+`replace` accepts an existing receipt-managed v1 or v2 object and imposes no
+version ordering, so it is the migration path from a legacy v1 receipt to v2.
+`upgrade` requires an existing v2 object and a strictly higher candidate v2
+version. `rollback` requires an existing v2 object and a strictly lower
+candidate v2 version. CortexFS keeps no version history: the rollback caller
+must provide the older v2 manifest and its exact hash-bound artifact.
+
+All three commands default to a no-write dry-run; `--yes` applies the
+transition. The candidate manifest must name the exact installed class/name,
+must pass current CortexFS compatibility validation, and must use
+`cortexfs.object/v2`. Compatibility still grants no authority.
+
+Applied replacement prepares and syncs the complete candidate in a
+same-filesystem stage. It hides the old executable first, transitions the exact
+receipt-managed pair, and publishes the new executable last as the visible
+commit boundary. A pre-commit failure automatically rolls the exact old pair
+back when its receipts still match. At receipt checkpoints the operation does
+not intentionally overwrite or delete a foreign inode; a conflict or failed
+safe restoration may retain audit-visible safety residue.
+
+This protocol does not claim pair atomicity and cannot close Linux's final
+pathname syscall race against a hostile writer with the same Unix authority.
+Before `--yes`, the caller must quiesce the matching runtime and other writers.
+Replacement itself keeps no version archive, does not stop or start a runtime,
+does not grant policy authority, and does not create socket state.
+
+## Installed Object Replacement, Inspection, and Removal
 
 The host-side inspection and receipt-managed removal surfaces are:
 

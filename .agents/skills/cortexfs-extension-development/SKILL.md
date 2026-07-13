@@ -43,16 +43,24 @@ provider special case, watcher, queue, or alternate orchestration path.
    `ctx object install --source PATH MANIFEST --tier user|system`, where PATH
    is the durable backing tree. Never use `/ctx`, `CTX_ROOT`, or `--root` as
    the writable target, and never copy directly into a live object directory.
-9. Verify discovery, metadata, policy denial, authorized execution, JSONL
+9. For an existing receipt-managed object, validate a v2 candidate and dry-run
+   `ctx object replace|upgrade|rollback --source PATH MANIFEST --tier user|system`.
+   Apply only after an explicit mutation request by adding `--yes`. Use
+   `replace` for v1 migration or unordered replacement, `upgrade` only for a
+   higher v2 version, and `rollback` only for a lower caller-supplied v2
+   manifest and artifact.
+10. Verify discovery, metadata, policy denial, authorized execution, JSONL
    ordering, and durable agent behavior through the installed path.
 
 ## Boundaries
 
 - Keep `/ctx/status`, `/ctx/bin`, `/ctx/model`, `/ctx/agent`, `/ctx/tool`,
   `/ctx/home`, and `/ctx/shared` as the only root classes.
-- Treat manifest installation as new-object-only. Use a new name for an
-  upgrade until a separately specified replacement contract exists. Manifest
-  v2 does not declare upgrade or replacement support.
+- Treat installation as new-object-only and replacement as a separate explicit
+  lifecycle. Candidates are always v2. Replacement may migrate a
+  receipt-managed v1 or v2 object; upgrade and rollback require current v2 and
+  strict higher/lower ordering. CortexFS stores no version history, so rollback
+  requires the caller's old manifest and artifact.
 - Treat the executable publication as the object commit boundary. Do not
   fabricate runtime-owned `status`, `pid`, `log`, or socket state.
 - Keep tool installation separate from authorization. Installing a tool must
@@ -60,6 +68,14 @@ provider special case, watcher, queue, or alternate orchestration path.
 - Treat v2 compatibility as install-admission metadata, not authority. It does
   not grant policy access or start a runtime, and a later mismatch must not
   prevent receipt-managed uninstall.
+- Treat replacement as dry-run unless `--yes` is explicit. It uses a
+  same-filesystem stage, hides the old executable first, and publishes the new
+  executable last. It is not pair-atomic and may retain safety residue on a
+  conflict; it must not intentionally replace a foreign inode at receipt
+  checkpoints.
+- Quiesce the matching runtime and same-authority writers before applied
+  replacement. The lifecycle command does not stop/start a runtime, grant
+  policy, create sockets, or retain a version archive.
 - Install user tools under `/ctx/home/<effective-uid>/tool` and system tools
   under `/ctx/tool`. Install agents under `/ctx/agent`; although the root ABI
   defines `/ctx/home/<effective-uid>/agent`, neither manifest schema carries

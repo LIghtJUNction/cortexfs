@@ -4,8 +4,10 @@ pub mod install;
 pub mod layout;
 pub mod metadata;
 pub mod receipt;
+pub mod replace;
 pub mod residue;
 pub(crate) mod runner;
+mod swap;
 pub mod uninstall;
 
 /// Deserializes a present optional wire field while rejecting explicit null.

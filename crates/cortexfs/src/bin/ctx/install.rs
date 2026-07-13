@@ -3,6 +3,7 @@ use crate::{
     terminal_safe_text,
 };
 use cortexfs::object::install::{InstallError, InstallTier};
+use cortexfs::object::replace::ReplaceMode;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn parse_object_command(
@@ -10,7 +11,7 @@ pub(crate) fn parse_object_command(
 ) -> Result<Command, CliError> {
     let action = required_arg(
         &mut values,
-        "object requires check, inspect, install, uninstall, or residue",
+        "object requires check, inspect, install, replace, upgrade, rollback, uninstall, or residue",
     )?;
     if action == "check" {
         let manifest = PathBuf::from(required_arg(
@@ -37,12 +38,21 @@ pub(crate) fn parse_object_command(
     if action == "inspect" {
         return parse_object_inspect_command(values);
     }
+    let replace_mode = match action.as_str() {
+        "replace" => Some(ReplaceMode::Replace),
+        "upgrade" => Some(ReplaceMode::Upgrade),
+        "rollback" => Some(ReplaceMode::Rollback),
+        _ => None,
+    };
+    if let Some(mode) = replace_mode {
+        return parse_object_replace_command(mode, values);
+    }
     if action == "uninstall" {
         return parse_object_uninstall_command(values);
     }
     if action != "install" {
         return Err(CliError::usage(
-            "object expects check, inspect, install, uninstall, or residue",
+            "object expects check, inspect, install, replace, upgrade, rollback, uninstall, or residue",
         ));
     }
     let mut manifest = None;
@@ -88,6 +98,89 @@ pub(crate) fn parse_object_command(
         source,
         manifest,
         tier,
+    })
+}
+
+fn replace_words(mode: ReplaceMode) -> (&'static str, &'static str, &'static str) {
+    match mode {
+        ReplaceMode::Replace => ("replace", "would-replace", "replaced"),
+        ReplaceMode::Upgrade => ("upgrade", "would-upgrade", "upgraded"),
+        ReplaceMode::Rollback => ("rollback", "would-rollback", "rolled-back"),
+    }
+}
+
+fn parse_object_replace_command(
+    mode: ReplaceMode,
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    let (action, _dry_run, _applied) = replace_words(mode);
+    let mut source = None;
+    let mut manifest = None;
+    let mut tier = InstallTier::User;
+    let mut tier_seen = false;
+    let mut yes = false;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--source" => {
+                if source.is_some() {
+                    return Err(CliError::usage(format!(
+                        "object {action} --source specified twice"
+                    )));
+                }
+                let message = format!("object {action} --source requires a durable backing path");
+                let value = required_arg(&mut values, &message)?;
+                if value.starts_with('-') {
+                    return Err(CliError::usage(message));
+                }
+                source = Some(PathBuf::from(value));
+            }
+            "--tier" => {
+                if tier_seen {
+                    return Err(CliError::usage(format!(
+                        "object {action} --tier specified twice"
+                    )));
+                }
+                tier_seen = true;
+                let message = format!("object {action} --tier requires user or system");
+                let value = required_arg(&mut values, &message)?;
+                tier = InstallTier::parse(&value).ok_or_else(|| {
+                    CliError::usage(format!("object {action} --tier expects user or system"))
+                })?;
+            }
+            "--yes" => {
+                if yes {
+                    return Err(CliError::usage(format!(
+                        "object {action} --yes specified twice"
+                    )));
+                }
+                yes = true;
+            }
+            _ if value.starts_with('-') => {
+                return Err(CliError::usage(format!(
+                    "unexpected object {action} argument: {}",
+                    terminal_safe_field(&value)
+                )));
+            }
+            _ if manifest.is_none() => manifest = Some(PathBuf::from(value)),
+            _ => {
+                return Err(CliError::usage(format!(
+                    "object {action} accepts one manifest path"
+                )));
+            }
+        }
+    }
+    Ok(Command::ObjectReplace {
+        source: source.ok_or_else(|| {
+            CliError::usage(format!(
+                "object {action} requires --source PATH for the durable backing tree; /ctx and --root are ABI projections"
+            ))
+        })?,
+        manifest: manifest.ok_or_else(|| {
+            CliError::usage(format!("object {action} requires a manifest path"))
+        })?,
+        tier,
+        mode,
+        yes,
     })
 }
 
@@ -334,6 +427,32 @@ pub(crate) fn run_object_uninstall(
     ))
 }
 
+pub(crate) fn run_object_replace(
+    source: &Path,
+    manifest: &Path,
+    tier: InstallTier,
+    mode: ReplaceMode,
+    yes: bool,
+) -> Result<(), CliError> {
+    let (_action, dry_run, applied) = replace_words(mode);
+    let report = cortexfs::object::replace::replace_object(source, manifest, tier, mode, yes)
+        .map_err(|error| match error {
+            InstallError::Invalid(message) => CliError::usage(terminal_safe_field(&message)),
+            InstallError::Unavailable(message) => {
+                CliError::unavailable(terminal_safe_field(&message))
+            }
+        })?;
+    let action = if report.applied { applied } else { dry_run };
+    print_line(&format!(
+        "{action} {}/{} tier={} from={} to={}",
+        terminal_safe_field(report.class.as_str()),
+        terminal_safe_field(&report.name),
+        terminal_safe_field(report.tier.as_str()),
+        terminal_safe_field(report.from_version.as_deref().unwrap_or("legacy")),
+        terminal_safe_field(&report.to_version),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +576,127 @@ mod tests {
                 )
             })
         );
+    }
+
+    #[test]
+    fn parses_all_replace_modes_as_default_user_dry_runs() {
+        for (action, expected_mode) in [
+            ("replace", ReplaceMode::Replace),
+            ("upgrade", ReplaceMode::Upgrade),
+            ("rollback", ReplaceMode::Rollback),
+        ] {
+            assert!(
+                parse(&[action, "--source", "/source", "tool.json"]).is_ok_and(|command| {
+                    matches!(
+                        command,
+                        Command::ObjectReplace {
+                            source,
+                            manifest,
+                            tier: InstallTier::User,
+                            mode,
+                            yes: false,
+                        } if source == Path::new("/source")
+                            && manifest == Path::new("tool.json")
+                            && mode == expected_mode
+                    )
+                }),
+                "{action}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_applied_system_upgrade_in_any_option_order() {
+        assert!(
+            parse(&[
+                "upgrade",
+                "--tier",
+                "system",
+                "tool.json",
+                "--yes",
+                "--source",
+                "/durable",
+            ])
+            .is_ok_and(|command| {
+                matches!(
+                    command,
+                    Command::ObjectReplace {
+                        source,
+                        manifest,
+                        tier: InstallTier::System,
+                        mode: ReplaceMode::Upgrade,
+                        yes: true,
+                    } if source == Path::new("/durable")
+                        && manifest == Path::new("tool.json")
+                )
+            })
+        );
+    }
+
+    #[test]
+    fn replace_commands_reject_missing_duplicate_unknown_and_extra_arguments() {
+        for args in [
+            &["replace", "tool.json"][..],
+            &["replace", "--source", "/source"][..],
+            &["replace", "--source"][..],
+            &["replace", "--source", "--yes", "tool.json"][..],
+            &["replace", "--source", "-source", "tool.json"][..],
+            &["replace", "--source", "/source", "-tool.json"][..],
+            &[
+                "replace",
+                "--source",
+                "/one",
+                "--source",
+                "/two",
+                "tool.json",
+            ][..],
+            &[
+                "replace",
+                "--source",
+                "/source",
+                "--tier",
+                "user",
+                "--tier",
+                "system",
+                "tool.json",
+            ][..],
+            &[
+                "replace",
+                "--source",
+                "/source",
+                "tool.json",
+                "--yes",
+                "--yes",
+            ][..],
+            &["replace", "--source", "/source", "--unknown", "tool.json"][..],
+            &["replace", "--source", "/source", "one.json", "two.json"][..],
+            &[
+                "replace",
+                "--source",
+                "/source",
+                "--tier",
+                "local",
+                "tool.json",
+            ][..],
+        ] {
+            assert!(parse(args).is_err_and(|error| error.message.contains("object replace")));
+        }
+    }
+
+    #[test]
+    fn replace_command_escapes_multiline_unknown_argument() -> Result<(), &'static str> {
+        let Err(error) = parse(&[
+            "rollback",
+            "--source",
+            "/source",
+            "tool.json",
+            "--evil\nINJECTED",
+        ]) else {
+            return Err("multiline option was accepted");
+        };
+        assert_eq!(error.message.lines().count(), 1);
+        assert!(error.message.contains("--evil\\nINJECTED"));
+        Ok(())
     }
 
     #[test]
@@ -742,7 +982,7 @@ mod tests {
         assert!(parse(&["remove"]).is_err_and(|error| {
             error
                 .message
-                .contains("expects check, inspect, install, uninstall, or residue")
+                .contains("expects check, inspect, install, replace, upgrade, rollback, uninstall, or residue")
         }));
         assert!(
             parse(&["install", "--unknown"]).is_err_and(|error| {

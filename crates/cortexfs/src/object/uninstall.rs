@@ -1,16 +1,17 @@
-use super::install::{
-    InstallError, InstallTier, create_stage, install_class_path, rename_noreplace,
-};
-use super::receipt::{EntryKind, EntryReceipt, InspectedObject, entry_matches, inspect_object};
+use super::install::{InstallError, InstallTier, create_stage, install_class_path};
+use super::receipt::{EntryKind, EntryReceipt, InspectedObject, inspect_object};
 use super::residue::cleanup_residue;
+#[cfg(test)]
+use super::swap::{create_foreign_control, create_foreign_executable};
+use super::swap::{
+    move_exact, relative_stage, require_entry, require_missing, restore_exact, sync_dirs,
+};
 use crate::ObjectClass;
 use crate::support::plain::{open_plain_directory, proc_fd_path};
 
 use std::ffi::OsString;
 use std::fs;
-#[cfg(test)]
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Inspects or removes one exact installer-managed object.
 ///
@@ -91,14 +92,6 @@ fn uninstall_with(
         ))
     })?;
     Ok(inspected)
-}
-
-fn relative_stage(root: &Path, class: &Path, stage: &str) -> Result<PathBuf, InstallError> {
-    class
-        .join(stage)
-        .strip_prefix(root)
-        .map(Path::to_path_buf)
-        .map_err(|_error| InstallError::unavailable("cannot derive uninstall residue path"))
 }
 
 fn quarantine_object(
@@ -255,60 +248,6 @@ fn rollback_moves(
     }
 }
 
-fn move_exact(
-    source: &fs::File,
-    source_name: &str,
-    target: &fs::File,
-    target_name: &str,
-    receipt: EntryReceipt,
-    kind: EntryKind,
-) -> Result<(), String> {
-    require_entry(source, source_name, receipt, kind)?;
-    rename_noreplace(source, source_name, target, target_name)
-        .map_err(|error| format!("cannot quarantine object entry: {error}"))?;
-    if entry_matches(target, target_name, receipt, kind)
-        && require_missing(source, source_name).is_ok()
-    {
-        return Ok(());
-    }
-    let detail = "quarantined object entry did not match its retained receipt";
-    match restore_exact(target, target_name, source, source_name, receipt, kind) {
-        Ok(()) => Err(format!("{detail}; restored moved entry")),
-        Err(error) => {
-            let sync = sync_dirs(source, target)
-                .err()
-                .map_or_else(String::new, |sync| format!("; {sync}"));
-            let disposition = if entry_matches(target, target_name, receipt, kind) {
-                format!("; matching receipt retained as {target_name}")
-            } else if entry_matches(source, source_name, receipt, kind) {
-                format!("; matching receipt restored as {source_name}")
-            } else {
-                "; quarantine receipt no longer matches".to_owned()
-            };
-            Err(format!(
-                "{detail}; restore failed: {error}{disposition}{sync}"
-            ))
-        }
-    }
-}
-
-fn restore_exact(
-    source: &fs::File,
-    source_name: &str,
-    target: &fs::File,
-    target_name: &str,
-    receipt: EntryReceipt,
-    kind: EntryKind,
-) -> Result<(), String> {
-    require_entry(source, source_name, receipt, kind)?;
-    require_missing(target, target_name)?;
-    rename_noreplace(source, source_name, target, target_name)
-        .map_err(|error| format!("cannot restore quarantined object entry: {error}"))?;
-    require_entry(target, target_name, receipt, kind)?;
-    require_missing(source, source_name)?;
-    sync_dirs(source, target)
-}
-
 fn require_stage(
     stage: &fs::File,
     executable: EntryReceipt,
@@ -330,73 +269,6 @@ fn require_stage(
     }
     require_entry(stage, "control", control, EntryKind::Directory)?;
     require_entry(stage, "executable", executable, EntryKind::Executable)
-}
-
-fn require_entry(
-    parent: &fs::File,
-    name: &str,
-    receipt: EntryReceipt,
-    kind: EntryKind,
-) -> Result<(), String> {
-    if entry_matches(parent, name, receipt, kind) {
-        Ok(())
-    } else {
-        Err(format!(
-            "object entry receipt changed: {name} expected dev={} ino={}",
-            receipt.dev, receipt.ino
-        ))
-    }
-}
-
-fn require_missing(parent: &fs::File, name: &str) -> Result<(), String> {
-    match nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW) {
-        Err(nix::errno::Errno::ENOENT) => Ok(()),
-        Ok(stat) => Err(format!(
-            "object path was recreated: {name} dev={} ino={}",
-            stat.st_dev, stat.st_ino
-        )),
-        Err(error) => Err(format!(
-            "cannot verify object path absence: {name}: {error}"
-        )),
-    }
-}
-
-fn sync_dirs(first: &fs::File, second: &fs::File) -> Result<(), String> {
-    first
-        .sync_all()
-        .map_err(|error| format!("cannot sync object class: {error}"))?;
-    second
-        .sync_all()
-        .map_err(|error| format!("cannot sync object quarantine: {error}"))
-}
-
-#[cfg(test)]
-fn create_foreign_executable(class: &fs::File, name: &str) -> Result<(), String> {
-    let fd = nix::fcntl::openat(
-        class,
-        name,
-        nix::fcntl::OFlag::O_WRONLY
-            | nix::fcntl::OFlag::O_CREAT
-            | nix::fcntl::OFlag::O_EXCL
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::from_bits_truncate(0o755),
-    )
-    .map_err(|error| format!("cannot create foreign executable: {error}"))?;
-    let mut file = fs::File::from(fd);
-    file.write_all(b"foreign")
-        .map_err(|error| format!("cannot write foreign executable: {error}"))?;
-    file.sync_all()
-        .map_err(|error| format!("cannot sync foreign executable: {error}"))
-}
-
-#[cfg(test)]
-fn create_foreign_control(class: &fs::File, name: &str) -> Result<(), String> {
-    nix::sys::stat::mkdirat(class, name, nix::sys::stat::Mode::from_bits_truncate(0o700))
-        .map_err(|error| format!("cannot create foreign control: {error}"))?;
-    class
-        .sync_all()
-        .map_err(|error| format!("cannot sync foreign control: {error}"))
 }
 
 #[cfg(test)]
