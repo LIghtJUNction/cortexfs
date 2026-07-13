@@ -18,3 +18,7 @@ path = "src/tool.rs"
 [[bin]]
 name = "cortexfs-echo-agent"
 path = "src/agent.rs"
+
+[dev-dependencies]
+cortexfs = { path = "../../../crates/cortexfs" }
+sha2 = "0.11.0"
