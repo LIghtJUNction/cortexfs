@@ -25,37 +25,7 @@ mod tests {
     #[test]
     fn installed_sdks_run_two_declared_native_tool_calls() -> Result<(), Box<dyn std::error::Error>>
     {
-        let root = install_fixture_tool()?;
-        let package = root.path().join("package");
-
-        let agent = Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-agent"));
-        let reference = root.path().join("agent/coder.d");
-        let mut controls = BTreeMap::new();
-        for name in [
-            "owner", "uid", "gid", "groups", "label", "iso", "parent", "life", "root", "cwd",
-            "env", "path", "mount", "model",
-        ] {
-            controls.insert(name, fs::read_to_string(reference.join(name))?);
-        }
-        controls.insert("path", format!("{}\n", root.path().join("tool").display()));
-        controls.insert(
-            "mount",
-            format!(
-                "{}\t{}\tro\trbind,nosuid,nodev\n",
-                root.path().display(),
-                root.path().display()
-            ),
-        );
-        controls.insert("abi", "sdk-envelope-v1".to_owned());
-        controls.insert("tools", "example.echo\n".to_owned());
-        controls.insert(
-            "policy",
-            "allow coder_t model:main use\nallow coder_t tool:example.echo execute\n".to_owned(),
-        );
-        let agent_manifest = package.join("agent.json");
-        write_manifest(&agent_manifest, "agent", "fixture-agent", agent, &controls)?;
-        install_object(root.path(), &agent_manifest, InstallTier::System)?;
-        assert!(inspect_object_layout(root.path(), ObjectClass::Agent, "fixture-agent").is_ok());
+        let root = install_fixture_agent()?;
 
         let view = derive_agent_runtime_view(root.path(), "fixture-agent").map_err(|error| {
             std::io::Error::other(format!("cannot derive fixture runtime view: {error:?}"))
@@ -105,6 +75,58 @@ mod tests {
         assert!(tool_results.next().is_none());
         assert_tool_result(&first, "fixture-call-1", "native:one")?;
         assert_tool_result(&second, "fixture-call-2", "native:two")?;
+        Ok(())
+    }
+
+    #[test]
+    fn installed_agent_cli_joins_argv_and_emits_success_jsonl()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = install_fixture_agent()?;
+        let output = run_installed_agent(&root, &["hello", "world"], b"", "agent-cli-argv")?;
+
+        assert_eq!(
+            (
+                output.status.code(),
+                String::from_utf8(output.stdout)?,
+                output.stderr,
+            ),
+            (
+                Some(0),
+                concat!(
+                    "{\"run\":\"agent-cli-argv\",\"type\":\"start\"}\n",
+                    "{\"content\":[{\"text\":\"hello world\",\"type\":\"text\"}],\"role\":\"assistant\",\"run\":\"agent-cli-argv\",\"type\":\"message\"}\n",
+                    "{\"run\":\"agent-cli-argv\",\"status\":\"ok\",\"type\":\"done\"}\n",
+                )
+                .to_owned(),
+                Vec::new(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn installed_agent_cli_reads_stdin_when_argv_is_empty() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root = install_fixture_agent()?;
+        let output = run_installed_agent(&root, &[], b"from stdin", "agent-cli-stdin")?;
+
+        assert_eq!(
+            (
+                output.status.code(),
+                String::from_utf8(output.stdout)?,
+                output.stderr,
+            ),
+            (
+                Some(0),
+                concat!(
+                    "{\"run\":\"agent-cli-stdin\",\"type\":\"start\"}\n",
+                    "{\"content\":[{\"text\":\"from stdin\",\"type\":\"text\"}],\"role\":\"assistant\",\"run\":\"agent-cli-stdin\",\"type\":\"message\"}\n",
+                    "{\"run\":\"agent-cli-stdin\",\"status\":\"ok\",\"type\":\"done\"}\n",
+                )
+                .to_owned(),
+                Vec::new(),
+            )
+        );
         Ok(())
     }
 
@@ -246,6 +268,40 @@ mod tests {
         Ok(root)
     }
 
+    fn install_fixture_agent() -> Result<FixtureRoot, Box<dyn std::error::Error>> {
+        let root = install_fixture_tool()?;
+        let package = root.path().join("package");
+        let agent = Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-agent"));
+        let reference = root.path().join("agent/coder.d");
+        let mut controls = BTreeMap::new();
+        for name in [
+            "owner", "uid", "gid", "groups", "label", "iso", "parent", "life", "root", "cwd",
+            "env", "path", "mount", "model",
+        ] {
+            controls.insert(name, fs::read_to_string(reference.join(name))?);
+        }
+        controls.insert("path", format!("{}\n", root.path().join("tool").display()));
+        controls.insert(
+            "mount",
+            format!(
+                "{}\t{}\tro\trbind,nosuid,nodev\n",
+                root.path().display(),
+                root.path().display()
+            ),
+        );
+        controls.insert("abi", "sdk-envelope-v1".to_owned());
+        controls.insert("tools", "example.echo\n".to_owned());
+        controls.insert(
+            "policy",
+            "allow coder_t model:main use\nallow coder_t tool:example.echo execute\n".to_owned(),
+        );
+        let agent_manifest = package.join("agent.json");
+        write_manifest(&agent_manifest, "agent", "fixture-agent", agent, &controls)?;
+        install_object(root.path(), &agent_manifest, InstallTier::System)?;
+        assert!(inspect_object_layout(root.path(), ObjectClass::Agent, "fixture-agent").is_ok());
+        Ok(root)
+    }
+
     fn run_installed_tool(
         root: &FixtureRoot,
         args: &[&str],
@@ -264,6 +320,29 @@ mod tests {
             .stdin
             .take()
             .ok_or("missing fixture tool stdin")?
+            .write_all(stdin)?;
+        Ok(child.wait_with_output()?)
+    }
+
+    fn run_installed_agent(
+        root: &FixtureRoot,
+        args: &[&str],
+        stdin: &[u8],
+        run_id: &str,
+    ) -> Result<Output, Box<dyn std::error::Error>> {
+        let mut child = Command::new(root.path().join("agent/fixture-agent"))
+            .args(args)
+            .env_clear()
+            .env("CTX_AGENT", "fixture-agent")
+            .env("CTX_RUN_ID", run_id)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .ok_or("missing fixture agent stdin")?
             .write_all(stdin)?;
         Ok(child.wait_with_output()?)
     }

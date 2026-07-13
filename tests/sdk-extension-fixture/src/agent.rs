@@ -14,6 +14,15 @@ impl Agent for FixtureAgent {
         invocation: &AgentInvocation,
         output: &mut AgentEmitter<&mut dyn Write>,
     ) -> AgentResult<AgentOutcome> {
+        if invocation.history_messages().is_none()
+            && invocation.tool_context().is_none()
+            && invocation.observation().is_none()
+        {
+            output
+                .message(invocation.input())
+                .map_err(|error| AgentError::new("EIO", error.to_string()))?;
+            return Ok(AgentOutcome::Complete);
+        }
         match invocation.step() {
             0 => {
                 AgentToolCallRequest::new("fixture-call-1", "example.echo", vec!["one".to_owned()])
