@@ -94,10 +94,10 @@ impl InstallTier {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ObjectManifest {
-    schema: String,
+pub(super) struct ObjectManifest {
+    pub(super) schema: String,
     #[serde(default, deserialize_with = "present")]
-    version: Option<String>,
+    pub(super) version: Option<String>,
     #[serde(default, deserialize_with = "present")]
     compatibility: Option<ManifestCompatibility>,
     class: ManifestClass,
@@ -179,18 +179,20 @@ pub struct InstalledObject {
 /// A manifest and executable verified for publication without modifying a tree.
 #[derive(Debug)]
 pub struct CheckedObject {
-    class: ObjectClass,
-    name: String,
-    manifest: ObjectManifest,
-    source: fs::File,
+    pub(super) class: ObjectClass,
+    pub(super) name: String,
+    pub(super) manifest: ObjectManifest,
+    pub(super) source: fs::File,
 }
 
-struct StagedObject {
-    directory: fs::File,
+pub(super) struct StagedObject {
+    pub(super) name: String,
+    pub(super) directory: fs::File,
     _control: fs::File,
     _executable: fs::File,
-    control_receipt: EntryReceipt,
-    executable_receipt: EntryReceipt,
+    pub(super) directory_receipt: EntryReceipt,
+    pub(super) control_receipt: EntryReceipt,
+    pub(super) executable_receipt: EntryReceipt,
 }
 
 impl CheckedObject {
@@ -252,12 +254,7 @@ pub fn install_object(
         mut source,
         ..
     } = check_object(manifest_path)?;
-    if class == ObjectClass::Agent && tier == InstallTier::User {
-        return Err(InstallError::invalid(format!(
-            "{} cannot carry user-tier identity to the root socket runtime; install the agent with --tier system",
-            manifest.schema
-        )));
-    }
+    validate_install_tier(class, &manifest.schema, tier)?;
     let class_dir = install_class_path(root, class, tier)?;
     let class_fd = open_plain_directory(&class_dir).map_err(|error| {
         InstallError::unavailable(format!("cannot open object install tier: {error}"))
@@ -551,6 +548,19 @@ fn validate_version(manifest: &ObjectManifest) -> Result<(), InstallError> {
     Ok(())
 }
 
+pub(super) fn validate_install_tier(
+    class: ObjectClass,
+    schema: &str,
+    tier: InstallTier,
+) -> Result<(), InstallError> {
+    if class == ObjectClass::Agent && tier == InstallTier::User {
+        return Err(InstallError::invalid(format!(
+            "{schema} cannot carry user-tier identity to the root socket runtime; install the agent with --tier system"
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn install_class_path(
     root: &Path,
     class: ObjectClass,
@@ -636,13 +646,13 @@ fn write_manifest_controls(
     mkdirat(&hooks, "post.d", 0o755)
 }
 
-fn prepare_stage(
+pub(super) fn prepare_stage(
     class: &fs::File,
     source: &mut fs::File,
     manifest: &ObjectManifest,
     tier: InstallTier,
 ) -> Result<StagedObject, InstallError> {
-    let (_name, directory, _receipt) = create_stage(class)?;
+    let (name, directory, directory_receipt) = create_stage(class)?;
     let control = create_stage_control(&directory)?;
     write_manifest_controls(&control, manifest)?;
     let control_receipt = receipt_for(&control, EntryKind::Directory)?;
@@ -672,9 +682,11 @@ fn prepare_stage(
         InstallError::unavailable(format!("cannot sync install stage: {error}"))
     })?;
     Ok(StagedObject {
+        name,
         directory,
         _control: control,
         _executable: executable,
+        directory_receipt,
         control_receipt,
         executable_receipt,
     })

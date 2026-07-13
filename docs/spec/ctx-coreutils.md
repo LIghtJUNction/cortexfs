@@ -67,6 +67,8 @@ ctx schedule result home/1000/agent/coder/session/default/context/plan.json work
 ctx object check tool.yaml
 ctx object install --source /var/lib/cortexfs/storage/v1-root tool.yaml --tier system
 ctx object inspect --source /var/lib/cortexfs/storage/v1-root tool example.echo --tier system
+ctx object upgrade --source /var/lib/cortexfs/storage/v1-root tool-v2.yaml --tier system
+ctx object rollback --source /var/lib/cortexfs/storage/v1-root tool-v1.yaml --tier system
 ctx object uninstall --source /var/lib/cortexfs/storage/v1-root tool example.echo --tier system
 ctx object residue audit --source /var/lib/cortexfs/storage/v1-root
 ctx object residue cleanup --source /var/lib/cortexfs/storage/v1-root --path tool/.cortexfs-install-123-0 --dev DEV --ino INO
@@ -197,12 +199,15 @@ second submission namespace.
 Agent lifecycle conveniences exist as thin wrappers:
 
 Executable extensions use host-side check, new-object-only install, read-only
-inspect, and receipt-managed uninstall commands:
+inspect, receipt-managed replacement, and receipt-managed uninstall commands:
 
 ```text
 ctx object check MANIFEST
 ctx object install --source PATH MANIFEST [--tier user|system]
 ctx object inspect --source PATH CLASS NAME [--tier user|system]
+ctx object replace --source PATH MANIFEST [--tier user|system] [--yes]
+ctx object upgrade --source PATH MANIFEST [--tier user|system] [--yes]
+ctx object rollback --source PATH MANIFEST [--tier user|system] [--yes]
 ctx object uninstall --source PATH CLASS NAME [--tier user|system] [--yes]
 ```
 
@@ -246,8 +251,8 @@ before success is reported. Success or failure may retain a hidden
 
 A `cortexfs.object-install/v2` receipt records `object_version` and
 `cortexfs_requirement`; a `cortexfs.object-install/v1` receipt records neither.
-Manifest v2 adds compatibility metadata only: installation remains
-new-object-only, and upgrade or replacement is not declared by this contract.
+Installation remains new-object-only; replacement is an explicit, separate
+receipt-managed operation.
 
 `ctx object inspect` is a read-only check of one exact installer-managed `tool`
 or `agent`; the tier defaults to `user`. It validates the installer receipt and
@@ -267,6 +272,37 @@ install-time values. An object with a missing or legacy receipt is unmanaged
 and is reported as unavailable; inspection never adopts or modifies it. For v2,
 the compatibility values are recorded facts: inspection does not reject an
 installed object merely because a later CortexFS build no longer matches them.
+
+`replace`, `upgrade`, and `rollback` all require a v2 candidate manifest for the
+exact installed class/name and default to a no-write dry-run. `--yes` applies
+the transition. `replace` accepts a receipt-managed v1 or v2 current object
+without version ordering. `upgrade` requires current v2 and a strictly higher
+candidate version. `rollback` requires current v2 and a strictly lower
+candidate version; the caller supplies the older manifest and exact artifact
+because CortexFS keeps no version history.
+
+Success prints one of:
+
+```text
+would-replace CLASS/NAME tier=T from=FROM to=TO
+would-upgrade CLASS/NAME tier=T from=FROM to=TO
+would-rollback CLASS/NAME tier=T from=FROM to=TO
+replaced CLASS/NAME tier=T from=FROM to=TO
+upgraded CLASS/NAME tier=T from=FROM to=TO
+rolled-back CLASS/NAME tier=T from=FROM to=TO
+```
+
+`FROM` is `legacy` for a v1 receipt. Applied replacement builds and syncs a
+same-filesystem candidate stage, hides the old executable first, and publishes
+the new executable last as the visible commit boundary. Before that commit, a
+failure automatically restores the exact old pair when safe. Receipt
+checkpoints do not intentionally overwrite or delete foreign inodes; conflicts
+may retain audit-visible safety residue. This is not pair atomicity, and it
+does not close the final pathname syscall race against a same-authority writer.
+
+Before `--yes`, the caller must quiesce the matching runtime and other writers.
+The commands do not stop or start runtimes, retain version history, grant
+policy authority, or create socket state.
 
 `ctx object uninstall` accepts only one exact installer-receipt-managed `tool`
 or `agent` pair; the tier defaults to `user`. Its default dry-run performs the

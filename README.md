@@ -415,13 +415,26 @@ tsh> loads
 New executable tool plugins should use a hash-bound `cortexfs.object/v2`
 manifest with an object SemVer `version` and a Cargo-style
 `compatibility.cortexfs` requirement. `cortexfs.object/v1` is legacy and omits
-both fields. Installation remains new-object-only; v2 defines no upgrade or
-replacement. Plugins run through the normal `CTX_PATH` and policy path, and
-installation requires the durable backing tree explicitly:
+both fields. Installation remains new-object-only. Existing receipt-managed v1
+or v2 objects accept a v2 replacement candidate through explicit lifecycle
+commands. Plugins run through the normal `CTX_PATH` and policy path, and every
+mutation requires the durable backing tree explicitly:
 
 ```bash
 ctx object install --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object replace --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object upgrade --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object rollback --source "$CTX_SOURCE" old-tool.manifest.json --tier user
 ```
+
+`replace`, `upgrade`, and `rollback` default to dry-run and require `--yes` to
+apply. Replace has no version ordering and can migrate a v1 receipt; upgrade
+requires a higher v2 version, while rollback requires a lower v2 manifest and
+artifact supplied by the caller. CortexFS keeps no version history. Applied
+replacement uses a same-filesystem stage, hides the old executable first, and
+publishes the new executable last. It does not claim pair atomicity, stop or
+start a runtime, grant policy, or create sockets; receipt conflicts preserve
+foreign inodes and may leave auditable safety residue.
 
 `/ctx`, `CTX_ROOT`, and `--root` describe the ABI projection, not a writable
 installation target. `tsh.config` controls the visible tool metadata context size; pinned

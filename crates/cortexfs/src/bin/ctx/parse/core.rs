@@ -1,5 +1,6 @@
 use crate::*;
 use cortexfs::object::install::InstallTier;
+use cortexfs::object::replace::ReplaceMode;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct CliError {
@@ -76,6 +77,13 @@ pub(crate) enum Command {
         class: ObjectClass,
         name: String,
         tier: InstallTier,
+    },
+    ObjectReplace {
+        source: PathBuf,
+        manifest: PathBuf,
+        tier: InstallTier,
+        mode: ReplaceMode,
+        yes: bool,
     },
     ObjectUninstall {
         source: PathBuf,
@@ -228,6 +236,15 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             name,
             tier,
         } => success(install::run_object_inspect(&source, class, &name, tier)),
+        Command::ObjectReplace {
+            source,
+            manifest,
+            tier,
+            mode,
+            yes,
+        } => success(install::run_object_replace(
+            &source, &manifest, tier, mode, yes,
+        )),
         Command::ObjectUninstall {
             source,
             class,

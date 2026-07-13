@@ -80,5 +80,32 @@ start a runtime, and a later CortexFS mismatch does not prevent
 receipt-managed uninstall.
 
 Treat a multi-object extension as an ordered sequence of single-object
-installs. Do not claim bundle atomicity. Installation is new-object-only;
-manifest v2 does not define upgrade or replacement.
+installs. Do not claim bundle atomicity. Installation is new-object-only.
+
+## Receipt-managed replacement
+
+Replacement candidates always use `cortexfs.object/v2` and name the exact
+installed class/name:
+
+```text
+ctx object replace --source PATH MANIFEST [--tier user|system] [--yes]
+ctx object upgrade --source PATH MANIFEST [--tier user|system] [--yes]
+ctx object rollback --source PATH MANIFEST [--tier user|system] [--yes]
+```
+
+All three commands default to dry-run. `replace` accepts a receipt-managed v1
+or v2 current object without ordering its versions. `upgrade` requires current
+v2 and a strictly higher candidate. `rollback` requires current v2 and a
+strictly lower candidate; CortexFS stores no version history, so the caller
+supplies the old manifest and exact artifact. `--yes` is the explicit mutation
+boundary.
+
+Applied replacement prepares and syncs the candidate in a same-filesystem
+stage, hides the old executable first, and publishes the new executable last.
+Before that commit boundary, failure restores the exact old pair when safe.
+Receipt conflicts do not intentionally overwrite or delete foreign inodes and
+may retain audit-visible safety residue. This is not pair atomicity.
+
+Quiesce the matching runtime and same-authority writers before `--yes`.
+Replacement does not retain version history, stop or start a runtime, grant
+policy authority, or create socket state.
