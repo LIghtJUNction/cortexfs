@@ -9,6 +9,22 @@ Request:
 {"op":"send","id":"client-msg-id","session":"default","scope":"private","cwd":"/workspace","input":"hello"}
 ```
 
+## Durable Run IDs
+
+Each production durable `send`, `chat`, and `repl` run ID is independently
+generated from 128 bits of Linux system entropy and encoded as `ctx-` followed
+by exactly 32 lowercase hexadecimal characters. The probability of accidental
+reuse or collision is negligible. Short `r1`, `run-1`, and `msg-1` values in
+examples and tests are illustrative or local labels only, not
+production-generated durable IDs.
+
+Within one session, retrying `send` with the same client `id`, input, scope,
+and effective `cwd` replays the original `start` or recorded final `done`.
+Replay does not execute the agent and appends no message, event, or index fact.
+Reusing an `id` with a different payload returns `EINVAL`. Malformed JSONL or
+a final line without its terminating newline returns `EIO`; an implementation
+must not append to or reuse an unprovable history claim.
+
 `cwd` must be a path inside the agent chroot. If omitted, runtime uses
 `agent/<name>.d/cwd`. If `cwd` does not exist, return `ENOENT`. If it exists
 but is outside the visible mount/chroot, return `EACCES`. A client must not pass
@@ -138,6 +154,22 @@ index/by-uuid/<uuid>  single value, session name for that external uuid
 `index/by-cwd/<hash>`, `index/by-hash/<hash>`, and `index/by-uuid/<uuid>` are
 not symlinks. That keeps the ABI identical across mounts and different backing
 stores.
+
+Session garbage collection defaults to a no-write preview. Applying it with
+`--yes` archives each eligible live session by same-filesystem
+`RENAME_NOREPLACE` to `<session-root>/.archive/<session>` and removes exact
+references to that session from `index/list`, `index/by-cwd/`,
+`index/by-hash/`, and `index/by-uuid/`. The archive destination never
+overwrites an existing entry. Permanent deletion is opt-in and requires
+`--delete --yes`; `--delete` without `--yes` only changes the preview mode.
+
+`default`, `index/current`, explicit `--keep` names, and sessions whose plain,
+bounded `state` value is `active` are protected. A missing `state` remains
+compatible with legacy sessions; unsafe or unreadable state entries are
+conservatively protected. GC selects only live session directories and never
+selects archived entries for a second operation. `.archive` is an internal
+backing-store directory, not a new root ABI namespace, and this phase defines
+no restore command.
 
 Resume is not a root-level feature. Clients read the session index for the
 current agent:

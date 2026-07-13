@@ -197,6 +197,7 @@ pub(crate) fn parse_agent_session_gc(
         name,
         dry_run: true,
         yes: false,
+        delete: false,
         keep: Vec::new(),
         patterns: Vec::new(),
         older_than_days: None,
@@ -208,6 +209,7 @@ pub(crate) fn parse_agent_session_gc(
                 args.yes = true;
                 args.dry_run = false;
             }
+            "--delete" => args.delete = true,
             "--keep" => args.keep.push(required_arg(
                 &mut values,
                 "agent session gc --keep requires a session name",

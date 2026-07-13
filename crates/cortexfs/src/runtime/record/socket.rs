@@ -9,17 +9,19 @@ pub(crate) type SocketRecordResult<T> = Result<T, SocketSessionRecordError>;
 /// supplied chroot `cwd` when present. `cancel` appends a cancelled `done`
 /// event and marks the session cancelled. `resume`, `ping`, and temp sessions
 /// do not mutate durable session files.
-pub fn record_socket_request_to_session(
+#[cfg(test)]
+pub(crate) fn record_unindexed_socket_request_for_test(
     session_dir: &Path,
     request: &SocketRequest,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
-    record_socket_request(session_dir, request, None)
+    record_socket_request(session_dir, request, None, None)
 }
 
 fn record_socket_request(
     session_dir: &Path,
     request: &SocketRequest,
     preparation: Option<&OwnedSessionPreparation>,
+    history: Option<&columnar::HistoryGuard<'_>>,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
     match *request {
         SocketRequest::Send {
@@ -37,6 +39,7 @@ fn record_socket_request(
             cwd.as_deref(),
             input,
             preparation,
+            history,
         ),
         SocketRequest::Cancel { ref id } => record_socket_cancel_to_session(session_dir, id),
         SocketRequest::Resume { .. } | SocketRequest::Stop { .. } | SocketRequest::Ping => {
@@ -54,7 +57,7 @@ fn record_socket_request(
 pub fn record_indexed_socket_send_to_session(
     session_root: &Path,
     request: &SocketRequest,
-) -> Result<SocketSessionRecord, IndexedSocketSessionRecordError> {
+) -> Result<SocketSendOutcome<SocketSessionRecord>, IndexedSocketSessionRecordError> {
     record_indexed_socket_send(session_root, request, None)
 }
 
@@ -62,7 +65,7 @@ pub(crate) fn record_prepared_indexed_socket_send_to_session(
     session_root: &Path,
     request: &SocketRequest,
     preparation: &OwnedSessionPreparation,
-) -> Result<SocketSessionRecord, IndexedSocketSessionRecordError> {
+) -> Result<SocketSendOutcome<SocketSessionRecord>, IndexedSocketSessionRecordError> {
     record_indexed_socket_send(session_root, request, Some(preparation))
 }
 
@@ -70,14 +73,22 @@ fn record_indexed_socket_send(
     session_root: &Path,
     request: &SocketRequest,
     preparation: Option<&OwnedSessionPreparation>,
-) -> Result<SocketSessionRecord, IndexedSocketSessionRecordError> {
-    let (session, scope, cwd) = match *request {
+) -> Result<SocketSendOutcome<SocketSessionRecord>, IndexedSocketSessionRecordError> {
+    let (id, session, scope, cwd, input) = match *request {
         SocketRequest::Send {
+            ref id,
             ref session,
             scope,
             ref cwd,
+            ref input,
             ..
-        } => (session.as_str(), scope, cwd.as_deref()),
+        } => (
+            id.as_str(),
+            session.as_str(),
+            scope,
+            cwd.as_deref(),
+            input.as_str(),
+        ),
         SocketRequest::Resume { .. }
         | SocketRequest::Cancel { .. }
         | SocketRequest::Stop { .. }
@@ -93,17 +104,46 @@ fn record_indexed_socket_send(
         ));
     }
 
+    let session_dir = session_root.join(session);
+    validate_socket_send(&session_dir, id, session, scope, input)
+        .map_err(IndexedSocketSessionRecordError::Session)?;
+    let history = columnar::HistoryGuard::exclusive(&session_dir).map_err(|_error| {
+        IndexedSocketSessionRecordError::Session(SocketSessionRecordError::CannotRecord)
+    })?;
+    match history
+        .lookup_send(id, input, scope.as_str(), cwd)
+        .map_err(|_error| {
+            IndexedSocketSessionRecordError::Session(SocketSessionRecordError::CorruptHistory)
+        })? {
+        columnar::SendClaim::Vacant => {}
+        columnar::SendClaim::Replay(frame) => {
+            return Ok(SocketSendOutcome::Replayed(SocketSessionRecord::new(
+                Vec::new(),
+                vec![frame],
+            )));
+        }
+        columnar::SendClaim::Conflict => {
+            return Err(IndexedSocketSessionRecordError::Session(
+                SocketSessionRecordError::RequestConflict,
+            ));
+        }
+        columnar::SendClaim::Corrupt => {
+            return Err(IndexedSocketSessionRecordError::Session(
+                SocketSessionRecordError::CorruptHistory,
+            ));
+        }
+    }
+
     let by_cwd_key = cwd.and_then(session_index_key_for_cwd);
     preflight_session_index_update(session_root, session, by_cwd_key.as_deref(), None, None)
         .map_err(IndexedSocketSessionRecordError::Index)?;
 
-    let session_dir = session_root.join(session);
-    let record = record_socket_request(&session_dir, request, preparation)
+    let record = record_socket_request(&session_dir, request, preparation, Some(&history))
         .map_err(IndexedSocketSessionRecordError::Session)?;
     update_session_index(session_root, session, by_cwd_key.as_deref())
         .map_err(IndexedSocketSessionRecordError::Index)?;
 
-    Ok(record)
+    Ok(SocketSendOutcome::Recorded(record))
 }
 
 /// Records a completed assistant response into durable session files.

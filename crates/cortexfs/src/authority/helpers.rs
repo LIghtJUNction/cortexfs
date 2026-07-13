@@ -1,12 +1,17 @@
 use crate::*;
 
 use crate::support::plain::{open_plain_directory, path_metadata_no_follow, plain_file_name};
+#[cfg(test)]
+use std::os::unix::fs::FileExt;
 
-pub(crate) fn append_jsonl_event(path: &Path, event: &str) -> std::io::Result<()> {
-    append_jsonl_line(path, event)
-}
-
+#[cfg(test)]
 pub(crate) fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
+    if line.bytes().any(|byte| matches!(byte, b'\n' | b'\r')) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "jsonl line contains a line break",
+        ));
+    }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let parent_dir = open_plain_directory(parent)?;
     let file_name = plain_file_name(path)?;
@@ -14,18 +19,29 @@ pub(crate) fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> 
         &parent_dir,
         file_name,
         nix::fcntl::OFlag::O_APPEND
-            | nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_RDWR
             | nix::fcntl::OFlag::O_NOFOLLOW
             | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(nix_errno_to_io)?;
     let mut file = fs::File::from(file_fd);
-    if !file.metadata()?.is_file() {
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
         return Err(std::io::Error::other("jsonl target is not a regular file"));
     }
-    file.write_all(line.as_bytes())?;
-    file.write_all(b"\n")?;
+    if metadata.len() != 0 {
+        let mut last = [0_u8; 1];
+        if file.read_at(&mut last, metadata.len() - 1)? != 1 || last[0] != b'\n' {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "jsonl target has an incomplete final line",
+            ));
+        }
+    }
+    let mut frame = line.as_bytes().to_vec();
+    frame.push(b'\n');
+    file.write_all(&frame)?;
     file.flush()?;
     file.sync_all()
 }
@@ -43,12 +59,21 @@ pub fn atomic_create_text_with_mode(path: &Path, content: &str, mode: u32) -> st
 }
 
 pub fn atomic_replace_text_preserving_metadata(path: &Path, content: &str) -> std::io::Result<()> {
-    atomic_replace_text_preserving_metadata_inner(path, content, None)
+    atomic_replace_text_preserving_metadata_inner(path, content, None, None)
+}
+
+pub fn atomic_replace_text_preserving_metadata_if_matches(
+    path: &Path,
+    content: &str,
+    expected: (u64, u64),
+) -> std::io::Result<()> {
+    atomic_replace_text_preserving_metadata_inner(path, content, Some(expected), None)
 }
 
 fn atomic_replace_text_preserving_metadata_inner(
     path: &Path,
     content: &str,
+    expected: Option<(u64, u64)>,
     before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
 ) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -71,10 +96,14 @@ fn atomic_replace_text_preserving_metadata_inner(
             "atomic replace target is not a regular file",
         ));
     }
+    let identity = (metadata.dev(), metadata.ino());
+    if expected.is_some_and(|expected| expected != identity) {
+        return Err(std::io::Error::other("atomic replace target changed"));
+    }
     let replacement = AtomicReplaceMetadata {
         mode: metadata.permissions().mode() & 0o7777,
         owner: Some((metadata.uid(), metadata.gid())),
-        identity: Some((metadata.dev(), metadata.ino())),
+        identity: Some(expected.unwrap_or(identity)),
         commit: AtomicCommit::Replace,
     };
     drop(existing);
@@ -87,7 +116,7 @@ pub(crate) fn atomic_replace_text_preserving_metadata_with_hook(
     content: &str,
     before_commit: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    atomic_replace_text_preserving_metadata_inner(path, content, Some(before_commit))
+    atomic_replace_text_preserving_metadata_inner(path, content, None, Some(before_commit))
 }
 
 #[derive(Clone, Copy)]

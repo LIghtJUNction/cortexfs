@@ -19,6 +19,8 @@ use crate::{
 pub enum EventStreamIssue {
     /// Line is not valid JSON.
     InvalidJson(usize),
+    /// Stream does not end with a newline-terminated event.
+    MissingFinalNewline(usize),
     /// Event line is not a JSON object.
     EventNotObject(usize),
     /// Event does not have a `type` string.
@@ -58,6 +60,11 @@ pub fn inspect_event_stream_jsonl(content: &str) -> EventStreamReport {
     for_each_jsonl_line(content, |line_number, line| {
         inspect_event_stream_line(line_number, line, &mut issues);
     });
+    if !content.is_empty() && !content.ends_with('\n') {
+        issues.push(EventStreamIssue::MissingFinalNewline(
+            content.lines().count(),
+        ));
+    }
     EventStreamReport::new(issues)
 }
 

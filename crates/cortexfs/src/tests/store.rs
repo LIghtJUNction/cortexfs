@@ -1,3 +1,444 @@
+static LEGACY_SNAPSHOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn session_history_stream_maps_only_abi_marker_paths() {
+    assert_eq!(
+        super::columnar::Stream::from_abi_path(
+            "home/1000/agent/coder/session/default/messages.jsonl",
+        ),
+        Some(super::columnar::Stream::Messages),
+    );
+    assert_eq!(
+        super::columnar::Stream::from_abi_path(
+            "shared/team/agent/coder/session/default/events.jsonl",
+        ),
+        Some(super::columnar::Stream::Events),
+    );
+    assert_eq!(
+        (
+            super::columnar::Stream::from_abi_path(
+                "home/1000/agent/coder/session/default/latest.md",
+            ),
+            super::columnar::Stream::from_abi_path("messages.jsonl"),
+        ),
+        (None, None),
+    );
+}
+
+#[test]
+fn legacy_history_read_does_not_create_store_on_read_only_session() {
+    let root = reference_tree("legacy-history-read-only");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let messages = "{\"role\":\"user\",\"content\":\"hello\"}\n";
+    write_text_file(&session.join("messages.jsonl"), messages);
+    assert!(fs::set_permissions(&session, fs::Permissions::from_mode(0o555)).is_ok());
+    assert!(
+        fs::set_permissions(
+            session.join("messages.jsonl"),
+            fs::Permissions::from_mode(0o444),
+        )
+        .is_ok()
+    );
+
+    let history = ok!(super::columnar::read_text(
+        &session,
+        super::columnar::Stream::Messages,
+        1024,
+    ));
+    assert_eq!(history, messages);
+    assert!(!session.join(".store").exists());
+    assert!(fs::set_permissions(&session, fs::Permissions::from_mode(0o700)).is_ok());
+}
+
+fn assert_legacy_snapshot_rechecks_created_lock(store_exists: bool) {
+    use std::sync::{Arc, Barrier};
+
+    let _serial = match LEGACY_SNAPSHOT_TEST_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+
+    let case = if store_exists {
+        "existing-store"
+    } else {
+        "missing-store"
+    };
+    let root = reference_tree(&format!("legacy-history-snapshot-lock-{case}"));
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let old_message = r#"{"role":"user","run":"old","content":"old"}"#;
+    let old_event = r#"{"type":"start","id":"old","run":"old","scope":"private","cwd":"/work"}"#;
+    let new_message = r#"{"role":"assistant","run":"new","content":"new"}"#;
+    let new_event = r#"{"type":"done","run":"new","status":"ok"}"#;
+    assert!(fs::write(session.join("messages.jsonl"), format!("{old_message}\n")).is_ok());
+    assert!(fs::write(session.join("events.jsonl"), format!("{old_event}\n")).is_ok());
+    if store_exists {
+        assert!(fs::create_dir_all(session.join(".store")).is_ok());
+    }
+
+    let entered = Arc::new(Barrier::new(2));
+    let release = Arc::new(Barrier::new(2));
+    super::columnar::set_legacy_snapshot_barrier(Some((
+        session.clone(),
+        Arc::clone(&entered),
+        Arc::clone(&release),
+    )));
+    let reader_session = session.clone();
+    let reader = thread::spawn(move || -> std::io::Result<(String, String)> {
+        let guard = super::columnar::HistoryGuard::shared(&reader_session)?;
+        Ok((
+            guard.read_text(super::columnar::Stream::Messages, 1024)?,
+            guard.read_text(super::columnar::Stream::Events, 1024)?,
+        ))
+    });
+    entered.wait();
+
+    let writer_session = session;
+    let writer = thread::spawn(move || -> std::io::Result<()> {
+        let guard = super::columnar::HistoryGuard::exclusive(&writer_session)?;
+        guard.append(super::columnar::Stream::Messages, &[new_message])?;
+        guard.append(super::columnar::Stream::Events, &[new_event])
+    });
+    assert!(writer.join().is_ok_and(|result| result.is_ok()));
+    release.wait();
+    let snapshot = reader.join().ok().and_then(Result::ok);
+    super::columnar::set_legacy_snapshot_barrier(None);
+
+    assert_eq!(
+        snapshot,
+        Some((
+            format!("{old_message}\n{new_message}\n"),
+            format!("{old_event}\n{new_event}\n"),
+        )),
+    );
+}
+
+#[test]
+fn legacy_history_snapshot_rechecks_lock_created_with_store() {
+    assert_legacy_snapshot_rechecks_created_lock(false);
+}
+
+#[test]
+fn legacy_history_snapshot_rechecks_lock_created_in_existing_store() {
+    assert_legacy_snapshot_rechecks_created_lock(true);
+}
+
+fn assert_legacy_append_rejects_changed_marker(replace: bool) {
+    let case = if replace { "replace" } else { "truncate" };
+    let root = reference_tree(&format!("legacy-history-append-{case}"));
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let messages = session.join("messages.jsonl");
+    let original = r#"{"role":"user","run":"first","content":"hello"}"#;
+    let start = r#"{"type":"start","id":"first","run":"first","scope":"private","cwd":"/work"}"#;
+    assert!(fs::write(&messages, format!("{original}\n")).is_ok());
+    assert!(fs::write(session.join("events.jsonl"), format!("{start}\n")).is_ok());
+    let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+
+    if replace {
+        let replacement = session.join("replacement.jsonl");
+        assert!(fs::write(&replacement, b"replacement\n").is_ok());
+        assert!(fs::rename(&replacement, &messages).is_ok());
+    } else {
+        let truncated = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&messages);
+        assert!(truncated.is_ok_and(|file| file.sync_all().is_ok()));
+    }
+    let changed = fs::read(&messages).unwrap_or_default();
+
+    let refresh = guard.refresh_claims();
+    let append = guard.append(
+        super::columnar::Stream::Messages,
+        &[r#"{"role":"assistant","run":"first","content":"must-not-write"}"#],
+    );
+
+    assert!(refresh.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData));
+    assert!(append.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData));
+    assert_eq!(fs::read(&messages).unwrap_or_default(), changed);
+    assert!(!session.join(".store/claim/.cursor.json").exists());
+}
+
+#[test]
+fn legacy_history_guard_rejects_replaced_marker_before_claim_or_append() {
+    assert_legacy_append_rejects_changed_marker(true);
+}
+
+#[test]
+fn legacy_history_guard_rejects_truncated_marker_before_claim_or_append() {
+    assert_legacy_append_rejects_changed_marker(false);
+}
+
+#[test]
+fn legacy_history_guard_sequential_append_is_immediately_complete() {
+    let root = reference_tree("legacy-history-sequential-append");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let user = r#"{"role":"user","run":"first","content":"hello"}"#;
+    let start = r#"{"type":"start","id":"first","run":"first","scope":"private","cwd":"/work"}"#;
+    let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+
+    ok!(guard.append(super::columnar::Stream::Messages, &[user]));
+    ok!(guard.append(super::columnar::Stream::Events, &[start]));
+
+    assert_eq!(
+        (
+            guard.len(super::columnar::Stream::Messages).ok(),
+            guard
+                .read_text(super::columnar::Stream::Messages, 1024)
+                .ok(),
+            guard.len(super::columnar::Stream::Events).ok(),
+            guard.read_text(super::columnar::Stream::Events, 1024).ok(),
+        ),
+        (
+            Some(u64::try_from(user.len() + 1).unwrap_or(u64::MAX)),
+            Some(format!("{user}\n")),
+            Some(u64::try_from(start.len() + 1).unwrap_or(u64::MAX)),
+            Some(format!("{start}\n")),
+        ),
+    );
+    assert!(matches!(
+        guard.lookup_send("first", "hello", "private", Some("/work")),
+        Ok(super::columnar::SendClaim::Replay(ref frame)) if frame == start
+    ));
+}
+
+#[test]
+fn legacy_history_guard_keeps_snapshot_across_first_columnar_writer() {
+    let root = reference_tree("legacy-history-first-writer-snapshot");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let old = r#"{"role":"user","run":"old","content":"legacy"}"#;
+    let new = r#"{"role":"assistant","run":"new","content":"committed"}"#;
+    let old_history = format!("{old}\n");
+    assert!(fs::write(session.join("messages.jsonl"), &old_history).is_ok());
+    let guard = ok!(super::columnar::HistoryGuard::shared(&session));
+    assert!(!session.join(".store").exists());
+
+    let writer_session = session.clone();
+    let writer = thread::spawn(move || {
+        super::columnar::append(&writer_session, super::columnar::Stream::Messages, &[new])
+    });
+    assert!(matches!(writer.join(), Ok(Ok(()))));
+    let committed = format!("{old}\n{new}\n");
+    assert_eq!(
+        super::columnar::read_text(
+            &session,
+            super::columnar::Stream::Messages,
+            u64::try_from(committed.len()).unwrap_or(u64::MAX),
+        )
+        .ok(),
+        Some(committed),
+    );
+    assert_eq!(
+        (
+            guard.is_columnar(),
+            guard.len(super::columnar::Stream::Messages).ok(),
+            guard
+                .read_at(super::columnar::Stream::Messages, 0, old_history.len(),)
+                .ok(),
+            guard
+                .tail(super::columnar::Stream::Messages, old_history.len())
+                .ok(),
+            guard
+                .read_text(
+                    super::columnar::Stream::Messages,
+                    u64::try_from(old_history.len()).unwrap_or(u64::MAX),
+                )
+                .ok(),
+        ),
+        (
+            false,
+            Some(u64::try_from(old_history.len()).unwrap_or(u64::MAX)),
+            Some(old_history.as_bytes().to_vec()),
+            Some(old_history.as_bytes().to_vec()),
+            Some(old_history),
+        ),
+    );
+}
+
+#[test]
+fn session_store_columnar_guard_does_not_fall_back_when_manifest_disappears() {
+    let root = reference_tree("session-store-columnar-guard-manifest");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    ok!(super::columnar::append(
+        &session,
+        super::columnar::Stream::Messages,
+        &[r#"{"role":"user","run":"first","content":"committed"}"#],
+    ));
+    let guard = ok!(super::columnar::HistoryGuard::shared(&session));
+    assert!(guard.is_columnar());
+    assert!(fs::remove_file(session.join(".store/manifest.json")).is_ok());
+
+    assert!(
+        guard
+            .len(super::columnar::Stream::Messages)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(
+        guard
+            .read_at(super::columnar::Stream::Messages, 0, 1)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
+    );
+    assert!(
+        guard
+            .tail(super::columnar::Stream::Messages, 1)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
+    );
+}
+
+#[test]
+fn session_claim_index_scans_legacy_history_once() {
+    let root = reference_tree("session-claim-legacy-once");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    write_text_file(
+        &session.join("messages.jsonl"),
+        "{\"role\":\"user\",\"run\":\"claim-1\",\"content\":\"hello\"}\n",
+    );
+    write_text_file(
+        &session.join("events.jsonl"),
+        "{\"type\":\"start\",\"id\":\"claim-1\",\"run\":\"claim-1\",\"scope\":\"private\",\"cwd\":\"/work\"}\n",
+    );
+    super::columnar::reset_claim_scan_bytes();
+    let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+
+    assert!(matches!(
+        guard.lookup_send("claim-1", "hello", "private", Some("/work")),
+        Ok(super::columnar::SendClaim::Replay(ref frame))
+            if frame.contains("\"type\":\"start\"")
+    ));
+    assert!(super::columnar::claim_scan_bytes() > 0);
+    super::columnar::reset_claim_scan_bytes();
+    assert!(matches!(
+        guard.lookup_send("claim-1", "hello", "private", Some("/work")),
+        Ok(super::columnar::SendClaim::Replay(_))
+    ));
+    assert_eq!(super::columnar::claim_scan_bytes(), 0);
+}
+
+#[test]
+fn session_claim_cursor_replays_idempotently_after_cursor_failure() {
+    let root = reference_tree("session-claim-cursor-recovery");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    write_text_file(
+        &session.join("messages.jsonl"),
+        "{\"role\":\"user\",\"run\":\"claim-1\",\"content\":\"hello\"}\n",
+    );
+    write_text_file(
+        &session.join("events.jsonl"),
+        "{\"type\":\"start\",\"id\":\"claim-1\",\"run\":\"claim-1\",\"scope\":\"private\",\"cwd\":\"/work\"}\n",
+    );
+    let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+    super::columnar::set_claim_cursor_failure(true);
+
+    assert!(guard.refresh_claims().is_err());
+    assert!(matches!(
+        guard.lookup_send("claim-1", "hello", "private", Some("/work")),
+        Ok(super::columnar::SendClaim::Replay(_))
+    ));
+}
+
+#[test]
+fn session_claim_cursor_survives_columnar_migration() {
+    let root = reference_tree("session-claim-columnar-migration");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    write_text_file(
+        &session.join("messages.jsonl"),
+        "{\"role\":\"user\",\"run\":\"claim-1\",\"content\":\"hello\"}\n",
+    );
+    write_text_file(
+        &session.join("events.jsonl"),
+        "{\"type\":\"start\",\"id\":\"claim-1\",\"run\":\"claim-1\",\"scope\":\"private\",\"cwd\":\"/work\"}\n",
+    );
+    {
+        let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+        assert!(matches!(
+            guard.lookup_send("claim-1", "hello", "private", Some("/work")),
+            Ok(super::columnar::SendClaim::Replay(_))
+        ));
+    }
+    ok!(super::columnar::append(
+        &session,
+        super::columnar::Stream::Events,
+        &["{\"type\":\"usage\",\"run\":\"claim-1\",\"input_tokens\":1}"],
+    ));
+    let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+
+    assert!(matches!(
+        guard.lookup_send("claim-1", "hello", "private", Some("/work")),
+        Ok(super::columnar::SendClaim::Replay(_))
+    ));
+}
+
 #[test]
 fn session_store_recovers_durable_wal_as_exact_jsonl() {
     let root = reference_tree("session-store-wal");
@@ -383,6 +824,125 @@ fn session_store_ignores_torn_wal_tail_and_recovers_on_append() {
 }
 
 #[test]
+fn session_store_wal_staging_without_manifest_keeps_raw_history_authoritative() {
+    let root = reference_tree("session-store-wal-staging");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let prefix = r#"{"role":"user","run":"first","content":"valid"}"#;
+    let raw = format!("{prefix}\n{{\"role\":\"assistant\"");
+    assert!(fs::write(session.join("messages.jsonl"), &raw).is_ok());
+    let migration = super::columnar::append(
+        &session,
+        super::columnar::Stream::Events,
+        &[r#"{"type":"usage","run":"first","input_tokens":1}"#],
+    );
+    assert!(migration.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData));
+    assert!(!session.join(".store/manifest.json").exists());
+    assert!(fs::metadata(session.join(".store/wal.jsonl")).is_ok_and(|meta| meta.len() > 0));
+
+    let guard = ok!(super::columnar::HistoryGuard::shared(&session));
+    assert_eq!(
+        (
+            guard.is_columnar(),
+            guard.len(super::columnar::Stream::Messages).ok(),
+            guard
+                .read_at(super::columnar::Stream::Messages, 0, raw.len())
+                .ok(),
+            guard
+                .tail(super::columnar::Stream::Messages, raw.len())
+                .ok(),
+            guard
+                .read_text(
+                    super::columnar::Stream::Messages,
+                    u64::try_from(raw.len()).unwrap_or(u64::MAX),
+                )
+                .ok(),
+        ),
+        (
+            false,
+            Some(u64::try_from(raw.len()).unwrap_or(u64::MAX)),
+            Some(raw.as_bytes().to_vec()),
+            Some(raw.as_bytes().to_vec()),
+            Some(raw.clone()),
+        ),
+    );
+    assert_eq!(
+        (
+            super::columnar::len(&session, super::columnar::Stream::Messages).ok(),
+            super::columnar::read_at(&session, super::columnar::Stream::Messages, 0, raw.len(),)
+                .ok(),
+            super::columnar::tail(&session, super::columnar::Stream::Messages, raw.len(),).ok(),
+            super::columnar::read_text(
+                &session,
+                super::columnar::Stream::Messages,
+                u64::try_from(raw.len()).unwrap_or(u64::MAX),
+            )
+            .ok(),
+        ),
+        (
+            Some(u64::try_from(raw.len()).unwrap_or(u64::MAX)),
+            Some(raw.as_bytes().to_vec()),
+            Some(raw.as_bytes().to_vec()),
+            Some(raw),
+        ),
+    );
+}
+
+#[test]
+fn session_store_wal_staging_keeps_guard_append_and_claims_on_raw_history() {
+    let root = reference_tree("session-store-wal-staging-raw-append");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let user = r#"{"role":"user","run":"first","content":"hello"}"#;
+    let start = r#"{"type":"start","id":"first","run":"first","scope":"private","cwd":"/work"}"#;
+    let raw_events = format!("{start}\n{{\"type\":\"usage\"");
+    assert!(fs::write(session.join("messages.jsonl"), format!("{user}\n")).is_ok());
+    assert!(fs::write(session.join("events.jsonl"), &raw_events).is_ok());
+    let migration = super::columnar::append(
+        &session,
+        super::columnar::Stream::Messages,
+        &[r#"{"role":"assistant","run":"first","content":"unused"}"#],
+    );
+    assert!(migration.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData));
+    assert!(!session.join(".store/manifest.json").exists());
+    let wal_before = fs::read(session.join(".store/wal.jsonl")).unwrap_or_default();
+    assert!(!wal_before.is_empty());
+
+    let usage = r#"{"type":"usage","run":"first","input_tokens":1}"#;
+    let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
+    assert!(!guard.is_columnar());
+    ok!(guard.append(super::columnar::Stream::Events, &[usage]));
+
+    assert_eq!(
+        fs::read(session.join(".store/wal.jsonl")).unwrap_or_default(),
+        wal_before,
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("events.jsonl")).ok(),
+        Some(format!("{raw_events}{usage}\n")),
+    );
+    assert!(
+        guard
+            .lookup_send("first", "hello", "private", Some("/work"))
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidData)
+    );
+}
+
+#[test]
 fn session_store_rejects_invalid_committed_wal_frame() {
     use std::fs::OpenOptions;
 
@@ -426,6 +986,38 @@ fn session_store_rejects_payload_with_newline() {
 
     let result = super::columnar::append(&session, super::columnar::Stream::Messages, &["{}\n{}"]);
     assert!(result.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidInput));
+}
+
+#[test]
+fn session_store_rejects_invalid_batch_before_creating_or_appending() {
+    let root = reference_tree("session-store-invalid-batch-atomic");
+    let session_root = root.join("home/1000/agent/coder/session");
+    ok!(ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    ));
+    let session = session_root.join("default");
+    let messages_before = fs::read(session.join("messages.jsonl")).unwrap_or_default();
+    let events_before = fs::read(session.join("events.jsonl")).unwrap_or_default();
+
+    let result = super::columnar::append(
+        &session,
+        super::columnar::Stream::Messages,
+        &[r#"{"role":"user","content":"valid"}"#, "{}\r"],
+    );
+
+    assert!(result.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidInput));
+    assert_eq!(
+        (
+            fs::read(session.join("messages.jsonl")).unwrap_or_default(),
+            fs::read(session.join("events.jsonl")).unwrap_or_default(),
+            session.join(".store").exists(),
+        ),
+        (messages_before, events_before, false),
+    );
 }
 
 #[test]

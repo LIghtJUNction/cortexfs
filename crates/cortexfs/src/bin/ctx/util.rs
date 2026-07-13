@@ -1,6 +1,23 @@
 use crate::*;
 
-const MAX_CTX_FILE_CHECK_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_CTX_FILE_CHECK_BYTES: u64 = 1024 * 1024;
+
+pub(crate) fn read_system_entropy(size: usize) -> Result<Vec<u8>, CliError> {
+    let mut file = fs::File::open("/dev/urandom")
+        .map_err(|error| CliError::unavailable(format!("cannot read system entropy: {error}")))?;
+    let mut bytes = vec![0; size];
+    file.read_exact(&mut bytes)
+        .map_err(|error| CliError::unavailable(format!("cannot read system entropy: {error}")))?;
+    Ok(bytes)
+}
+
+pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
+    let mut output = String::new();
+    for byte in bytes {
+        let _ignored = write!(output, "{byte:02x}");
+    }
+    output
+}
 
 pub(crate) fn read_file_to_string(path: &Path) -> Result<String, CliError> {
     let mut file = open_plain_read_file(path)?;

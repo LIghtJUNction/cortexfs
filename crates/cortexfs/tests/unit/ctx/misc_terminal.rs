@@ -252,7 +252,7 @@ fn ctx_file_helpers_refuse_symlink_reads_and_appends() {
     assert!(fs::write(&target, "outside\n").is_ok());
     assert!(std::os::unix::fs::symlink(&target, &link).is_ok());
 
-    assert!(cat_path(&link).is_err());
+    assert!(cat_path(&link, None).is_err());
     assert!(read_file_to_string(&link).is_err());
     assert!(file_append(&root, "link.txt", "changed").is_err());
     assert_eq!(fs::read_to_string(&target).unwrap_or_default(), "outside\n");
@@ -268,7 +268,7 @@ fn ctx_file_helpers_refuse_symlink_intermediate_reads() {
     assert!(std::os::unix::fs::symlink(&outside, root.join("link")).is_ok());
     let path = root.join("link/session/state");
 
-    assert!(cat_path(&path).is_err());
+    assert!(cat_path(&path, None).is_err());
     assert!(read_file_to_string(&path).is_err());
 }
 
@@ -318,6 +318,95 @@ fn ctx_file_writes_reject_symlink_intermediate_parent_without_writing_target() {
     assert_eq!(
         fs::read_to_string(outside_session.join("events.jsonl")).unwrap_or_default(),
         "outside\n"
+    );
+}
+
+#[test]
+fn ctx_file_set_and_append_refuse_session_history_without_side_effects() {
+    let root = clean_test_dir("ctx-file-session-history-read-only");
+    let paths = [
+        "home/1000/agent/coder/session/default/messages.jsonl",
+        "home/1000/model/openai/gpt-4o.d/session/default/events.jsonl",
+        "shared/team/agent/coder/session/default/events.jsonl",
+        "shared/team/model/openai/gpt-4o.d/session/default/messages.jsonl",
+    ];
+
+    for (index, path) in paths.into_iter().enumerate() {
+        let marker = root.join(path);
+        let session = marker.parent().unwrap_or(&marker);
+        let store = session.join(".store");
+        let claim = store.join("claim");
+        let cursor = claim.join(".cursor.json");
+        let claim_file = claim.join("claim-1");
+        assert!(fs::create_dir_all(&claim).is_ok());
+        assert!(fs::write(&marker, format!("marker-{index}\n")).is_ok());
+        assert!(fs::write(&cursor, b"cursor-marker\n").is_ok());
+        assert!(fs::write(&claim_file, b"claim-marker\n").is_ok());
+
+        let snapshot = || {
+            let mut store_entries = fs::read_dir(&store)
+                .map(|entries| {
+                    entries
+                        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            store_entries.sort();
+            let mut claim_entries = fs::read_dir(&claim)
+                .map(|entries| {
+                    entries
+                        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            claim_entries.sort();
+            (
+                fs::read(&marker).ok(),
+                fs::metadata(&marker).map(|metadata| metadata.ino()).ok(),
+                fs::metadata(&store).map(|metadata| metadata.ino()).ok(),
+                fs::metadata(&claim).map(|metadata| metadata.ino()).ok(),
+                store_entries,
+                claim_entries,
+                fs::read(&cursor).ok(),
+                fs::read(&claim_file).ok(),
+            )
+        };
+        let before = snapshot();
+
+        for operation in ["set", "append"] {
+            let result = if operation == "set" {
+                file_set(&root, path, "replacement")
+            } else {
+                file_append(&root, path, "replacement")
+            };
+            assert!(result.is_err(), "session history mutation must be refused");
+            let Err(error) = result else {
+                return;
+            };
+            assert_eq!(
+                (error.code, error.message),
+                (
+                    2,
+                    format!(
+                        "session history is read-only; maintained by the runtime or an authorized FUSE writer: {path}"
+                    )
+                ),
+                "unexpected {operation} error for {path}"
+            );
+            assert_eq!(snapshot(), before, "{operation} changed {path}");
+        }
+    }
+}
+
+#[test]
+fn ctx_file_set_and_append_preserve_ordinary_file_semantics() {
+    let root = clean_test_dir("ctx-file-ordinary-write");
+    assert!(fs::create_dir_all(root.join("shared/project")).is_ok());
+    assert!(file_set(&root, "shared/project/note", "first").is_ok());
+    assert!(file_append(&root, "shared/project/note", "second").is_ok());
+    assert_eq!(
+        fs::read_to_string(root.join("shared/project/note")).ok(),
+        Some("first\nsecond\n".to_owned())
     );
 }
 

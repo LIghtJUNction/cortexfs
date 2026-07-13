@@ -2,7 +2,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Error, ErrorKind, Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{FileExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{cell::Cell, thread_local};
@@ -21,7 +21,9 @@ use nix::libc;
 #[cfg(test)]
 use std::sync::{Barrier, Mutex, OnceLock};
 
+use crate::abi::path::{AbiPathKind, parse_abi_path};
 use crate::authority::helpers::generated_sibling_name;
+use crate::support::jsonl::read_jsonl_line;
 use crate::support::plain::{
     CreatePlainDirMessages, create_plain_dir_exclusive, create_plain_dir_with,
     open_plain_directory, open_plain_file, plain_file_name, read_small_text_file, sync_plain_dir,
@@ -34,6 +36,9 @@ const WAL_FILE: &str = "wal.jsonl";
 const MANIFEST_FILE: &str = "manifest.json";
 const DATA_DIR: &str = "data";
 const INDEX_DIR: &str = "index";
+const CLAIM_DIR: &str = "claim";
+const CLAIM_CURSOR_FILE: &str = ".cursor.json";
+const CLAIM_VERSION: u32 = 1;
 const MAX_SHARD_ROWS: usize = 128;
 const MAX_SHARD_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
@@ -41,12 +46,20 @@ const MAX_PAYLOAD_BYTES: usize = 256 * 1024;
 const MAX_WAL_OVERHEAD_BYTES: usize = 1024;
 const MAX_WAL_FRAME_BYTES: usize = MAX_PAYLOAD_BYTES * 2 + MAX_WAL_OVERHEAD_BYTES;
 const INDEX_RECORD_BYTES: usize = 48;
+const MAX_CLAIM_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_CLAIM_CURSOR_BYTES: u64 = 16 * 1024;
 
 #[cfg(test)]
-type PruneBarrierPair = (Arc<Barrier>, Arc<Barrier>);
+type TestBarrierPair = (Arc<Barrier>, Arc<Barrier>);
 
 #[cfg(test)]
-static PRUNE_BARRIERS: OnceLock<Mutex<Option<PruneBarrierPair>>> = OnceLock::new();
+static PRUNE_BARRIERS: OnceLock<Mutex<Option<TestBarrierPair>>> = OnceLock::new();
+
+#[cfg(test)]
+type LegacySnapshotBarrier = (PathBuf, Arc<Barrier>, Arc<Barrier>);
+
+#[cfg(test)]
+static LEGACY_SNAPSHOT_BARRIER: OnceLock<Mutex<Option<LegacySnapshotBarrier>>> = OnceLock::new();
 
 thread_local! {
     static EXPORT_COPY_FAILURE: Cell<bool> = const { Cell::new(false) };
@@ -59,6 +72,8 @@ thread_local! {
 thread_local! {
     static INDEX_RECORD_READS: Cell<usize> = const { Cell::new(0) };
     static SHARD_OPENS: Cell<usize> = const { Cell::new(0) };
+    static CLAIM_SCAN_BYTES: Cell<usize> = const { Cell::new(0) };
+    static CLAIM_CURSOR_FAILURE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// One projected session JSONL stream.
@@ -71,14 +86,897 @@ pub enum Stream {
     Events,
 }
 
-/// Durably appends complete JSONL line bodies to a session stream.
-pub fn append(session: &Path, stream: Stream, lines: &[&str]) -> std::io::Result<()> {
-    with_store_lock(session, FlockArg::LockExclusive, || {
-        append_locked(session, stream, lines)
+enum HistoryView {
+    Legacy(LegacySnapshot),
+    Columnar,
+}
+
+struct LegacySnapshot {
+    messages: MarkerSnapshot,
+    events: MarkerSnapshot,
+}
+
+impl LegacySnapshot {
+    fn open(session: &Path) -> std::io::Result<Self> {
+        let messages = MarkerSnapshot::open(&session.join(Stream::Messages.marker()))?;
+        wait_during_legacy_snapshot(session);
+        Ok(Self {
+            messages,
+            events: MarkerSnapshot::open(&session.join(Stream::Events.marker()))?,
+        })
+    }
+
+    fn marker(&self, stream: Stream) -> &MarkerSnapshot {
+        match stream {
+            Stream::Messages => &self.messages,
+            Stream::Events => &self.events,
+        }
+    }
+}
+
+struct MarkerSnapshot {
+    file: File,
+    length: Cell<u64>,
+    receipt: FileReceipt,
+}
+
+impl MarkerSnapshot {
+    fn open(path: &Path) -> std::io::Result<Self> {
+        let file = open_plain_file(path)?;
+        let metadata = file.metadata()?;
+        if !metadata.is_file() {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session marker is not a plain file",
+            ));
+        }
+        Ok(Self {
+            file,
+            length: Cell::new(metadata.len()),
+            receipt: FileReceipt {
+                dev: metadata.dev(),
+                ino: metadata.ino(),
+            },
+        })
+    }
+
+    fn read_at(&self, offset: u64, size: usize) -> std::io::Result<Vec<u8>> {
+        let remaining = self.length.get().saturating_sub(offset);
+        let available = usize::try_from(remaining).unwrap_or(usize::MAX).min(size);
+        let mut bytes = vec![0; available];
+        self.file.read_exact_at(&mut bytes, offset)?;
+        Ok(bytes)
+    }
+
+    fn tail(&self, max_bytes: usize) -> std::io::Result<Vec<u8>> {
+        let limit =
+            u64::try_from(max_bytes).map_err(|_error| Error::other("tail limit too large"))?;
+        let offset = self.length.get().saturating_sub(limit);
+        let mut bytes = self.read_at(offset, max_bytes)?;
+        trim_partial_tail(offset, &mut bytes);
+        Ok(bytes)
+    }
+
+    fn metadata_matches(&self, metadata: &fs::Metadata, length: u64) -> bool {
+        metadata.is_file()
+            && (metadata.dev(), metadata.ino()) == (self.receipt.dev, self.receipt.ino)
+            && metadata.len() == length
+    }
+
+    fn verify_current(&self, path: &Path) -> std::io::Result<()> {
+        let length = self.length.get();
+        if !self.metadata_matches(&self.file.metadata()?, length)
+            || !self.metadata_matches(&fs::symlink_metadata(path)?, length)
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session marker changed since history snapshot",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Stable lock guard for one session's authoritative history representation.
+pub(crate) struct HistoryGuard<'a> {
+    session: &'a Path,
+    view: HistoryView,
+    _lock: Option<Flock<File>>,
+}
+
+impl<'a> HistoryGuard<'a> {
+    /// Acquires the session history lock for mutation.
+    pub(crate) fn exclusive(session: &'a Path) -> std::io::Result<Self> {
+        Self::lock(session, FlockArg::LockExclusive)
+    }
+
+    /// Acquires the session history lock for projected reads.
+    pub(crate) fn shared(session: &'a Path) -> std::io::Result<Self> {
+        let store = session.join(STORE_DIR);
+        loop {
+            if let Some(file) = open_existing_shared_lock(&store)? {
+                let lock = Flock::lock(file, FlockArg::LockShared)
+                    .map_err(|(_file, error)| Error::from(error))?;
+                return Ok(Self {
+                    session,
+                    view: history_view(session, &store)?,
+                    _lock: Some(lock),
+                });
+            }
+
+            let snapshot = LegacySnapshot::open(session)?;
+            if open_existing_shared_lock(&store)?.is_some() {
+                continue;
+            }
+            if manifest_committed(&store)? {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "committed session store has no lock",
+                ));
+            }
+            return Ok(Self {
+                session,
+                view: HistoryView::Legacy(snapshot),
+                _lock: None,
+            });
+        }
+    }
+
+    fn lock(session: &'a Path, mode: FlockArg) -> std::io::Result<Self> {
+        let store = session.join(STORE_DIR);
+        create_store_dir(&store)?;
+        let file = open_lock(&store.join(LOCK_FILE))?;
+        let lock = Flock::lock(file, mode).map_err(|(_file, error)| Error::from(error))?;
+        Ok(Self {
+            session,
+            view: history_view(session, &store)?,
+            _lock: Some(lock),
+        })
+    }
+
+    /// Returns whether a committed manifest has activated columnar projection.
+    pub(crate) fn is_columnar(&self) -> bool {
+        matches!(self.view, HistoryView::Columnar)
+    }
+
+    /// Appends complete lines to the currently authoritative representation.
+    pub(crate) fn append(&self, stream: Stream, lines: &[&str]) -> std::io::Result<()> {
+        match self.view {
+            HistoryView::Legacy(ref snapshot) => {
+                let marker = snapshot.marker(stream);
+                append_marker_locked(&self.session.join(stream.marker()), marker, lines)
+            }
+            HistoryView::Columnar => append_locked(self.session, stream, lines),
+        }
+    }
+
+    /// Reads projected bytes while retaining the stable history lock.
+    pub(crate) fn read_at(
+        &self,
+        stream: Stream,
+        offset: u64,
+        size: usize,
+    ) -> std::io::Result<Vec<u8>> {
+        match self.view {
+            HistoryView::Legacy(ref snapshot) => snapshot.marker(stream).read_at(offset, size),
+            HistoryView::Columnar => read_at_locked(self.session, stream, offset, size),
+        }
+    }
+
+    /// Returns projected stream length while retaining the stable history lock.
+    pub(crate) fn len(&self, stream: Stream) -> std::io::Result<u64> {
+        match self.view {
+            HistoryView::Legacy(ref snapshot) => Ok(snapshot.marker(stream).length.get()),
+            HistoryView::Columnar => len_locked(self.session, stream),
+        }
+    }
+
+    /// Reads one bounded projected stream as UTF-8.
+    pub(crate) fn read_text(&self, stream: Stream, max_bytes: u64) -> std::io::Result<String> {
+        let length = self.len(stream)?;
+        if length > max_bytes {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session history exceeds read limit",
+            ));
+        }
+        let size = usize::try_from(length)
+            .map_err(|_error| Error::other("session history is too large"))?;
+        let bytes = self.read_at(stream, 0, size)?;
+        if bytes.len() != size {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "session history changed during locked read",
+            ));
+        }
+        String::from_utf8(bytes)
+            .map_err(|_error| Error::new(ErrorKind::InvalidData, "session history is not UTF-8"))
+    }
+
+    /// Reads a bounded recent projected tail without a partial leading line.
+    pub(crate) fn tail(&self, stream: Stream, max_bytes: usize) -> std::io::Result<Vec<u8>> {
+        match self.view {
+            HistoryView::Legacy(ref snapshot) => snapshot.marker(stream).tail(max_bytes),
+            HistoryView::Columnar => tail_locked(self.session, stream, max_bytes),
+        }
+    }
+
+    /// Advances the durable derived send-claim index to the projected EOF.
+    pub(crate) fn refresh_claims(&self) -> std::io::Result<()> {
+        if let HistoryView::Legacy(ref snapshot) = self.view {
+            for stream in [Stream::Messages, Stream::Events] {
+                snapshot
+                    .marker(stream)
+                    .verify_current(&self.session.join(stream.marker()))?;
+            }
+        }
+        let claim_dir = self.session.join(STORE_DIR).join(CLAIM_DIR);
+        create_store_dir(&claim_dir)?;
+        let mut cursor = read_claim_cursor(&claim_dir)?;
+        for stream in [Stream::Messages, Stream::Events] {
+            let advanced = self.scan_claim_stream(&claim_dir, stream, cursor.stream(stream))?;
+            cursor.set_stream(stream, advanced);
+            #[cfg(test)]
+            fail_claim_cursor_write()?;
+            write_claim_cursor(&claim_dir, &cursor)?;
+        }
+        Ok(())
+    }
+
+    /// Resolves one indexed send claim after advancing the bounded cursor.
+    pub(crate) fn lookup_send(
+        &self,
+        id: &str,
+        input: &str,
+        scope: &str,
+        cwd: Option<&str>,
+    ) -> std::io::Result<SendClaim> {
+        self.refresh_claims()?;
+        let claim_dir = self.session.join(STORE_DIR).join(CLAIM_DIR);
+        let Some(claim) = read_claim(&claim_dir, id)? else {
+            return Ok(SendClaim::Vacant);
+        };
+        let (Some(user), Some(start)) = (claim.user.as_ref(), claim.start.as_ref()) else {
+            return Ok(SendClaim::Corrupt);
+        };
+        if claim.corrupt || !claim.seen || !start.canonical {
+            return Ok(SendClaim::Corrupt);
+        }
+        if user.content.as_deref() != Some(input)
+            || start.scope.as_deref() != Some(scope)
+            || !start.cwd.matches(cwd)
+        {
+            return Ok(SendClaim::Conflict);
+        }
+        Ok(SendClaim::Replay(claim.done.as_ref().map_or_else(
+            || start.source.line.clone(),
+            |done| done.source.line.clone(),
+        )))
+    }
+
+    fn scan_claim_stream(
+        &self,
+        claim_dir: &Path,
+        stream: Stream,
+        mut cursor: ClaimStreamCursor,
+    ) -> std::io::Result<ClaimStreamCursor> {
+        let length = self.len(stream)?;
+        if cursor.offset > length {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session claim cursor is past projected history",
+            ));
+        }
+        if self.is_columnar() {
+            cursor.raw = None;
+            let reader = ProjectedReader {
+                guard: self,
+                stream,
+                offset: cursor.offset,
+                end: length,
+            };
+            cursor.offset =
+                scan_claim_reader(BufReader::new(reader), cursor.offset, stream, claim_dir)?;
+        } else {
+            cursor = self.scan_raw_claim_stream(claim_dir, stream, cursor, length)?;
+        }
+        if cursor.offset != length {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session claim cursor did not reach projected EOF",
+            ));
+        }
+        Ok(cursor)
+    }
+
+    fn scan_raw_claim_stream(
+        &self,
+        claim_dir: &Path,
+        stream: Stream,
+        mut cursor: ClaimStreamCursor,
+        length: u64,
+    ) -> std::io::Result<ClaimStreamCursor> {
+        let snapshot = match self.view {
+            HistoryView::Legacy(ref snapshot) => snapshot,
+            HistoryView::Columnar => {
+                return Err(Error::other("columnar history has no raw snapshot"));
+            }
+        };
+        let marker = snapshot.marker(stream);
+        if marker.length.get() < cursor.offset {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session marker shrank before claim scan",
+            ));
+        }
+        let receipt = marker.receipt;
+        if cursor.raw.is_some_and(|expected| expected != receipt) {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session marker changed before claim scan",
+            ));
+        }
+        let mut file = marker.file.try_clone()?;
+        file.seek(SeekFrom::Start(cursor.offset))?;
+        let remaining = length
+            .checked_sub(cursor.offset)
+            .ok_or_else(|| Error::other("session claim cursor underflow"))?;
+        cursor.offset = scan_claim_reader(
+            BufReader::new(file.take(remaining)),
+            cursor.offset,
+            stream,
+            claim_dir,
+        )?;
+        cursor.raw = Some(receipt);
+        Ok(cursor)
+    }
+}
+
+fn history_view(session: &Path, store: &Path) -> std::io::Result<HistoryView> {
+    if manifest_committed(store)? {
+        Ok(HistoryView::Columnar)
+    } else {
+        LegacySnapshot::open(session).map(HistoryView::Legacy)
+    }
+}
+
+fn manifest_committed(store: &Path) -> std::io::Result<bool> {
+    match fs::symlink_metadata(store.join(MANIFEST_FILE)) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(Error::new(
+            ErrorKind::InvalidData,
+            "session manifest is not a plain file",
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
+fn read_committed_manifest(store: &Path) -> std::io::Result<Manifest> {
+    if !manifest_committed(store)? {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "committed session manifest is missing",
+        ));
+    }
+    read_manifest(store)
+}
+
+/// Result of resolving one durable indexed send claim.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum SendClaim {
+    /// No fact exists for the requested id after both cursors reached EOF.
+    Vacant,
+    /// The canonical request already exists; return its terminal or start frame.
+    Replay(String),
+    /// The id exists with different request fields.
+    Conflict,
+    /// The indexed history for the id is incomplete or contradictory.
+    Corrupt,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+struct ClaimStreamCursor {
+    offset: u64,
+    raw: Option<FileReceipt>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct FileReceipt {
+    dev: u64,
+    ino: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClaimCursor {
+    version: u32,
+    messages: ClaimStreamCursor,
+    events: ClaimStreamCursor,
+}
+
+impl Default for ClaimCursor {
+    fn default() -> Self {
+        Self {
+            version: CLAIM_VERSION,
+            messages: ClaimStreamCursor::default(),
+            events: ClaimStreamCursor::default(),
+        }
+    }
+}
+
+impl ClaimCursor {
+    fn stream(&self, stream: Stream) -> ClaimStreamCursor {
+        match stream {
+            Stream::Messages => self.messages,
+            Stream::Events => self.events,
+        }
+    }
+
+    fn set_stream(&mut self, stream: Stream, cursor: ClaimStreamCursor) {
+        match stream {
+            Stream::Messages => self.messages = cursor,
+            Stream::Events => self.events = cursor,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct ClaimSource {
+    offset: u64,
+    end: u64,
+    line: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct UserClaim {
+    source: ClaimSource,
+    content: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct StartClaim {
+    source: ClaimSource,
+    canonical: bool,
+    scope: Option<String>,
+    cwd: ClaimCwd,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct DoneClaim {
+    source: ClaimSource,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+enum ClaimCwd {
+    Missing,
+    Null,
+    Text(String),
+    Invalid,
+}
+
+impl ClaimCwd {
+    fn from_value(value: Option<&Value>) -> Self {
+        match value {
+            None => Self::Missing,
+            Some(value) if value.is_null() => Self::Null,
+            Some(value) => value
+                .as_str()
+                .map_or(Self::Invalid, |value| Self::Text(value.to_owned())),
+        }
+    }
+
+    fn is_canonical(&self) -> bool {
+        matches!(self, Self::Null | Self::Text(_))
+    }
+
+    fn matches(&self, expected: Option<&str>) -> bool {
+        expected.map_or(
+            matches!(self, Self::Null),
+            |expected| matches!(self, Self::Text(recorded) if recorded == expected),
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClaimFile {
+    version: u32,
+    id: String,
+    seen: bool,
+    corrupt: bool,
+    user: Option<UserClaim>,
+    start: Option<StartClaim>,
+    done: Option<DoneClaim>,
+}
+
+impl ClaimFile {
+    fn new(id: &str) -> Self {
+        Self {
+            version: CLAIM_VERSION,
+            id: id.to_owned(),
+            seen: false,
+            corrupt: false,
+            user: None,
+            start: None,
+            done: None,
+        }
+    }
+}
+
+struct ProjectedReader<'guard, 'session> {
+    guard: &'guard HistoryGuard<'session>,
+    stream: Stream,
+    offset: u64,
+    end: u64,
+}
+
+impl Read for ProjectedReader<'_, '_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if buf.is_empty() || self.offset >= self.end {
+            return Ok(0);
+        }
+        let remaining = usize::try_from(self.end.saturating_sub(self.offset))
+            .unwrap_or(usize::MAX)
+            .min(buf.len());
+        let bytes = self.guard.read_at(self.stream, self.offset, remaining)?;
+        if bytes.is_empty() {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "projected session history ended before its length",
+            ));
+        }
+        let read = bytes.len();
+        buf.get_mut(..read)
+            .ok_or_else(|| Error::other("projected session read exceeded buffer"))?
+            .copy_from_slice(&bytes);
+        self.offset = self
+            .offset
+            .checked_add(
+                u64::try_from(read).map_err(|_error| Error::other("session read overflow"))?,
+            )
+            .ok_or_else(|| Error::other("session read overflow"))?;
+        Ok(read)
+    }
+}
+
+fn scan_claim_reader(
+    mut reader: impl BufRead,
+    mut offset: u64,
+    stream: Stream,
+    claim_dir: &Path,
+) -> std::io::Result<u64> {
+    let max_claim_bytes = usize::try_from(MAX_CLAIM_BYTES)
+        .map_err(|_error| Error::other("session claim size limit overflow"))?;
+    while let Some(line) = read_jsonl_line(&mut reader, max_claim_bytes)? {
+        let bytes = line
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| Error::other("session claim offset overflow"))?;
+        let end = offset
+            .checked_add(
+                u64::try_from(bytes)
+                    .map_err(|_error| Error::other("session claim offset overflow"))?,
+            )
+            .ok_or_else(|| Error::other("session claim offset overflow"))?;
+        #[cfg(test)]
+        CLAIM_SCAN_BYTES.with(|value| value.set(value.get().saturating_add(bytes)));
+        index_claim_line(claim_dir, stream, offset, end, &line)?;
+        offset = end;
+    }
+    Ok(offset)
+}
+
+fn index_claim_line(
+    claim_dir: &Path,
+    stream: Stream,
+    offset: u64,
+    end: u64,
+    line: &str,
+) -> std::io::Result<()> {
+    let value = serde_json::from_str::<Value>(line)
+        .map_err(|_error| Error::new(ErrorKind::InvalidData, "invalid session history JSON"))?;
+    let source = ClaimSource {
+        offset,
+        end,
+        line: line.to_owned(),
+    };
+    match stream {
+        Stream::Messages => index_message_claim(claim_dir, &value, source),
+        Stream::Events => index_event_claim(claim_dir, &value, source),
+    }
+}
+
+fn index_message_claim(
+    claim_dir: &Path,
+    value: &Value,
+    source: ClaimSource,
+) -> std::io::Result<()> {
+    let Some(run) = value
+        .get("run")
+        .and_then(Value::as_str)
+        .filter(|run| crate::is_object_name(run))
+    else {
+        return Ok(());
+    };
+    update_claim(claim_dir, run, |claim| {
+        claim.seen = true;
+        if value.get("role").and_then(Value::as_str) == Some("user") {
+            let user = UserClaim {
+                source,
+                content: value
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            };
+            claim.corrupt |= user.content.is_none() || merge_claim_fact(&mut claim.user, user);
+        }
     })
 }
 
+fn index_event_claim(claim_dir: &Path, value: &Value, source: ClaimSource) -> std::io::Result<()> {
+    let run = value
+        .get("run")
+        .and_then(Value::as_str)
+        .filter(|run| crate::is_object_name(run));
+    if let Some(run) = run {
+        update_claim(claim_dir, run, |claim| claim.seen = true)?;
+    }
+    let event_type = value.get("type").and_then(Value::as_str);
+    if event_type == Some("start") {
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| crate::is_object_name(id));
+        if let Some(id) = id {
+            index_start_claim(claim_dir, id, id, run, value, source.clone())?;
+        }
+        if let Some(run) = run
+            && Some(run) != id
+        {
+            index_start_claim(
+                claim_dir,
+                run,
+                id.unwrap_or_default(),
+                Some(run),
+                value,
+                source,
+            )?;
+        }
+    } else if event_type == Some("done")
+        && let Some(run) = run
+    {
+        let valid = matches!(
+            value.get("status").and_then(Value::as_str),
+            Some("ok" | "error" | "cancelled")
+        );
+        update_claim(claim_dir, run, |claim| {
+            claim.corrupt |= !valid
+                || merge_claim_fact(
+                    &mut claim.done,
+                    DoneClaim {
+                        source: source.clone(),
+                    },
+                );
+        })?;
+    }
+    Ok(())
+}
+
+fn index_start_claim(
+    claim_dir: &Path,
+    claim_id: &str,
+    event_id: &str,
+    run: Option<&str>,
+    value: &Value,
+    source: ClaimSource,
+) -> std::io::Result<()> {
+    let scope = value
+        .get("scope")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let cwd = ClaimCwd::from_value(value.get("cwd"));
+    let canonical =
+        event_id == claim_id && run == Some(claim_id) && scope.is_some() && cwd.is_canonical();
+    update_claim(claim_dir, claim_id, |claim| {
+        claim.corrupt |= merge_claim_fact(
+            &mut claim.start,
+            StartClaim {
+                source,
+                canonical,
+                scope,
+                cwd,
+            },
+        );
+    })
+}
+
+fn merge_claim_fact<T: Eq>(slot: &mut Option<T>, value: T) -> bool {
+    if let Some(current) = slot.as_ref() {
+        current != &value
+    } else {
+        *slot = Some(value);
+        false
+    }
+}
+
+fn update_claim(
+    claim_dir: &Path,
+    id: &str,
+    update: impl FnOnce(&mut ClaimFile),
+) -> std::io::Result<()> {
+    let mut claim = read_claim(claim_dir, id)?.unwrap_or_else(|| ClaimFile::new(id));
+    update(&mut claim);
+    write_claim(claim_dir, &claim)
+}
+
+fn read_claim(claim_dir: &Path, id: &str) -> std::io::Result<Option<ClaimFile>> {
+    if !crate::is_object_name(id) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "invalid session claim id",
+        ));
+    }
+    let path = claim_dir.join(id);
+    match read_small_text_file(&path, MAX_CLAIM_BYTES) {
+        Ok(content) => {
+            let claim = serde_json::from_str::<ClaimFile>(&content)
+                .map_err(|_error| Error::new(ErrorKind::InvalidData, "invalid session claim"))?;
+            if claim.version != CLAIM_VERSION || claim.id != id {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "session claim identity mismatch",
+                ));
+            }
+            Ok(Some(claim))
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_claim(claim_dir: &Path, claim: &ClaimFile) -> std::io::Result<()> {
+    let mut content = serde_json::to_string(claim).map_err(Error::other)?;
+    content.push('\n');
+    write_claim_text(&claim_dir.join(&claim.id), &content)
+}
+
+fn read_claim_cursor(claim_dir: &Path) -> std::io::Result<ClaimCursor> {
+    match read_small_text_file(&claim_dir.join(CLAIM_CURSOR_FILE), MAX_CLAIM_CURSOR_BYTES) {
+        Ok(content) => {
+            let cursor = serde_json::from_str::<ClaimCursor>(&content).map_err(|_error| {
+                Error::new(ErrorKind::InvalidData, "invalid session claim cursor")
+            })?;
+            if cursor.version != CLAIM_VERSION {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    "unsupported session claim cursor",
+                ));
+            }
+            Ok(cursor)
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(ClaimCursor::default()),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_claim_cursor(claim_dir: &Path, cursor: &ClaimCursor) -> std::io::Result<()> {
+    let mut content = serde_json::to_string(cursor).map_err(Error::other)?;
+    content.push('\n');
+    write_claim_text(&claim_dir.join(CLAIM_CURSOR_FILE), &content)
+}
+
+fn write_claim_text(path: &Path, content: &str) -> std::io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            atomic_replace_text_with_mode(path, content, 0o600)
+        }
+        Ok(_) => Err(Error::new(
+            ErrorKind::InvalidData,
+            "session claim path is not a plain file",
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            atomic_create_text_with_mode(path, content, 0o600)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+fn fail_claim_cursor_write() -> std::io::Result<()> {
+    if CLAIM_CURSOR_FAILURE.with(|value| value.replace(false)) {
+        return Err(Error::other("injected session claim cursor failure"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn reset_claim_scan_bytes() {
+    CLAIM_SCAN_BYTES.with(|value| value.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn claim_scan_bytes() -> usize {
+    CLAIM_SCAN_BYTES.with(Cell::get)
+}
+
+#[cfg(test)]
+pub(crate) fn set_claim_cursor_failure(fail: bool) {
+    CLAIM_CURSOR_FAILURE.with(|value| value.set(fail));
+}
+
+fn append_marker_locked(
+    path: &Path,
+    expected: &MarkerSnapshot,
+    lines: &[&str],
+) -> std::io::Result<()> {
+    validate_payloads(lines, ErrorKind::InvalidInput)?;
+    let growth = lines.iter().try_fold(0_u64, |total, line| {
+        let line_bytes = u64::try_from(line.len())
+            .map_err(|_error| Error::other("session marker growth overflow"))?;
+        total
+            .checked_add(line_bytes)
+            .and_then(|value| value.checked_add(1))
+            .ok_or_else(|| Error::other("session marker growth overflow"))
+    })?;
+    let before_length = expected.length.get();
+    let after_length = before_length
+        .checked_add(growth)
+        .ok_or_else(|| Error::other("session marker length overflow"))?;
+    let mut file = OpenOptions::new()
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    let before = file.metadata()?;
+    if !expected.metadata_matches(&before, before_length) {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "session marker changed before append",
+        ));
+    }
+    expected.verify_current(path)?;
+    for line in lines {
+        file.write_all(line.as_bytes())?;
+        file.write_all(b"\n")?;
+    }
+    file.flush()?;
+    file.sync_all()?;
+    let after = file.metadata()?;
+    let current = fs::symlink_metadata(path)?;
+    if !expected.metadata_matches(&after, after_length)
+        || !expected.metadata_matches(&current, after_length)
+    {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "session marker changed during append",
+        ));
+    }
+    expected.length.set(after_length);
+    Ok(())
+}
+
+/// Reads one projected stream as bounded UTF-8 text.
+pub(crate) fn read_text(session: &Path, stream: Stream, max_bytes: u64) -> std::io::Result<String> {
+    HistoryGuard::shared(session)?.read_text(stream, max_bytes)
+}
+
+/// Reads one bounded projected stream tail as UTF-8 text.
+pub(crate) fn tail_text(
+    session: &Path,
+    stream: Stream,
+    max_bytes: usize,
+) -> std::io::Result<String> {
+    String::from_utf8(HistoryGuard::shared(session)?.tail(stream, max_bytes)?)
+        .map_err(|_error| Error::new(ErrorKind::InvalidData, "session history is not UTF-8"))
+}
+
+/// Durably appends complete JSONL line bodies to a session stream.
+pub fn append(session: &Path, stream: Stream, lines: &[&str]) -> std::io::Result<()> {
+    validate_payloads(lines, ErrorKind::InvalidInput)?;
+    let _guard = HistoryGuard::exclusive(session)?;
+    append_locked(session, stream, lines)
+}
+
 fn append_locked(session: &Path, stream: Stream, lines: &[&str]) -> std::io::Result<()> {
+    validate_payloads(lines, ErrorKind::InvalidInput)?;
     let store = session.join(STORE_DIR);
     create_store_dir(&store)?;
     let wal = store.join(WAL_FILE);
@@ -140,9 +1038,7 @@ pub fn read_at(
     offset: u64,
     size: usize,
 ) -> std::io::Result<Vec<u8>> {
-    with_store_lock(session, FlockArg::LockShared, || {
-        read_at_locked(session, stream, offset, size)
-    })
+    HistoryGuard::shared(session)?.read_at(stream, offset, size)
 }
 
 fn read_at_locked(
@@ -151,14 +1047,11 @@ fn read_at_locked(
     offset: u64,
     size: usize,
 ) -> std::io::Result<Vec<u8>> {
+    let store = session.join(STORE_DIR);
+    let manifest = read_committed_manifest(&store)?;
     if size == 0 {
         return Ok(Vec::new());
     }
-    let store = session.join(STORE_DIR);
-    if !store.join(MANIFEST_FILE).is_file() && !store.join(WAL_FILE).is_file() {
-        return read_marker_at(session, stream, offset, size);
-    }
-    let manifest = read_manifest(&store)?;
     read_at_snapshot(&store, &manifest, stream, offset, size)
 }
 
@@ -232,26 +1125,12 @@ fn read_at_snapshot(
 
 /// Returns the projected JSONL byte length for one stream.
 pub fn len(session: &Path, stream: Stream) -> std::io::Result<u64> {
-    with_store_lock(session, FlockArg::LockShared, || {
-        len_locked(session, stream)
-    })
+    HistoryGuard::shared(session)?.len(stream)
 }
 
 fn len_locked(session: &Path, stream: Stream) -> std::io::Result<u64> {
     let store = session.join(STORE_DIR);
-    if !store.join(MANIFEST_FILE).is_file() && !store.join(WAL_FILE).is_file() {
-        let marker = open_plain_file(&session.join(stream.marker()))?;
-        let metadata = marker.metadata()?;
-        return if metadata.is_file() {
-            Ok(metadata.len())
-        } else {
-            Err(Error::new(
-                ErrorKind::InvalidData,
-                "session marker is not a plain file",
-            ))
-        };
-    }
-    let manifest = read_manifest(&store)?;
+    let manifest = read_committed_manifest(&store)?;
     len_snapshot(&store, &manifest, stream)
 }
 
@@ -277,28 +1156,15 @@ fn len_snapshot(store: &Path, manifest: &Manifest, stream: Stream) -> std::io::R
 
 /// Returns a bounded recent JSONL tail without a partial leading line.
 pub fn tail(session: &Path, stream: Stream, max_bytes: usize) -> std::io::Result<Vec<u8>> {
-    with_store_lock(session, FlockArg::LockShared, || {
-        tail_locked(session, stream, max_bytes)
-    })
+    HistoryGuard::shared(session)?.tail(stream, max_bytes)
 }
 
 fn tail_locked(session: &Path, stream: Stream, max_bytes: usize) -> std::io::Result<Vec<u8>> {
+    let store = session.join(STORE_DIR);
+    let manifest = read_committed_manifest(&store)?;
     if max_bytes == 0 {
         return Ok(Vec::new());
     }
-    let store = session.join(STORE_DIR);
-    if !store.join(MANIFEST_FILE).is_file() && !store.join(WAL_FILE).is_file() {
-        let length = open_plain_file(&session.join(stream.marker()))?
-            .metadata()?
-            .len();
-        let limit =
-            u64::try_from(max_bytes).map_err(|_error| Error::other("tail limit too large"))?;
-        let offset = length.saturating_sub(limit);
-        let mut bytes = read_marker_at(session, stream, offset, max_bytes)?;
-        trim_partial_tail(offset, &mut bytes);
-        return Ok(bytes);
-    }
-    let manifest = read_manifest(&store)?;
     let length = len_snapshot(&store, &manifest, stream)?;
     let limit = u64::try_from(max_bytes).map_err(|_error| Error::other("tail limit too large"))?;
     let offset = length.saturating_sub(limit);
@@ -524,10 +1390,7 @@ fn with_store_lock<T>(
     mode: FlockArg,
     action: impl FnOnce() -> std::io::Result<T>,
 ) -> std::io::Result<T> {
-    let store = session.join(STORE_DIR);
-    create_store_dir(&store)?;
-    let file = open_lock(&store.join(LOCK_FILE))?;
-    let _lock = Flock::lock(file, mode).map_err(|(_file, error)| Error::from(error))?;
+    let _guard = HistoryGuard::lock(session, mode)?;
     action()
 }
 
@@ -574,11 +1437,77 @@ fn open_lock(path: &Path) -> std::io::Result<File> {
     Ok(file)
 }
 
+fn open_shared_lock(path: &Path) -> std::io::Result<File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "session lock is not a plain file",
+        ));
+    }
+    Ok(file)
+}
+
+fn open_existing_shared_lock(store: &Path) -> std::io::Result<Option<File>> {
+    match fs::symlink_metadata(store) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "session store is not a plain directory",
+            ));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    match open_shared_lock(&store.join(LOCK_FILE)) {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn set_prune_barriers(barriers: Option<(Arc<Barrier>, Arc<Barrier>)>) {
     let slot = PRUNE_BARRIERS.get_or_init(|| Mutex::new(None));
     if let Ok(mut current) = slot.lock() {
         *current = barriers;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_legacy_snapshot_barrier(barrier: Option<LegacySnapshotBarrier>) {
+    let slot = LEGACY_SNAPSHOT_BARRIER.get_or_init(|| Mutex::new(None));
+    if let Ok(mut current) = slot.lock() {
+        *current = barrier;
+    }
+}
+
+fn wait_during_legacy_snapshot(session: &Path) {
+    let _ = session;
+    #[cfg(test)]
+    {
+        let barriers = LEGACY_SNAPSHOT_BARRIER
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .ok()
+            .and_then(|mut value| {
+                if value
+                    .as_ref()
+                    .is_some_and(|barrier| barrier.0.as_path() == session)
+                {
+                    value.take()
+                } else {
+                    None
+                }
+            });
+        if let Some((_target, entered, release)) = barriers {
+            entered.wait();
+            release.wait();
+        }
     }
 }
 
@@ -598,7 +1527,7 @@ fn wait_before_prune_replace() {
 }
 
 fn create_store_dir(store: &Path) -> std::io::Result<()> {
-    create_plain_dir_with(
+    let created = create_plain_dir_with(
         store,
         CreatePlainDirMessages {
             mode: 0o700,
@@ -608,7 +1537,14 @@ fn create_store_dir(store: &Path) -> std::io::Result<()> {
             contains_non_dir_message: "session store path contains a non-directory",
             invalid_name_message: "invalid session store path",
         },
-    )?;
+    );
+    if let Err(error) = created
+        && !(error.kind() == ErrorKind::AlreadyExists
+            && fs::symlink_metadata(store)
+                .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink()))
+    {
+        return Err(error);
+    }
     let directory = open_plain_directory(store)?;
     directory.set_permissions(fs::Permissions::from_mode(0o700))?;
     directory.sync_all()
@@ -635,7 +1571,7 @@ fn migrate_stream(session: &Path, wal: &Path, stream: Stream) -> std::io::Result
     let mut reader = BufReader::new(open_plain_file(&marker)?);
     let skip = next_ordinal(wal, stream)?;
     let mut ordinal = 0_u64;
-    while let Some(line) = read_jsonl_line(&mut reader)? {
+    while let Some(line) = read_jsonl_line(&mut reader, MAX_PAYLOAD_BYTES)? {
         if ordinal >= skip {
             append_wal(wal, stream, ordinal, &line)?;
         }
@@ -644,25 +1580,6 @@ fn migrate_stream(session: &Path, wal: &Path, stream: Stream) -> std::io::Result
             .ok_or_else(|| Error::other("session ordinal overflow"))?;
     }
     Ok(())
-}
-
-fn read_jsonl_line(reader: &mut BufReader<File>) -> std::io::Result<Option<String>> {
-    let mut bytes = Vec::new();
-    let limit = u64::try_from(MAX_PAYLOAD_BYTES.saturating_add(2))
-        .map_err(|_error| Error::other("session row limit too large"))?;
-    let read = reader.by_ref().take(limit).read_until(b'\n', &mut bytes)?;
-    if read == 0 {
-        return Ok(None);
-    }
-    if bytes.ends_with(b"\n") {
-        bytes.pop();
-    }
-    if bytes.len() > MAX_PAYLOAD_BYTES {
-        return Err(Error::new(ErrorKind::InvalidData, "session row too large"));
-    }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|_error| Error::new(ErrorKind::InvalidData, "session row is not UTF-8"))
 }
 
 fn append_wal(path: &Path, stream: Stream, ordinal: u64, payload: &str) -> std::io::Result<()> {
@@ -703,6 +1620,12 @@ fn validate_payload(payload: &str, kind: ErrorKind) -> std::io::Result<()> {
     serde_json::from_str::<Value>(payload)
         .map(|_value| ())
         .map_err(|_error| Error::new(kind, "session row is not one JSON value"))
+}
+
+fn validate_payloads(payloads: &[&str], kind: ErrorKind) -> std::io::Result<()> {
+    payloads
+        .iter()
+        .try_for_each(|payload| validate_payload(payload, kind))
 }
 
 fn clear_markers(session: &Path) -> std::io::Result<()> {
@@ -831,6 +1754,22 @@ impl Manifest {
 }
 
 impl Stream {
+    /// Maps one canonical session marker ABI path to its projected stream.
+    #[must_use]
+    pub fn from_abi_path(abi_path: &str) -> Option<Self> {
+        match parse_abi_path(abi_path) {
+            AbiPathKind::SessionFile {
+                file: "messages.jsonl",
+                ..
+            } => Some(Self::Messages),
+            AbiPathKind::SessionFile {
+                file: "events.jsonl",
+                ..
+            } => Some(Self::Events),
+            _ => None,
+        }
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Self::Messages => "messages",
@@ -1301,24 +2240,4 @@ fn append_projection(
     }
     *position = end;
     Ok(())
-}
-
-fn read_marker_at(
-    session: &Path,
-    stream: Stream,
-    offset: u64,
-    size: usize,
-) -> std::io::Result<Vec<u8>> {
-    let mut file = open_plain_file(&session.join(stream.marker()))?;
-    if !file.metadata()?.is_file() {
-        return Err(Error::new(
-            ErrorKind::InvalidData,
-            "session marker is not a plain file",
-        ));
-    }
-    file.seek(SeekFrom::Start(offset))?;
-    let limit = u64::try_from(size).map_err(|_error| Error::other("read size too large"))?;
-    let mut output = Vec::with_capacity(size);
-    file.take(limit).read_to_end(&mut output)?;
-    Ok(output)
 }

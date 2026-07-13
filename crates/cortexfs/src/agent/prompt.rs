@@ -4,7 +4,7 @@ pub(crate) const MAX_AGENT_RULES_CHARS: usize = 64_000;
 pub(crate) const MAX_AGENT_RULE_FILE_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_SKILL_FILE_BYTES: u64 = 16 * 1024;
 pub(crate) const MAX_SKILL_FILES: usize = 256;
-pub(crate) const MAX_HISTORY_MESSAGES_READ_BYTES: u64 = 64 * 1024;
+pub(crate) const MAX_HISTORY_MESSAGES_READ_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_HISTORY_MESSAGE_LINE_BYTES: usize = 16 * 1024;
 
 pub mod history;

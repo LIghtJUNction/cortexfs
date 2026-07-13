@@ -12,7 +12,7 @@ pub fn current_time_unix() -> u64 {
 
 #[must_use]
 pub fn collect_history_messages_from_session(session_dir: &Path, max_chars: usize) -> String {
-    let Ok(messages) = read_history_messages_tail(&session_dir.join("messages.jsonl")) else {
+    let Ok(messages) = read_history_messages_tail(session_dir) else {
         return "(no historical messages injected)".to_owned();
     };
     format_history_messages_jsonl(&messages, max_chars)

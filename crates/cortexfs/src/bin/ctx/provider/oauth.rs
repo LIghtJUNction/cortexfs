@@ -232,20 +232,3 @@ pub(crate) fn oauth_pkce_from_system_entropy() -> Result<cortexfs::OAuthPkce, Cl
 pub(crate) fn oauth_state_from_system_entropy() -> Result<String, CliError> {
     Ok(hex_bytes(&read_system_entropy(16)?))
 }
-
-pub(crate) fn read_system_entropy(size: usize) -> Result<Vec<u8>, CliError> {
-    let mut file = fs::File::open("/dev/urandom")
-        .map_err(|error| CliError::unavailable(format!("cannot read system entropy: {error}")))?;
-    let mut bytes = vec![0; size];
-    file.read_exact(&mut bytes)
-        .map_err(|error| CliError::unavailable(format!("cannot read system entropy: {error}")))?;
-    Ok(bytes)
-}
-
-pub(crate) fn hex_bytes(bytes: &[u8]) -> String {
-    let mut output = String::new();
-    for byte in bytes {
-        let _ignored = write!(output, "{byte:02x}");
-    }
-    output
-}

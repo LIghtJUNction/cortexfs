@@ -11,7 +11,7 @@ fn socket_session_recorder_appends_send_to_durable_history() {
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
     );
     let request = ok!(request);
-    let recorded = record_socket_request_to_session(&session, &request);
+    let recorded = record_unindexed_socket_request_for_test(&session, &request);
     let recorded = ok!(recorded);
     assert_eq!(recorded.messages().len(), 1);
     assert_eq!(recorded.events().len(), 1);
@@ -47,14 +47,14 @@ fn socket_session_recorder_revalidates_public_request_values() {
         input: "hello".to_owned(),
     };
     assert_eq!(
-        record_socket_request_to_session(&session, &bad_send),
+        record_unindexed_socket_request_for_test(&session, &bad_send),
         Err(SocketSessionRecordError::InvalidField("id"))
     );
     let bad_cancel = SocketRequest::Cancel {
         id: "bad/id".to_owned(),
     };
     assert_eq!(
-        record_socket_request_to_session(&session, &bad_cancel),
+        record_unindexed_socket_request_for_test(&session, &bad_cancel),
         Err(SocketSessionRecordError::InvalidField("id"))
     );
     assert_file_text(&session.join("messages.jsonl"), "");

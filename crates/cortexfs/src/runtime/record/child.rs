@@ -1404,7 +1404,55 @@ pub(crate) fn record_socket_send_to_session(
     cwd: Option<&str>,
     input: &str,
     preparation: Option<&OwnedSessionPreparation>,
+    locked_history: Option<&columnar::HistoryGuard<'_>>,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
+    validate_socket_send(session_dir, id, session, scope, input)?;
+
+    let message = serde_json::json!({
+        "role": "user",
+        "run": id,
+        "content": input
+    })
+    .to_string();
+    let event = serde_json::json!({
+        "type": "start",
+        "id": id,
+        "run": id,
+        "scope": scope.as_str(),
+        "cwd": cwd
+    })
+    .to_string();
+
+    let owned_history;
+    let history = if let Some(history) = locked_history {
+        history
+    } else {
+        owned_history = columnar::HistoryGuard::exclusive(session_dir)
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        &owned_history
+    };
+    history
+        .refresh_claims()
+        .and_then(|()| history.append(columnar::Stream::Messages, &[&message]))
+        .and_then(|()| history.append(columnar::Stream::Events, &[&event]))
+        .and_then(|()| history.refresh_claims())
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    set_session_state(session_dir, "active")?;
+    write_current_run_session_file(session_dir, &format!("{id}\n"), preparation)?;
+    if let Some(cwd) = cwd {
+        write_session_file(session_dir, "cwd", &format!("{cwd}\n"))?;
+    }
+
+    Ok(SocketSessionRecord::new(vec![message], vec![event]))
+}
+
+pub(crate) fn validate_socket_send(
+    session_dir: &Path,
+    id: &str,
+    session: &str,
+    scope: SocketSessionScope,
+    input: &str,
+) -> Result<(), SocketSessionRecordError> {
     if scope == SocketSessionScope::Temp {
         return Err(SocketSessionRecordError::TempSessionNotDurable);
     }
@@ -1414,29 +1462,7 @@ pub(crate) fn record_socket_send_to_session(
         return Err(SocketSessionRecordError::InvalidField("input"));
     }
     require_socket_session_name(session_dir, session)?;
-    require_socket_session_files(session_dir)?;
-
-    let message = serde_json::json!({
-        "role": "user",
-        "content": input
-    })
-    .to_string();
-    let event = serde_json::json!({
-        "type": "start",
-        "id": id,
-        "run": id
-    })
-    .to_string();
-
-    append_session_lines(session_dir, "messages.jsonl", &[&message])?;
-    append_session_lines(session_dir, "events.jsonl", &[&event])?;
-    set_session_state(session_dir, "active")?;
-    write_current_run_session_file(session_dir, &format!("{id}\n"), preparation)?;
-    if let Some(cwd) = cwd {
-        write_session_file(session_dir, "cwd", &format!("{cwd}\n"))?;
-    }
-
-    Ok(SocketSessionRecord::new(vec![message], vec![event]))
+    require_socket_session_files(session_dir)
 }
 
 pub(crate) fn record_socket_cancel_to_session(

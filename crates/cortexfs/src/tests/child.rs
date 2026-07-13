@@ -278,6 +278,8 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
     let parent_session = agent_home(&root, "coder");
     let child_session = agent_home(&root, "rev-123");
 
+    create_complete_session_layout(&parent_session);
+    write_text_file(&parent_session.join("messages.jsonl"), "");
     write_text_file(&parent_session.join("events.jsonl"), "");
     create_complete_session_layout(&child_session);
     write_text_file(
@@ -288,6 +290,7 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
 
     let recorded =
         record_owned_child_cancellation("coder", "rev-123", &parent_session, &child_session);
+    assert!(recorded.is_ok(), "{recorded:?}");
     let events = ok!(recorded);
     assert_file_text(&child_session.join("state"), "cancelled\n");
     assert_file_text(
@@ -304,6 +307,59 @@ fn owned_child_cancellation_records_state_and_events_without_deleting_history() 
         &format!("{}\n", events.child_event()),
     );
     assert!(inspect_event_stream_jsonl(&events.jsonl()).is_ok());
+}
+
+#[test]
+fn owned_child_cancellation_appends_to_columnar_history() {
+    let root = clean_test_dir("owned-child-cancel-columnar");
+    let parent_session = agent_home(&root, "coder");
+    let child_session = agent_home(&root, "rev-123");
+    for session in [&parent_session, &child_session] {
+        create_complete_session_layout(session);
+        write_text_file(&session.join("messages.jsonl"), "");
+        write_text_file(&session.join("events.jsonl"), "");
+    }
+    let parent_before = r#"{"type":"usage","run":"parent-run","input_tokens":1}"#;
+    let child_before = r#"{"type":"usage","run":"child-run","input_tokens":1}"#;
+    ok!(super::columnar::append(
+        &parent_session,
+        super::columnar::Stream::Events,
+        &[parent_before],
+    ));
+    ok!(super::columnar::append(
+        &child_session,
+        super::columnar::Stream::Events,
+        &[child_before],
+    ));
+
+    let events = ok!(record_owned_child_cancellation(
+        "coder",
+        "rev-123",
+        &parent_session,
+        &child_session,
+    ));
+    assert_eq!(
+        ok!(super::columnar::read_text(
+            &parent_session,
+            super::columnar::Stream::Events,
+            1024,
+        )),
+        format!("{parent_before}\n{}\n", events.parent_event())
+    );
+    assert_eq!(
+        ok!(super::columnar::read_text(
+            &child_session,
+            super::columnar::Stream::Events,
+            1024,
+        )),
+        format!("{child_before}\n{}\n", events.child_event())
+    );
+    assert_file_text(&child_session.join("state"), "cancelled\n");
+    assert_eq!(
+        fs::metadata(child_session.join("events.jsonl"))
+            .map_or(u64::MAX, |metadata| metadata.len()),
+        0
+    );
 }
 
 #[test]

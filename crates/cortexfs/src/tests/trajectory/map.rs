@@ -10,18 +10,18 @@ fn trajectory_from_recorded_session_validates_and_writes() {
         r#"{"op":"send","id":"run-1","session":"default","cwd":"/work","input":"read README"}"#,
     );
     let send = ok!(send);
-    assert!(record_socket_request_to_session(&session, &send).is_ok());
+    assert!(record_unindexed_socket_request_for_test(&session, &send).is_ok());
 
-    write_text_file(
-        &session.join("events.jsonl"),
-        concat!(
-            r#"{"type":"start","id":"run-1","run":"run-1"}"#,
-            "\n",
-            r#"{"type":"tool_call","run":"run-1","id":"call-1","name":"fs.read","arguments":{"path":"README.md"}}"#,
-            "\n",
-            r#"{"type":"usage","run":"run-1","input_tokens":12,"output_tokens":4}"#,
-            "\n",
-        ),
+    assert!(
+        crate::runtime::record::session::append_session_lines(
+            &session,
+            "events.jsonl",
+            &[
+                r#"{"type":"tool_call","run":"run-1","id":"call-1","name":"fs.read","arguments":{"path":"README.md"}}"#,
+                r#"{"type":"usage","run":"run-1","input_tokens":12,"output_tokens":4}"#,
+            ],
+        )
+        .is_ok()
     );
 
     let tool = record_tool_execution_result_to_session(
@@ -31,7 +31,7 @@ fn trajectory_from_recorded_session_validates_and_writes() {
         "fs.read",
         "file contents",
     );
-    assert!(tool.is_ok());
+    assert!(tool.is_ok(), "{tool:?}");
     let assistant = record_assistant_response_to_session(&session, "run-1", "README looks good");
     assert!(assistant.is_ok());
 

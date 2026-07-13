@@ -73,8 +73,9 @@ pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
     if state.trim() != "cancelled" {
         return false;
     }
-    let Ok(events) = read_small_text_file(
-        &session_dir.join("events.jsonl"),
+    let Ok(events) = columnar::read_text(
+        session_dir,
+        columnar::Stream::Events,
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     ) else {
         return false;
@@ -146,8 +147,9 @@ pub(crate) fn record_agent_error_from_event_frames(
     };
 
     require_socket_session_files(session_dir)?;
-    let events = read_small_text_file(
-        &session_dir.join("events.jsonl"),
+    let events = columnar::read_text(
+        session_dir,
+        columnar::Stream::Events,
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     )
     .map_err(|_error| SocketSessionRecordError::CannotRecord)?;

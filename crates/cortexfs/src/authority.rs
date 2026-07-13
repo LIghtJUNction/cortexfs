@@ -279,9 +279,9 @@ pub fn record_owned_child_cancellation(
 
     atomic_replace_text(&child_state, "cancelled\n")
         .map_err(|_error| OwnedChildCancellationError::CannotRecord)?;
-    append_jsonl_event(&parent_events, events.parent_event())
+    append_session_lines(parent_session_dir, "events.jsonl", &[events.parent_event()])
         .map_err(|_error| OwnedChildCancellationError::CannotRecord)?;
-    append_jsonl_event(&child_events, events.child_event())
+    append_session_lines(child_session_dir, "events.jsonl", &[events.child_event()])
         .map_err(|_error| OwnedChildCancellationError::CannotRecord)?;
 
     Ok(events)

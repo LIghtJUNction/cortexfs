@@ -1,5 +1,7 @@
 use crate::*;
 
+const PROJECTED_CAT_CHUNK_BYTES: usize = 64 * 1024;
+
 pub(crate) fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, CliError> {
     let abi_path = classify_input_path(root, path)?;
     if !matches!(
@@ -44,11 +46,47 @@ pub(crate) fn file_command(root: &Path, args: &FileArgs) -> Result<(), CliError>
 }
 
 pub(crate) fn file_cat(root: &Path, path: &str) -> Result<(), CliError> {
-    let path = resolve_abi_path(root, path)?;
-    cat_path(&path)
+    let abi_path = classify_input_path(root, path)?;
+    let stream = columnar::Stream::from_abi_path(&abi_path);
+    let resolved = resolve_abi_path(root, path)?;
+    cat_path(&resolved, stream)
 }
 
-pub(crate) fn cat_path(path: &Path) -> Result<(), CliError> {
+pub(crate) fn cat_path(
+    path: &Path,
+    session_stream: Option<columnar::Stream>,
+) -> Result<(), CliError> {
+    if let Some(stream) = session_stream {
+        let session = path
+            .parent()
+            .ok_or_else(|| CliError::usage("session history path must have a parent directory"))?;
+        let mut stdout = io::stdout().lock();
+        let mut offset = 0_u64;
+        loop {
+            let bytes = columnar::read_at(session, stream, offset, PROJECTED_CAT_CHUNK_BYTES)
+                .map_err(|error| {
+                    CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+                })?;
+            if bytes.is_empty() {
+                break;
+            }
+            stdout
+                .write_all(&bytes)
+                .map_err(|error| CliError::unavailable(format!("stdout write failed: {error}")))?;
+            offset = offset
+                .checked_add(u64::try_from(bytes.len()).map_err(|error| {
+                    CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+                })?)
+                .ok_or_else(|| {
+                    CliError::unavailable(format!("cannot read {}: file too large", path.display()))
+                })?;
+            if bytes.len() < PROJECTED_CAT_CHUNK_BYTES {
+                break;
+            }
+        }
+        return Ok(());
+    }
+
     let mut file = open_plain_read_file(path)?;
     let metadata = file.metadata().map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
@@ -66,6 +104,12 @@ pub(crate) fn cat_path(path: &Path) -> Result<(), CliError> {
 }
 
 pub(crate) fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
+    let abi_path = classify_input_path(root, path)?;
+    if columnar::Stream::from_abi_path(&abi_path).is_some() {
+        return Err(CliError::usage(format!(
+            "session history is read-only; maintained by the runtime or an authorized FUSE writer: {path}"
+        )));
+    }
     let path = resolve_abi_path(root, path)?;
     let Some(parent) = path.parent() else {
         return Err(CliError::usage("set requires a parent directory"));
@@ -132,6 +176,12 @@ pub(crate) fn file_set(root: &Path, path: &str, value: &str) -> Result<(), CliEr
 }
 
 pub(crate) fn file_append(root: &Path, path: &str, value: &str) -> Result<(), CliError> {
+    let abi_path = classify_input_path(root, path)?;
+    if columnar::Stream::from_abi_path(&abi_path).is_some() {
+        return Err(CliError::usage(format!(
+            "session history is read-only; maintained by the runtime or an authorized FUSE writer: {path}"
+        )));
+    }
     let path = resolve_abi_path(root, path)?;
     let Some(parent) = path.parent() else {
         return Err(CliError::usage("append requires a parent directory"));
@@ -146,6 +196,7 @@ pub(crate) fn file_append(root: &Path, path: &str, value: &str) -> Result<(), Cl
     } else {
         format!("{value}\n")
     };
+
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
@@ -186,12 +237,23 @@ pub(crate) fn file_type(root: &Path, path: &str) -> Result<(), CliError> {
 }
 
 pub(crate) fn file_info(root: &Path, path: &str) -> Result<(), CliError> {
+    let abi_path = classify_input_path(root, path)?;
+    let stream = columnar::Stream::from_abi_path(&abi_path);
     let resolved = resolve_abi_path(root, path)?;
     let metadata = fs::symlink_metadata(&resolved).map_err(|error| {
         CliError::unavailable(format!("cannot stat {}: {error}", resolved.display()))
     })?;
-    let bytes = metadata.len();
-    print_line(&format!("path={}", classify_input_path(root, path)?))?;
+    let bytes = if let Some(stream) = stream {
+        let session = resolved
+            .parent()
+            .ok_or_else(|| CliError::usage("session history path must have a parent directory"))?;
+        columnar::len(session, stream).map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", resolved.display()))
+        })?
+    } else {
+        metadata.len()
+    };
+    print_line(&format!("path={abi_path}"))?;
     print_line(&format!("resolved={}", resolved.display()))?;
     print_line(&format!("type={}", file_type_name(root, path)?))?;
     print_line(&format!("fs_type={}", fs_type_name(&metadata)))?;

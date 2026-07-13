@@ -100,7 +100,7 @@ pub(crate) fn write_tool_result_event(
         }]
     })
     .to_string();
-    if !inspect_event_stream_jsonl(&event).is_ok() {
+    if !inspect_event_stream_jsonl(&format!("{event}\n")).is_ok() {
         return Err("generated invalid tool result event".to_owned());
     }
     writeln!(stdout, "{event}").map_err(|error| format!("cannot write output: {error}"))

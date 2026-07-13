@@ -50,10 +50,20 @@ impl FuseV1Projection {
         let path = self.resolve(&normalized)?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
         let mode = projected_metadata_mode(&normalized, &metadata);
+        let size = if metadata.is_file() {
+            if let Some(stream) = columnar::Stream::from_abi_path(&normalized) {
+                let session = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+                columnar::len(session, stream).map_err(|error| fuse_metadata_error(&error))?
+            } else {
+                metadata.len()
+            }
+        } else {
+            metadata.len()
+        };
         Ok(FuseV1Attr::with_owner(
             normalized,
             fuse_file_type(metadata.file_type()),
-            metadata.len(),
+            size,
             mode,
             metadata.uid(),
             metadata.gid(),
@@ -131,6 +141,7 @@ impl FuseV1Projection {
         fuse_join_child_path(parent, name).ok().is_some_and(|path| {
             Self::layout_atomic_temp_target(&path).is_some()
                 || Self::is_socket_alias_claim_path(&path)
+                || Self::is_session_store_path(&path)
         })
     }
 
@@ -150,6 +161,15 @@ impl FuseV1Projection {
             path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
         if !metadata.is_file() {
             return Err(FuseV1Error::NotFile);
+        }
+        if let Some(stream) = columnar::Stream::from_abi_path(&normalized) {
+            let session = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+            return columnar::read_text(session, stream, MAX_FUSE_V1_SMALL_READ_BYTES).map_err(
+                |error| match error.kind() {
+                    std::io::ErrorKind::InvalidData => FuseV1Error::InvalidContent,
+                    _ => fuse_metadata_error(&error),
+                },
+            );
         }
         if metadata.len() > MAX_FUSE_V1_SMALL_READ_BYTES {
             return Err(FuseV1Error::TooLarge);
@@ -178,6 +198,11 @@ impl FuseV1Projection {
             path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
         if !metadata.is_file() {
             return Err(FuseV1Error::NotFile);
+        }
+        if let Some(stream) = columnar::Stream::from_abi_path(&normalized) {
+            let session = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+            return columnar::read_at(session, stream, offset, size)
+                .map_err(|error| fuse_metadata_error(&error));
         }
         let mut file = open_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
         file.seek(SeekFrom::Start(offset))
@@ -279,19 +304,19 @@ impl FuseV1Projection {
             return Err(FuseV1Error::TooLarge);
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
+        if Self::is_session_store_path(&normalized) {
+            return Err(FuseV1Error::NotFound);
+        }
+        if Self::is_session_append_path(&normalized) {
+            return self.append_session_history_at(&normalized, offset, content);
+        }
         if offset != 0 {
             if Self::is_agent_log_control_path(&normalized) {
-                return self.append_plain_file_at_end(&normalized, offset, content);
-            }
-            if Self::is_session_append_path(&normalized) {
                 return self.append_plain_file_at_end(&normalized, offset, content);
             }
             return Err(FuseV1Error::InvalidOffset);
         }
         if Self::is_session_replace_path(&normalized) {
-            return self.replace_session_plain_file(&normalized, content);
-        }
-        if Self::is_session_append_path(&normalized) {
             return self.replace_session_plain_file(&normalized, content);
         }
         if let Some(target) = Self::layout_atomic_temp_target(&normalized)
@@ -337,6 +362,13 @@ impl FuseV1Projection {
             return Err(FuseV1Error::TooLarge);
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
+        if Self::is_session_store_path(&normalized) {
+            return Err(FuseV1Error::NotFound);
+        }
+        if Self::is_session_append_path(&normalized) {
+            self.authorize_layout_path(&normalized, uid)?;
+            return self.append_session_history_at(&normalized, offset, content);
+        }
         if offset != 0 {
             if Self::agent_control_target(&normalized).is_some()
                 || Self::is_agent_wrapper_path(&normalized)
@@ -344,13 +376,12 @@ impl FuseV1Projection {
                     Self::agent_control_target(&target).is_some()
                         || Self::is_agent_wrapper_path(&target)
                 })
-                || Self::is_session_append_path(&normalized)
             {
                 self.authorize_layout_path(&normalized, uid)?;
             }
             return self.write_control_file_at(&normalized, offset, content);
         }
-        if Self::is_session_replace_path(&normalized) || Self::is_session_append_path(&normalized) {
+        if Self::is_session_replace_path(&normalized) {
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
         if let Some(target) = Self::layout_atomic_temp_target(&normalized) {
@@ -396,6 +427,63 @@ impl FuseV1Projection {
         file.sync_all().map_err(|_error| FuseV1Error::Io)
     }
 
+    pub(crate) fn append_session_history_at(
+        &self,
+        normalized: &str,
+        offset: u64,
+        content: &[u8],
+    ) -> Result<(), FuseV1Error> {
+        let stream =
+            columnar::Stream::from_abi_path(normalized).ok_or(FuseV1Error::NotControlFile)?;
+        let path = self.resolve(normalized)?;
+        let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(FuseV1Error::Io);
+        }
+        let session = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let parsed = (|| {
+            let content =
+                std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
+            if content.is_empty() {
+                return Ok(Vec::new());
+            }
+            let body = content
+                .strip_suffix('\n')
+                .ok_or(FuseV1Error::InvalidContent)?;
+            if body.contains('\r') {
+                return Err(FuseV1Error::InvalidContent);
+            }
+            let lines = body.split('\n').collect::<Vec<_>>();
+            if lines.is_empty()
+                || lines
+                    .iter()
+                    .any(|line| serde_json::from_str::<Value>(line).is_err())
+            {
+                return Err(FuseV1Error::InvalidContent);
+            }
+            Ok(lines)
+        })();
+        let projected_len = columnar::len(session, stream).map_err(|_error| FuseV1Error::Io)?;
+        if offset != projected_len {
+            return Err(FuseV1Error::InvalidOffset);
+        }
+        let lines = parsed?;
+        let history =
+            columnar::HistoryGuard::exclusive(session).map_err(|_error| FuseV1Error::Io)?;
+        let locked_len = history.len(stream).map_err(|_error| FuseV1Error::Io)?;
+        if offset != locked_len {
+            return Err(FuseV1Error::InvalidOffset);
+        }
+        if lines.is_empty() {
+            return Ok(());
+        }
+        history
+            .refresh_claims()
+            .and_then(|()| history.append(stream, &lines))
+            .and_then(|()| history.refresh_claims())
+            .map_err(|_error| FuseV1Error::Io)
+    }
+
     pub(crate) fn replace_session_plain_file(
         &self,
         normalized: &str,
@@ -403,6 +491,15 @@ impl FuseV1Projection {
     ) -> Result<(), FuseV1Error> {
         let content = std::str::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)?;
         let path = self.resolve(normalized)?;
+        if Self::is_session_append_path(normalized) {
+            return atomic_create_text_with_mode(&path, content, 0o600).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    FuseV1Error::AlreadyExists
+                } else {
+                    FuseV1Error::Io
+                }
+            });
+        }
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
             Ok(_) => return Err(FuseV1Error::Io),
@@ -507,6 +604,7 @@ impl FuseV1Projection {
         if Self::layout_atomic_temp_target(&from).as_deref() != Some(to.as_str()) {
             return Err(FuseV1Error::NotControlFile);
         }
+        let no_replace = no_replace || Self::is_session_append_path(&to);
         self.authorize_layout_path(&from, uid)?;
         self.authorize_layout_path(&to, uid)?;
         let from_path = self.resolve(&from)?;
@@ -798,6 +896,14 @@ impl FuseV1Projection {
         )
     }
 
+    fn is_session_store_path(normalized: &str) -> bool {
+        let Some((session, suffix)) = normalized.split_once("/.store") else {
+            return false;
+        };
+        (suffix.is_empty() || suffix.starts_with('/'))
+            && parse_abi_path(session).is_session_instance()
+    }
+
     #[doc(hidden)]
     #[must_use]
     pub fn is_session_replace_path(normalized: &str) -> bool {
@@ -968,6 +1074,9 @@ impl FuseV1Projection {
     }
 
     pub(crate) fn resolve(&self, abi_path: &str) -> Result<PathBuf, FuseV1Error> {
+        if Self::is_session_store_path(abi_path) {
+            return Err(FuseV1Error::NotFound);
+        }
         resolve_fuse_abi_path(&self.root, abi_path)
     }
 }

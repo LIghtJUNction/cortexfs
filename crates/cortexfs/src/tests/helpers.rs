@@ -140,6 +140,7 @@ pub(super) fn session_file_fixture_value(file: &str) -> &'static str {
         "state" => "idle\n",
         "cwd" => "/work\n",
         "meta.json" => "{\"client\":\"ctx\",\"model\":\"debug/echo\",\"scope\":\"private\"}\n",
+        "messages.jsonl" | "events.jsonl" => "",
         _ => "ok\n",
     }
 }
