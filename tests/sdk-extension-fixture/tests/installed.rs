@@ -8,6 +8,7 @@ mod tests {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
+    use std::process::{Command, Output, Stdio};
     use std::sync::atomic::Ordering;
 
     use cortexfs::object::install::{InstallTier, install_object};
@@ -24,29 +25,10 @@ mod tests {
     #[test]
     fn installed_sdks_run_two_declared_native_tool_calls() -> Result<(), Box<dyn std::error::Error>>
     {
-        let root = FixtureRoot::new()?;
-        ensure_v1_reference_tree(root.path()).map_err(|error| {
-            std::io::Error::other(format!("cannot bootstrap fixture tree: {error:?}"))
-        })?;
+        let root = install_fixture_tool()?;
         let package = root.path().join("package");
-        fs::create_dir_all(&package)?;
 
-        let tool = Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-tool"));
         let agent = Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-agent"));
-        let tool_manifest = package.join("tool.json");
-        let tool_controls = BTreeMap::from([
-            ("description", "SDK fixture echo".to_owned()),
-            ("schema", r#"{"type":"object"}"#.to_owned()),
-            ("cap", "text".to_owned()),
-            (
-                "policy",
-                "allow coder_t tool:example.echo execute\n".to_owned(),
-            ),
-        ]);
-        write_manifest(&tool_manifest, "tool", "example.echo", tool, &tool_controls)
-            .map_err(|_error| std::io::Error::other("installed agent runtime failed"))?;
-        install_object(root.path(), &tool_manifest, InstallTier::System)?;
-
         let reference = root.path().join("agent/coder.d");
         let mut controls = BTreeMap::new();
         for name in [
@@ -126,6 +108,98 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn installed_tool_cli_joins_argv_and_emits_success_jsonl()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = install_fixture_tool()?;
+        let output = run_installed_tool(&root, &["hello", "world"], b"", "cli-argv")?;
+
+        assert_eq!(
+            (
+                output.status.code(),
+                String::from_utf8(output.stdout)?,
+                output.stderr,
+            ),
+            (
+                Some(0),
+                concat!(
+                    "{\"run\":\"cli-argv\",\"tool\":\"example.echo\",\"type\":\"start\"}\n",
+                    "{\"content\":[{\"text\":\"native:hello world\",\"type\":\"text\"}],\"role\":\"tool\",\"run\":\"cli-argv\",\"type\":\"message\"}\n",
+                    "{\"run\":\"cli-argv\",\"status\":\"ok\",\"type\":\"done\"}\n",
+                )
+                .to_owned(),
+                Vec::new(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn installed_tool_cli_reads_stdin_when_argv_is_empty() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root = install_fixture_tool()?;
+        let output = run_installed_tool(&root, &[], b"from stdin", "cli-stdin")?;
+
+        assert_eq!(
+            (
+                output.status.code(),
+                String::from_utf8(output.stdout)?,
+                output.stderr,
+            ),
+            (
+                Some(0),
+                concat!(
+                    "{\"run\":\"cli-stdin\",\"tool\":\"example.echo\",\"type\":\"start\"}\n",
+                    "{\"content\":[{\"text\":\"native:from stdin\",\"type\":\"text\"}],\"role\":\"tool\",\"run\":\"cli-stdin\",\"type\":\"message\"}\n",
+                    "{\"run\":\"cli-stdin\",\"status\":\"ok\",\"type\":\"done\"}\n",
+                )
+                .to_owned(),
+                Vec::new(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn installed_tool_cli_error_emits_canonical_jsonl_and_exits_one()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = install_fixture_tool()?;
+        let output = run_installed_tool(&root, &["__error__"], b"", "cli-error")?;
+
+        assert_eq!(
+            (
+                output.status.code(),
+                String::from_utf8(output.stdout)?,
+                output.stderr,
+            ),
+            (
+                Some(1),
+                concat!(
+                    "{\"run\":\"cli-error\",\"tool\":\"example.echo\",\"type\":\"start\"}\n",
+                    "{\"code\":\"EINVAL\",\"message\":\"fixture failure\",\"run\":\"cli-error\",\"type\":\"error\"}\n",
+                    "{\"run\":\"cli-error\",\"status\":\"error\",\"type\":\"done\"}\n",
+                )
+                .to_owned(),
+                Vec::new(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn installed_tool_cli_rejects_oversized_stdin_before_jsonl()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = install_fixture_tool()?;
+        let stdin = vec![b'x'; 1024 * 1024 + 1];
+        let output = run_installed_tool(&root, &[], &stdin, "cli-oversized")?;
+
+        assert_eq!(
+            (output.status.code(), output.stdout, output.stderr),
+            (Some(1), Vec::new(), Vec::new())
+        );
+        Ok(())
+    }
+
     fn assert_tool_result(
         frame: &Value,
         call_id: &str,
@@ -142,6 +216,56 @@ mod tests {
         );
         assert_eq!(item.get("content").and_then(Value::as_str), Some(content));
         Ok(())
+    }
+
+    fn install_fixture_tool() -> Result<FixtureRoot, Box<dyn std::error::Error>> {
+        let root = FixtureRoot::new()?;
+        ensure_v1_reference_tree(root.path()).map_err(|error| {
+            std::io::Error::other(format!("cannot bootstrap fixture tree: {error:?}"))
+        })?;
+        let package = root.path().join("package");
+        fs::create_dir_all(&package)?;
+        let manifest = package.join("tool.json");
+        let controls = BTreeMap::from([
+            ("description", "SDK fixture echo".to_owned()),
+            ("schema", r#"{"type":"object"}"#.to_owned()),
+            ("cap", "text".to_owned()),
+            (
+                "policy",
+                "allow coder_t tool:example.echo execute\n".to_owned(),
+            ),
+        ]);
+        write_manifest(
+            &manifest,
+            "tool",
+            "example.echo",
+            Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-tool")),
+            &controls,
+        )?;
+        install_object(root.path(), &manifest, InstallTier::System)?;
+        Ok(root)
+    }
+
+    fn run_installed_tool(
+        root: &FixtureRoot,
+        args: &[&str],
+        stdin: &[u8],
+        run_id: &str,
+    ) -> Result<Output, Box<dyn std::error::Error>> {
+        let mut child = Command::new(root.path().join("tool/example.echo"))
+            .args(args)
+            .env_clear()
+            .env("CTX_RUN_ID", run_id)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .ok_or("missing fixture tool stdin")?
+            .write_all(stdin)?;
+        Ok(child.wait_with_output()?)
     }
 
     fn write_manifest(

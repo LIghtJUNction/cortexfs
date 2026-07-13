@@ -1,8 +1,8 @@
 use super::*;
 
-pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
+pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<ExitCode, String> {
     if is_passthrough_tool(name) {
-        return run_passthrough_tool(name, args);
+        return run_passthrough_tool(name, args).map(|()| ExitCode::SUCCESS);
     }
     if env::var("CTX_TOOL_MODE").as_deref() == Ok("cli") {
         return run_cli_tool(name, args);
@@ -13,7 +13,7 @@ pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
     let mut stdout = stdout.lock();
     let invocation = ToolInvocation::new(run.clone(), input);
     match run_core_tool(name, &invocation, &mut stdout) {
-        Ok(true) => Ok(()),
+        Ok(true) => Ok(ExitCode::SUCCESS),
         Ok(false) => write_tool_start(&mut stdout, &run, name)
             .and_then(|()| {
                 write_tool_error(
@@ -23,17 +23,17 @@ pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
                     "tool is not implemented by cortexfs-object-runner",
                 )
             })
+            .map(|()| ExitCode::SUCCESS)
             .map_err(|error| format!("cannot write output: {error}")),
         Err(error) => Err(format!("cannot write output: {error}")),
     }
 }
 
-pub(crate) fn run_cli_tool(name: &str, args: &[OsString]) -> Result<(), String> {
+pub(crate) fn run_cli_tool(name: &str, args: &[OsString]) -> Result<ExitCode, String> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     match run_core_tool_cli(name, args, &mut stdout) {
-        Ok(Some(code)) if code == ExitCode::SUCCESS => Ok(()),
-        Ok(Some(code)) => Err(format!("{name} tool exited with {code:?}")),
+        Ok(Some(code)) => Ok(code),
         Ok(None) => Err("tool is not implemented by cortexfs-object-runner".to_owned()),
         Err(error) => Err(format!("cannot run tool: {error}")),
     }
