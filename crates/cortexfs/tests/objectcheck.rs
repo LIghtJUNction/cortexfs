@@ -217,6 +217,95 @@ mod tests {
     }
 
     #[test]
+    fn residue_cli_audit_dry_run_and_apply() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("source");
+        let relative = "tool/.cortexfs-install-cli";
+        let stage = source.join(relative);
+        fs::create_dir_all(&stage)?;
+        fs::write(stage.join("payload"), b"data")?;
+        let metadata = fs::symlink_metadata(&stage)?;
+        let dev = metadata.dev();
+        let ino = metadata.ino();
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "residue", "audit", "--source"])
+                .arg(&source),
+        )?;
+        assert!(
+            status.success(),
+            "ctx object residue audit failed: {stderr}"
+        );
+        assert_eq!(
+            stdout,
+            format!(
+                "residue kind=install path={relative} dev={dev} ino={ino} type=directory state=occupied cleanup=eligible\n"
+            )
+        );
+        assert!(stderr.is_empty());
+
+        let before = (dev, ino, state(&stage)?);
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "residue", "cleanup", "--source"])
+                .arg(&source)
+                .args(["--path", relative, "--dev"])
+                .arg(dev.to_string())
+                .arg("--ino")
+                .arg(ino.to_string()),
+        )?;
+        assert!(
+            status.success(),
+            "ctx object residue cleanup dry-run failed: {stderr}"
+        );
+        assert_eq!(
+            stdout,
+            format!("would-clean path={relative} dev={dev} ino={ino} entries=2\n")
+        );
+        assert!(stderr.is_empty());
+        let metadata = fs::symlink_metadata(&stage)?;
+        assert_eq!((metadata.dev(), metadata.ino(), state(&stage)?), before);
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "residue", "cleanup", "--source"])
+                .arg(&source)
+                .args(["--path", relative, "--dev"])
+                .arg(dev.to_string())
+                .arg("--ino")
+                .arg(ino.to_string())
+                .arg("--yes"),
+        )?;
+        assert!(
+            status.success(),
+            "ctx object residue cleanup --yes failed: {stderr}"
+        );
+        assert_eq!(
+            stdout,
+            format!("cleaned path={relative} dev={dev} ino={ino} entries=2\n")
+        );
+        assert!(stderr.is_empty());
+        let Err(error) = fs::symlink_metadata(&stage) else {
+            return Err(io::Error::other("residue stage still exists after cleanup").into());
+        };
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+
+        let (status, stdout, stderr) = run_ctx_single_line(
+            Command::new(env!("CARGO_BIN_EXE_ctx"))
+                .args(["object", "residue", "audit", "--source"])
+                .arg(&source),
+        )?;
+        assert!(
+            status.success(),
+            "ctx object residue audit after cleanup failed: {stderr}"
+        );
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn install_then_inspect_detects_tamper_without_modifying_object()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
