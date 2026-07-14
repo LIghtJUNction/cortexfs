@@ -183,6 +183,25 @@ pub(crate) fn parse_agent_session_admin(
         "gc" => Ok(Command::Agent(AgentArgs::SessionGc(
             parse_agent_session_gc(values)?,
         ))),
+        "select" => {
+            let name = required_arg(&mut values, "agent session select requires an agent name")?;
+            let target = required_arg(&mut values, "agent session select requires a target")?;
+            if required_arg(&mut values, "agent session select requires --from")? != "--from" {
+                return Err(CliError::usage("agent session select requires --from"));
+            }
+            let from = required_arg(
+                &mut values,
+                "agent session select --from requires a session",
+            )?;
+            if let Some(value) = values.next() {
+                return Err(CliError::usage(format!("unexpected argument: {value}")));
+            }
+            Ok(Command::Agent(AgentArgs::SessionSelect {
+                name,
+                target,
+                from,
+            }))
+        }
         _ => Err(CliError::usage(format!(
             "unknown agent session command: {command}"
         ))),

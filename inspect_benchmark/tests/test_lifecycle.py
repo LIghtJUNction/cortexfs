@@ -407,7 +407,7 @@ class LifecycleSystemTests(unittest.TestCase):
             current = system._archive_session(
                 "ctx", "coder", baseline, 1, root=root, uid=1000
             )
-            self.assertIn("current", current.detail)
+            self.assertIn("select", current.detail)
             (session_root / "index" / "current").write_text("default\n")
             (owned / "context" / "child" / "one").mkdir(parents=True)
             referenced = system._archive_session(
@@ -466,6 +466,72 @@ class LifecycleSystemTests(unittest.TestCase):
             self.assertFalse(mismatch.archived)
             collision = system._session_baseline("coder", "owned", root=root, uid=1000)
             self.assertFalse(collision.absent)
+
+    def test_current_owned_session_is_restored_then_archived(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session_root = self.session_tree(root)
+            (session_root / "default").mkdir()
+            baseline = system._session_baseline("coder", "owned", root=root, uid=1000)
+            owned = session_root / "owned"
+            owned.mkdir()
+            (owned / "state").write_text("done\n")
+            (session_root / "index" / "current").write_text("owned\n")
+
+            def command(args, _timeout):
+                if "select" in args:
+                    (session_root / "index" / "current").write_text("default\n")
+                    return {"success": True, "stdout": "", "stderr": ""}
+                if "--dry-run" in args:
+                    return {
+                        "success": True,
+                        "stdout": "ctx: dry-run; pass --yes to archive\narchive owned\n",
+                        "stderr": "",
+                    }
+                return {"success": True, "stdout": "archived owned\n", "stderr": ""}
+
+            with patch.object(system, "_command", side_effect=command) as invoked:
+                receipt = system._archive_session(
+                    "ctx", "coder", baseline, 1, root=root, uid=1000
+                )
+            self.assertTrue(receipt.archived)
+            self.assertEqual(receipt.current_after, "default")
+            self.assertEqual(invoked.call_count, 3)
+
+    def test_current_restore_cas_and_baseline_failures_retain_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session_root = self.session_tree(root)
+            (session_root / "default").mkdir()
+            baseline = system._session_baseline("coder", "owned", root=root, uid=1000)
+            owned = session_root / "owned"
+            owned.mkdir()
+            (owned / "state").write_text("done\n")
+            (session_root / "index" / "current").write_text("owned\n")
+            for stderr in ("EAGAIN current mismatch", "ENOENT baseline missing"):
+                with (
+                    self.subTest(stderr=stderr),
+                    patch.object(
+                        system,
+                        "_command",
+                        return_value={"success": False, "stdout": "", "stderr": stderr},
+                    ) as invoked,
+                ):
+                    receipt = system._archive_session(
+                        "ctx", "coder", baseline, 1, root=root, uid=1000
+                    )
+                self.assertFalse(receipt.archive_allowed)
+                self.assertIn(stderr.split()[0], receipt.detail)
+                self.assertEqual(invoked.call_count, 1)
+                self.assertTrue(owned.is_dir())
+
+            missing_baseline = agents.SessionBaseline("owned", True, "missing", ("default",))
+            with patch.object(system, "_command") as invoked:
+                receipt = system._archive_session(
+                    "ctx", "coder", missing_baseline, 1, root=root, uid=1000
+                )
+            self.assertIn("baseline", receipt.detail)
+            invoked.assert_not_called()
 
     def test_gc_preview_zero_multiple_wrong_and_sanitization(self) -> None:
         self.assertEqual(

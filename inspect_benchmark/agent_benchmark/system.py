@@ -348,14 +348,47 @@ def _archive_session(
         refusal = "default session is protected"
     elif state not in {"idle", "done", "error"}:
         refusal = f"session is not terminal: {state!r}"
-    elif current == session:
-        refusal = "session is current"
     else:
         try:
             if _session_has_refs(agent_name, session, root=root, uid=uid):
                 refusal = "session has child references"
         except (OSError, ValueError) as error:
             refusal = f"session reference inspection failed: {error}"
+    if refusal is None and current == session:
+        if baseline.current not in baseline.sessions:
+            refusal = "baseline current session was not present in baseline index"
+        else:
+            restore = _command(
+                [
+                    ctx_path,
+                    "agent",
+                    "session",
+                    "select",
+                    agent_name,
+                    baseline.current,
+                    "--from",
+                    session,
+                ],
+                min(timeout, 30.0),
+            )
+            if not restore["success"]:
+                refusal = str(
+                    sanitize(
+                        str(restore["stderr"])
+                        or "current session restoration command failed"
+                    )
+                )
+            else:
+                try:
+                    _appeared, _state, current = _session_after(
+                        agent_name, session, root=root, uid=uid
+                    )
+                except (OSError, UnicodeError, ValueError) as error:
+                    refusal = f"restored current session verification failed: {error}"
+                if refusal is None and current != baseline.current:
+                    refusal = "current session restoration verification mismatch"
+    elif refusal is None and current != baseline.current:
+        refusal = "current session changed since baseline"
     if refusal is not None:
         return SessionReceipt(
             session,

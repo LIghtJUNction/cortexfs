@@ -199,7 +199,7 @@ def test_report_contains_required_metric_fields() -> None:
         "Input/output tokens",
         "tokens/s",
         "chars/s",
-        "EIO",
+        "## Errors",
     ):
         assert expected in report
 

@@ -69,9 +69,9 @@ pub use provider::oauth::{
 };
 pub use support::control::ControlLineIssue;
 pub use support::index::{
-    SessionIndexIssue, SessionIndexKind, SessionIndexReport, SessionIndexUpdateError,
-    inspect_session_index, preflight_session_index_update, update_session_index,
-    update_session_index_with_keys,
+    SessionIndexGuard, SessionIndexIssue, SessionIndexKind, SessionIndexReport,
+    SessionIndexUpdateError, compare_and_update_session_index, inspect_session_index,
+    preflight_session_index_update, update_session_index, update_session_index_with_keys,
 };
 pub use support::layout::{LayoutPathRole, PathLayoutIssue};
 pub use support::manuals::{
