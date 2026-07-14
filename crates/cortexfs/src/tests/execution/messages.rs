@@ -440,6 +440,57 @@ printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","argu
 }
 
 #[test]
+fn recoverable_agent_error_allows_following_tool_call() {
+    let root = reference_tree("agent-recoverable-error-tool-call");
+    declare_native_echo_tool(&root, true);
+    let agent_executable = root.join("agent/coder");
+    write_text_file(
+        &agent_executable,
+        r#"#!/bin/sh
+printf '{"type":"error","run":"%s","code":"EAGAIN","message":"fallback","recoverable":true}\n' "$CTX_RUN_ID"
+printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID"
+"#,
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(
+        client
+            .write_all(
+                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tool\"}\n"
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/work",
+            model: Some("debug/echo"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Direct,
+        },
+    );
+    let outcome = ok!(outcome);
+    let jsonl = outcome.jsonl();
+    assert!(jsonl.contains("\"recoverable\":true"));
+    assert!(jsonl.contains("\"type\":\"tool_call\""));
+    assert!(jsonl.contains("\"type\":\"message\""));
+    assert_eq!(jsonl.matches("\"type\":\"done\"").count(), 1);
+    assert!(jsonl.contains("\"status\":\"ok\""));
+    assert_file_text(&session_root.join("default/state"), "done\n");
+}
+
+#[test]
 fn sdk_envelope_agent_runs_two_authoritative_tool_steps() {
     let root = reference_tree("sdk-envelope-two-step");
     write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");

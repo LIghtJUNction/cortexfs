@@ -72,6 +72,66 @@ mod tests {
         Ok(())
     }
 
+    fn spawn_activation(
+        source: &Path,
+        socket: &Path,
+        runtime: &str,
+        agent: &str,
+    ) -> std::io::Result<ChildGuard> {
+        Command::new("/usr/bin/bwrap")
+            .args([
+                "--bind",
+                "/",
+                "/",
+                "--proc",
+                "/proc",
+                "--dev-bind",
+                "/dev",
+                "/dev",
+                "--tmpfs",
+                "/run/cortexfs",
+                "--dir",
+                "/run/cortexfs/control",
+                "--",
+                "/usr/bin/systemd-socket-activate",
+                "-l",
+                socket
+                    .to_str()
+                    .ok_or_else(|| std::io::Error::other("invalid socket"))?,
+                runtime,
+                "--source",
+            ])
+            .arg(source)
+            .args(["--agent", agent])
+            .process_group(0)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map(|child| ChildGuard(Some(child)))
+    }
+
+    fn wait_for_socket(
+        activation: &mut ChildGuard,
+        socket: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !socket.exists() {
+            if let Some(status) = activation.child()?.try_wait()? {
+                let stderr = activation.terminate_with_stderr();
+                return Err(format!(
+                    "socket activation prerequisites unavailable or child exited {status}: {stderr}"
+                )
+                .into());
+            }
+            if Instant::now() >= deadline {
+                let stderr = activation.terminate_with_stderr();
+                return Err(format!("socket activation timed out: {stderr}").into());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+
     #[test]
     fn socket_activated_runtime_ping_does_not_execute_agent_or_provider()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -83,10 +143,7 @@ mod tests {
         let ctx = env!("CARGO_BIN_EXE_ctx");
         let runtime = env!("CARGO_BIN_EXE_cortexfs-agent-runtime");
         for program in [
-            "/usr/bin/unshare",
-            "/bin/sh",
-            "/usr/bin/mount",
-            "/usr/bin/install",
+            "/usr/bin/bwrap",
             "/usr/bin/systemd-socket-activate",
             runtime,
         ] {
@@ -122,44 +179,8 @@ mod tests {
             "allow coder_t model:debug/echo use\nallow coder_t tool:tsh execute\n",
         )?;
 
-        let mut activation = ChildGuard(Some(
-        Command::new("/usr/bin/unshare")
-        .args([
-            "--user",
-            "--map-root-user",
-            "--mount",
-            "--fork",
-            "/bin/sh",
-            "-c",
-                "/usr/bin/mount -t tmpfs tmpfs /run/cortexfs && /usr/bin/install -d -m 0711 /run/cortexfs/control && exec /usr/bin/systemd-socket-activate \"$@\"",
-            "cortexfs-runtime-test",
-            "-l",
-            socket.to_str().ok_or("socket")?,
-            runtime,
-            "--source",
-        ])
-            .arg(&source)
-            .args(["--agent", "coder"])
-            .process_group(0)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()?,
-        ));
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !socket.exists() {
-            if let Some(status) = activation.child()?.try_wait()? {
-                let stderr = activation.terminate_with_stderr();
-                return Err(format!(
-                    "socket activation prerequisites unavailable or child exited {status}: {stderr}"
-                )
-                .into());
-            }
-            if Instant::now() >= deadline {
-                let stderr = activation.terminate_with_stderr();
-                return Err(format!("socket activation timed out: {stderr}").into());
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
+        let mut activation = spawn_activation(&source, &socket, runtime, "coder")?;
+        wait_for_socket(&mut activation, &socket)?;
         let mut stream = UnixStream::connect(&socket).map_err(|error| {
             let stderr = activation.terminate_with_stderr();
             format!("cannot connect activated socket: {error}; activation stderr: {stderr}")
@@ -187,6 +208,79 @@ mod tests {
         assert!(response.contains("\"type\":\"pong\""));
         assert!(!agent_marker.exists());
         assert!(!provider_marker.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn socket_activated_agent_failures_are_canonical_and_restartable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let source = root.path().join("source");
+        let ctx = env!("CARGO_BIN_EXE_ctx");
+        let runtime = env!("CARGO_BIN_EXE_cortexfs-agent-runtime");
+        for program in [
+            "/usr/bin/bwrap",
+            "/usr/bin/systemd-socket-activate",
+            runtime,
+        ] {
+            require_program(Path::new(program))?;
+        }
+        let bootstrap = Command::new(ctx)
+            .args(["bootstrap", source.to_str().ok_or("source")?])
+            .output()?;
+        if !bootstrap.status.success() {
+            return Err(String::from_utf8_lossy(&bootstrap.stderr)
+                .into_owned()
+                .into());
+        }
+        let agent = source.join("agent/architect");
+        fs::write(
+            &agent,
+            "#!/bin/sh\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\nexit 1\n",
+        )?;
+        fs::set_permissions(&agent, fs::Permissions::from_mode(0o755))?;
+        fs::write(source.join("agent/architect.d/model"), "debug/echo\n")?;
+
+        for attempt in 1..=2 {
+            let socket = root.path().join(format!("coder-{attempt}.sock"));
+            let mut activation = spawn_activation(&source, &socket, runtime, "architect")?;
+            wait_for_socket(&mut activation, &socket)?;
+            let mut stream = UnixStream::connect(&socket)?;
+            writeln!(
+                stream,
+                "{{\"op\":\"send\",\"id\":\"failure-{attempt}\",\"session\":\"default\",\"input\":\"fail\"}}"
+            )?;
+            stream.shutdown(std::net::Shutdown::Write)?;
+            let mut response = String::new();
+            BufReader::new(stream).read_to_string(&mut response)?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = activation.child()?.try_wait()? {
+                    break status;
+                }
+                if Instant::now() >= deadline {
+                    let stderr = activation.terminate_with_stderr();
+                    return Err(format!("activation did not exit: {stderr}").into());
+                }
+                thread::sleep(Duration::from_millis(10));
+            };
+            let stderr = activation.terminate_with_stderr();
+            assert!(status.success(), "stderr={stderr}; response={response}");
+            let done = response
+                .lines()
+                .filter(|line| {
+                    serde_json::from_str::<serde_json::Value>(line).is_ok_and(|value| {
+                        value.get("type").and_then(serde_json::Value::as_str) == Some("done")
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(done.len(), 1, "stderr={stderr}; response={response}");
+            assert!(
+                done.first()
+                    .is_some_and(|line| line.contains("\"status\":\"error\""))
+            );
+            assert!(response.contains("\"type\":\"error\""));
+        }
         Ok(())
     }
 }
