@@ -227,6 +227,42 @@ fn session_index_update_preserves_existing_file_metadata() {
 }
 
 #[test]
+fn session_index_secondary_creation_uses_index_owner_on_repeated_cycles() {
+    let root = clean_test_dir("session-index-secondary-owner");
+    let session_root = root.join("session");
+    let index = session_root.join("index");
+    assert!(fs::create_dir_all(index.join("by-cwd")).is_ok());
+    assert!(fs::create_dir_all(session_root.join("default")).is_ok());
+    write_text_file(&index.join("list"), "default\n");
+    write_text_file(&index.join("current"), "default\n");
+    if nix::unistd::geteuid().is_root() {
+        let uid = nix::unistd::Uid::from_raw(65_534);
+        let gid = nix::unistd::Gid::from_raw(65_534);
+        assert!(nix::unistd::chown(&index, Some(uid), Some(gid)).is_ok());
+        assert!(nix::unistd::chown(&index.join("by-cwd"), Some(uid), Some(gid)).is_ok());
+    }
+    let owner = index
+        .metadata()
+        .map(|metadata| (metadata.uid(), metadata.gid()));
+    assert!(owner.is_ok());
+    let owner = owner.unwrap_or_default();
+
+    for _cycle in 0..2 {
+        assert_eq!(
+            update_session_index(&session_root, "default", Some("cwd-cycle")),
+            Ok(())
+        );
+        let secondary = index.join("by-cwd/cwd-cycle");
+        let metadata = secondary.metadata();
+        assert!(metadata.is_ok());
+        let metadata = ok!(metadata);
+        assert_eq!((metadata.uid(), metadata.gid()), owner);
+        assert_eq!(metadata.permissions().mode() & 0o7777, 0o600);
+        assert!(fs::remove_file(secondary).is_ok());
+    }
+}
+
+#[test]
 fn session_index_update_rejects_missing_and_invalid_index_state() {
     let root = clean_test_dir("session-index-update-bad");
     let session_root = root.join("session");
