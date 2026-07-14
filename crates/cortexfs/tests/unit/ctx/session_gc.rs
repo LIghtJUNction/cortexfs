@@ -1,4 +1,5 @@
 use crate::{SessionIndexGuard, agent_session_select};
+use cortexfs::update_session_index;
 use std::thread;
 use std::time::Duration;
 
@@ -145,6 +146,26 @@ fn agent_session_gc_and_select_share_index_guard() {
     drop(guard);
     assert_eq!(received.recv_timeout(Duration::from_secs(2)), Ok(Ok(())));
     assert!(worker.join().is_ok());
+}
+
+#[test]
+fn benchmark_like_secondary_index_create_and_gc_repeats_twice() {
+    let root = clean_test_dir("ctx-agent-session-secondary-gc-cycle");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let secondary = session_root.join("index/by-cwd/cwd-cycle");
+    for _cycle in 0..2 {
+        assert!(fs::create_dir_all(session_root.join("e2e-cycle")).is_ok());
+        assert_eq!(
+            update_session_index(&session_root, "e2e-cycle", Some("cwd-cycle")),
+            Ok(())
+        );
+        assert!(secondary.is_file());
+        assert!(agent_session_select(&root, "coder", "default", "e2e-cycle").is_ok());
+        let args = agent_session_gc_args(true, true, &["e2e-cycle"], &[]);
+        assert!(agent_session_gc(&root, &args).is_ok());
+        assert!(!session_root.join("e2e-cycle").exists());
+        assert!(!secondary.exists());
+    }
 }
 
 #[test]

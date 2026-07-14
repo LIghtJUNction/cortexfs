@@ -67,6 +67,21 @@ pub fn atomic_create_text_with_mode(path: &Path, content: &str, mode: u32) -> st
         .and_then(AtomicReplaceOutcome::into_result)
 }
 
+pub(crate) fn atomic_create_text_with_mode_and_owner(
+    path: &Path,
+    content: &str,
+    mode: u32,
+    owner: (u32, u32),
+) -> std::io::Result<()> {
+    atomic_replace_text_inner(
+        path,
+        content,
+        AtomicReplaceMetadata::create_owned(mode, owner),
+        None,
+    )
+    .and_then(AtomicReplaceOutcome::into_result)
+}
+
 pub fn atomic_replace_text_preserving_metadata(path: &Path, content: &str) -> std::io::Result<()> {
     atomic_replace_text_preserving_metadata_inner(path, content, None, None)
 }
@@ -193,6 +208,15 @@ impl AtomicReplaceMetadata {
         Self {
             mode,
             owner: None,
+            identity: None,
+            commit: AtomicCommit::NoReplace,
+        }
+    }
+
+    const fn create_owned(mode: u32, owner: (u32, u32)) -> Self {
+        Self {
+            mode,
+            owner: Some(owner),
             identity: None,
             commit: AtomicCommit::NoReplace,
         }
