@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import sys
 import tempfile
 import types
@@ -98,6 +99,37 @@ def frame(value: object) -> bytes:
 
 
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def run_real_agent(
+        self,
+        frames: list[dict[str, object]],
+        *,
+        exit_code: int = 0,
+        stderr: str = "",
+        delay: float = 0,
+        timeout: float = 1.0,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "ctx-fixture"
+            executable.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, sys, time\n"
+                f"frames = {frames!r}\n"
+                "for value in frames:\n"
+                "    print(json.dumps(value), flush=True)\n"
+                f"sys.stderr.write({stderr!r})\n"
+                f"time.sleep({delay!r})\n"
+                f"raise SystemExit({exit_code!r})\n",
+                encoding="utf-8",
+            )
+            executable.chmod(0o755)
+            return await agents.run_ctx_agent(
+                ctx_path=os.fspath(executable),
+                agent_name="coder",
+                session="benchmark-owned",
+                prompt="x",
+                timeout=timeout,
+            )
+
     async def run_agent(
         self,
         lines: list[bytes],
@@ -212,6 +244,81 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         self.assertIsNone(result.error_code)
+
+    async def test_real_collector_recoverable_errors_follow_terminal_outcome(
+        self,
+    ) -> None:
+        recoverable = {
+            "type": "error",
+            "run": "r",
+            "code": "ERETRY",
+            "message": "first candidate failed",
+            "recoverable": True,
+        }
+        later = {
+            **recoverable,
+            "code": "EFALLBACK",
+            "message": "last candidate failed",
+        }
+        successful = await self.run_real_agent(
+            [
+                {"type": "start", "run": "r"},
+                recoverable,
+                later,
+                {"type": "message", "run": "r", "role": "assistant", "content": "ok"},
+                {"type": "done", "run": "r", "status": "success"},
+            ]
+        )
+        self.assertTrue(successful.runtime_success)
+        self.assertIsNone(successful.error_code)
+        self.assertEqual(
+            [
+                item["code"]
+                for item in successful.frames
+                if item["type"] == "error"
+            ],
+            ["ERETRY", "EFALLBACK"],
+        )
+
+        failed = await self.run_real_agent(
+            [recoverable, later, {"type": "done", "run": "r", "status": "error"}]
+        )
+        self.assertFalse(failed.runtime_success)
+        self.assertEqual(failed.error_code, "EFALLBACK")
+        self.assertEqual(failed.error_message, "last candidate failed")
+
+    async def test_real_collector_preserves_authoritative_failures(self) -> None:
+        recoverable = {
+            "type": "error",
+            "run": "r",
+            "code": "ERETRY",
+            "message": "candidate failed",
+            "recoverable": True,
+        }
+        fatal = {
+            "type": "error",
+            "run": "r",
+            "code": "EFATAL",
+            "message": "fatal failure",
+        }
+        nonrecoverable = await self.run_real_agent(
+            [recoverable, fatal, {"type": "done", "run": "r", "status": "error"}]
+        )
+        self.assertEqual(nonrecoverable.error_code, "EFATAL")
+
+        stderr = await self.run_real_agent([recoverable], exit_code=2, stderr="boom")
+        self.assertEqual(stderr.error_code, "exit_2")
+        self.assertEqual(stderr.error_message, "boom")
+
+        exited = await self.run_real_agent([recoverable], exit_code=2)
+        self.assertEqual(exited.error_code, "ERETRY")
+        self.assertEqual(exited.error_message, "candidate failed")
+
+        timed_out = await self.run_real_agent(
+            [recoverable], delay=0.2, timeout=0.01
+        )
+        self.assertTrue(timed_out.timed_out)
+        self.assertEqual(timed_out.error_code, "ETIMEDOUT")
 
     async def test_outer_cancellation_cancels_server(self) -> None:
         runner = FakeRunner()

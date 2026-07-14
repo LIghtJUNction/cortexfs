@@ -304,6 +304,7 @@ async def run_ctx_agent(
     done_status: str | None = None
     error_code: str | None = None
     error_message: str | None = None
+    last_recoverable_error: tuple[str, str] | None = None
     canonical_run_id: str | None = None
     stdout_bytes = 0
     retained_bytes = 0
@@ -313,7 +314,7 @@ async def run_ctx_agent(
     async def collect() -> int:
         nonlocal ttft, input_tokens, output_tokens, done_status
         nonlocal error_code, error_message, canonical_run_id, stdout_bytes
-        nonlocal retained_bytes, terminal_seen, frame_count
+        nonlocal retained_bytes, terminal_seen, frame_count, last_recoverable_error
         while True:
             raw_line = await process.stdout.readline()
             if not raw_line:
@@ -375,10 +376,14 @@ async def run_ctx_agent(
                 done_status = frame["status"]
                 terminal_seen = True
             elif kind == "error":
-                error_code = str(sanitize(str(frame.get("code") or "agent_error")))
-                error_message = str(
-                    sanitize(str(frame.get("message") or "ctx agent failed"))
+                diagnostic = (
+                    str(sanitize(str(frame.get("code") or "agent_error"))),
+                    str(sanitize(str(frame.get("message") or "ctx agent failed"))),
                 )
+                if frame.get("recoverable") is True:
+                    last_recoverable_error = diagnostic
+                else:
+                    error_code, error_message = diagnostic
         return await process.wait()
 
     timed_out = False
@@ -456,10 +461,14 @@ async def run_ctx_agent(
         and done_status in {"ok", "success"}
     )
     if not runtime_success and error_code is None:
-        error_code = f"exit_{exit_code}" if exit_code else "protocol_error"
-        error_message = str(
-            sanitize(stderr or f"ctx agent ended with status {done_status!r}")
-        )
+        if stderr:
+            error_code = f"exit_{exit_code}" if exit_code else "protocol_error"
+            error_message = stderr
+        elif last_recoverable_error is not None:
+            error_code, error_message = last_recoverable_error
+        else:
+            error_code = f"exit_{exit_code}" if exit_code else "protocol_error"
+            error_message = str(sanitize(f"ctx agent ended with status {done_status!r}"))
     identity = RunIdentity(client_id, canonical_run_id, session)
     if cancellation is not None and local_signal is not None:
         cancellation = CancellationReceipt(
