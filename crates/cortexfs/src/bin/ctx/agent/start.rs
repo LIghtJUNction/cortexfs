@@ -599,7 +599,7 @@ pub(crate) fn rollback_agent_late_chat_start_with(
 }
 
 fn remove_matching_socket_alias(visible: &Path, target: &Path) {
-    let _ignored = remove_exact_socket_alias(visible, target);
+    let _ignored = cortexfs::agent::launch::remove_exact_socket_alias(visible, target);
 }
 
 fn remove_plain_runtime_socket(path: &Path) {

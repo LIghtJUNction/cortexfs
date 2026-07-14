@@ -1,4 +1,7 @@
-use super::{BWRAP_PROGRAM, DEFAULT_SOURCE, RuntimeConfig, runtime_agent_execution, runtime_model};
+use super::{
+    BWRAP_PROGRAM, DEFAULT_SOURCE, RuntimeConfig, RuntimeMode, runtime_agent_execution,
+    runtime_model,
+};
 use cortexfs::{AgentExecutableSocketExecution, MountTable};
 use std::ffi::OsString;
 use std::fs;
@@ -12,6 +15,7 @@ pub(crate) fn runtime_config_parses_agent_and_default_source() {
         Ok(RuntimeConfig {
             source: Path::new(DEFAULT_SOURCE).to_path_buf(),
             agent: "coder".to_owned(),
+            mode: RuntimeMode::Serve,
         })
     );
 }
@@ -28,8 +32,74 @@ pub(crate) fn runtime_config_accepts_positional_agent() {
         Ok(RuntimeConfig {
             source: Path::new("/tmp/ctx").to_path_buf(),
             agent: "reviewer".to_owned(),
+            mode: RuntimeMode::Serve,
         })
     );
+}
+
+#[test]
+pub(crate) fn runtime_config_parses_internal_socket_alias_modes() {
+    for (flag, mode) in [
+        ("--prepare-socket-alias", RuntimeMode::PrepareSocketAlias),
+        ("--cleanup-socket-alias", RuntimeMode::CleanupSocketAlias),
+    ] {
+        let parsed = RuntimeConfig::parse(vec![
+            OsString::from(flag),
+            OsString::from("--source"),
+            OsString::from("/tmp/ctx"),
+            OsString::from("--agent"),
+            OsString::from("coder"),
+        ]);
+        assert_eq!(
+            parsed,
+            Ok(RuntimeConfig {
+                source: Path::new("/tmp/ctx").to_path_buf(),
+                agent: "coder".to_owned(),
+                mode,
+            })
+        );
+    }
+}
+
+#[test]
+pub(crate) fn runtime_config_rejects_conflicting_or_positional_internal_modes() {
+    assert!(
+        RuntimeConfig::parse(vec![
+            OsString::from("--prepare-socket-alias"),
+            OsString::from("--cleanup-socket-alias"),
+            OsString::from("--agent"),
+            OsString::from("coder"),
+        ])
+        .is_err()
+    );
+    assert!(
+        RuntimeConfig::parse(vec![
+            OsString::from("--prepare-socket-alias"),
+            OsString::from("coder"),
+        ])
+        .is_err()
+    );
+}
+
+#[test]
+pub(crate) fn packaged_socket_unit_uses_receipted_alias_lifecycle_and_safe_ordering()
+-> Result<(), Box<dyn std::error::Error>> {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let unit = fs::read_to_string(manifest.join("../../packaging/systemd/cortexfs-agent@.socket"))?;
+    for expected in [
+        "DefaultDependencies=no",
+        "Requires=cortexfs.service",
+        "After=cortexfs.service",
+        "Conflicts=shutdown.target",
+        "Before=shutdown.target",
+        "--prepare-socket-alias",
+        "--cleanup-socket-alias",
+    ] {
+        assert!(unit.lines().any(|line| line.contains(expected)));
+    }
+    assert!(!unit.contains("/usr/bin/rm -f"));
+    assert!(!unit.contains("/usr/bin/ln -s"));
+    Ok(())
 }
 
 #[test]

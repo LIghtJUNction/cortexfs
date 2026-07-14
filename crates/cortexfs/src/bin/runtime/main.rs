@@ -53,6 +53,25 @@ pub(crate) fn main() -> ExitCode {
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     let config = RuntimeConfig::parse(args)?;
+    match config.mode {
+        RuntimeMode::PrepareSocketAlias => {
+            return cortexfs::agent::launch::prepare_system_agent_alias(
+                &config.source,
+                &config.agent,
+            )
+            .map(|_changed| ())
+            .map_err(|error| format!("prepare socket alias: {error}"));
+        }
+        RuntimeMode::CleanupSocketAlias => {
+            return cortexfs::agent::launch::cleanup_system_agent_alias(
+                &config.source,
+                &config.agent,
+            )
+            .map(|_changed| ())
+            .map_err(|error| format!("cleanup socket alias: {error}"));
+        }
+        RuntimeMode::Serve => {}
+    }
     let view = derive_agent_runtime_view(&config.source, &config.agent)
         .map_err(|error| format!("agent view {}: {}", error.errno(), config.agent))?;
     let mut listenfd = ListenFd::from_env();
@@ -203,16 +222,26 @@ pub(crate) fn runtime_model(_source: &Path, requested_model: &str) -> String {
     requested_model.to_owned()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RuntimeMode {
+    Serve,
+    PrepareSocketAlias,
+    CleanupSocketAlias,
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct RuntimeConfig {
     source: PathBuf,
     agent: String,
+    mode: RuntimeMode,
 }
 
 impl RuntimeConfig {
     fn parse(args: Vec<OsString>) -> Result<Self, String> {
         let mut source = PathBuf::from(DEFAULT_SOURCE);
         let mut agent = None;
+        let mut positional_agent = false;
+        let mut mode = RuntimeMode::Serve;
         let mut values = args.into_iter();
 
         while let Some(value) = values.next() {
@@ -230,11 +259,26 @@ impl RuntimeConfig {
                 agent = Some(os_string(next)?);
                 continue;
             }
+            if value == "--prepare-socket-alias" {
+                if mode != RuntimeMode::Serve {
+                    return Err("runtime modes are mutually exclusive".to_owned());
+                }
+                mode = RuntimeMode::PrepareSocketAlias;
+                continue;
+            }
+            if value == "--cleanup-socket-alias" {
+                if mode != RuntimeMode::Serve {
+                    return Err("runtime modes are mutually exclusive".to_owned());
+                }
+                mode = RuntimeMode::CleanupSocketAlias;
+                continue;
+            }
             if value == "--help" || value == "-h" {
                 return Err(usage());
             }
             if agent.is_none() {
                 agent = Some(os_string(value)?);
+                positional_agent = true;
                 continue;
             }
             return Err("unexpected extra argument".to_owned());
@@ -243,7 +287,14 @@ impl RuntimeConfig {
         let Some(agent) = agent else {
             return Err(usage());
         };
-        Ok(Self { source, agent })
+        if mode != RuntimeMode::Serve && positional_agent {
+            return Err("internal socket alias modes require --agent".to_owned());
+        }
+        Ok(Self {
+            source,
+            agent,
+            mode,
+        })
     }
 }
 
@@ -254,7 +305,7 @@ pub(crate) fn os_string(value: OsString) -> Result<String, String> {
 }
 
 pub(crate) fn usage() -> String {
-    "usage: cortexfs-agent-runtime [--source CTX_SOURCE] --agent AGENT".to_owned()
+    "usage: cortexfs-agent-runtime [--source CTX_SOURCE] --agent AGENT [--prepare-socket-alias|--cleanup-socket-alias]".to_owned()
 }
 
 #[cfg(test)]
