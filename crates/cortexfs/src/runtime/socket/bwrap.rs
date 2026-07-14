@@ -12,6 +12,7 @@ pub(crate) fn agent_executable_socket_command(
     agent_executable: &fs::File,
     request: AgentExecutableRunRequest<'_>,
     control: Option<RunControlCommand<'_>>,
+    provider_egress: Option<&Path>,
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
@@ -62,6 +63,7 @@ pub(crate) fn agent_executable_socket_command(
                     agent_home_sandbox_fd: agent_home_sandbox_fd.raw(),
                     agent_home,
                     control_socket: control.map(|(socket, _environment)| socket),
+                    provider_egress,
                 },
             ));
             apply_agent_executable_socket_env(&mut command, runtime, request);
@@ -98,6 +100,7 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub agent_home_sandbox_fd: RawFd,
     pub agent_home: &'a Path,
     pub control_socket: Option<&'a Path>,
+    pub provider_egress: Option<&'a Path>,
 }
 
 pub(crate) struct InheritedFd(RawFd);
@@ -204,6 +207,18 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     ];
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
+    }
+    if let Some(host_dir) = request.provider_egress {
+        bwrap.extend([
+            "--dir".to_owned(),
+            runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
+            "--ro-bind".to_owned(),
+            host_dir.display().to_string(),
+            runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
+            "--setenv".to_owned(),
+            runtime::egress::PROVIDER_EGRESS_DIR_ENV.to_owned(),
+            runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
+        ]);
     }
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(socket) = request.control_socket {

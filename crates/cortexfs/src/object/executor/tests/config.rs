@@ -310,6 +310,80 @@ fn provider_transport_uses_exact_http_route() {
 }
 
 #[test]
+fn provider_egress_converts_only_direct_transport() {
+    let transport = ResolvedTransport::Direct {
+        base_url: "https://api.example.test/v1".to_owned(),
+    };
+
+    assert_eq!(
+        provider_egress_transport(
+            "fixture",
+            transport,
+            Some(OsStr::new(
+                cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+            ))
+        ),
+        Ok(ResolvedTransport::Unix {
+            base_url: "https://api.example.test/v1".to_owned(),
+            socket_path: "/run/cortexfs/provider-egress/fixture.sock".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn provider_egress_preserves_explicit_http_transport() {
+    let transport = ResolvedTransport::Http {
+        base_url: "http://127.0.0.1:8080/v1".to_owned(),
+    };
+
+    assert_eq!(
+        provider_egress_transport(
+            "fixture",
+            transport.clone(),
+            Some(OsStr::new(
+                cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+            ))
+        ),
+        Ok(transport)
+    );
+}
+
+#[test]
+fn provider_egress_preserves_explicit_unix_transport() {
+    let transport = ResolvedTransport::Unix {
+        base_url: "http://localhost/v1".to_owned(),
+        socket_path: "/run/fixture.sock".to_owned(),
+    };
+
+    assert_eq!(
+        provider_egress_transport(
+            "fixture",
+            transport.clone(),
+            Some(OsStr::new(
+                cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+            ))
+        ),
+        Ok(transport)
+    );
+}
+
+#[test]
+fn provider_egress_rejects_environment_drift() {
+    let transport = ResolvedTransport::Direct {
+        base_url: "https://api.example.test/v1".to_owned(),
+    };
+
+    assert_eq!(
+        provider_egress_transport(
+            "fixture",
+            transport,
+            Some(OsStr::new("/run/attacker-controlled"))
+        ),
+        Err("invalid provider egress directory".to_owned())
+    );
+}
+
+#[test]
 fn provider_transport_uses_wildcard_unix_route() {
     let config = test_provider_config("https://api.example.test/v1");
 

@@ -1,3 +1,19 @@
+fn assert_provider_egress_args(args: &[String], host_dir: &str) {
+    assert!(args.contains(&"--unshare-net".to_owned()));
+    assert!(contains_arg_triplet(
+        args,
+        "--ro-bind",
+        host_dir,
+        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+    ));
+    assert!(contains_arg_triplet(
+        args,
+        "--setenv",
+        crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
+        crate::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH
+    ));
+}
+
 #[test]
 fn agent_executable_socket_direct_does_not_inherit_provider_secrets() {
     let root = reference_tree("agent-direct-secrets");
@@ -132,10 +148,10 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         agent_home_sandbox_fd: 11,
         agent_home: session_root.parent().unwrap_or(&session_root),
         control_socket: Some(Path::new("/run/cortexfs/control/source.sock")),
+        provider_egress: Some(Path::new("/run/cortexfs/egress-run-1")),
     });
 
     assert!(!args.contains(&"--clearenv".to_owned()));
-    assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
     assert!(contains_arg_pair(&args, "--tmpfs", "/tmp"));
     assert!(contains_arg_pair(&args, "--ro-bind", "/usr"));
@@ -171,6 +187,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "CTX_PROVIDER_CONFIG_DIR",
         &root.join("shared/providers.d").display().to_string()
     ));
+    assert_provider_egress_args(&args, "/run/cortexfs/egress-run-1");
     assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
     assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_FD"));
     assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PATH"));
@@ -249,7 +266,7 @@ fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
         step: 0,
     };
     let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, None)
+        agent_executable_socket_command(runtime, &opened, request, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let replacement = root.join("agent").join("replacement");
     write_text_file(&replacement, "#!/bin/sh\nprintf B\n");
@@ -314,13 +331,119 @@ fn agent_executable_socket_bwrap_preserves_provider_secret_env()
     };
 
     let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, None)
+        agent_executable_socket_command(runtime, &opened, request, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let output = command.output()?;
     drop(agent_executable_fd);
     assert!(output.status.success(), "bwrap failed: {output:?}");
     assert_eq!(output.stdout, b"provider-secret");
     Ok(())
+}
+
+#[test]
+fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
+    let root = reference_tree("agent-bwrap-egress-spawn-failure");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent/coder");
+    write_text_file(&agent_executable, "#!/bin/sh\nexit 0\n");
+    set_file_mode(&agent_executable, 0o755);
+    let model_control = root.join("model/fixture/chat.d");
+    assert!(fs::create_dir_all(&model_control).is_ok());
+    write_text_file(
+        &model_control.join("default"),
+        "base_url=http://127.0.0.1:9/v1\n",
+    );
+    let control_dir = root.join("runtime");
+    assert!(fs::create_dir_all(&control_dir).is_ok());
+    let (client, mut socket) = ok!(UnixStream::pair());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let result = crate::runtime::socket::exec::run_agent_executable_streaming(
+        &mut socket,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/workspace",
+            model: Some("fixture/chat"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Bwrap {
+                program: Path::new("/definitely/missing/bwrap"),
+                mount_table: view.mount_table(),
+                control_dir: Some(&control_dir),
+            },
+        },
+        AgentExecutableRunRequest {
+            run_id: "run-1",
+            cancellation_id: "run-1",
+            session: "default",
+            cwd: None,
+            input: "hi",
+            history_messages: "",
+            tool_context: "",
+            debug: None,
+            envelope: None,
+            step: 0,
+        },
+    );
+
+    assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
+    assert!(!control_dir.join("egress-run-1").exists());
+}
+
+#[test]
+fn debug_alias_does_not_create_provider_egress() {
+    let root = reference_tree("agent-bwrap-debug-no-egress");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent/coder");
+    write_text_file(&agent_executable, "#!/bin/sh\nexit 0\n");
+    set_file_mode(&agent_executable, 0o755);
+    let control_dir = root.join("runtime");
+    assert!(fs::create_dir_all(&control_dir).is_ok());
+    let (client, mut socket) = ok!(UnixStream::pair());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let result = crate::runtime::socket::exec::run_agent_executable_streaming(
+        &mut socket,
+        AgentExecutableSocketRuntime {
+            ctx_root: &root,
+            source_root: &root,
+            identity: view.identity(),
+            env: view.env(),
+            session_root: &session_root,
+            default_cwd: "/workspace",
+            model: Some("main"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Bwrap {
+                program: Path::new("/definitely/missing/bwrap"),
+                mount_table: view.mount_table(),
+                control_dir: Some(&control_dir),
+            },
+        },
+        AgentExecutableRunRequest {
+            run_id: "run-1",
+            cancellation_id: "run-1",
+            session: "default",
+            cwd: None,
+            input: "hi",
+            history_messages: "",
+            tool_context: "",
+            debug: None,
+            envelope: None,
+            step: 0,
+        },
+    );
+
+    assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
+    assert!(!control_dir.join("egress-run-1").exists());
 }
 
 #[test]
@@ -418,10 +541,16 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         agent_home_sandbox_fd: 11,
         agent_home: session_root.parent().unwrap_or(&session_root),
         control_socket: None,
+        provider_egress: None,
     });
 
     assert!(!args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg == crate::runtime::egress::PROVIDER_EGRESS_DIR_ENV)
+    );
 }
 
 #[test]
@@ -464,6 +593,7 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         agent_home_sandbox_fd: 11,
         agent_home: session_root.parent().unwrap_or(&session_root),
         control_socket: None,
+        provider_egress: None,
     });
 
     assert!(contains_arg_triplet(
@@ -552,6 +682,7 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
         &opened,
         request,
         Some((capability.socket(), environment.as_slice())),
+        None,
     ));
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = std::sync::Arc::clone(&shutdown);
@@ -577,7 +708,7 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
     assert!(fs::remove_dir(&control_dir).is_ok());
 
     let (mut command, _fds) = ok!(agent_executable_socket_command(
-        runtime, &opened, request, None
+        runtime, &opened, request, None, None
     ));
     assert!(ok!(command.output()).status.success());
 }

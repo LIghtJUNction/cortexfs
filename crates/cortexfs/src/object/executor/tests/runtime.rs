@@ -61,27 +61,6 @@ fn provider_runtime_driver_uses_responses_when_chat_is_absent() {
 }
 
 #[test]
-fn openai_public_http_provider_requires_credential_before_curl() {
-    let transport = ResolvedTransport::Direct {
-        base_url: "https://api.example.test/v1".to_owned(),
-    };
-
-    assert_eq!(
-        openai_api_key("api.example.test", &transport, None),
-        Err("missing provider credential: api.example.test".to_owned())
-    );
-}
-
-#[test]
-fn openai_local_http_provider_allows_missing_credential() {
-    let transport = ResolvedTransport::Direct {
-        base_url: "http://127.0.0.1:8317/v1".to_owned(),
-    };
-
-    assert_eq!(openai_api_key("local", &transport, None), Ok(None));
-}
-
-#[test]
 fn openai_provider_uses_resolved_credential_when_present() {
     let transport = ResolvedTransport::Direct {
         base_url: "https://api.example.test/v1".to_owned(),
@@ -89,8 +68,94 @@ fn openai_provider_uses_resolved_credential_when_present() {
     let credential = ProviderCredential::Bearer("secret".to_owned());
 
     assert_eq!(
-        openai_api_key("api.example.test", &transport, Some(&credential)),
+        openai_api_key(
+            "api.example.test",
+            transport_allows_unauthenticated(&transport),
+            Some(&credential)
+        ),
         Ok(Some("secret"))
+    );
+}
+
+#[test]
+fn brokered_external_direct_provider_still_requires_credential_before_request() {
+    let original = ResolvedTransport::Direct {
+        base_url: "https://api.example.test/v1".to_owned(),
+    };
+    let allow_unauthenticated = transport_allows_unauthenticated(&original);
+    let rewritten = provider_egress_transport(
+        "fixture",
+        original,
+        Some(OsStr::new(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        )),
+    );
+
+    assert_eq!(
+        rewritten.map(|transport| (
+            transport,
+            openai_api_key("fixture", allow_unauthenticated, None)
+        )),
+        Ok((
+            ResolvedTransport::Unix {
+                base_url: "https://api.example.test/v1".to_owned(),
+                socket_path: "/run/cortexfs/provider-egress/fixture.sock".to_owned(),
+            },
+            Err("missing provider credential: fixture".to_owned())
+        ))
+    );
+}
+
+#[test]
+fn brokered_local_direct_provider_remains_anonymous() {
+    let original = ResolvedTransport::Direct {
+        base_url: "http://127.0.0.1:8317/v1".to_owned(),
+    };
+    let allow_unauthenticated = transport_allows_unauthenticated(&original);
+    let rewritten = provider_egress_transport(
+        "local",
+        original,
+        Some(OsStr::new(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        )),
+    );
+
+    assert_eq!(
+        rewritten.map(|transport| (
+            transport,
+            openai_api_key("local", allow_unauthenticated, None)
+        )),
+        Ok((
+            ResolvedTransport::Unix {
+                base_url: "http://127.0.0.1:8317/v1".to_owned(),
+                socket_path: "/run/cortexfs/provider-egress/local.sock".to_owned(),
+            },
+            Ok(None)
+        ))
+    );
+}
+
+#[test]
+fn native_unix_provider_remains_anonymous() {
+    let original = ResolvedTransport::Unix {
+        base_url: "http://localhost/v1".to_owned(),
+        socket_path: "/run/native.sock".to_owned(),
+    };
+    let allow_unauthenticated = transport_allows_unauthenticated(&original);
+    let routed = provider_egress_transport(
+        "local",
+        original.clone(),
+        Some(OsStr::new(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        )),
+    );
+
+    assert_eq!(
+        routed.map(|transport| (
+            transport,
+            openai_api_key("local", allow_unauthenticated, None)
+        )),
+        Ok((original, Ok(None)))
     );
 }
 
