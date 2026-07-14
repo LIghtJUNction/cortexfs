@@ -188,21 +188,30 @@ pub(crate) fn openai_responses_tool_specs() -> Vec<Value> {
 }
 pub(crate) fn current_agent_openai_tools() -> Vec<String> {
     let agent = env::var("CTX_AGENT").ok();
+    let session = env::var("CTX_SESSION").ok();
     let root =
         env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(cortexfs::CTX_ROOT), PathBuf::from);
-    current_agent_openai_tools_for(agent.as_deref(), &root)
+    current_agent_openai_tools_for(agent.as_deref(), session.as_deref(), &root)
 }
-pub(crate) fn current_agent_openai_tools_for(agent: Option<&str>, root: &Path) -> Vec<String> {
+pub(crate) fn current_agent_openai_tools_for(
+    agent: Option<&str>,
+    session: Option<&str>,
+    root: &Path,
+) -> Vec<String> {
     let mut tools = vec!["tsh".to_owned()];
     let Some(agent) = agent else {
         return tools;
     };
-    let Ok(view) = derive_agent_runtime_view(root, agent) else {
+    let (Ok(view), Some(session)) = (derive_agent_runtime_view(root, agent), session) else {
         return tools;
     };
-    for tool in view.declared_tools() {
-        if provider_function_name_is_compatible(tool) && !tools.contains(tool) {
-            tools.push(tool.clone());
+    let path = cortexfs::tsh_context_state_path(&view.home().join("session").join(session));
+    let Ok(state) = cortexfs::read_tsh_context_state(&path) else {
+        return tools;
+    };
+    for tool in state.tools {
+        if provider_function_name_is_compatible(&tool.name) && !tools.contains(&tool.name) {
+            tools.push(tool.name);
         }
     }
     tools.sort();
@@ -361,10 +370,18 @@ mod requests_tests {
                 last_used: 2,
             },
         ];
-        cortexfs::write_tsh_context_state(&cortexfs::tsh_context_state_path(view.home()), &state)
-            .expect("state");
-        let tools = current_agent_openai_tools_for(Some("coder"), &root);
+        let session = "session-a";
+        cortexfs::write_tsh_context_state(
+            &cortexfs::tsh_context_state_path(&view.home().join("session").join(session)),
+            &state,
+        )
+        .expect("state");
+        let tools = current_agent_openai_tools_for(Some("coder"), Some(session), &root);
         assert_eq!(tools, vec!["bash".to_owned(), "tsh".to_owned()]);
+        assert_eq!(
+            current_agent_openai_tools_for(Some("coder"), Some("session-b"), &root),
+            vec!["tsh".to_owned()]
+        );
         let _ignored = fs::remove_dir_all(root);
     }
 }

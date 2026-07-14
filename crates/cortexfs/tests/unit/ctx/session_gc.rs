@@ -3,6 +3,24 @@ use cortexfs::update_session_index;
 use std::thread;
 use std::time::Duration;
 
+#[test]
+fn session_gc_storage_root_is_pinned_across_current_switch() {
+    let root = clean_test_dir("session-gc-current-pin");
+    let generations = root.join("generations");
+    let relative = Path::new("home/1000/agent/coder/session");
+    for generation in ["old", "new"] {
+        assert!(fs::create_dir_all(generations.join(generation).join(relative)).is_ok());
+    }
+    assert!(
+        std::os::unix::fs::symlink("generations/old", root.join("current")).is_ok()
+    );
+    let pinned = crate::gc_storage_session_root(&root.join("current"), relative);
+    assert!(std::os::unix::fs::symlink("generations/new", root.join(".next")).is_ok());
+    assert!(fs::rename(root.join(".next"), root.join("current")).is_ok());
+
+    assert!(matches!(pinned, Ok(Some(ref path)) if path == &generations.join("old").join(relative)));
+}
+
 fn create_agent_session_gc_fixture(root: &Path) -> PathBuf {
     let home = ctx_home(root);
     assert!(home.is_ok(), "{home:?}");

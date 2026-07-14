@@ -147,12 +147,17 @@ fn gc_session_root(root: &Path, name: &str) -> Result<PathBuf, CliError> {
     let Ok(relative) = session_root.strip_prefix(root) else {
         return Ok(session_root);
     };
-    let storage_session_root = Path::new(SYSTEM_STORAGE_ROOT).join(relative);
-    if plain_session_dir_exists(&storage_session_root) {
-        Ok(storage_session_root)
-    } else {
-        Ok(session_root)
-    }
+    gc_storage_session_root(Path::new(SYSTEM_STORAGE_ROOT), relative)?.map_or(Ok(session_root), Ok)
+}
+
+pub(crate) fn gc_storage_session_root(
+    storage: &Path,
+    relative: &Path,
+) -> Result<Option<PathBuf>, CliError> {
+    let storage = pin_storage_source(storage)
+        .map_err(|error| CliError::unavailable(format!("cannot pin storage current: {error}")))?;
+    let session_root = storage.join(relative);
+    Ok(plain_session_dir_exists(&session_root).then_some(session_root))
 }
 
 fn agent_session_gc_protected(args: &AgentSessionGcArgs, current: &str) -> HashSet<String> {

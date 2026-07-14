@@ -69,7 +69,7 @@ pub use provider::oauth::{
 };
 pub use reference::storage::{
     SYSTEM_STORAGE_CURRENT, SYSTEM_STORAGE_DIR, StorageUpdateError, pin_storage_source,
-    update_storage_generation,
+    update_storage_generation, update_storage_generation_with_prune,
 };
 pub use support::control::ControlLineIssue;
 pub use support::index::{
@@ -111,6 +111,6 @@ pub use tool::core::tools::{
     run_core_tool_cli, run_core_tool_cli_with_root,
 };
 pub use tool::state::{
-    TshContextState, TshLoadedToolState, read_tsh_context_state, tsh_context_state_path,
-    write_tsh_context_state,
+    TshContextState, TshLoadedToolState, read_tsh_context_state, retain_tsh_context_tool,
+    tsh_context_contains, tsh_context_state_path, write_tsh_context_state,
 };

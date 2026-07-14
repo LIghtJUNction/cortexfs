@@ -401,7 +401,9 @@ fn persistent_context_path_with_capability(
     validate_runtime_source_receipt(&runtime.source, &receipt)?;
     let view = derive_agent_runtime_view(&runtime.source, agent)
         .map_err(|error| agent_view_error_to_tsh(&error))?;
-    Ok(Some(cortexfs::tsh_context_state_path(view.home())))
+    Ok(Some(cortexfs::tsh_context_state_path(
+        &view.home().join("session").join(&runtime.session),
+    )))
 }
 
 fn validate_runtime_source_receipt(

@@ -1,7 +1,8 @@
 [Unit]
 Description=CortexFS agent runtime for %i
 Documentation=file:/usr/share/doc/cortexfs-git/README.md
-Requires=cortexfs.service
+BindsTo=cortexfs.service
+PartOf=cortexfs.service
 After=cortexfs.service
 StartLimitIntervalSec=0
 

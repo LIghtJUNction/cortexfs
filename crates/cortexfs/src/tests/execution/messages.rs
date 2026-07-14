@@ -256,7 +256,8 @@ fn client_disconnect_does_not_mask_invalid_agent_output() {
         },
     );
     assert!(matches!(closer.join(), Ok(Ok(bytes)) if bytes > 0));
-    assert_eq!(result, Err(SocketRuntimeError::InvalidAgentOutput));
+    assert!(result.is_ok(), "{result:?}");
+    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]
@@ -344,12 +345,25 @@ fn legacy_agent_rejects_forged_approval_facts() {
             None,
             direct_agent_runtime(&root, &view, &session_root, &executable),
         );
-        assert_eq!(result, Err(SocketRuntimeError::InvalidAgentOutput));
+        let outcome = ok!(result);
+        assert!(
+            outcome
+                .frames()
+                .iter()
+                .any(|frame| frame.contains("\"code\":\"EPROTO\""))
+        );
+        assert!(
+            outcome
+                .frames()
+                .iter()
+                .any(|frame| frame.contains("\"status\":\"error\""))
+        );
         let events = ok!(fs::read_to_string(
             session_root.join("default/events.jsonl")
         ));
         assert!(!events.contains("approval_request"), "{case}: {events}");
         assert!(!events.contains("approval_result"), "{case}: {events}");
+        assert_file_text(&session_root.join("default/state"), "error\n");
     }
 }
 
@@ -720,6 +734,99 @@ fn sdk_envelope_rejects_oversized_tool_context_before_agent_spawn() {
         session_root.join("default/events.jsonl")
     ));
     assert!(!events.contains("tool_result"), "{events}");
+}
+
+#[test]
+fn argv_agent_accepts_correlated_internal_tool_rounds_and_terminalizes() {
+    let root = reference_tree("argv-internal-tool-rounds");
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        r#"#!/bin/sh
+run="$CTX_RUN_ID"
+printf '{"type":"start","run":"%s"}\n' "$run"
+printf '{"type":"tool_call","run":"%s","id":"call-1","name":"bash","arguments":{"args":["one"]}}\n' "$run"
+printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"tool_result","tool_call_id":"call-1","content":"one"}]}\n' "$run"
+printf '{"type":"tool_call","run":"%s","id":"call-2","name":"bash","arguments":{"args":["two"]}}\n' "$run"
+printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"tool_result","tool_call_id":"call-2","content":"two"}]}\n' "$run"
+printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"finished"}]}\n' "$run"
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
+"#,
+    );
+    set_file_mode(&executable, 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(
+        client
+            .write_all(
+                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tools\"}\n"
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let result = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    );
+    assert!(result.is_ok(), "{result:?}");
+    drop(socket);
+    let mut response = String::new();
+    assert!(client.read_to_string(&mut response).is_ok());
+    assert_eq!(
+        response.matches(r#""type":"tool_call""#).count(),
+        2,
+        "{response}"
+    );
+    assert_eq!(
+        response.matches(r#""type":"tool_result""#).count(),
+        2,
+        "{response}"
+    );
+    assert!(response.contains("finished"), "{response}");
+    assert_file_text(&session_root.join("default/state"), "done\n");
+}
+
+#[test]
+fn mismatched_internal_tool_result_returns_protocol_error_and_terminalizes() {
+    let root = reference_tree("argv-mismatched-tool-result");
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        r#"#!/bin/sh
+run="$CTX_RUN_ID"
+printf '{"type":"start","run":"%s"}\n' "$run"
+printf '{"type":"tool_call","run":"%s","id":"call-1","name":"bash","arguments":{"args":["one"]}}\n' "$run"
+printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"tool_result","tool_call_id":"wrong","content":"forged"}]}\n' "$run"
+"#,
+    );
+    set_file_mode(&executable, 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(
+        client
+            .write_all(
+                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tools\"}\n"
+            )
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+
+    let result = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    );
+    assert!(result.is_ok(), "{result:?}");
+    drop(socket);
+    let mut response = String::new();
+    assert!(client.read_to_string(&mut response).is_ok());
+    assert!(response.contains(r#""code":"EPROTO""#), "{response}");
+    assert!(!response.contains("forged"), "{response}");
+    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]
@@ -1366,7 +1473,20 @@ fn sdk_envelope_rejects_agent_lifecycle_and_result_frames() {
             None,
             direct_agent_runtime(&root, &view, &session_root, &executable),
         );
-        assert_eq!(result, Err(SocketRuntimeError::InvalidAgentOutput));
+        let outcome = ok!(result);
+        assert!(
+            outcome
+                .frames()
+                .iter()
+                .any(|event| event.contains("\"code\":\"EPROTO\""))
+        );
+        assert!(
+            outcome
+                .frames()
+                .iter()
+                .any(|event| event.contains("\"status\":\"error\""))
+        );
+        assert_file_text(&session_root.join("default/state"), "error\n");
     }
 }
 
@@ -1822,7 +1942,20 @@ printf '\n'
         },
     );
 
-    assert_eq!(outcome, Err(SocketRuntimeError::InvalidAgentOutput));
+    let outcome = ok!(outcome);
+    assert!(
+        outcome
+            .frames()
+            .iter()
+            .any(|frame| frame.contains("\"code\":\"EPROTO\""))
+    );
+    assert!(
+        outcome
+            .frames()
+            .iter()
+            .any(|frame| frame.contains("\"status\":\"error\""))
+    );
+    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]

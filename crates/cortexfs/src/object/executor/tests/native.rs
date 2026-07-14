@@ -1,5 +1,5 @@
 #[test]
-fn declared_native_tool_executes_and_tsh_cache_does_not_admit_it()
+fn session_loaded_or_declared_native_tool_executes_without_bypassing_policy()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = short_unique_temp_path("loaded-native-tool");
     let _ignored = fs::remove_dir_all(&root);
@@ -73,21 +73,18 @@ fn declared_native_tool_executes_and_tsh_cache_does_not_admit_it()
         pinned: false,
         last_used: 1,
     }];
-    cortexfs::write_tsh_context_state(&cortexfs::tsh_context_state_path(view.home()), &state)?;
+    let session_state =
+        cortexfs::tsh_context_state_path(&view.home().join("session").join(&config.session));
+    cortexfs::write_tsh_context_state(&session_state, &state)?;
 
-    let after_cache_forgery = execute_agent_tool_call(&config, &call);
-    assert!(
-        matches!(after_cache_forgery, Err(ref error) if error.contains("declare it in the agent tools control"))
-    );
+    let after_session_load = execute_agent_tool_call(&config, &call)?;
+    assert_eq!(after_session_load, "loaded-direct");
 
     fs::write(control.join("tools"), "bash\n")?;
     let after_declaration = execute_agent_tool_call(&config, &call)?;
     assert_eq!(after_declaration, "loaded-direct");
 
-    cortexfs::write_tsh_context_state(
-        &cortexfs::tsh_context_state_path(view.home()),
-        &cortexfs::TshContextState::default(),
-    )?;
+    cortexfs::write_tsh_context_state(&session_state, &cortexfs::TshContextState::default())?;
     let after_tsh_unload = execute_agent_tool_call(&config, &call)?;
     assert_eq!(after_tsh_unload, "loaded-direct");
 
