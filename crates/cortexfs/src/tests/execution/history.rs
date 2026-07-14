@@ -192,18 +192,28 @@ fn duplicate_agent_done_is_rejected_before_terminal_delivery() {
             .is_ok()
     );
     assert!(client.shutdown(Shutdown::Write).is_ok());
-    assert_eq!(
-        serve_agent_executable_socket_stream_once(
-            &mut socket,
-            None,
-            direct_agent_runtime(&root, &view, &session_root, &executable),
-        ),
-        Err(SocketRuntimeError::InvalidAgentOutput)
+    let outcome = ok!(serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    ));
+    assert!(
+        outcome
+            .frames()
+            .iter()
+            .any(|frame| frame.contains("\"code\":\"EPROTO\""))
+    );
+    assert!(
+        outcome
+            .frames()
+            .iter()
+            .any(|frame| frame.contains("\"status\":\"error\""))
     );
     drop(socket);
     let mut response = String::new();
     assert!(client.read_to_string(&mut response).is_ok());
-    assert!(!response.contains("\"type\":\"done\""));
+    assert!(response.contains("\"code\":\"EPROTO\""));
+    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]
@@ -322,18 +332,28 @@ fn direct_agent_error_lifecycle_is_canonicalized() {
             .is_ok()
     );
     assert!(client.shutdown(Shutdown::Write).is_ok());
-    assert_eq!(
-        serve_agent_executable_socket_stream_once(
-            &mut socket,
-            None,
-            direct_agent_runtime(&root, &view, &session_root, &executable),
-        ),
-        Err(SocketRuntimeError::InvalidAgentOutput)
+    let outcome = ok!(serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    ));
+    assert!(
+        outcome
+            .frames()
+            .iter()
+            .any(|frame| frame.contains("\"code\":\"EPROTO\""))
+    );
+    assert!(
+        outcome
+            .frames()
+            .iter()
+            .any(|frame| frame.contains("\"status\":\"error\""))
     );
     drop(socket);
     let mut response = String::new();
     assert!(client.read_to_string(&mut response).is_ok());
     assert!(!response.contains("wrong-run"));
+    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]

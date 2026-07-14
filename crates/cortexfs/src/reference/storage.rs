@@ -45,6 +45,14 @@ impl std::error::Error for StorageUpdateError {}
 
 /// Stages, validates, and atomically selects the next reference-tree generation.
 pub fn update_storage_generation(storage: &Path) -> Result<PathBuf, StorageUpdateError> {
+    update_storage_generation_with_prune(storage, false)
+}
+
+/// Stages a generation and optionally removes every non-current plain generation.
+pub fn update_storage_generation_with_prune(
+    storage: &Path,
+    prune: bool,
+) -> Result<PathBuf, StorageUpdateError> {
     require_plain_or_create(storage)?;
     let generations = storage.join("generations");
     require_plain_or_create(&generations)?;
@@ -58,6 +66,9 @@ pub fn update_storage_generation(storage: &Path) -> Result<PathBuf, StorageUpdat
     if let Some(current) = current.as_deref()
         && validate_generation(current).is_ok()
     {
+        if prune {
+            prune_generations(&generations, current)?;
+        }
         return Ok(current.to_path_buf());
     }
     let name = generation_name();
@@ -70,7 +81,28 @@ pub fn update_storage_generation(storage: &Path) -> Result<PathBuf, StorageUpdat
     if result.is_err() {
         let _ignored = fs::remove_dir_all(&stage);
     }
-    result
+    let generation = result?;
+    if prune {
+        prune_generations(&generations, &generation)?;
+    }
+    Ok(generation)
+}
+
+fn prune_generations(generations: &Path, current: &Path) -> Result<(), StorageUpdateError> {
+    let current_name = current.file_name().ok_or(StorageUpdateError::Invalid(
+        "current generation name is invalid",
+    ))?;
+    for entry in fs::read_dir(generations)? {
+        let entry = entry?;
+        if entry.file_name() == current_name {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
+    sync_dir(generations)
 }
 
 fn stage_generation(
@@ -321,9 +353,9 @@ mod tests {
         fs::write(session.join("user.txt"), "keep\n")?;
         symlink("/ctx/model/local/custom", legacy.join("model/code"))?;
 
-        let generation = update_storage_generation(&storage)?;
+        let generation = update_storage_generation_with_prune(&storage, true)?;
 
-        assert!(storage.join("generations/adopted-v1").is_dir());
+        assert!(!storage.join("generations/adopted-v1").exists());
         assert_eq!(
             fs::read_link(storage.join("current"))?,
             generation.strip_prefix(&storage)?
@@ -357,6 +389,7 @@ mod tests {
             format!("{}\n", crate::DEFAULT_WORKER_MODEL)
         );
         assert_eq!(update_storage_generation(&storage)?, generation);
+        assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 1);
         Ok(())
     }
 

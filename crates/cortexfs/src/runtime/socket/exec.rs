@@ -173,6 +173,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     write_while_connected(&mut client_connected, || {
         write_optional_socket_debug_timing_frame(stream, debug, "socket_send_received")
     })?;
+    let debug = debug.map(SocketDebugTiming::with_request_baseline);
     write_while_connected(&mut client_connected, || {
         write_optional_socket_debug_timing_frame(stream, debug, "history_collected")
     })?;
@@ -238,6 +239,10 @@ fn run_agent_request(
                 process: AgentProcessOutcome::Error,
             }
         }
+        Err(SocketRuntimeError::InvalidAgentOutput) => AgentRunOutcome {
+            frames: agent_invalid_output_frames(request.run_id),
+            process: AgentProcessOutcome::Error,
+        },
         Err(error) => return Err(error),
     };
     canonicalize_agent_outcome(stream, request.run_id, outcome)
@@ -947,7 +952,7 @@ pub(crate) fn run_agent_executable_streaming(
     let session_dir = runtime.session_root.join(request.session);
     let mut cancelled = false;
     let mut saw_agent_frame = false;
-    let mut yielded_tool_call = None;
+    let mut yielded_tool_call: Option<(String, object::executor::call::AgentToolCall)> = None;
     let mut saw_terminal_lifecycle = false;
     let mut withheld_done = false;
     let mut withheld_error: Option<usize> = None;
@@ -1023,7 +1028,27 @@ pub(crate) fn run_agent_executable_streaming(
                         continue;
                     }
                 }
-                if agent_frame_has_tool_result(&value) || yielded_tool_call.is_some() {
+                if agent_frame_has_tool_result(&value) {
+                    let Some((tool_call_frame, tool_call)) = yielded_tool_call.take() else {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(SocketRuntimeError::InvalidAgentOutput);
+                    };
+                    if !agent_tool_result_matches(&value, request.run_id, &tool_call.id) {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(SocketRuntimeError::InvalidAgentOutput);
+                    }
+                    write_while_connected(&mut client_connected, || {
+                        write_socket_frame(stream, &tool_call_frame)
+                    })?;
+                    write_while_connected(&mut client_connected, || {
+                        write_socket_frame(stream, &line)
+                    })?;
+                    frames.extend([tool_call_frame, line]);
+                    continue;
+                }
+                if yielded_tool_call.is_some() {
                     terminate_agent_process_group(&mut child);
                     let _ignored = child.wait();
                     return Err(SocketRuntimeError::InvalidAgentOutput);
@@ -1187,6 +1212,28 @@ fn agent_frame_has_tool_result(value: &Value) -> bool {
             })
 }
 
+fn agent_tool_result_matches(value: &Value, run_id: &str, call_id: &str) -> bool {
+    if value.get("run").and_then(Value::as_str) != Some(run_id) {
+        return false;
+    }
+    if value.get("type").and_then(Value::as_str) == Some("tool_result") {
+        return value
+            .get("tool_call_id")
+            .or_else(|| value.get("id"))
+            .and_then(Value::as_str)
+            == Some(call_id);
+    }
+    value
+        .get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|parts| {
+            parts.iter().any(|part| {
+                part.get("type").and_then(Value::as_str) == Some("tool_result")
+                    && part.get("tool_call_id").and_then(Value::as_str) == Some(call_id)
+            })
+        })
+}
+
 fn write_while_connected(
     connected: &mut bool,
     write: impl FnOnce() -> Result<(), SocketRuntimeError>,
@@ -1248,6 +1295,19 @@ pub(crate) fn agent_process_failed_frames(run_id: &str, stderr: &str) -> Vec<Str
             "status": "error"
         })
         .to_string(),
+    ]
+}
+
+fn agent_invalid_output_frames(run_id: &str) -> Vec<String> {
+    vec![
+        serde_json::json!({
+            "type": "error",
+            "run": run_id,
+            "code": "EPROTO",
+            "message": "agent emitted an invalid event sequence"
+        })
+        .to_string(),
+        serde_json::json!({"type": "done", "run": run_id, "status": "error"}).to_string(),
     ]
 }
 

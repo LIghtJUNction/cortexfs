@@ -222,12 +222,17 @@ fn parses_bootstrap_and_mount_commands() {
 
     assert!(matches!(
         cmd!("storage", "update", "/var/lib/cortexfs/storage"),
-        Ok(Command::StorageUpdate { storage: Some(ref path) })
+        Ok(Command::StorageUpdate { storage: Some(ref path), prune: false })
             if path == Path::new("/var/lib/cortexfs/storage")
     ));
     assert!(matches!(
         cmd!("storage", "update"),
-        Ok(Command::StorageUpdate { storage: None })
+        Ok(Command::StorageUpdate { storage: None, prune: false })
+    ));
+    assert!(matches!(
+        cmd!("storage", "update", "--prune", "/var/lib/cortexfs/storage"),
+        Ok(Command::StorageUpdate { storage: Some(ref path), prune: true })
+            if path == Path::new("/var/lib/cortexfs/storage")
     ));
     assert!(cmd!("storage", "delete").is_err());
 

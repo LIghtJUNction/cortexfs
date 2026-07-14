@@ -135,12 +135,12 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
     assert!(matches!(server.join(), Ok(Ok(()))));
     assert!(
         source
-            .join("home/1000/agent/coder/cache/tsh/context.json")
+            .join("home/1000/agent/coder/session/live/context/tsh.json")
             .is_file()
     );
     assert!(
         !projection
-            .join("home/1000/agent/coder/cache/tsh/context.json")
+            .join("home/1000/agent/coder/session/live/context/tsh.json")
             .exists()
     );
     Ok(())

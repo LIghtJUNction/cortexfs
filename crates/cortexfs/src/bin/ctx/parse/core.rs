@@ -48,6 +48,7 @@ pub(crate) enum Command {
     },
     StorageUpdate {
         storage: Option<PathBuf>,
+        prune: bool,
     },
     Mount {
         source: Option<PathBuf>,
@@ -198,7 +199,9 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             dry_run,
             check,
         } => success(bootstrap_reference_tree(source.as_deref(), dry_run, check)),
-        Command::StorageUpdate { storage } => success(update_storage(storage.as_deref())),
+        Command::StorageUpdate { storage, prune } => {
+            success(update_storage(storage.as_deref(), prune))
+        }
         Command::Mount { source, mountpoint } => success(mount_reference_tree(
             &cli.root,
             source.as_deref(),
@@ -378,9 +381,18 @@ pub(crate) fn parse_storage_command(
     if required_arg(&mut values, "storage requires update")? != "update" {
         return Err(CliError::usage("storage supports only update"));
     }
-    let storage = values.next().map(PathBuf::from);
-    no_extra_args(values)?;
-    Ok(Command::StorageUpdate { storage })
+    let mut storage = None;
+    let mut prune = false;
+    for value in values {
+        match value.as_str() {
+            "--prune" if !prune => prune = true,
+            _ if storage.is_none() && !value.starts_with('-') => {
+                storage = Some(PathBuf::from(value));
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(Command::StorageUpdate { storage, prune })
 }
 
 #[expect(

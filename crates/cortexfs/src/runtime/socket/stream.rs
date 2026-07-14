@@ -73,6 +73,14 @@ pub(crate) fn write_socket_frame(
 #[derive(Clone, Copy)]
 pub(crate) struct SocketDebugTiming {
     pub(crate) start_unix_ms: u128,
+    pub(crate) request_start_unix_ms: Option<u128>,
+}
+
+impl SocketDebugTiming {
+    pub(crate) fn with_request_baseline(mut self) -> Self {
+        self.request_start_unix_ms = Some(current_unix_millis());
+        self
+    }
 }
 
 pub(crate) fn socket_debug_timing_from_frame(frame: &str) -> Option<SocketDebugTiming> {
@@ -82,6 +90,7 @@ pub(crate) fn socket_debug_timing_from_frame(frame: &str) -> Option<SocketDebugT
     }
     Some(SocketDebugTiming {
         start_unix_ms: current_unix_millis(),
+        request_start_unix_ms: None,
     })
 }
 
@@ -97,13 +106,20 @@ pub(crate) fn write_socket_debug_timing_frame(
     stage: &str,
 ) -> Result<(), SocketRuntimeError> {
     let elapsed_ms = current_unix_millis().saturating_sub(timing.start_unix_ms);
-    let frame = serde_json::json!({
+    let mut frame = serde_json::json!({
         "type": "debug",
         "stage": stage,
         "elapsed_ms": elapsed_ms
-    })
-    .to_string();
-    write_socket_frame(stream, &frame)
+    });
+    if let Some(request_start_unix_ms) = timing.request_start_unix_ms
+        && let Some(object) = frame.as_object_mut()
+    {
+        object.insert(
+            "request_elapsed_ms".to_owned(),
+            serde_json::json!(current_unix_millis().saturating_sub(request_start_unix_ms)),
+        );
+    }
+    write_socket_frame(stream, &frame.to_string())
 }
 
 pub(crate) fn write_optional_socket_debug_timing_frame(

@@ -97,11 +97,20 @@ pub(crate) fn packaged_socket_unit_uses_receipted_alias_lifecycle_and_safe_order
     ] {
         assert!(unit.lines().any(|line| line.contains(expected)));
     }
+    assert!(!unit.contains("BindsTo=cortexfs.service"));
+    assert!(!unit.contains("PartOf=cortexfs.service"));
     assert!(!unit.contains("/usr/bin/rm -f"));
     assert!(!unit.contains("/usr/bin/ln -s"));
 
     let service =
         fs::read_to_string(manifest.join("../../packaging/systemd/cortexfs-agent@.service"))?;
+    for expected in [
+        "BindsTo=cortexfs.service",
+        "PartOf=cortexfs.service",
+        "After=cortexfs.service",
+    ] {
+        assert!(service.lines().any(|line| line == expected));
+    }
     let unit_section = service
         .strip_prefix("[Unit]\n")
         .and_then(|contents| contents.split_once("\n[Service]\n"))

@@ -47,6 +47,7 @@ pub(crate) struct PreparedAgentToolCall {
     tool_executable: fs::File,
     name: String,
     approval: cortexfs::AgentApprovalMode,
+    working_set: Option<(PathBuf, cortexfs::TshLoadedToolState, usize)>,
 }
 
 pub(crate) fn prepare_agent_tool_call(
@@ -55,6 +56,15 @@ pub(crate) fn prepare_agent_tool_call(
 ) -> Result<PreparedAgentToolCall, String> {
     let view = derive_agent_runtime_view(config.ctx_root, config.agent)
         .map_err(|error| format!("cannot derive agent authority: {}", error.errno()))?;
+    let owner = view.owner().to_string();
+    let home_source = config
+        .source
+        .join("home")
+        .join(&owner)
+        .join("agent")
+        .join(view.agent_name());
+    let context_path =
+        cortexfs::tsh_context_state_path(&home_source.join("session").join(config.session));
     let network_allowed = view.policy().allows(
         view.policy_subject(),
         PolicyObjectClass::Network,
@@ -63,7 +73,10 @@ pub(crate) fn prepare_agent_tool_call(
     );
     if tool_call.name == "tsh" {
         validate_agent_tsh_args(&tool_call.args)?;
-    } else if !view.declared_tools().contains(&tool_call.name) {
+    } else if !view.declared_tools().contains(&tool_call.name)
+        && !cortexfs::tsh_context_contains(&context_path, &tool_call.name)
+            .map_err(|error| format!("cannot read session tool context: {error}"))?
+    {
         return Err(format!(
             "unsupported native tool {}; declare it in the agent tools control",
             tool_call.name
@@ -103,14 +116,7 @@ pub(crate) fn prepare_agent_tool_call(
     } else {
         prepare_agent_tool_sandbox(&view, config.source)?
     };
-    let owner = view.owner().to_string();
     let ctx_home_target = Path::new(DEFAULT_CTX_ROOT).join("home").join(&owner);
-    let home_source = config
-        .source
-        .join("home")
-        .join(&owner)
-        .join("agent")
-        .join(view.agent_name());
     let home_target = ctx_home_target.join("agent").join(view.agent_name());
     let home_dir = open_plain_directory(&home_source)
         .map_err(|error| format!("cannot open agent home {}: {error}", home_source.display()))?;
@@ -145,7 +151,35 @@ pub(crate) fn prepare_agent_tool_call(
         tool_executable,
         name: tool_call.name.clone(),
         approval: view.approval(),
+        working_set: (tool_call.name != "tsh").then(|| {
+            (
+                context_path,
+                cortexfs::TshLoadedToolState {
+                    name: tool_call.name.clone(),
+                    path: hit.path().to_path_buf(),
+                    description: String::new(),
+                    schema: None,
+                    dynamic_resident: true,
+                    pinned: false,
+                    last_used: 0,
+                },
+                tsh_working_set_limit(&view),
+            )
+        }),
     })
+}
+
+fn tsh_working_set_limit(view: &cortexfs::AgentRuntimeView) -> usize {
+    let Some(hit) = view.tool_path().find("tsh").ok().flatten() else {
+        return cortexfs::tool::core::tools::TshRuntimeConfig::default().max_loaded_tools;
+    };
+    let path = hit.control_dir().join("config");
+    let Ok(content) = read_small_plain_text_file(&path, MAX_RUNNER_CONTROL_BYTES, "runner") else {
+        return cortexfs::tool::core::tools::TshRuntimeConfig::default().max_loaded_tools;
+    };
+    cortexfs::tool::core::tools::parse_tsh_runtime_config(&content)
+        .unwrap_or_default()
+        .max_loaded_tools
 }
 
 impl PreparedAgentToolCall {
@@ -166,7 +200,12 @@ impl PreparedAgentToolCall {
         .map_err(|error| format!("cannot run tool:{}: {error}", self.name))?;
         drop(self.home_dir);
         drop(self.tool_executable);
-        finish_agent_tool_output(&output)
+        let result = finish_agent_tool_output(&output)?;
+        if let Some((path, tool, limit)) = self.working_set {
+            cortexfs::retain_tsh_context_tool(&path, tool, limit)
+                .map_err(|error| format!("cannot persist session tool context: {error}"))?;
+        }
+        Ok(result)
     }
 }
 

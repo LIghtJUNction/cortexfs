@@ -62,7 +62,10 @@ and validates the next `bin/cortexfs.bootstrap.json` `tree_version`, then
 switches `current`. The legacy `v1-root` directory is adopted once without
 losing sessions, controls, or aliases. A failed stage leaves `current`
 unchanged. This is a restart boundary, not a watcher, poller, or hot reload;
-the `/ctx` ABI shape remains unchanged and old generations are not auto-GCed.
+the `/ctx` ABI shape remains unchanged. The package generates root files
+locally; generations are not distributed artifacts. The systemd restart path,
+after stopping consumers, explicitly uses `--prune` to remove non-current
+generations. There is no background generation GC.
 The mount and agent runtime resolve `current` once at process startup and keep
 that concrete generation for their full lifetime, including mount cache
 refresh. Short-lived object-runner invocations may resolve the then-current
