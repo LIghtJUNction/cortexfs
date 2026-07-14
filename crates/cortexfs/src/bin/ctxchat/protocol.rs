@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
@@ -19,14 +19,8 @@ pub(crate) fn request(
     stream.flush()?;
     let mut frames = Vec::new();
     let mut response_bytes = 0usize;
-    for line in BufReader::new(stream.try_clone()?).lines() {
-        let line = line?;
-        if line.len() > MAX_FRAME_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "response frame exceeds limit",
-            ));
-        }
+    let mut reader = BufReader::new(stream.try_clone()?);
+    while let Some(line) = read_frame(&mut reader)? {
         response_bytes = response_bytes
             .checked_add(line.len().saturating_add(1))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "response exceeds limit"))?;
@@ -51,6 +45,30 @@ pub(crate) fn request(
         io::ErrorKind::UnexpectedEof,
         "socket closed before done frame",
     ))
+}
+
+fn read_frame(reader: &mut impl BufRead) -> io::Result<Option<String>> {
+    let mut bytes = Vec::new();
+    let limit = u64::try_from(MAX_FRAME_BYTES)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let read = reader.by_ref().take(limit).read_until(b'\n', &mut bytes)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_FRAME_BYTES || bytes.last() != Some(&b'\n') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "response frame exceeds limit",
+        ));
+    }
+    bytes.pop();
+    if bytes.last() == Some(&b'\r') {
+        bytes.pop();
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_error| io::Error::new(io::ErrorKind::InvalidData, "response frame is not UTF-8"))
 }
 
 fn respond_approval(
@@ -176,6 +194,27 @@ mod tests {
             .err()
             .ok_or_else(|| io::Error::other("missing EOF error"))?;
         assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+        server
+            .join()
+            .map_err(|_panic| io::Error::other("server panicked"))??;
+        Ok(())
+    }
+
+    #[test]
+    fn oversized_frame_without_newline_is_rejected_during_read() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let socket = root.path().join("agent.sock");
+        let listener = UnixListener::bind(&socket)?;
+        let server = thread::spawn(move || -> io::Result<()> {
+            let (mut stream, _) = listener.accept()?;
+            let mut line = String::new();
+            BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+            stream.write_all(&vec![b'x'; MAX_FRAME_BYTES.saturating_add(1)])
+        });
+        let error = request(&socket, &json!({"op":"ping"}), &[])
+            .err()
+            .ok_or_else(|| io::Error::other("missing frame limit error"))?;
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         server
             .join()
             .map_err(|_panic| io::Error::other("server panicked"))??;

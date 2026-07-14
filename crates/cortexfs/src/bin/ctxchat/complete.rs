@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use cortexfs::support::terminal::terminal_safe_text;
 use rustyline::completion::{Completer, Pair};
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
@@ -70,11 +71,35 @@ impl Completer for ChatHelper {
             values
                 .into_iter()
                 .filter(|value| value.starts_with(word))
-                .map(|value| Pair {
-                    display: value.clone(),
-                    replacement: value,
-                })
+                .map(completion_pair)
                 .collect(),
         ))
+    }
+}
+
+fn completion_pair(value: String) -> Pair {
+    Pair {
+        display: terminal_safe_text(&value),
+        replacement: value,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_character_filename_escapes_display_but_preserves_replacement() -> std::io::Result<()>
+    {
+        let root = tempfile::tempdir()?;
+        std::fs::write(root.path().join("owned\x1b[2J"), "data")?;
+        let value = complete_paths(root.path(), "owned")
+            .into_iter()
+            .next()
+            .ok_or_else(|| std::io::Error::other("missing completion"))?;
+        let pair = completion_pair(format!("@{value}"));
+        assert_eq!(pair.display, "@owned\\u{1b}[2J");
+        assert_eq!(pair.replacement, "@owned\x1b[2J");
+        Ok(())
     }
 }
