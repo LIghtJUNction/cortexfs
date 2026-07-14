@@ -13,6 +13,7 @@ pub mod receipt;
 pub mod schema;
 pub mod session;
 pub mod stream;
+pub mod terminal;
 pub mod toolpath;
 pub mod trajectory;
 
