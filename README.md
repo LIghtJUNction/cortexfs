@@ -1,14 +1,24 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: filesystem as Agent OS" width="900">
+  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: a FUSE filesystem interface for agent runtimes" width="900">
+</p>
+
+<p align="center">
+  <a href="https://github.com/LIghtJUNction/cortexfs/actions/workflows/pages.yml"><img alt="Pages deployment" src="https://img.shields.io/github/actions/workflow/status/LIghtJUNction/cortexfs/pages.yml?branch=main&amp;label=pages"></a>
+  <a href="https://lightjunction.github.io/cortexfs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-live-2A8F73"></a>
+  <a href="https://crates.io/crates/cortexfs"><img alt="crates.io" src="https://img.shields.io/crates/v/cortexfs"></a>
+  <a href="https://www.rust-lang.org/"><img alt="Rust 1.91 or newer" src="https://img.shields.io/badge/rust-1.91%2B-000000?logo=rust"></a>
+  <a href="https://doc.rust-lang.org/edition-guide/rust-2024/"><img alt="Rust edition 2024" src="https://img.shields.io/badge/edition-2024-000000?logo=rust"></a>
+  <a href="https://www.kernel.org/doc/html/latest/filesystems/fuse.html"><img alt="Linux FUSE" src="https://img.shields.io/badge/platform-Linux%20%7C%20FUSE-FCC624?logo=linux&amp;logoColor=black"></a>
+  <a href="https://github.com/LIghtJUNction/cortexfs/blob/main/Cargo.toml"><img alt="MIT license metadata" src="https://img.shields.io/badge/license-MIT-2A8F73"></a>
 </p>
 
 **Your agent runtime shouldn’t hide inside a database.**
 
-CortexFS is a FUSE Agent OS. It mounts models, agents, tools, and durable
-sessions at `/ctx` — a small Unix ABI you can `ls`, `cat`, execute, secure, and
-audit.
+CortexFS is a FUSE filesystem for agent runtimes. It mounts models, agents,
+tools, and durable sessions at `/ctx` — a small Unix filesystem interface you
+can `ls`, `cat`, execute, secure, and audit.
 
 CortexFS exposes exactly three executable object classes: `model` is pure
 inference, `agent` is a policy-bound orchestrator, and `tool` is an executable
@@ -43,6 +53,55 @@ The v1 shape is intentionally small:
 For the normative ABI, start with the [v1 specification](docs/spec/README.md)
 and [architecture guide](docs/architecture.md). [docs/DESIGN.md](docs/DESIGN.md)
 defines the visual system for CortexFS documentation and demos, not the ABI.
+
+## An Agent Runtime You Can Open
+
+CortexFS is an agent runtime project with a built-in execution engine and a
+FUSE interface. A file manager, shell, or agent can inspect the same live work
+view: runtime status, durable `messages.jsonl` and `events.jsonl`, rebuildable
+context, and session state are ordinary paths rather than records hidden behind
+one client.
+
+That means an agent can retrieve history with ordinary file reads, while a
+human can inspect the same session tree without entering the chat UI.
+Conventional chat and CLI views, including Codex CLI, do not expose CortexFS's
+durable state as a mounted shared filesystem. This is a filesystem
+inspectability and composability distinction, not a claim that Codex lacks
+other surfaces or persistence, nor a claim about model quality or CLI speed.
+
+Model selection stays equally plain: `agent/<name>.d/model` is a text control
+containing an alias such as `main`. The visible `/ctx/model/main` alias is
+projected from the writable per-user backing symlink at
+`/ctx/home/$(id -u)/model/main`; users retarget that backing path to select the
+model behind the alias. The agent control file itself is not a symlink.
+
+## Measured Runtime
+
+The embedded chart includes a timestamped local service snapshot from the real
+`/ctx` `cortexfs` FUSE mount with `default_permissions` and `allow_other`.
+Snapshot values are local observations, not stable requirements or cross-tool
+benchmarks.
+
+The agent benchmark ran the five-item dataset once across `architect`, `coder`,
+`reviewer`, and `worker` (20 requests total), with every role selecting model
+route `main`:
+
+- Runtime success: **100% (20/20)**; every benchmark session was archived.
+- Exact-match accuracy: **20% (4/20)**. The current route completed every run,
+  but often returned useful prose instead of the dataset's required exact short
+  answer, so exact-match quality remains the clear weakness.
+- End-to-end latency: **p50 6,737.81 ms**, **p95 11,432.03 ms** (20 samples;
+  lower is better).
+- Time to first token: **p50 5,573.45 ms**, **p95 10,315.34 ms** (20 samples;
+  lower is better).
+- Token reporting was available for only **1/20** requests, so token throughput
+  is not representative and is intentionally not promoted here.
+
+See the [sanitized benchmark provenance](docs/benchmarks/20260714-agent-summary.json)
+and [Inspect benchmark guide](inspect_benchmark/README.md) for the recorded
+inputs, preflight, lifecycle, and reproduction workflow.
+
+![CortexFS measured runtime and benchmark](docs/assets/cortexfs-performance.svg)
 
 ## What It Feels Like
 
@@ -621,13 +680,13 @@ Run the deterministic agent tool-loop smoke without a live model:
 npm run agent-tool-loop:smoke
 ```
 
-Regenerate README images and the local benchmark chart:
+Regenerate README images and the local runtime chart. Pass an Inspect summary
+to include agent benchmark results:
 
 ```bash
-scripts/update-readme-svg.sh
+BENCHMARK_SUMMARY=docs/benchmarks/20260714-agent-summary.json \
+  scripts/update-readme-svg.sh
 ```
-
-![CortexFS local benchmark](docs/assets/cortexfs-performance.svg)
 
 Verus proof sources live under `proofs/verus/`. They are opt-in and do not
 change the runtime Cargo workspace. Install the upstream `verus` binary from

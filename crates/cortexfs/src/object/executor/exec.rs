@@ -44,6 +44,7 @@ pub(crate) fn execute_agent_tool_call_with(
 pub(crate) struct PreparedAgentToolCall {
     command: Command,
     home_dir: fs::File,
+    home_alias_dir: fs::File,
     tool_executable: fs::File,
     name: String,
     approval: cortexfs::AgentApprovalMode,
@@ -120,8 +121,13 @@ pub(crate) fn prepare_agent_tool_call(
     let home_target = ctx_home_target.join("agent").join(view.agent_name());
     let home_dir = open_plain_directory(&home_source)
         .map_err(|error| format!("cannot open agent home {}: {error}", home_source.display()))?;
+    let home_alias_dir = home_dir
+        .try_clone()
+        .map_err(|error| format!("cannot duplicate agent home fd: {error}"))?;
     crate::provider::name::files::clear_fd_cloexec(&home_dir)
         .map_err(|error| format!("cannot preserve agent home fd: {error:?}"))?;
+    crate::provider::name::files::clear_fd_cloexec(&home_alias_dir)
+        .map_err(|error| format!("cannot preserve agent home alias fd: {error:?}"))?;
     let mut command = Command::new(BWRAP_PROGRAM);
     let control = if config.inherit_control {
         nested_control_environment(
@@ -141,6 +147,7 @@ pub(crate) fn prepare_agent_tool_call(
         sandbox: sandbox.as_ref(),
         network_allowed,
         home_fd: home_dir.as_raw_fd(),
+        home_alias_fd: home_alias_dir.as_raw_fd(),
         home_target: &home_target,
         ctx_home_target: &ctx_home_target,
         control: control.as_ref(),
@@ -148,6 +155,7 @@ pub(crate) fn prepare_agent_tool_call(
     Ok(PreparedAgentToolCall {
         command,
         home_dir,
+        home_alias_dir,
         tool_executable,
         name: tool_call.name.clone(),
         approval: view.approval(),
@@ -199,6 +207,7 @@ impl PreparedAgentToolCall {
         }
         .map_err(|error| format!("cannot run tool:{}: {error}", self.name))?;
         drop(self.home_dir);
+        drop(self.home_alias_dir);
         drop(self.tool_executable);
         let result = finish_agent_tool_output(&output)?;
         if let Some((path, tool, limit)) = self.working_set {
@@ -341,6 +350,7 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) sandbox: Option<&'a AgentToolSandbox>,
     pub(crate) network_allowed: bool,
     pub(crate) home_fd: RawFd,
+    pub(crate) home_alias_fd: RawFd,
     pub(crate) home_target: &'a Path,
     pub(crate) ctx_home_target: &'a Path,
     pub(crate) control: Option<&'a (PathBuf, OsString)>,
@@ -501,6 +511,9 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from("--bind-fd"),
         OsString::from(request.home_fd.to_string()),
         request.home_target.as_os_str().to_owned(),
+        OsString::from("--bind-fd"),
+        OsString::from(request.home_alias_fd.to_string()),
+        OsString::from("/home/agent"),
     ]);
     if let Some(sandbox) = request.sandbox {
         args.extend(overlay_workspace_bwrap_args(sandbox));
