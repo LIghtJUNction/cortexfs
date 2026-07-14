@@ -1,0 +1,51 @@
+{
+  "schema": "cortexfs.readme-benchmark/v1",
+  "run_id": "20260714T153229.261562Z",
+  "timestamp": "2026-07-14T15:32:29.261562Z",
+  "runtime": {
+    "commit": "98e0fd50c2d9590fa0717a1c8e712c85ff8cc666",
+    "package": "cortexfs-git 0.1.0.r602.g927e327-1",
+    "model_routes": {
+      "architect": "main",
+      "coder": "main",
+      "reviewer": "main",
+      "worker": "main"
+    }
+  },
+  "dataset": {
+    "ids": ["qa-001", "qa-002", "qa-003", "qa-004", "qa-005"],
+    "sha256": "e9e3b76c8c31e447a9823efc852f2f3d7832aae81ef682045c60becb8d8f9a54",
+    "samples": 5
+  },
+  "agents": ["architect", "coder", "reviewer", "worker"],
+  "repeat": 1,
+  "timeout_seconds": 180,
+  "overall": {
+    "requests": 20,
+    "runtime_successes": 20,
+    "runtime_success_rate": 1.0,
+    "exact_matches": 4,
+    "exact_accuracy": 0.2,
+    "latency_ms": {"mean": 7503.291905349761, "p50": 6737.809776499489, "p95": 11432.03188735461},
+    "ttft_ms": {"mean": 6245.835248799631, "p50": 5573.450453495752, "p95": 10315.341933152016},
+    "latency_samples": 20,
+    "ttft_samples": 20,
+    "token_samples": 1,
+    "input_tokens": 982,
+    "output_tokens": 45,
+    "errors": {}
+  },
+  "cleanup": {"archived": 20, "total": 20},
+  "preflight": {
+    "status_ok": true,
+    "doctor_ok": true,
+    "fuse": {
+      "target": "/ctx",
+      "source": "cortexfs",
+      "fstype": "fuse",
+      "default_permissions": true,
+      "allow_other": true
+    },
+    "pong_agents": ["architect", "coder", "reviewer", "worker"]
+  }
+}
