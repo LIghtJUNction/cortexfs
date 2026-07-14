@@ -66,14 +66,9 @@ impl FuseV1Projection {
                     .into_iter()
                     .map(|provider| FuseV1DirEntry::new(provider, FuseV1FileType::Directory))
                     .collect::<Vec<_>>();
-                entries.push(FuseV1DirEntry::new(
-                    DEFAULT_MODEL_ALIAS.to_owned(),
-                    FuseV1FileType::Symlink,
-                ));
-                entries.push(FuseV1DirEntry::new(
-                    HELPER_MODEL_ALIAS.to_owned(),
-                    FuseV1FileType::Symlink,
-                ));
+                entries.extend(MODEL_ALIASES.iter().map(|alias| {
+                    FuseV1DirEntry::new((*alias).to_owned(), FuseV1FileType::Symlink)
+                }));
                 entries.push(FuseV1DirEntry::new(
                     MODEL_ROUTE_FILE.to_owned(),
                     FuseV1FileType::Regular,
@@ -357,10 +352,12 @@ impl FuseV1Projection {
         {
             return Ok(target);
         }
-        Ok(PathBuf::from(if alias == HELPER_MODEL_ALIAS {
-            HELPER_MODEL_ALIAS_TARGET
-        } else {
-            DEFAULT_MODEL_ALIAS_TARGET
-        }))
+        if alias == HELPER_MODEL_ALIAS {
+            return Ok(PathBuf::from(HELPER_MODEL_ALIAS_TARGET));
+        }
+        if alias != DEFAULT_MODEL_ALIAS {
+            return self.default_model_alias_target(DEFAULT_MODEL_ALIAS);
+        }
+        Ok(PathBuf::from(DEFAULT_MODEL_ALIAS_TARGET))
     }
 }

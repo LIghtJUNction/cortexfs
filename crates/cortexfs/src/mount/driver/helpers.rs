@@ -1,4 +1,5 @@
 use super::*;
+use crate::is_model_alias;
 
 pub(crate) const TTL: Duration = Duration::from_secs(1);
 pub(crate) const S_IFMT: u32 = 0o170_000;
@@ -20,7 +21,9 @@ pub(crate) fn main() -> ExitCode {
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     let config = MountConfig::parse(args)?;
-    let fs = CortexFuse::new(config.source.clone())?;
+    let source = crate::pin_storage_source(&config.source)
+        .map_err(|error| format!("invalid source root: {error}"))?;
+    let fs = CortexFuse::new(source.clone())?;
     let mut options = Config::default();
     options.acl = SessionACL::All;
     options.mount_options = vec![
@@ -34,7 +37,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
                 .map_err(|error| format!("mount failed: {error}"))
         },
         || {
-            FuseV1Projection::new(config.source)
+            FuseV1Projection::new(source)
                 .refresh_provider_model_cache()
                 .map_err(|error| format!("refresh failed: {error:?}"))
         },
@@ -326,7 +329,8 @@ impl CortexFuse {
         let name = name.to_str().ok_or(FuseV1Error::InvalidPath)?;
         let parent_path = self.path_for_inode(parent)?;
         let path = child_path(&parent_path, name).ok_or(FuseV1Error::InvalidPath)?;
-        matches!(path.as_str(), "model/main" | "model/helper")
+        path.strip_prefix("model/")
+            .is_some_and(is_model_alias)
             .then_some(path)
             .ok_or(FuseV1Error::InvalidPath)
     }
@@ -462,7 +466,7 @@ impl CortexFuse {
         if overlay {
             return true;
         }
-        if matches!(path, "model/main" | "model/helper") {
+        if path.strip_prefix("model/").is_some_and(is_model_alias) {
             return !backing_exists || self.projection.readlink(path).is_ok();
         }
         if path == "model/debug" || path.starts_with("model/debug/echo.d/") {

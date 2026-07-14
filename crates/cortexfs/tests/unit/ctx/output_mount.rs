@@ -104,7 +104,7 @@ fn plain_sibling_mount_bin_rejects_symlink_executable() {
 #[test]
 fn mount_spawn_commands_use_clean_runtime_environment() {
     let mount_bin = Path::new("/usr/bin/cortexfs-mount");
-    let source = Path::new("/var/lib/cortexfs/storage/v1-root");
+    let source = Path::new("/var/lib/cortexfs/storage/current");
     let mountpoint = Path::new("/ctx");
     let detached = detached_mount_command(mount_bin, source, mountpoint);
     let direct = direct_mount_command(mount_bin, source, mountpoint);
@@ -119,7 +119,7 @@ fn mount_spawn_commands_use_clean_runtime_environment() {
             "-f".to_owned(),
             "/usr/bin/cortexfs-mount".to_owned(),
             "--source".to_owned(),
-            "/var/lib/cortexfs/storage/v1-root".to_owned(),
+            "/var/lib/cortexfs/storage/current".to_owned(),
             "/ctx".to_owned(),
         ]
     );
@@ -131,7 +131,7 @@ fn mount_spawn_commands_use_clean_runtime_environment() {
             .collect::<Vec<_>>(),
         vec![
             "--source".to_owned(),
-            "/var/lib/cortexfs/storage/v1-root".to_owned(),
+            "/var/lib/cortexfs/storage/current".to_owned(),
             "/ctx".to_owned(),
         ]
     );

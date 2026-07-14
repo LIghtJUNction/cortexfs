@@ -78,7 +78,7 @@ pub(crate) fn agent_repl_model_summary(
 ) -> Result<String, CliError> {
     let model = read_agent_model_for_context(&agent_control_dir(root, name), "agent")?;
     let model_text = styled(color, ANSI_CYAN, &model);
-    if !matches!(model.as_str(), "main" | "helper") {
+    if !is_model_alias(&model) {
         return Ok(model_text);
     }
     Ok(match read_model_alias_target(root, &model) {

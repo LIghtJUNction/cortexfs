@@ -72,6 +72,10 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
   model/
     main -> /ctx/model/openai/gpt-5.5
     helper -> /ctx/model/openai/codex-auto-review
+    fast -> /ctx/model/openai/gpt-5.5
+    reason -> /ctx/model/openai/gpt-5.5
+    code -> /ctx/model/openai/gpt-5.5
+    vision -> /ctx/model/openai/gpt-5.5
 
     debug/
       echo

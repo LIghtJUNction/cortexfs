@@ -40,6 +40,8 @@ echo "summarize this file" | /ctx/model/main
 ```
 
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
+初始 canonical aliases 是 `main`、兼容用 `helper`，以及 `fast`、`reason`、`code`、
+`vision`；能力 alias 无匹配模型时安全回落到当前 `main` target。
 默认参考树提供 `architect`、`coder`、`reviewer` 三个 agent：`architect` 负责规划和协调，
 `coder` 是可修改 `/workspace` 源码的实现 agent，`reviewer` 负责独立审查。
 

@@ -40,9 +40,11 @@ echo "summarize this file" | /ctx/model/main
 ```
 
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
-默认参考树提供 `coder`、`reviewer`、`executor` 三个初始可用 agent：`coder` 使用
-`model/main`（默认 `openai/gpt-5.5`），`reviewer` 使用 `model/helper`（默认
-`openai/codex-auto-review`），`executor` 默认使用 `openai/gpt-5.3-codex-spark`。
+默认参考树提供 `architect`、`coder`、`reviewer`、`worker` 四个初始可用 agent：
+`architect`、`coder`、`reviewer` 使用 `model/main`（默认 `openai/gpt-5.5`），
+`worker` 默认使用 `api.lmm.best/gpt-5.3-codex-spark`。`model/helper` 保留为兼容
+alias；`fast`、`reason`、`code`、`vision` 是能力 alias，找不到匹配模型时回落到
+当前 `main` target。
 供应商密钥不写进 model 文件、`.d/` 控制目录或进程环境变量。provider adapter 从
 root-owned CortexFS system secret store 直接读取 API key；用户不需要在 provider JSON
 里手写环境变量名。长期凭据写入：

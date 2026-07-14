@@ -54,6 +54,20 @@ Policy, path, mount, uid/gid, and mode bits grant authority.
 
 ## Where things live
 
+The packaged host keeps versioned durable trees under
+`/var/lib/cortexfs/storage/generations/<generation>` and exposes the selected
+tree through the atomic `/var/lib/cortexfs/storage/current` symlink. On a
+systemd restart, `ctx storage update` clones the current generation, applies
+and validates the next `bin/cortexfs.bootstrap.json` `tree_version`, then
+switches `current`. The legacy `v1-root` directory is adopted once without
+losing sessions, controls, or aliases. A failed stage leaves `current`
+unchanged. This is a restart boundary, not a watcher, poller, or hot reload;
+the `/ctx` ABI shape remains unchanged and old generations are not auto-GCed.
+The mount and agent runtime resolve `current` once at process startup and keep
+that concrete generation for their full lifetime, including mount cache
+refresh. Short-lived object-runner invocations may resolve the then-current
+generation each time.
+
 | Place | Path shape | Role |
 | --- | --- | --- |
 | Control | `/ctx/agent/<name>.d/*` | policy, mount, cwd, system.md |

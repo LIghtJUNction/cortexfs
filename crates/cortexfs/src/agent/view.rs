@@ -120,7 +120,7 @@ fn read_agent_model_limit(
     ctx_root: &Path,
     model: &str,
 ) -> Result<ModelContextLimit, AgentRuntimeViewError> {
-    let model_name = if matches!(model, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS) {
+    let model_name = if is_model_alias(model) {
         let alias = ctx_root.join("model").join(model);
         let metadata = fs::symlink_metadata(&alias)
             .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("model".to_owned()))?;

@@ -43,7 +43,15 @@ pub(crate) const DEBUG_ECHO_PROVIDER: &str = "debug";
 pub(crate) const DEBUG_ECHO_NAME: &str = "echo";
 pub(crate) const DEFAULT_MODEL_ALIAS: &str = "main";
 pub(crate) const HELPER_MODEL_ALIAS: &str = "helper";
+/// Canonical model aliases exposed directly below `/ctx/model`.
+pub const MODEL_ALIASES: &[&str] = &["main", "helper", "fast", "reason", "code", "vision"];
 pub const DEFAULT_WORKER_MODEL: &str = "api.lmm.best/gpt-5.3-codex-spark";
+
+/// Returns whether a name is a canonical model alias.
+#[must_use]
+pub fn is_model_alias(name: &str) -> bool {
+    MODEL_ALIASES.contains(&name)
+}
 
 /// Returns the implicit model for an agent that has no explicit `model` control file.
 #[must_use]

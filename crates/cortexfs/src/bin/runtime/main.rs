@@ -34,7 +34,7 @@ use cortexfs::{
 use listenfd::ListenFd;
 use nix::sys::stat::{Mode, fchmod};
 
-const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
+const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
 const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
 const RUN_CONTROL_DIR: &str = "/run/cortexfs/control";
 
@@ -52,7 +52,9 @@ pub(crate) fn main() -> ExitCode {
 }
 
 pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
-    let config = RuntimeConfig::parse(args)?;
+    let mut config = RuntimeConfig::parse(args)?;
+    config.source = cortexfs::pin_storage_source(&config.source)
+        .map_err(|error| format!("invalid source root: {error}"))?;
     match config.mode {
         RuntimeMode::PrepareSocketAlias => {
             return cortexfs::agent::launch::prepare_system_agent_alias(

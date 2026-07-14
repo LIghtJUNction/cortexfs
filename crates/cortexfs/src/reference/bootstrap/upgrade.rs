@@ -1,7 +1,7 @@
 use super::*;
 
 /// Monotonic reference-tree generation written to the backing source.
-pub const REFERENCE_TREE_VERSION: u32 = 2;
+pub const REFERENCE_TREE_VERSION: u32 = 3;
 
 /// Relative path for bootstrap state under the source root.
 pub const BOOTSTRAP_STATE_REL: &str = "bin/cortexfs.bootstrap.json";

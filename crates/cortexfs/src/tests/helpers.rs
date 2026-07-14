@@ -302,7 +302,7 @@ pub(super) fn create_complete_object_layout(
         assert!(fs::create_dir_all(&worker_control).is_ok());
         write_text_file(&worker_control.join("limit"), "unknown\n");
         assert!(fs::create_dir_all(root.join("model")).is_ok());
-        for alias in ["main", "helper"] {
+        for alias in MODEL_ALIASES {
             let path = root.join("model").join(alias);
             if !path.exists() {
                 assert!(std::os::unix::fs::symlink("/ctx/model/debug/echo", path).is_ok());
@@ -356,3 +356,4 @@ pub(super) fn bind_socket(path: &Path) -> Option<UnixListener> {
     UnixListener::bind(path).ok()
 }
 use super::*;
+use crate::MODEL_ALIASES;

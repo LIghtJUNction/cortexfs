@@ -38,10 +38,6 @@ pub(crate) fn resolve_model_alias(ctx_root: &Path, name: &str) -> Result<String,
     Ok(model.to_owned())
 }
 
-pub(crate) fn is_model_alias(name: &str) -> bool {
-    matches!(name, "main" | "helper")
-}
-
 #[cfg(test)]
 pub(crate) fn resolved_model_path(ctx_root: &Path, model: &str) -> Result<PathBuf, String> {
     let name = resolved_model_name(ctx_root, model)?;

@@ -1777,7 +1777,7 @@ allow coder_t agent:window-child start\n",
         if !nix::unistd::Uid::effective().is_root() {
             return;
         }
-        let source = Path::new("/var/lib/cortexfs/storage/v1-root");
+        let source = Path::new("/var/lib/cortexfs/storage/current");
         let random_id = fs::read_to_string("/proc/sys/kernel/random/uuid");
         assert!(random_id.is_ok());
         let Ok(random_id) = random_id else { return };
