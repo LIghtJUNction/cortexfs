@@ -1,16 +1,19 @@
 [Unit]
 Description=CortexFS agent socket for %i
 Documentation=file:/usr/share/doc/cortexfs-git/README.md
+DefaultDependencies=no
 Requires=cortexfs.service
 After=cortexfs.service
+Conflicts=shutdown.target
+Before=shutdown.target
 
 [Socket]
 ListenStream=/run/cortexfs/agent/%i.sock
 SocketMode=0666
 RemoveOnStop=yes
 ExecStartPre=/usr/bin/install -d -m 0755 /run/cortexfs/agent
-ExecStartPre=/usr/bin/rm -f /run/cortexfs/agent/%i.sock /var/lib/cortexfs/storage/v1-root/agent/%i.sock
-ExecStartPre=/usr/bin/ln -s /run/cortexfs/agent/%i.sock /var/lib/cortexfs/storage/v1-root/agent/%i.sock
+ExecStartPre=/usr/bin/cortexfs-agent-runtime --prepare-socket-alias --source /var/lib/cortexfs/storage/v1-root --agent %i
+ExecStopPost=/usr/bin/cortexfs-agent-runtime --cleanup-socket-alias --source /var/lib/cortexfs/storage/v1-root --agent %i
 
 [Install]
 WantedBy=sockets.target

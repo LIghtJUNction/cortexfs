@@ -1279,7 +1279,7 @@ fn exact_socket_alias_cleanup_restores_mismatched_alias_after_claim() {
     let other = root.join("other.sock");
     assert!(symlink(&other, &visible).is_ok());
 
-    let result = remove_exact_socket_alias(&visible, &expected);
+    let result = cortexfs::agent::launch::remove_exact_socket_alias(&visible, &expected);
 
     assert!(matches!(
         result,

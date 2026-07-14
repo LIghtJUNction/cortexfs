@@ -52,7 +52,7 @@ use super::{
     cortexfs_mount_bin, ctx_root_entry_present, ctx_root_shape, env_exports, is_mount_point,
     parse_systemctl_main_pid, plain_sibling_mount_bin, read_agent_processes, read_ctx_status,
     read_status_agent_processes,
-    remove_exact_socket_alias, render_agent_event_lines, render_agent_process_tree,
+    render_agent_event_lines, render_agent_process_tree,
     render_agent_status_lines,
     require_agent_mount, require_cli_name, require_session_name,
     classify_input_path, resolve_abi_path, run_visible_tool, run_visible_tool_with_writer,

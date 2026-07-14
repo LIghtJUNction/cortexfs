@@ -383,12 +383,14 @@ fn select_user_manager_caller(
 mod user_manager_tests {
     use super::{
         SystemAgentSocketReceipt, UserManagerCaller, compensate_unreceipted_system_start_with,
-        ensure_terminal_runtime_dir, parse_unit_state, select_user_manager_caller,
-        stop_system_agent_socket, system_agent_visible_socket, wait_system_agent_visible_socket,
+        ensure_terminal_runtime_dir, parse_unit_state, prepare_exact_socket_alias,
+        remove_exact_socket_alias, select_user_manager_caller, stop_system_agent_socket,
+        system_agent_visible_socket, wait_system_agent_visible_socket,
     };
     use crate::AgentUnixIdentity;
     use std::fs;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::net::UnixListener;
 
     fn runtime_fixture(name: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!("cfs-{name}-{}", std::process::id()));
@@ -511,6 +513,70 @@ mod user_manager_tests {
     }
 
     #[test]
+    fn bootstrap_socket_prepare_and_cleanup_are_exact_and_idempotent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let visible = root.path().join("coder.sock");
+        let runtime = root.path().join("runtime.sock");
+        let listener = UnixListener::bind(&visible)?;
+        fs::set_permissions(&visible, fs::Permissions::from_mode(0o777))?;
+        let metadata = fs::symlink_metadata(&visible)?;
+
+        assert!(prepare_exact_socket_alias(
+            &visible,
+            &runtime,
+            (metadata.uid(), metadata.gid()),
+            0o777,
+        )?);
+        drop(listener);
+        assert_eq!(fs::read_link(&visible)?, runtime);
+        assert!(!prepare_exact_socket_alias(
+            &visible,
+            &runtime,
+            (metadata.uid(), metadata.gid()),
+            0o777,
+        )?);
+        assert!(remove_exact_socket_alias(&visible, &runtime)?);
+        assert!(!remove_exact_socket_alias(&visible, &runtime)?);
+        Ok(())
+    }
+
+    #[test]
+    fn socket_alias_operations_preserve_wrong_types_and_targets()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let visible = root.path().join("coder.sock");
+        let runtime = root.path().join("runtime.sock");
+        let wrong = root.path().join("wrong.sock");
+
+        fs::write(&visible, "keep")?;
+        assert!(prepare_exact_socket_alias(&visible, &runtime, (0, 0), 0o777).is_err());
+        assert_eq!(fs::read_to_string(&visible)?, "keep");
+        assert!(remove_exact_socket_alias(&visible, &runtime).is_err());
+        assert_eq!(fs::read_to_string(&visible)?, "keep");
+
+        fs::remove_file(&visible)?;
+        std::os::unix::fs::symlink(&wrong, &visible)?;
+        assert!(prepare_exact_socket_alias(&visible, &runtime, (0, 0), 0o777).is_err());
+        assert!(remove_exact_socket_alias(&visible, &runtime).is_err());
+        assert_eq!(fs::read_link(&visible)?, wrong);
+        Ok(())
+    }
+
+    #[test]
+    fn socket_alias_operations_reject_writable_parent() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let visible = root.path().join("coder.sock");
+        let runtime = root.path().join("runtime.sock");
+        std::os::unix::fs::symlink(&runtime, &visible)?;
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o777))?;
+
+        assert!(remove_exact_socket_alias(&visible, &runtime).is_err());
+        assert_eq!(fs::read_link(&visible)?, runtime);
+        Ok(())
+    }
+
+    #[test]
     fn owned_start_without_receipt_is_stopped_and_bounded() {
         let mut states = vec![Some("inactive".to_owned()), Some("active".to_owned())];
         let result = compensate_unreceipted_system_start_with(
@@ -595,6 +661,273 @@ pub fn system_agent_runtime_socket(agent: &str) -> PathBuf {
 #[must_use]
 pub fn system_agent_visible_socket(source: &Path, agent: &str) -> PathBuf {
     source.join("agent").join(format!("{agent}.sock"))
+}
+
+const BOOTSTRAP_SOCKET_MODE: u32 = 0o777;
+
+/// Replaces the trusted bootstrap socket with the exact systemd runtime alias.
+pub fn prepare_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool> {
+    if !crate::is_object_name(agent) {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let source_dir = open_owned_alias_parent(source)?;
+    let _agent_dir = open_owned_alias_child(&source_dir, "agent")?;
+    let view = crate::derive_agent_runtime_view(source, agent)
+        .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
+    let executable = source.join("agent").join(agent);
+    let executable_meta = fs::symlink_metadata(&executable)?;
+    if !executable_meta.is_file()
+        || executable_meta.file_type().is_symlink()
+        || executable_meta.permissions().mode() & 0o111 == 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "agent executable is not a plain executable file",
+        ));
+    }
+    let runtime = system_agent_runtime_socket(agent);
+    let run_dir = open_owned_alias_parent(Path::new("/run"))?;
+    let cortexfs_dir = open_owned_alias_child(&run_dir, "cortexfs")?;
+    let runtime_dir = open_owned_alias_child(&cortexfs_dir, "agent")?;
+    let runtime_name = runtime
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    match nix::sys::stat::fstatat(
+        &runtime_dir,
+        runtime_name,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    ) {
+        Err(nix::errno::Errno::ENOENT) => {}
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "runtime socket path already exists",
+            ));
+        }
+        Err(error) => return Err(io::Error::from(error)),
+    }
+    prepare_exact_socket_alias(
+        &system_agent_visible_socket(source, agent),
+        &runtime,
+        (view.identity().uid(), view.identity().gid()),
+        BOOTSTRAP_SOCKET_MODE,
+    )
+}
+
+/// Removes only the exact systemd runtime alias, preserving every other entry.
+pub fn cleanup_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool> {
+    if !crate::is_object_name(agent) {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let source_dir = open_owned_alias_parent(source)?;
+    let _agent_dir = open_owned_alias_child(&source_dir, "agent")?;
+    remove_exact_socket_alias(
+        &system_agent_visible_socket(source, agent),
+        &system_agent_runtime_socket(agent),
+    )
+}
+
+/// Claims and replaces one trusted bootstrap socket with an exact symlink.
+pub fn prepare_exact_socket_alias(
+    visible_socket: &Path,
+    runtime_socket: &Path,
+    owner: (u32, u32),
+    mode: u32,
+) -> io::Result<bool> {
+    let parent = visible_socket
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_owned_alias_parent(parent)?;
+    let name = visible_socket
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    match nix::fcntl::readlinkat(&parent_dir, name) {
+        Ok(target) if Path::new(&target) == runtime_socket => return Ok(false),
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "refusing to replace mismatched socket alias",
+            ));
+        }
+        Err(nix::errno::Errno::EINVAL) => {}
+        Err(error) => return Err(io::Error::from(error)),
+    }
+    let metadata = alias_entry_stat(&parent_dir, name)?;
+    let entry_mode = metadata.st_mode;
+    if !nix::sys::stat::SFlag::from_bits_truncate(metadata.st_mode)
+        .contains(nix::sys::stat::SFlag::S_IFSOCK)
+        || (metadata.st_uid, metadata.st_gid) != owner
+        || (entry_mode & 0o7777) != mode
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to replace untrusted bootstrap socket",
+        ));
+    }
+    let identity = (metadata.st_dev, metadata.st_ino);
+    let Some(claim) = claim_socket_entry(&parent_dir, name)? else {
+        return Err(io::Error::from(io::ErrorKind::NotFound));
+    };
+    let result = (|| {
+        let claimed = alias_entry_stat(&parent_dir, &claim)?;
+        if (claimed.st_dev, claimed.st_ino) != identity
+            || !nix::sys::stat::SFlag::from_bits_truncate(claimed.st_mode)
+                .contains(nix::sys::stat::SFlag::S_IFSOCK)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "bootstrap socket changed during claim",
+            ));
+        }
+        nix::unistd::symlinkat(runtime_socket, &parent_dir, name).map_err(io::Error::from)?;
+        let target = nix::fcntl::readlinkat(&parent_dir, name).map_err(io::Error::from)?;
+        if Path::new(&target) != runtime_socket {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "created socket alias has the wrong target",
+            ));
+        }
+        parent_dir.sync_all()?;
+        nix::unistd::unlinkat(
+            &parent_dir,
+            claim.as_str(),
+            nix::unistd::UnlinkatFlags::NoRemoveDir,
+        )
+        .map_err(io::Error::from)?;
+        parent_dir.sync_all()
+    })();
+    if let Err(error) = result {
+        if nix::fcntl::readlinkat(&parent_dir, name)
+            .is_ok_and(|target| Path::new(&target) == runtime_socket)
+        {
+            let _ignored =
+                nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir);
+        }
+        restore_socket_claim(&parent_dir, &claim, name)?;
+        parent_dir.sync_all()?;
+        return Err(error);
+    }
+    Ok(true)
+}
+
+/// Claims and removes only an exact socket alias.
+pub fn remove_exact_socket_alias(visible_socket: &Path, runtime_socket: &Path) -> io::Result<bool> {
+    let parent = visible_socket
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_owned_alias_parent(parent)?;
+    let name = visible_socket
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let Some(claim) = claim_socket_entry(&parent_dir, name)? else {
+        return Ok(false);
+    };
+    let validation = (|| {
+        let stat = alias_entry_stat(&parent_dir, &claim)?;
+        if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFLNK)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "refusing to remove non-alias socket path",
+            ));
+        }
+        let target =
+            nix::fcntl::readlinkat(&parent_dir, claim.as_str()).map_err(io::Error::from)?;
+        if Path::new(&target) != runtime_socket {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "refusing to remove mismatched socket alias",
+            ));
+        }
+        Ok(())
+    })();
+    if let Err(error) = validation {
+        restore_socket_claim(&parent_dir, &claim, name)?;
+        parent_dir.sync_all()?;
+        return Err(error);
+    }
+    nix::unistd::unlinkat(
+        &parent_dir,
+        claim.as_str(),
+        nix::unistd::UnlinkatFlags::NoRemoveDir,
+    )
+    .map_err(io::Error::from)?;
+    parent_dir.sync_all()?;
+    Ok(true)
+}
+
+fn open_owned_alias_parent(path: &Path) -> io::Result<fs::File> {
+    let directory = crate::support::plain::open_plain_directory(path)?;
+    let metadata = directory.metadata()?;
+    if metadata.uid() != nix::unistd::geteuid().as_raw()
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+    }
+    Ok(directory)
+}
+
+fn open_owned_alias_child(parent: &fs::File, name: &str) -> io::Result<fs::File> {
+    let directory = nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_DIRECTORY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(io::Error::from)?;
+    let metadata = directory.metadata()?;
+    if metadata.uid() != nix::unistd::geteuid().as_raw()
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(io::Error::from(io::ErrorKind::PermissionDenied));
+    }
+    Ok(directory)
+}
+
+fn alias_entry_stat(parent: &fs::File, name: &str) -> io::Result<nix::libc::stat> {
+    nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(io::Error::from)
+}
+
+fn claim_socket_entry(parent: &fs::File, name: &str) -> io::Result<Option<String>> {
+    for attempt in 0..16_u8 {
+        let claim = crate::authority::helpers::generated_sibling_name(name, "claim", attempt);
+        match nix::fcntl::renameat2(
+            parent,
+            name,
+            parent,
+            claim.as_str(),
+            nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+        ) {
+            Ok(()) => return Ok(Some(claim)),
+            Err(nix::errno::Errno::ENOENT) => return Ok(None),
+            Err(nix::errno::Errno::EEXIST) => {}
+            Err(error) => return Err(io::Error::from(error)),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "cannot create unique socket claim",
+    ))
+}
+
+fn restore_socket_claim(parent: &fs::File, claim: &str, name: &str) -> io::Result<()> {
+    nix::fcntl::renameat2(
+        parent,
+        claim,
+        parent,
+        name,
+        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(io::Error::from)
 }
 
 pub fn ensure_system_agent_socket(
