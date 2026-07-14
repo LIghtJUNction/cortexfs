@@ -2,15 +2,17 @@
 
 use crate::{
     PeerCredentials, peer_credentials,
-    support::{plain::open_plain_directory, receipt::random_hex},
+    support::{
+        plain::open_plain_directory,
+        receipt::{SocketReceipt, random_hex},
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
-use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write as _};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::time::Duration;
@@ -22,15 +24,13 @@ const MAX_REQUEST_IDS: usize = 64;
 const MAX_REQUEST_ID_BYTES: usize = 128;
 
 pub struct RunCapability {
-    socket: PathBuf,
     token: String,
     agent: String,
     session: String,
     run: String,
     uid: u32,
     gid: u32,
-    dev: u64,
-    ino: u64,
+    socket_receipt: SocketReceipt,
     source_receipt: Option<cortexfs_runtime_client::RuntimeSourceReceipt>,
     #[cfg(test)]
     consumed: AtomicBool,
@@ -127,18 +127,6 @@ impl RunCapability {
         uid: u32,
         gid: u32,
     ) -> Result<(Self, UnixListener), RunCapabilityError> {
-        let directory_fd =
-            open_plain_directory(directory).map_err(|_error| RunCapabilityError::CannotCreate)?;
-        let directory_metadata = directory_fd
-            .metadata()
-            .map_err(|_error| RunCapabilityError::CannotCreate)?;
-        if !directory_metadata.is_dir()
-            || directory_metadata.file_type().is_symlink()
-            || directory_metadata.uid() != nix::unistd::geteuid().as_raw()
-            || directory_metadata.permissions().mode() & 0o7777 != 0o711
-        {
-            return Err(RunCapabilityError::CannotCreate);
-        }
         let token =
             random_hex::<TOKEN_BYTES>().map_err(|_error| RunCapabilityError::CannotCreate)?;
         let socket = directory.join(format!(
@@ -149,38 +137,24 @@ impl RunCapability {
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or(RunCapabilityError::CannotCreate)?;
-        let bind_path = crate::support::plain::proc_fd_path(&directory_fd).join(name);
-        let listener =
-            UnixListener::bind(&bind_path).map_err(|_error| RunCapabilityError::CannotCreate)?;
-        let identity = match socket_identity(&directory_fd, name) {
-            Ok(identity) => identity,
-            Err(error) => {
-                let _isolated = isolate_unidentified_socket(&directory_fd, name);
-                return Err(error);
-            }
-        };
-        if let Err(error) = configure_socket(
-            directory,
-            &directory_fd,
-            (directory_metadata.dev(), directory_metadata.ino()),
-            name,
-            identity,
-            (uid, gid),
-        ) {
-            let _cleanup = quarantine_socket(&directory_fd, name, identity);
-            return Err(error);
-        }
+        let (socket_receipt, listener) =
+            SocketReceipt::bind(directory, name, (uid, gid)).map_err(|error| match error {
+                crate::support::receipt::SocketReceiptError::Create => {
+                    RunCapabilityError::CannotCreate
+                }
+                crate::support::receipt::SocketReceiptError::Cleanup => {
+                    RunCapabilityError::CleanupConflict
+                }
+            })?;
         Ok((
             Self {
-                socket,
                 token,
                 agent: agent.to_owned(),
                 session: session.to_owned(),
                 run: run.to_owned(),
                 uid,
                 gid,
-                dev: identity.0,
-                ino: identity.1,
+                socket_receipt,
                 source_receipt: None,
                 #[cfg(test)]
                 consumed: AtomicBool::new(false),
@@ -191,7 +165,7 @@ impl RunCapability {
 
     #[must_use]
     pub fn socket(&self) -> &Path {
-        &self.socket
+        self.socket_receipt.path()
     }
 
     #[must_use]
@@ -412,7 +386,7 @@ impl RunCapability {
 
     pub fn ping(&self, request_id: &str) -> Result<(), RunCapabilityError> {
         cortexfs_runtime_client::ping(
-            &self.socket,
+            self.socket_receipt.path(),
             &self.token,
             request_id,
             &self.agent,
@@ -438,7 +412,7 @@ impl RunCapability {
         life: &str,
     ) -> Result<CreateChildResult, RunCapabilityError> {
         cortexfs_runtime_client::create_child(
-            &self.socket,
+            self.socket_receipt.path(),
             &self.token,
             request_id,
             &self.agent,
@@ -455,18 +429,9 @@ impl RunCapability {
     }
 
     pub fn cleanup(&self) -> Result<(), RunCapabilityError> {
-        let parent_path = self
-            .socket
-            .parent()
-            .ok_or(RunCapabilityError::CleanupConflict)?;
-        let parent = open_plain_directory(parent_path)
-            .map_err(|_error| RunCapabilityError::CleanupConflict)?;
-        let name = self
-            .socket
-            .file_name()
-            .and_then(|value| value.to_str())
-            .ok_or(RunCapabilityError::CleanupConflict)?;
-        quarantine_socket(&parent, name, (self.dev, self.ino))
+        self.socket_receipt
+            .cleanup()
+            .map_err(|_error| RunCapabilityError::CleanupConflict)
     }
 }
 
@@ -511,106 +476,6 @@ fn client_error(error: cortexfs_runtime_client::RuntimeClientError) -> RunCapabi
     }
 }
 
-fn configure_socket(
-    directory_path: &Path,
-    directory: &File,
-    directory_identity: (u64, u64),
-    name: &str,
-    identity: (u64, u64),
-    owner: (u32, u32),
-) -> Result<(), RunCapabilityError> {
-    let rebound =
-        open_plain_directory(directory_path).map_err(|_error| RunCapabilityError::CannotCreate)?;
-    let rebound_metadata = rebound
-        .metadata()
-        .map_err(|_error| RunCapabilityError::CannotCreate)?;
-    if directory_identity != (rebound_metadata.dev(), rebound_metadata.ino()) {
-        return Err(RunCapabilityError::CannotCreate);
-    }
-    require_socket_identity(directory, name, identity)?;
-    nix::sys::stat::fchmodat(
-        directory,
-        name,
-        nix::sys::stat::Mode::from_bits_truncate(0o600),
-        nix::sys::stat::FchmodatFlags::NoFollowSymlink,
-    )
-    .map_err(|_error| RunCapabilityError::CannotCreate)?;
-    require_socket_identity(directory, name, identity)?;
-    nix::unistd::fchownat(
-        directory,
-        name,
-        Some(nix::unistd::Uid::from_raw(owner.0)),
-        Some(nix::unistd::Gid::from_raw(owner.1)),
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    )
-    .map_err(|_error| RunCapabilityError::CannotCreate)?;
-    require_socket_identity(directory, name, identity)?;
-    directory
-        .sync_all()
-        .map_err(|_error| RunCapabilityError::CannotCreate)
-}
-
-fn quarantine_socket(
-    parent: &File,
-    name: &str,
-    expected: (u64, u64),
-) -> Result<(), RunCapabilityError> {
-    require_socket_identity(parent, name, expected)
-        .map_err(|_error| RunCapabilityError::CleanupConflict)?;
-    let quarantine = quarantine_name(name)?;
-    nix::fcntl::renameat2(
-        parent,
-        name,
-        parent,
-        quarantine.as_str(),
-        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
-    )
-    .map_err(|_error| RunCapabilityError::CleanupConflict)?;
-    if require_socket_identity(parent, &quarantine, expected).is_err() {
-        let _ignored = nix::fcntl::renameat2(
-            parent,
-            quarantine.as_str(),
-            parent,
-            name,
-            nix::fcntl::RenameFlags::RENAME_NOREPLACE,
-        );
-        return Err(RunCapabilityError::CleanupConflict);
-    }
-    nix::unistd::unlinkat(
-        parent,
-        quarantine.as_str(),
-        nix::unistd::UnlinkatFlags::NoRemoveDir,
-    )
-    .map_err(|_error| RunCapabilityError::CleanupConflict)?;
-    parent
-        .sync_all()
-        .map_err(|_error| RunCapabilityError::CleanupConflict)
-}
-
-fn isolate_unidentified_socket(parent: &File, name: &str) -> Result<(), RunCapabilityError> {
-    let quarantine = quarantine_name(name)?;
-    nix::fcntl::renameat2(
-        parent,
-        name,
-        parent,
-        quarantine.as_str(),
-        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
-    )
-    .map_err(|_error| RunCapabilityError::CleanupConflict)?;
-    parent
-        .sync_all()
-        .map_err(|_error| RunCapabilityError::CleanupConflict)
-}
-
-fn quarantine_name(name: &str) -> Result<String, RunCapabilityError> {
-    let suffix =
-        random_hex::<TOKEN_BYTES>().map_err(|_error| RunCapabilityError::CleanupConflict)?;
-    Ok(format!(
-        ".{name}.rollback-{}",
-        suffix.get(..16).unwrap_or(&suffix)
-    ))
-}
-
 fn peer_allowed(peer: PeerCredentials, uid: u32) -> bool {
     peer.uid() == uid
 }
@@ -620,28 +485,6 @@ fn control_timeout() -> Duration {
         Duration::from_millis(100)
     } else {
         Duration::from_secs(5)
-    }
-}
-
-fn socket_identity(parent: &File, name: &str) -> Result<(u64, u64), RunCapabilityError> {
-    let stat = nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-        .map_err(|_error| RunCapabilityError::CannotCreate)?;
-    let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
-    if !kind.contains(nix::sys::stat::SFlag::S_IFSOCK) {
-        return Err(RunCapabilityError::CannotCreate);
-    }
-    Ok((stat.st_dev, stat.st_ino))
-}
-
-fn require_socket_identity(
-    parent: &File,
-    name: &str,
-    expected: (u64, u64),
-) -> Result<(), RunCapabilityError> {
-    if socket_identity(parent, name)? == expected {
-        Ok(())
-    } else {
-        Err(RunCapabilityError::CleanupConflict)
     }
 }
 
@@ -742,15 +585,15 @@ impl fmt::Debug for RunCapability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug = f.debug_struct("RunCapability");
         debug
-            .field("socket", &self.socket)
+            .field("socket", &self.socket_receipt.path())
             .field("token", &"[REDACTED]")
             .field("agent", &self.agent)
             .field("session", &self.session)
             .field("run", &self.run)
             .field("uid", &self.uid)
             .field("gid", &self.gid)
-            .field("dev", &self.dev)
-            .field("ino", &self.ino)
+            .field("dev", &self.socket_receipt.identity().0)
+            .field("ino", &self.socket_receipt.identity().1)
             .field("source_receipt", &self.source_receipt);
         #[cfg(test)]
         debug.field("consumed", &self.consumed.load(Ordering::Acquire));
@@ -764,7 +607,7 @@ impl std::error::Error for RunCapabilityError {}
 mod tests {
     use super::*;
     use std::fs;
-    use std::os::unix::fs::FileTypeExt;
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
     use std::sync::Arc;
     use std::thread;
 
@@ -810,7 +653,7 @@ mod tests {
         assert_eq!(metadata.permissions().mode() & 0o7777, 0o600);
         assert_eq!(
             (metadata.dev(), metadata.ino()),
-            (capability.dev, capability.ino)
+            capability.socket_receipt.identity()
         );
         Ok(())
     }
