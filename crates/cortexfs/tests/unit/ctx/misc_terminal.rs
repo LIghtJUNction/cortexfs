@@ -38,6 +38,18 @@ fn cli_error_line_escapes_terminal_controls() {
 }
 
 #[test]
+fn agent_repl_unknown_command_line_escapes_terminal_controls() {
+    let rendered = agent_repl_unknown_command_line("/bad\u{1b}]52;c;payload\u{7}");
+
+    assert_eq!(
+        rendered,
+        "ctx: unknown repl command: /bad\\u{1b}]52;c;payload\\u{7}"
+    );
+    assert!(!rendered.as_bytes().contains(&0x1b));
+    assert!(!rendered.as_bytes().contains(&0x07));
+}
+
+#[test]
 fn temp_file_name_changes_with_retry_attempt() {
     assert_ne!(temp_file_name(0), temp_file_name(1));
 }
@@ -115,6 +127,32 @@ fn provider_secret_stdin_reader_rejects_input_over_limit() {
     let read = read_provider_secret_stdin_limited(
         std::io::Cursor::new(secret.as_bytes()),
         MAX_PROVIDER_SECRET_STDIN_BYTES,
+    );
+
+    assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));
+}
+
+#[test]
+fn agent_repl_stdin_reader_accepts_input_at_limit() {
+    let input = "x".repeat(MAX_AGENT_REPL_STDIN_BYTES);
+
+    let read = read_limited_input_text(
+        std::io::Cursor::new(input.as_bytes()),
+        MAX_AGENT_REPL_STDIN_BYTES,
+        "agent stdin exceeds input limit",
+    );
+
+    assert_eq!(read.unwrap_or_default().len(), MAX_AGENT_REPL_STDIN_BYTES);
+}
+
+#[test]
+fn agent_repl_stdin_reader_rejects_input_over_limit() {
+    let input = "x".repeat(MAX_AGENT_REPL_STDIN_BYTES + 1);
+
+    let read = read_limited_input_text(
+        std::io::Cursor::new(input.as_bytes()),
+        MAX_AGENT_REPL_STDIN_BYTES,
+        "agent stdin exceeds input limit",
     );
 
     assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));
