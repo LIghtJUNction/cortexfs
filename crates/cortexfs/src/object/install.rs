@@ -8,8 +8,8 @@ use crate::object::receipt::{
 };
 use crate::support::plain::{open_plain_directory, open_plain_file, write_text_file_at};
 use crate::{
-    AgentWindowSetting, MountTable, ObjectClass, PolicyV0, is_model_name, is_object_name,
-    policy_subject_from_label,
+    AgentWindowSetting, MountTable, ObjectClass, PolicyV0, is_model_alias, is_model_name,
+    is_object_name, policy_subject_from_label,
 };
 use semver::{Version, VersionReq};
 use serde::Deserialize;
@@ -466,7 +466,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
                 return Err(InstallError::invalid("invalid control value: label"));
             }
             (ObjectClass::Agent, "model")
-                if !(is_model_name(value.trim()) || matches!(value.trim(), "main" | "helper")) =>
+                if !(is_model_name(value.trim()) || is_model_alias(value.trim())) =>
             {
                 return Err(InstallError::invalid("invalid control value: model"));
             }

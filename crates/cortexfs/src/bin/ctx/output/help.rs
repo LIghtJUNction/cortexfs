@@ -12,6 +12,7 @@ pub(crate) fn print_help() -> Result<(), CliError> {
         "  ctx man [agent|tool|model|ctx|root|session|provider]",
         "  ctx bootstrap [--check|--dry-run] [SOURCE]",
         "  ctx update [--check|--dry-run] [SOURCE]",
+        "  ctx storage update [STORAGE]",
         "  ctx [--root PATH] mount [--source SOURCE] [MOUNTPOINT]",
         "  ctx [--root PATH] ls [PATH|model|agent|tool]",
         "  ctx [--root PATH] which model|agent|tool NAME",
@@ -167,6 +168,14 @@ pub(crate) fn print_help_topic(topic: &str) -> Result<(), CliError> {
             "next:",
             "  ctx agent start coder",
             "  ctx agent chat coder",
+        ]),
+        "storage" => print_help_lines(&[
+            "ctx storage - atomically stage and select a host storage generation",
+            "",
+            "usage:",
+            "  ctx storage update [STORAGE]",
+            "",
+            "default storage: /var/lib/cortexfs/storage",
         ]),
         "mount" => print_help_lines(&[
             "usage:",

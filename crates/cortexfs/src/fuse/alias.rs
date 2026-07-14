@@ -70,7 +70,7 @@ impl FuseV1Projection {
         }
     }
 
-    /// Renames a temporary model symlink onto `model/main` or `model/helper`.
+    /// Renames a temporary model symlink onto a canonical model alias.
     pub fn rename_model_alias_symlink(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
         let from = normalize_fuse_abi_path(from)?;
         let to = normalize_fuse_abi_path(to)?;

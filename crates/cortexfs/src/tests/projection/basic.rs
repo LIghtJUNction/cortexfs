@@ -1324,7 +1324,12 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
         .iter()
         .map(super::FuseV1DirEntry::name)
         .collect::<Vec<_>>();
-    assert_eq!(model_names, ["debug", "helper", "main", "route"]);
+    assert_eq!(
+        model_names,
+        [
+            "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
+        ]
+    );
     let main_node = projection.lookup(&model_node, "main");
     assert!(matches!(
         main_node,

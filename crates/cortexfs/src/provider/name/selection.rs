@@ -52,7 +52,7 @@ pub(crate) fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<St
             (!provider.is_empty() && !model.is_empty()).then_some(provider.to_owned())
         });
     }
-    if !matches!(model, "main" | "helper") {
+    if !is_model_alias(model) {
         return None;
     }
     let target = read_model_alias_target(ctx_root, model).ok()?;

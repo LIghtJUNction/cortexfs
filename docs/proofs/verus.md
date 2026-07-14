@@ -53,7 +53,7 @@ The following remain future verification work, not current proof coverage:
 - equivalence between `is_valid_object_name` and executable Rust
   `is_object_name`
 - provider/model composition in `is_model_name`
-- the `main` and `helper` aliases accepted by `is_model_reference`
+- the canonical aliases accepted by `is_model_reference`
 - class-dependent validation in `is_object_name_for_class`
 - the SDK-local predicate in `crates/cortexfs-agent-sdk/src/lib.rs`, which
   currently uses a 255-byte limit rather than the core ABI's 64-byte limit

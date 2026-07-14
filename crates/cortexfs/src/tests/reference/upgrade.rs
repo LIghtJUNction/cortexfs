@@ -9,7 +9,7 @@ fn reference_tree_bootstrap_writes_bootstrap_state() {
         return;
     };
     assert_eq!(state.schema, 1);
-    assert_eq!(state.tree_version, 2);
+    assert_eq!(state.tree_version, REFERENCE_TREE_VERSION);
     assert_eq!(
         state.managed_agents,
         vec![
@@ -77,7 +77,7 @@ fn reference_tree_bootstrap_promotes_missing_v1_worker() {
     let state = read_bootstrap_state(&root);
     assert!(matches!(
         state,
-        Some(state) if state.tree_version == 2
+        Some(state) if state.tree_version == REFERENCE_TREE_VERSION
             && state.managed_agents.iter().any(|name| name == "worker")
     ));
 }
@@ -140,7 +140,10 @@ fn reference_tree_bootstrap_keeps_retired_agents_for_manual_review() {
     );
 
     assert!(ensure_v1_reference_tree(&root).is_ok());
-    assert!(matches!(read_bootstrap_state(&root), Some(state) if state.tree_version == 2));
+    assert!(matches!(
+        read_bootstrap_state(&root),
+        Some(state) if state.tree_version == REFERENCE_TREE_VERSION
+    ));
 
     let plan = plan_reference_tree_upgrade(&root);
     for name in ["base", "executor"] {

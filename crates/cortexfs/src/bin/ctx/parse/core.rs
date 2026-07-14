@@ -46,6 +46,9 @@ pub(crate) enum Command {
         dry_run: bool,
         check: bool,
     },
+    StorageUpdate {
+        storage: Option<PathBuf>,
+    },
     Mount {
         source: Option<PathBuf>,
         mountpoint: Option<PathBuf>,
@@ -195,6 +198,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             dry_run,
             check,
         } => success(bootstrap_reference_tree(source.as_deref(), dry_run, check)),
+        Command::StorageUpdate { storage } => success(update_storage(storage.as_deref())),
         Command::Mount { source, mountpoint } => success(mount_reference_tree(
             &cli.root,
             source.as_deref(),
@@ -368,6 +372,17 @@ pub(crate) fn parse_bootstrap_command(
     })
 }
 
+pub(crate) fn parse_storage_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    if required_arg(&mut values, "storage requires update")? != "update" {
+        return Err(CliError::usage("storage supports only update"));
+    }
+    let storage = values.next().map(PathBuf::from);
+    no_extra_args(values)?;
+    Ok(Command::StorageUpdate { storage })
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "flat CLI dispatch keeps subcommand parsing explicit"
@@ -410,6 +425,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             Ok(Command::Status)
         }
         "bootstrap" | "update" => parse_bootstrap_command(values),
+        "storage" => parse_storage_command(values),
         "mount" => parse_mount_command(values),
         "ls" => parse_ls_command(values),
         "which" => {
@@ -532,6 +548,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "man"
             | "bootstrap"
             | "update"
+            | "storage"
             | "mount"
             | "ls"
             | "which"

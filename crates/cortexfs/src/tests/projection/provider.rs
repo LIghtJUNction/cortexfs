@@ -1,3 +1,14 @@
+fn assert_model_entries(projection: &FuseV1Projection, path: &str, expected: &[&str]) {
+    let entries = projection.readdir(path);
+    assert!(entries.is_ok());
+    let names = entries
+        .unwrap_or_default()
+        .into_iter()
+        .map(|entry| entry.name().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(names, expected);
+}
+
 #[test]
 fn fuse_v1_projection_projects_configured_provider_models() {
     let root = reference_tree("fuse-v1-provider-model");
@@ -21,16 +32,20 @@ fn fuse_v1_projection_projects_configured_provider_models() {
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
-    let model_entries = projection.readdir("model");
-    assert!(model_entries.is_ok());
-    let model_names = model_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        model_names,
-        ["api.lmm.best", "debug", "helper", "main", "route"]
+    assert_model_entries(
+        &projection,
+        "model",
+        &[
+            "api.lmm.best",
+            "code",
+            "debug",
+            "fast",
+            "helper",
+            "main",
+            "reason",
+            "route",
+            "vision",
+        ],
     );
     let route = projection.read_to_string("model/route");
     assert!(matches!(route, Ok(ref content) if content.contains("fallback: direct")));
@@ -46,23 +61,17 @@ fn fuse_v1_projection_projects_configured_provider_models() {
         Ok("group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)\nmodel(gpt-*) -> proxy\nfallback: direct\n".to_owned())
     );
 
-    let provider_entries = projection.readdir("model/api.lmm.best");
-    assert!(provider_entries.is_ok());
-    let provider_names = provider_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        provider_names,
-        [
+    assert_model_entries(
+        &projection,
+        "model/api.lmm.best",
+        &[
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.4-mini.d",
             "gpt-5.4.d",
             "gpt-5.5",
-            "gpt-5.5.d"
-        ]
+            "gpt-5.5.d",
+        ],
     );
 
     let metadata = projection.read_to_string("model/api.lmm.best/gpt-5.4-mini");
@@ -357,7 +366,12 @@ fn fuse_v1_projection_uses_configured_provider_name_for_address_provider() {
         .into_iter()
         .map(|entry| entry.name().to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(model_names, ["debug", "helper", "local", "main", "route"]);
+    assert_eq!(
+        model_names,
+        [
+            "code", "debug", "fast", "helper", "local", "main", "reason", "route", "vision",
+        ]
+    );
     assert_eq!(
         projection.read_to_string("model/local/gpt-5.4-mini.d/default"),
         Ok("base_url=http://127.0.0.1:8317/v1\n".to_owned())
@@ -391,7 +405,12 @@ fn fuse_v1_projection_ignores_symlink_provider_configs() {
         .into_iter()
         .map(|entry| entry.name().to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(model_names, ["debug", "helper", "main", "route"]);
+    assert_eq!(
+        model_names,
+        [
+            "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
+        ]
+    );
     assert_eq!(
         projection.getattr("model/local"),
         Err(FuseV1Error::NotFound)
@@ -556,7 +575,12 @@ fn fuse_v1_projection_skips_disabled_provider_models() {
         .into_iter()
         .map(|entry| entry.name().to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(model_names, ["debug", "helper", "main", "route"]);
+    assert_eq!(
+        model_names,
+        [
+            "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
+        ]
+    );
     assert_eq!(
         projection.getattr("model/api.lmm.best"),
         Err(FuseV1Error::NotFound)

@@ -34,15 +34,16 @@ use crate::{
     MAX_SKILL_METADATA_CHARS, ModelContextLimit, PolicyObjectClass, PolicyPermission, PolicyV0,
     ToolExecutionAuthority, ToolExecutionDenial, agent_provider_messages, authorize_tool_execution,
     collect_agent_rules, collect_skill_metadata, current_time_unix, derive_agent_runtime_view,
-    inspect_event_stream_jsonl, is_model_name, is_object_name, parse_model_fallback, run_core_tool,
-    run_core_tool_cli, run_echo_model, skill_metadata_budget_from_env, write_run_snapshot,
+    inspect_event_stream_jsonl, is_model_alias, is_model_name, is_object_name,
+    parse_model_fallback, run_core_tool, run_core_tool_cli, run_echo_model,
+    skill_metadata_budget_from_env, write_run_snapshot,
 };
 use cortexfs_tool_sdk::ToolInvocation;
 use nix::libc;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
+const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
 pub(crate) const DEFAULT_CTX_ROOT: &str = "/ctx";
 const MAX_AGENT_TOOL_ITERATIONS: usize = 8;
 const MAX_MODEL_FALLBACK_CANDIDATES: usize = 16;

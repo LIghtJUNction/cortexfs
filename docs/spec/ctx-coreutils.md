@@ -65,13 +65,13 @@ ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-
 ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
 
 ctx object check tool.yaml
-ctx object install --source /var/lib/cortexfs/storage/v1-root tool.yaml --tier system
-ctx object inspect --source /var/lib/cortexfs/storage/v1-root tool example.echo --tier system
-ctx object upgrade --source /var/lib/cortexfs/storage/v1-root tool-v2.yaml --tier system
-ctx object rollback --source /var/lib/cortexfs/storage/v1-root tool-v1.yaml --tier system
-ctx object uninstall --source /var/lib/cortexfs/storage/v1-root tool example.echo --tier system
-ctx object residue audit --source /var/lib/cortexfs/storage/v1-root
-ctx object residue cleanup --source /var/lib/cortexfs/storage/v1-root --path tool/.cortexfs-install-123-0 --dev DEV --ino INO
+ctx object install --source /var/lib/cortexfs/storage/current tool.yaml --tier system
+ctx object inspect --source /var/lib/cortexfs/storage/current tool example.echo --tier system
+ctx object upgrade --source /var/lib/cortexfs/storage/current tool-v2.yaml --tier system
+ctx object rollback --source /var/lib/cortexfs/storage/current tool-v1.yaml --tier system
+ctx object uninstall --source /var/lib/cortexfs/storage/current tool example.echo --tier system
+ctx object residue audit --source /var/lib/cortexfs/storage/current
+ctx object residue cleanup --source /var/lib/cortexfs/storage/current --path tool/.cortexfs-install-123-0 --dev DEV --ino INO
 
 ctx validate-name coder
 ctx doctor

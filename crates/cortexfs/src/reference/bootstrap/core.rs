@@ -63,7 +63,7 @@ pub(crate) const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
     ReferenceAgentSpec {
         name: "reviewer",
         parent: Some("agent:architect"),
-        model: HELPER_MODEL_ALIAS,
+        model: DEFAULT_MODEL_ALIAS,
     },
     ReferenceAgentSpec {
         name: "worker",
@@ -156,14 +156,41 @@ pub(crate) fn ensure_reference_model_aliases(
         models,
         Some("codex-auto-review"),
     );
-    ensure_reference_model_alias(
-        &root.join("model").join(DEFAULT_MODEL_ALIAS),
-        Path::new(&main),
-    )?;
-    ensure_reference_model_alias(
-        &root.join("model").join(HELPER_MODEL_ALIAS),
-        Path::new(&helper),
-    )
+    for (alias, target) in MODEL_ALIASES.iter().copied().map(|alias| {
+        let target = match alias {
+            DEFAULT_MODEL_ALIAS => main.clone(),
+            HELPER_MODEL_ALIAS => helper.clone(),
+            alias => capability_model_alias_target(alias, models).unwrap_or_else(|| main.clone()),
+        };
+        (alias, target)
+    }) {
+        ensure_reference_model_alias(&root.join("model").join(alias), Path::new(&target))?;
+    }
+    Ok(())
+}
+
+fn capability_model_alias_target(alias: &str, models: &[ProjectedProviderModel]) -> Option<String> {
+    models
+        .iter()
+        .find(|model| match alias {
+            "fast" => model_name_has_word(&model.model, "fast"),
+            "reason" => model.cap.lines().any(|cap| cap.trim() == "reasoning"),
+            "code" => ["code", "coder", "coding"]
+                .iter()
+                .any(|word| model_name_has_word(&model.model, word)),
+            "vision" => model
+                .cap
+                .lines()
+                .any(|cap| matches!(cap.trim(), "vision" | "image_input")),
+            _ => false,
+        })
+        .map(|model| format!("/ctx/model/{}/{}", model.provider, model.model))
+}
+
+fn model_name_has_word(model: &str, expected: &str) -> bool {
+    model
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|word| word.eq_ignore_ascii_case(expected))
 }
 
 pub(crate) fn reference_model_alias_target(
@@ -522,6 +549,7 @@ Report commands, outputs, status, and failures without expanding scope.
     reason = "legacy reference stub retained while object-runner wrapper rollout settles"
 )]
 pub(crate) fn reference_agent_stub_script(name: &str) -> String {
+    let model_aliases = MODEL_ALIASES.join("|");
     format!(
         r#"#!/bin/sh
 # CortexFS reference-tree agent stub. The selected model is a file ABI choice.
@@ -539,7 +567,7 @@ fi
 case "$model" in
   */*/*|/*|../*|*/../*|*/..|*//*) model="" ;;
   */*) ;;
-  main|helper)
+  {model_aliases})
     target="$(/usr/bin/readlink "$ctx_root/model/$model" 2>/dev/null || true)"
     case "$target" in
       /ctx/model/*/*) model="${{target#/ctx/model/}}" ;;
@@ -897,6 +925,46 @@ mod reference_model_tests {
                 fallback: String::new(),
                 limit: ModelContextLimit::Unknown,
             },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "turbo-fast".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "openai.chat".to_owned(),
+                cap: "chat\nstream".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "deep".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "openai.chat".to_owned(),
+                cap: "chat\nreasoning".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "code-pro".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "openai.chat".to_owned(),
+                cap: "chat\nstream".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "multimodal".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "openai.chat".to_owned(),
+                cap: "chat\nvision".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
         ];
         for model in &models {
             ensure_reference_provider_model(root.path(), model)
@@ -913,6 +981,17 @@ mod reference_model_tests {
             fs::read_link(root.path().join("model/helper"))?,
             PathBuf::from("/ctx/model/api.test/codex-auto-review")
         );
+        for (alias, target) in [
+            ("fast", "turbo-fast"),
+            ("reason", "deep"),
+            ("code", "code-pro"),
+            ("vision", "multimodal"),
+        ] {
+            assert_eq!(
+                fs::read_link(root.path().join("model").join(alias))?,
+                PathBuf::from(format!("/ctx/model/api.test/{target}"))
+            );
+        }
         Ok(())
     }
 
@@ -937,6 +1016,12 @@ mod reference_model_tests {
             fs::read_link(root.path().join("model/helper"))?,
             PathBuf::from("/ctx/model/debug/echo")
         );
+        for alias in MODEL_ALIASES {
+            assert_eq!(
+                fs::read_link(root.path().join("model").join(alias))?,
+                PathBuf::from("/ctx/model/debug/echo")
+            );
+        }
         Ok(())
     }
 }

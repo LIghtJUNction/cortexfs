@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn model_alias_name(abi_path: &str) -> Option<&str> {
     let alias = abi_path.strip_prefix("model/")?;
-    matches!(alias, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS).then_some(alias)
+    is_model_alias(alias).then_some(alias)
 }
 
 pub(crate) fn model_control_dir_entries() -> Vec<FuseV1DirEntry> {

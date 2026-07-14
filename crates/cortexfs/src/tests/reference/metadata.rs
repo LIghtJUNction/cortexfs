@@ -58,6 +58,20 @@ fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
 }
 
 #[test]
+fn reference_tree_bootstrap_preserves_existing_canonical_model_aliases() {
+    let root = clean_test_dir("reference-tree-canonical-model-alias");
+    assert!(fs::create_dir_all(root.join("model")).is_ok());
+    assert!(symlink("/ctx/model/local/custom", root.join("model/code")).is_ok());
+
+    assert!(ensure_v1_reference_tree(&root).is_ok());
+
+    assert!(matches!(
+        fs::read_link(root.join("model/code")),
+        Ok(ref target) if target == Path::new("/ctx/model/local/custom")
+    ));
+}
+
+#[test]
 fn reference_tree_bootstrap_rejects_symlink_model_alias_parent_without_writing_target() {
     let root = clean_test_dir("reference-tree-model-alias-parent-symlink");
     let outside = clean_test_dir("reference-tree-model-alias-parent-symlink-outside");

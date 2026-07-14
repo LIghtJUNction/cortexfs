@@ -872,7 +872,7 @@ impl FuseV1Projection {
             .ok_or(FuseV1Error::InvalidContent)?;
         let setting = AgentWindowSetting::parse_control(&window_content)
             .ok_or(FuseV1Error::InvalidContent)?;
-        let model_name = if matches!(model, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS) {
+        let model_name = if is_model_alias(model) {
             let target = self.default_model_alias_target(model)?;
             target
                 .to_str()

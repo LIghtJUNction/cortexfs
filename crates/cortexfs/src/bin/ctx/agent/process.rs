@@ -348,7 +348,7 @@ pub(crate) fn read_agent_model_for_context(
 ) -> Result<String, CliError> {
     let model = read_agent_control_trimmed(control, "model")?
         .unwrap_or_else(|| default_agent_process_model(control_agent_name(control)).to_owned());
-    if !(is_model_name(&model) || matches!(model.as_str(), "main" | "helper")) {
+    if !(is_model_name(&model) || is_model_alias(&model)) {
         return Err(CliError::usage(format!(
             "invalid {context} model for {}: {model}",
             control_agent_name(control)

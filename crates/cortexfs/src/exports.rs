@@ -5,11 +5,11 @@ pub use abi::constants::{
     CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_DIRS, CONTEXT_REQUIRED_FILES,
     CORTEXFS_OBJECT_RUNNER, CTX_ROOT, DEFAULT_AGENT_PROMPT_TEMPLATE, DEFAULT_WORKER_MODEL,
     EXEC_OBJECTS, FORBIDDEN_MODEL_CAPABILITIES, FUSE_V1_ROOT_INODE, MAX_FUSE_V1_SMALL_READ_BYTES,
-    MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES,
+    MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES, MODEL_ALIASES,
     MODEL_CONTROL_FILES, OBJECT_HOOK_DIR, OBJECT_HOOK_PHASE_DIRS, ROOT_ENTRIES,
     SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, STABLE_MODEL_CAPABILITIES,
     TOOL_CONTROL_FILES, default_agent_model_for_name, is_dedicated_worker_agent_name,
-    is_worker_agent_name,
+    is_model_alias, is_worker_agent_name,
 };
 pub use abi::path::{
     AbiPathKind, ObjectClass, classify_abi_path, is_model_name, is_object_name, is_root_entry,
@@ -66,6 +66,10 @@ pub use provider::oauth::{
     OAuthError, OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, oauth_authorization_code_form,
     oauth_authorization_url, oauth_refresh_token_form, parse_oauth_token_response,
     resolve_oauth_access_token, resolve_oauth_access_token_with,
+};
+pub use reference::storage::{
+    SYSTEM_STORAGE_CURRENT, SYSTEM_STORAGE_DIR, StorageUpdateError, pin_storage_source,
+    update_storage_generation,
 };
 pub use support::control::ControlLineIssue;
 pub use support::index::{

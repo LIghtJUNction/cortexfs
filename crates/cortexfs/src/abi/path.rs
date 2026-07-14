@@ -6,8 +6,8 @@
 use std::borrow::Cow;
 
 use crate::{
-    AgentControlKind, ContextJsonlKind, DEFAULT_MODEL_ALIAS, HELPER_MODEL_ALIAS,
-    MAX_OBJECT_NAME_LEN, ROOT_ENTRIES, SessionControlKind, SessionIndexKind,
+    AgentControlKind, ContextJsonlKind, MAX_OBJECT_NAME_LEN, ROOT_ENTRIES, SessionControlKind,
+    SessionIndexKind, is_model_alias,
 };
 
 pub use crate::abi::parse::{classify_abi_path, parse_abi_path};
@@ -113,7 +113,7 @@ pub fn is_model_name(name: &str) -> bool {
 }
 
 pub(crate) fn is_model_reference(name: &str) -> bool {
-    is_model_name(name) || matches!(name, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS)
+    is_model_name(name) || is_model_alias(name)
 }
 
 pub(crate) fn is_object_name_for_class(class: ObjectClass, name: &str) -> bool {

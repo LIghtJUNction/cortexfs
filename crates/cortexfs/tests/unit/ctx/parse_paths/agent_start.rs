@@ -1297,7 +1297,7 @@ fn exact_socket_alias_cleanup_restores_mismatched_alias_after_claim() {
 }
 #[test]
 fn system_agent_visible_socket_matches_host_backing_path() {
-    let root = Path::new("/var/lib/cortexfs/storage/v1-root");
+    let root = Path::new("/var/lib/cortexfs/storage/current");
     assert_eq!(
         cortexfs::agent::launch::system_agent_visible_socket(root, "child"),
         root.join("agent/child.sock")

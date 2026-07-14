@@ -6,8 +6,9 @@ There is only one model ABI:
 /ctx/model/<provider>/<model>       one-shot inference executable
 /ctx/model/<provider>/<model>.sock  optional CortexFS session socket
 /ctx/model/<provider>/<model>.d/    control files
-/ctx/model/main                     default coder model symlink
-/ctx/model/helper                   default reviewer model symlink
+/ctx/model/main                     default model symlink
+/ctx/model/{helper,fast,reason,code,vision}
+                                    canonical compatibility/capability aliases
 ```
 
 `<provider>/<model>` is represented as two path components. For native model
@@ -61,6 +62,10 @@ Example:
 /ctx/model/
   main -> /ctx/model/openai/gpt-5.5
   helper -> /ctx/model/openai/codex-auto-review
+  fast -> /ctx/model/openai/gpt-5.5
+  reason -> /ctx/model/openai/gpt-5.5
+  code -> /ctx/model/openai/gpt-5.5
+  vision -> /ctx/model/openai/gpt-5.5
   debug/
     echo
     echo.d/
@@ -86,6 +91,12 @@ Example:
       status
       log
 ```
+
+`main`, `helper`, `fast`, `reason`, `code`, and `vision` are the complete
+canonical alias set. `helper` remains a compatibility alias. Bootstrap may
+select a projected model whose provider-neutral metadata matches a capability
+alias; when it cannot identify one, that alias points to the selected `main`
+target. Existing valid user-managed alias symlinks are preserved.
 
 Control files:
 

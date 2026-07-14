@@ -268,7 +268,7 @@ fn assert_reference_agents(root: &Path) {
     assert_file_text(&root.join("agent/coder.d/cwd"), "/workspace\n");
     assert_file_text(&root.join("agent/coder.d/model"), "main\n");
     assert_file_text(&root.join("agent/reviewer.d/parent"), "agent:architect\n");
-    assert_file_text(&root.join("agent/reviewer.d/model"), "helper\n");
+    assert_file_text(&root.join("agent/reviewer.d/model"), "main\n");
     assert_file_text(&root.join("agent/worker.d/parent"), "agent:architect\n");
     assert_file_text(
         &root.join("agent/worker.d/model"),

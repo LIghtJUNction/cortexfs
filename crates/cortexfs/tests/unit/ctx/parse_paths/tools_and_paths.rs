@@ -220,6 +220,17 @@ fn parses_bootstrap_and_mount_commands() {
         Err(ref error) if error.code == 2
     ));
 
+    assert!(matches!(
+        cmd!("storage", "update", "/var/lib/cortexfs/storage"),
+        Ok(Command::StorageUpdate { storage: Some(ref path) })
+            if path == Path::new("/var/lib/cortexfs/storage")
+    ));
+    assert!(matches!(
+        cmd!("storage", "update"),
+        Ok(Command::StorageUpdate { storage: None })
+    ));
+    assert!(cmd!("storage", "delete").is_err());
+
     let mount = cmd!(
         "mount",
         "--source",

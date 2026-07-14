@@ -3,7 +3,7 @@ use crate::*;
 const SESSION_ARCHIVE_DIR: &str = ".archive";
 const MAX_SESSION_GC_STATE_BYTES: u64 = 64;
 const MAX_SESSION_GC_INDEX_BYTES: u64 = 64 * 1024;
-const SYSTEM_STORAGE_ROOT: &str = "/var/lib/cortexfs/storage/v1-root";
+const SYSTEM_STORAGE_ROOT: &str = "/var/lib/cortexfs/storage/current";
 
 #[cfg(test)]
 thread_local! {
