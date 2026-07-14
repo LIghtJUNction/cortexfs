@@ -621,8 +621,11 @@ fn record_owned_child_completion(
     if view.lifecycle() != ChildLifecycle::Owned {
         return Ok(());
     }
-    let (parent_agent, parent_session, _parent_run) =
-        parse_exact_parent(parent).ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let (parent_agent, parent_session) = match classify_parent_reference(parent) {
+        ParentReference::Static { .. } => return Ok(()),
+        ParentReference::Delegated { agent, session, .. } => (agent, session),
+        ParentReference::Malformed => return Err(SocketRuntimeError::CannotRunAgent),
+    };
     let channel = canonical_owned_child_channel(
         runtime.source_root,
         view.owner(),
@@ -673,6 +676,35 @@ fn canonical_owned_child_channel(
         .join(child_agent))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ParentReference<'a> {
+    Static {
+        agent: &'a str,
+    },
+    Delegated {
+        agent: &'a str,
+        session: &'a str,
+        run: &'a str,
+    },
+    Malformed,
+}
+
+fn classify_parent_reference(value: &str) -> ParentReference<'_> {
+    if let Some(agent) = value.strip_prefix("agent:")
+        && !agent.contains(char::is_whitespace)
+        && is_object_name(agent)
+    {
+        return ParentReference::Static { agent };
+    }
+    parse_exact_parent(value).map_or(ParentReference::Malformed, |(agent, session, run)| {
+        ParentReference::Delegated {
+            agent,
+            session,
+            run,
+        }
+    })
+}
+
 fn parse_exact_parent(value: &str) -> Option<(&str, &str, &str)> {
     let mut fields = value.split_whitespace();
     let agent = fields.next()?.strip_prefix("agent:")?;
@@ -682,6 +714,7 @@ fn parse_exact_parent(value: &str) -> Option<(&str, &str, &str)> {
         || !is_object_name(agent)
         || !is_object_name(session)
         || !is_object_name(run)
+        || value != format!("agent:{agent} session:{session} run:{run}")
     {
         return None;
     }
@@ -1415,14 +1448,35 @@ mod completion_tests {
     }
 
     #[test]
-    fn exact_parent_parser_rejects_partial_or_extra_fields() {
+    fn parent_reference_classifier_is_exact() {
         assert_eq!(
-            parse_exact_parent("agent:parent session:session run:run"),
-            Some(("parent", "session", "run"))
+            classify_parent_reference("agent:architect"),
+            ParentReference::Static { agent: "architect" }
         );
-        assert!(parse_exact_parent("agent:parent session:session").is_none());
-        assert!(parse_exact_parent("agent:parent session:session run:run extra:x").is_none());
-        assert!(parse_exact_parent("session:session agent:parent run:run").is_none());
+        assert_eq!(
+            classify_parent_reference("agent:parent session:session run:run"),
+            ParentReference::Delegated {
+                agent: "parent",
+                session: "session",
+                run: "run"
+            }
+        );
+        for malformed in [
+            "agent:parent session:session",
+            "agent:parent run:run",
+            "agent:parent session:session run:run extra:x",
+            "agent:parent agent:other session:session run:run",
+            "session:session agent:parent run:run",
+            "agent:bad/name",
+            "agent:parent session:bad/name run:run",
+            "agent:parent session:session run:bad/name",
+            "agent:parent  session:session run:run",
+        ] {
+            assert_eq!(
+                classify_parent_reference(malformed),
+                ParentReference::Malformed
+            );
+        }
     }
 
     #[test]
