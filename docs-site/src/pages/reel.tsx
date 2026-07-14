@@ -46,7 +46,7 @@ export default function Reel(): ReactElement {
         <code>FUSE · UNIX ABI · JSONL</code>
       </header>
 
-      <section className="cortexReelStage" aria-label="Filesystem as Agent OS">
+      <section className="cortexReelStage" aria-label="FUSE filesystem interface for agent runtimes">
         <div className="cortexReelAssembly" data-reel-animate aria-hidden="true">
           <div className="cortexReelLongShadow" />
           <div className="cortexReelPlate">
@@ -74,7 +74,7 @@ export default function Reel(): ReactElement {
         </div>
 
         <div className="cortexReelPhase cortexReelPhaseOne" data-reel-animate>
-          <p>FILESYSTEM AS AGENT OS</p>
+          <p>FUSE FILESYSTEM INTERFACE</p>
           <h1>Runtime,<br />mounted.</h1>
           <code>status · bin · model · agent · tool · home · shared</code>
         </div>

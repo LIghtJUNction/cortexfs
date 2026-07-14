@@ -2,6 +2,23 @@ use super::*;
 use crate::*;
 
 #[test]
+fn persistent_context_uses_only_reserved_bwrap_home_mapping() {
+    let authoritative = Path::new("/var/lib/cortexfs/storage/current/home/1000/agent/coder");
+    assert_eq!(
+        persistent_context_visible_home(authoritative, Some(std::ffi::OsStr::new("/home/agent"))),
+        PathBuf::from("/home/agent")
+    );
+    assert_eq!(
+        persistent_context_visible_home(authoritative, Some(std::ffi::OsStr::new("/tmp/escape"))),
+        authoritative
+    );
+    assert_eq!(
+        persistent_context_visible_home(authoritative, None),
+        authoritative
+    );
+}
+
+#[test]
 pub(crate) fn tsh_terminal_without_run_capability_uses_ephemeral_context()
 -> Result<(), Box<dyn std::error::Error>> {
     const CHILD: &str = "CORTEXFS_TSH_TERMINAL_EPHEMERAL_CHILD";

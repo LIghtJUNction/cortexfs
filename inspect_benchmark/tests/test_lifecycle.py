@@ -412,7 +412,7 @@ class LifecycleSystemTests(unittest.TestCase):
     def command_fixture(
         self, failure: str | None = None, status_output: str = "idle\nmodel=main\n"
     ):
-        def command(values: list[str], _timeout: float):
+        def command(values: list[str], _timeout: float, **_kwargs: object):
             key = " ".join(values)
             if values[1:] == ["status"]:
                 stdout = "ctx\n    State: running\n   Status: ready\n  Mounted: yes\n"

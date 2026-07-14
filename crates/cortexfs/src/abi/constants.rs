@@ -9,7 +9,7 @@ pub const CTX_ROOT: &str = "/ctx";
 /// Rust object runner used by executable object metadata files.
 pub const CORTEXFS_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
 
-/// Root entries reserved by the new Agent OS ABI.
+/// Root entries reserved by the FUSE filesystem ABI.
 pub const ROOT_ENTRIES: &[&str] = &["status", "bin", "model", "agent", "tool", "home", "shared"];
 
 /// Object classes exposed as executable files.
