@@ -1,14 +1,24 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: filesystem as Agent OS" width="900">
+  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: a FUSE filesystem interface for agent runtimes" width="900">
+</p>
+
+<p align="center">
+  <a href="https://github.com/LIghtJUNction/cortexfs/actions/workflows/pages.yml"><img alt="Pages deployment" src="https://img.shields.io/github/actions/workflow/status/LIghtJUNction/cortexfs/pages.yml?branch=main&amp;label=pages"></a>
+  <a href="https://lightjunction.github.io/cortexfs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-live-2A8F73"></a>
+  <a href="https://crates.io/crates/cortexfs"><img alt="crates.io" src="https://img.shields.io/crates/v/cortexfs"></a>
+  <a href="https://www.rust-lang.org/"><img alt="Rust 1.91 or newer" src="https://img.shields.io/badge/rust-1.91%2B-000000?logo=rust"></a>
+  <a href="https://doc.rust-lang.org/edition-guide/rust-2024/"><img alt="Rust edition 2024" src="https://img.shields.io/badge/edition-2024-000000?logo=rust"></a>
+  <a href="https://www.kernel.org/doc/html/latest/filesystems/fuse.html"><img alt="Linux FUSE" src="https://img.shields.io/badge/platform-Linux%20%7C%20FUSE-FCC624?logo=linux&amp;logoColor=black"></a>
+  <a href="https://github.com/LIghtJUNction/cortexfs/blob/main/Cargo.toml"><img alt="MIT license metadata" src="https://img.shields.io/badge/license-MIT-2A8F73"></a>
 </p>
 
 **Your agent runtime shouldn’t hide inside a database.**
 
-CortexFS is a FUSE Agent OS. It mounts models, agents, tools, and durable
-sessions at `/ctx` — a small Unix ABI you can `ls`, `cat`, execute, secure, and
-audit.
+CortexFS is a FUSE filesystem for agent runtimes. It mounts models, agents,
+tools, and durable sessions at `/ctx` — a small Unix filesystem interface you
+can `ls`, `cat`, execute, secure, and audit.
 
 CortexFS exposes exactly three executable object classes: `model` is pure
 inference, `agent` is a policy-bound orchestrator, and `tool` is an executable

@@ -73,7 +73,7 @@ const roots = ['status', 'bin', 'model', 'agent', 'tool', 'home', 'shared'];
 const zh: Copy = {
   description:
     'CortexFS 在 /ctx 挂载模型、agent、tool 与持久 session，形成可查看、执行、安全控制和审计的小型 Unix ABI。',
-  eyebrow: 'Filesystem as Agent OS',
+  eyebrow: 'FUSE 文件系统接口',
   title: 'Agent runtime 不该藏在数据库里。',
   lead:
     'CortexFS 在 /ctx 挂载模型、agent、tool 和持久 session——一个可用 ls、cat、执行、安全控制和审计的小型 Unix ABI。',
@@ -176,7 +176,7 @@ const zh: Copy = {
 const en: Copy = {
   description:
     'CortexFS mounts models, agents, tools, and durable sessions at /ctx as a small Unix ABI you can inspect, execute, secure, and audit.',
-  eyebrow: 'Filesystem as Agent OS',
+  eyebrow: 'FUSE filesystem interface',
   title: 'Your agent runtime shouldn’t hide inside a database.',
   lead:
     'CortexFS mounts models, agents, tools, and durable sessions at /ctx — a small Unix ABI you can ls, cat, execute, secure, and audit.',

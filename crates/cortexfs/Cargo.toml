@@ -1,6 +1,6 @@
 [package]
 name = "cortexfs"
-description = "CortexFS Agent OS ABI design core."
+description = "FUSE filesystem interface for agent runtimes."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
