@@ -165,8 +165,33 @@ pub(crate) fn record_agent_error_from_event_frames(
     }
 
     append_session_lines(session_dir, "events.jsonl", &terminal)?;
-    set_session_state(session_dir, "error")?;
     Ok(true)
+}
+
+pub(crate) fn record_agent_terminal_state_from_event_frames(
+    session_dir: &Path,
+    run_id: &str,
+    frames: &[String],
+) -> Result<bool, SocketSessionRecordError> {
+    let matching_done = frames.iter().rev().find_map(|frame| {
+        let value = serde_json::from_str::<Value>(frame).ok()?;
+        if value.get("type").and_then(Value::as_str) != Some("done")
+            || value.get("run").and_then(Value::as_str) != Some(run_id)
+        {
+            return None;
+        }
+        Some(value)
+    });
+    let Some(matching_done) = matching_done else {
+        return Ok(false);
+    };
+    let terminal_state = match matching_done.get("status").and_then(Value::as_str) {
+        Some("ok") => "done",
+        Some("error") => "error",
+        _ => return Ok(false),
+    };
+    require_socket_session_files(session_dir)?;
+    transition_active_session_run(session_dir, run_id, terminal_state)
 }
 
 pub(crate) fn record_tool_results_from_event_frames(

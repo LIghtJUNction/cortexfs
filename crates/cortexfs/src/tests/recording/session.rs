@@ -38,7 +38,12 @@ fn socket_session_recorder_cancels_without_deleting_history() {
         &session.join("messages.jsonl"),
         "{\"role\":\"user\",\"content\":\"keep me\"}\n",
     );
-    write_text_file(&session.join("events.jsonl"), "");
+    write_text_file(
+        &session.join("events.jsonl"),
+        "{\"type\":\"start\",\"id\":\"run-1\",\"run\":\"run-1\",\"client_id\":\"run-1\"}\n",
+    );
+    write_text_file(&session.join("state"), "active\n");
+    write_text_file(&session.join("current_run"), "run-1\n");
 
     let request = parse_socket_request_frame(r#"{"op":"cancel","id":"run-1"}"#);
     let request = ok!(request);
@@ -122,6 +127,121 @@ fn assistant_response_recorder_rejects_nul_content_without_recording() {
     assert_file_text(&session.join("messages.jsonl"), "");
     assert_file_text(&session.join("events.jsonl"), "");
     assert_file_text(&session.join("latest.md"), "old\n");
+}
+
+#[test]
+fn agent_terminal_frames_end_only_the_matching_active_run() {
+    let root = clean_test_dir("agent-terminal-session-state");
+    let session = root.join("default");
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("state"), "active\n");
+    write_text_file(&session.join("current_run"), "run-ok\n");
+    write_text_file(&session.join("events.jsonl"), "raw-history\n");
+
+    let pending = vec![r#"{"type":"delta","run":"run-ok","text":"x"}"#.to_owned()];
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session, "run-ok", &pending,
+        ),
+        Ok(false)
+    );
+    assert_file_text(&session.join("state"), "active\n");
+    assert_file_text(&session.join("current_run"), "run-ok\n");
+
+    let done = vec![r#"{"type":"done","run":"run-ok","status":"ok"}"#.to_owned()];
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session, "run-ok", &done,
+        ),
+        Ok(true)
+    );
+    assert_file_text(&session.join("state"), "done\n");
+    assert_file_text(&session.join("current_run"), "run-ok\n");
+
+    let late_error = vec![r#"{"type":"done","run":"run-ok","status":"error"}"#.to_owned()];
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session,
+            "run-ok",
+            &late_error,
+        ),
+        Ok(false)
+    );
+    assert_file_text(&session.join("state"), "done\n");
+
+    write_text_file(&session.join("state"), "active\n");
+    write_text_file(&session.join("current_run"), "run-new\n");
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session, "run-ok", &done,
+        ),
+        Ok(false)
+    );
+    assert_file_text(&session.join("state"), "active\n");
+    assert_file_text(&session.join("current_run"), "run-new\n");
+
+    write_text_file(&session.join("current_run"), "run-blocked\n");
+    let cancelled_latest = vec![
+        r#"{"type":"done","run":"run-blocked","status":"ok"}"#.to_owned(),
+        r#"{"type":"done","run":"run-blocked","status":"cancelled"}"#.to_owned(),
+    ];
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session,
+            "run-blocked",
+            &cancelled_latest,
+        ),
+        Ok(false)
+    );
+    assert_file_text(&session.join("state"), "active\n");
+    let unknown_latest = vec![
+        r#"{"type":"done","run":"run-blocked","status":"ok"}"#.to_owned(),
+        r#"{"type":"done","run":"run-blocked","status":"future"}"#.to_owned(),
+    ];
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session,
+            "run-blocked",
+            &unknown_latest,
+        ),
+        Ok(false)
+    );
+    assert_file_text(&session.join("state"), "active\n");
+
+    write_text_file(&session.join("state"), "active\n");
+    write_text_file(&session.join("current_run"), "run-error\n");
+    let error = vec![r#"{"type":"done","run":"run-error","status":"error"}"#.to_owned()];
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session,
+            "run-error",
+            &error,
+        ),
+        Ok(true)
+    );
+    assert_file_text(&session.join("state"), "error\n");
+    assert_file_text(&session.join("current_run"), "run-error\n");
+    let late_ok = vec![r#"{"type":"done","run":"run-error","status":"ok"}"#.to_owned()];
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session,
+            "run-error",
+            &late_ok,
+        ),
+        Ok(false)
+    );
+    assert_file_text(&session.join("state"), "error\n");
+    write_text_file(&session.join("state"), "cancelled\n");
+    assert_eq!(
+        crate::runtime::socket::events::record_agent_terminal_state_from_event_frames(
+            &session,
+            "run-error",
+            &late_ok,
+        ),
+        Ok(false)
+    );
+    assert_file_text(&session.join("state"), "cancelled\n");
+    assert_file_text(&session.join("events.jsonl"), "raw-history\n");
 }
 use super::*;
 use crate::runtime::record::session::set_session_state;
