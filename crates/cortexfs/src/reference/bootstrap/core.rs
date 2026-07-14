@@ -437,13 +437,17 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
             format_args!(
                 "allow {policy_subject} tool:fs.write execute\n\
                  allow {policy_subject} tool:fs.replace execute\n\
-                 allow {policy_subject} tool:shell.exec execute\n"
+                 allow {policy_subject} tool:shell.exec execute\n\
+                 allow {policy_subject} tool:bash execute\n"
             ),
         );
     } else if name == "executor" {
         let _ignored = std::fmt::Write::write_fmt(
             &mut policy,
-            format_args!("allow {policy_subject} tool:shell.exec execute\n"),
+            format_args!(
+                "allow {policy_subject} tool:shell.exec execute\n\
+                 allow {policy_subject} tool:bash execute\n"
+            ),
         );
     }
     for child in reference_agent_children(name) {
