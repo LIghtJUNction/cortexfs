@@ -150,6 +150,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
         sandbox: Some(&sandbox),
         network_allowed: false,
         home_fd: 10,
+        home_alias_fd: 11,
         home_target: Path::new("/ctx/home/1000/agent/coder"),
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,
@@ -199,6 +200,12 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
     ));
     assert!(contains_os_arg_triplet(
         &args,
+        "--bind-fd",
+        "11",
+        "/home/agent"
+    ));
+    assert!(contains_os_arg_triplet(
+        &args,
         "--setenv",
         "HOME",
         "/home/agent"
@@ -227,6 +234,7 @@ fn nested_control_pair_is_propagated_and_bound() -> Result<(), Box<dyn std::erro
         sandbox: None,
         network_allowed: false,
         home_fd: 10,
+        home_alias_fd: 11,
         home_target: Path::new("/ctx/home/1000/agent/coder"),
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: Some(&control),
@@ -344,7 +352,10 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         work,
     };
     let home_dir = open_plain_directory(&home)?;
+    let home_alias_dir = home_dir.try_clone()?;
     crate::provider::name::files::clear_fd_cloexec(&home_dir)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    crate::provider::name::files::clear_fd_cloexec(&home_alias_dir)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
@@ -356,6 +367,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         sandbox: Some(&sandbox),
         network_allowed: false,
         home_fd: home_dir.as_raw_fd(),
+        home_alias_fd: home_alias_dir.as_raw_fd(),
         home_target: Path::new("/ctx/home/1000/agent/coder"),
         ctx_home_target: Path::new("/ctx/home/1000"),
         control: None,

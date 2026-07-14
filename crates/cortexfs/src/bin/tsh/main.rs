@@ -401,9 +401,21 @@ fn persistent_context_path_with_capability(
     validate_runtime_source_receipt(&runtime.source, &receipt)?;
     let view = derive_agent_runtime_view(&runtime.source, agent)
         .map_err(|error| agent_view_error_to_tsh(&error))?;
+    let home = persistent_context_visible_home(view.home(), env::var_os("HOME").as_deref());
     Ok(Some(cortexfs::tsh_context_state_path(
-        &view.home().join("session").join(&runtime.session),
+        &home.join("session").join(&runtime.session),
     )))
+}
+
+fn persistent_context_visible_home(
+    authoritative_home: &Path,
+    home: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    if home == Some(std::ffi::OsStr::new("/home/agent")) {
+        PathBuf::from("/home/agent")
+    } else {
+        authoritative_home.to_path_buf()
+    }
 }
 
 fn validate_runtime_source_receipt(

@@ -302,6 +302,7 @@ fn assert_reference_agents(root: &Path) {
     let coder_policy = ok!(fs::read_to_string(root.join("agent/coder.d/policy")));
     assert!(coder_policy.contains("allow coder_t tool:fs.write execute"));
     assert!(coder_policy.contains("allow coder_t tool:shell.exec execute"));
+    assert!(coder_policy.contains("allow coder_t tool:bash execute"));
 
     for index in ["by-cwd", "by-hash", "by-uuid"] {
         assert!(
