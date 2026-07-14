@@ -2011,3 +2011,80 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     );
 }
 use super::*;
+
+#[test]
+fn socket_tsh_request_is_durable_and_replays_without_second_execution() {
+    let root = reference_tree("socket-tsh-replay");
+    let session_root = agent_session_root(&root, "coder");
+    write_text_file(
+        &root.join("agent/coder.d/path"),
+        &format!("{}/tool\n", root.display()),
+    );
+    write_text_file(
+        &root.join("agent/coder.d/mount"),
+        &format!(
+            "{}\t{}\tro\trbind,nosuid,nodev\n",
+            root.display(),
+            root.display()
+        ),
+    );
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let executable = root.join("agent/coder");
+    let tsh = root.join("tool/tsh");
+    let _ignored = fs::remove_file(&tsh);
+    write_text_file(
+        &tsh,
+        r#"#!/bin/sh
+state="$HOME/session/$CTX_SESSION/context/tsh.json"
+count="$HOME/session/$CTX_SESSION/context/tsh-count"
+n=0
+test ! -f "$count" || n=$(cat "$count")
+n=$((n + 1))
+printf '%s\n' "$n" > "$count"
+printf '%s\n' '{"version":1,"tools":[{"name":"bash","path":"/ctx/tool/bash","description":"","schema":null,"dynamic_resident":true,"pinned":false,"last_used":1}]}' > "$state"
+printf loaded
+"#,
+    );
+    set_file_mode(&tsh, 0o755);
+    let control_dir = root.join("run-control");
+    assert!(fs::create_dir_all(&control_dir).is_ok());
+    assert!(fs::set_permissions(&control_dir, fs::Permissions::from_mode(0o711)).is_ok());
+
+    for _attempt in 0..2 {
+        let (mut client, mut socket) = ok!(UnixStream::pair());
+        assert!(client
+            .write_all(b"{\"op\":\"tsh\",\"id\":\"load-1\",\"session\":\"default\",\"args\":[\"load\",\"bash\"]}\n")
+            .is_ok());
+        assert!(client.shutdown(Shutdown::Write).is_ok());
+        let result = serve_agent_executable_socket_stream_once(
+            &mut socket,
+            None,
+            AgentExecutableSocketRuntime {
+                ctx_root: &root,
+                source_root: &root,
+                identity: view.identity(),
+                env: view.env(),
+                session_root: &session_root,
+                default_cwd: "/workspace",
+                model: Some("debug/echo"),
+                network_allowed: false,
+                agent_name: "coder",
+                agent_executable: &executable,
+                execution: AgentExecutableSocketExecution::Bwrap {
+                    program: Path::new("/usr/bin/bwrap"),
+                    mount_table: view.mount_table(),
+                    control_dir: Some(&control_dir),
+                },
+            },
+        );
+        assert!(
+            matches!(result, Ok(ref response) if response.frames().iter().any(|frame| frame.contains("loaded"))),
+            "{result:?}"
+        );
+    }
+    let context = session_root.join("default/context");
+    assert_file_text(&context.join("tsh-count"), "1\n");
+    let state = ok!(cortexfs::read_tsh_context_state(&context.join("tsh.json")));
+    assert!(state.tools.iter().any(|tool| tool.name == "bash"));
+    assert_file_text(&session_root.join("default/state"), "done\n");
+}

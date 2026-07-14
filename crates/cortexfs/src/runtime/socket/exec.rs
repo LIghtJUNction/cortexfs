@@ -1,4 +1,5 @@
 use super::*;
+use std::ffi::OsString;
 use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,6 +36,76 @@ impl Drop for RunControlServer {
             let _ignored = join.join();
         }
     }
+}
+
+struct StartedRunControl {
+    tool: object::executor::exec::AgentToolControl,
+    environment: [(String, String); 2],
+    server: RunControlServer,
+}
+
+fn start_run_control(
+    runtime: AgentExecutableSocketRuntime<'_>,
+    session: &str,
+    run: &str,
+) -> Result<Option<StartedRunControl>, SocketRuntimeError> {
+    let control_dir = match runtime.execution {
+        AgentExecutableSocketExecution::Direct
+        | AgentExecutableSocketExecution::Bwrap {
+            control_dir: None, ..
+        } => return Ok(None),
+        AgentExecutableSocketExecution::Bwrap {
+            control_dir: Some(control_dir),
+            ..
+        } => control_dir,
+    };
+    let (capability, listener) = runtime::control::RunCapability::create_with_source(
+        control_dir,
+        runtime.source_root,
+        runtime.agent_name,
+        session,
+        run,
+        runtime.identity.uid(),
+        runtime.identity.gid(),
+    )
+    .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let target = Path::new(SOCKET_RUN_CONTROL_PATH);
+    let environment = capability.environment(target);
+    let tool = object::executor::exec::AgentToolControl {
+        source: capability.socket().to_path_buf(),
+        target: target.to_path_buf(),
+        token: OsString::from(&environment[1].1),
+    };
+    let source_root = runtime.source_root.to_path_buf();
+    let ctx_root = runtime.ctx_root.to_path_buf();
+    let request_run = run.to_owned();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let server_shutdown = Arc::clone(&shutdown);
+    let (startup_sender, startup) = mpsc::sync_channel(1);
+    let error_sender = startup_sender.clone();
+    let join = thread::spawn(move || {
+        let result = capability.serve_run_with_handler(
+            &listener,
+            &server_shutdown,
+            &startup_sender,
+            || Some(request_run.clone()),
+            |request| create_socket_child(&source_root, &ctx_root, request),
+        );
+        if let Err(ref error) = result {
+            let _ignored = error_sender.try_send(Err(error.clone()));
+        }
+        let cleanup = capability.cleanup();
+        result.and(cleanup)
+    });
+    Ok(Some(StartedRunControl {
+        tool,
+        environment,
+        server: RunControlServer {
+            shutdown,
+            startup,
+            join: Some(join),
+        },
+    }))
 }
 
 fn handle_agent_stop_request(
@@ -105,8 +176,9 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
     let debug = socket_debug_timing_from_frame(frame);
     let request = parse_socket_request_frame(frame).map_err(SocketRuntimeError::Request)?;
-    if let SocketRequest::Stop { ref agent } = request {
-        return handle_agent_stop_request(stream, runtime.agent_name, stop, peer_uid, agent);
+    if let Some(result) = handle_agent_immediate_request(stream, runtime, stop, peer_uid, &request)
+    {
+        return result;
     }
     let SocketRequest::Send {
         ref session,
@@ -218,6 +290,161 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     let mut frames = recorder_response.frames().to_vec();
     frames.extend(agent_frames);
     Ok(SocketRuntimeResponse::new(frames))
+}
+
+fn handle_agent_immediate_request(
+    stream: &mut UnixStream,
+    runtime: AgentExecutableSocketRuntime<'_>,
+    stop: Option<&dyn AgentStopHandler>,
+    peer_uid: u32,
+    request: &SocketRequest,
+) -> Option<Result<SocketRuntimeResponse, SocketRuntimeError>> {
+    match *request {
+        SocketRequest::Stop { ref agent } => Some(handle_agent_stop_request(
+            stream,
+            runtime.agent_name,
+            stop,
+            peer_uid,
+            agent,
+        )),
+        SocketRequest::Tsh {
+            ref id,
+            ref session,
+            ref args,
+        } => Some(handle_agent_tsh_request(stream, runtime, id, session, args)),
+        _ => None,
+    }
+}
+
+fn handle_agent_tsh_request(
+    stream: &mut UnixStream,
+    runtime: AgentExecutableSocketRuntime<'_>,
+    id: &str,
+    session: &str,
+    args: &[String],
+) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    let preparation = prepare_owned_durable_session(
+        runtime.session_root,
+        session,
+        runtime.default_cwd,
+        runtime.model,
+        SocketSessionScope::Private,
+        runtime.identity.uid(),
+        runtime.identity.gid(),
+    )
+    .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let input = serde_json::to_string(args).map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let send = SocketRequest::Send {
+        id: id.to_owned(),
+        session: session.to_owned(),
+        scope: SocketSessionScope::Private,
+        cwd: None,
+        workspace: None,
+        input: format!(":tsh {input}"),
+    };
+    let recorder = match handle_socket_send(
+        runtime.session_root,
+        runtime.default_cwd,
+        runtime.model,
+        &send,
+        Some(&preparation),
+    )? {
+        SocketSendOutcome::Replayed(response) => {
+            let response = replayed_run_response(&runtime.session_root.join(session), &response);
+            write_socket_runtime_response(stream, &response)?;
+            return Ok(response);
+        }
+        SocketSendOutcome::Recorded(response) => response,
+    };
+    let run = recorder
+        .frames()
+        .first()
+        .and_then(|frame| serde_json::from_str::<Value>(frame).ok())
+        .and_then(|frame| frame.get("run").and_then(Value::as_str).map(str::to_owned))
+        .ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let call = object::executor::AgentToolCall {
+        id: "tsh".to_owned(),
+        name: "tsh".to_owned(),
+        args: args.iter().map(OsString::from).collect(),
+    };
+    let mut control =
+        start_run_control(runtime, session, &run)?.ok_or(SocketRuntimeError::CannotRunAgent)?;
+    let config = object::executor::exec::AgentToolExecutionConfig {
+        agent: runtime.agent_name,
+        source: runtime.source_root,
+        ctx_root: runtime.ctx_root,
+        run: &run,
+        session,
+        inherit_control: false,
+        control: Some(control.tool.clone()),
+        cancel: None,
+    };
+    let mut bytes = Vec::new();
+    object::executor::output::write_tool_call_event(&mut bytes, &run, &call)
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let result = object::executor::exec::execute_agent_tool_call_with(&config, &call);
+    control
+        .server
+        .finish()
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let content = result.as_deref().unwrap_or_else(|error| error);
+    object::executor::output::write_tool_result_event(&mut bytes, &run, &call, content)
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let mut frames = String::from_utf8(bytes)
+        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+        .lines()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if result.is_err() {
+        frames.extend(agent_process_failed_frames(&run, content));
+    } else {
+        frames.push(serde_json::json!({"type":"done", "run":run, "status":"ok"}).to_string());
+    }
+    let session_dir = runtime.session_root.join(session);
+    record_tool_results_from_event_frames(&session_dir, &run, &frames)
+        .map_err(SocketRuntimeError::Record)?;
+    let _terminal_error = record_agent_error_from_event_frames(&session_dir, &run, &frames)
+        .map_err(SocketRuntimeError::Record)?;
+    record_agent_terminal_state_from_event_frames(&session_dir, &run, &frames)
+        .map_err(SocketRuntimeError::Record)?;
+    let mut all = recorder.frames().to_vec();
+    all.extend(frames);
+    let response = SocketRuntimeResponse::new(all);
+    write_socket_runtime_response(stream, &response)?;
+    Ok(response)
+}
+
+fn replayed_run_response(
+    session_dir: &Path,
+    response: &SocketRuntimeResponse,
+) -> SocketRuntimeResponse {
+    let Some(run) = response.frames().first().and_then(|frame| {
+        serde_json::from_str::<Value>(frame)
+            .ok()
+            .and_then(|value| value.get("run").and_then(Value::as_str).map(str::to_owned))
+    }) else {
+        return response.clone();
+    };
+    let Ok(events) = columnar::read_text(
+        session_dir,
+        columnar::Stream::Events,
+        MAX_SOCKET_RUNTIME_EVENTS_BYTES,
+    ) else {
+        return response.clone();
+    };
+    let frames = events
+        .lines()
+        .filter(|line| {
+            serde_json::from_str::<Value>(line)
+                .is_ok_and(|value| value.get("run").and_then(Value::as_str) == Some(run.as_str()))
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if frames.is_empty() {
+        response.clone()
+    } else {
+        SocketRuntimeResponse::new(frames)
+    }
 }
 
 fn run_agent_request(
@@ -432,6 +659,7 @@ fn run_agent_envelope_loop(
             run: request.run_id,
             session: request.session,
             inherit_control: false,
+            control: None,
             cancel: Some((&cancel_dir, request.cancellation_id)),
         };
         let (content, status) =
@@ -821,36 +1049,14 @@ pub(crate) fn run_agent_executable_streaming(
             None
         }
     };
-    let control = match runtime.execution {
-        AgentExecutableSocketExecution::Direct
-        | AgentExecutableSocketExecution::Bwrap {
-            control_dir: None, ..
-        } => None,
-        AgentExecutableSocketExecution::Bwrap {
-            control_dir: Some(control_dir),
-            ..
-        } => {
-            let (capability, listener) = runtime::control::RunCapability::create_with_source(
-                control_dir,
-                runtime.source_root,
-                runtime.agent_name,
-                request.session,
-                request.run_id,
-                runtime.identity.uid(),
-                runtime.identity.gid(),
-            )
-            .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-            let environment = capability.environment(Path::new(SOCKET_RUN_CONTROL_PATH));
-            Some((capability, listener, environment))
-        }
-    };
+    let mut control = start_run_control(runtime, request.session, request.run_id)?;
     let command_result = agent_executable_socket_command(
         runtime,
         &agent_executable,
         request,
         control
             .as_ref()
-            .map(|entry| (entry.0.socket(), entry.2.as_slice())),
+            .map(|entry| (entry.tool.source.as_path(), entry.environment.as_slice())),
         provider_egress
             .as_ref()
             .map(runtime::egress::ProviderEgress::host_dir),
@@ -858,9 +1064,10 @@ pub(crate) fn run_agent_executable_streaming(
     let (mut command, agent_executable_fd) = match command_result {
         Ok(command) => command,
         Err(error) => {
-            if let Some((capability, _listener, _environment)) = control {
-                capability
-                    .cleanup()
+            if let Some(mut control) = control {
+                control
+                    .server
+                    .finish()
                     .map_err(|_cleanup| SocketRuntimeError::CannotRunAgent)?;
             }
             return Err(error);
@@ -869,34 +1076,7 @@ pub(crate) fn run_agent_executable_streaming(
     apply_socket_debug_timing_env(&mut command, request.debug);
     apply_agent_identity_to_command(&mut command, runtime.identity);
     command.stderr(Stdio::piped());
-    let mut control_server = control.map(|(capability, listener, _environment)| {
-        let source_root = runtime.source_root.to_path_buf();
-        let ctx_root = runtime.ctx_root.to_path_buf();
-        let request_run = request.run_id.to_owned();
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let server_shutdown = Arc::clone(&shutdown);
-        let (startup_sender, startup_receiver) = mpsc::sync_channel(1);
-        let error_sender = startup_sender.clone();
-        let join = thread::spawn(move || {
-            let result = capability.serve_run_with_handler(
-                &listener,
-                &server_shutdown,
-                &startup_sender,
-                || Some(request_run.clone()),
-                |request| create_socket_child(&source_root, &ctx_root, request),
-            );
-            if let Err(ref error) = result {
-                let _ignored = error_sender.try_send(Err(error.clone()));
-            }
-            let cleanup = capability.cleanup();
-            result.and(cleanup)
-        });
-        RunControlServer {
-            shutdown,
-            startup: startup_receiver,
-            join: Some(join),
-        }
-    });
+    let mut control_server = control.take().map(|entry| entry.server);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(_error) => {
@@ -1159,6 +1339,7 @@ pub(crate) fn run_agent_executable_streaming(
             run: request.run_id,
             session: request.session,
             inherit_control: false,
+            control: None,
             cancel: None,
         };
         let (result, status) =

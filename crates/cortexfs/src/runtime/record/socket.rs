@@ -44,9 +44,10 @@ fn record_socket_request(
             history,
         ),
         SocketRequest::Cancel { ref id } => record_socket_cancel_to_session(session_dir, id),
-        SocketRequest::Resume { .. } | SocketRequest::Stop { .. } | SocketRequest::Ping => {
-            Err(SocketSessionRecordError::UnsupportedRequest)
-        }
+        SocketRequest::Tsh { .. }
+        | SocketRequest::Resume { .. }
+        | SocketRequest::Stop { .. }
+        | SocketRequest::Ping => Err(SocketSessionRecordError::UnsupportedRequest),
     }
 }
 
@@ -91,7 +92,8 @@ fn record_indexed_socket_send(
             cwd.as_deref(),
             input.as_str(),
         ),
-        SocketRequest::Resume { .. }
+        SocketRequest::Tsh { .. }
+        | SocketRequest::Resume { .. }
         | SocketRequest::Cancel { .. }
         | SocketRequest::Stop { .. }
         | SocketRequest::Ping => {
