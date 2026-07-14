@@ -20,6 +20,7 @@ struct Options {
     agent: String,
     session: String,
     raw: bool,
+    approvals: Vec<String>,
 }
 
 fn main() -> ExitCode {
@@ -146,7 +147,13 @@ fn run() -> io::Result<()> {
 
 fn send_text(socket: &Path, options: &Options, text: &str) -> io::Result<()> {
     render::frames(
-        &protocol::send(socket, &request_id(), &options.session, text)?,
+        &protocol::send(
+            socket,
+            &request_id(),
+            &options.session,
+            text,
+            &options.approvals,
+        )?,
         options.raw,
     )
 }
@@ -187,6 +194,7 @@ fn messages(options: &Options) -> PathBuf {
     session_dir(options).join("messages.jsonl")
 }
 fn tool_names(root: &Path) -> Vec<String> {
+    const MAX_TOOLS: usize = 4096;
     fs::read_dir(root.join("tool"))
         .ok()
         .into_iter()
@@ -198,12 +206,15 @@ fn tool_names(root: &Path) -> Vec<String> {
                 .extension()
                 .is_none_or(|ext| !ext.eq_ignore_ascii_case("d"))
         })
+        .take(MAX_TOOLS)
         .collect()
 }
 fn print_file(path: &Path) -> io::Result<()> {
     match fs::read_to_string(path) {
         Ok(text) => {
-            io::stdout().lock().write_all(text.as_bytes())?;
+            io::stdout()
+                .lock()
+                .write_all(cortexfs::support::terminal::terminal_safe_text(&text).as_bytes())?;
             Ok(())
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -237,6 +248,7 @@ fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
     let mut agent = None;
     let mut session = "default".to_owned();
     let mut raw = false;
+    let mut approvals = Vec::new();
     let mut args = args;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -252,7 +264,16 @@ fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
             }
             "--raw" => raw = true,
             "--approval" => {
-                let _ignored = args.next();
+                let approval = args.next().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "--approval requires tool name")
+                })?;
+                if !cortexfs::is_object_name(&approval) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "invalid approved tool name",
+                    ));
+                }
+                approvals.push(approval);
             }
             value if !value.starts_with('-') && agent.is_none() => agent = Some(value.to_owned()),
             _ => {
@@ -272,6 +293,7 @@ fn parse(args: impl Iterator<Item = String>) -> io::Result<Options> {
         agent,
         session,
         raw,
+        approvals,
     })
 }
 
@@ -283,4 +305,28 @@ fn banner(options: &Options, workspace: &Path) {
         options.session,
         workspace.display()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_preserves_repeatable_approval_policy() -> io::Result<()> {
+        let options = parse(
+            [
+                "coder",
+                "--session",
+                "work",
+                "--approval",
+                "example.echo",
+                "--approval",
+                "fs.read",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        )?;
+        assert_eq!(options.approvals, ["example.echo", "fs.read"]);
+        Ok(())
+    }
 }

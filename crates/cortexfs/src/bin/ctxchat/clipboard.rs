@@ -1,16 +1,35 @@
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 
 const MAX_CLIPBOARD_BYTES: usize = 256 * 1024;
 
 pub(crate) fn read() -> io::Result<String> {
     for (program, args) in readers() {
-        let output = Command::new(program).args(args).output();
-        if let Ok(output) = output
-            && output.status.success()
-            && output.stdout.len() <= MAX_CLIPBOARD_BYTES
-        {
-            return String::from_utf8(output.stdout).map_err(|_error| {
+        let Ok(mut child) = Command::new(program)
+            .args(args)
+            .stdout(Stdio::piped())
+            .spawn()
+        else {
+            continue;
+        };
+        let mut stdout = Vec::new();
+        let read = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("clipboard stdout unavailable"))?
+            .take(
+                u64::try_from(MAX_CLIPBOARD_BYTES)
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(1),
+            )
+            .read_to_end(&mut stdout);
+        if read.is_err() || stdout.len() > MAX_CLIPBOARD_BYTES {
+            let _ignored = child.kill();
+            let _ignored = child.wait();
+            continue;
+        }
+        if child.wait().is_ok_and(|status| status.success()) {
+            return String::from_utf8(stdout).map_err(|_error| {
                 io::Error::new(io::ErrorKind::InvalidData, "clipboard is not UTF-8")
             });
         }

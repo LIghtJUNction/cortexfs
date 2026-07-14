@@ -9,8 +9,8 @@ use rustyline::{Context, Helper};
 use crate::reference::{complete_paths, history_texts};
 
 const SLASH: &[&str] = &[
-    "/help", "/new", "/resume", "/history", "/output", "/tools", "/status", "/debug", "/cancel",
-    "/clear", "/paste", "/copy", "/exit",
+    "/help", "/new", "/history", "/output", "/tools", "/status", "/clear", "/paste", "/copy",
+    "/exit",
 ];
 const COLON: &[&str] = &[
     ":load", ":pin", ":loads", ":unload", ":unpin", ":tools", ":help",
