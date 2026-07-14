@@ -419,6 +419,119 @@ fn provider_partial_eof_is_nonfallback_without_retry() -> Result<(), Box<dyn std
 
 #[cfg(unix)]
 #[test]
+fn agent_driver_route_falls_back_from_responses_to_chat() -> Result<(), Box<dyn std::error::Error>>
+{
+    const CHILD_ENV: &str = "CORTEXFS_TEST_AGENT_DRIVER_FALLBACK";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let mut output = Vec::new();
+        runner::provider_chat_completion("fixture/model", "hello", "run-1", &mut output)
+            .map_err(|error| std::io::Error::other(error.message))?;
+        return Ok(());
+    }
+
+    let (base_url, stop, server) = spawn_driver_fallback_server()?;
+    let root = unique_temp_dir("runner-agent-driver-fallback")?;
+    let providers = root.join("providers.d");
+    let control = root.join("model/fixture/model.d");
+    fs::create_dir_all(&providers)?;
+    fs::create_dir_all(&control)?;
+    fs::write(
+        providers.join("fixture.json"),
+        format!(
+            "{{\"name\":\"fixture\",\"base_url\":\"{base_url}/v1\",\"formats\":[\"openai.chat\",\"openai.responses\"]}}\n"
+        ),
+    )?;
+    fs::write(
+        control.join("driver"),
+        "default=openai-chat\nagent=openai-responses,openai-chat\n",
+    )?;
+    let status = std::process::Command::new(std::env::current_exe()?)
+        .arg("agent_driver_route_falls_back_from_responses_to_chat")
+        .arg("--nocapture")
+        .env(CHILD_ENV, "1")
+        .env("CTX_PROVIDER_CONFIG_DIR", &providers)
+        .env("CTX_ROOT", &root)
+        .env("CTX_AGENT", "architect")
+        .status()?;
+    let _ignored = stop.send(());
+    let paths = server
+        .join()
+        .map_err(|_panic| std::io::Error::other("provider test server panicked"))??;
+    let _ignored = fs::remove_dir_all(root);
+
+    assert!(status.success(), "driver fallback child assertion failed");
+    assert_eq!(
+        paths,
+        ["/v1/responses", "/v1/responses", "/v1/chat/completions"]
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+type DriverFallbackServer = (
+    String,
+    std::sync::mpsc::Sender<()>,
+    thread::JoinHandle<std::io::Result<Vec<String>>>,
+);
+
+#[cfg(unix)]
+fn spawn_driver_fallback_server() -> Result<DriverFallbackServer, Box<dyn std::error::Error>> {
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::mpsc::TryRecvError;
+
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let address = listener.local_addr()?;
+    let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
+    let server = thread::spawn(move || {
+        let mut paths = Vec::new();
+        loop {
+            match stop_receiver.try_recv() {
+                Ok(()) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => {}
+            }
+            let (mut stream, _peer) = match listener.accept() {
+                Ok(connection) => connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let mut request = [0_u8; 8 * 1024];
+            let read = stream.read(&mut request)?;
+            let head = String::from_utf8_lossy(request.get(..read).unwrap_or_default());
+            let path = head
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or_default()
+                .to_owned();
+            paths.push(path);
+            if paths.len() < 3 {
+                stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")?;
+            } else {
+                let body = concat!(
+                    r#"data: {"choices":[{"delta":{"content":"fallback"},"finish_reason":"stop"}]}"#,
+                    "\n\n"
+                );
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                stream.write_all(header.as_bytes())?;
+                stream.write_all(body.as_bytes())?;
+            }
+            stream.flush()?;
+        }
+        Ok(paths)
+    });
+    Ok((format!("http://{address}"), stop_sender, server))
+}
+
+#[cfg(unix)]
+#[test]
 fn provider_chat_finish_reason_is_terminal() -> Result<(), Box<dyn std::error::Error>> {
     let (result, requests, _output) = call_test_provider_sse(concat!(
         r#"data: {"choices":[{"delta":{"content":"complete"}}]}"#,

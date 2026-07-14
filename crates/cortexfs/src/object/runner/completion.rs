@@ -53,8 +53,88 @@ pub(crate) fn provider_chat_completion(
     let route = provider_route(&config, provider, model, route.as_deref())
         .map_err(ProviderCompletionError::fallback)?;
     let effort = model_effort(&ctx_root, provider, model);
-    let driver = provider_runtime_driver(&config, env::var_os("CTX_AGENT").is_some());
-    let credential = provider_credential(provider, &config, route.key_slot.as_deref(), driver)
+    let agent_call = env::var_os("CTX_AGENT").is_some();
+    let drivers = model_runtime_drivers(&ctx_root, provider, model, agent_call)
+        .map_err(ProviderCompletionError::fallback)?
+        .unwrap_or_else(|| vec![provider_runtime_driver(&config, agent_call)]);
+    let mut last_error = None;
+    for driver in drivers {
+        match call_provider_driver(
+            driver, provider, model, input, run, stdout, &config, &route, effort,
+        ) {
+            Ok(()) => return Ok(()),
+            Err(error) if error.can_fallback => last_error = Some(error),
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        ProviderCompletionError::fallback(format!("no supported model driver: {name}"))
+    }))
+}
+
+fn model_runtime_drivers(
+    ctx_root: &Path,
+    provider: &str,
+    model: &str,
+    agent_call: bool,
+) -> Result<Option<Vec<ProviderRuntimeDriver>>, String> {
+    let control = ctx_root
+        .join("model")
+        .join(provider)
+        .join(format!("{model}.d"))
+        .join("driver");
+    let content = match read_small_plain_text_file(&control, MAX_RUNNER_CONTROL_BYTES, "runner") {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(_error) => return Err("cannot read model driver control".to_owned()),
+    };
+    let routes = cortexfs::parse_model_driver_routes(&content).map_err(|error| {
+        format!(
+            "invalid model driver control: {}",
+            crate::object::layout::model_driver_route_error_value(&error)
+        )
+    })?;
+    let use_case = if agent_call {
+        cortexfs::ModelDriverUseCase::Agent
+    } else {
+        cortexfs::ModelDriverUseCase::Exec
+    };
+    let drivers = routes.drivers_for(use_case).ok_or_else(|| {
+        format!(
+            "model driver control has no {} or default route",
+            use_case.as_str()
+        )
+    })?;
+    drivers
+        .iter()
+        .map(|driver| match driver.as_str() {
+            "openai-chat" | "openai.chat" => Ok(ProviderRuntimeDriver::OpenAiChat),
+            "openai-responses" | "openai.responses" => Ok(ProviderRuntimeDriver::OpenAiResponses),
+            "anthropic-messages" | "anthropic.messages" => {
+                Ok(ProviderRuntimeDriver::AnthropicMessages)
+            }
+            _ => Err(format!("unsupported model driver adapter: {driver}")),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "narrow provider driver dispatch boundary"
+)]
+fn call_provider_driver(
+    driver: ProviderRuntimeDriver,
+    provider: &str,
+    model: &str,
+    input: &str,
+    run: &str,
+    stdout: &mut impl Write,
+    config: &RunnerProviderConfig,
+    route: &ProviderRoute,
+    effort: cortexfs::ModelEffort,
+) -> Result<(), ProviderCompletionError> {
+    let credential = provider_credential(provider, config, route.key_slot.as_deref(), driver)
         .map_err(ProviderCompletionError::fallback)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
@@ -181,5 +261,86 @@ impl ProviderCompletionError {
             message,
             can_fallback: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod driver_route_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn direct_exec_uses_exec_driver_route() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/fixture/model.d");
+        fs::create_dir_all(&control)?;
+        fs::write(
+            control.join("driver"),
+            "default=openai-responses\nexec=openai-chat\nagent=openai-responses,openai-chat\n",
+        )?;
+
+        assert_eq!(
+            model_runtime_drivers(root.path(), "fixture", "model", false),
+            Ok(Some(vec![ProviderRuntimeDriver::OpenAiChat]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn agent_route_uses_default_when_agent_route_is_missing()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/fixture/model.d");
+        fs::create_dir_all(&control)?;
+        fs::write(control.join("driver"), "default=openai-chat\n")?;
+
+        assert_eq!(
+            model_runtime_drivers(root.path(), "fixture", "model", true),
+            Ok(Some(vec![ProviderRuntimeDriver::OpenAiChat]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_adapter_returns_stable_error_before_transport()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/fixture/model.d");
+        fs::create_dir_all(&control)?;
+        fs::write(control.join("driver"), "agent=vendor-magic\n")?;
+
+        assert_eq!(
+            model_runtime_drivers(root.path(), "fixture", "model", true),
+            Err("unsupported model driver adapter: vendor-magic".to_owned())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_control_returns_stable_error() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/fixture/model.d");
+        fs::create_dir_all(&control)?;
+        fs::write(control.join("driver"), "agent=\n")?;
+
+        assert_eq!(
+            model_runtime_drivers(root.path(), "fixture", "model", true),
+            Err("invalid model driver control: line 1 empty driver".to_owned())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unreadable_control_returns_stable_error_without_os_detail()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/fixture/model.d/driver");
+        fs::create_dir_all(&control)?;
+
+        assert_eq!(
+            model_runtime_drivers(root.path(), "fixture", "model", true),
+            Err("cannot read model driver control".to_owned())
+        );
+        Ok(())
     }
 }
