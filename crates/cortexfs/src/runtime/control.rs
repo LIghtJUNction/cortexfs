@@ -1,10 +1,12 @@
 //! Internal capability channel for one active agent run.
 
-use crate::{PeerCredentials, peer_credentials, support::plain::open_plain_directory};
+use crate::{
+    PeerCredentials, peer_credentials,
+    support::{plain::open_plain_directory, receipt::random_hex},
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
-use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write as _};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -137,7 +139,8 @@ impl RunCapability {
         {
             return Err(RunCapabilityError::CannotCreate);
         }
-        let token = random_hex::<TOKEN_BYTES>()?;
+        let token =
+            random_hex::<TOKEN_BYTES>().map_err(|_error| RunCapabilityError::CannotCreate)?;
         let socket = directory.join(format!(
             "control-{}.sock",
             token.get(..24).unwrap_or(&token)
@@ -640,18 +643,6 @@ fn require_socket_identity(
     } else {
         Err(RunCapabilityError::CleanupConflict)
     }
-}
-
-pub(crate) fn random_hex<const N: usize>() -> Result<String, RunCapabilityError> {
-    let mut bytes = [0_u8; N];
-    File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .map_err(|_error| RunCapabilityError::CannotCreate)?;
-    let mut token = String::with_capacity(N * 2);
-    for byte in bytes {
-        write!(&mut token, "{byte:02x}").map_err(|_error| RunCapabilityError::CannotCreate)?;
-    }
-    Ok(token)
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
