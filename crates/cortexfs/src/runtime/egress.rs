@@ -21,6 +21,19 @@ const CONNECT_BUDGET: Duration = Duration::from_millis(250);
 const RELAY_TIMEOUT: Duration = Duration::from_millis(100);
 const RELAY_BUFFER_BYTES: usize = 16 * 1024;
 
+/// Fixed path where a sandboxed provider runner sees its run-scoped relay sockets.
+pub const PROVIDER_EGRESS_SANDBOX_PATH: &str = "/run/cortexfs/provider-egress";
+/// Environment variable advertising the fixed provider relay directory.
+pub const PROVIDER_EGRESS_DIR_ENV: &str = "CTX_PROVIDER_EGRESS_DIR";
+
+pub(crate) fn is_provider_model(ctx_root: &Path, model: &str) -> Result<bool, ProviderEgressError> {
+    let candidates =
+        model_candidates(ctx_root, model).map_err(|_error| ProviderEgressError::InvalidModel)?;
+    Ok(candidates
+        .first()
+        .is_some_and(|candidate| candidate.name != "debug/echo"))
+}
+
 /// Stable failure while planning or creating a provider egress boundary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderEgressError {

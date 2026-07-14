@@ -788,6 +788,34 @@ pub(crate) fn run_agent_executable_streaming(
 ) -> Result<AgentRunOutcome, SocketRuntimeError> {
     let mut client_connected = true;
     let agent_executable = open_agent_executable_no_follow(runtime.agent_executable)?;
+    let provider_model = match runtime.execution {
+        AgentExecutableSocketExecution::Direct => false,
+        AgentExecutableSocketExecution::Bwrap { .. } => runtime
+            .model
+            .map(|model| runtime::egress::is_provider_model(runtime.ctx_root, model))
+            .transpose()
+            .map_err(|_error| SocketRuntimeError::CannotRunAgent)?
+            .unwrap_or(false),
+    };
+    let provider_egress = match runtime.execution {
+        AgentExecutableSocketExecution::Bwrap { control_dir, .. } if provider_model => {
+            let control_dir = control_dir.ok_or(SocketRuntimeError::CannotRunAgent)?;
+            Some(
+                runtime::egress::ProviderEgress::create(
+                    control_dir,
+                    runtime.ctx_root,
+                    runtime.model.ok_or(SocketRuntimeError::CannotRunAgent)?,
+                    runtime.identity.uid(),
+                    runtime.identity.gid(),
+                    request.run_id,
+                )
+                .map_err(|_error| SocketRuntimeError::CannotRunAgent)?,
+            )
+        }
+        AgentExecutableSocketExecution::Direct | AgentExecutableSocketExecution::Bwrap { .. } => {
+            None
+        }
+    };
     let control = match runtime.execution {
         AgentExecutableSocketExecution::Direct
         | AgentExecutableSocketExecution::Bwrap {
@@ -818,6 +846,9 @@ pub(crate) fn run_agent_executable_streaming(
         control
             .as_ref()
             .map(|entry| (entry.0.socket(), entry.2.as_slice())),
+        provider_egress
+            .as_ref()
+            .map(runtime::egress::ProviderEgress::host_dir),
     );
     let (mut command, agent_executable_fd) = match command_result {
         Ok(command) => command,

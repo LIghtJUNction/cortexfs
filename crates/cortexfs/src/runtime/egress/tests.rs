@@ -122,6 +122,27 @@ fn plan_resolves_alias_fallback_and_deduplicates_provider() -> Result<(), Box<dy
 }
 
 #[test]
+fn provider_model_detection_resolves_provider_alias() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    write_model(root.path(), "fixture/chat", "http://127.0.0.1:8001/v1")?;
+    fs::create_dir_all(root.path().join("model"))?;
+    std::os::unix::fs::symlink("/ctx/model/fixture/chat", root.path().join("model/main"))?;
+
+    assert!(is_provider_model(root.path(), "main")?);
+    Ok(())
+}
+
+#[test]
+fn provider_model_detection_skips_debug_alias() -> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    fs::create_dir_all(root.path().join("model/debug/echo.d"))?;
+    std::os::unix::fs::symlink("/ctx/model/debug/echo", root.path().join("model/main"))?;
+
+    assert!(!is_provider_model(root.path(), "main")?);
+    Ok(())
+}
+
+#[test]
 fn plan_rejects_conflicting_provider_authorities_before_resources()
 -> Result<(), Box<dyn std::error::Error>> {
     let (root, control) = fixture()?;

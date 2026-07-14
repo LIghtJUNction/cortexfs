@@ -419,6 +419,77 @@ fn provider_partial_eof_is_nonfallback_without_retry() -> Result<(), Box<dyn std
 
 #[cfg(unix)]
 #[test]
+fn brokered_external_provider_stops_all_openai_drivers_before_request()
+-> Result<(), Box<dyn std::error::Error>> {
+    const CHILD_ENV: &str = "CORTEXFS_TEST_BROKERED_PROVIDER_AUTH";
+    const PROVIDER: &str = "zztestegressauth";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        assert!(matches!(
+            cortexfs::read_provider_system_secret(PROVIDER, "default"),
+            Ok(None)
+        ));
+        reset_provider_request_attempts();
+        let mut output = Vec::new();
+        let result = runner::provider_chat_completion(
+            &format!("{PROVIDER}/model"),
+            "hello",
+            "run-1",
+            &mut output,
+        );
+        let Err(error) = result else {
+            return Err(std::io::Error::other("credential-free provider call succeeded").into());
+        };
+        assert_eq!(
+            error.message,
+            format!("missing provider credential: {PROVIDER}")
+        );
+        assert_eq!(provider_request_attempts(), 0);
+        return Ok(());
+    }
+
+    let root = unique_temp_dir("runner-brokered-provider-auth")?;
+    let providers = root.join("providers.d");
+    let control = root.join(format!("model/{PROVIDER}/model.d"));
+    fs::create_dir_all(&providers)?;
+    fs::create_dir_all(&control)?;
+    fs::write(
+        providers.join(format!("{PROVIDER}.json")),
+        format!(
+            "{{\"name\":\"{PROVIDER}\",\"base_url\":\"https://api.example.test/v1\",\"formats\":[\"openai.chat\",\"openai.responses\"]}}\n"
+        ),
+    )?;
+    fs::write(
+        control.join("driver"),
+        "default=openai-chat,openai-responses\n",
+    )?;
+    let status = std::process::Command::new(std::env::current_exe()?)
+        .arg("brokered_external_provider_stops_all_openai_drivers_before_request")
+        .arg("--nocapture")
+        .env(CHILD_ENV, "1")
+        .env("CTX_PROVIDER_CONFIG_DIR", &providers)
+        .env("CTX_ROOT", &root)
+        .env(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        )
+        .env_remove("CTX_AGENT")
+        .env_remove("CTX_PROVIDER_SECRET_VALUE")
+        .env_remove("CTX_PROVIDER_SECRET_FD")
+        .env_remove("CTX_PROVIDER_SECRET_PATH")
+        .env_remove("CTX_PROVIDER_SECRET_PROVIDER")
+        .env_remove("CTX_PROVIDER_SECRET_SLOT")
+        .status()?;
+    let _ignored = fs::remove_dir_all(root);
+
+    assert!(
+        status.success(),
+        "brokered provider auth child assertion failed"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn agent_driver_route_falls_back_from_responses_to_chat() -> Result<(), Box<dyn std::error::Error>>
 {
     const CHILD_ENV: &str = "CORTEXFS_TEST_AGENT_DRIVER_FALLBACK";

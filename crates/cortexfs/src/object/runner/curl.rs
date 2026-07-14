@@ -1,5 +1,19 @@
 use super::*;
 
+#[cfg(test)]
+static PROVIDER_REQUEST_ATTEMPTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn reset_provider_request_attempts() {
+    PROVIDER_REQUEST_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn provider_request_attempts() -> usize {
+    PROVIDER_REQUEST_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub(crate) fn run_curl_json(
     target: &CurlJsonTarget,
     api_key: Option<&str>,
@@ -51,6 +65,8 @@ pub(crate) fn start_curl_json_with_headers(
     headers: &[String],
     body: &str,
 ) -> Result<Child, String> {
+    #[cfg(test)]
+    PROVIDER_REQUEST_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut child = provider_curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

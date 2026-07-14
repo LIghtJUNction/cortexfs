@@ -50,8 +50,15 @@ pub(crate) fn provider_chat_completion(
         "runner",
     )
     .ok();
-    let route = provider_route(&config, provider, model, route.as_deref())
+    let mut route = provider_route(&config, provider, model, route.as_deref())
         .map_err(ProviderCompletionError::fallback)?;
+    let allow_unauthenticated = transport_allows_unauthenticated(&route.transport);
+    route.transport = provider_egress_transport(
+        provider,
+        route.transport,
+        env::var_os(cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV).as_deref(),
+    )
+    .map_err(ProviderCompletionError::fallback)?;
     let effort = model_effort(&ctx_root, provider, model);
     let agent_call = env::var_os("CTX_AGENT").is_some();
     let drivers = model_runtime_drivers(&ctx_root, provider, model, agent_call)
@@ -60,7 +67,16 @@ pub(crate) fn provider_chat_completion(
     let mut last_error = None;
     for driver in drivers {
         match call_provider_driver(
-            driver, provider, model, input, run, stdout, &config, &route, effort,
+            driver,
+            provider,
+            model,
+            input,
+            run,
+            stdout,
+            &config,
+            &route,
+            effort,
+            allow_unauthenticated,
         ) {
             Ok(()) => return Ok(()),
             Err(error) if error.can_fallback => last_error = Some(error),
@@ -70,6 +86,35 @@ pub(crate) fn provider_chat_completion(
     Err(last_error.unwrap_or_else(|| {
         ProviderCompletionError::fallback(format!("no supported model driver: {name}"))
     }))
+}
+
+pub(crate) fn provider_egress_transport(
+    provider: &str,
+    transport: ResolvedTransport,
+    egress_dir: Option<&std::ffi::OsStr>,
+) -> Result<ResolvedTransport, String> {
+    let Some(egress_dir) = egress_dir else {
+        return Ok(transport);
+    };
+    if egress_dir != std::ffi::OsStr::new(cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH) {
+        return Err("invalid provider egress directory".to_owned());
+    }
+    match transport {
+        ResolvedTransport::Direct { base_url } => {
+            if !cortexfs::is_object_name(provider) {
+                return Err("invalid provider egress name".to_owned());
+            }
+            Ok(ResolvedTransport::Unix {
+                base_url,
+                socket_path: format!(
+                    "{}/{}.sock",
+                    cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+                    provider
+                ),
+            })
+        }
+        ResolvedTransport::Http { .. } | ResolvedTransport::Unix { .. } => Ok(transport),
+    }
 }
 
 fn model_runtime_drivers(
@@ -133,12 +178,13 @@ fn call_provider_driver(
     config: &RunnerProviderConfig,
     route: &ProviderRoute,
     effort: cortexfs::ModelEffort,
+    allow_unauthenticated: bool,
 ) -> Result<(), ProviderCompletionError> {
     let credential = provider_credential(provider, config, route.key_slot.as_deref(), driver)
         .map_err(ProviderCompletionError::fallback)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
-            let key = openai_api_key(provider, &route.transport, credential.as_ref())
+            let key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
@@ -164,7 +210,7 @@ fn call_provider_driver(
             }
         }
         ProviderRuntimeDriver::OpenAiResponses => {
-            let key = openai_api_key(provider, &route.transport, credential.as_ref())
+            let key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
@@ -205,13 +251,13 @@ fn call_provider_driver(
 }
 pub(crate) fn openai_api_key<'a>(
     provider: &str,
-    transport: &ResolvedTransport,
+    allow_unauthenticated: bool,
     credential: Option<&'a ProviderCredential>,
 ) -> Result<Option<&'a str>, String> {
     if let Some(credential) = credential {
         return Ok(Some(credential.secret()));
     }
-    if transport_allows_unauthenticated(transport) {
+    if allow_unauthenticated {
         return Ok(None);
     }
     Err(format!("missing provider credential: {provider}"))
