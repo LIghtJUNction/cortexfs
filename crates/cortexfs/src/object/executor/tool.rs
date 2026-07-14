@@ -63,6 +63,13 @@ pub(crate) fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), 
             command.env(key, value);
         }
     }
+    if name == "tsh" {
+        for key in tsh_passthrough_capability_env_keys() {
+            if let Some(value) = env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+    }
     let status = command
         .status()
         .map_err(|error| format!("cannot run {name} tool: {error}"))?;
@@ -71,6 +78,16 @@ pub(crate) fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), 
     } else {
         Err(format!("{name} tool exited with {status}"))
     }
+}
+
+pub(crate) fn tsh_passthrough_capability_env_keys() -> &'static [&'static str] {
+    &[
+        "CTX_CONTROL_SOCKET",
+        "CTX_CONTROL_TOKEN",
+        "CTX_HOME",
+        "CTX_PATH",
+        "HOME",
+    ]
 }
 
 pub(crate) fn passthrough_tool_runtime_env_keys() -> &'static [&'static str] {

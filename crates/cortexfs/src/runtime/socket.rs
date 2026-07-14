@@ -44,7 +44,7 @@ pub fn handle_socket_request(
             ref after,
         } => handle_socket_resume(session_root, session, after.as_deref()),
         SocketRequest::Cancel { ref id } => handle_socket_cancel(session_root, id),
-        SocketRequest::Stop { .. } => Err(SocketRuntimeError::Record(
+        SocketRequest::Tsh { .. } | SocketRequest::Stop { .. } => Err(SocketRuntimeError::Record(
             SocketSessionRecordError::UnsupportedRequest,
         )),
     }

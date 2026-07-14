@@ -57,6 +57,12 @@ pub enum SocketRequest {
         /// User input text.
         input: String,
     },
+    /// Execute one tsh command through the authoritative agent runtime.
+    Tsh {
+        id: String,
+        session: String,
+        args: Vec<String>,
+    },
     /// Resume a session stream, optionally after an event id.
     Resume {
         /// `CortexFS` session name. Defaults to `default` when omitted.
@@ -156,6 +162,13 @@ enum SocketRequestFrame {
         workspace: Option<String>,
         input: String,
     },
+    #[serde(rename = "tsh")]
+    Tsh {
+        id: String,
+        #[serde(default = "default_socket_session")]
+        session: String,
+        args: Vec<String>,
+    },
     #[serde(rename = "resume")]
     Resume {
         #[serde(default = "default_socket_session")]
@@ -202,6 +215,22 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
                 workspace,
                 input,
             } => parse_socket_send_request(id, session, scope.into(), cwd, workspace, input),
+            SocketRequestFrame::Tsh { id, session, args } => {
+                validate_socket_object_field("id", &id)?;
+                validate_socket_object_field("session", &session)?;
+                if args.is_empty()
+                    || args.len() > 64
+                    || args
+                        .iter()
+                        .any(|arg| arg.contains('\0') || arg.len() > 4096)
+                {
+                    return Err(SocketRequestError::InvalidField {
+                        field: "args",
+                        value: args.join(" "),
+                    });
+                }
+                Ok(Self::Tsh { id, session, args })
+            }
             SocketRequestFrame::Resume { session, after } => {
                 parse_socket_resume_request(session, after)
             }

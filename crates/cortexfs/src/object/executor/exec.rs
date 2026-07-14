@@ -17,6 +17,7 @@ pub(crate) struct AgentToolExecutionConfig<'a> {
     pub(crate) run: &'a str,
     pub(crate) session: &'a str,
     pub(crate) inherit_control: bool,
+    pub(crate) control: Option<AgentToolControl>,
     pub(crate) cancel: Option<(&'a Path, &'a str)>,
 }
 
@@ -29,9 +30,17 @@ impl<'a> AgentToolExecutionConfig<'a> {
             run: &config.run,
             session: &config.session,
             inherit_control: true,
+            control: None,
             cancel: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AgentToolControl {
+    pub(crate) source: PathBuf,
+    pub(crate) target: PathBuf,
+    pub(crate) token: OsString,
 }
 
 pub(crate) fn execute_agent_tool_call_with(
@@ -129,14 +138,8 @@ pub(crate) fn prepare_agent_tool_call(
     crate::provider::name::files::clear_fd_cloexec(&home_alias_dir)
         .map_err(|error| format!("cannot preserve agent home alias fd: {error:?}"))?;
     let mut command = Command::new(BWRAP_PROGRAM);
-    let control = if config.inherit_control {
-        nested_control_environment(
-            env::var_os("CTX_CONTROL_SOCKET"),
-            env::var_os("CTX_CONTROL_TOKEN"),
-        )?
-    } else {
-        None
-    };
+    let inherited_control = inherited_agent_tool_control(config)?;
+    let control = config.control.as_ref().or(inherited_control.as_ref());
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config,
         tool_executable: &proc_fd_path(&tool_executable),
@@ -150,7 +153,7 @@ pub(crate) fn prepare_agent_tool_call(
         home_alias_fd: home_alias_dir.as_raw_fd(),
         home_target: &home_target,
         ctx_home_target: &ctx_home_target,
-        control: control.as_ref(),
+        control,
     }));
     Ok(PreparedAgentToolCall {
         command,
@@ -175,6 +178,19 @@ pub(crate) fn prepare_agent_tool_call(
             )
         }),
     })
+}
+
+fn inherited_agent_tool_control(
+    config: &AgentToolExecutionConfig<'_>,
+) -> Result<Option<AgentToolControl>, String> {
+    if config.inherit_control {
+        nested_control_environment(
+            env::var_os("CTX_CONTROL_SOCKET"),
+            env::var_os("CTX_CONTROL_TOKEN"),
+        )
+    } else {
+        Ok(None)
+    }
 }
 
 fn tsh_working_set_limit(view: &cortexfs::AgentRuntimeView) -> usize {
@@ -353,13 +369,13 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) home_alias_fd: RawFd,
     pub(crate) home_target: &'a Path,
     pub(crate) ctx_home_target: &'a Path,
-    pub(crate) control: Option<&'a (PathBuf, OsString)>,
+    pub(crate) control: Option<&'a AgentToolControl>,
 }
 
 pub(crate) fn nested_control_environment(
     socket: Option<OsString>,
     token: Option<OsString>,
-) -> Result<Option<(PathBuf, OsString)>, String> {
+) -> Result<Option<AgentToolControl>, String> {
     match (socket, token) {
         (None, None) => Ok(None),
         (Some(socket), Some(token)) => {
@@ -370,7 +386,11 @@ pub(crate) fn nested_control_environment(
             if !nested_control_socket_is_plain(&metadata) {
                 return Err("CTX_CONTROL_SOCKET is not a plain socket".to_owned());
             }
-            Ok(Some((socket, token)))
+            Ok(Some(AgentToolControl {
+                source: socket.clone(),
+                target: socket,
+                token,
+            }))
         }
         _ => Err("incomplete CTX_CONTROL_SOCKET/CTX_CONTROL_TOKEN pair".to_owned()),
     }
@@ -482,12 +502,13 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
     args.extend(optional_dev_toolchain_bind_args());
     args.extend(agent_tool_env_bwrap_args(request));
     if let Some(control) = request.control {
-        let socket = &control.0;
-        args.extend(bwrap_dir_args_for_parent(&socket.display().to_string()));
+        args.extend(bwrap_dir_args_for_parent(
+            &control.target.display().to_string(),
+        ));
         args.extend([
             OsString::from("--bind"),
-            socket.as_os_str().to_owned(),
-            socket.as_os_str().to_owned(),
+            control.source.as_os_str().to_owned(),
+            control.target.as_os_str().to_owned(),
         ]);
     }
     args.extend(bwrap_source_root_bind_args(request.config.source));
@@ -585,8 +606,8 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from("/usr/bin:/bin"),
     ]);
     if let Some(control) = request.control {
-        let socket = &control.0;
-        let token = &control.1;
+        let socket = &control.target;
+        let token = &control.token;
         args.extend([
             OsString::from("--setenv"),
             OsString::from("CTX_CONTROL_SOCKET"),

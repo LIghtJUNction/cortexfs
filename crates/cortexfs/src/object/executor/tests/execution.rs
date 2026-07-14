@@ -220,7 +220,11 @@ fn nested_control_pair_is_propagated_and_bound() -> Result<(), Box<dyn std::erro
     let socket = PathBuf::from(crate::runtime::socket::SOCKET_RUN_CONTROL_PATH);
     let token = OsString::from("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
     validate_nested_control_values(socket.as_os_str(), &token)?;
-    let control = (socket.clone(), token);
+    let control = crate::object::executor::exec::AgentToolControl {
+        source: socket.clone(),
+        target: socket.clone(),
+        token,
+    };
     let config = test_agent_run_config();
     let mounts = cortexfs::MountTable::parse("")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
