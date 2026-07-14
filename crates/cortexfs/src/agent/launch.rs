@@ -382,14 +382,16 @@ fn select_user_manager_caller(
 #[cfg(test)]
 mod user_manager_tests {
     use super::{
-        SystemAgentSocketReceipt, UserManagerCaller, compensate_unreceipted_system_start_with,
-        ensure_terminal_runtime_dir, parse_unit_state, prepare_exact_socket_alias,
+        SystemAgentSocketReceipt, UserManagerCaller, claim_socket_entry_from,
+        cleanup_exact_socket_alias, compensate_unreceipted_system_start_with,
+        dispose_claimed_alias, ensure_terminal_runtime_dir, exact_alias_receipt,
+        open_owned_alias_parent, parse_unit_state, prepare_exact_socket_alias,
         remove_exact_socket_alias, select_user_manager_caller, stop_system_agent_socket,
         system_agent_visible_socket, wait_system_agent_visible_socket,
     };
     use crate::AgentUnixIdentity;
     use std::fs;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
     use std::os::unix::net::UnixListener;
 
     fn runtime_fixture(name: &str) -> std::path::PathBuf {
@@ -536,8 +538,45 @@ mod user_manager_tests {
             (metadata.uid(), metadata.gid()),
             0o777,
         )?);
-        assert!(remove_exact_socket_alias(&visible, &runtime)?);
-        assert!(!remove_exact_socket_alias(&visible, &runtime)?);
+        let collision = root
+            .path()
+            .join(crate::authority::helpers::generated_sibling_name(
+                "coder.sock",
+                "restore",
+                0,
+            ));
+        fs::write(&collision, "keep collision")?;
+        assert!(cleanup_exact_socket_alias(
+            &visible,
+            &runtime,
+            (metadata.uid(), metadata.gid()),
+            0o777,
+        )?);
+        let restored = fs::symlink_metadata(&visible)?;
+        assert!(restored.file_type().is_socket());
+        assert_eq!(
+            (restored.uid(), restored.gid()),
+            (metadata.uid(), metadata.gid())
+        );
+        assert_eq!(restored.permissions().mode() & 0o7777, 0o777);
+        assert_eq!(fs::read_to_string(&collision)?, "keep collision");
+        assert!(
+            !root
+                .path()
+                .join(crate::authority::helpers::generated_sibling_name(
+                    "coder.sock",
+                    "restore",
+                    1,
+                ))
+                .exists()
+        );
+        assert!(prepare_exact_socket_alias(
+            &visible,
+            &runtime,
+            (metadata.uid(), metadata.gid()),
+            0o777,
+        )?);
+        assert_eq!(fs::read_link(&visible)?, runtime);
         Ok(())
     }
 
@@ -548,9 +587,14 @@ mod user_manager_tests {
         let visible = root.path().join("coder.sock");
         let runtime = root.path().join("runtime.sock");
         let wrong = root.path().join("wrong.sock");
+        let owner = (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        );
 
         fs::write(&visible, "keep")?;
         assert!(prepare_exact_socket_alias(&visible, &runtime, (0, 0), 0o777).is_err());
+        assert!(cleanup_exact_socket_alias(&visible, &runtime, owner, 0o777).is_err());
         assert_eq!(fs::read_to_string(&visible)?, "keep");
         assert!(remove_exact_socket_alias(&visible, &runtime).is_err());
         assert_eq!(fs::read_to_string(&visible)?, "keep");
@@ -558,8 +602,89 @@ mod user_manager_tests {
         fs::remove_file(&visible)?;
         std::os::unix::fs::symlink(&wrong, &visible)?;
         assert!(prepare_exact_socket_alias(&visible, &runtime, (0, 0), 0o777).is_err());
+        assert!(cleanup_exact_socket_alias(&visible, &runtime, owner, 0o777).is_err());
         assert!(remove_exact_socket_alias(&visible, &runtime).is_err());
         assert_eq!(fs::read_link(&visible)?, wrong);
+        Ok(())
+    }
+
+    #[test]
+    fn exchanged_alias_disposal_preserves_conflicts() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let parent = open_owned_alias_parent(root.path())?;
+        let target = root.path().join("runtime.sock");
+        let wrong = root.path().join("wrong.sock");
+
+        let wrong_target_name = "wrong-target.sock";
+        let wrong_target_path = root.path().join(wrong_target_name);
+        std::os::unix::fs::symlink(&target, &wrong_target_path)?;
+        let wrong_target_receipt = exact_alias_receipt(&parent, wrong_target_name, &target)?;
+        let wrong_target_claim = "wrong-target.claim".to_owned();
+        assert_eq!(
+            claim_socket_entry_from(&parent, wrong_target_name, [wrong_target_claim.clone()],)?,
+            Some(wrong_target_claim.clone())
+        );
+        assert!(
+            dispose_claimed_alias(
+                &parent,
+                wrong_target_name,
+                &wrong_target_claim,
+                wrong_target_receipt,
+                &wrong,
+            )
+            .is_err()
+        );
+        assert_eq!(fs::read_link(&wrong_target_path)?, target);
+
+        let mismatch_name = "receipt-mismatch.sock";
+        let mismatch_path = root.path().join(mismatch_name);
+        std::os::unix::fs::symlink(&target, &mismatch_path)?;
+        let mismatch_claim = "receipt-mismatch.claim".to_owned();
+        assert_eq!(
+            claim_socket_entry_from(&parent, mismatch_name, [mismatch_claim.clone()])?,
+            Some(mismatch_claim.clone())
+        );
+        assert!(
+            dispose_claimed_alias(
+                &parent,
+                mismatch_name,
+                &mismatch_claim,
+                (u64::MAX, u64::MAX),
+                &target,
+            )
+            .is_err()
+        );
+        assert!(fs::symlink_metadata(&mismatch_path).is_err());
+        assert_eq!(fs::read_link(root.path().join(&mismatch_claim))?, target);
+
+        let collision_name = "claim-collision.sock";
+        let collision_path = root.path().join(collision_name);
+        std::os::unix::fs::symlink(&target, &collision_path)?;
+        let collision_receipt = exact_alias_receipt(&parent, collision_name, &target)?;
+        let collision_claim = "claim-collision.occupied".to_owned();
+        let owned_claim = "claim-collision.owned".to_owned();
+        fs::write(root.path().join(&collision_claim), "keep collision")?;
+        assert_eq!(
+            claim_socket_entry_from(
+                &parent,
+                collision_name,
+                [collision_claim.clone(), owned_claim.clone()],
+            )?,
+            Some(owned_claim.clone())
+        );
+        dispose_claimed_alias(
+            &parent,
+            collision_name,
+            &owned_claim,
+            collision_receipt,
+            &target,
+        )?;
+        assert!(fs::symlink_metadata(&collision_path).is_err());
+        assert_eq!(
+            fs::read_to_string(root.path().join(collision_claim))?,
+            "keep collision"
+        );
+        assert!(fs::symlink_metadata(root.path().join(owned_claim)).is_err());
         Ok(())
     }
 
@@ -722,10 +847,234 @@ pub fn cleanup_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     }
     let source_dir = open_owned_alias_parent(source)?;
     let _agent_dir = open_owned_alias_child(&source_dir, "agent")?;
-    remove_exact_socket_alias(
+    let view = crate::derive_agent_runtime_view(source, agent)
+        .map_err(|_error| io::Error::from(io::ErrorKind::InvalidData))?;
+    cleanup_exact_socket_alias(
         &system_agent_visible_socket(source, agent),
         &system_agent_runtime_socket(agent),
+        (view.identity().uid(), view.identity().gid()),
+        BOOTSTRAP_SOCKET_MODE,
     )
+}
+
+fn cleanup_exact_socket_alias(
+    visible_socket: &Path,
+    runtime_socket: &Path,
+    owner: (u32, u32),
+    mode: u32,
+) -> io::Result<bool> {
+    let parent = visible_socket
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_owned_alias_parent(parent)?;
+    let name = visible_socket
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let (temporary, placeholder, _listener) =
+        prepare_socket_sibling(&parent_dir, name, owner, mode)?;
+    let alias = match exact_alias_receipt(&parent_dir, name, runtime_socket) {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            remove_receipted_socket(&parent_dir, &temporary, placeholder)?;
+            return Err(error);
+        }
+    };
+    if let Err(error) = exchange_socket_entries(&parent_dir, &temporary, name) {
+        remove_receipted_socket(&parent_dir, &temporary, placeholder)?;
+        return Err(error);
+    }
+    let committed = socket_receipt_matches(&parent_dir, name, placeholder, owner, mode)
+        && alias_receipt_matches(&parent_dir, &temporary, alias, runtime_socket);
+    if !committed {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "socket alias exchange verification failed; preserved exchanged entries",
+        ));
+    }
+    dispose_receipted_alias(&parent_dir, &temporary, alias, runtime_socket)?;
+    parent_dir.sync_all()?;
+    Ok(true)
+}
+
+type SocketReceipt = (u64, u64);
+
+fn prepare_socket_sibling(
+    parent: &fs::File,
+    name: &str,
+    owner: (u32, u32),
+    mode: u32,
+) -> io::Result<(String, SocketReceipt, std::os::unix::net::UnixListener)> {
+    for attempt in 0..16_u8 {
+        let temporary = crate::authority::helpers::generated_sibling_name(name, "restore", attempt);
+        let path = crate::support::plain::proc_fd_path(parent).join(&temporary);
+        match std::os::unix::net::UnixListener::bind(path) {
+            Ok(listener) => {
+                let receipt = socket_entry_receipt(parent, &temporary)?;
+                let configured = (|| {
+                    nix::unistd::fchownat(
+                        parent,
+                        temporary.as_str(),
+                        Some(nix::unistd::Uid::from_raw(owner.0)),
+                        Some(nix::unistd::Gid::from_raw(owner.1)),
+                        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+                    )
+                    .map_err(io::Error::from)?;
+                    require_socket_receipt(parent, &temporary, receipt, owner, mode, false)?;
+                    nix::sys::stat::fchmodat(
+                        parent,
+                        temporary.as_str(),
+                        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+                        nix::sys::stat::FchmodatFlags::NoFollowSymlink,
+                    )
+                    .map_err(io::Error::from)?;
+                    require_socket_receipt(parent, &temporary, receipt, owner, mode, true)
+                })();
+                if let Err(error) = configured {
+                    remove_receipted_socket(parent, &temporary, receipt)?;
+                    return Err(error);
+                }
+                return Ok((temporary, receipt, listener));
+            }
+            Err(error) if error.kind() == io::ErrorKind::AddrInUse => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "cannot create unique socket restore entry",
+    ))
+}
+
+fn exact_alias_receipt(parent: &fs::File, name: &str, target: &Path) -> io::Result<SocketReceipt> {
+    let stat = alias_entry_stat(parent, name)?;
+    if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+        .contains(nix::sys::stat::SFlag::S_IFLNK)
+        || Path::new(&nix::fcntl::readlinkat(parent, name).map_err(io::Error::from)?) != target
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to exchange mismatched socket alias",
+        ));
+    }
+    Ok((stat.st_dev, stat.st_ino))
+}
+
+fn socket_entry_receipt(parent: &fs::File, name: &str) -> io::Result<SocketReceipt> {
+    let stat = alias_entry_stat(parent, name)?;
+    if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+        .contains(nix::sys::stat::SFlag::S_IFSOCK)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "prepared restore entry is not a socket",
+        ));
+    }
+    Ok((stat.st_dev, stat.st_ino))
+}
+
+fn require_socket_receipt(
+    parent: &fs::File,
+    name: &str,
+    receipt: SocketReceipt,
+    owner: (u32, u32),
+    mode: u32,
+    require_mode: bool,
+) -> io::Result<()> {
+    let stat = alias_entry_stat(parent, name)?;
+    if (stat.st_dev, stat.st_ino) != receipt
+        || !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
+            .contains(nix::sys::stat::SFlag::S_IFSOCK)
+        || (stat.st_uid, stat.st_gid) != owner
+        || (require_mode && stat.st_mode & 0o7777 != mode)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "prepared restore socket changed",
+        ));
+    }
+    Ok(())
+}
+
+fn socket_receipt_matches(
+    parent: &fs::File,
+    name: &str,
+    receipt: SocketReceipt,
+    owner: (u32, u32),
+    mode: u32,
+) -> bool {
+    require_socket_receipt(parent, name, receipt, owner, mode, true).is_ok()
+}
+
+fn alias_receipt_matches(
+    parent: &fs::File,
+    name: &str,
+    receipt: SocketReceipt,
+    target: &Path,
+) -> bool {
+    exact_alias_receipt(parent, name, target).is_ok_and(|current| current == receipt)
+}
+
+fn exchange_socket_entries(parent: &fs::File, left: &str, right: &str) -> io::Result<()> {
+    nix::fcntl::renameat2(
+        parent,
+        left,
+        parent,
+        right,
+        nix::fcntl::RenameFlags::RENAME_EXCHANGE,
+    )
+    .map_err(io::Error::from)
+}
+
+fn remove_receipted_socket(
+    parent: &fs::File,
+    name: &str,
+    receipt: SocketReceipt,
+) -> io::Result<()> {
+    if socket_entry_receipt(parent, name)? != receipt {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to remove changed restore socket",
+        ));
+    }
+    nix::unistd::unlinkat(parent, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
+        .map_err(io::Error::from)
+}
+
+fn dispose_receipted_alias(
+    parent: &fs::File,
+    name: &str,
+    receipt: SocketReceipt,
+    target: &Path,
+) -> io::Result<()> {
+    let Some(claim) = claim_socket_entry(parent, name)? else {
+        return Err(io::Error::from(io::ErrorKind::NotFound));
+    };
+    dispose_claimed_alias(parent, name, &claim, receipt, target)
+}
+
+fn dispose_claimed_alias(
+    parent: &fs::File,
+    name: &str,
+    claim: &str,
+    receipt: SocketReceipt,
+    target: &Path,
+) -> io::Result<()> {
+    if !alias_receipt_matches(parent, claim, receipt, target) {
+        if entry_receipt_matches(parent, claim, receipt) {
+            restore_socket_claim(parent, claim, name)?;
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "refusing to remove changed exchanged alias claim",
+        ));
+    }
+    nix::unistd::unlinkat(parent, claim, nix::unistd::UnlinkatFlags::NoRemoveDir)
+        .map_err(io::Error::from)
+}
+
+fn entry_receipt_matches(parent: &fs::File, name: &str, receipt: SocketReceipt) -> bool {
+    alias_entry_stat(parent, name).is_ok_and(|stat| (stat.st_dev, stat.st_ino) == receipt)
 }
 
 /// Claims and replaces one trusted bootstrap socket with an exact symlink.
@@ -898,8 +1247,21 @@ fn alias_entry_stat(parent: &fs::File, name: &str) -> io::Result<nix::libc::stat
 }
 
 fn claim_socket_entry(parent: &fs::File, name: &str) -> io::Result<Option<String>> {
-    for attempt in 0..16_u8 {
-        let claim = crate::authority::helpers::generated_sibling_name(name, "claim", attempt);
+    claim_socket_entry_from(
+        parent,
+        name,
+        (0..16_u8).map(|attempt| {
+            crate::authority::helpers::generated_sibling_name(name, "claim", attempt)
+        }),
+    )
+}
+
+fn claim_socket_entry_from(
+    parent: &fs::File,
+    name: &str,
+    claims: impl IntoIterator<Item = String>,
+) -> io::Result<Option<String>> {
+    for claim in claims {
         match nix::fcntl::renameat2(
             parent,
             name,
@@ -1335,7 +1697,7 @@ pub fn ensure_agent_chat_socket(visible: &Path, runtime: &Path) -> io::Result<Ag
     };
     if let Err(error) = nix::unistd::symlinkat(runtime, &dir, name) {
         if let AgentChatAliasState::ReplacedPlaceholder { mode, uid, gid } = receipt {
-            drop(restore_chat_placeholder(visible, mode, uid, gid));
+            drop(restore_socket_placeholder(visible, mode, uid, gid));
         }
         return Err(io::Error::from(error));
     }
@@ -1369,12 +1731,12 @@ pub fn rollback_agent_chat_alias(
         .map_err(io::Error::from)?;
     dir.sync_all()?;
     if let AgentChatAliasState::ReplacedPlaceholder { mode, uid, gid } = *receipt {
-        restore_chat_placeholder(visible, mode, uid, gid)?;
+        restore_socket_placeholder(visible, mode, uid, gid)?;
     }
     Ok(())
 }
 
-fn restore_chat_placeholder(path: &Path, mode: u32, uid: u32, gid: u32) -> io::Result<()> {
+fn restore_socket_placeholder(path: &Path, mode: u32, uid: u32, gid: u32) -> io::Result<()> {
     crate::support::plain::ensure_socket_placeholder(path, mode)?;
     let parent = path.parent().ok_or(io::ErrorKind::InvalidInput)?;
     let dir = crate::support::plain::open_plain_directory(parent)?;
@@ -1411,7 +1773,7 @@ fn placeholder_identity(dir: &fs::File, name: &str) -> io::Result<(u64, u64)> {
     {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            "restored chat placeholder changed",
+            "restored socket placeholder changed",
         ));
     }
     Ok((stat.st_dev, stat.st_ino))
@@ -1427,7 +1789,7 @@ fn require_placeholder_identity(
     } else {
         Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            "restored chat placeholder identity changed",
+            "restored socket placeholder identity changed",
         ))
     }
 }
