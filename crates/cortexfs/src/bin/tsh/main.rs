@@ -396,7 +396,11 @@ fn persistent_context_path_with_capability(
         &runtime.session,
         &runtime.run,
     )
-    .map_err(|_error| TshError::unavailable("persistent cache runtime receipt unavailable"))?
+    .map_err(|error| {
+        TshError::unavailable(format!(
+            "persistent cache runtime receipt unavailable: {error:?}"
+        ))
+    })?
     .ok_or_else(|| TshError::unavailable("persistent cache runtime receipt missing"))?;
     validate_runtime_source_receipt(&runtime.source, &receipt)?;
     let view = derive_agent_runtime_view(&runtime.source, agent)

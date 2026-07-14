@@ -382,7 +382,8 @@ fn handle_agent_tsh_request(
     let mut bytes = Vec::new();
     object::executor::output::write_tool_call_event(&mut bytes, &run, &call)
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    let result = object::executor::exec::execute_agent_tool_call_with(&config, &call);
+    let result =
+        object::executor::exec::execute_agent_tool_call_as(&config, &call, runtime.identity);
     control
         .server
         .finish()
@@ -1342,11 +1343,14 @@ pub(crate) fn run_agent_executable_streaming(
             control: None,
             cancel: None,
         };
-        let (result, status) =
-            match object::executor::exec::execute_agent_tool_call_with(&config, &tool_call) {
-                Ok(result) => (result, "ok"),
-                Err(error) => (format!("ERROR: {error}\n"), "error"),
-            };
+        let (result, status) = match object::executor::exec::execute_agent_tool_call_as(
+            &config,
+            &tool_call,
+            runtime.identity,
+        ) {
+            Ok(result) => (result, "ok"),
+            Err(error) => (format!("ERROR: {error}\n"), "error"),
+        };
         let mut output = Vec::new();
         object::executor::output::write_tool_result_event(
             &mut output,
