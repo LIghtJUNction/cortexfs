@@ -9,6 +9,7 @@ pub mod path;
 pub mod plain;
 pub mod process;
 pub mod queue;
+pub mod receipt;
 pub mod schema;
 pub mod session;
 pub mod stream;

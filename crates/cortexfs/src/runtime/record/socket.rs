@@ -148,7 +148,7 @@ fn record_indexed_socket_send(
     } else {
         format!(
             "ctx-{}",
-            runtime::control::random_hex::<16>().map_err(|_error| {
+            support::receipt::random_hex::<16>().map_err(|_error| {
                 IndexedSocketSessionRecordError::Session(SocketSessionRecordError::CannotRecord)
             })?
         )
