@@ -1,14 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fmt;
-use std::io::{self, Read, Write};
-use std::net::Shutdown;
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::io;
+use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::object::executor::{
     MAX_RUNNER_CONTROL_BYTES, model_candidates, model_default_base_url, read_small_plain_text_file,
@@ -17,9 +15,6 @@ use crate::support::receipt::{EmptyDirReceipt, SocketReceipt};
 use crate::{is_object_name, peer_credentials};
 
 const ACCEPT_PAUSE: Duration = Duration::from_millis(10);
-const CONNECT_BUDGET: Duration = Duration::from_millis(250);
-const RELAY_TIMEOUT: Duration = Duration::from_millis(100);
-const RELAY_BUFFER_BYTES: usize = 16 * 1024;
 
 /// Fixed path where a sandboxed provider runner sees its run-scoped relay sockets.
 pub const PROVIDER_EGRESS_SANDBOX_PATH: &str = "/run/cortexfs/provider-egress";
@@ -41,7 +36,6 @@ pub enum ProviderEgressError {
     InvalidModel,
     MissingControl,
     InvalidBaseUrl,
-    CannotResolve,
     AuthorityConflict,
     CannotCreate,
 }
@@ -53,7 +47,6 @@ impl fmt::Display for ProviderEgressError {
             Self::InvalidModel => "invalid provider egress model",
             Self::MissingControl => "missing provider egress control",
             Self::InvalidBaseUrl => "invalid provider egress base URL",
-            Self::CannotResolve => "cannot resolve provider egress authority",
             Self::AuthorityConflict => "conflicting provider egress authority",
             Self::CannotCreate => "cannot create provider egress boundary",
         })
@@ -65,7 +58,9 @@ impl std::error::Error for ProviderEgressError {}
 #[derive(Debug, Eq, PartialEq)]
 struct ProviderTarget {
     provider: String,
-    addresses: Vec<SocketAddr>,
+    base_url: String,
+    authority: String,
+    base_path: String,
 }
 
 /// Run-scoped Unix sockets that relay only to pre-resolved provider authorities.
@@ -136,7 +131,7 @@ impl ProviderEgress {
             let provider = target.provider.clone();
             match thread::Builder::new()
                 .name(format!("egress-{provider}"))
-                .spawn(move || serve(listener, target.addresses, uid, stop))
+                .spawn(move || serve(listener, target, uid, stop))
             {
                 Ok(handle) => threads.push(handle),
                 Err(_error) => {
@@ -177,7 +172,7 @@ impl Drop for ProviderEgress {
 fn plan_targets(ctx_root: &Path, model: &str) -> Result<Vec<ProviderTarget>, ProviderEgressError> {
     let candidates =
         model_candidates(ctx_root, model).map_err(|_error| ProviderEgressError::InvalidModel)?;
-    let mut targets: BTreeMap<String, (String, u16, BTreeSet<SocketAddr>)> = BTreeMap::new();
+    let mut targets: BTreeMap<String, ProviderTarget> = BTreeMap::new();
     for (index, candidate) in candidates.into_iter().enumerate() {
         let (provider, name) = candidate
             .name
@@ -204,47 +199,52 @@ fn plan_targets(ctx_root: &Path, model: &str) -> Result<Vec<ProviderTarget>, Pro
         if !matches!(url.scheme(), "http" | "https") {
             return Err(ProviderEgressError::InvalidBaseUrl);
         }
-        let host = url
-            .host_str()
-            .ok_or(ProviderEgressError::InvalidBaseUrl)?
-            .trim_start_matches('[')
-            .trim_end_matches(']');
-        let port = url
-            .port_or_known_default()
-            .ok_or(ProviderEgressError::InvalidBaseUrl)?;
-        let addresses = (host, port)
-            .to_socket_addrs()
-            .map_err(|_error| ProviderEgressError::CannotResolve)?
-            .collect::<BTreeSet<_>>();
-        if addresses.is_empty() {
-            return Err(ProviderEgressError::CannotResolve);
+        if url.cannot_be_a_base()
+            || url.username() != ""
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(ProviderEgressError::InvalidBaseUrl);
         }
+        let authority = url.origin().ascii_serialization();
+        let base_path = url.path().trim_end_matches('/').to_owned();
+        if base_path.contains(['%', '\\']) {
+            return Err(ProviderEgressError::InvalidBaseUrl);
+        }
+        let mut canonical = url;
+        canonical.set_path(if base_path.is_empty() {
+            "/"
+        } else {
+            &base_path
+        });
         match targets.get_mut(provider) {
             Some(known) => {
-                if known.0 != host || known.1 != port {
+                if known.authority != authority || known.base_path != base_path {
                     return Err(ProviderEgressError::AuthorityConflict);
                 }
-                known.2.extend(addresses);
             }
             None => {
-                targets.insert(provider.to_owned(), (host.to_owned(), port, addresses));
+                targets.insert(
+                    provider.to_owned(),
+                    ProviderTarget {
+                        provider: provider.to_owned(),
+                        base_url: canonical.to_string().trim_end_matches('/').to_owned(),
+                        authority,
+                        base_path,
+                    },
+                );
             }
         }
     }
-    Ok(targets
-        .into_iter()
-        .map(|(provider, (_host, _port, addresses))| ProviderTarget {
-            provider,
-            addresses: addresses.into_iter().collect(),
-        })
-        .collect())
+    Ok(targets.into_values().collect())
 }
 
 #[expect(
     clippy::needless_pass_by_value,
     reason = "the host thread exclusively owns its listener, target set, and stop handle"
 )]
-fn serve(listener: UnixListener, addresses: Vec<SocketAddr>, uid: u32, shutdown: Arc<AtomicBool>) {
+fn serve(listener: UnixListener, target: ProviderTarget, uid: u32, shutdown: Arc<AtomicBool>) {
     if listener.set_nonblocking(true).is_err() {
         return;
     }
@@ -252,118 +252,13 @@ fn serve(listener: UnixListener, addresses: Vec<SocketAddr>, uid: u32, shutdown:
         match listener.accept() {
             Ok((stream, _address)) => {
                 if peer_credentials(&stream).is_ok_and(|peer| peer.uid() == uid) {
-                    let _ignored = relay(stream, &addresses, &shutdown);
+                    let _ignored = http::relay(stream, &target, &shutdown);
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(ACCEPT_PAUSE);
             }
             Err(_error) => return,
-        }
-    }
-}
-
-fn relay(
-    local: UnixStream,
-    addresses: &[SocketAddr],
-    shutdown: &Arc<AtomicBool>,
-) -> io::Result<()> {
-    let remote = connect_target(addresses, shutdown)?;
-    local.set_read_timeout(Some(RELAY_TIMEOUT))?;
-    local.set_write_timeout(Some(RELAY_TIMEOUT))?;
-    remote.set_read_timeout(Some(RELAY_TIMEOUT))?;
-    remote.set_write_timeout(Some(RELAY_TIMEOUT))?;
-    let local_read = local.try_clone()?;
-    let remote_write = remote.try_clone()?;
-    let outbound_stop = Arc::clone(shutdown);
-    let outbound = thread::spawn(move || {
-        copy_bounded(local_read, remote_write, &outbound_stop, |stream| {
-            stream.shutdown(Shutdown::Write)
-        })
-    });
-    let inbound = copy_bounded(remote, local, shutdown, |stream| {
-        stream.shutdown(Shutdown::Write)
-    });
-    let _outbound = outbound.join();
-    inbound
-}
-
-fn connect_target(addresses: &[SocketAddr], shutdown: &AtomicBool) -> io::Result<TcpStream> {
-    let deadline = Instant::now() + CONNECT_BUDGET;
-    for address in addresses {
-        if shutdown.load(Ordering::Acquire) {
-            return Err(io::Error::new(
-                io::ErrorKind::Interrupted,
-                "provider egress connect cancelled",
-            ));
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            break;
-        }
-        if let Ok(stream) = TcpStream::connect_timeout(address, remaining) {
-            return Ok(stream);
-        }
-    }
-    Err(io::Error::new(
-        io::ErrorKind::TimedOut,
-        "provider egress connect budget exhausted",
-    ))
-}
-
-fn copy_bounded<R, W>(
-    mut source: R,
-    mut destination: W,
-    shutdown: &AtomicBool,
-    finish: impl FnOnce(&W) -> io::Result<()>,
-) -> io::Result<()>
-where
-    R: Read,
-    W: Write,
-{
-    let mut buffer = [0_u8; RELAY_BUFFER_BYTES];
-    loop {
-        if shutdown.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let count = match source.read(&mut buffer) {
-            Ok(0) => return finish(&destination),
-            Ok(count) => count,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::WouldBlock
-                        | io::ErrorKind::TimedOut
-                        | io::ErrorKind::Interrupted
-                ) =>
-            {
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
-        if shutdown.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        let mut written = 0;
-        while written < count {
-            if shutdown.load(Ordering::Acquire) {
-                return Ok(());
-            }
-            let pending = buffer
-                .get(written..count)
-                .ok_or_else(|| io::Error::other("provider egress relay range is invalid"))?;
-            match destination.write(pending) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(bytes) => written += bytes,
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::WouldBlock
-                            | io::ErrorKind::TimedOut
-                            | io::ErrorKind::Interrupted
-                    ) => {}
-                Err(error) => return Err(error),
-            }
         }
     }
 }
@@ -381,5 +276,6 @@ fn cleanup_receipts(sockets: &BTreeMap<String, SocketReceipt>, directory: &Empty
     let _cleanup = directory.cleanup();
 }
 
+mod http;
 #[cfg(test)]
 mod tests;
