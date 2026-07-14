@@ -8,7 +8,6 @@ include!("parse_paths/agent_process.rs");
 include!("parse_paths/agent_profile.rs");
 include!("parse_paths/agent_status_validation.rs");
 include!("parse_paths/agent_start.rs");
-include!("parse_paths/agent_repl.rs");
 include!("parse_paths/agent_rendering.rs");
 include!("parse_paths/tools_and_paths.rs");
 include!("parse_paths/abi_detection.rs");

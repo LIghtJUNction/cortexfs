@@ -85,12 +85,9 @@ Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 
 ## Chat And Terminal
 
-`ctx agent chat` owns line editing, interrupt handling, socket requests, and
-assistant response rendering. Interactive chat responses are buffered before
-printing so model output does not corrupt the user's current input buffer.
-`Ctrl+C` exits an idle chat. While a run is active it asks CortexFS to cancel
-that run and returns to the prompt.
-`ctx agent repl` remains a compatibility alias for the same chat UI.
+`ctxchat` owns line editing, references, clipboard adapters, socket requests,
+and response rendering through the documented file/socket ABI. `ctx agent
+chat` and `ctx agent repl` exec `ctxchat` as compatibility adapters.
 
 Inside the chat shell, `/workspace` prints the host checkout mounted at
 `/workspace`; `/status` prints agent model, lifecycle, role, and workspace;
@@ -107,6 +104,7 @@ The socket request shape used by `ctx` is newline-delimited JSON:
 
 ```json
 {"op":"send","id":"ctx-...","session":"default","scope":"private","cwd":"/workspace","input":"fix tests"}
+{"op":"tsh","id":"tool-...","session":"default","args":["load","bash"]}
 {"op":"resume","session":"default"}
 {"op":"cancel","id":"run-1"}
 ```

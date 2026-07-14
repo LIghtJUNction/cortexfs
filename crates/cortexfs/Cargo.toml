@@ -48,6 +48,10 @@ name = "ctxterm"
 path = "src/bin/ctxterm/main.rs"
 
 [[bin]]
+name = "ctxchat"
+path = "src/bin/ctxchat/main.rs"
+
+[[bin]]
 name = "tsh"
 path = "src/bin/tsh/main.rs"
 

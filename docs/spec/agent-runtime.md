@@ -72,9 +72,15 @@ Socket requests are JSONL. They name a session and operation:
 
 ```json
 {"op":"send","id":"msg-1","session":"default","scope":"private","cwd":"/workspace","input":"hello"}
+{"op":"tsh","id":"tool-1","session":"default","args":["load","bash"]}
 {"op":"resume","session":"default"}
 {"op":"cancel","id":"run-1"}
 ```
+
+`tsh` executes through the authenticated agent runtime without a model call.
+It emits canonical `start`, `tool_call`, `tool_result`, and `done` frames.
+Repeating an identical request id replays the durable result without executing
+the command twice.
 
 The socket runtime records user messages before invoking the agent/model path.
 Assistant text is derived from stable event frames and recorded back to the

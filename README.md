@@ -227,9 +227,9 @@ ctx agent tools coder
 ctx agent prompt coder
 ```
 
-Inside chat, `/workspace` shows the host checkout mounted for the agent and
-`/tools` lists visible CortexFS tools. `ctx agent chat` is the human chat
-surface; `tsh` remains the agent-facing tool shell inside `ctxterm`.
+`ctxchat` is the replaceable file/socket-ABI chat UI; `ctx agent chat` delegates
+to it for compatibility. `tsh` remains the agent-facing tool shell inside
+`ctxterm`.
 
 Ask clear coding tasks directly:
 
