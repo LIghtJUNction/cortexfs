@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{self, Read};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::fd::AsRawFd;
 use std::path::Path;
 
 use serde_json::Value;
@@ -8,6 +8,7 @@ use serde_json::Value;
 const MAX_REFERENCE_BYTES: usize = 64 * 1024;
 const MAX_CONTEXT_BYTES: usize = 128 * 1024;
 const MAX_HISTORY_BYTES: u64 = 1024 * 1024;
+const MAX_DIRECTORY_ENTRIES: usize = 4096;
 
 pub(crate) fn expand(input: &str, workspace: &Path, messages: &Path) -> io::Result<String> {
     let history = history_texts(messages)?;
@@ -39,37 +40,32 @@ pub(crate) fn expand(input: &str, workspace: &Path, messages: &Path) -> io::Resu
 }
 
 fn path_block(workspace: &Path, value: &str) -> io::Result<String> {
-    let root = fs::canonicalize(workspace)?;
-    let candidate = root.join(value);
-    let metadata = fs::symlink_metadata(&candidate)?;
-    if metadata.file_type().is_symlink() {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "reference cannot be a symlink",
-        ));
-    }
-    let canonical = fs::canonicalize(&candidate)?;
-    if !canonical.starts_with(&root) {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "reference escapes workspace",
-        ));
-    }
+    let file = open_relative(workspace, Path::new(value))?;
+    let metadata = file.metadata()?;
     if metadata.is_dir() {
-        let mut names = fs::read_dir(&canonical)?
+        let mut names = fs::read_dir(format!("/proc/self/fd/{}", file.as_raw_fd()))?
+            .take(MAX_DIRECTORY_ENTRIES.saturating_add(1))
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_name().into_string().ok())
             .collect::<Vec<_>>();
+        if names.len() > MAX_DIRECTORY_ENTRIES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "reference directory exceeds entry limit",
+            ));
+        }
         names.sort();
         return Ok(format!(
             "<reference path={value:?} type=\"directory\">\n{}\n</reference>\n",
             names.join("\n")
         ));
     }
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_NOFOLLOW)
-        .open(&canonical)?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "reference is not a plain file",
+        ));
+    }
     let max_bytes = u64::try_from(MAX_REFERENCE_BYTES).unwrap_or(u64::MAX);
     if file.metadata()?.len() > max_bytes {
         return Err(io::Error::new(
@@ -87,6 +83,42 @@ fn path_block(workspace: &Path, value: &str) -> io::Result<String> {
     ))
 }
 
+fn open_relative(root: &Path, path: &Path) -> io::Result<fs::File> {
+    let mut directory = cortexfs::support::plain::open_plain_directory(root)?;
+    let mut components = path.components().peekable();
+    while let Some(component) = components.next() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "reference path contains unsupported components",
+            ));
+        };
+        let name = name
+            .to_str()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid reference path"))?;
+        let last = components.peek().is_none();
+        let flags = nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC
+            | if last {
+                nix::fcntl::OFlag::empty()
+            } else {
+                nix::fcntl::OFlag::O_DIRECTORY
+            };
+        let fd = nix::fcntl::openat(&directory, name, flags, nix::sys::stat::Mode::empty())
+            .map_err(io::Error::from)?;
+        let opened = fs::File::from(fd);
+        if last {
+            return Ok(opened);
+        }
+        directory = opened;
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "reference path is empty",
+    ))
+}
+
 fn history_block(history: &[String], query: &str) -> io::Result<String> {
     let selected = query
         .parse::<usize>()
@@ -100,24 +132,53 @@ fn history_block(history: &[String], query: &str) -> io::Result<String> {
 }
 
 pub(crate) fn history_texts(path: &Path) -> io::Result<Vec<String>> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_file() => metadata,
-        Ok(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "history is not a plain file",
-            ));
-        }
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "history path has no parent"))?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid history path"))?;
+    let directory = match cortexfs::support::plain::open_plain_directory(parent) {
+        Ok(directory) => directory,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
+    let fd = match nix::fcntl::openat(
+        &directory,
+        name,
+        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    ) {
+        Ok(fd) => fd,
+        Err(nix::errno::Errno::ENOENT) => return Ok(Vec::new()),
+        Err(error) => return Err(io::Error::from(error)),
+    };
+    let file = fs::File::from(fd);
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "history is not a plain file",
+        ));
+    }
     if metadata.len() > MAX_HISTORY_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "history is too large",
         ));
     }
-    let text = fs::read_to_string(path)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_HISTORY_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_HISTORY_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "history is too large",
+        ));
+    }
+    let text = String::from_utf8(bytes)
+        .map_err(|_error| io::Error::new(io::ErrorKind::InvalidData, "history is not UTF-8"))?;
     Ok(text
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -160,6 +221,7 @@ pub(crate) fn complete_paths(workspace: &Path, prefix: &str) -> Vec<String> {
                 format!("{base}/{name}")
             }
         })
+        .take(MAX_DIRECTORY_ENTRIES)
         .collect()
 }
 
@@ -184,6 +246,10 @@ mod tests {
         assert!(expanded.contains("one\ntwo"));
         assert!(expand("@binary", root.path(), &root.path().join("missing")).is_err());
         assert!(expand("@link", root.path(), &root.path().join("missing")).is_err());
+        fs::create_dir_all(root.path().join("real"))?;
+        fs::write(root.path().join("real/note"), "secret")?;
+        symlink(root.path().join("real"), root.path().join("middle"))?;
+        assert!(expand("@middle/note", root.path(), &root.path().join("missing")).is_err());
         Ok(())
     }
 

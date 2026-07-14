@@ -272,19 +272,7 @@ fn run_ctxchat_adapter(
         .filter(|path| path.is_file())
         .unwrap_or_else(|| PathBuf::from("ctxchat"));
     let mut command = std::process::Command::new(program);
-    command.args([
-        "--root",
-        &root.display().to_string(),
-        name,
-        "--session",
-        &session,
-    ]);
-    if raw {
-        command.arg("--raw");
-    }
-    for approval in approvals {
-        command.args(["--approval", approval]);
-    }
+    command.args(ctxchat_args(root, name, &session, raw, approvals));
     match command.status() {
         Ok(status) => Ok(Some(
             status
@@ -296,5 +284,59 @@ fn run_ctxchat_adapter(
         Err(error) => Err(CliError::unavailable(format!(
             "cannot start ctxchat: {error}"
         ))),
+    }
+}
+
+fn ctxchat_args(
+    root: &Path,
+    name: &str,
+    session: &str,
+    raw: bool,
+    approvals: &[String],
+) -> Vec<String> {
+    let mut args = vec![
+        "--root".to_owned(),
+        root.display().to_string(),
+        name.to_owned(),
+        "--session".to_owned(),
+        session.to_owned(),
+    ];
+    if raw {
+        args.push("--raw".to_owned());
+    }
+    for approval in approvals {
+        args.push("--approval".to_owned());
+        args.push(approval.clone());
+    }
+    args
+}
+
+#[cfg(test)]
+mod adapter_tests {
+    use super::*;
+
+    #[test]
+    fn adapter_forwards_raw_and_repeatable_approvals() {
+        assert_eq!(
+            ctxchat_args(
+                Path::new("/ctx"),
+                "coder",
+                "work",
+                true,
+                &["example.echo".to_owned(), "fs.read".to_owned()],
+            ),
+            [
+                "--root",
+                "/ctx",
+                "coder",
+                "--session",
+                "work",
+                "--raw",
+                "--approval",
+                "example.echo",
+                "--approval",
+                "fs.read",
+            ]
+        );
     }
 }
