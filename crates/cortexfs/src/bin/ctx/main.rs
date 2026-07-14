@@ -39,6 +39,7 @@ use std::sync::{
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use cortexfs::support::terminal::terminal_safe_text;
 use nix::libc;
 
 #[cfg(test)]
