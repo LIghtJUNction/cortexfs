@@ -67,6 +67,276 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 }
 
 #[test]
+fn agent_request_failures_are_terminal_without_failing_the_socket_runtime() {
+    let root = reference_tree("agent-request-failure-terminal");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let agent_executable = root.join("agent/coder");
+    write_text_file(
+        &agent_executable,
+        "#!/bin/sh\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\nexit 1\n",
+    );
+    set_file_mode(&agent_executable, 0o755);
+    let runtime = AgentExecutableSocketRuntime {
+        ctx_root: &root,
+        source_root: &root,
+        identity: view.identity(),
+        env: view.env(),
+        session_root: &session_root,
+        default_cwd: "/work",
+        model: Some("debug/echo"),
+        network_allowed: false,
+        agent_name: "coder",
+        agent_executable: &agent_executable,
+        execution: AgentExecutableSocketExecution::Direct,
+    };
+
+    for request_id in ["failure-1", "failure-2"] {
+        let (mut client, mut socket) = ok!(UnixStream::pair());
+        assert!(
+            writeln!(
+                client,
+                "{{\"op\":\"send\",\"id\":\"{request_id}\",\"session\":\"default\",\"input\":\"fail\"}}"
+            )
+            .is_ok()
+        );
+        assert!(client.shutdown(Shutdown::Write).is_ok());
+        let outcome = serve_agent_executable_socket_stream_once(&mut socket, None, runtime);
+        let outcome = ok!(outcome);
+        let terminal = outcome
+            .frames()
+            .iter()
+            .filter(|frame| {
+                serde_json::from_str::<serde_json::Value>(frame).is_ok_and(|value| {
+                    value.get("type").and_then(serde_json::Value::as_str) == Some("done")
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(terminal.len(), 1);
+        assert!(
+            terminal
+                .first()
+                .is_some_and(|frame| frame.contains("\"status\":\"error\""))
+        );
+        assert!(outcome.frames().iter().any(|frame| {
+            serde_json::from_str::<serde_json::Value>(frame).is_ok_and(|value| {
+                value.get("type").and_then(serde_json::Value::as_str) == Some("error")
+            })
+        }));
+        assert!(outcome.frames().iter().any(|frame| {
+            serde_json::from_str::<serde_json::Value>(frame).is_ok_and(|value| {
+                value.get("type").and_then(serde_json::Value::as_str) == Some("done")
+                    && value.get("status").and_then(serde_json::Value::as_str) == Some("error")
+            })
+        }));
+        assert_file_text(&session_root.join("default/state"), "error\n");
+    }
+}
+
+#[test]
+fn successful_agent_without_done_gets_canonical_terminal_frame() {
+    let root = reference_tree("agent-success-canonical-done");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        "#!/bin/sh\nprintf '{\"type\":\"delta\",\"run\":\"%s\",\"text\":\"ok\"}\\n' \"$CTX_RUN_ID\"\n",
+    );
+    set_file_mode(&executable, 0o755);
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(
+        client
+            .write_all(b"{\"op\":\"send\",\"id\":\"success-1\",\"session\":\"default\",\"input\":\"ok\"}\n")
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    );
+    let outcome = ok!(outcome);
+    assert_eq!(
+        outcome
+            .frames()
+            .iter()
+            .filter(|frame| frame.contains("\"type\":\"done\""))
+            .count(),
+        1
+    );
+    assert!(outcome.frames().iter().any(|frame| {
+        serde_json::from_str::<serde_json::Value>(frame).is_ok_and(|value| {
+            value.get("type").and_then(serde_json::Value::as_str) == Some("done")
+                && value.get("status").and_then(serde_json::Value::as_str) == Some("ok")
+        })
+    }));
+    assert_file_text(&session_root.join("default/state"), "done\n");
+}
+
+#[test]
+fn duplicate_agent_done_is_rejected_before_terminal_delivery() {
+    let root = reference_tree("agent-duplicate-done");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        "#!/bin/sh\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"error\"}\\n' \"$CTX_RUN_ID\"\n",
+    );
+    set_file_mode(&executable, 0o755);
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(
+        client
+            .write_all(b"{\"op\":\"send\",\"id\":\"duplicate-1\",\"session\":\"default\",\"input\":\"x\"}\n")
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    assert_eq!(
+        serve_agent_executable_socket_stream_once(
+            &mut socket,
+            None,
+            direct_agent_runtime(&root, &view, &session_root, &executable),
+        ),
+        Err(SocketRuntimeError::InvalidAgentOutput)
+    );
+    drop(socket);
+    let mut response = String::new();
+    assert!(client.read_to_string(&mut response).is_ok());
+    assert!(!response.contains("\"type\":\"done\""));
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "table-driven lifecycle cases keep one shared runtime fixture"
+)]
+fn direct_agent_error_lifecycle_is_canonicalized() {
+    let root = reference_tree("agent-error-lifecycle");
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let executable = root.join("agent/coder");
+    let cases = [
+        (
+            "error-only",
+            "#!/bin/sh\nprintf '{\"type\":\"error\",\"run\":\"%s\",\"code\":\"EIO\",\"message\":\"failed\"}\\n' \"$CTX_RUN_ID\"\n",
+            "error",
+            false,
+        ),
+        (
+            "error-done-ok",
+            "#!/bin/sh\nprintf '{\"type\":\"error\",\"run\":\"%s\",\"code\":\"EIO\",\"message\":\"failed\"}\\n' \"$CTX_RUN_ID\"\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\n",
+            "error",
+            false,
+        ),
+        (
+            "recoverable-done-ok",
+            "#!/bin/sh\nprintf '{\"type\":\"error\",\"run\":\"%s\",\"code\":\"EAGAIN\",\"message\":\"fallback\",\"recoverable\":true}\\n' \"$CTX_RUN_ID\"\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\n",
+            "ok",
+            true,
+        ),
+        (
+            "multiple-terminal-errors",
+            "#!/bin/sh\nprintf '{\"type\":\"error\",\"run\":\"%s\",\"code\":\"EIO\",\"message\":\"first\"}\\n' \"$CTX_RUN_ID\"\nprintf '{\"type\":\"error\",\"run\":\"%s\",\"code\":\"EIO\",\"message\":\"last\"}\\n' \"$CTX_RUN_ID\"\n",
+            "error",
+            false,
+        ),
+    ];
+    for (id, script, expected_status, recoverable) in cases {
+        write_text_file(&executable, script);
+        set_file_mode(&executable, 0o755);
+        let (mut client, mut socket) = ok!(UnixStream::pair());
+        assert!(
+            writeln!(
+                client,
+                "{{\"op\":\"send\",\"id\":\"{id}\",\"session\":\"default\",\"input\":\"x\"}}"
+            )
+            .is_ok()
+        );
+        assert!(client.shutdown(Shutdown::Write).is_ok());
+        let outcome = serve_agent_executable_socket_stream_once(
+            &mut socket,
+            None,
+            direct_agent_runtime(&root, &view, &session_root, &executable),
+        );
+        let outcome = ok!(outcome);
+        let done = outcome
+            .frames()
+            .iter()
+            .filter(|frame| frame.contains("\"type\":\"done\""))
+            .collect::<Vec<_>>();
+        assert_eq!(done.len(), 1);
+        assert!(
+            done.first().is_some_and(|frame| {
+                frame.contains(&format!("\"status\":\"{expected_status}\""))
+            })
+        );
+        assert_eq!(
+            outcome
+                .frames()
+                .iter()
+                .filter(|frame| frame.contains("\"type\":\"error\""))
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcome
+                .frames()
+                .iter()
+                .any(|frame| frame.contains("\"recoverable\":true")),
+            recoverable
+        );
+        if id == "multiple-terminal-errors" {
+            assert!(
+                outcome
+                    .frames()
+                    .iter()
+                    .any(|frame| frame.contains("\"message\":\"last\""))
+            );
+            assert!(
+                !outcome
+                    .frames()
+                    .iter()
+                    .any(|frame| frame.contains("\"message\":\"first\""))
+            );
+        }
+        assert_file_text(
+            &session_root.join("default/state"),
+            if expected_status == "ok" {
+                "done\n"
+            } else {
+                "error\n"
+            },
+        );
+    }
+
+    write_text_file(
+        &executable,
+        "#!/bin/sh\nprintf '{\"type\":\"error\",\"run\":\"wrong-run\",\"code\":\"EIO\",\"message\":\"forged\"}\\n'\n",
+    );
+    set_file_mode(&executable, 0o755);
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(
+        client
+            .write_all(b"{\"op\":\"send\",\"id\":\"wrong-error\",\"session\":\"default\",\"input\":\"x\"}\n")
+            .is_ok()
+    );
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    assert_eq!(
+        serve_agent_executable_socket_stream_once(
+            &mut socket,
+            None,
+            direct_agent_runtime(&root, &view, &session_root, &executable),
+        ),
+        Err(SocketRuntimeError::InvalidAgentOutput)
+    );
+    drop(socket);
+    let mut response = String::new();
+    assert!(client.read_to_string(&mut response).is_ok());
+    assert!(!response.contains("wrong-run"));
+}
+
+#[test]
 fn agent_executable_socket_runtime_stops_child_after_cancel() {
     let root = reference_tree("agent-executable-socket-runtime-cancel");
     let session_root = agent_session_root(&root, "coder");

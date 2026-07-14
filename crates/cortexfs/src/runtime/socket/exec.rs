@@ -195,11 +195,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         envelope: None,
         step: 0,
     };
-    let agent_outcome = if agent_uses_sdk_envelope(runtime)? {
-        run_agent_envelope_loop(stream, runtime, run_request)?
-    } else {
-        run_agent_executable_streaming(stream, runtime, run_request)?
-    };
+    let agent_outcome = run_agent_request(stream, runtime, run_request)?;
     record_owned_child_completion(runtime, session, &run_id, &agent_outcome)?;
     let agent_frames = agent_outcome.frames;
     if scope != SocketSessionScope::Temp {
@@ -221,6 +217,97 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     let mut frames = recorder_response.frames().to_vec();
     frames.extend(agent_frames);
     Ok(SocketRuntimeResponse::new(frames))
+}
+
+fn run_agent_request(
+    stream: &mut UnixStream,
+    runtime: AgentExecutableSocketRuntime<'_>,
+    request: AgentExecutableRunRequest<'_>,
+) -> Result<AgentRunOutcome, SocketRuntimeError> {
+    let outcome = if agent_uses_sdk_envelope(runtime)? {
+        run_agent_envelope_loop(stream, runtime, request)
+    } else {
+        run_agent_executable_streaming(stream, runtime, request)
+    };
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(SocketRuntimeError::CannotRunAgent) => {
+            let frames = agent_process_failed_frames(request.run_id, "agent request failed");
+            AgentRunOutcome {
+                frames,
+                process: AgentProcessOutcome::Error,
+            }
+        }
+        Err(error) => return Err(error),
+    };
+    canonicalize_agent_outcome(stream, request.run_id, outcome)
+}
+
+fn canonicalize_agent_outcome(
+    stream: &mut UnixStream,
+    run_id: &str,
+    mut outcome: AgentRunOutcome,
+) -> Result<AgentRunOutcome, SocketRuntimeError> {
+    let mut done_status = None;
+    let mut terminal_error = None;
+    outcome.frames.retain(|frame| {
+        let Ok(value) = serde_json::from_str::<Value>(frame) else {
+            return true;
+        };
+        if value.get("run").and_then(Value::as_str) == Some(run_id) {
+            match value.get("type").and_then(Value::as_str) {
+                Some("done") => {
+                    done_status = value
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    return false;
+                }
+                Some("error")
+                    if value.get("recoverable").and_then(Value::as_bool) != Some(true) =>
+                {
+                    terminal_error = Some(frame.clone());
+                    return false;
+                }
+                _ => {}
+            }
+        }
+        true
+    });
+    if outcome.process == AgentProcessOutcome::Cancelled {
+        return Ok(outcome);
+    }
+    let status = match (
+        outcome.process,
+        terminal_error.is_some(),
+        done_status.as_deref(),
+    ) {
+        (AgentProcessOutcome::Success, false, None | Some("ok")) => "ok",
+        (_, true, _)
+        | (AgentProcessOutcome::Success, false, Some("error"))
+        | (AgentProcessOutcome::Error, false, _) => {
+            outcome.process = AgentProcessOutcome::Error;
+            "error"
+        }
+        (AgentProcessOutcome::Success, false, Some(_)) => {
+            return Err(SocketRuntimeError::InvalidAgentOutput);
+        }
+        (AgentProcessOutcome::Cancelled, _, _) => return Ok(outcome),
+    };
+    if status == "error" {
+        let error = terminal_error.unwrap_or_else(|| {
+            serde_json::json!({
+                "type":"error", "run":run_id, "code":"EIO", "message":"agent process failed"
+            })
+            .to_string()
+        });
+        deliver_host_frame(stream, &error)?;
+        outcome.frames.push(error);
+    }
+    let done = serde_json::json!({"type":"done", "run":run_id, "status":status}).to_string();
+    deliver_host_frame(stream, &done)?;
+    outcome.frames.push(done);
+    Ok(outcome)
 }
 
 fn agent_uses_sdk_envelope(
@@ -291,9 +378,6 @@ fn run_agent_envelope_loop(
         }
         if outcome.process == AgentProcessOutcome::Error {
             let terminal = agent_process_failed_frames(request.run_id, "agent process failed");
-            for frame in &terminal {
-                deliver_host_frame(stream, frame)?;
-            }
             frames.extend(terminal);
             return Ok(AgentRunOutcome {
                 frames,
@@ -305,7 +389,6 @@ fn run_agent_envelope_loop(
         let Some(call) = call else {
             let done =
                 serde_json::json!({"type":"done", "run":request.run_id, "status":"ok"}).to_string();
-            deliver_host_frame(stream, &done)?;
             frames.push(done);
             return Ok(AgentRunOutcome {
                 frames,
@@ -321,9 +404,6 @@ fn run_agent_envelope_loop(
                     "agent replayed tool call id"
                 },
             );
-            for frame in &terminal {
-                deliver_host_frame(stream, frame)?;
-            }
             frames.extend(terminal);
             return Ok(AgentRunOutcome {
                 frames,
@@ -805,6 +885,8 @@ pub(crate) fn run_agent_executable_streaming(
     let mut saw_agent_frame = false;
     let mut yielded_tool_call = None;
     let mut saw_terminal_lifecycle = false;
+    let mut withheld_done = false;
+    let mut withheld_error: Option<usize> = None;
     loop {
         match stdout_receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(line) => {
@@ -858,6 +940,25 @@ pub(crate) fn run_agent_executable_streaming(
                     let _ignored = child.wait();
                     return Err(SocketRuntimeError::InvalidAgentOutput);
                 }
+                if frame_type.as_deref() == Some("error") {
+                    if value.get("run").and_then(Value::as_str) != Some(request.run_id) {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(SocketRuntimeError::InvalidAgentOutput);
+                    }
+                    if value.get("recoverable").and_then(Value::as_bool) != Some(true) {
+                        saw_terminal_lifecycle = true;
+                        if let Some(index) = withheld_error {
+                            if let Some(frame) = frames.get_mut(index) {
+                                *frame = line;
+                            }
+                        } else {
+                            withheld_error = Some(frames.len());
+                            frames.push(line);
+                        }
+                        continue;
+                    }
+                }
                 if agent_frame_has_tool_result(&value) || yielded_tool_call.is_some() {
                     terminate_agent_process_group(&mut child);
                     let _ignored = child.wait();
@@ -874,7 +975,19 @@ pub(crate) fn run_agent_executable_streaming(
                     yielded_tool_call = Some((line, tool_call));
                     continue;
                 }
-                saw_terminal_lifecycle |= matches!(frame_type.as_deref(), Some("error" | "done"));
+                if frame_type.as_deref() == Some("done") {
+                    if value.get("run").and_then(Value::as_str) != Some(request.run_id)
+                        || withheld_done
+                    {
+                        terminate_agent_process_group(&mut child);
+                        let _ignored = child.wait();
+                        return Err(SocketRuntimeError::InvalidAgentOutput);
+                    }
+                    withheld_done = true;
+                    saw_terminal_lifecycle = true;
+                    frames.push(line);
+                    continue;
+                }
                 if frame_type.as_deref() != Some("start") {
                     write_while_connected(&mut client_connected, || {
                         write_socket_frame(stream, &line)
@@ -931,9 +1044,6 @@ pub(crate) fn run_agent_executable_streaming(
             });
         }
         let frames = agent_process_failed_frames(request.run_id, &stderr);
-        for frame in &frames {
-            write_while_connected(&mut client_connected, || write_socket_frame(stream, frame))?;
-        }
         return Ok(AgentRunOutcome {
             frames,
             process: AgentProcessOutcome::Error,
@@ -985,9 +1095,9 @@ pub(crate) fn run_agent_executable_streaming(
             "status": status
         })
         .to_string();
-        for frame in [&result_frame, &done_frame] {
-            write_while_connected(&mut client_connected, || write_socket_frame(stream, frame))?;
-        }
+        write_while_connected(&mut client_connected, || {
+            write_socket_frame(stream, &result_frame)
+        })?;
         frames.extend([result_frame, done_frame]);
     }
     Ok(AgentRunOutcome {
