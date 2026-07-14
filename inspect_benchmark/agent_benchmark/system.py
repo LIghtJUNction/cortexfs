@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .agents import (
     CleanupReceipt,
@@ -30,9 +30,15 @@ ALLOWED_CATEGORIES = frozenset(
     {"general", "logic", "knowledge", "translation", "policy"}
 )
 ALLOWED_DIFFICULTIES = frozenset({"easy", "medium", "hard"})
+COMMAND_VALIDATION_STDOUT_LIMIT = 256 * 1024
 
 
-def _command(command: list[str], timeout: float) -> dict[str, Any]:
+def _command(
+    command: list[str],
+    timeout: float,
+    *,
+    stdout_validator: Callable[[str], bool] | None = None,
+) -> dict[str, Any]:
     started = time.perf_counter()
     try:
         result = subprocess.run(
@@ -42,9 +48,12 @@ def _command(command: list[str], timeout: float) -> dict[str, Any]:
             timeout=timeout,
             check=False,
         )
+        success = result.returncode == 0 and (
+            stdout_validator is None or stdout_validator(result.stdout)
+        )
         value = {
             "command": command,
-            "success": result.returncode == 0,
+            "success": success,
             "exit_code": result.returncode,
             "latency_seconds": time.perf_counter() - started,
             "stdout": result.stdout[-8192:],
@@ -67,10 +76,21 @@ def _command(command: list[str], timeout: float) -> dict[str, Any]:
         return sanitized
 
 
+def _healthy_doctor_output(stdout: str) -> bool:
+    if len(stdout.encode()) > COMMAND_VALIDATION_STDOUT_LIMIT:
+        return False
+    lines = [line for line in stdout.splitlines() if line]
+    return bool(lines) and all(line.startswith("ok ") for line in lines)
+
+
 def _preflight(ctx_path: str, agents: Sequence[str], timeout: float) -> dict[str, Any]:
     health = {
         "status": _command([ctx_path, "status"], min(timeout, 30.0)),
-        "doctor": _command([ctx_path, "doctor"], min(timeout, 30.0)),
+        "doctor": _command(
+            [ctx_path, "doctor"],
+            min(timeout, 30.0),
+            stdout_validator=_healthy_doctor_output,
+        ),
         "mount": _command(
             ["findmnt", "-no", "TARGET,SOURCE,FSTYPE,OPTIONS", "/ctx"],
             min(timeout, 10.0),
@@ -86,12 +106,7 @@ def _preflight(ctx_path: str, agents: Sequence[str], timeout: float) -> dict[str
     ):
         raise ValueError("ctx status is not running, ready, and mounted")
     doctor = health["doctor"]
-    doctor_lines = [line for line in str(doctor["stdout"]).splitlines() if line]
-    if (
-        not doctor["success"]
-        or not doctor_lines
-        or any(not line.startswith("ok ") for line in doctor_lines)
-    ):
+    if not doctor["success"]:
         raise ValueError("ctx doctor reported an unhealthy ABI")
     mount = health["mount"]
     fields = str(mount["stdout"]).split(None, 3)

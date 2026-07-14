@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent_benchmark.system import (
+    COMMAND_VALIDATION_STDOUT_LIMIT,
     OutputDirectory,
     _agents,
     _aggregate,
@@ -18,6 +19,7 @@ from agent_benchmark.system import (
     _comparison_status,
     _dataset,
     _gc_candidates,
+    _healthy_doctor_output,
     _percentile,
     _preflight,
     _report,
@@ -124,7 +126,9 @@ def test_redaction_and_usage_validation() -> None:
 def test_preflight_requires_exact_idle_first_status_line(
     monkeypatch: pytest.MonkeyPatch, status_output: str, accepted: bool
 ) -> None:
-    def command(values: list[str], _timeout: float) -> dict[str, object]:
+    def command(
+        values: list[str], _timeout: float, **_kwargs: object
+    ) -> dict[str, object]:
         if values[1:] == ["status"]:
             stdout = "ctx\n    State: running\n   Status: ready\n  Mounted: yes\n"
         elif values[1:] == ["doctor"]:
@@ -143,6 +147,46 @@ def test_preflight_requires_exact_idle_first_status_line(
     else:
         with pytest.raises(ValueError, match="must begin with idle"):
             _preflight("ctx", ["coder"], 1)
+
+
+def test_preflight_validates_complete_doctor_output_before_bounding_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doctor_stdout = [
+        "ok root /ctx\n"
+        + "ok session "
+        + "x" * 8300
+        + "\nok Authorization: benchmark-secret\nok final\n"
+    ]
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[1:] == ["status"]:
+            stdout = "ctx\n    State: running\n   Status: ready\n  Mounted: yes\n"
+        elif command[1:] == ["doctor"]:
+            stdout = doctor_stdout[0]
+        elif command[0] == "findmnt":
+            stdout = "/ctx cortexfs fuse rw,default_permissions,allow_other\n"
+        else:
+            raise AssertionError(command)
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    health = _preflight("ctx", [], 1)
+    published = str(health["doctor"]["stdout"])
+    assert len(published.encode()) <= 8192
+    assert "benchmark-secret" not in published
+    doctor_stdout[0] = "bad root /ctx\n" + "ok session " + "x" * 8300 + "\nok final\n"
+    with pytest.raises(ValueError, match="doctor"):
+        _preflight("ctx", [], 1)
+
+
+def test_healthy_doctor_output_enforces_validation_boundary() -> None:
+    at_limit = "ok " + "x" * (COMMAND_VALIDATION_STDOUT_LIMIT - 4) + "\n"
+    over_limit = "ok " + "x" * (COMMAND_VALIDATION_STDOUT_LIMIT - 3) + "\n"
+    assert len(at_limit.encode()) == COMMAND_VALIDATION_STDOUT_LIMIT
+    assert len(over_limit.encode()) == COMMAND_VALIDATION_STDOUT_LIMIT + 1
+    assert _healthy_doctor_output(at_limit)
+    assert not _healthy_doctor_output(over_limit)
 
 
 def test_gc_preview_parser_uses_literal_production_grammar() -> None:
