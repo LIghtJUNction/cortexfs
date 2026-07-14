@@ -2,8 +2,9 @@
 version: alpha
 name: CortexFS
 description: >
-  Visual identity for CortexFS — a FUSE Agent OS. Warm paper surfaces, deep ink
-  type, mint interaction accent, and monospace technical instrumentation.
+  Visual identity for CortexFS — a FUSE filesystem interface. Warm paper
+  surfaces, deep ink type, mint interaction accent, and monospace technical
+  instrumentation.
   Applied to docs-site, marketing surfaces, and agent-facing HTML demos.
 colors:
   primary: "#111312"

@@ -8,7 +8,7 @@ not become root ABI.
 ## One-page model
 
 ```text
-/ctx is a FUSE Agent OS ABI view.
+/ctx is a FUSE filesystem interface for agent runtimes.
 model is a pure inference file.
 agent is the policy-bound orchestrator.
 tool is a capability endpoint.

@@ -32,7 +32,7 @@ write_hero_svg() {
     <text class="serif paper" x="88" y="46" font-size="42" font-weight="700">Cor</text><text class="serif mint" x="160" y="46" font-size="42" font-weight="700" font-style="italic">TeX</text><text class="serif paper" x="230" y="46" font-size="42" font-weight="700">fs</text>
   </g>
   <g transform="translate(64 164)">
-    <text class="sans mint" x="0" y="0" font-size="15" font-weight="900" letter-spacing="3">FILESYSTEM AS AGENT OS</text>
+    <text class="sans mint" x="0" y="0" font-size="15" font-weight="900" letter-spacing="3">FUSE FILESYSTEM INTERFACE</text>
     <text class="serif paper" x="0" y="72" font-size="62" font-weight="650">Durable agents.</text>
     <text class="serif paper" x="0" y="140" font-size="62" font-weight="650">One Unix ABI.</text>
     <text class="sans muted" x="0" y="190" font-size="21">Small enough to inspect. Ordinary enough to script.</text>

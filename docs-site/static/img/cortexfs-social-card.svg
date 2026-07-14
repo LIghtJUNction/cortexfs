@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
-  <title id="title">CortexFS — Filesystem as Agent OS</title>
+  <title id="title">CortexFS — FUSE filesystem interface</title>
   <desc id="desc">CortexFS social card stating that agent runtimes should not hide inside a database, with a terminal listing the seven stable CortexFS root names.</desc>
 
   <rect width="1200" height="630" fill="#f7f5f1"/>
@@ -18,7 +18,7 @@
   </g>
 
   <g transform="translate(70 154)">
-    <text x="0" y="0" fill="#2a8f73" font-family="Inter, ui-sans-serif, sans-serif" font-size="15" font-weight="900" letter-spacing="2.6">FILESYSTEM AS AGENT OS</text>
+    <text x="0" y="0" fill="#2a8f73" font-family="Inter, ui-sans-serif, sans-serif" font-size="15" font-weight="900" letter-spacing="2.6">FUSE FILESYSTEM INTERFACE</text>
     <text x="0" y="78" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="55" font-weight="600">Your agent runtime</text>
     <text x="0" y="140" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="55" font-weight="600">shouldn’t hide inside</text>
     <text x="0" y="202" fill="#111312" font-family="Georgia, 'Times New Roman', serif" font-size="55" font-weight="600">a database.</text>
