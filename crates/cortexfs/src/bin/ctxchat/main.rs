@@ -95,7 +95,11 @@ fn run() -> io::Result<()> {
             }
             "/tools" => {
                 for tool in tool_names(&options.root) {
-                    writeln!(io::stdout().lock(), "{tool}")?;
+                    writeln!(
+                        io::stdout().lock(),
+                        "{}",
+                        cortexfs::support::terminal::terminal_safe_text(&tool)
+                    )?;
                 }
             }
             "/paste" => send_text(
