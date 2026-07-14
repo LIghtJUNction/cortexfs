@@ -2,9 +2,85 @@ use super::*;
 
 use crate::support::plain::{open_plain_directory, read_small_text_file};
 
-pub(crate) fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
-    if nix::unistd::geteuid().is_root() {
-        command.gid(identity.gid()).uid(identity.uid());
+pub(crate) fn command_for_agent_identity(
+    program: impl AsRef<std::ffi::OsStr>,
+    identity: &AgentUnixIdentity,
+) -> Command {
+    if !nix::unistd::geteuid().is_root() {
+        return Command::new(program);
+    }
+    let mut command = Command::new("/usr/bin/setpriv");
+    command.args(["--reuid", &identity.uid().to_string()]);
+    command.args(["--regid", &identity.gid().to_string()]);
+    if identity.groups().is_empty() {
+        command.arg("--clear-groups");
+    } else {
+        command.arg("--groups").arg(
+            identity
+                .groups()
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    command.arg("--").arg(program);
+    command
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "identity tests stay beside the command constructor"
+)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn root_caller_applies_uid_gid_and_supplementary_groups()
+    -> Result<(), Box<dyn std::error::Error>> {
+        if !nix::unistd::geteuid().is_root() {
+            return Ok(());
+        }
+        let identity = AgentUnixIdentity::new(65_534, 65_534, [1]);
+        let mut command = command_for_agent_identity("/usr/bin/id", &identity);
+        command.arg("-u");
+        let uid = command.output()?;
+        assert!(uid.status.success());
+        assert_eq!(String::from_utf8(uid.stdout)?.trim(), "65534");
+
+        let mut command = command_for_agent_identity("/usr/bin/id", &identity);
+        command.arg("-g");
+        let gid = command.output()?;
+        assert!(gid.status.success());
+        assert_eq!(String::from_utf8(gid.stdout)?.trim(), "65534");
+
+        let mut command = command_for_agent_identity("/usr/bin/id", &identity);
+        command.arg("-G");
+        let groups = command.output()?;
+        assert!(groups.status.success());
+        let groups = String::from_utf8(groups.stdout)?;
+        let groups = groups.split_whitespace().collect::<Vec<_>>();
+        assert!(groups.contains(&"65534"));
+        assert!(groups.contains(&"1"));
+        Ok(())
+    }
+
+    #[test]
+    fn non_root_caller_keeps_existing_identity() -> Result<(), Box<dyn std::error::Error>> {
+        if nix::unistd::geteuid().is_root() {
+            return Ok(());
+        }
+        let mut command =
+            command_for_agent_identity("/usr/bin/id", &AgentUnixIdentity::new(65_534, 65_534, [1]));
+        command.arg("-u");
+        let output = command.output()?;
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout)?.trim(),
+            nix::unistd::geteuid().as_raw().to_string()
+        );
+        Ok(())
     }
 }
 

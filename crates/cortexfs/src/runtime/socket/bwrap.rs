@@ -16,7 +16,10 @@ pub(crate) fn agent_executable_socket_command(
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
-            let mut command = Command::new(support::plain::proc_fd_path(agent_executable));
+            let mut command = command_for_agent_identity(
+                support::plain::proc_fd_path(agent_executable),
+                runtime.identity,
+            );
             apply_agent_executable_socket_env(&mut command, runtime, request);
             if let Some((_socket, environment)) = control {
                 command.envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
@@ -48,7 +51,7 @@ pub(crate) fn agent_executable_socket_command(
                 .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
             let agent_home_source_fd = InheritedFd::duplicate(&agent_home_dir)?;
             let agent_home_sandbox_fd = InheritedFd::duplicate(&agent_home_dir)?;
-            let mut command = Command::new(program);
+            let mut command = command_for_agent_identity(program, runtime.identity);
             command.args(agent_executable_socket_bwrap_args(
                 &BwrapAgentExecutableArgs {
                     runtime,
