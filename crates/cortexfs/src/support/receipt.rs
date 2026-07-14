@@ -1,3 +1,11 @@
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "staged empty-directory receipt awaits its phase-specific caller"
+    )
+)]
+
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs::File;
@@ -9,6 +17,260 @@ use std::path::{Path, PathBuf};
 use super::plain::{open_plain_directory, proc_fd_path};
 
 const QUARANTINE_BYTES: usize = 32;
+const CHILD_BYTES: usize = 32;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ReceiptError {
+    CannotCreate,
+    CleanupConflict,
+}
+
+impl fmt::Display for ReceiptError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match *self {
+            Self::CannotCreate => "cannot create directory receipt",
+            Self::CleanupConflict => "directory receipt cleanup conflict",
+        })
+    }
+}
+
+impl std::error::Error for ReceiptError {}
+
+pub(crate) struct EmptyDirReceipt {
+    path: PathBuf,
+    parent: (u64, u64),
+    child: (u64, u64),
+}
+
+impl EmptyDirReceipt {
+    pub(crate) fn create(
+        directory: &Path,
+        prefix: &str,
+        uid: u32,
+        gid: u32,
+        mode: u32,
+    ) -> std::result::Result<Self, ReceiptError> {
+        if prefix.is_empty() || Path::new(prefix).file_name() != Some(prefix.as_ref()) {
+            return Err(ReceiptError::CannotCreate);
+        }
+        let parent =
+            open_plain_directory(directory).map_err(|_error| ReceiptError::CannotCreate)?;
+        let metadata = parent
+            .metadata()
+            .map_err(|_error| ReceiptError::CannotCreate)?;
+        let parent_identity = (metadata.dev(), metadata.ino());
+        let suffix = random_hex::<CHILD_BYTES>().map_err(|_error| ReceiptError::CannotCreate)?;
+        let name = format!("{prefix}-{}", suffix.get(..24).unwrap_or(&suffix));
+        nix::sys::stat::mkdirat(
+            &parent,
+            name.as_str(),
+            nix::sys::stat::Mode::from_bits_truncate(mode),
+        )
+        .map_err(|_error| ReceiptError::CannotCreate)?;
+        let child = match plain_dir_identity(&parent, &name) {
+            Ok(identity) => identity,
+            Err(_error) => {
+                let _isolated = isolate_unidentified_dir(&parent, &name);
+                return Err(ReceiptError::CannotCreate);
+            }
+        };
+        if configure_dir(
+            directory,
+            &parent,
+            &name,
+            (parent_identity, child),
+            (uid, gid),
+            mode,
+        )
+        .is_err()
+        {
+            let _cleanup = quarantine_dir(&parent, &name, child);
+            return Err(ReceiptError::CannotCreate);
+        }
+        Ok(Self {
+            path: directory.join(name),
+            parent: parent_identity,
+            child,
+        })
+    }
+
+    pub(crate) fn cleanup(&self) -> std::result::Result<(), ReceiptError> {
+        let parent_path = self.path.parent().ok_or(ReceiptError::CleanupConflict)?;
+        let parent =
+            open_plain_directory(parent_path).map_err(|_error| ReceiptError::CleanupConflict)?;
+        let metadata = parent
+            .metadata()
+            .map_err(|_error| ReceiptError::CleanupConflict)?;
+        if (metadata.dev(), metadata.ino()) != self.parent {
+            return Err(ReceiptError::CleanupConflict);
+        }
+        let name = self
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or(ReceiptError::CleanupConflict)?;
+        quarantine_dir(&parent, name, self.child)
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+fn configure_dir(
+    directory_path: &Path,
+    directory: &File,
+    name: &str,
+    identities: ((u64, u64), (u64, u64)),
+    owner: (u32, u32),
+    mode: u32,
+) -> std::result::Result<(), ReceiptError> {
+    let (parent_identity, child_identity) = identities;
+    require_plain_dir(directory, name, child_identity)?;
+    nix::unistd::fchownat(
+        directory,
+        name,
+        Some(nix::unistd::Uid::from_raw(owner.0)),
+        Some(nix::unistd::Gid::from_raw(owner.1)),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| ReceiptError::CannotCreate)?;
+    require_plain_dir(directory, name, child_identity)?;
+    nix::sys::stat::fchmodat(
+        directory,
+        name,
+        nix::sys::stat::Mode::from_bits_truncate(mode),
+        nix::sys::stat::FchmodatFlags::NoFollowSymlink,
+    )
+    .map_err(|_error| ReceiptError::CannotCreate)?;
+    require_plain_dir(directory, name, child_identity)?;
+    let rebound =
+        open_plain_directory(directory_path).map_err(|_error| ReceiptError::CannotCreate)?;
+    let metadata = rebound
+        .metadata()
+        .map_err(|_error| ReceiptError::CannotCreate)?;
+    if (metadata.dev(), metadata.ino()) != parent_identity {
+        return Err(ReceiptError::CannotCreate);
+    }
+    directory
+        .sync_all()
+        .map_err(|_error| ReceiptError::CannotCreate)
+}
+
+fn plain_dir_identity(parent: &File, name: &str) -> std::result::Result<(u64, u64), ReceiptError> {
+    let stat = nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+        .map_err(|_error| ReceiptError::CleanupConflict)?;
+    let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
+    if kind != nix::sys::stat::SFlag::S_IFDIR {
+        return Err(ReceiptError::CleanupConflict);
+    }
+    Ok((stat.st_dev, stat.st_ino))
+}
+
+fn require_plain_dir(
+    parent: &File,
+    name: &str,
+    expected: (u64, u64),
+) -> std::result::Result<(), ReceiptError> {
+    if plain_dir_identity(parent, name)? == expected {
+        Ok(())
+    } else {
+        Err(ReceiptError::CleanupConflict)
+    }
+}
+
+fn require_empty_dir(parent: &File, name: &str) -> std::result::Result<(), ReceiptError> {
+    let fd = nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_DIRECTORY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|_error| ReceiptError::CleanupConflict)?;
+    let child = File::from(fd);
+    let mut entries =
+        std::fs::read_dir(proc_fd_path(&child)).map_err(|_error| ReceiptError::CleanupConflict)?;
+    if entries.next().is_some() {
+        return Err(ReceiptError::CleanupConflict);
+    }
+    Ok(())
+}
+
+fn quarantine_dir(
+    parent: &File,
+    name: &str,
+    expected: (u64, u64),
+) -> std::result::Result<(), ReceiptError> {
+    require_plain_dir(parent, name, expected)?;
+    require_empty_dir(parent, name)?;
+    let quarantine = dir_quarantine_name(name)?;
+    nix::fcntl::renameat2(
+        parent,
+        name,
+        parent,
+        quarantine.as_str(),
+        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(|_error| ReceiptError::CleanupConflict)?;
+    if require_plain_dir(parent, &quarantine, expected).is_err()
+        || require_empty_dir(parent, &quarantine).is_err()
+    {
+        rollback_dir(parent, &quarantine, name, expected);
+        return Err(ReceiptError::CleanupConflict);
+    }
+    if nix::unistd::unlinkat(
+        parent,
+        quarantine.as_str(),
+        nix::unistd::UnlinkatFlags::RemoveDir,
+    )
+    .is_err()
+    {
+        rollback_dir(parent, &quarantine, name, expected);
+        return Err(ReceiptError::CleanupConflict);
+    }
+    parent
+        .sync_all()
+        .map_err(|_error| ReceiptError::CleanupConflict)
+}
+
+fn rollback_dir(parent: &File, quarantine: &str, name: &str, expected: (u64, u64)) {
+    if require_plain_dir(parent, quarantine, expected).is_ok() {
+        let _ignored = nix::fcntl::renameat2(
+            parent,
+            quarantine,
+            parent,
+            name,
+            nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+        );
+    }
+}
+
+fn isolate_unidentified_dir(parent: &File, name: &str) -> std::result::Result<(), ReceiptError> {
+    let quarantine = dir_quarantine_name(name)?;
+    nix::fcntl::renameat2(
+        parent,
+        name,
+        parent,
+        quarantine.as_str(),
+        nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+    )
+    .map_err(|_error| ReceiptError::CleanupConflict)?;
+    parent
+        .sync_all()
+        .map_err(|_error| ReceiptError::CleanupConflict)
+}
+
+fn dir_quarantine_name(name: &str) -> std::result::Result<String, ReceiptError> {
+    let suffix =
+        random_hex::<QUARANTINE_BYTES>().map_err(|_error| ReceiptError::CleanupConflict)?;
+    Ok(format!(
+        ".{name}.rollback-{}",
+        suffix.get(..16).unwrap_or(&suffix)
+    ))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SocketReceiptError {
@@ -232,84 +494,4 @@ pub(crate) fn random_hex<const N: usize>() -> Result<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fs;
-    use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
-
-    use super::*;
-
-    fn fixture() -> std::result::Result<
-        (tempfile::TempDir, SocketReceipt, UnixListener),
-        Box<dyn std::error::Error>,
-    > {
-        let root = tempfile::tempdir()?;
-        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o711))?;
-        let (receipt, listener) = SocketReceipt::bind(
-            root.path(),
-            "control.sock",
-            (
-                nix::unistd::getuid().as_raw(),
-                nix::unistd::getgid().as_raw(),
-            ),
-        )?;
-        Ok((root, receipt, listener))
-    }
-
-    #[test]
-    fn socket_receipt_configures_and_cleans_socket()
-    -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let (_root, receipt, listener) = fixture()?;
-        let metadata = fs::symlink_metadata(receipt.path())?;
-        assert!(metadata.file_type().is_socket());
-        assert_eq!(metadata.uid(), nix::unistd::getuid().as_raw());
-        assert_eq!(metadata.gid(), nix::unistd::getgid().as_raw());
-        assert_eq!(metadata.permissions().mode() & 0o7777, 0o600);
-        assert_eq!((metadata.dev(), metadata.ino()), receipt.identity());
-        drop(listener);
-        receipt.cleanup()?;
-        assert!(!receipt.path().exists());
-        Ok(())
-    }
-
-    #[test]
-    fn cleanup_refuses_replacement_socket() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        let (_root, receipt, listener) = fixture()?;
-        drop(listener);
-        fs::remove_file(receipt.path())?;
-        let _replacement = UnixListener::bind(receipt.path())?;
-        assert_eq!(receipt.cleanup(), Err(SocketReceiptError::Cleanup));
-        assert!(receipt.path().exists());
-        Ok(())
-    }
-
-    #[test]
-    fn cleanup_refuses_non_socket_and_symlink()
-    -> std::result::Result<(), Box<dyn std::error::Error>> {
-        for use_symlink in [false, true] {
-            let (_root, receipt, listener) = fixture()?;
-            drop(listener);
-            fs::remove_file(receipt.path())?;
-            if use_symlink {
-                symlink("missing", receipt.path())?;
-            } else {
-                fs::write(receipt.path(), b"replacement")?;
-            }
-            assert_eq!(receipt.cleanup(), Err(SocketReceiptError::Cleanup));
-            assert!(fs::symlink_metadata(receipt.path()).is_ok());
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn random_hex_has_exact_lowercase_format() -> std::result::Result<(), Box<dyn std::error::Error>>
-    {
-        let token = random_hex::<32>()?;
-        assert_eq!(token.len(), 64);
-        assert!(
-            token
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        );
-        Ok(())
-    }
-}
+mod tests;
