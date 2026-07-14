@@ -50,16 +50,6 @@ pub(crate) fn execute_agent_tool_call_with(
     prepare_agent_tool_call(config, tool_call)?.execute(config)
 }
 
-pub(crate) fn execute_agent_tool_call_as(
-    config: &AgentToolExecutionConfig<'_>,
-    tool_call: &AgentToolCall,
-    identity: &cortexfs::AgentUnixIdentity,
-) -> Result<String, String> {
-    let mut prepared = prepare_agent_tool_call(config, tool_call)?;
-    crate::runtime::socket::apply_agent_identity_to_command(&mut prepared.command, identity);
-    prepared.execute(config)
-}
-
 pub(crate) struct PreparedAgentToolCall {
     command: Command,
     home_dir: fs::File,
@@ -147,7 +137,8 @@ pub(crate) fn prepare_agent_tool_call(
         .map_err(|error| format!("cannot preserve agent home fd: {error:?}"))?;
     crate::provider::name::files::clear_fd_cloexec(&home_alias_dir)
         .map_err(|error| format!("cannot preserve agent home alias fd: {error:?}"))?;
-    let mut command = Command::new(BWRAP_PROGRAM);
+    let mut command =
+        crate::runtime::socket::command_for_agent_identity(BWRAP_PROGRAM, view.identity());
     let inherited_control = inherited_agent_tool_control(config)?;
     let control = config.control.as_ref().or(inherited_control.as_ref());
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {

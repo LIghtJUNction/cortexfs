@@ -382,8 +382,7 @@ fn handle_agent_tsh_request(
     let mut bytes = Vec::new();
     object::executor::output::write_tool_call_event(&mut bytes, &run, &call)
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    let result =
-        object::executor::exec::execute_agent_tool_call_as(&config, &call, runtime.identity);
+    let result = object::executor::exec::execute_agent_tool_call_with(&config, &call);
     control
         .server
         .finish()
@@ -1075,7 +1074,6 @@ pub(crate) fn run_agent_executable_streaming(
         }
     };
     apply_socket_debug_timing_env(&mut command, request.debug);
-    apply_agent_identity_to_command(&mut command, runtime.identity);
     command.stderr(Stdio::piped());
     let mut control_server = control.take().map(|entry| entry.server);
     let mut child = match command.spawn() {
@@ -1343,14 +1341,11 @@ pub(crate) fn run_agent_executable_streaming(
             control: None,
             cancel: None,
         };
-        let (result, status) = match object::executor::exec::execute_agent_tool_call_as(
-            &config,
-            &tool_call,
-            runtime.identity,
-        ) {
-            Ok(result) => (result, "ok"),
-            Err(error) => (format!("ERROR: {error}\n"), "error"),
-        };
+        let (result, status) =
+            match object::executor::exec::execute_agent_tool_call_with(&config, &tool_call) {
+                Ok(result) => (result, "ok"),
+                Err(error) => (format!("ERROR: {error}\n"), "error"),
+            };
         let mut output = Vec::new();
         object::executor::output::write_tool_result_event(
             &mut output,
