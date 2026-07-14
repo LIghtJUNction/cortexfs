@@ -99,6 +99,22 @@ pub(crate) fn packaged_socket_unit_uses_receipted_alias_lifecycle_and_safe_order
     }
     assert!(!unit.contains("/usr/bin/rm -f"));
     assert!(!unit.contains("/usr/bin/ln -s"));
+
+    let service =
+        fs::read_to_string(manifest.join("../../packaging/systemd/cortexfs-agent@.service"))?;
+    let unit_section = service
+        .strip_prefix("[Unit]\n")
+        .and_then(|contents| contents.split_once("\n[Service]\n"))
+        .ok_or("packaged agent service must contain [Unit] before [Service]")?;
+    assert_eq!(
+        unit_section
+            .0
+            .lines()
+            .filter(|line| *line == "StartLimitIntervalSec=0")
+            .count(),
+        1
+    );
+    assert!(!unit_section.1.contains("StartLimitIntervalSec"));
     Ok(())
 }
 
