@@ -265,3 +265,46 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 }
 use super::runtime::test_agent_run_config;
 use super::*;
+#[cfg(unix)]
+#[test]
+fn agent_model_command_forwards_only_exact_provider_egress_dir()
+-> Result<(), Box<dyn std::error::Error>> {
+    const CHILD_ENV: &str = "CORTEXFS_TEST_AGENT_MODEL_EGRESS_ENV";
+    if let Some(expected) = std::env::var_os(CHILD_ENV) {
+        let executable = fs::File::open(std::env::current_exe()?)?;
+        let command = agent_model_command(&test_agent_run_config(), "input", &executable);
+        let actual = command
+            .get_envs()
+            .find_map(|(name, value)| {
+                (name == cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV)
+                    .then(|| value.map(OsStr::to_owned))
+            })
+            .flatten();
+        let expected = (expected == "exact")
+            .then(|| OsString::from(cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH));
+        assert_eq!(actual, expected);
+        return Ok(());
+    }
+
+    for (case, value) in [
+        (
+            "exact",
+            Some(cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH),
+        ),
+        ("missing", None),
+        ("drift", Some("/run/cortexfs/attacker-controlled")),
+    ] {
+        let mut child = std::process::Command::new(std::env::current_exe()?);
+        child
+            .arg("agent_model_command_forwards_only_exact_provider_egress_dir")
+            .arg("--nocapture")
+            .env(CHILD_ENV, case);
+        if let Some(value) = value {
+            child.env(cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV, value);
+        } else {
+            child.env_remove(cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV);
+        }
+        assert!(child.status()?.success(), "failed environment case: {case}");
+    }
+    Ok(())
+}
