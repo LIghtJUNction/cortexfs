@@ -265,3 +265,14 @@ pub(crate) fn model_fallback_chain(ctx_root: &Path, model: &str) -> Vec<String> 
         Vec::new()
     }
 }
+
+pub(crate) fn model_default_base_url(content: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let line = line
+            .split_once('#')
+            .map_or(line, |(value, _comment)| value)
+            .trim();
+        let value = line.strip_prefix("base_url=")?.trim();
+        (!value.is_empty()).then_some(value.to_owned())
+    })
+}
