@@ -245,7 +245,7 @@ mod tests {
             ),
         )?;
 
-        for attempt in 1..=2 {
+        for attempt in 1..=7 {
             let socket = root.path().join(format!("coder-{attempt}.sock"));
             let mut activation = spawn_activation(&source, &socket, runtime, "reviewer")?;
             wait_for_socket(&mut activation, &socket)?;
