@@ -152,6 +152,11 @@ pub(crate) fn agent_repl(
     raw: bool,
     approvals: &[String],
 ) -> Result<ExitCode, CliError> {
+    if env::var_os("CORTEXFS_CTXCHAT_LEGACY").is_none()
+        && let Some(code) = run_ctxchat_adapter(root, name, session, raw, approvals)?
+    {
+        return Ok(code);
+    }
     let mut session = agent_session_name(root, name, session)?;
     let mut debug = AgentDebugState::default();
     if io::stdin().is_terminal() {
@@ -250,4 +255,46 @@ pub(crate) fn agent_repl(
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn run_ctxchat_adapter(
+    root: &Path,
+    name: &str,
+    session: Option<&str>,
+    raw: bool,
+    approvals: &[String],
+) -> Result<Option<ExitCode>, CliError> {
+    let session = agent_session_name(root, name, session)?;
+    let sibling = env::current_exe()
+        .ok()
+        .map(|path| path.with_file_name("ctxchat"));
+    let program = sibling
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("ctxchat"));
+    let mut command = std::process::Command::new(program);
+    command.args([
+        "--root",
+        &root.display().to_string(),
+        name,
+        "--session",
+        &session,
+    ]);
+    if raw {
+        command.arg("--raw");
+    }
+    for approval in approvals {
+        command.args(["--approval", approval]);
+    }
+    match command.status() {
+        Ok(status) => Ok(Some(
+            status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .map_or_else(|| ExitCode::from(1), ExitCode::from),
+        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot start ctxchat: {error}"
+        ))),
+    }
 }

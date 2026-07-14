@@ -22,7 +22,10 @@
 /.env.*
 !/.env.example
 /tmp/
+/ctx
+/inspect_benchmark/tmp/
 *.log
 *.pid
 .codegraph
 /.tokensave/
+SWAP.md
