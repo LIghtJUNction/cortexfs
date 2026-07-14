@@ -1,66 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
-  <title id="title">CortexFS — Agents, as files.</title>
-  <desc id="desc">A warm paper editorial hero for CortexFS, showing three executable object classes under /ctx: model, agent, and tool. Durable sessions are stored under user agent homes.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" role="img" aria-labelledby="title desc">
+  <title id="title">CortexFS: Durable agents. One Unix ABI.</title>
+  <desc id="desc">Four default agent roles share the frozen CortexFS Unix ABI, while a same-session retry with the same client ID and payload replays the recorded run instead of executing it again.</desc>
   <defs>
-    <style>
-      .serif{font-family:Georgia,"Times New Roman",serif}.sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.ink{fill:#111312}.slate{fill:#66716c}.mint{fill:#2a8f73}.paper{fill:#fffdfa}.coal-muted{fill:#fffdfa;fill-opacity:.68}.line{stroke:#ded8ca}
-    </style>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#d8ff66" stroke-opacity=".06"/></pattern>
+    <filter id="shadow" x="-8%" y="-10%" width="116%" height="120%"><feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#000" flood-opacity=".28"/></filter>
+    <style>.serif{font-family:Georgia,"Times New Roman",serif}.sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.paper{fill:#fffdfa}.muted{fill:#bfb6a8}.mint{fill:#2a8f73}.lime{fill:#d8ff66}.ink{fill:#111312}.soft{fill:#fffdfa;fill-opacity:.06;stroke:#fffdfa;stroke-opacity:.11}</style>
   </defs>
-
-  <rect width="1200" height="520" fill="#f7f5f1"/>
-  <path d="M56 48H1144M56 472H1144" class="line" stroke-width="1"/>
-
-  <g transform="translate(72 72)">
-    <g aria-label="CortexFS">
-      <rect width="52" height="52" rx="6" fill="#fff" stroke="#ded8ca"/>
-      <path class="ink" d="M12 15h15l4 5h10v11H12V15Zm0 21h11v11H12V36Zm24 2h11v5h-3v4h-5v-4h-3v-5Z"/>
-      <path class="mint" d="M31 9h6L22 43h-6L31 9Z"/>
-      <text class="serif ink" x="68" y="38" font-size="34" font-weight="700">Cor</text>
-      <text class="serif mint" x="126" y="38" font-size="34" font-weight="700" font-style="italic">TeX</text>
-      <text class="serif ink" x="184" y="38" font-size="34" font-weight="700">fs</text>
-    </g>
-
-    <text class="sans mint" y="120" font-size="12" font-weight="900" letter-spacing="2.4">FUSE FILESYSTEM INTERFACE</text>
-    <text class="serif ink" y="193" font-size="68" font-weight="600">Agents, as files.</text>
-    <text class="sans slate" y="239" font-size="17">A small Unix ABI for durable agent runtimes.</text>
-
-    <g transform="translate(0 291)">
-      <path d="M0 0H428" class="line"/>
-      <text class="mono ink" y="32" font-size="13" font-weight="800">write request</text>
-      <text class="mono mint" x="124" y="32" font-size="13" font-weight="900">→</text>
-      <text class="mono ink" x="154" y="32" font-size="13" font-weight="800">atomic rename</text>
-      <text class="mono mint" x="285" y="32" font-size="13" font-weight="900">→</text>
-      <text class="mono ink" x="315" y="32" font-size="13" font-weight="800">read result</text>
-    </g>
+  <rect width="1200" height="560" fill="#111312"/><rect x="604" width="596" height="560" fill="url(#grid)"/>
+  <g transform="translate(64 48)">
+    <rect width="68" height="68" rx="6" fill="#d8ff66"/><path fill="#111312" d="M41.5 13h8L31.8 57h-8l17.7-44Z"/><path fill="#111312" d="M15 20h18l5 6h15v14H15V20Zm0 26h14v14H15V46Zm31 4h15v6h-5v5h-6v-5h-4v-6Z"/>
+    <text class="serif paper" x="88" y="46" font-size="42" font-weight="700">Cor</text><text class="serif mint" x="160" y="46" font-size="42" font-weight="700" font-style="italic">TeX</text><text class="serif paper" x="230" y="46" font-size="42" font-weight="700">fs</text>
   </g>
-
-  <g transform="translate(654 64)">
-    <rect width="474" height="392" rx="8" fill="#181b19"/>
-    <path d="M0 56H474" stroke="#fffdfa" stroke-opacity=".12"/>
-    <circle cx="28" cy="28" r="4" fill="#d8ff66"/>
-    <text class="mono paper" x="46" y="33" font-size="13" font-weight="850">/ctx</text>
-    <text class="mono coal-muted" x="390" y="33" font-size="12">mounted</text>
-
-    <g class="mono" font-size="14" font-weight="800">
-      <text class="paper" x="34" y="92">/ctx</text>
-      <text class="coal-muted" x="34" y="121">├── <tspan class="paper">status</tspan></text>
-      <text class="coal-muted" x="34" y="150">├── <tspan class="paper">bin/</tspan></text>
-      <text class="coal-muted" x="34" y="179">├── <tspan class="paper">model/</tspan></text>
-      <text class="coal-muted" x="34" y="208">├── <tspan class="paper">agent/</tspan></text>
-      <text class="coal-muted" x="34" y="237">├── <tspan class="paper">tool/</tspan></text>
-      <text class="coal-muted" x="34" y="266">├── <tspan class="paper">home/</tspan></text>
-      <text class="coal-muted" x="34" y="295">└── <tspan class="paper">shared/</tspan></text>
+  <g transform="translate(64 164)">
+    <text class="sans mint" x="0" y="0" font-size="15" font-weight="900" letter-spacing="3">FUSE FILESYSTEM INTERFACE</text>
+    <text class="serif paper" x="0" y="72" font-size="62" font-weight="650">Durable agents.</text>
+    <text class="serif paper" x="0" y="140" font-size="62" font-weight="650">One Unix ABI.</text>
+    <text class="sans muted" x="0" y="190" font-size="21">Small enough to inspect. Ordinary enough to script.</text>
+    <rect x="0" y="226" width="432" height="52" rx="8" fill="#fffdfa"/><text class="mono ink" x="22" y="259" font-size="16" font-weight="900">ctx agent start coder</text>
+    <rect x="0" y="292" width="432" height="52" rx="8" fill="#181b19" stroke="#fffdfa" stroke-opacity=".14"/><text class="mono lime" x="22" y="325" font-size="16" font-weight="900">ctx agent chat coder</text>
+  </g>
+  <g transform="translate(638 56)" filter="url(#shadow)">
+    <rect width="500" height="448" rx="8" fill="#181b19" stroke="#fffdfa" stroke-opacity=".13"/>
+    <rect width="500" height="52" rx="8" fill="#0f1110"/><rect width="62" height="52" rx="8" fill="#d8ff66"/>
+    <text class="mono ink" x="18" y="33" font-size="14" font-weight="950">ctx</text><text class="mono paper" x="84" y="33" font-size="14" font-weight="850">/ctx/agent</text><text class="mono muted" x="394" y="33" font-size="12" font-weight="850">default</text>
+    <g transform="translate(24 76)">
+      <rect class="soft" width="218" height="62" rx="6"/><text class="mono lime" x="16" y="25" font-size="15" font-weight="900">architect</text><text class="sans muted" x="16" y="47" font-size="13" font-weight="700">plan + coordinate</text>
+      <rect class="soft" x="234" width="218" height="62" rx="6"/><text class="mono lime" x="250" y="25" font-size="15" font-weight="900">coder</text><text class="sans muted" x="250" y="47" font-size="13" font-weight="700">primary implementation</text>
+      <rect class="soft" y="78" width="218" height="62" rx="6"/><text class="mono lime" x="16" y="103" font-size="15" font-weight="900">worker</text><text class="sans muted" x="16" y="125" font-size="13" font-weight="700">bounded Spark tasks</text>
+      <rect class="soft" x="234" y="78" width="218" height="62" rx="6"/><text class="mono lime" x="250" y="103" font-size="15" font-weight="900">reviewer</text><text class="sans muted" x="250" y="125" font-size="13" font-weight="700">verify + guard</text>
+      <text class="sans mint" x="0" y="188" font-size="12" font-weight="900" letter-spacing="2">RETRY-SAFE DURABLE RUN</text>
+      <rect x="0" y="212" width="120" height="42" rx="6" fill="#fffdfa" fill-opacity=".07" stroke="#fffdfa" stroke-opacity=".12"/><text class="mono paper" x="31" y="239" font-size="14" font-weight="850">claim</text>
+      <text class="mono muted" x="137" y="239" font-size="16" font-weight="850">→</text>
+      <rect x="166" y="212" width="120" height="42" rx="6" fill="#2a8f73" fill-opacity=".22" stroke="#2a8f73"/><text class="mono paper" x="208" y="239" font-size="14" font-weight="850">run</text>
+      <text class="mono muted" x="303" y="239" font-size="16" font-weight="850">→</text>
+      <rect x="332" y="212" width="120" height="42" rx="6" fill="#d8ff66" fill-opacity=".12" stroke="#d8ff66" stroke-opacity=".4"/><text class="mono lime" x="364" y="239" font-size="14" font-weight="850">replay</text>
+      <text class="sans muted" x="0" y="282" font-size="13" font-weight="700">same session + client id + payload</text>
+      <rect x="0" y="304" width="452" height="42" rx="6" fill="#d8ff66" fill-opacity=".08" stroke="#d8ff66" stroke-opacity=".2"/><text class="mono paper" x="16" y="330" font-size="13" font-weight="850">retry = replay, not re-run</text>
     </g>
-
-    <path d="M270 91V290" stroke="#fffdfa" stroke-opacity=".12"/>
-    <text class="sans coal-muted" x="304" y="109" font-size="12" font-weight="900" letter-spacing="1.6">UNIX-NATIVE</text>
-    <text class="serif paper" x="304" y="158" font-size="26" font-weight="600">Inspect.</text>
-    <text class="serif paper" x="304" y="194" font-size="26" font-weight="600">Script.</text>
-    <text class="serif paper" x="304" y="230" font-size="26" font-weight="600">Compose.</text>
-
-    <path d="M34 320H440" stroke="#fffdfa" stroke-opacity=".12"/>
-    <text class="mono coal-muted" x="34" y="355" font-size="12">$</text>
-    <text class="mono paper" x="54" y="355" font-size="12" font-weight="800">ls /ctx/agent</text>
-    <rect x="170" y="346" width="7" height="12" fill="#d8ff66"/>
   </g>
 </svg>
