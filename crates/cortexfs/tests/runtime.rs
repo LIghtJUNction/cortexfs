@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn socket_activated_agent_failures_are_canonical_and_restartable()
+    fn socket_activated_generated_wrapper_is_terminal_and_restartable()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
         let source = root.path().join("source");
@@ -233,22 +233,26 @@ mod tests {
                 .into_owned()
                 .into());
         }
-        let agent = source.join("agent/architect");
+        let agent = source.join("agent/reviewer");
+        assert!(fs::read_to_string(&agent)?.contains("cortexfs-object-runner"));
+        fs::write(source.join("agent/reviewer.d/model"), "debug/echo\n")?;
+        let policy = source.join("agent/reviewer.d/policy");
         fs::write(
-            &agent,
-            "#!/bin/sh\nprintf '{\"type\":\"done\",\"run\":\"%s\",\"status\":\"ok\"}\\n' \"$CTX_RUN_ID\"\nexit 1\n",
+            &policy,
+            format!(
+                "{}allow reviewer_t model:debug/echo use\n",
+                fs::read_to_string(&policy)?
+            ),
         )?;
-        fs::set_permissions(&agent, fs::Permissions::from_mode(0o755))?;
-        fs::write(source.join("agent/architect.d/model"), "debug/echo\n")?;
 
         for attempt in 1..=2 {
             let socket = root.path().join(format!("coder-{attempt}.sock"));
-            let mut activation = spawn_activation(&source, &socket, runtime, "architect")?;
+            let mut activation = spawn_activation(&source, &socket, runtime, "reviewer")?;
             wait_for_socket(&mut activation, &socket)?;
             let mut stream = UnixStream::connect(&socket)?;
             writeln!(
                 stream,
-                "{{\"op\":\"send\",\"id\":\"failure-{attempt}\",\"session\":\"default\",\"input\":\"fail\"}}"
+                "{{\"op\":\"send\",\"id\":\"wrapper-{attempt}\",\"session\":\"default\",\"input\":\"hello\"}}"
             )?;
             stream.shutdown(std::net::Shutdown::Write)?;
             let mut response = String::new();
@@ -277,9 +281,14 @@ mod tests {
             assert_eq!(done.len(), 1, "stderr={stderr}; response={response}");
             assert!(
                 done.first()
-                    .is_some_and(|line| line.contains("\"status\":\"error\""))
+                    .is_some_and(|line| line.contains("\"status\":\"ok\"")),
+                "stderr={stderr}; response={response}"
             );
-            assert!(response.contains("\"type\":\"error\""));
+            let state = source
+                .join("home")
+                .join(nix::unistd::geteuid().as_raw().to_string())
+                .join("agent/reviewer/session/default/state");
+            assert_eq!(fs::read_to_string(state)?, "done\n");
         }
         Ok(())
     }
