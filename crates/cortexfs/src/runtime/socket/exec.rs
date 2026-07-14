@@ -1325,7 +1325,9 @@ pub(crate) fn prompt_quoted(value: &str) -> String {
 mod completion_tests {
     use super::*;
     use std::ffi::OsString;
-    use std::net::Shutdown;
+    use std::io;
+    use std::net::{Shutdown, TcpListener};
+    use std::os::unix::fs::PermissionsExt;
 
     fn approval_call() -> object::executor::AgentToolCall {
         object::executor::AgentToolCall {
@@ -1350,13 +1352,13 @@ mod completion_tests {
             client.write_all(response.as_bytes())?;
             client.shutdown(Shutdown::Write)?;
             let approval = request_tool_approval(&mut server, "run-1", &approval_call())
-                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+                .map_err(|error| io::Error::other(format!("{error:?}")))?;
             assert!(!approval.allowed, "{response:?}");
         }
         let (_client, mut server) = UnixStream::pair()?;
         server.set_read_timeout(Some(Duration::from_millis(10)))?;
         let approval = request_tool_approval(&mut server, "run-1", &approval_call())
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(!approval.allowed);
 
         let (mut client, mut server) = UnixStream::pair()?;
@@ -1365,7 +1367,7 @@ mod completion_tests {
         )?;
         client.shutdown(Shutdown::Write)?;
         let approval = request_tool_approval(&mut server, "run-1", &approval_call())
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(approval.allowed);
         Ok(())
     }
@@ -1381,13 +1383,13 @@ mod completion_tests {
         client.shutdown(Shutdown::Write)?;
 
         let first = request_tool_approval(&mut server, "run-1", &approval_call())
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(first.allowed);
 
         let mut second_call = approval_call();
         second_call.id = "call-2".to_owned();
         let replayed = request_tool_approval(&mut server, "run-1", &second_call)
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
         assert!(!replayed.allowed);
         Ok(())
     }
@@ -1430,6 +1432,202 @@ mod completion_tests {
 
     fn completion_root(name: &str) -> PathBuf {
         env::temp_dir().join(format!("cfs-{name}-{}", std::process::id()))
+    }
+
+    fn test_object_runner() -> Option<PathBuf> {
+        let executable = env::current_exe().ok()?;
+        let debug = executable.parent()?.parent()?;
+        let runner = debug.join("cortexfs-object-runner");
+        runner.is_file().then_some(runner)
+    }
+
+    fn spawn_provider_upstream()
+    -> io::Result<(std::net::SocketAddr, thread::JoinHandle<io::Result<String>>)> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let address = listener.local_addr()?;
+        let thread = thread::spawn(move || -> io::Result<String> {
+            let (mut stream, _) = listener.accept()?;
+            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+            let mut request = Vec::new();
+            let mut chunk = [0; 4096];
+            loop {
+                let read = stream.read(&mut chunk)?;
+                if read == 0 {
+                    break;
+                }
+                let bytes = chunk
+                    .get(..read)
+                    .ok_or_else(|| io::Error::other("invalid upstream read"))?;
+                request.extend_from_slice(bytes);
+                let Some(header_end) = request.windows(4).position(|part| part == b"\r\n\r\n")
+                else {
+                    continue;
+                };
+                let header_bytes = request
+                    .get(..header_end)
+                    .ok_or_else(|| io::Error::other("invalid upstream headers"))?;
+                let headers = String::from_utf8_lossy(header_bytes);
+                let length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or_default();
+                if request.len() >= header_end + 4 + length {
+                    break;
+                }
+            }
+            let body = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"brokered ok\"},\"finish_reason\":null}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2}}\n\n",
+                "data: [DONE]\n\n"
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )?;
+            String::from_utf8(request)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        });
+        Ok((address, thread))
+    }
+
+    fn prepare_provider_fixture(
+        root: &Path,
+        runner: &Path,
+        address: std::net::SocketAddr,
+    ) -> io::Result<()> {
+        ensure_v1_reference_tree(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
+        ensure_v1_runtime_models(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
+        fs::copy(runner, root.join("bin/cortexfs-object-runner"))?;
+        fs::set_permissions(
+            root.join("bin/cortexfs-object-runner"),
+            fs::Permissions::from_mode(0o755),
+        )?;
+        let model = root.join("model/fixture/chat");
+        let control = root.join("model/fixture/chat.d");
+        fs::create_dir_all(&control)?;
+        fs::write(
+            &model,
+            "#!/ctx/bin/cortexfs-object-runner\n# cortexfs.object=model\n# cortexfs.name=fixture/chat\n",
+        )?;
+        fs::set_permissions(&model, fs::Permissions::from_mode(0o755))?;
+        fs::write(
+            control.join("default"),
+            format!("base_url=http://{address}/custom\n"),
+        )?;
+        fs::write(control.join("driver"), "agent=openai-chat\n")?;
+        fs::write(control.join("limit"), "8192\n")?;
+        fs::write(root.join("agent/coder.d/model"), "fixture/chat\n")?;
+        fs::write(
+            root.join("agent/coder.d/policy"),
+            "allow coder_t model:fixture/chat use\n",
+        )
+    }
+
+    #[test]
+    fn bwrap_agent_streams_through_provider_egress_to_http_upstream()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let runner = test_object_runner().ok_or("missing built cortexfs-object-runner")?;
+        if !Command::new("/usr/bin/bwrap")
+            .args(["--ro-bind", "/", "/", "--unshare-net", "/bin/true"])
+            .status()?
+            .success()
+        {
+            return Ok(());
+        }
+
+        let root = tempfile::tempdir()?;
+        let (address, upstream_thread) = spawn_provider_upstream()?;
+        prepare_provider_fixture(root.path(), &runner, address)?;
+
+        let view = derive_agent_runtime_view(root.path(), "coder")
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
+        let session_root = view.home().join("session");
+        fs::create_dir_all(session_root.join("default"))?;
+        let control_dir = root.path().join("control");
+        fs::create_dir_all(&control_dir)?;
+        fs::set_permissions(&control_dir, fs::Permissions::from_mode(0o711))?;
+        let mount_table = MountTable::parse("/ctx\t/ctx\tro\trbind,nosuid,nodev\n")
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
+        let identity = AgentUnixIdentity::new(
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+            [],
+        );
+        let env = vec![
+            (
+                "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
+                "fixture".to_owned(),
+            ),
+            ("CTX_PROVIDER_SECRET_SLOT".to_owned(), "default".to_owned()),
+            (
+                "CTX_PROVIDER_SECRET_VALUE".to_owned(),
+                "test-secret".to_owned(),
+            ),
+        ];
+        let agent_executable = root.path().join("agent/coder");
+        let runtime = AgentExecutableSocketRuntime {
+            ctx_root: root.path(),
+            source_root: root.path(),
+            identity: &identity,
+            env: &env,
+            session_root: &session_root,
+            default_cwd: "/workspace",
+            model: Some("fixture/chat"),
+            network_allowed: false,
+            agent_name: "coder",
+            agent_executable: &agent_executable,
+            execution: AgentExecutableSocketExecution::Bwrap {
+                program: Path::new("/usr/bin/bwrap"),
+                mount_table: &mount_table,
+                control_dir: Some(&control_dir),
+            },
+        };
+        let request = AgentExecutableRunRequest {
+            run_id: "run1",
+            cancellation_id: "run1",
+            session: "default",
+            cwd: None,
+            input: "say hello",
+            history_messages: "",
+            tool_context: "",
+            debug: None,
+            envelope: None,
+            step: 0,
+        };
+        let (mut client, mut server) = UnixStream::pair()?;
+        let outcome = run_agent_executable_streaming(&mut server, runtime, request)
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
+        server.shutdown(Shutdown::Write)?;
+        let mut delivered = String::new();
+        client.read_to_string(&mut delivered)?;
+        let frames = outcome.frames.join("\n");
+        assert!(frames.contains("brokered ok"), "{frames}");
+        assert!(frames.contains("\"type\":\"usage\""), "{frames}");
+        assert!(frames.contains("\"type\":\"done\""), "{frames}");
+        assert!(delivered.contains("brokered ok"), "{delivered}");
+        let captured = upstream_thread
+            .join()
+            .map_err(|_panic| io::Error::other("upstream panicked"))??;
+        assert!(
+            captured.starts_with("POST /custom/v1/chat/completions HTTP/1.1\r\n"),
+            "{captured}"
+        );
+        assert!(
+            captured.contains(&format!("Host: {address}\r\n")),
+            "{captured}"
+        );
+        assert!(
+            captured
+                .to_ascii_lowercase()
+                .contains("authorization: bearer test-secret\r\n"),
+            "{captured}"
+        );
+        Ok(())
     }
 
     #[test]

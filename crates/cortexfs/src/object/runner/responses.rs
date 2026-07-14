@@ -194,12 +194,8 @@ macro_rules! provider_target_fn {
                     ref socket_path,
                 } => (base_url, Some(socket_path.clone())),
             };
-            let base = base_url.trim().trim_end_matches('/');
-            let url = if base.rsplit('/').next() == Some("v1") {
-                format!("{base}/{}", $path)
-            } else {
-                format!("{base}/v1/{}", $path)
-            };
+            let base = crate::provider::effective_base_url(base_url);
+            let url = format!("{base}/{}", $path);
             CurlJsonTarget { url, unix_socket }
         }
     };
@@ -217,6 +213,28 @@ pub(crate) fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> 
 #[cfg(test)]
 mod responses_tests {
     use super::*;
+
+    #[test]
+    fn provider_targets_share_effective_v1_base_normalization() {
+        for (base, expected) in [
+            ("http://localhost", "http://localhost/v1/responses"),
+            ("http://localhost/v1", "http://localhost/v1/responses"),
+            (
+                "http://localhost/custom",
+                "http://localhost/custom/v1/responses",
+            ),
+            (
+                "http://localhost/custom/v1",
+                "http://localhost/custom/v1/responses",
+            ),
+        ] {
+            let target = responses_target(&ResolvedTransport::Direct {
+                base_url: base.to_owned(),
+            });
+            assert_eq!(target.url, expected);
+        }
+    }
+
     #[test]
     fn responses_function_call_becomes_canonical_tool_call() {
         let output = json!({

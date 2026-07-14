@@ -168,12 +168,7 @@ pub(crate) fn curl_config_quote(value: &str) -> Result<String, FuseV1Error> {
 }
 
 pub(crate) fn provider_models_url(base_url: &str) -> String {
-    let base = base_url.trim().trim_end_matches('/');
-    if base.rsplit('/').next() == Some("v1") {
-        format!("{base}/models")
-    } else {
-        format!("{base}/v1/models")
-    }
+    format!("{}/models", super::effective_base_url(base_url))
 }
 
 #[cfg(test)]

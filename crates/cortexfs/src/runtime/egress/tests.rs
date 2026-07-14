@@ -46,6 +46,53 @@ fn plan_keeps_validated_fixed_base_without_dns() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn plan_normalizes_root_and_custom_bases_to_effective_v1_paths()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (base, expected) in [
+        ("", "/v1"),
+        ("/v1", "/v1"),
+        ("/custom", "/custom/v1"),
+        ("/custom/v1", "/custom/v1"),
+    ] {
+        let root = tempfile::tempdir()?;
+        write_model(
+            root.path(),
+            "fixture/chat",
+            &format!("https://example.test{base}"),
+        )?;
+        let targets = plan_targets(root.path(), "fixture/chat")?;
+        let target = targets.first().ok_or("missing target")?;
+        assert_eq!(target.base_url, format!("https://example.test{expected}"));
+        assert_eq!(target.base_path, expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn plan_deduplicates_equivalent_effective_provider_bases() -> Result<(), Box<dyn std::error::Error>>
+{
+    for (primary, fallback) in [("", "/v1"), ("/custom", "/custom/v1")] {
+        let root = tempfile::tempdir()?;
+        write_model(
+            root.path(),
+            "fixture/primary",
+            &format!("http://127.0.0.1:8001{primary}"),
+        )?;
+        write_model(
+            root.path(),
+            "fixture/fallback",
+            &format!("http://127.0.0.1:8001{fallback}"),
+        )?;
+        fs::write(
+            root.path().join("model/fixture/primary.d/fallback"),
+            "fixture/fallback\n",
+        )?;
+        assert_eq!(plan_targets(root.path(), "fixture/primary")?.len(), 1);
+    }
+    Ok(())
+}
+
+#[test]
 fn plan_rejects_provider_base_conflicts_before_resources() -> Result<(), Box<dyn std::error::Error>>
 {
     let (root, control) = fixture()?;

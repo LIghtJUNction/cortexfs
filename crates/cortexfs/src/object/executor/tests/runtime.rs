@@ -98,7 +98,7 @@ fn brokered_external_direct_provider_still_requires_credential_before_request() 
         )),
         Ok((
             ResolvedTransport::Unix {
-                base_url: "https://api.example.test/v1".to_owned(),
+                base_url: "http://localhost/v1".to_owned(),
                 socket_path: "/run/cortexfs/provider-egress/fixture.sock".to_owned(),
             },
             Err("missing provider credential: fixture".to_owned())
@@ -127,10 +127,39 @@ fn brokered_local_direct_provider_remains_anonymous() {
         )),
         Ok((
             ResolvedTransport::Unix {
-                base_url: "http://127.0.0.1:8317/v1".to_owned(),
+                base_url: "http://localhost/v1".to_owned(),
                 socket_path: "/run/cortexfs/provider-egress/local.sock".to_owned(),
             },
             Ok(None)
+        ))
+    );
+}
+
+#[test]
+fn brokered_provider_keeps_only_trusted_path_and_frozen_auth_policy() {
+    let original = ResolvedTransport::Direct {
+        base_url: "https://api.example.test/custom?ignored=yes".to_owned(),
+    };
+    let allow_unauthenticated = transport_allows_unauthenticated(&original);
+    let rewritten = provider_egress_transport(
+        "fixture",
+        original,
+        Some(OsStr::new(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        )),
+    );
+
+    assert_eq!(
+        rewritten.map(|transport| (
+            transport,
+            openai_api_key("fixture", allow_unauthenticated, None)
+        )),
+        Ok((
+            ResolvedTransport::Unix {
+                base_url: "http://localhost/custom".to_owned(),
+                socket_path: "/run/cortexfs/provider-egress/fixture.sock".to_owned(),
+            },
+            Err("missing provider credential: fixture".to_owned())
         ))
     );
 }
