@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-benchmark"
+description = "Inspect AI benchmark environment for evaluating custom agents"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "inspect-ai>=0.3.180",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.52.0"]
+test = ["pytest>=8.0"]
+
+[project.entry-points.inspect_ai]
+agent_benchmark = "agent_benchmark._registry"
+
+[tool.setuptools.packages.find]
+include = ["agent_benchmark*"]
+exclude = ["agent_benchmark.egg-info*", "inspect_benchmark*", "tests*"]
+
+[tool.setuptools.package-data]
+agent_benchmark = ["data/*.jsonl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
