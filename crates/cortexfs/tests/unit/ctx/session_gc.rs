@@ -1,3 +1,7 @@
+use crate::{SessionIndexGuard, agent_session_select};
+use std::thread;
+use std::time::Duration;
+
 fn create_agent_session_gc_fixture(root: &Path) -> PathBuf {
     let home = ctx_home(root);
     assert!(home.is_ok(), "{home:?}");
@@ -81,6 +85,66 @@ fn parses_agent_session_gc_delete_command() {
             && keep == &vec!["keep-me".to_owned()]
             && patterns == &vec!["e2e-*".to_owned()]
     ));
+}
+
+#[test]
+fn parses_and_applies_agent_session_select_compare_and_swap() {
+    let command = cmd!("agent", "session", "select", "coder", "default", "--from", "current");
+    assert!(matches!(
+        command,
+        Ok(Command::Agent(AgentArgs::SessionSelect {
+            ref name,
+            ref target,
+            ref from,
+        })) if name == "coder" && target == "default" && from == "current"
+    ));
+
+    let root = clean_test_dir("ctx-agent-session-select");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let list = fs::read_to_string(session_root.join("index/list")).unwrap_or_default();
+    assert!(agent_session_select(&root, "coder", "default", "current").is_ok());
+    assert_eq!(
+        fs::read_to_string(session_root.join("index/current")).ok().as_deref(),
+        Some("default\n")
+    );
+    assert_eq!(
+        fs::read_to_string(session_root.join("index/list")).unwrap_or_default(),
+        list
+    );
+    assert!(agent_session_select(&root, "coder", "current", "current").is_err());
+    assert!(agent_session_select(&root, "coder", "missing", "default").is_err());
+}
+
+#[test]
+fn agent_session_gc_and_select_share_index_guard() {
+    let root = clean_test_dir("ctx-agent-session-index-guard");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let guard = SessionIndexGuard::exclusive(&session_root);
+    assert!(guard.is_ok());
+    let select_root = root.to_path_buf();
+    let (sent, received) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        let result = agent_session_select(&select_root, "coder", "default", "current");
+        let _ignored = sent.send(result);
+    });
+    assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
+    drop(guard);
+    assert_eq!(received.recv_timeout(Duration::from_secs(2)), Ok(Ok(())));
+    assert!(worker.join().is_ok());
+
+    let guard = SessionIndexGuard::exclusive(&session_root);
+    assert!(guard.is_ok());
+    let gc_root = root.to_path_buf();
+    let (sent, received) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        let args = agent_session_gc_args(false, false, &["missing-*"], &[]);
+        let result = agent_session_gc(&gc_root, &args);
+        let _ignored = sent.send(result);
+    });
+    assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
+    drop(guard);
+    assert_eq!(received.recv_timeout(Duration::from_secs(2)), Ok(Ok(())));
+    assert!(worker.join().is_ok());
 }
 
 #[test]

@@ -1,4 +1,8 @@
+use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+
+use nix::fcntl::{Flock, FlockArg};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -7,10 +11,27 @@ use crate::{
     ControlLineIssue, atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
     is_object_name,
     support::control::{inspect_control_line, inspect_control_lines},
-    support::plain::read_small_text_file,
+    support::plain::{open_plain_directory, read_small_text_file},
 };
 
 const MAX_SESSION_INDEX_FILE_BYTES: u64 = 64 * 1024;
+
+/// Exclusive transaction guard for a durable session index.
+#[derive(Debug)]
+pub struct SessionIndexGuard {
+    _lock: Flock<fs::File>,
+}
+
+impl SessionIndexGuard {
+    /// Locks the stable, no-follow `session/index` directory inode.
+    pub fn exclusive(session_root: &Path) -> Result<Self, SessionIndexUpdateError> {
+        let directory = open_plain_directory(&session_root.join("index"))
+            .map_err(|_error| SessionIndexUpdateError::MissingIndex)?;
+        let lock = Flock::lock(directory, FlockArg::LockExclusive)
+            .map_err(|(_directory, _error)| SessionIndexUpdateError::CannotRecord)?;
+        Ok(Self { _lock: lock })
+    }
+}
 
 #[cfg(test)]
 thread_local! {
@@ -60,6 +81,8 @@ pub enum SessionIndexUpdateError {
     InvalidIndex,
     /// Index files could not be read or atomically rewritten.
     CannotRecord,
+    /// `index/current` no longer names the caller's expected session.
+    CurrentMismatch,
 }
 
 impl SessionIndexUpdateError {
@@ -74,6 +97,7 @@ impl SessionIndexUpdateError {
             | Self::InvalidIndex => "EINVAL",
             Self::MissingSession | Self::MissingIndex => "ENOENT",
             Self::CannotRecord => "EIO",
+            Self::CurrentMismatch => "EAGAIN",
         }
     }
 }
@@ -143,6 +167,23 @@ pub fn update_session_index_with_keys(
     by_hash_key: Option<&str>,
     by_uuid_key: Option<&str>,
 ) -> Result<(), SessionIndexUpdateError> {
+    let _guard = SessionIndexGuard::exclusive(session_root)?;
+    update_session_index_with_keys_locked(
+        session_root,
+        session_name,
+        by_cwd_key,
+        by_hash_key,
+        by_uuid_key,
+    )
+}
+
+fn update_session_index_with_keys_locked(
+    session_root: &Path,
+    session_name: &str,
+    by_cwd_key: Option<&str>,
+    by_hash_key: Option<&str>,
+    by_uuid_key: Option<&str>,
+) -> Result<(), SessionIndexUpdateError> {
     let update = prepare_session_index_update(
         session_root,
         session_name,
@@ -178,6 +219,41 @@ pub fn update_session_index_with_keys(
     }
 
     Ok(())
+}
+
+/// Selects a durable session only when `index/current` still matches `expected_current`.
+pub fn compare_and_update_session_index(
+    session_root: &Path,
+    session_name: &str,
+    expected_current: &str,
+) -> Result<(), SessionIndexUpdateError> {
+    if !is_object_name(expected_current) {
+        return Err(SessionIndexUpdateError::InvalidSessionName);
+    }
+    let _guard = SessionIndexGuard::exclusive(session_root)?;
+    let update = prepare_session_index_update(session_root, session_name, None, None, None)?;
+    if !update.list.lines().any(|existing| existing == session_name) {
+        return Err(SessionIndexUpdateError::MissingSession);
+    }
+    let current_metadata = update
+        .current_path
+        .metadata()
+        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    let current = read_session_index_file(&update.current_path)
+        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    if current.trim() != expected_current {
+        return Err(SessionIndexUpdateError::CurrentMismatch);
+    }
+    #[cfg(test)]
+    if SESSION_INDEX_UPDATE_FAILURE.with(|value| value.replace(false)) {
+        return Err(SessionIndexUpdateError::CannotRecord);
+    }
+    crate::authority::helpers::atomic_replace_text_preserving_metadata_if_matches(
+        &update.current_path,
+        &format!("{session_name}\n"),
+        (current_metadata.dev(), current_metadata.ino()),
+    )
+    .map_err(|_error| SessionIndexUpdateError::CurrentMismatch)
 }
 
 #[cfg(test)]

@@ -32,6 +32,9 @@ pub(crate) fn agent_session_gc(root: &Path, args: &AgentSessionGcArgs) -> Result
         require_cli_name("session name", keep)?;
     }
     let session_root = gc_session_root(root, &args.name)?;
+    let _index_guard = SessionIndexGuard::exclusive(&session_root).map_err(|error| {
+        CliError::unavailable(format!("cannot lock session index: {}", error.errno()))
+    })?;
     let current = current_session_name(&session_root)?;
     let protected = agent_session_gc_protected(args, &current);
     let patterns = agent_session_gc_patterns(args);
@@ -106,6 +109,24 @@ pub(crate) fn agent_session_gc(root: &Path, args: &AgentSessionGcArgs) -> Result
         print_line(&format!("{action} {}", terminal_safe_text(&source.name)))?;
     }
     Ok(())
+}
+
+pub(crate) fn agent_session_select(
+    root: &Path,
+    name: &str,
+    target: &str,
+    expected_current: &str,
+) -> Result<(), CliError> {
+    require_cli_name("agent name", name)?;
+    require_cli_name("session name", target)?;
+    require_cli_name("expected current session name", expected_current)?;
+    let session_root = gc_session_root(root, name)?;
+    compare_and_update_session_index(&session_root, target, expected_current).map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot select session {target} from {expected_current}: {}",
+            error.errno()
+        ))
+    })
 }
 
 fn gc_rollback_error(error: CliError, rollback: Result<(), CliError>) -> CliError {

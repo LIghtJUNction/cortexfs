@@ -353,4 +353,82 @@ fn session_index_update_rejects_oversized_index_files() {
         Err(SessionIndexUpdateError::CannotRecord)
     );
 }
+
+#[test]
+fn session_index_compare_update_changes_only_current_and_fails_closed() {
+    let root = clean_test_dir("session-index-compare-update");
+    let session_root = root.join("session");
+    assert!(fs::create_dir_all(session_root.join("index")).is_ok());
+    for session in ["default", "owned", "missing-from-list"] {
+        assert!(fs::create_dir_all(session_root.join(session)).is_ok());
+    }
+    write_text_file(&session_root.join("index/list"), "owned\ndefault\n");
+    write_text_file(&session_root.join("index/current"), "owned\n");
+    let list = fs::read(session_root.join("index/list")).unwrap_or_default();
+
+    assert_eq!(
+        compare_and_update_session_index(&session_root, "default", "wrong"),
+        Err(SessionIndexUpdateError::CurrentMismatch)
+    );
+    assert_eq!(
+        fs::read(session_root.join("index/list")).unwrap_or_default(),
+        list
+    );
+    assert_eq!(
+        fs::read(session_root.join("index/current")).unwrap_or_default(),
+        b"owned\n"
+    );
+    assert_eq!(
+        compare_and_update_session_index(&session_root, "missing-from-list", "owned"),
+        Err(SessionIndexUpdateError::MissingSession)
+    );
+
+    set_session_index_update_failure(true);
+    assert_eq!(
+        compare_and_update_session_index(&session_root, "default", "owned"),
+        Err(SessionIndexUpdateError::CannotRecord)
+    );
+    assert_eq!(
+        fs::read(session_root.join("index/list")).unwrap_or_default(),
+        list
+    );
+    assert_eq!(
+        fs::read(session_root.join("index/current")).unwrap_or_default(),
+        b"owned\n"
+    );
+
+    assert!(compare_and_update_session_index(&session_root, "default", "owned").is_ok());
+    assert_eq!(
+        fs::read(session_root.join("index/list")).unwrap_or_default(),
+        list
+    );
+    assert_eq!(
+        fs::read(session_root.join("index/current")).unwrap_or_default(),
+        b"default\n"
+    );
+}
+
+#[test]
+fn session_index_guard_serializes_normal_updates() {
+    let root = clean_test_dir("session-index-guard-serialization");
+    let session_root = root.join("session");
+    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    for session in ["default", "other"] {
+        assert!(fs::create_dir_all(session_root.join(session)).is_ok());
+    }
+    write_text_file(&session_root.join("index/list"), "default\nother\n");
+    write_text_file(&session_root.join("index/current"), "default\n");
+    let guard = SessionIndexGuard::exclusive(&session_root);
+    assert!(guard.is_ok());
+    let (sent, received) = std::sync::mpsc::channel();
+    let update_root = session_root;
+    let worker = thread::spawn(move || {
+        let result = update_session_index(&update_root, "other", None);
+        let _ignored = sent.send(result);
+    });
+    assert!(received.recv_timeout(Duration::from_millis(50)).is_err());
+    drop(guard);
+    assert_eq!(received.recv_timeout(Duration::from_secs(2)), Ok(Ok(())));
+    assert!(worker.join().is_ok());
+}
 use super::*;

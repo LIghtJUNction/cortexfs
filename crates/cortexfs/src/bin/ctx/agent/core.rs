@@ -53,6 +53,11 @@ pub(crate) enum AgentArgs {
         session: Option<String>,
     },
     SessionGc(AgentSessionGcArgs),
+    SessionSelect {
+        name: String,
+        target: String,
+        from: String,
+    },
     Prompt {
         name: String,
     },
@@ -203,6 +208,11 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             ref session,
         } => success(agent_trajectory(root, name, session.as_deref())),
         AgentArgs::SessionGc(ref args) => success(agent_session_gc(root, args)),
+        AgentArgs::SessionSelect {
+            ref name,
+            ref target,
+            ref from,
+        } => success(agent_session_select(root, name, target, from)),
         AgentArgs::Prompt { ref name } => success(agent_prompt(root, name)),
         AgentArgs::Tools { ref name } => success(agent_tools(root, name)),
         AgentArgs::Children {
