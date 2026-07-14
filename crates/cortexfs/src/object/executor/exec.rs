@@ -50,6 +50,16 @@ pub(crate) fn execute_agent_tool_call_with(
     prepare_agent_tool_call(config, tool_call)?.execute(config)
 }
 
+pub(crate) fn execute_agent_tool_call_as(
+    config: &AgentToolExecutionConfig<'_>,
+    tool_call: &AgentToolCall,
+    identity: &cortexfs::AgentUnixIdentity,
+) -> Result<String, String> {
+    let mut prepared = prepare_agent_tool_call(config, tool_call)?;
+    crate::runtime::socket::apply_agent_identity_to_command(&mut prepared.command, identity);
+    prepared.execute(config)
+}
+
 pub(crate) struct PreparedAgentToolCall {
     command: Command,
     home_dir: fs::File,
