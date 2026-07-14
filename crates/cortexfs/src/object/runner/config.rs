@@ -32,16 +32,6 @@ pub(crate) fn provider_config_from_model_control(
         formats: model_driver_formats(&driver),
     })
 }
-pub(crate) fn model_default_base_url(content: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let line = line
-            .split_once('#')
-            .map_or(line, |(value, _comment)| value)
-            .trim();
-        let value = line.strip_prefix("base_url=")?.trim();
-        (!value.is_empty()).then_some(value.to_owned())
-    })
-}
 pub(crate) fn model_driver_formats(content: &str) -> Vec<String> {
     let mut formats = Vec::new();
     if content.contains("openai.chat") || content.contains("openai-chat") {
