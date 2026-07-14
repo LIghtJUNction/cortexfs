@@ -127,7 +127,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
     })
 }
 
-fn agent_model_command(
+pub(crate) fn agent_model_command(
     config: &AgentModelRunConfig,
     input: &str,
     model_executable: &fs::File,
@@ -155,7 +155,22 @@ fn agent_model_command(
     command.env("CTX_AGENT_WINDOW_SETTING", config.window_setting.value());
     command.process_group(0);
     pass_runtime_provider_secret_env(&mut command);
+    pass_provider_egress_env(&mut command);
     command
+}
+
+fn pass_provider_egress_env(command: &mut Command) {
+    let value = env::var_os(cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV);
+    if value.as_deref()
+        == Some(OsStr::new(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        ))
+    {
+        command.env(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        );
+    }
 }
 
 pub(crate) fn append_model_exit_error(
