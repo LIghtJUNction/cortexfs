@@ -1583,8 +1583,7 @@ pub(crate) fn record_socket_send_to_session(
             .and_then(|()| history.refresh_claims())
             .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
     }
-    set_session_state(session_dir, "active")?;
-    write_current_run_session_file(session_dir, &format!("{run_id}\n"), preparation)?;
+    set_active_session_run_locked(history, session_dir, run_id, preparation)?;
     if let Some(cwd) = cwd {
         write_session_file(session_dir, "cwd", &format!("{cwd}\n"))?;
     }
@@ -1619,8 +1618,17 @@ pub(crate) fn record_socket_cancel_to_session(
         .map_err(|_error| SocketSessionRecordError::InvalidField("id"))?;
     require_socket_session_files(session_dir)?;
 
-    let event = done_event_json(run_id, "cancelled");
-    append_session_lines(session_dir, "events.jsonl", &[&event])?;
+    let history = columnar::HistoryGuard::exclusive(session_dir)
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    let Some(canonical_run) =
+        resolve_active_session_cancel_run_locked(&history, session_dir, run_id)?
+    else {
+        return Err(SocketSessionRecordError::CannotRecord);
+    };
+    let event = done_event_json(&canonical_run, "cancelled");
+    history
+        .append(columnar::Stream::Events, &[&event])
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
     set_session_state(session_dir, "cancelled")?;
 
     Ok(SocketSessionRecord::new(Vec::new(), vec![event]))

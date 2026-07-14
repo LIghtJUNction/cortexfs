@@ -178,6 +178,23 @@ pub fn record_assistant_response_to_session(
     run_id: &str,
     content: &str,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
+    record_assistant_response(session_dir, run_id, content, true)
+}
+
+pub(crate) fn record_agent_assistant_response_to_session(
+    session_dir: &Path,
+    run_id: &str,
+    content: &str,
+) -> Result<SocketSessionRecord, SocketSessionRecordError> {
+    record_assistant_response(session_dir, run_id, content, false)
+}
+
+fn record_assistant_response(
+    session_dir: &Path,
+    run_id: &str,
+    content: &str,
+    set_terminal_state: bool,
+) -> Result<SocketSessionRecord, SocketSessionRecordError> {
     validate_socket_object_field("run", run_id)
         .map_err(|_error| SocketSessionRecordError::SessionMismatch)?;
     if content.contains('\0') {
@@ -204,7 +221,9 @@ pub fn record_assistant_response_to_session(
     append_session_lines(session_dir, "messages.jsonl", &[&message])?;
     append_session_lines(session_dir, "events.jsonl", &[&event, &done])?;
     write_session_file(session_dir, "latest.md", &format!("{content}\n"))?;
-    set_session_state(session_dir, "done")?;
+    if set_terminal_state {
+        set_session_state(session_dir, "done")?;
+    }
 
     Ok(SocketSessionRecord::new(vec![message], vec![event, done]))
 }

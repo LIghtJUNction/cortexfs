@@ -55,6 +55,82 @@ fn indexed_socket_send_records_history_and_updates_session_index() {
 }
 
 #[test]
+fn indexed_cancel_uses_canonical_run_for_state_and_events() {
+    let root = clean_test_dir("indexed-cancel-canonical-run");
+    let session_root = root.join("session");
+    let session = session_root.join("canonical");
+    let compatible = session_root.join("compatible");
+    create_complete_session_layout(&session);
+    create_complete_session_layout(&compatible);
+    write_text_file(&session_root.join("index/list"), "canonical\ncompatible\n");
+    write_text_file(&session_root.join("index/current"), "canonical\n");
+
+    let request = ok!(parse_socket_request_frame(
+        r#"{"op":"send","id":"client-canonical","session":"canonical","input":"hello"}"#,
+    ));
+    assert!(matches!(
+        record_indexed_socket_send_to_session(&session_root, &request),
+        Ok(SocketSendOutcome::Recorded(_))
+    ));
+    let canonical_run = ok!(fs::read_to_string(session.join("current_run")));
+    let canonical_run = canonical_run.trim();
+    assert_ne!(canonical_run, "client-canonical");
+    assert!(
+        crate::runtime::record::child::record_socket_cancel_to_session(&session, canonical_run)
+            .is_ok()
+    );
+    assert_file_text(&session.join("state"), "cancelled\n");
+    assert!(crate::runtime::socket::events::agent_run_cancelled(
+        &session,
+        canonical_run
+    ));
+    let events = ok!(fs::read_to_string(session.join("events.jsonl")));
+    assert!(events.lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|value| {
+            value.get("type").and_then(serde_json::Value::as_str) == Some("done")
+                && value.get("run").and_then(serde_json::Value::as_str) == Some(canonical_run)
+                && value.get("status").and_then(serde_json::Value::as_str) == Some("cancelled")
+        })
+    }));
+    assert!(
+        crate::runtime::record::child::record_socket_cancel_to_session(&session, canonical_run)
+            .is_err()
+    );
+    assert!(
+        crate::runtime::record::child::record_socket_cancel_to_session(&session, "foreign-run")
+            .is_err()
+    );
+
+    let compatible_request = ok!(parse_socket_request_frame(
+        r#"{"op":"send","id":"client-compatible","session":"compatible","input":"hello"}"#,
+    ));
+    assert!(matches!(
+        record_indexed_socket_send_to_session(&session_root, &compatible_request),
+        Ok(SocketSendOutcome::Recorded(_))
+    ));
+    let compatible_run = ok!(fs::read_to_string(compatible.join("current_run")));
+    let compatible_run = compatible_run.trim();
+    assert!(
+        crate::runtime::record::child::record_socket_cancel_to_session(
+            &compatible,
+            "client-compatible"
+        )
+        .is_ok()
+    );
+    assert!(crate::runtime::socket::events::agent_run_cancelled(
+        &compatible,
+        compatible_run
+    ));
+    assert!(
+        crate::runtime::record::child::record_socket_cancel_to_session(
+            &compatible,
+            "client-compatible"
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn indexed_socket_send_replays_without_changing_history_or_index() {
     let root = clean_test_dir("indexed-socket-replay");
     let session_root = root.join("session");

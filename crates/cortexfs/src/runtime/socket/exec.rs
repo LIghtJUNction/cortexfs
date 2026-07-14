@@ -109,7 +109,6 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
         return handle_agent_stop_request(stream, runtime.agent_name, stop, peer_uid, agent);
     }
     let SocketRequest::Send {
-        ref id,
         ref session,
         scope,
         ref cwd,
@@ -186,7 +185,7 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
 
     let run_request = AgentExecutableRunRequest {
         run_id: &run_id,
-        cancellation_id: id,
+        cancellation_id: &run_id,
         session,
         cwd: cwd.as_deref(),
         input,
@@ -212,9 +211,11 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
             record_agent_error_from_event_frames(&session_dir, &run_id, &agent_frames)
                 .map_err(SocketRuntimeError::Record)?;
         if !terminal_error && let Some(text) = assistant_text_from_event_frames(&agent_frames) {
-            record_assistant_response_to_session(&session_dir, &run_id, &text)
+            record_agent_assistant_response_to_session(&session_dir, &run_id, &text)
                 .map_err(SocketRuntimeError::Record)?;
         }
+        record_agent_terminal_state_from_event_frames(&session_dir, &run_id, &agent_frames)
+            .map_err(SocketRuntimeError::Record)?;
     }
 
     let mut frames = recorder_response.frames().to_vec();

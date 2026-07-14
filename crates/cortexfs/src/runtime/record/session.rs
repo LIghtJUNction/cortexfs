@@ -8,6 +8,9 @@ use nix::{
     unistd::{Gid, Uid, fchown},
 };
 
+const MAX_SESSION_TRANSITION_FILE_BYTES: u64 = 64 * 1024;
+const MAX_SESSION_TRANSITION_EVENTS_BYTES: u64 = 1024 * 1024;
+
 #[derive(Debug)]
 struct SessionPermissionReceipt {
     path: PathBuf,
@@ -398,6 +401,89 @@ fn verify_owned_session_preparation(
 pub(crate) fn set_session_state(dir: &Path, state: &str) -> SocketRecordResult<()> {
     write_session_file(dir, "state", &format!("{state}\n"))?;
     touch_session(dir)
+}
+
+pub(crate) fn set_active_session_run_locked(
+    _history: &columnar::HistoryGuard<'_>,
+    dir: &Path,
+    run_id: &str,
+    preparation: Option<&OwnedSessionPreparation>,
+) -> SocketRecordResult<()> {
+    write_current_run_session_file(dir, &format!("{run_id}\n"), preparation)?;
+    set_session_state(dir, "active")
+}
+
+pub(crate) fn transition_active_session_run_locked(
+    history: &columnar::HistoryGuard<'_>,
+    dir: &Path,
+    run_id: &str,
+    terminal_state: &str,
+) -> SocketRecordResult<bool> {
+    if !active_session_run_matches_locked(history, dir, run_id)? {
+        return Ok(false);
+    }
+    set_session_state(dir, terminal_state)?;
+    Ok(true)
+}
+
+pub(crate) fn active_session_run_matches_locked(
+    _history: &columnar::HistoryGuard<'_>,
+    dir: &Path,
+    run_id: &str,
+) -> SocketRecordResult<bool> {
+    let state =
+        support::plain::read_small_text_file(&dir.join("state"), MAX_SESSION_TRANSITION_FILE_BYTES)
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    let current_run = support::plain::read_small_text_file(
+        &dir.join("current_run"),
+        MAX_SESSION_TRANSITION_FILE_BYTES,
+    )
+    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    Ok(state.trim() == "active" && current_run.trim() == run_id)
+}
+
+pub(crate) fn resolve_active_session_cancel_run_locked(
+    history: &columnar::HistoryGuard<'_>,
+    dir: &Path,
+    requested_id: &str,
+) -> SocketRecordResult<Option<String>> {
+    let current_run = support::plain::read_small_text_file(
+        &dir.join("current_run"),
+        MAX_SESSION_TRANSITION_FILE_BYTES,
+    )
+    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    let current_run = current_run.trim();
+    if !active_session_run_matches_locked(history, dir, current_run)? {
+        return Ok(None);
+    }
+    if requested_id == current_run {
+        return Ok(Some(current_run.to_owned()));
+    }
+    let events = history
+        .read_text(
+            columnar::Stream::Events,
+            MAX_SESSION_TRANSITION_EVENTS_BYTES,
+        )
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    Ok(events.lines().rev().find_map(|line| {
+        serde_json::from_str::<Value>(line)
+            .is_ok_and(|value| {
+                value.get("type").and_then(Value::as_str) == Some("start")
+                    && value.get("client_id").and_then(Value::as_str) == Some(requested_id)
+                    && value.get("run").and_then(Value::as_str) == Some(current_run)
+            })
+            .then(|| current_run.to_owned())
+    }))
+}
+
+pub(crate) fn transition_active_session_run(
+    dir: &Path,
+    run_id: &str,
+    terminal_state: &str,
+) -> SocketRecordResult<bool> {
+    let history = columnar::HistoryGuard::exclusive(dir)
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    transition_active_session_run_locked(&history, dir, run_id, terminal_state)
 }
 
 pub(crate) fn touch_session(dir: &Path) -> SocketRecordResult<()> {
