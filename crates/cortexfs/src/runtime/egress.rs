@@ -208,16 +208,13 @@ fn plan_targets(ctx_root: &Path, model: &str) -> Result<Vec<ProviderTarget>, Pro
             return Err(ProviderEgressError::InvalidBaseUrl);
         }
         let authority = url.origin().ascii_serialization();
-        let base_path = url.path().trim_end_matches('/').to_owned();
+        let source_path = url.path().trim_end_matches('/');
+        let base_path = crate::provider::effective_base_url(source_path);
         if base_path.contains(['%', '\\']) {
             return Err(ProviderEgressError::InvalidBaseUrl);
         }
         let mut canonical = url;
-        canonical.set_path(if base_path.is_empty() {
-            "/"
-        } else {
-            &base_path
-        });
+        canonical.set_path(&base_path);
         match targets.get_mut(provider) {
             Some(known) => {
                 if known.authority != authority || known.base_path != base_path {

@@ -104,8 +104,11 @@ pub(crate) fn provider_egress_transport(
             if !cortexfs::is_object_name(provider) {
                 return Err("invalid provider egress name".to_owned());
             }
+            let trusted = reqwest::Url::parse(&base_url)
+                .map_err(|_error| "invalid provider egress base URL".to_owned())?;
+            let local_base_url = format!("http://localhost{}", trusted.path());
             Ok(ResolvedTransport::Unix {
-                base_url,
+                base_url: local_base_url,
                 socket_path: format!(
                     "{}/{}.sock",
                     cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,

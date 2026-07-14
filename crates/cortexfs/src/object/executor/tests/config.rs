@@ -324,7 +324,7 @@ fn provider_egress_converts_only_direct_transport() {
             ))
         ),
         Ok(ResolvedTransport::Unix {
-            base_url: "https://api.example.test/v1".to_owned(),
+            base_url: "http://localhost/v1".to_owned(),
             socket_path: "/run/cortexfs/provider-egress/fixture.sock".to_owned(),
         })
     );
