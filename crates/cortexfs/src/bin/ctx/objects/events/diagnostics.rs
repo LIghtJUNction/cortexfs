@@ -259,12 +259,6 @@ pub(crate) fn print_terminal_line(line: &str) -> Result<(), CliError> {
     print_line(&line)
 }
 
-pub(crate) fn write_terminal_error(line: &str) -> Result<(), CliError> {
-    let line = terminal_safe_text(line);
-    write_error(&line)
-        .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))
-}
-
 pub(crate) fn write_terminal_diagnostic(line: &str) -> Result<(), CliError> {
     write_error(line)
         .map_err(|error| CliError::unavailable(format!("stderr write failed: {error}")))

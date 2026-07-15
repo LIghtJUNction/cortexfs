@@ -19,58 +19,6 @@ pub(crate) struct AgentVisibleTool {
     pub(crate) status: String,
 }
 
-pub(crate) fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
-    require_cli_name("agent name", name)?;
-    let view = derive_agent_runtime_view(root, name)
-        .map_err(|error| CliError::unavailable(format!("agent view {}: {name}", error.errno())))?;
-    if !agent_tool_is_authorized(&view, "tsh")? {
-        return Ok(Vec::new());
-    }
-    let mut tools = vec!["tsh".to_owned()];
-    for tool in view.declared_tools() {
-        if agent_tool_is_authorized(&view, tool)? {
-            tools.push(tool.clone());
-        }
-    }
-    tools.sort();
-    tools.dedup();
-    Ok(tools)
-}
-
-pub(crate) fn agent_tool_is_authorized(
-    view: &AgentRuntimeView,
-    tool: &str,
-) -> Result<bool, CliError> {
-    let Some(hit) = view
-        .tool_path()
-        .find(tool)
-        .map_err(|error| CliError::unavailable(format!("cannot inspect CTX_PATH: {error:?}")))?
-    else {
-        return Ok(false);
-    };
-    let policy = read_file_to_string(&hit.control_dir().join("policy")).map_err(|error| {
-        CliError::unavailable(format!(
-            "cannot read {}: {}",
-            hit.control_dir().join("policy").display(),
-            error.message
-        ))
-    })?;
-    let tool_policy = PolicyV0::parse(&policy)
-        .map_err(|_error| CliError::unavailable(format!("invalid policy for tool:{tool}")))?;
-    Ok(authorize_tool_execution(
-        view.tool_path(),
-        tool,
-        ToolExecutionAuthority::new(
-            view.identity(),
-            view.mount_table(),
-            view.policy_subject(),
-            view.policy(),
-            &tool_policy,
-        ),
-    )
-    .is_ok())
-}
-
 pub(crate) fn agent_visible_tool_entries(
     root: &Path,
     name: &str,

@@ -8,7 +8,11 @@ fn terminal_connect_error_classifies_socket_failures() {
         &std::io::Error::from(std::io::ErrorKind::NotFound),
     );
     assert!(missing.message.contains("terminal is not running"));
-    assert!(missing.message.contains("ctx agent start coder --session test"));
+    assert!(
+        missing
+            .message
+            .contains("ctx agent start coder --session test")
+    );
 
     let refused = terminal_connect_cli_error(
         socket,
@@ -16,194 +20,12 @@ fn terminal_connect_error_classifies_socket_failures() {
         "test",
         &std::io::Error::from(std::io::ErrorKind::ConnectionRefused),
     );
-    assert!(refused
-        .message
-        .contains("terminal socket exists but has no listener"));
+    assert!(
+        refused
+            .message
+            .contains("terminal socket exists but has no listener")
+    );
     assert!(!refused.message.contains("terminal is not running"));
-}
-
-#[test]
-fn agent_repl_editor_enables_terminal_signals() {
-    assert!(agent_repl_editor_config().enable_signals());
-}
-
-#[test]
-fn agent_repl_ignores_session_workspace_and_displays_current_caller() {
-    let root = clean_test_dir("ctx-agent-repl-model-summary");
-    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
-    let session = root
-        .join("home")
-        .join(std::process::Command::new("id")
-            .arg("-u")
-            .output()
-            .ok()
-            .and_then(|output| String::from_utf8(output.stdout).ok())
-            .map(|uid| uid.trim().to_owned())
-            .filter(|uid| !uid.is_empty())
-            .unwrap_or_else(|| "1000".to_owned()))
-        .join("agent/coder/session/default");
-    assert!(fs::create_dir_all(&session).is_ok());
-    assert!(fs::create_dir_all(root.join("model")).is_ok());
-    assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
-    assert!(fs::write(session.join("workspace"), "/\n").is_ok());
-    assert!(
-        std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))
-            .is_ok()
-    );
-
-    assert_eq!(
-        agent_repl_prompt(false, "coder", "default"),
-        "ctx agent coder/default ❯ "
-    );
-    assert_eq!(
-        agent_repl_model_summary(false, &root, "coder"),
-        Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
-    );
-    let workspace = std::env::current_dir()
-        .ok()
-        .map_or_else(|| "(unknown)".to_owned(), |path| path.display().to_string());
-    let workspace_line = format!(" Workspace: {workspace}");
-    let banner = agent_repl_banner_lines(false, &root, "coder", "default");
-    assert!(matches!(banner, Ok(ref lines) if lines.iter().any(|line| line == &workspace_line)));
-    assert_eq!(
-        agent_repl_workspace_line(false),
-        workspace_line
-    );
-    assert_ne!(agent_repl_workspace_line(false), " Workspace: /");
-    assert!(AGENT_REPL_COMMANDS.contains("/help"));
-    assert!(AGENT_REPL_COMMANDS.contains("/new"));
-    assert!(AGENT_REPL_COMMANDS.contains("/workspace"));
-    assert!(AGENT_REPL_COMMANDS.contains("/clear"));
-    let mut debug = AgentDebugState::default();
-    let mut session = "default".to_owned();
-    assert_eq!(
-        agent_repl_command(
-            &root,
-            "coder",
-            &mut session,
-            "/workspace",
-            false,
-            &mut debug
-        ),
-        Ok(Some(ExitCode::SUCCESS))
-    );
-}
-
-#[test]
-fn agent_repl_new_does_not_copy_persisted_workspace() {
-    let root = clean_test_dir("ctx-agent-repl-new-session");
-    let session_root = root
-        .join("home")
-        .join(current_uid_for_test())
-        .join("agent/coder/session");
-    let default = session_root.join("default");
-    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
-    assert!(fs::create_dir_all(&default).is_ok());
-    assert!(fs::write(root.join("agent/coder.d/cwd"), "/workspace\n").is_ok());
-    assert!(fs::write(default.join("workspace"), "/repo\n").is_ok());
-
-    let mut session = "default".to_owned();
-    let mut debug = AgentDebugState::default();
-    assert_eq!(
-        agent_repl_command(&root, "coder", &mut session, "/new focus", false, &mut debug),
-        Ok(Some(ExitCode::SUCCESS))
-    );
-
-    assert_eq!(session, "focus");
-    assert!(session_root.join("focus/messages.jsonl").is_file());
-    assert!(!session_root.join("focus/workspace").exists());
-}
-
-#[test]
-fn agent_repl_model_summary_defaults_missing_worker_model_to_spark() {
-    let root = clean_test_dir("ctx-agent-repl-worker-default-model");
-    assert!(fs::create_dir_all(root.join("agent/worker.d")).is_ok());
-
-    assert_eq!(
-        agent_repl_model_summary(false, &root, "worker"),
-        Ok("api.lmm.best/gpt-5.3-codex-spark".to_owned())
-    );
-}
-
-#[test]
-fn agent_repl_model_summary_rejects_invalid_model() {
-    let root = clean_test_dir("ctx-agent-repl-invalid-model");
-    assert!(fs::create_dir_all(root.join("agent/worker.d")).is_ok());
-    assert!(fs::write(root.join("agent/worker.d/model"), "bad/model/name\n").is_ok());
-
-    assert!(matches!(
-        agent_repl_model_summary(false, &root, "worker"),
-        Err(ref error)
-            if error.code == 2
-                && error.message == "invalid agent model for worker: bad/model/name"
-    ));
-}
-
-#[test]
-fn agent_repl_model_summary_defaults_worker_prefix_to_spark() {
-    let root = clean_test_dir("ctx-agent-repl-worker-prefix-default-model");
-    assert!(fs::create_dir_all(root.join("agent/worker-fast.d")).is_ok());
-
-    assert_eq!(
-        agent_repl_model_summary(false, &root, "worker-fast"),
-        Ok("api.lmm.best/gpt-5.3-codex-spark".to_owned())
-    );
-}
-
-#[test]
-fn agent_repl_model_summary_rejects_symlink_model_directory() {
-    let root = clean_test_dir("ctx-agent-repl-model-summary-symlink-model");
-    let outside = clean_test_dir("ctx-agent-repl-model-summary-symlink-model-outside");
-    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
-    assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
-    assert!(
-        std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", outside.join("main"))
-            .is_ok()
-    );
-    assert!(std::os::unix::fs::symlink(&outside, root.join("model")).is_ok());
-
-    assert_eq!(
-        agent_repl_model_summary(false, &root, "coder"),
-        Ok("main (missing alias)".to_owned())
-    );
-}
-
-#[test]
-fn agent_repl_model_summary_does_not_follow_symlink_alias_target() {
-    let root = clean_test_dir("ctx-agent-repl-model-summary-symlink-target");
-    let outside = clean_test_dir("ctx-agent-repl-model-summary-symlink-target-outside");
-    assert!(fs::create_dir_all(root.join("agent/coder.d")).is_ok());
-    assert!(fs::create_dir_all(root.join("model/localhost")).is_ok());
-    assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(fs::write(root.join("agent/coder.d/model"), "main\n").is_ok());
-    assert!(
-        std::os::unix::fs::symlink("/ctx/model/localhost/gpt-5.4-mini", root.join("model/main"))
-            .is_ok()
-    );
-    assert!(std::os::unix::fs::symlink(
-        &outside,
-        root.join("model/localhost/gpt-5.4-mini")
-    )
-    .is_ok());
-
-    assert_eq!(
-        agent_repl_model_summary(false, &root, "coder"),
-        Ok("main -> /ctx/model/localhost/gpt-5.4-mini (missing)".to_owned())
-    );
-}
-
-#[test]
-fn agent_repl_exits_on_interrupt_signal_errors() {
-    assert!(agent_repl_should_exit_on_readline_error(
-        &rustyline::error::ReadlineError::Interrupted
-    ));
-    assert!(agent_repl_should_exit_on_readline_error(
-        &rustyline::error::ReadlineError::Signal(rustyline::error::Signal::Interrupt)
-    ));
-    assert!(agent_repl_should_exit_on_readline_error(
-        &rustyline::error::ReadlineError::Eof
-    ));
 }
 
 #[test]
@@ -273,7 +95,13 @@ fn top_level_send_ignores_external_session_workspace() {
     assert!(fs::create_dir_all(&agent_dir).is_ok());
     assert!(fs::create_dir_all(&session).is_ok());
     assert!(fs::write(agent_dir.join("cwd"), "/workspace\n").is_ok());
-    assert!(fs::write(session.join("workspace"), format!("{}\n", workspace.display())).is_ok());
+    assert!(
+        fs::write(
+            session.join("workspace"),
+            format!("{}\n", workspace.display())
+        )
+        .is_ok()
+    );
     let server = spawn_agent_socket_request_capture(&root, "coder");
 
     let result = run(vec![
@@ -355,10 +183,7 @@ fn top_level_resume_uses_agent_resume_request_shape() {
     assert!(!request.contains("\"input\""));
 }
 
-fn spawn_agent_socket_request_capture(
-    root: &Path,
-    agent: &str,
-) -> std::thread::JoinHandle<String> {
+fn spawn_agent_socket_request_capture(root: &Path, agent: &str) -> std::thread::JoinHandle<String> {
     let socket = root.join("agent").join(format!("{agent}.sock"));
     let listener = std::os::unix::net::UnixListener::bind(&socket);
     assert!(listener.is_ok());
@@ -374,9 +199,7 @@ fn spawn_agent_socket_request_capture(
         };
         let mut request = String::new();
         assert!(std::io::Read::read_to_string(&mut stream, &mut request).is_ok());
-        assert!(
-            std::io::Write::write_all(&mut stream, b"{\"type\":\"done\"}\n").is_ok()
-        );
+        assert!(std::io::Write::write_all(&mut stream, b"{\"type\":\"done\"}\n").is_ok());
         request
     })
 }
@@ -405,7 +228,6 @@ fn buffered_agent_renderer_keeps_assistant_output_atomic() {
                         "error EIO: boom".to_owned()
                     ]
                 && rendered.exit_code == 1
-                && !rendered.interrupted
     ));
 }
 
@@ -424,7 +246,6 @@ fn buffered_agent_renderer_prints_assistant_content_array_message() {
             if rendered.output == "工具已执行\n"
                 && rendered.diagnostics.is_empty()
                 && rendered.exit_code == 0
-                && !rendered.interrupted
     ));
 }
 
@@ -457,29 +278,8 @@ fn agent_renderer_waiting_diagnostic_is_readable() {
 }
 
 #[test]
-fn debug_tool_line_reports_current_names_and_changes() {
-    assert_eq!(
-        format_debug_tool_line(None, &["fs.read".to_owned(), "tsh".to_owned()]),
-        "[debug tools] = fs.read tsh"
-    );
-    assert_eq!(
-        format_debug_tool_line(
-            Some(&["fs.read".to_owned(), "tsh".to_owned()]),
-            &["fs.read".to_owned(), "fs.write".to_owned()]
-        ),
-        "[debug tools] +fs.write -tsh = fs.read fs.write"
-    );
-}
-
-#[test]
 fn debug_agent_send_request_marks_socket_frame() {
-    let request = agent_send_request_json(
-        "run-1",
-        "default",
-        "/workspace",
-        "hello",
-        true,
-    );
+    let request = agent_send_request_json("run-1", "default", "/workspace", "hello", true);
 
     assert!(request.contains(r#""debug":true"#));
     assert!(!request.contains(r#""workspace""#));

@@ -1,11 +1,5 @@
 use crate::*;
 
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct AgentEventRender {
-    pub(crate) exit_code: u8,
-    pub(crate) interrupted: bool,
-}
-
 pub(crate) fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
     stream
         .set_read_timeout(Some(Duration::from_secs(1)))
@@ -13,17 +7,7 @@ pub(crate) fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliErr
             CliError::unavailable(format!("cannot configure socket progress: {error}"))
         })?;
     let reader = io::BufReader::new(stream);
-    Ok(ExitCode::from(
-        render_agent_event_lines(reader, None, None)?.exit_code,
-    ))
-}
-
-pub(crate) fn render_agent_events_interruptible(
-    stream: UnixStream,
-    interrupt: &AtomicBool,
-) -> Result<AgentEventRender, CliError> {
-    let reader = io::BufReader::new(stream);
-    render_agent_event_lines(reader, Some(interrupt), None)
+    Ok(ExitCode::from(render_agent_event_lines(reader, None)?))
 }
 
 pub(crate) fn render_agent_events_approving(
@@ -38,25 +22,10 @@ pub(crate) fn render_agent_events_approving(
         })?;
     let reader = io::BufReader::new(stream);
     let mut responder = ApprovalResponder::new(writer, approvals)?;
-    Ok(ExitCode::from(
-        render_agent_event_lines(reader, None, Some(&mut responder))?.exit_code,
-    ))
-}
-
-pub(crate) fn render_agent_events_interruptible_approving(
-    stream: UnixStream,
-    interrupt: &AtomicBool,
-    approvals: &[String],
-) -> Result<AgentEventRender, CliError> {
-    if approvals.is_empty() {
-        return render_agent_events_interruptible(stream, interrupt);
-    }
-    let writer = stream
-        .try_clone()
-        .map_err(|error| CliError::unavailable(format!("cannot clone approval socket: {error}")))?;
-    let reader = io::BufReader::new(stream);
-    let mut responder = ApprovalResponder::new(writer, approvals)?;
-    render_agent_event_lines(reader, Some(interrupt), Some(&mut responder))
+    Ok(ExitCode::from(render_agent_event_lines(
+        reader,
+        Some(&mut responder),
+    )?))
 }
 
 pub(crate) struct ApprovalResponder {
@@ -131,9 +100,8 @@ mod approval_tests {
 )]
 pub(crate) fn render_agent_event_lines(
     mut reader: impl BufRead,
-    interrupt: Option<&AtomicBool>,
     mut approval: Option<&mut ApprovalResponder>,
-) -> Result<AgentEventRender, CliError> {
+) -> Result<u8, CliError> {
     let mut saw_delta = false;
     let mut usage_totals = AgentUsageTotals::default();
     let mut exit = ExitCode::SUCCESS;
@@ -164,13 +132,6 @@ pub(crate) fn render_agent_event_lines(
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
-                    clear_waiting_status_if_active(&mut waiting_status_active)?;
-                    return Ok(AgentEventRender {
-                        exit_code: exit_code_u8(exit),
-                        interrupted: true,
-                    });
-                }
                 update_waiting_status(
                     quiet_since.elapsed(),
                     &mut next_waiting_notice,
@@ -256,10 +217,7 @@ pub(crate) fn render_agent_event_lines(
             _ => {}
         }
     }
-    Ok(AgentEventRender {
-        exit_code: exit_code_u8(exit),
-        interrupted: false,
-    })
+    Ok(exit_code_u8(exit))
 }
 
 pub(crate) fn clear_waiting_status_if_active(active: &mut bool) -> Result<(), CliError> {
@@ -345,28 +303,11 @@ pub(crate) struct BufferedAgentEvents {
     pub(crate) output: String,
     pub(crate) diagnostics: Vec<String>,
     pub(crate) exit_code: u8,
-    pub(crate) interrupted: bool,
 }
 
 #[cfg(test)]
 pub(crate) fn collect_agent_events_buffered(
-    reader: impl BufRead,
-) -> Result<BufferedAgentEvents, CliError> {
-    collect_agent_events_buffered_with(reader, None)
-}
-
-#[cfg(test)]
-pub(crate) fn collect_agent_events_buffered_interruptible(
-    reader: impl BufRead,
-    interrupt: &AtomicBool,
-) -> Result<BufferedAgentEvents, CliError> {
-    collect_agent_events_buffered_with(reader, Some(interrupt))
-}
-
-#[cfg(test)]
-pub(crate) fn collect_agent_events_buffered_with(
     mut reader: impl BufRead,
-    interrupt: Option<&AtomicBool>,
 ) -> Result<BufferedAgentEvents, CliError> {
     let mut saw_delta = false;
     let mut usage_totals = AgentUsageTotals::default();
@@ -392,20 +333,11 @@ pub(crate) fn collect_agent_events_buffered_with(
                 }
             }
             Err(error)
-                if interrupt.is_some()
-                    && matches!(
-                        error.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
             {
-                if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
-                    return Ok(BufferedAgentEvents {
-                        output,
-                        diagnostics,
-                        exit_code,
-                        interrupted: true,
-                    });
-                }
                 continue;
             }
             Err(error) => {
@@ -476,7 +408,6 @@ pub(crate) fn collect_agent_events_buffered_with(
         output,
         diagnostics,
         exit_code,
-        interrupted: false,
     })
 }
 

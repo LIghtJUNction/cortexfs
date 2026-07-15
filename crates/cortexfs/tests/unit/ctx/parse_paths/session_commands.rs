@@ -17,6 +17,10 @@ fn parses_session_file_commands() {
             session: Some(ref session)
         }) if agent == "coder" && session == "focus"
     ));
+    assert!(matches!(
+        cmd!("history", "coder", "focus"),
+        Err(ref error) if error.code == 2 && error.message.contains("unexpected argument")
+    ));
 
     let output = cmd!("agent", "output", "coder", "--session", "default");
     assert!(matches!(
@@ -46,10 +50,7 @@ fn parses_session_file_commands() {
     let resume = cmd!("resume", "coder", "default");
     assert!(matches!(
         resume,
-        Ok(Command::Resume {
-            ref agent,
-            session: Some(ref session)
-        }) if agent == "coder" && session == "default"
+        Err(ref error) if error.code == 2 && error.message.contains("unexpected argument")
     ));
 
     let resume_flagged = cmd!("resume", "coder", "-s", "focus");
@@ -61,14 +62,14 @@ fn parses_session_file_commands() {
         }) if agent == "coder" && session == "focus"
     ));
 
-    let send = cmd!("send", "coder", "default", "hello");
+    let send = cmd!("send", "coder", "hello", "world");
     assert!(matches!(
         send,
         Ok(Command::Send {
             ref agent,
-            session: Some(ref session),
+            session: None,
             ref input
-        }) if agent == "coder" && session == "default" && input == "hello"
+        }) if agent == "coder" && input == "hello world"
     ));
 
     let send_current = cmd!("send", "coder", "hello");
@@ -185,7 +186,15 @@ fn parses_literal_help_as_positional_argument() {
 
 #[test]
 fn parses_agent_session_client_commands() {
-    let send = cmd!("agent", "send", "coder", "--session", "test", "hello", "world");
+    let send = cmd!(
+        "agent",
+        "send",
+        "coder",
+        "--session",
+        "test",
+        "hello",
+        "world"
+    );
     assert!(matches!(
         send,
         Ok(Command::Agent(AgentArgs::Send {
@@ -200,18 +209,13 @@ fn parses_agent_session_client_commands() {
     let repl = cmd!("agent", "repl", "coder", "--raw");
     assert!(matches!(
         repl,
-        Ok(Command::Agent(AgentArgs::Repl {
-            ref name,
-            session: None,
-            raw: true,
-            ..
-        })) if name == "coder"
+        Err(ref error) if error.code == 2 && error.message == "unknown agent command: repl"
     ));
 
     let chat = cmd!("agent", "chat", "coder", "--session", "focus");
     assert!(matches!(
         chat,
-        Ok(Command::Agent(AgentArgs::Repl {
+        Ok(Command::Agent(AgentArgs::Chat {
             ref name,
             session: Some(ref session),
             raw: false,
@@ -233,14 +237,7 @@ fn parses_agent_session_client_commands() {
 
 #[test]
 fn agent_send_rejects_invalid_approval_during_parse() {
-    let command = cmd!(
-        "agent",
-        "send",
-        "coder",
-        "--approve",
-        "bad/name",
-        "hello"
-    );
+    let command = cmd!("agent", "send", "coder", "--approve", "bad/name", "hello");
 
     assert!(matches!(
         command,
@@ -249,7 +246,7 @@ fn agent_send_rejects_invalid_approval_during_parse() {
 }
 
 #[test]
-fn agent_chat_and_repl_share_invalid_approval_parse_validation() {
+fn agent_chat_rejects_invalid_approval_during_parse() {
     let command = cmd!("agent", "chat", "coder", "--approve", "bad/name");
 
     assert!(matches!(
