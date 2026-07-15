@@ -23,7 +23,6 @@ ctx abi
 ctx env
 ctx root
 ctx bootstrap
-ctx update
 ctx mount
 
 ctx ls
@@ -92,15 +91,15 @@ Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
-`ctx update [SOURCE]` is an alias for `ctx bootstrap [SOURCE]`. It updates the
+`ctx bootstrap [SOURCE]` updates the
 reference source tree only; it does not remount `/ctx`, start a watcher, or add
 a second refresh boundary.
 
 Optional flags:
 
 ```text
-ctx update --check [SOURCE]     report tree_version, missing agents, retired leftovers
-ctx update --dry-run [SOURCE]   show would_ensure / would_skip / would_write (no writes)
+ctx bootstrap --check [SOURCE]     report tree_version, missing agents, retired leftovers
+ctx bootstrap --dry-run [SOURCE]   show would_ensure / would_skip / would_write (no writes)
 ```
 
 Default bootstrap materializes `architect` / `coder` / `reviewer`, writes
@@ -108,7 +107,7 @@ Default bootstrap materializes `architect` / `coder` / `reviewer`, writes
 `applied_migrations`) only when state differs. Retired `base` / `worker` /
 `executor` objects are reported and retained for manual review because legacy
 trees have no manifest proving ownership and full control-tree integrity.
-Session history under `home/` is never deleted by update.
+Session history under `home/` is never deleted by bootstrap.
 
 Top-level agent session shortcuts follow the same current-session default as
 their `ctx agent ...` forms:
@@ -116,28 +115,24 @@ their `ctx agent ...` forms:
 ```text
 ctx history AGENT
 ctx history AGENT --session SESSION
-ctx history AGENT SESSION
 ctx resume AGENT
 ctx resume AGENT --session SESSION
-ctx resume AGENT SESSION
 ctx send AGENT INPUT
 ctx send AGENT --session SESSION INPUT
-ctx send AGENT SESSION INPUT
 ctx agent wait AGENT CHILD [--session SESSION]
 ```
 
 Omitting the session reads `session/index/current` first and falls back to
-`default`. The positional `SESSION` form remains accepted for compatibility.
+`default`. An explicit session uses `--session SESSION`.
 `ctx send` and `ctx resume` render assistant events the same way as
 `ctx agent send` and `ctx agent resume`; raw socket JSONL is reserved for lower
 level socket commands and explicit raw agent modes.
 
-`ctx agent chat` is the preferred human-chat spelling. `ctx agent repl` is a
-compatibility alias for the same socket UI and session defaults. It is not the agent terminal and
+`ctx agent chat` is the human chat UI. It is not the agent terminal and
 does not enter `tsh`; humans use `ctx agent watch` or `ctx agent attach` for the
 persistent terminal.
 
-`ctx agent send` and `ctx agent chat`/`repl` accept repeatable
+`ctx agent send` and `ctx agent chat` accept repeatable
 `--approve TOOL`. In non-raw mode the client answers a hosted SDK
 `approval_request` with `allow_once` only when its exact tool name is in this
 explicit list; every other name is denied. There is no blanket approval or TTY

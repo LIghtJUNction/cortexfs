@@ -49,15 +49,15 @@ Bootstrap and inspect the reference source with:
 
 ```bash
 ctx bootstrap
-ctx update --check
-ctx update --dry-run
+ctx bootstrap --check
+ctx bootstrap --dry-run
 ```
 
-`ctx update` writes `bin/cortexfs.bootstrap.json` only when the schema,
+`ctx bootstrap` writes `bin/cortexfs.bootstrap.json` only when the schema,
 tree version, managed-agent list, or required migrations need refresh. Retired
 `base`, `worker`, and `executor` objects are reported but retained for
 manual review because old installations have no manifest proving ownership and
-full control-tree integrity. A successful update makes the next `--check`
+full control-tree integrity. A successful bootstrap makes the next `--check`
 clean.
 
 The default `coder.d/system.md` treats `coder` as the parent integrator:
@@ -316,8 +316,9 @@ agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
 ```
 
-`agent.sh coder` opens the chat REPL through `ctx agent-sh coder`. With prompt
-arguments, `ctx agent-sh` forwards one message to `ctx agent send`. Use
+`agent.sh coder` opens the chat UI through
+`ctx agent chat coder --session default`. With prompt arguments, it forwards one
+message to `ctx agent send coder --session default`. Use
 `agent.sh --watch coder` to observe the agent terminal, and `agent.sh --attach
 coder` only when you want to enter `ctxterm -> tsh`. `agent.sh` does not keep a
 private chat database.

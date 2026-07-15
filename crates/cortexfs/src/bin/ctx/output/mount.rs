@@ -100,7 +100,7 @@ pub(crate) fn print_bootstrap_dry_run(source: &Path) -> Result<(), CliError> {
     for line in format_bootstrap_plan_lines(&plan) {
         print_line(&line)?;
     }
-    print_line("note=no files written; run ctx update without --dry-run to apply")?;
+    print_line("note=no files written; run ctx bootstrap without --dry-run to apply")?;
     Ok(())
 }
 

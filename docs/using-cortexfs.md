@@ -49,16 +49,16 @@ echo "summarize this file" | /ctx/model/main
 
 ```bash
 ctx bootstrap
-ctx update --check
-ctx update --dry-run
+ctx bootstrap --check
+ctx bootstrap --dry-run
 ctx agent start coder --session default
 ctx agent chat coder
 ```
 
-`ctx update` / `ctx bootstrap` 会物化 reference source，并按需写入
+`ctx bootstrap` 会物化 reference source，并按需写入
 `bin/cortexfs.bootstrap.json`。已退役的 `base` / `worker` / `executor`
-缺少可证明整个控制树归属和未漂移的旧 manifest，因此 update 只报告并保留给人工处理，
-不会自动删除。`--check` / `--dry-run` 不写盘；成功 update 后再次 `--check`
+缺少可证明整个控制树归属和未漂移的旧 manifest，因此 bootstrap 只报告并保留给人工处理，
+不会自动删除。`--check` / `--dry-run` 不写盘；成功 bootstrap 后再次 `--check`
 应为 clean。
 
 改源码前可以先审计它看到的状态、工具和 prompt：
@@ -353,7 +353,7 @@ agent.sh --session default coder "inspect the failing test"
 agent.sh --resume coder
 ```
 
-`agent.sh coder` 会通过 `ctx agent chat coder --session default` 进入 agent 聊天界面；`ctx agent repl` 只是兼容别名。带 prompt
+`agent.sh coder` 会通过 `ctx agent chat coder --session default` 进入 agent 聊天界面。带 prompt
 参数时由脚本转发到 `ctx agent send coder --session default ...` 发送一条消息。需要旁观 agent terminal 时使用 `agent.sh --watch coder`；需要进入
 terminal、看到 `ctxterm -> tsh` 时，才使用 `agent.sh --attach coder`。
 `agent.sh` 不保存私有聊天数据库。
