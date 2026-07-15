@@ -89,6 +89,7 @@ pub(crate) mod access;
 pub(crate) use crate::cli::stderr;
 pub(crate) use crate::cli::text;
 pub(crate) mod args;
+pub(crate) mod error;
 pub(crate) mod exec;
 pub(crate) mod timeout;
 pub(crate) mod tool;
@@ -97,6 +98,7 @@ pub(crate) use agent::*;
 pub(crate) use alias::*;
 pub(crate) use args::*;
 pub(crate) use call::*;
+pub(crate) use error::*;
 pub(crate) use exec::*;
 pub(crate) use frames::*;
 pub(crate) use inference::*;
@@ -132,16 +134,16 @@ pub(crate) fn main() -> ExitCode {
     }
 }
 
-pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, String> {
+pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, ExecError> {
     let (object_path, input) = split_object_args(args)?;
     let object = ObjectPath::parse(&object_path)?;
     match (object.class.as_str(), object.name.as_str()) {
         ("model", name) => run_model(name, &input).map(|()| ExitCode::SUCCESS),
         ("agent", name) => run_agent(name, &input).map(|()| ExitCode::SUCCESS),
         ("tool", name) => run_tool(name, &input),
-        (class, _name) => Err(format!(
+        (class, _name) => Err(ExecError::new(format!(
             "object class {class} is not handled by this runner"
-        )),
+        ))),
     }
 }
 

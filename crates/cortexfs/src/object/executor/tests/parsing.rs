@@ -81,7 +81,7 @@ fn tool_call_arguments_reject_excessive_limits() {
     });
     let call = agent_tool_call_from_value(&value);
 
-    assert!(matches!(call, Err(ref error) if error.contains("argument count limit")));
+    assert!(matches!(call, Err(ref error) if error.message().contains("argument count limit")));
     let value = serde_json::json!({
         "type": "tool_call",
         "id": "call-1",
@@ -92,7 +92,7 @@ fn tool_call_arguments_reject_excessive_limits() {
     });
     let call = agent_tool_call_from_value(&value);
 
-    assert!(matches!(call, Err(ref error) if error.contains("byte limit")));
+    assert!(matches!(call, Err(ref error) if error.message().contains("byte limit")));
 }
 
 #[test]

@@ -277,11 +277,16 @@ impl<W: Write> ToolEmitter<W> {
 
     /// Emits a tool message frame with text content.
     pub fn message(&mut self, text: &str) -> io::Result<()> {
+        self.content(&[json!({ "type": "text", "text": text })])
+    }
+
+    /// Emits a tool message frame with borrowed structured content blocks.
+    pub fn content(&mut self, content: &[Value]) -> io::Result<()> {
         self.frame(&json!({
             "type": "message",
             "run": self.run_id,
             "role": "tool",
-            "content": [{ "type": "text", "text": text }]
+            "content": content
         }))
     }
 
@@ -713,6 +718,31 @@ mod tests {
         assert_eq!(frames[1]["content"][0]["text"], "hello");
         assert_eq!(frames[2]["type"], "done");
         assert_eq!(frames[2]["status"], "ok");
+    }
+
+    #[test]
+    fn tool_emitter_content_emits_blocks_directly() {
+        let content = [
+            serde_json::json!({"type":"text","text":"hello"}),
+            serde_json::json!({"type":"resource_link","uri":"file:///result"}),
+        ];
+        let mut output = Vec::new();
+        let mut emitter = ToolEmitter::new("r-test", &mut output);
+
+        emitter
+            .content(&content)
+            .expect("structured content should be emitted");
+
+        let output = String::from_utf8(output).expect("emitted JSONL should be UTF-8");
+        assert_eq!(
+            parse_jsonl_frames(&output).expect("emitted frame should be valid JSONL"),
+            vec![serde_json::json!({
+                "type": "message",
+                "run": "r-test",
+                "role": "tool",
+                "content": content
+            })]
+        );
     }
 
     #[test]

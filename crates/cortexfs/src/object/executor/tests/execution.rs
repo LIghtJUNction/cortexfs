@@ -141,6 +141,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
     ];
 
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
+        authorized_object: Path::new("/ctx/tool/probe"),
         config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
         tool_executable: Path::new("/proc/self/fd/9"),
         tool_args: &[OsString::from("tools")],
@@ -229,6 +230,7 @@ fn nested_control_pair_is_propagated_and_bound() -> Result<(), Box<dyn std::erro
     let mounts = cortexfs::MountTable::parse("")
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
+        authorized_object: Path::new("/ctx/tool/probe"),
         config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
         tool_executable: Path::new("/tool"),
         tool_args: &[],
@@ -295,7 +297,7 @@ fn agent_tool_process_cancellation_terminates_process_group() {
     let result = crate::object::executor::run_agent_tool_process_cancellable(&mut command, || {
         start.elapsed() >= Duration::from_millis(100)
     });
-    assert_eq!(result, Err("tool cancelled".to_owned()));
+    assert_eq!(result, Err(ExecError::new("tool cancelled")));
     thread::sleep(Duration::from_millis(100));
     assert!(!leaked.exists());
 }
@@ -362,6 +364,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
     crate::provider::name::files::clear_fd_cloexec(&home_alias_dir)
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
+        authorized_object: Path::new("/ctx/tool/probe"),
         config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
         tool_executable: &proc_fd_path(&tool_executable),
         tool_args: &[],
@@ -465,7 +468,7 @@ fn agent_tool_call_refuses_symlinked_tsh_policy() -> Result<(), Box<dyn std::err
     };
     let result = execute_agent_tool_call(&config, &call);
 
-    assert!(matches!(result, Err(ref error) if error.contains("cannot read")));
+    assert!(matches!(result, Err(ref error) if error.message().contains("cannot read")));
     let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
@@ -549,7 +552,7 @@ fn agent_tool_process_times_out_instead_of_hanging() {
 
     let result = run_agent_tool_process_with_timeout(&mut command, Duration::from_millis(100));
 
-    assert!(matches!(result, Err(ref error) if error.contains("timed out")));
+    assert!(matches!(result, Err(ref error) if error.message().contains("timed out")));
     assert!(started.elapsed() < Duration::from_secs(2));
 }
 
@@ -579,7 +582,7 @@ fn agent_tool_process_kills_child_after_oversized_output() {
 
     let result = run_agent_tool_process_with_timeout(&mut command, Duration::from_secs(10));
 
-    assert!(matches!(result, Err(ref error) if error.contains("tool output exceeds")));
+    assert!(matches!(result, Err(ref error) if error.message().contains("tool output exceeds")));
     assert!(started.elapsed() < Duration::from_secs(2));
 }
 
@@ -593,7 +596,7 @@ fn agent_tool_process_rejects_fast_oversized_output() {
 
     let result = run_agent_tool_process_with_timeout(&mut command, Duration::from_secs(2));
 
-    assert!(matches!(result, Err(ref error) if error.contains("tool output exceeds")));
+    assert!(matches!(result, Err(ref error) if error.message().contains("tool output exceeds")));
 }
 
 #[test]
@@ -646,7 +649,82 @@ fn tool_stdout_maps_canonical_sdk_error_even_with_successful_process_status() {
     );
     assert_eq!(
         parse_tool_stdout(output),
-        Ok(ToolStdout::SdkError("EINVAL: bad input".to_owned()))
+        Ok(ToolStdout::SdkError {
+            content: String::new(),
+            error: "EINVAL: bad input".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn tool_stdout_preserves_resource_link_content() {
+    let output = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.read\"}\n",
+        "{\"type\":\"message\",\"run\":\"r1\",\"role\":\"tool\",\"content\":[{\"type\":\"resource_link\",\"uri\":\"file:///report.txt\",\"name\":\"report\",\"mimeType\":\"text/plain\"}]}\n",
+        "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}\n",
+    );
+    let expected = serde_json::json!([{
+        "type": "resource_link",
+        "uri": "file:///report.txt",
+        "name": "report",
+        "mimeType": "text/plain"
+    }])
+    .to_string();
+
+    assert_eq!(
+        parse_tool_stdout(output),
+        Ok(ToolStdout::SdkSuccess(expected))
+    );
+}
+
+#[test]
+fn tool_stdout_preserves_mixed_and_annotated_structured_content() {
+    let content = serde_json::json!([
+        {"type":"text","text":"caption"},
+        {"type":"text","text":"annotated","annotations":{"audience":["user"]}},
+        {"type":"image","data":"aW1hZ2U=","mimeType":"image/png"},
+        {"type":"audio","data":"YXVkaW8=","mimeType":"audio/wav"},
+        {"type":"resource","resource":{"uri":"file:///note.txt","text":"note"}}
+    ]);
+    let output = format!(
+        "{{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.read\"}}\n{{\"type\":\"message\",\"run\":\"r1\",\"role\":\"tool\",\"content\":{content}}}\n{{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}}\n"
+    );
+
+    assert_eq!(
+        parse_tool_stdout(&output),
+        Ok(ToolStdout::SdkSuccess(content.to_string()))
+    );
+}
+
+#[test]
+fn tool_stdout_preserves_message_content_before_error() {
+    let output = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.read\"}\n",
+        "{\"type\":\"message\",\"run\":\"r1\",\"role\":\"tool\",\"content\":[{\"type\":\"text\",\"text\":\"remote detail\"}]}\n",
+        "{\"type\":\"error\",\"run\":\"r1\",\"code\":\"EIO\",\"message\":\"remote MCP tool returned an error\"}\n",
+        "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"error\"}\n",
+    );
+
+    assert_eq!(
+        parse_tool_stdout(output),
+        Ok(ToolStdout::SdkError {
+            content: "remote detail".to_owned(),
+            error: "EIO: remote MCP tool returned an error".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn tool_stdout_rejects_malformed_content_item() {
+    let output = concat!(
+        "{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"example.read\"}\n",
+        "{\"type\":\"message\",\"run\":\"r1\",\"role\":\"tool\",\"content\":[{\"text\":\"missing type\"}]}\n",
+        "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}\n",
+    );
+
+    assert_eq!(
+        parse_tool_stdout(output),
+        Err(ExecError::new("invalid CortexFS Tool SDK content item"))
     );
 }
 
@@ -731,7 +809,7 @@ fn agent_tsh_args_reject_root_override() {
             OsString::from("/tmp/fakectx"),
             OsString::from("evil"),
         ]),
-        Err("tool_call args cannot override tsh root".to_owned())
+        Err(ExecError::new("tool_call args cannot override tsh root"))
     );
     assert_eq!(
         validate_agent_tsh_args(&[
@@ -739,7 +817,7 @@ fn agent_tsh_args_reject_root_override() {
             OsString::from("/tmp/fakectx"),
             OsString::from("evil"),
         ]),
-        Err("tool_call args cannot override tsh root".to_owned())
+        Err(ExecError::new("tool_call args cannot override tsh root"))
     );
 }
 
@@ -747,7 +825,7 @@ fn agent_tsh_args_reject_root_override() {
 fn agent_tsh_args_reject_empty_args() {
     assert_eq!(
         validate_agent_tsh_args(&[]),
-        Err("tool_call args for tsh cannot be empty".to_owned())
+        Err(ExecError::new("tool_call args for tsh cannot be empty"))
     );
 }
 
@@ -755,11 +833,15 @@ fn agent_tsh_args_reject_empty_args() {
 fn agent_tsh_args_reject_recursive_tsh_program_name() {
     assert_eq!(
         validate_agent_tsh_args(&[OsString::from("tsh")]),
-        Err("tool_call args for tsh must not include the tsh program name".to_owned())
+        Err(ExecError::new(
+            "tool_call args for tsh must not include the tsh program name"
+        ))
     );
     assert_eq!(
         validate_agent_tsh_args(&[OsString::from("tsh"), OsString::from("tools")]),
-        Err("tool_call args for tsh must not include the tsh program name".to_owned())
+        Err(ExecError::new(
+            "tool_call args for tsh must not include the tsh program name"
+        ))
     );
 }
 
@@ -842,7 +924,7 @@ fn execute_agent_tsh_call_rejects_empty_args() -> Result<(), Box<dyn std::error:
 
     assert_eq!(
         result,
-        Err("tool_call args for tsh cannot be empty".to_owned())
+        Err(ExecError::new("tool_call args for tsh cannot be empty"))
     );
     assert!(!executed.exists());
 
@@ -886,4 +968,40 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 }
 use super::runtime::test_agent_run_config;
 use super::*;
-use crate::object::executor::{ToolStdout, parse_tool_stdout};
+use crate::object::executor::{ToolStdout, authorized_tool_target, parse_tool_stdout};
+
+#[test]
+fn authorized_tool_target_maps_backing_source_tiers_under_ctx() {
+    let source = Path::new("/var/lib/cortexfs/generation");
+    let system = cortexfs::ToolHit::new(source.join("tool/system"));
+    let user = cortexfs::ToolHit::new(source.join("home/42/tool/user"));
+
+    assert_eq!(
+        authorized_tool_target(source, &system),
+        PathBuf::from("/ctx/tool/system")
+    );
+    assert_eq!(
+        authorized_tool_target(source, &user),
+        PathBuf::from("/ctx/home/42/tool/user")
+    );
+}
+
+#[test]
+fn authorized_tool_target_preserves_absolute_projected_tiers() {
+    let source = Path::new("/var/lib/cortexfs/generation");
+    let user = cortexfs::ToolHit::new(PathBuf::from("/ctx/home/42/tool/user-only"));
+    let shared = cortexfs::ToolHit::new(PathBuf::from("/ctx/shared/team/tool/shared"));
+
+    assert_eq!(
+        authorized_tool_target(source, &user),
+        PathBuf::from("/ctx/home/42/tool/user-only")
+    );
+    assert_eq!(
+        authorized_tool_target(source, &shared),
+        PathBuf::from("/ctx/shared/team/tool/shared")
+    );
+    assert_ne!(
+        authorized_tool_target(source, &shared),
+        PathBuf::from("/ctx/home/42/tool/shared")
+    );
+}

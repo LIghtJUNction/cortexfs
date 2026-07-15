@@ -45,7 +45,7 @@ fn agent_tool_loop_supports_multiple_distinct_tsh_calls() {
                         streamed: false,
                     })
                 }
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, tool_call| {
@@ -198,7 +198,7 @@ fn agent_tool_loop_falls_back_on_followup_model_error_after_tool_result() {
                         streamed: false,
                     })
                 }
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, tool_call| {
@@ -271,7 +271,7 @@ fn agent_tool_loop_feeds_failed_verification_args_back_for_repair() {
                         streamed: false,
                     })
                 }
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, tool_call| {
@@ -282,12 +282,12 @@ fn agent_tool_loop_feeds_failed_verification_args_back_for_repair() {
                 .collect::<Vec<_>>();
             executed.push(args.clone());
             if args.first().is_some_and(|tool| tool == "shell.exec") && args.len() == 2 {
-                return Err("compile failed\n".to_owned());
+                return Err(ExecError::new("compile failed\n"));
             }
             if args.first().is_some_and(|tool| tool == "fs.replace") && args.len() == 4 {
                 return Ok("replaced\n".to_owned());
             }
-            Err(format!("unexpected args: {args:?}"))
+            Err(ExecError::new(format!("unexpected args: {args:?}")))
         },
     );
 
@@ -352,7 +352,7 @@ fn agent_tool_loop_allows_verification_rerun_after_edit() {
                     success: true,
                     streamed: false,
                 }),
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, tool_call| {
@@ -418,7 +418,7 @@ fn agent_tool_loop_falls_back_when_followup_has_no_visible_reply() {
                         streamed: false,
                     })
                 }
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, tool_call| {
@@ -469,7 +469,7 @@ fn agent_tool_loop_falls_back_when_followup_model_errors_after_tool_result() {
                         streamed: false,
                     })
                 }
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, tool_call| {
@@ -510,9 +510,9 @@ fn agent_tool_loop_falls_back_when_followup_model_call_fails_after_tool_result()
                 }),
                 2 => {
                     assert!(config.suppress_model_error_events);
-                    Err("model unavailable".to_owned())
+                    Err(ExecError::new("model unavailable"))
                 }
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, tool_call| {
@@ -555,7 +555,7 @@ fn agent_tool_loop_wraps_followup_plain_text_as_event() {
                     success: true,
                     streamed: false,
                 }),
-                _ => Err(format!("unexpected model iteration {step}")),
+                _ => Err(ExecError::new(format!("unexpected model iteration {step}"))),
             }
         },
         |_config, _tool_call| Ok("fs.read\ntsh\n".to_owned()),
@@ -659,7 +659,7 @@ esac
             {
                 return Ok("loaded fs.read\t/ctx/tool/fs.read\tmetadata\n".to_owned());
             }
-            Err(format!("unexpected args: {args:?}"))
+            Err(ExecError::new(format!("unexpected args: {args:?}")))
         },
     );
 

@@ -387,7 +387,9 @@ fn handle_agent_tsh_request(
         .server
         .finish()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    let content = result.as_deref().unwrap_or_else(|error| error);
+    let content = result
+        .as_ref()
+        .map_or_else(|error| error.message(), String::as_str);
     object::executor::output::write_tool_result_event(&mut bytes, &run, &call, content)
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
     let mut frames = String::from_utf8(bytes)

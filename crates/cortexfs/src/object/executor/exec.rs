@@ -6,7 +6,7 @@ use std::os::unix::fs::FileTypeExt;
 pub(crate) fn execute_agent_tool_call(
     config: &AgentModelRunConfig,
     tool_call: &AgentToolCall,
-) -> Result<String, String> {
+) -> Result<String, ExecError> {
     execute_agent_tool_call_with(&AgentToolExecutionConfig::from_model(config), tool_call)
 }
 
@@ -46,7 +46,7 @@ pub(crate) struct AgentToolControl {
 pub(crate) fn execute_agent_tool_call_with(
     config: &AgentToolExecutionConfig<'_>,
     tool_call: &AgentToolCall,
-) -> Result<String, String> {
+) -> Result<String, ExecError> {
     prepare_agent_tool_call(config, tool_call)?.execute(config)
 }
 
@@ -63,9 +63,10 @@ pub(crate) struct PreparedAgentToolCall {
 pub(crate) fn prepare_agent_tool_call(
     config: &AgentToolExecutionConfig<'_>,
     tool_call: &AgentToolCall,
-) -> Result<PreparedAgentToolCall, String> {
-    let view = derive_agent_runtime_view(config.ctx_root, config.agent)
-        .map_err(|error| format!("cannot derive agent authority: {}", error.errno()))?;
+) -> Result<PreparedAgentToolCall, ExecError> {
+    let view = derive_agent_runtime_view(config.ctx_root, config.agent).map_err(|error| {
+        ExecError::new(format!("cannot derive agent authority: {}", error.errno()))
+    })?;
     let owner = view.owner().to_string();
     let home_source = config
         .source
@@ -85,25 +86,30 @@ pub(crate) fn prepare_agent_tool_call(
         validate_agent_tsh_args(&tool_call.args)?;
     } else if !view.declared_tools().contains(&tool_call.name)
         && !cortexfs::tsh_context_contains(&context_path, &tool_call.name)
-            .map_err(|error| format!("cannot read session tool context: {error}"))?
+            .map_err(|error| ExecError::new(format!("cannot read session tool context: {error}")))?
     {
-        return Err(format!(
+        return Err(ExecError::new(format!(
             "unsupported native tool {}; declare it in the agent tools control",
             tool_call.name
-        ));
+        )));
     }
     let Some(hit) = view
         .tool_path()
         .find(&tool_call.name)
-        .map_err(|error| format!("cannot inspect CTX_PATH: {error:?}"))?
+        .map_err(|error| ExecError::new(format!("cannot inspect CTX_PATH: {error:?}")))?
     else {
-        return Err(format!("tool not found: {}", tool_call.name));
+        return Err(ExecError::new(format!(
+            "tool not found: {}",
+            tool_call.name
+        )));
     };
     let policy_path = hit.control_dir().join("policy");
     let policy_text = read_small_plain_text_file(&policy_path, MAX_RUNNER_CONTROL_BYTES, "runner")
-        .map_err(|error| format!("cannot read {}: {error}", policy_path.display()))?;
+        .map_err(|error| {
+            ExecError::new(format!("cannot read {}: {error}", policy_path.display()))
+        })?;
     let tool_policy = PolicyV0::parse(&policy_text)
-        .map_err(|_error| format!("invalid policy for tool:{}", tool_call.name))?;
+        .map_err(|_error| ExecError::new(format!("invalid policy for tool:{}", tool_call.name)))?;
     let grant = authorize_tool_execution(
         view.tool_path(),
         &tool_call.name,
@@ -115,34 +121,21 @@ pub(crate) fn prepare_agent_tool_call(
             &tool_policy,
         ),
     )
-    .map_err(|denial| tool_denial_message(&tool_call.name, denial))?;
+    .map_err(|denial| ExecError::new(tool_denial_message(&tool_call.name, denial)))?;
     let tool_executable = open_executable_no_follow(grant.hit().path())
-        .map_err(|error| format!("cannot run tool:{}: {error}", tool_call.name))?;
-    let git_write_declared = view.mount_table().entries().iter().any(|mount| {
-        mount.target() == "/workspace/.git" && mount.mode() == cortexfs::MountMode::ReadWrite
-    });
-    let sandbox = if git_write_declared {
-        None
-    } else {
-        prepare_agent_tool_sandbox(&view, config.source)?
-    };
+        .map_err(|error| ExecError::new(format!("cannot run tool:{}: {error}", tool_call.name)))?;
+    let sandbox = prepare_optional_agent_tool_sandbox(&view, config.source)?;
     let ctx_home_target = Path::new(DEFAULT_CTX_ROOT).join("home").join(&owner);
+    let authorized_object = authorized_tool_target(config.source, grant.hit());
     let home_target = ctx_home_target.join("agent").join(view.agent_name());
-    let home_dir = open_plain_directory(&home_source)
-        .map_err(|error| format!("cannot open agent home {}: {error}", home_source.display()))?;
-    let home_alias_dir = home_dir
-        .try_clone()
-        .map_err(|error| format!("cannot duplicate agent home fd: {error}"))?;
-    crate::provider::name::files::clear_fd_cloexec(&home_dir)
-        .map_err(|error| format!("cannot preserve agent home fd: {error:?}"))?;
-    crate::provider::name::files::clear_fd_cloexec(&home_alias_dir)
-        .map_err(|error| format!("cannot preserve agent home alias fd: {error:?}"))?;
+    let (home_dir, home_alias_dir) = open_agent_home_fds(&home_source)?;
     let mut command =
         crate::runtime::socket::command_for_agent_identity(BWRAP_PROGRAM, view.identity());
     let inherited_control = inherited_agent_tool_control(config)?;
     let control = config.control.as_ref().or(inherited_control.as_ref());
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config,
+        authorized_object: &authorized_object,
         tool_executable: &proc_fd_path(&tool_executable),
         tool_args: &tool_call.args,
         env: view.env(),
@@ -181,9 +174,27 @@ pub(crate) fn prepare_agent_tool_call(
     })
 }
 
+fn open_agent_home_fds(home_source: &Path) -> Result<(fs::File, fs::File), ExecError> {
+    let home_dir = open_plain_directory(home_source).map_err(|error| {
+        ExecError::with_io(
+            &format!("cannot open agent home {}", home_source.display()),
+            &error,
+        )
+    })?;
+    let home_alias_dir = home_dir
+        .try_clone()
+        .map_err(|error| ExecError::with_io("cannot duplicate agent home fd", &error))?;
+    crate::provider::name::files::clear_fd_cloexec(&home_dir)
+        .map_err(|error| ExecError::new(format!("cannot preserve agent home fd: {error:?}")))?;
+    crate::provider::name::files::clear_fd_cloexec(&home_alias_dir).map_err(|error| {
+        ExecError::new(format!("cannot preserve agent home alias fd: {error:?}"))
+    })?;
+    Ok((home_dir, home_alias_dir))
+}
+
 fn inherited_agent_tool_control(
     config: &AgentToolExecutionConfig<'_>,
-) -> Result<Option<AgentToolControl>, String> {
+) -> Result<Option<AgentToolControl>, ExecError> {
     if config.inherit_control {
         nested_control_environment(
             env::var_os("CTX_CONTROL_SOCKET"),
@@ -214,7 +225,7 @@ impl PreparedAgentToolCall {
     pub(crate) fn execute(
         mut self,
         config: &AgentToolExecutionConfig<'_>,
-    ) -> Result<String, String> {
+    ) -> Result<String, ExecError> {
         let output = if let Some((session_dir, run)) = config.cancel {
             run_agent_tool_process_cancellable(&mut self.command, || {
                 crate::agent_run_cancelled(session_dir, run)
@@ -222,25 +233,33 @@ impl PreparedAgentToolCall {
         } else {
             run_agent_tool_process(&mut self.command)
         }
-        .map_err(|error| format!("cannot run tool:{}: {error}", self.name))?;
+        .map_err(|error| ExecError::new(format!("cannot run tool:{}: {error}", self.name)))?;
         drop(self.home_dir);
         drop(self.home_alias_dir);
         drop(self.tool_executable);
         let result = finish_agent_tool_output(&output)?;
         if let Some((path, tool, limit)) = self.working_set {
-            cortexfs::retain_tsh_context_tool(&path, tool, limit)
-                .map_err(|error| format!("cannot persist session tool context: {error}"))?;
+            cortexfs::retain_tsh_context_tool(&path, tool, limit).map_err(|error| {
+                ExecError::new(format!("cannot persist session tool context: {error}"))
+            })?;
         }
         Ok(result)
     }
 }
 
-fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, String> {
+fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, ExecError> {
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed = parse_tool_stdout(&stdout).map_err(|error| trim_tool_result(&error))?;
+    let parsed = parse_tool_stdout(&stdout)
+        .map_err(|error| ExecError::new(trim_tool_result(error.message())))?;
     let mut result = match parsed {
         ToolStdout::Legacy(text) | ToolStdout::SdkSuccess(text) => text,
-        ToolStdout::SdkError(error) => return Err(trim_tool_result(&error)),
+        ToolStdout::SdkError { mut content, error } => {
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&error);
+            return Err(ExecError::new(trim_tool_result(&content)));
+        }
     };
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !stderr.trim().is_empty() {
@@ -256,7 +275,7 @@ fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, Str
             result.push_str(&output.status.to_string());
             result.push('\n');
         }
-        return Err(trim_tool_result(&result));
+        return Err(ExecError::new(trim_tool_result(&result)));
     }
     Ok(trim_tool_result(&result))
 }
@@ -265,10 +284,10 @@ fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, Str
 pub(crate) enum ToolStdout {
     Legacy(String),
     SdkSuccess(String),
-    SdkError(String),
+    SdkError { content: String, error: String },
 }
 
-pub(crate) fn parse_tool_stdout(output: &str) -> Result<ToolStdout, String> {
+pub(crate) fn parse_tool_stdout(output: &str) -> Result<ToolStdout, ExecError> {
     let Some(first_line) = output.lines().find(|line| !line.is_empty()) else {
         return Ok(ToolStdout::Legacy(output.to_owned()));
     };
@@ -279,34 +298,35 @@ pub(crate) fn parse_tool_stdout(output: &str) -> Result<ToolStdout, String> {
         return Ok(ToolStdout::Legacy(output.to_owned()));
     }
     let run = sdk_frame_string(&first, &["type", "run", "tool"], "run")?;
-    let mut text = String::new();
+    let mut content = Vec::new();
     let mut error = None;
     let mut done = None;
     for line in output.lines().skip_while(|line| line.is_empty()).skip(1) {
         if line.is_empty() || done.is_some() {
-            return Err("invalid CortexFS Tool SDK output after start".to_owned());
+            return Err(ExecError::new(
+                "invalid CortexFS Tool SDK output after start",
+            ));
         }
         let frame = serde_json::from_str::<Value>(line)
-            .map_err(|_error| "invalid CortexFS Tool SDK JSONL after start".to_owned())?;
+            .map_err(|_error| ExecError::new("invalid CortexFS Tool SDK JSONL after start"))?;
         if frame.get("run").and_then(Value::as_str) != Some(run) {
-            return Err("CortexFS Tool SDK output run mismatch".to_owned());
+            return Err(ExecError::new("CortexFS Tool SDK output run mismatch"));
         }
         match frame.get("type").and_then(Value::as_str) {
             Some("message") if error.is_none() => {
                 sdk_exact_keys(&frame, &["type", "run", "role", "content"])?;
                 if frame.get("role").and_then(Value::as_str) != Some("tool") {
-                    return Err("invalid CortexFS Tool SDK message role".to_owned());
+                    return Err(ExecError::new("invalid CortexFS Tool SDK message role"));
                 }
                 let items = frame
                     .get("content")
                     .and_then(Value::as_array)
-                    .ok_or_else(|| "invalid CortexFS Tool SDK message content".to_owned())?;
+                    .ok_or_else(|| ExecError::new("invalid CortexFS Tool SDK message content"))?;
                 for item in items {
-                    sdk_exact_keys(item, &["type", "text"])?;
-                    if item.get("type").and_then(Value::as_str) != Some("text") {
-                        return Err("invalid CortexFS Tool SDK content item".to_owned());
+                    if !item.is_object() || item.get("type").and_then(Value::as_str).is_none() {
+                        return Err(ExecError::new("invalid CortexFS Tool SDK content item"));
                     }
-                    text.push_str(sdk_frame_string(item, &["type", "text"], "text")?);
+                    content.push(item.clone());
                 }
             }
             Some("error") if error.is_none() => {
@@ -322,30 +342,50 @@ pub(crate) fn parse_tool_stdout(output: &str) -> Result<ToolStdout, String> {
                     sdk_frame_string(&frame, &["type", "run", "status"], "status")?.to_owned(),
                 );
             }
-            _ => return Err("invalid CortexFS Tool SDK frame sequence".to_owned()),
+            _ => return Err(ExecError::new("invalid CortexFS Tool SDK frame sequence")),
         }
     }
+    let content = render_sdk_content(&content)?;
     match (error, done.as_deref()) {
-        (None, Some("ok")) => Ok(ToolStdout::SdkSuccess(text)),
-        (Some(error), Some("error")) => Ok(ToolStdout::SdkError(error)),
-        _ => Err("invalid CortexFS Tool SDK terminal status".to_owned()),
+        (None, Some("ok")) => Ok(ToolStdout::SdkSuccess(content)),
+        (Some(error), Some("error")) => Ok(ToolStdout::SdkError { content, error }),
+        _ => Err(ExecError::new("invalid CortexFS Tool SDK terminal status")),
     }
 }
 
-fn sdk_frame_string<'a>(frame: &'a Value, keys: &[&str], name: &str) -> Result<&'a str, String> {
+fn render_sdk_content(content: &[Value]) -> Result<String, ExecError> {
+    let plain_text = content.iter().all(|item| {
+        item.as_object().is_some_and(|object| {
+            object.len() == 2
+                && item.get("type").and_then(Value::as_str) == Some("text")
+                && item.get("text").is_some_and(Value::is_string)
+        })
+    });
+    if !plain_text {
+        return serde_json::to_string(content)
+            .map_err(|_error| ExecError::new("cannot serialize CortexFS Tool SDK content"));
+    }
+    let mut text = String::new();
+    for item in content {
+        text.push_str(sdk_frame_string(item, &["type", "text"], "text")?);
+    }
+    Ok(text)
+}
+
+fn sdk_frame_string<'a>(frame: &'a Value, keys: &[&str], name: &str) -> Result<&'a str, ExecError> {
     sdk_exact_keys(frame, keys)?;
     frame
         .get(name)
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("invalid CortexFS Tool SDK {name}"))
+        .ok_or_else(|| ExecError::new(format!("invalid CortexFS Tool SDK {name}")))
 }
 
-fn sdk_exact_keys(frame: &Value, keys: &[&str]) -> Result<(), String> {
+fn sdk_exact_keys(frame: &Value, keys: &[&str]) -> Result<(), ExecError> {
     let object = frame
         .as_object()
-        .ok_or_else(|| "CortexFS Tool SDK frame is not an object".to_owned())?;
+        .ok_or_else(|| ExecError::new("CortexFS Tool SDK frame is not an object"))?;
     if object.len() != keys.len() || !keys.iter().all(|key| object.contains_key(*key)) {
-        return Err("CortexFS Tool SDK frame has invalid fields".to_owned());
+        return Err(ExecError::new("CortexFS Tool SDK frame has invalid fields"));
     }
     Ok(())
 }
@@ -359,6 +399,7 @@ pub(crate) struct AgentToolSandbox {
 
 pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) config: &'a AgentToolExecutionConfig<'a>,
+    pub(crate) authorized_object: &'a Path,
     pub(crate) tool_executable: &'a Path,
     pub(crate) tool_args: &'a [OsString],
     pub(crate) env: &'a [(String, String)],
@@ -373,19 +414,41 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) control: Option<&'a AgentToolControl>,
 }
 
+pub(crate) fn authorized_tool_target(source: &Path, hit: &cortexfs::ToolHit) -> PathBuf {
+    hit.path().strip_prefix(source).map_or_else(
+        |_error| hit.path().to_path_buf(),
+        |relative| Path::new(DEFAULT_CTX_ROOT).join(relative),
+    )
+}
+
+fn prepare_optional_agent_tool_sandbox(
+    view: &crate::AgentRuntimeView,
+    source: &Path,
+) -> Result<Option<AgentToolSandbox>, ExecError> {
+    let git_write_declared = view.mount_table().entries().iter().any(|mount| {
+        mount.target() == "/workspace/.git" && mount.mode() == cortexfs::MountMode::ReadWrite
+    });
+    if git_write_declared {
+        Ok(None)
+    } else {
+        prepare_agent_tool_sandbox(view, source)
+    }
+}
+
 pub(crate) fn nested_control_environment(
     socket: Option<OsString>,
     token: Option<OsString>,
-) -> Result<Option<AgentToolControl>, String> {
+) -> Result<Option<AgentToolControl>, ExecError> {
     match (socket, token) {
         (None, None) => Ok(None),
         (Some(socket), Some(token)) => {
             validate_nested_control_values(&socket, &token)?;
             let socket = PathBuf::from(socket);
-            let metadata = fs::symlink_metadata(&socket)
-                .map_err(|error| format!("cannot inspect CTX_CONTROL_SOCKET: {error}"))?;
+            let metadata = fs::symlink_metadata(&socket).map_err(|error| {
+                ExecError::new(format!("cannot inspect CTX_CONTROL_SOCKET: {error}"))
+            })?;
             if !nested_control_socket_is_plain(&metadata) {
-                return Err("CTX_CONTROL_SOCKET is not a plain socket".to_owned());
+                return Err(ExecError::new("CTX_CONTROL_SOCKET is not a plain socket"));
             }
             Ok(Some(AgentToolControl {
                 source: socket.clone(),
@@ -393,7 +456,9 @@ pub(crate) fn nested_control_environment(
                 token,
             }))
         }
-        _ => Err("incomplete CTX_CONTROL_SOCKET/CTX_CONTROL_TOKEN pair".to_owned()),
+        _ => Err(ExecError::new(
+            "incomplete CTX_CONTROL_SOCKET/CTX_CONTROL_TOKEN pair",
+        )),
     }
 }
 
@@ -401,15 +466,22 @@ pub(crate) fn nested_control_socket_is_plain(metadata: &fs::Metadata) -> bool {
     metadata.file_type().is_socket() && !metadata.file_type().is_symlink()
 }
 
-pub(crate) fn validate_nested_control_values(socket: &OsStr, token: &OsStr) -> Result<(), String> {
+pub(crate) fn validate_nested_control_values(
+    socket: &OsStr,
+    token: &OsStr,
+) -> Result<(), ExecError> {
     if socket != OsStr::new(crate::runtime::socket::SOCKET_RUN_CONTROL_PATH) {
-        return Err("CTX_CONTROL_SOCKET is not the fixed runtime control path".to_owned());
+        return Err(ExecError::new(
+            "CTX_CONTROL_SOCKET is not the fixed runtime control path",
+        ));
     }
     let token = token
         .to_str()
-        .ok_or_else(|| "CTX_CONTROL_TOKEN is not ASCII hex".to_owned())?;
+        .ok_or_else(|| ExecError::new("CTX_CONTROL_TOKEN is not ASCII hex"))?;
     if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("CTX_CONTROL_TOKEN is not a 32-byte hex token".to_owned());
+        return Err(ExecError::new(
+            "CTX_CONTROL_TOKEN is not a 32-byte hex token",
+        ));
     }
     Ok(())
 }
@@ -417,7 +489,7 @@ pub(crate) fn validate_nested_control_values(socket: &OsStr, token: &OsStr) -> R
 pub(crate) fn prepare_agent_tool_sandbox(
     view: &cortexfs::AgentRuntimeView,
     source: &Path,
-) -> Result<Option<AgentToolSandbox>, String> {
+) -> Result<Option<AgentToolSandbox>, ExecError> {
     let Some(workspace) = env::var_os("CTX_WORKSPACE").map(PathBuf::from) else {
         return Ok(None);
     };
@@ -441,10 +513,18 @@ pub(crate) fn prepare_agent_tool_sandbox(
         .join(hash);
     let upper = root.join("upper");
     let work = root.join("work");
-    fs::create_dir_all(&upper)
-        .map_err(|error| format!("cannot create overlay upper {}: {error}", upper.display()))?;
-    fs::create_dir_all(&work)
-        .map_err(|error| format!("cannot create overlay work {}: {error}", work.display()))?;
+    fs::create_dir_all(&upper).map_err(|error| {
+        ExecError::with_io(
+            &format!("cannot create overlay upper {}", upper.display()),
+            &error,
+        )
+    })?;
+    fs::create_dir_all(&work).map_err(|error| {
+        ExecError::with_io(
+            &format!("cannot create overlay work {}", work.display()),
+            &error,
+        )
+    })?;
     Ok(Some(AgentToolSandbox {
         workspace,
         upper,
@@ -602,6 +682,9 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         OsString::from("--setenv"),
         OsString::from("CTX_TOOL_MODE"),
         OsString::from("cli"),
+        OsString::from("--setenv"),
+        OsString::from("CTX_AUTHORIZED_OBJECT"),
+        request.authorized_object.as_os_str().to_owned(),
         OsString::from("--setenv"),
         OsString::from("PATH"),
         OsString::from("/usr/bin:/bin"),
@@ -800,14 +883,14 @@ pub(crate) fn bwrap_dir_args_for_chdir(cwd: &str) -> Vec<OsString> {
 
 pub(crate) fn run_agent_tool_process(
     command: &mut Command,
-) -> Result<std::process::Output, String> {
+) -> Result<std::process::Output, ExecError> {
     run_agent_tool_process_with_timeout(command, Duration::from_secs(agent_tool_timeout_seconds()))
 }
 
 pub(crate) fn run_agent_tool_process_cancellable(
     command: &mut Command,
     mut cancelled: impl FnMut() -> bool,
-) -> Result<std::process::Output, String> {
+) -> Result<std::process::Output, ExecError> {
     run_agent_tool_process_with_timeout_and_cancel(
         command,
         Duration::from_secs(agent_tool_timeout_seconds()),
@@ -819,7 +902,7 @@ pub(crate) fn run_agent_tool_process_cancellable(
 pub(crate) fn run_agent_tool_process_with_timeout(
     command: &mut Command,
     timeout: Duration,
-) -> Result<std::process::Output, String> {
+) -> Result<std::process::Output, ExecError> {
     run_agent_tool_process_with_timeout_and_cancel(command, timeout, &mut || false)
 }
 
@@ -827,21 +910,22 @@ fn run_agent_tool_process_with_timeout_and_cancel(
     command: &mut Command,
     timeout: Duration,
     cancelled: &mut impl FnMut() -> bool,
-) -> Result<std::process::Output, String> {
+) -> Result<std::process::Output, ExecError> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = spawn_with_etxtbsy_retry(command).map_err(|error| error.to_string())?;
+    let mut child =
+        spawn_with_etxtbsy_retry(command).map_err(|error| ExecError::new(error.to_string()))?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "cannot read tool stdout".to_owned())?;
+        .ok_or_else(|| ExecError::new("cannot read tool stdout"))?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| "cannot read tool stderr".to_owned())?;
+        .ok_or_else(|| ExecError::new("cannot read tool stderr"))?;
     let stdout_reader =
         thread::spawn(move || read_limited_bytes(stdout, MAX_AGENT_TOOL_OUTPUT_BYTES + 1));
     let stderr_reader =
@@ -867,9 +951,9 @@ fn run_agent_tool_process_with_timeout_and_cancel(
                 if let Some(reader) = stderr_reader.take() {
                     let _ignored = reader.join();
                 }
-                return Err(format!(
+                return Err(ExecError::new(format!(
                     "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
-                ));
+                )));
             }
             stdout = Some(output);
         }
@@ -888,24 +972,30 @@ fn run_agent_tool_process_with_timeout_and_cancel(
                 if let Some(reader) = stdout_reader.take() {
                     let _ignored = reader.join();
                 }
-                return Err(format!(
+                return Err(ExecError::new(format!(
                     "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
-                ));
+                )));
             }
             stderr = Some(output);
         }
-        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| ExecError::new(error.to_string()))?
+        {
             break status;
         }
         if Instant::now() >= deadline {
             terminate_process_group(&mut child);
             let _ignored = child.wait();
-            return Err(format!("tool timed out after {}s", timeout.as_secs()));
+            return Err(ExecError::new(format!(
+                "tool timed out after {}s",
+                timeout.as_secs()
+            )));
         }
         if cancelled() {
             terminate_process_group(&mut child);
             let _ignored = child.wait();
-            return Err("tool cancelled".to_owned());
+            return Err(ExecError::new("tool cancelled"));
         }
         thread::sleep(Duration::from_millis(50));
     };
@@ -923,9 +1013,9 @@ fn run_agent_tool_process_with_timeout_and_cancel(
         }
     };
     if stdout.len() > MAX_AGENT_TOOL_OUTPUT_BYTES || stderr.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
-        return Err(format!(
+        return Err(ExecError::new(format!(
             "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
-        ));
+        )));
     }
     Ok(std::process::Output {
         status,
@@ -937,17 +1027,17 @@ fn run_agent_tool_process_with_timeout_and_cancel(
 pub(crate) fn collect_agent_tool_output_reader(
     reader: Option<thread::JoinHandle<Vec<u8>>>,
     timeout: Duration,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ExecError> {
     let Some(reader) = reader else {
         return Ok(Vec::new());
     };
     let deadline = Instant::now() + timeout;
     while !reader.is_finished() {
         if Instant::now() >= deadline {
-            return Err(format!(
+            return Err(ExecError::new(format!(
                 "tool output did not close within {}s",
                 timeout.as_secs()
-            ));
+            )));
         }
         thread::sleep(Duration::from_millis(10));
     }

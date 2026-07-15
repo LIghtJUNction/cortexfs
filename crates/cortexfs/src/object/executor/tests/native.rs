@@ -58,7 +58,7 @@ fn session_loaded_or_declared_native_tool_executes_without_bypassing_policy()
 
     let before_declaration = execute_agent_tool_call(&config, &call);
     assert!(
-        matches!(before_declaration, Err(ref error) if error.contains("declare it in the agent tools control"))
+        matches!(before_declaration, Err(ref error) if error.message().contains("declare it in the agent tools control"))
     );
 
     let view = cortexfs::derive_agent_runtime_view(&root, "coder")
@@ -88,7 +88,26 @@ fn session_loaded_or_declared_native_tool_executes_without_bypassing_policy()
     let after_tsh_unload = execute_agent_tool_call(&config, &call)?;
     assert_eq!(after_tsh_unload, "loaded-direct");
 
-    let sdk_cases = [
+    assert_sdk_output_contract(&tool_dir.join("bash"), &config, &call)?;
+    write_executable_script(&tool_dir.join("bash"), "#!/bin/sh\nprintf loaded-direct\n")?;
+
+    fs::write(control.join("policy"), "allow coder_t model:main use\n")?;
+    let declared_but_denied = execute_agent_tool_call(&config, &call);
+    assert_eq!(
+        declared_but_denied,
+        Err(ExecError::new("cannot execute tool:bash: EACCES"))
+    );
+
+    let _ignored = fs::remove_dir_all(root);
+    Ok(())
+}
+
+fn assert_sdk_output_contract(
+    tool: &Path,
+    config: &AgentModelRunConfig,
+    call: &AgentToolCall,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
         (
             concat!(
                 "#!/bin/sh\n",
@@ -111,21 +130,27 @@ fn session_loaded_or_declared_native_tool_executes_without_bypassing_policy()
             "terminal status",
         ),
     ];
-    for (script, expected) in sdk_cases {
-        write_executable_script(&tool_dir.join("bash"), script)?;
-        let result = execute_agent_tool_call(&config, &call);
-        assert!(matches!(result, Err(ref error) if error.contains(expected)));
+    for (script, expected) in cases {
+        write_executable_script(tool, script)?;
+        let result = execute_agent_tool_call(config, call);
+        assert!(matches!(result, Err(ref error) if error.message().contains(expected)));
     }
-    write_executable_script(&tool_dir.join("bash"), "#!/bin/sh\nprintf loaded-direct\n")?;
-
-    fs::write(control.join("policy"), "allow coder_t model:main use\n")?;
-    let declared_but_denied = execute_agent_tool_call(&config, &call);
+    write_executable_script(
+        tool,
+        concat!(
+            "#!/bin/sh\n",
+            "printf '%s\\n' '{\"type\":\"start\",\"run\":\"r1\",\"tool\":\"bash\"}' ",
+            "'{\"type\":\"message\",\"run\":\"r1\",\"role\":\"tool\",\"content\":[{\"type\":\"text\",\"text\":\"remote detail\"}]}' ",
+            "'{\"type\":\"error\",\"run\":\"r1\",\"code\":\"EIO\",\"message\":\"remote MCP tool returned an error\"}' ",
+            "'{\"type\":\"done\",\"run\":\"r1\",\"status\":\"error\"}'\n",
+        ),
+    )?;
     assert_eq!(
-        declared_but_denied,
-        Err("cannot execute tool:bash: EACCES".to_owned())
+        execute_agent_tool_call(config, call),
+        Err(ExecError::new(
+            "remote detail\nEIO: remote MCP tool returned an error"
+        ))
     );
-
-    let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
 use super::runtime::test_agent_run_config;
