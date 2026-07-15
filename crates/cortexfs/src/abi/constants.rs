@@ -106,6 +106,7 @@ pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
 
 /// Canonical agent control-file set materialized by bootstrap.
 pub const AGENT_CONTROL_FILES: &[&str] = &[
+    "abi",
     "owner",
     "uid",
     "gid",
@@ -134,7 +135,6 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
 ///
 /// Entries may overlap [`AGENT_CONTROL_FILES`] to preserve canonical bootstrap materialization.
 pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &[
-    "abi",
     "approval",
     "tools",
     "system.md",

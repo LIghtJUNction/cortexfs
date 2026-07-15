@@ -165,12 +165,15 @@ pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
     })
 }
 
-pub(crate) fn assistant_text_from_event_frames(frames: &[String]) -> Option<String> {
+fn assistant_text_from_event_frames(run_id: &str, frames: &[String]) -> Option<String> {
     let mut output = String::new();
     for frame in frames {
         let Ok(value) = serde_json::from_str::<Value>(frame) else {
             continue;
         };
+        if value.get("run").and_then(Value::as_str) != Some(run_id) {
+            continue;
+        }
         let event_type = value.get("type").and_then(Value::as_str);
         if matches!(event_type, Some("delta" | "reasoning_delta"))
             && let Some(text) = value.get("text").and_then(Value::as_str)
@@ -191,83 +194,102 @@ pub(crate) fn assistant_text_from_event_frames(frames: &[String]) -> Option<Stri
     (!output.is_empty()).then_some(output)
 }
 
-pub(crate) fn record_agent_error_from_event_frames(
-    session_dir: &Path,
-    run_id: &str,
-    frames: &[String],
-) -> Result<bool, SocketSessionRecordError> {
-    let mut error = None;
-    let mut terminal = None;
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        if value.get("run").and_then(Value::as_str) != Some(run_id) {
-            continue;
-        }
-        match value.get("type").and_then(Value::as_str) {
-            Some("error") => error = Some(frame.as_str()),
-            Some("done") => {
-                terminal = None;
-                if value.get("status").and_then(Value::as_str) == Some("error")
-                    && let Some(error) = error
-                {
-                    terminal = Some([error, frame.as_str()]);
-                }
-            }
-            _ => {}
-        }
-    }
-    let Some(terminal) = terminal else {
-        return Ok(false);
-    };
-
-    require_socket_session_files(session_dir)?;
-    let events = columnar::read_text(
-        session_dir,
-        columnar::Stream::Events,
-        MAX_SOCKET_RUNTIME_EVENTS_BYTES,
-    )
-    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    let mut already_done = false;
-    for_each_jsonl_line(&events, |_line_number, line| {
-        already_done |= serde_json::from_str::<Value>(line).is_ok_and(|value| {
-            value.get("type").and_then(Value::as_str) == Some("done")
-                && value.get("run").and_then(Value::as_str) == Some(run_id)
-        });
-    });
-    if already_done {
-        return Ok(true);
-    }
-
-    append_session_lines(session_dir, "events.jsonl", &terminal)?;
-    Ok(true)
+enum AgentTerminal<'a> {
+    Success {
+        assistant: Option<String>,
+        done: &'a str,
+    },
+    Error {
+        error: &'a str,
+        done: &'a str,
+    },
 }
 
-pub(crate) fn record_agent_terminal_state_from_event_frames(
-    session_dir: &Path,
+/// Finds the final terminal status event and associated done marker for a run.
+fn agent_terminal_from_event_frames<'a>(
     run_id: &str,
-    frames: &[String],
-) -> Result<bool, SocketSessionRecordError> {
-    let matching_done = frames.iter().rev().find_map(|frame| {
+    frames: &'a [String],
+) -> Option<AgentTerminal<'a>> {
+    let (done, success) = frames.iter().rev().find_map(|frame| {
         let value = serde_json::from_str::<Value>(frame).ok()?;
         if value.get("type").and_then(Value::as_str) != Some("done")
             || value.get("run").and_then(Value::as_str) != Some(run_id)
         {
             return None;
         }
-        Some(value)
-    });
-    let Some(matching_done) = matching_done else {
+        match value.get("status").and_then(Value::as_str) {
+            Some("ok") => Some((frame.as_str(), true)),
+            Some("error") => Some((frame.as_str(), false)),
+            _ => None,
+        }
+    })?;
+    if success {
+        return Some(AgentTerminal::Success {
+            assistant: assistant_text_from_event_frames(run_id, frames),
+            done,
+        });
+    }
+    frames
+        .iter()
+        .rev()
+        .find(|frame| {
+            serde_json::from_str::<Value>(frame).is_ok_and(|value| {
+                value.get("type").and_then(Value::as_str) == Some("error")
+                    && value.get("run").and_then(Value::as_str) == Some(run_id)
+                    && value.get("recoverable").and_then(Value::as_bool) != Some(true)
+            })
+        })
+        .map(|error| AgentTerminal::Error {
+            error: error.as_str(),
+            done,
+        })
+}
+
+pub(crate) fn settle_agent_run_from_event_frames(
+    session_dir: &Path,
+    run_id: &str,
+    frames: &[String],
+) -> Result<bool, SocketSessionRecordError> {
+    let Some(terminal) = agent_terminal_from_event_frames(run_id, frames) else {
         return Ok(false);
     };
-    let terminal_state = match matching_done.get("status").and_then(Value::as_str) {
-        Some("ok") => "done",
-        Some("error") => "error",
-        _ => return Ok(false),
-    };
     require_socket_session_files(session_dir)?;
-    transition_active_session_run(session_dir, run_id, terminal_state)
+    let history = columnar::HistoryGuard::exclusive(session_dir)
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    if !active_session_run_matches_locked(&history, session_dir, run_id)? {
+        return Ok(false);
+    }
+    history
+        .refresh_claims()
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    let terminal_state = match terminal {
+        AgentTerminal::Success {
+            assistant: Some(assistant),
+            done,
+        } => {
+            record_assistant_response_locked(&history, session_dir, run_id, &assistant, done)?;
+            "done"
+        }
+        AgentTerminal::Success {
+            assistant: None,
+            done,
+        } => {
+            history
+                .append(columnar::Stream::Events, &[done])
+                .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+            "done"
+        }
+        AgentTerminal::Error { error, done } => {
+            history
+                .append(columnar::Stream::Events, &[error, done])
+                .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+            "error"
+        }
+    };
+    history
+        .refresh_claims()
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    transition_active_session_run_locked(&history, session_dir, run_id, terminal_state)
 }
 
 pub(crate) fn record_tool_results_from_event_frames(

@@ -1,4 +1,3 @@
-use crate::agent::control::approval_abi_valid;
 use crate::support::layout::{
     LayoutPathRole, PathLayoutIssue, PlainPathKindCheck, check_plain_file, require_plain,
 };
@@ -309,8 +308,6 @@ pub(crate) fn inspect_agent_control_files(
         return;
     }
 
-    let mut abi = None;
-    let mut approval = None;
     for file in AGENT_CONTROL_FILES.iter().copied().chain(
         AGENT_OPTIONAL_CONTROL_FILES
             .iter()
@@ -328,22 +325,7 @@ pub(crate) fn inspect_agent_control_files(
         };
         if validate_agent_bootstrap_control_content(file, &content).is_err() {
             issues.push(PathLayoutIssue::invalid_value(path, "invalid content"));
-            continue;
         }
-        if file == "abi" {
-            abi = Some(content);
-        } else if file == "approval" {
-            approval = Some(content);
-        }
-    }
-    if !approval_abi_valid(
-        abi.as_deref().map(str::trim),
-        approval.as_deref().map(str::trim),
-    ) {
-        issues.push(PathLayoutIssue::invalid_value(
-            format!("agent/{name}.d/approval"),
-            "invalid content",
-        ));
     }
 }
 

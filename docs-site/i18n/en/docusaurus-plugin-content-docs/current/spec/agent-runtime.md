@@ -79,12 +79,10 @@ Assistant text is derived from stable event frames and recorded back to the
 durable session. Raw messages and events remain ordinary files; context packs
 are rebuildable views.
 
-Executable agents select their launch ABI through the optional
-`agent/<name>.d/abi` control. Absence means the exact legacy `argv-v1`
-contract. `sdk-envelope-v1` opts into a host-written, bounded typed invocation
-envelope on stdin and permits the host to restart the executable with the
-authoritative result of a yielded tool call. `argv-v1` and `sdk-envelope-v1`
-are the only v1 values.
+Executable agents use the required `agent/<name>.d/abi` control. Its only v1
+value is `sdk-envelope-v1`: the host writes a bounded typed invocation envelope
+to stdin and may restart the executable with the authoritative result of a
+yielded tool call.
 
 The `sdk-envelope-v1` stdin body is exactly one UTF-8 JSON object followed by
 one newline, with no other bytes, and is at most 1 MiB including that newline:
@@ -121,15 +119,15 @@ crash cannot resume from agent-provided state.
 An executable Agent SDK step may terminate by yielding exactly one typed
 `tool_call`. The process emits no `done` frame and exits. The socket host
 validates and executes the request through the existing agent tool authority,
-policy, and sandbox path, emits the matching `tool_result`, and, for
-`sdk-envelope-v1`, may start the next bounded step with that result in the
-typed envelope. The host alone emits the logical run's final `done`.
+policy, and sandbox path, emits the matching `tool_result`, and may start the
+next bounded step with that result in the typed envelope. The host alone emits
+the logical run's final `done`.
 Agent-originated results, malformed or multiple calls, and frames after a
 yielded call are invalid output.
 
 The optional `agent/<name>.d/approval` control is `auto` when absent and accepts
-`auto` or `ask`. `ask` is valid only with `sdk-envelope-v1`. After the host has
-completed direct-native declaration, path, agent/tool policy, Linux/mount, and
+`auto` or `ask`. In `ask` mode, after the host has completed direct-native
+declaration, path, agent/tool policy, Linux/mount, and
 nofollow executable checks—but before spawn—it emits a bounded
 `approval_request`. It reads exactly one bounded response on the same socket:
 
@@ -145,10 +143,10 @@ The root-authoritative system socket accepts the agent owner UID or UID 0 for
 internal child dispatch and stop. This UID 0 exception does not apply to the
 receipt-bound per-run capability socket, which remains owner-UID only.
 
-Before invoking an executable agent for a durable `send`, the socket runtime
-sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
-`messages.jsonl` history. This is prompt context only; it does not grant
-additional session authority.
+Before invoking an executable agent, the socket runtime writes exactly one
+`sdk-envelope-v1` frame to stdin. Its `history_messages` and `tool_context`
+fields carry bounded prompt context; the agent boundary does not expose legacy
+`CTX_AGENT_HISTORY_MESSAGES` or `CTX_AGENT_TOOL_CONTEXT` environment inputs.
 
 The socket-activated executable agent runtime observes the durable session state
 for the active run. When the matching `done/cancelled` event appears, it stops

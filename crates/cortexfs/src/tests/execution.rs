@@ -7,6 +7,7 @@ fn reference_tree(name: &str) -> TestDir {
     root
 }
 
+/// Builds an in-process agent executable socket runtime for direct execution tests.
 fn direct_agent_runtime<'a>(
     root: &'a Path,
     view: &'a crate::AgentRuntimeView,
@@ -42,7 +43,23 @@ fn response_run(response: &crate::SocketRuntimeResponse) -> Result<String, Strin
     Err("runtime response has no start run".to_owned())
 }
 
+fn agent_envelope(run: &str) -> String {
+    serde_json::json!({
+        "schema": cortexfs_runtime_client::agent::AGENT_INVOCATION_SCHEMA,
+        "run": run,
+        "step": 0,
+        "input": "",
+        "history_messages": "",
+        "tool_context": "",
+        "observation": null
+    })
+    .to_string()
+        + "\n"
+}
+
+mod cancel;
 mod history;
 mod messages;
 mod policy;
 mod sandbox;
+mod settlement;

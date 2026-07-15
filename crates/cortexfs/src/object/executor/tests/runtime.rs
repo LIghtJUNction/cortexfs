@@ -16,7 +16,6 @@ pub(super) fn test_agent_run_config() -> AgentModelRunConfig {
         source: PathBuf::from("/tmp/cortexfs-test-source"),
         ctx_root: PathBuf::from("/tmp/cortexfs-test-ctx"),
         run: "r1".to_owned(),
-        session: "default".to_owned(),
         model: "main".to_owned(),
         model_path: PathBuf::from("/tmp/cortexfs-test-ctx/model/main"),
         system_prompt: String::new(),
@@ -289,12 +288,33 @@ fn prompt_admission_includes_output_reservation_and_rechecks_tool_growth() {
         matches!(budget, Some(value) if value.output_tokens() == 1_024 && value.input_chars() == 12_288)
     );
     assert_eq!(admit_agent_prompt(&config, "hello"), Ok(true));
-    let call = AgentToolCall {
-        id: "call-1".to_owned(),
-        name: "tsh".to_owned(),
-        args: vec![OsString::from("status")],
+    let frame = format!(
+        "{}\n",
+        serde_json::json!({
+            "schema": cortexfs_runtime_client::agent::AGENT_INVOCATION_SCHEMA,
+            "run": "r1",
+            "step": 1,
+            "input": "hello",
+            "history_messages": "previous message",
+            "tool_context": "",
+            "observation": {
+                "tool_call_id": "call-1",
+                "name": "tsh",
+                "status": "ok",
+                "content": "x".repeat(16_384),
+                "truncated": false
+            }
+        })
+    );
+    let envelope = cortexfs_runtime_client::agent::read_agent_invocation(frame.as_bytes());
+    assert!(
+        envelope.is_ok(),
+        "valid test envelope rejected: {envelope:?}"
+    );
+    let Some(envelope) = envelope.ok() else {
+        return;
     };
-    config.push_tool_result(&call, &"x".repeat(16_384));
+    config.apply_invocation(&envelope);
     assert_eq!(admit_agent_prompt(&config, "hello"), Ok(false));
 }
 

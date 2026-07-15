@@ -333,6 +333,7 @@ pub(super) fn agent_control_fixture_value(file: &str) -> &'static str {
         "path" => "/ctx/tool:/ctx/home/1000/tool",
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev",
         "model" => "debug/echo",
+        "abi" => "sdk-envelope-v1",
         "window" => "auto",
         "policy" => "allow coder_t model:debug/echo use",
         "status" => "idle",

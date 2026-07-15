@@ -23,15 +23,12 @@ fn agent_executable_socket_direct_does_not_inherit_provider_secrets() {
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
+IFS= read -r envelope || exit 2
 if [ -n "$CTX_PROVIDER_SECRET_VALUE$CTX_PROVIDER_SECRET_PROVIDER$CTX_PROVIDER_SECRET_SLOT$CTX_PROVIDER_SECRET_FD$CTX_PROVIDER_SECRET_PATH" ]; then
-  printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
   printf '{"type":"delta","run":"%s","text":"leaked:%s:%s:%s:%s:%s"}\n' "$CTX_RUN_ID" "$CTX_PROVIDER_SECRET_VALUE" "$CTX_PROVIDER_SECRET_PROVIDER" "$CTX_PROVIDER_SECRET_SLOT" "$CTX_PROVIDER_SECRET_FD" "$CTX_PROVIDER_SECRET_PATH"
-  printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
   exit 0
 fi
-printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 printf '{"type":"delta","run":"%s","text":"secret-not-inherited"}\n' "$CTX_RUN_ID"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
@@ -262,11 +259,9 @@ fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
         history_messages: "",
         tool_context: "",
         debug: None,
-        envelope: None,
-        step: 0,
     };
     let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, None, None)
+        agent_executable_socket_command(runtime, &opened, request, 0, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let replacement = root.join("agent").join("replacement");
     write_text_file(&replacement, "#!/bin/sh\nprintf B\n");
@@ -326,12 +321,10 @@ fn agent_executable_socket_bwrap_preserves_provider_secret_env()
         history_messages: "",
         tool_context: "",
         debug: None,
-        envelope: None,
-        step: 0,
     };
 
     let (mut command, agent_executable_fd) =
-        agent_executable_socket_command(runtime, &opened, request, None, None)
+        agent_executable_socket_command(runtime, &opened, request, 0, None, None)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let output = command.output()?;
     drop(agent_executable_fd);
@@ -358,6 +351,7 @@ fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
     assert!(fs::create_dir_all(&control_dir).is_ok());
     let (client, mut socket) = ok!(UnixStream::pair());
     assert!(client.shutdown(Shutdown::Write).is_ok());
+    let envelope = agent_envelope("run-1");
 
     let result = crate::runtime::socket::exec::run_agent_executable_streaming(
         &mut socket,
@@ -387,9 +381,9 @@ fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
             history_messages: "",
             tool_context: "",
             debug: None,
-            envelope: None,
-            step: 0,
         },
+        &envelope,
+        0,
     );
 
     assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
@@ -408,6 +402,7 @@ fn debug_alias_does_not_create_provider_egress() {
     assert!(fs::create_dir_all(&control_dir).is_ok());
     let (client, mut socket) = ok!(UnixStream::pair());
     assert!(client.shutdown(Shutdown::Write).is_ok());
+    let envelope = agent_envelope("run-1");
 
     let result = crate::runtime::socket::exec::run_agent_executable_streaming(
         &mut socket,
@@ -437,9 +432,9 @@ fn debug_alias_does_not_create_provider_egress() {
             history_messages: "",
             tool_context: "",
             debug: None,
-            envelope: None,
-            step: 0,
         },
+        &envelope,
+        0,
     );
 
     assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
@@ -460,15 +455,15 @@ fn agent_executable_socket_bwrap_ignores_request_workspace()
 workspace_env=absent
 workspace_mount=absent
 workspace_context=neutral
+IFS= read -r envelope || exit 2
+tool_context="$(printf '%s' "$envelope" | jq -r '.tool_context')"
 if [ -n "${CTX_WORKSPACE+x}" ]; then workspace_env=leaked; fi
 if [ -e /workspace/etc/passwd ]; then workspace_mount=leaked; fi
-case "$CTX_AGENT_TOOL_CONTEXT" in
+case "$tool_context" in
   *'Host workspace configuration: determined by agent policy'*) ;;
   *) workspace_context=leaked ;;
 esac
-printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 printf '{"type":"delta","run":"%s","text":"%s-%s-%s"}\n' "$CTX_RUN_ID" "$workspace_env" "$workspace_mount" "$workspace_context"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
@@ -674,13 +669,12 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
         history_messages: "[]",
         tool_context: "",
         debug: None,
-        envelope: None,
-        step: 0,
     };
     let (mut command, _fds) = ok!(agent_executable_socket_command(
         runtime,
         &opened,
         request,
+        0,
         Some((capability.socket(), environment.as_slice())),
         None,
     ));
@@ -708,7 +702,7 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
     assert!(fs::remove_dir(&control_dir).is_ok());
 
     let (mut command, _fds) = ok!(agent_executable_socket_command(
-        runtime, &opened, request, None, None
+        runtime, &opened, request, 0, None, None
     ));
     assert!(ok!(command.output()).status.success());
 }

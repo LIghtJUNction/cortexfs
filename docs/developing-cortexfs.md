@@ -234,9 +234,9 @@ agent 默认 native tool 只有 `tsh`。后续工具不是凭 prompt 自动出�
 npm run agent-tool-loop:smoke
 ```
 
-该 smoke 会验证 `tsh tools`、`tsh load/unload`、object-runner 多轮 tool call、
-工具结果通过 `CTX_AGENT_TOOL_CONTEXT` 回灌给下一轮模型进程，以及授权后的可见 `tsh`
-子进程调用。
+该 smoke 会验证 `tsh tools`、`tsh load/unload`、host 驱动的
+`sdk-envelope-v1` 多步 tool call、工具 observation 回灌，以及授权后的可见 `tsh`
+子进程调用。agent 进程边界不再读取旧的上下文环境变量。
 
 ### 上下文窗口管理
 

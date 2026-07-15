@@ -1,4 +1,3 @@
-use crate::agent::control::approval_abi_valid;
 use crate::*;
 
 /// Installs a v1 executable object wrapper plus required `.d` control files.
@@ -94,19 +93,6 @@ pub(crate) fn validate_control_overrides(
         }
         validate_object_control_content(class, file, &ensure_trailing_newline(value))?;
     }
-    if class == ObjectClass::Agent {
-        let abi = control_overrides
-            .iter()
-            .find_map(|&(file, value)| (file == "abi").then_some(value))
-            .map(str::trim);
-        let approval = control_overrides
-            .iter()
-            .find_map(|&(file, value)| (file == "approval").then_some(value))
-            .map(str::trim);
-        if !approval_abi_valid(abi, approval) {
-            return Err(ObjectBootstrapError::InvalidControlValue);
-        }
-    }
     Ok(())
 }
 
@@ -164,10 +150,7 @@ pub(crate) fn validate_agent_bootstrap_control_content(
     content: &str,
 ) -> Result<(), ObjectBootstrapError> {
     let valid = match file {
-        "abi" => matches!(
-            content,
-            "argv-v1" | "argv-v1\n" | "sdk-envelope-v1" | "sdk-envelope-v1\n"
-        ),
+        "abi" => matches!(content, "sdk-envelope-v1" | "sdk-envelope-v1\n"),
         "tools" => inspect_agent_tools_control(content).is_ok(),
         "meta.json" => serde_json::from_str::<Value>(content).is_ok_and(|value| value.is_object()),
         "system.md" | "prompt.template.md" => !content.contains('\0'),
@@ -223,6 +206,7 @@ pub(crate) fn default_model_control_value(object_name: &str, file: &str) -> Stri
 
 pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> String {
     match file {
+        "abi" => "sdk-envelope-v1".to_owned(),
         "owner" | "uid" | "gid" => "0".to_owned(),
         "label" => format!("user_u:agent_r:{object_name}_t:s0"),
         "iso" => "shared".to_owned(),

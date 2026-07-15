@@ -64,6 +64,7 @@ fn agent_bootstrap_rejects_invalid_optional_control_content() {
     for (file, content) in [
         ("abi", "future-v1\n"),
         ("abi", " argv-v1\n"),
+        ("abi", "argv-v1\n"),
         ("abi", "argv-v1\n\n"),
         ("tools", "bad/name\n"),
         ("tools", "fs.read\nfs.read\n"),
@@ -82,12 +83,7 @@ fn agent_bootstrap_rejects_invalid_optional_control_content() {
 
 #[test]
 fn agent_bootstrap_accepts_canonical_abi_with_optional_newline() {
-    for content in [
-        "argv-v1",
-        "argv-v1\n",
-        "sdk-envelope-v1",
-        "sdk-envelope-v1\n",
-    ] {
+    for content in ["sdk-envelope-v1", "sdk-envelope-v1\n"] {
         assert!(
             crate::validate_object_control_content(ObjectClass::Agent, "abi", content).is_ok(),
             "{content:?}"
@@ -96,22 +92,12 @@ fn agent_bootstrap_accepts_canonical_abi_with_optional_newline() {
 }
 
 #[test]
-fn agent_bootstrap_requires_sdk_envelope_for_ask_approval() {
+fn agent_bootstrap_defaults_to_sdk_envelope_for_ask_approval() {
     let root = clean_test_dir("object-bootstrap-agent-approval");
     let target = root.join("runtime/agent");
     write_fixture_file(&target, 0o755);
     let target = target.display().to_string();
 
-    assert_eq!(
-        install_executable_object_wrapper(
-            &root,
-            ObjectClass::Agent,
-            "coder",
-            &target,
-            &[("approval", "ask")],
-        ),
-        Err(ObjectBootstrapError::InvalidControlValue)
-    );
     assert_eq!(
         install_executable_object_wrapper(
             &root,
@@ -142,9 +128,15 @@ fn agent_bootstrap_requires_sdk_envelope_for_ask_approval() {
             ObjectClass::Agent,
             "coder",
             &target,
-            &[("approval", "ask"), ("abi", "sdk-envelope-v1")],
+            &[("approval", "ask")],
         )
         .is_ok()
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("agent/coder.d/abi"))
+            .ok()
+            .as_deref(),
+        Some("sdk-envelope-v1\n")
     );
 }
 

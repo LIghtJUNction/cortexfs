@@ -97,10 +97,9 @@ symlink overlay:
 
 ## Exec Protocol
 
-Executable agents may select their launch protocol with the optional
-`agent/<name>.d/abi` control. The only v1 values are `argv-v1` and
-`sdk-envelope-v1`. Absence is exactly equivalent to `argv-v1`, preserving the
-legacy argv/stdin behavior without inference or content sniffing.
+Executable agents use the required `agent/<name>.d/abi` control. Its only v1
+value is `sdk-envelope-v1`; the runtime supplies the typed invocation described
+by the [Agent Runtime specification](agent-runtime.md).
 
 `model/<provider>/<model>`, `agent/<name>`, and `tool/<name>` are executable
 files. They must accept argv or stdin input:

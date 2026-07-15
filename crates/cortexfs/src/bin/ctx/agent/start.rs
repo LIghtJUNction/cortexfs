@@ -85,7 +85,7 @@ pub(crate) fn agent_start_host(
         system,
         terminal_alias_created,
     } = start_agent_runtime_services(root, args, &cli_mounts, &view)?;
-    let invocation = systemd_run_invocation_id(&output);
+    let invocation = invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
     let role = agent_role_for_display(view.agent_name());
     let uid = view.identity().uid().to_string();
@@ -506,10 +506,6 @@ pub(crate) fn agent_start_status_lines(
     lines
 }
 
-pub(crate) fn systemd_run_invocation_id(output: &std::process::Output) -> Option<String> {
-    invocation_id(output)
-}
-
 pub(crate) fn systemd_run_diagnostics(output: &std::process::Output) -> String {
     let mut diagnostics = String::new();
     for bytes in [&output.stderr, &output.stdout] {
@@ -610,14 +606,6 @@ fn remove_plain_runtime_socket(path: &Path) {
 
 pub(crate) fn agent_unit_main_pid(identity: &AgentUnixIdentity, unit: &str) -> Option<String> {
     unit_main_pid_for(identity, unit).map(|pid| pid.to_string())
-}
-
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "compatibility parser exercised by unit harness")
-)]
-pub(crate) fn parse_systemctl_main_pid(output: &str) -> Option<String> {
-    parse_main_pid(output).map(|pid| pid.to_string())
 }
 
 const SYSTEMCTL_PROGRAM: &str = "/usr/bin/systemctl";

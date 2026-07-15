@@ -294,6 +294,7 @@ fn complete_agent_control_value(file: &str, name: &str) -> String {
         "path" => "/ctx/tool:/ctx/home/1000/tool".to_owned(),
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
         "model" => "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+        "abi" => "sdk-envelope-v1".to_owned(),
         "window" => "auto".to_owned(),
         "policy" => format!("allow {subject} model:api.lmm.best/gpt-5.3-codex-spark use"),
         "status" => "idle".to_owned(),

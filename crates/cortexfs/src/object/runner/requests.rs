@@ -334,6 +334,7 @@ mod requests_tests {
         )
         .expect("mount");
         fs::write(control.join("model"), "local/chat\n").expect("model");
+        fs::write(control.join("abi"), "sdk-envelope-v1\n").expect("abi");
         fs::write(control.join("window"), "auto\n").expect("window");
         let model_control = root.join("model/local/chat.d");
         fs::create_dir_all(&model_control).expect("model control");

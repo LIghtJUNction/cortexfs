@@ -1,7 +1,5 @@
 use crate::*;
 
-pub(crate) type AgentStartCommand = AgentLaunchCommand;
-
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -9,7 +7,7 @@ pub(crate) fn agent_start_systemd_command(
     view: &AgentRuntimeView,
     socket: &Path,
     unit: &str,
-) -> AgentStartCommand {
+) -> AgentLaunchCommand {
     let home = view.ctx_home();
     let mut command = AgentLaunchCommand {
         program: SYSTEMD_RUN_PROGRAM.to_owned(),
@@ -39,7 +37,7 @@ pub(crate) fn agent_chat_socket_systemd_command(
     name: &str,
     socket: &Path,
     unit: &str,
-) -> AgentStartCommand {
+) -> AgentLaunchCommand {
     let source = agent_source_root(root);
     cortexfs::chat_socket_command(
         &cortexfs::AgentLaunchRequest {
@@ -86,7 +84,7 @@ pub(crate) fn agent_runtime_program() -> String {
 
 pub(crate) fn agent_start_process_command(
     identity: &AgentUnixIdentity,
-    command: &AgentStartCommand,
+    command: &AgentLaunchCommand,
 ) -> io::Result<ProcessCommand> {
     launch_process_for(identity, command)
 }

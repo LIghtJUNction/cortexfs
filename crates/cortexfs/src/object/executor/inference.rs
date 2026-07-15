@@ -19,7 +19,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
     stdout: &mut impl Write,
     timeout: Duration,
 ) -> Result<AgentModelRunOutcome, ExecError> {
-    if !admit_agent_prompt(config, input).map_err(ExecError::new)? {
+    if !admit_agent_prompt(config, input)? {
         return agent_model_error_outcome(
             stdout,
             &config.run,

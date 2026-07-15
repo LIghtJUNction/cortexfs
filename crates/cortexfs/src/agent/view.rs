@@ -1,7 +1,6 @@
 use crate::*;
 use std::collections::BTreeSet;
 
-use crate::agent::control::approval_abi_valid;
 use crate::support::plain::{open_plain_directory, read_small_text_file};
 
 /// Derives an agent runtime view from the frozen v1 control files.
@@ -75,6 +74,9 @@ pub fn derive_agent_runtime_view(
     let policy = PolicyV0::parse(&policy_content)
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("policy".to_owned()))?;
     let declared_tools = parse_agent_tools_control(&control_dir)?;
+    if read_required_agent_control_value(&control_dir, "abi")? != "sdk-envelope-v1" {
+        return Err(AgentRuntimeViewError::InvalidControlFile("abi".to_owned()));
+    }
     let approval = parse_agent_approval_control(&control_dir)?;
 
     let ctx_home = ctx_root.join("home").join(owner.to_string());
@@ -178,20 +180,6 @@ pub(crate) fn parse_agent_approval_control(
         }
         Err(error) => return Err(error),
     };
-    let abi = if approval == AgentApprovalMode::Ask {
-        Some(read_required_agent_control_value(control_dir, "abi")?)
-    } else {
-        None
-    };
-    let approval_value = match approval {
-        AgentApprovalMode::Auto => "auto",
-        AgentApprovalMode::Ask => "ask",
-    };
-    if !approval_abi_valid(abi.as_deref(), Some(approval_value)) {
-        return Err(AgentRuntimeViewError::InvalidControlFile(
-            "approval".to_owned(),
-        ));
-    }
     Ok(approval)
 }
 

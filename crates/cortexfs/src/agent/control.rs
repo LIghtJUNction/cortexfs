@@ -129,12 +129,6 @@ pub fn inspect_agent_tools_control(content: &str) -> AgentControlReport {
     AgentControlReport::new(issues)
 }
 
-/// Checks the approval mode against the selected executable-agent ABI.
-#[must_use]
-pub(crate) fn approval_abi_valid(abi: Option<&str>, approval: Option<&str>) -> bool {
-    approval.unwrap_or("auto") != "ask" || abi.unwrap_or("argv-v1") == "sdk-envelope-v1"
-}
-
 pub(crate) fn inspect_required_agent_number_control(content: &str) -> AgentControlReport {
     AgentControlReport::new(inspect_control_line(
         content,

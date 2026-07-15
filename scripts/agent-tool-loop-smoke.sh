@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cargo test --locked -p cortexfs agent_tool_loop --all-features
+hosted_test=tests::installed_sdks_run_two_declared_native_tool_calls
+cargo test --locked -p cortexfs-sdk-extension-fixture --test installed \
+    "$hosted_test" -- --list | grep -Fqx "$hosted_test: test"
+cargo test --locked -p cortexfs-sdk-extension-fixture --test installed \
+    "$hosted_test" -- --exact
 cargo test --locked -p cortexfs agent_tool_call_executes_visible_tsh_for_search_and_load --all-features
 cargo test --locked -p cortexfs --bin tsh tool_context --all-features
 cargo build --locked -p cortexfs \
@@ -87,7 +91,7 @@ if command -v bwrap >/dev/null 2>&1; then
             rm -f "$approval_socket"
         fi
         if [ -n "$approval_root" ]; then
-            rm -rf "$approval_root"
+            "${system_privilege[@]}" rm -rf "$approval_root"
         fi
         rm -rf "$root" "$workspace"
     }
@@ -618,7 +622,7 @@ EOF
             "$approval_unit" "$approval_socket" "$approval_root" \
             "$control_before" "$control_after" approval
         printf 'systemd socket approval smoke passed\n' >&2
-        rm -rf "$approval_root"
+        "${system_privilege[@]}" rm -rf "$approval_root"
         approval_root=
         approval_unit=
         approval_socket=

@@ -180,22 +180,27 @@ pub fn record_assistant_response_to_session(
     run_id: &str,
     content: &str,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
-    record_assistant_response(session_dir, run_id, content, true)
+    require_socket_session_files(session_dir)?;
+    let history = columnar::HistoryGuard::exclusive(session_dir)
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    history
+        .refresh_claims()
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    let done = done_event_json(run_id, "ok");
+    let record = record_assistant_response_locked(&history, session_dir, run_id, content, &done)?;
+    history
+        .refresh_claims()
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+    set_session_state(session_dir, "done")?;
+    Ok(record)
 }
 
-pub(crate) fn record_agent_assistant_response_to_session(
+pub(crate) fn record_assistant_response_locked(
+    history: &columnar::HistoryGuard<'_>,
     session_dir: &Path,
     run_id: &str,
     content: &str,
-) -> Result<SocketSessionRecord, SocketSessionRecordError> {
-    record_assistant_response(session_dir, run_id, content, false)
-}
-
-fn record_assistant_response(
-    session_dir: &Path,
-    run_id: &str,
-    content: &str,
-    set_terminal_state: bool,
+    done: &str,
 ) -> Result<SocketSessionRecord, SocketSessionRecordError> {
     validate_socket_object_field("run", run_id)
         .map_err(|_error| SocketSessionRecordError::SessionMismatch)?;
@@ -218,16 +223,16 @@ fn record_assistant_response(
         "content": content_parts
     })
     .to_string();
-    let done = done_event_json(run_id, "ok");
-
-    append_session_lines(session_dir, "messages.jsonl", &[&message])?;
-    append_session_lines(session_dir, "events.jsonl", &[&event, &done])?;
+    history
+        .append(columnar::Stream::Messages, &[&message])
+        .and_then(|()| history.append(columnar::Stream::Events, &[&event, done]))
+        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
     write_session_file(session_dir, "latest.md", &format!("{content}\n"))?;
-    if set_terminal_state {
-        set_session_state(session_dir, "done")?;
-    }
 
-    Ok(SocketSessionRecord::new(vec![message], vec![event, done]))
+    Ok(SocketSessionRecord::new(
+        vec![message],
+        vec![event, done.to_owned()],
+    ))
 }
 
 /// Records a denied tool execution as durable session runtime history.

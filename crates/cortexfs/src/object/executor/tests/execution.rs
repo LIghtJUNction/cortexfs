@@ -1,47 +1,8 @@
 #[test]
 fn agent_tool_call_executes_visible_tsh_for_search_and_load()
 -> Result<(), Box<dyn std::error::Error>> {
-    let root = short_unique_temp_path("atl");
-    let _ignored = fs::remove_dir_all(&root);
-    let control = root.join("agent").join("coder.d");
-    let tool_control = root.join("tool").join("tsh.d");
-    fs::create_dir_all(&control)?;
-    fs::create_dir_all(&tool_control)?;
-    fs::create_dir_all(root.join("tool"))?;
+    let (root, tool_control) = agent_tool_fixture("atl", "tsh")?;
     fs::create_dir_all(root.join("home/1000/agent/coder"))?;
-    fs::write(control.join("owner"), "1000\n")?;
-    fs::write(control.join("uid"), "1000\n")?;
-    fs::write(control.join("gid"), "1000\n")?;
-    fs::write(control.join("groups"), "1000\n")?;
-    fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n")?;
-    fs::write(control.join("iso"), "shared\n")?;
-    fs::write(control.join("parent"), "\n")?;
-    fs::write(control.join("life"), "owned\n")?;
-    fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n")?;
-    fs::write(control.join("cwd"), "/workspace\n")?;
-    fs::write(control.join("env"), "\n")?;
-    fs::write(control.join("model"), "main\n")?;
-    write_agent_window_fixture(&root, &control)?;
-    fs::write(control.join("status"), "idle\n")?;
-    fs::write(control.join("pid"), "\n")?;
-    fs::write(control.join("log"), "\n")?;
-    fs::write(control.join("meta.json"), "{}\n")?;
-    fs::write(
-        control.join("path"),
-        format!("{}\n", root.join("tool").display()),
-    )?;
-    fs::write(
-        control.join("mount"),
-        format!(
-            "{}\t{}\tro\trbind,nosuid,nodev\n",
-            root.display(),
-            root.display()
-        ),
-    )?;
-    fs::write(
-        control.join("policy"),
-        "allow coder_t model:main use\nallow coder_t tool:tsh execute\n",
-    )?;
     fs::write(
         tool_control.join("policy"),
         "allow coder_t tool:tsh execute\n",
@@ -51,21 +12,25 @@ fn agent_tool_call_executes_visible_tsh_for_search_and_load()
         r#"#!/bin/sh
 case "$1" in
   tools)
-    printf 'fs.read\nshell.exec\ntsh\n'
+    text='fs.read\nshell.exec\ntsh\n'
     ;;
   load)
     if [ "$2" = "fs.read" ]; then
-      printf 'loaded fs.read\t%s/tool/fs.read\tmetadata\n' "$CTX_ROOT"
+      text="loaded fs.read\\t$CTX_ROOT/tool/fs.read\\tmetadata\\n"
     else
-      printf 'unknown tool: %s\n' "$2" >&2
-      exit 2
+      printf '{"type":"start","run":"%s","tool":"tsh"}\n' "$CTX_RUN_ID"
+      printf '{"type":"error","run":"%s","code":"EINVAL","message":"unknown tool"}\n' "$CTX_RUN_ID"
+      printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
+      exit 0
     fi
     ;;
   *)
-    printf 'unexpected tsh args: %s %s\n' "$1" "$2" >&2
     exit 2
     ;;
 esac
+printf '{"type":"start","run":"%s","tool":"tsh"}\n' "$CTX_RUN_ID"
+printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"text","text":"%s"}]}\n' "$CTX_RUN_ID" "$text"
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     )?;
     fs::set_permissions(
@@ -83,7 +48,7 @@ esac
         name: "tsh".to_owned(),
         args: vec![OsString::from("tools")],
     };
-    let search_result = execute_agent_tool_call(&config, &search)?;
+    let search_result = execute_prepared_agent_tool_call(&config, &search)?;
 
     assert!(search_result.contains("fs.read"));
     assert!(search_result.contains("tsh"));
@@ -93,7 +58,7 @@ esac
         name: "tsh".to_owned(),
         args: vec![OsString::from("load"), OsString::from("fs.read")],
     };
-    let load_result = execute_agent_tool_call(&config, &load)?;
+    let load_result = execute_prepared_agent_tool_call(&config, &load)?;
 
     assert!(load_result.contains("loaded fs.read"));
     assert!(load_result.contains("/tool/fs.read"));
@@ -142,7 +107,7 @@ fn agent_tool_bwrap_args_use_overlay_workspace_upper() -> Result<(), Box<dyn std
 
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
         authorized_object: Path::new("/ctx/tool/probe"),
-        config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
+        config: &test_agent_tool_config(&config),
         tool_executable: Path::new("/proc/self/fd/9"),
         tool_args: &[OsString::from("tools")],
         env: &env,
@@ -231,7 +196,7 @@ fn nested_control_pair_is_propagated_and_bound() -> Result<(), Box<dyn std::erro
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
         authorized_object: Path::new("/ctx/tool/probe"),
-        config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
+        config: &test_agent_tool_config(&config),
         tool_executable: Path::new("/tool"),
         tool_args: &[],
         env: &[],
@@ -294,9 +259,10 @@ fn agent_tool_process_cancellation_terminates_process_group() {
         &format!("sleep 5; printf leaked > {}", leaked.display()),
     ]);
     let start = Instant::now();
-    let result = crate::object::executor::run_agent_tool_process_cancellable(&mut command, || {
-        start.elapsed() >= Duration::from_millis(100)
-    });
+    let result =
+        crate::object::executor::exec::run_agent_tool_process_cancellable(&mut command, || {
+            start.elapsed() >= Duration::from_millis(100)
+        });
     assert_eq!(result, Err(ExecError::new("tool cancelled")));
     thread::sleep(Duration::from_millis(100));
     assert!(!leaked.exists());
@@ -365,7 +331,7 @@ fn agent_tool_bwrap_exec_writes_workspace_overlay_upper() -> Result<(), Box<dyn 
         .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let args = agent_tool_bwrap_args(&AgentToolBwrapArgs {
         authorized_object: Path::new("/ctx/tool/probe"),
-        config: &crate::object::executor::AgentToolExecutionConfig::from_model(&config),
+        config: &test_agent_tool_config(&config),
         tool_executable: &proc_fd_path(&tool_executable),
         tool_args: &[],
         env: &[],
@@ -407,46 +373,7 @@ fn visible_workspace_source_falls_back_to_current_namespace_workspace() {
 
 #[test]
 fn agent_tool_call_refuses_symlinked_tsh_policy() -> Result<(), Box<dyn std::error::Error>> {
-    let root = short_unique_temp_path("atl-policy-symlink");
-    let _ignored = fs::remove_dir_all(&root);
-    let control = root.join("agent").join("coder.d");
-    let tool_control = root.join("tool").join("tsh.d");
-    fs::create_dir_all(&control)?;
-    fs::create_dir_all(&tool_control)?;
-    fs::create_dir_all(root.join("tool"))?;
-    fs::write(control.join("owner"), "1000\n")?;
-    fs::write(control.join("uid"), "1000\n")?;
-    fs::write(control.join("gid"), "1000\n")?;
-    fs::write(control.join("groups"), "1000\n")?;
-    fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n")?;
-    fs::write(control.join("iso"), "shared\n")?;
-    fs::write(control.join("parent"), "\n")?;
-    fs::write(control.join("life"), "owned\n")?;
-    fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n")?;
-    fs::write(control.join("cwd"), "/workspace\n")?;
-    fs::write(control.join("env"), "\n")?;
-    fs::write(control.join("model"), "main\n")?;
-    write_agent_window_fixture(&root, &control)?;
-    fs::write(control.join("status"), "idle\n")?;
-    fs::write(control.join("pid"), "\n")?;
-    fs::write(control.join("log"), "\n")?;
-    fs::write(control.join("meta.json"), "{}\n")?;
-    fs::write(
-        control.join("path"),
-        format!("{}\n", root.join("tool").display()),
-    )?;
-    fs::write(
-        control.join("mount"),
-        format!(
-            "{}\t{}\tro\trbind,nosuid,nodev\n",
-            root.display(),
-            root.display()
-        ),
-    )?;
-    fs::write(
-        control.join("policy"),
-        "allow coder_t model:main use\nallow coder_t tool:tsh execute\n",
-    )?;
+    let (root, tool_control) = agent_tool_fixture("atl-policy-symlink", "tsh")?;
     let outside_policy = root.join("outside-policy");
     fs::write(&outside_policy, "allow coder_t tool:tsh execute\n")?;
     symlink(&outside_policy, tool_control.join("policy"))?;
@@ -466,7 +393,7 @@ fn agent_tool_call_refuses_symlinked_tsh_policy() -> Result<(), Box<dyn std::err
         name: "tsh".to_owned(),
         args: vec![OsString::from("tools")],
     };
-    let result = execute_agent_tool_call(&config, &call);
+    let result = execute_prepared_agent_tool_call(&config, &call);
 
     assert!(matches!(result, Err(ref error) if error.message().contains("cannot read")));
     let _ignored = fs::remove_dir_all(root);
@@ -752,11 +679,10 @@ fn tool_stdout_rejects_sdk_run_mismatch_and_missing_done() {
 }
 
 #[test]
-fn tool_stdout_preserves_non_sdk_legacy_plain_text() {
-    assert_eq!(
-        parse_tool_stdout("legacy output\n"),
-        Ok(ToolStdout::Legacy("legacy output\n".to_owned()))
-    );
+fn tool_stdout_rejects_non_sdk_output() {
+    assert!(parse_tool_stdout("").is_err());
+    assert!(parse_tool_stdout("plain output\n").is_err());
+    assert!(parse_tool_stdout("{\"type\":\"message\"}\n").is_err());
 }
 
 #[test]
@@ -859,46 +785,7 @@ fn agent_tsh_args_allow_tool_arguments_after_tool_name() {
 
 #[test]
 fn execute_agent_tsh_call_rejects_empty_args() -> Result<(), Box<dyn std::error::Error>> {
-    let root = short_unique_temp_path("atl-empty-args");
-    let _ignored = fs::remove_dir_all(&root);
-    let control = root.join("agent").join("coder.d");
-    let tool_control = root.join("tool").join("tsh.d");
-    fs::create_dir_all(&control)?;
-    fs::create_dir_all(&tool_control)?;
-    fs::create_dir_all(root.join("tool"))?;
-    fs::write(control.join("owner"), "1000\n")?;
-    fs::write(control.join("uid"), "1000\n")?;
-    fs::write(control.join("gid"), "1000\n")?;
-    fs::write(control.join("groups"), "1000\n")?;
-    fs::write(control.join("label"), "user_u:agent_r:coder_t:s0\n")?;
-    fs::write(control.join("iso"), "shared\n")?;
-    fs::write(control.join("parent"), "\n")?;
-    fs::write(control.join("life"), "owned\n")?;
-    fs::write(control.join("root"), "/ctx/home/1000/agent/coder/root\n")?;
-    fs::write(control.join("cwd"), "/workspace\n")?;
-    fs::write(control.join("env"), "\n")?;
-    fs::write(control.join("model"), "main\n")?;
-    write_agent_window_fixture(&root, &control)?;
-    fs::write(control.join("status"), "idle\n")?;
-    fs::write(control.join("pid"), "\n")?;
-    fs::write(control.join("log"), "\n")?;
-    fs::write(control.join("meta.json"), "{}\n")?;
-    fs::write(
-        control.join("path"),
-        format!("{}\n", root.join("tool").display()),
-    )?;
-    fs::write(
-        control.join("mount"),
-        format!(
-            "{}\t{}\tro\trbind,nosuid,nodev\n",
-            root.display(),
-            root.display()
-        ),
-    )?;
-    fs::write(
-        control.join("policy"),
-        "allow coder_t model:main use\nallow coder_t tool:tsh execute\n",
-    )?;
+    let (root, tool_control) = agent_tool_fixture("atl-empty-args", "tsh")?;
     fs::write(
         tool_control.join("policy"),
         "allow coder_t tool:tsh execute\n",
@@ -920,7 +807,7 @@ fn execute_agent_tsh_call_rejects_empty_args() -> Result<(), Box<dyn std::error:
         name: "tsh".to_owned(),
         args: Vec::new(),
     };
-    let result = execute_agent_tool_call(&config, &call);
+    let result = execute_prepared_agent_tool_call(&config, &call);
 
     assert_eq!(
         result,
@@ -968,7 +855,7 @@ fn find_overlay_generated_file(root: &Path) -> std::io::Result<PathBuf> {
 }
 use super::runtime::test_agent_run_config;
 use super::*;
-use crate::object::executor::{ToolStdout, authorized_tool_target, parse_tool_stdout};
+use crate::object::executor::exec::{ToolStdout, authorized_tool_target, parse_tool_stdout};
 
 #[test]
 fn authorized_tool_target_maps_backing_source_tiers_under_ctx() {
