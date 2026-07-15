@@ -4,7 +4,7 @@ pub(crate) fn run_agent_model_once(
     config: &AgentModelRunConfig,
     input: &str,
     stdout: &mut impl Write,
-) -> Result<AgentModelRunOutcome, String> {
+) -> Result<AgentModelRunOutcome, ExecError> {
     run_agent_model_once_with_timeout(
         config,
         input,
@@ -18,8 +18,8 @@ pub(crate) fn run_agent_model_once_with_timeout(
     input: &str,
     stdout: &mut impl Write,
     timeout: Duration,
-) -> Result<AgentModelRunOutcome, String> {
-    if !admit_agent_prompt(config, input)? {
+) -> Result<AgentModelRunOutcome, ExecError> {
+    if !admit_agent_prompt(config, input).map_err(ExecError::new)? {
         return agent_model_error_outcome(
             stdout,
             &config.run,
@@ -30,15 +30,15 @@ pub(crate) fn run_agent_model_once_with_timeout(
     }
     write_agent_debug_timing(stdout, config, "model_spawn_start")?;
     let model_executable = open_executable_no_follow(&config.model_path)
-        .map_err(|error| format!("cannot run agent model: {error}"))?;
+        .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
     let mut command = agent_model_command(config, input, &model_executable);
     let mut child = spawn_with_etxtbsy_retry(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
-        .map_err(|error| format!("cannot run agent model: {error}"))?;
+        .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
     write_agent_debug_timing(stdout, config, "model_spawned")?;
     let child_stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "cannot read agent model output".to_owned())?;
+        .ok_or_else(|| ExecError::new("cannot read agent model output"))?;
     let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
     let stdout_reader = spawn_agent_model_stdout_reader(child_stdout);
     let mut frames = Vec::new();
@@ -76,7 +76,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
                         .map_err(|error| {
                             terminate_process_group(&mut child);
                             let _ignored = child.wait();
-                            format!("cannot write output: {error}")
+                            ExecError::with_io("cannot write output", &error)
                         })?;
                     streamed = true;
                 }
@@ -90,7 +90,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
                 return overflow_agent_model_outcome(
                     stdout,
                     &config.run,
-                    &error,
+                    error.message(),
                     config.suppress_model_error_events,
                 );
             }
@@ -110,14 +110,16 @@ pub(crate) fn run_agent_model_once_with_timeout(
                         config.suppress_model_error_events,
                     );
                 }
-                let _ignored = child.try_wait().map_err(|error| error.to_string())?;
+                let _ignored = child
+                    .try_wait()
+                    .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
             }
         }
     }
     let _ignored = stdout_reader.handle.join();
     let status = child
         .wait()
-        .map_err(|error| format!("cannot run agent model: {error}"))?;
+        .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
     let stderr = collect_child_stderr(stderr_reader);
     append_model_exit_error(stdout, config, status, &stderr, &mut frames)?;
     Ok(AgentModelRunOutcome {
@@ -179,7 +181,7 @@ pub(crate) fn append_model_exit_error(
     status: std::process::ExitStatus,
     stderr: &str,
     frames: &mut Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), ExecError> {
     if status.success() || frames_have_error(frames) {
         return Ok(());
     }
@@ -191,7 +193,7 @@ pub(crate) fn append_model_exit_error(
     if !config.suppress_model_error_events {
         write_error_event(stdout, &config.run, "EIO", &message)
             .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
+            .map_err(|error| ExecError::with_io("cannot write output", &error))?;
     }
     frames.push(
         serde_json::json!({
@@ -210,7 +212,7 @@ pub(crate) fn overflow_agent_model_outcome(
     run: &str,
     message: &str,
     suppress_output: bool,
-) -> Result<AgentModelRunOutcome, String> {
+) -> Result<AgentModelRunOutcome, ExecError> {
     agent_model_error_outcome(stdout, run, "EOVERFLOW", message, suppress_output)
 }
 
@@ -220,11 +222,11 @@ pub(crate) fn agent_model_error_outcome(
     code: &str,
     message: &str,
     suppress_output: bool,
-) -> Result<AgentModelRunOutcome, String> {
+) -> Result<AgentModelRunOutcome, ExecError> {
     if !suppress_output {
         write_error_event(stdout, run, code, message)
             .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
+            .map_err(|error| ExecError::with_io("cannot write output", &error))?;
     }
     Ok(AgentModelRunOutcome {
         frames: vec![

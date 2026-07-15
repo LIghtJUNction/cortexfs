@@ -72,9 +72,9 @@ fn object_args_reject_exec_metadata_that_disagrees_with_authorized_object()
     assert!(matches!(
         result,
         Err(error)
-            if error.contains("/ctx/tool/bash")
-                && error.contains("/ctx/tool/safe")
-                && error.contains("does not match authorized object")
+            if error.message().contains("/ctx/tool/bash")
+                && error.message().contains("/ctx/tool/safe")
+                && error.message().contains("does not match authorized object")
     ));
 
     let _ignored = fs::remove_dir_all(root);
@@ -83,7 +83,7 @@ fn object_args_reject_exec_metadata_that_disagrees_with_authorized_object()
 
 #[test]
 fn runner_rejects_missing_object_path() {
-    assert_eq!(run(Vec::new()), Err("missing object path".to_owned()));
+    assert_eq!(run(Vec::new()), Err(ExecError::new("missing object path")));
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn runner_rejects_unknown_model() {
             OsString::from("/ctx/model/missing-provider/gpt-5.4"),
             OsString::from("{}"),
         ]),
-        Err("missing provider: missing-provider".to_owned())
+        Err(ExecError::new("missing provider: missing-provider"))
     );
 }
 
@@ -132,7 +132,7 @@ fn model_alias_rejects_cross_class_symlink_target() -> Result<(), Box<dyn std::e
 
     assert_eq!(
         resolve_model_alias(&root, "main"),
-        Err("invalid model alias target: main".to_owned())
+        Err(ExecError::new("invalid model alias target: main"))
     );
 
     let _ignored = fs::remove_dir_all(root);
@@ -149,7 +149,7 @@ fn model_alias_rejects_symlink_model_directory() -> Result<(), Box<dyn std::erro
 
     assert_eq!(
         resolve_model_alias(&root, "main"),
-        Err("missing model alias: main".to_owned())
+        Err(ExecError::new("missing model alias: main"))
     );
     assert_eq!(
         missing_model_message(&root, "main", &root.join("model/debug/echo")),
@@ -182,7 +182,9 @@ fn model_path_rejects_traversal_reference() {
 
     assert_eq!(
         resolved_model_path(&root, "../tool/shell.exec"),
-        Err("invalid model reference: ../tool/shell.exec".to_owned())
+        Err(ExecError::new(
+            "invalid model reference: ../tool/shell.exec"
+        ))
     );
 }
 
@@ -351,7 +353,7 @@ fn agent_model_config_denies_fallback_without_selected_model_policy()
 
     assert!(matches!(
         config,
-        Err(ref error) if error.contains("agent policy denies model:evil/leak use")
+        Err(ref error) if error.message().contains("agent policy denies model:evil/leak use")
     ));
     let _ignored = fs::remove_dir_all(root);
     Ok(())

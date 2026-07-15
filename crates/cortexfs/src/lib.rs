@@ -53,19 +53,36 @@ macro_rules! impl_issue_report {
     };
 }
 
+// Module layers (docs/internal-architecture.md §4): depend only downward.
+// L0 abi/policy → L1 support → L2 authority/context → L3 provider/tool →
+// L4 reference/mount → L5 agent/runtime → L6 object → L7 fuse → L8 bin/*.
+
+/// L0 — pure ABI grammar and request types.
 pub mod abi;
+/// L5 — agent lifecycle, launch, child, schedule (not FUSE projection).
 pub mod agent;
+/// L2 — identity and authority helpers.
 pub mod authority;
+/// L2 — context packs and working-set construction.
 pub mod context;
+/// L4 — mount table types and parsing.
 pub mod mount;
+/// L0 — SELinux-like allowlist policy types.
 pub mod policy;
+/// L3 — provider/model registry (not root ABI).
 pub mod provider;
+/// L3 — tool schema and execution authority helpers.
 pub mod tool;
 
+/// L7 — FUSE projection only; must not call `object::executor`.
 pub mod fuse;
+/// L6 — object install/swap and one-shot executor/runner.
 pub mod object;
+/// L4 — storage generations and bootstrap tree.
 pub mod reference;
+/// L5 — sockets, durable session record, egress.
 pub mod runtime;
+/// L1 — plain files, jsonl, layout, process helpers (no FUSE/HTTP).
 pub mod support;
 
 pub use abi::authority::*;

@@ -328,7 +328,7 @@ fn host_admission_serializes_the_shared_provider_messages_byte_for_byte() {
     );
     assert_eq!(
         serialized_agent_messages(&config, "user \"input\" 雪"),
-        serde_json::to_vec(&expected).map_err(|error| error.to_string())
+        serde_json::to_vec(&expected).map_err(|error| ExecError::new(error.to_string()))
     );
 }
 

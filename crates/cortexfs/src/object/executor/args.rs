@@ -1,43 +1,46 @@
 use super::*;
 
-pub(crate) fn shell_words(value: &str) -> Result<Vec<String>, String> {
+pub(crate) fn shell_words(value: &str) -> Result<Vec<String>, ExecError> {
     parse_shell_words!(
         value,
         "tool_call command ends with unfinished escape".to_owned(),
         "tool_call command has unterminated quote".to_owned()
     )
+    .map_err(ExecError::new)
 }
 
-pub(crate) fn validate_tool_call_arg_limits(args: &[String]) -> Result<(), String> {
+pub(crate) fn validate_tool_call_arg_limits(args: &[String]) -> Result<(), ExecError> {
     if args.len() > MAX_AGENT_TOOL_ARGC {
-        return Err("tool_call args exceed argument count limit".to_owned());
+        return Err(ExecError::new("tool_call args exceed argument count limit"));
     }
     let bytes = args
         .iter()
         .map(String::len)
         .try_fold(0_usize, usize::checked_add)
-        .ok_or_else(|| "tool_call args exceed byte limit".to_owned())?;
+        .ok_or_else(|| ExecError::new("tool_call args exceed byte limit"))?;
     if bytes > MAX_AGENT_TOOL_ARG_BYTES {
-        return Err("tool_call args exceed byte limit".to_owned());
+        return Err(ExecError::new("tool_call args exceed byte limit"));
     }
     Ok(())
 }
 
-pub(crate) fn validate_agent_tsh_args(args: &[OsString]) -> Result<(), String> {
+pub(crate) fn validate_agent_tsh_args(args: &[OsString]) -> Result<(), ExecError> {
     if args.is_empty() {
-        return Err("tool_call args for tsh cannot be empty".to_owned());
+        return Err(ExecError::new("tool_call args for tsh cannot be empty"));
     }
     let Some(first) = args.first() else {
-        return Err("tool_call args for tsh cannot be empty".to_owned());
+        return Err(ExecError::new("tool_call args for tsh cannot be empty"));
     };
     let Some(first) = first.to_str() else {
-        return Err("tool_call args must be valid UTF-8".to_owned());
+        return Err(ExecError::new("tool_call args must be valid UTF-8"));
     };
     if matches!(first, "--root" | "-r") {
-        return Err("tool_call args cannot override tsh root".to_owned());
+        return Err(ExecError::new("tool_call args cannot override tsh root"));
     }
     if first == "tsh" {
-        return Err("tool_call args for tsh must not include the tsh program name".to_owned());
+        return Err(ExecError::new(
+            "tool_call args for tsh must not include the tsh program name",
+        ));
     }
     Ok(())
 }

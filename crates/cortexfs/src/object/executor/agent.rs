@@ -1,9 +1,10 @@
 use super::*;
 
-pub(crate) fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
+pub(crate) fn run_agent(name: &str, args: &[OsString]) -> Result<(), ExecError> {
     crate::runtime::control::ping_from_environment(name)
-        .map_err(|error| format!("run capability handshake failed: {error:?}"))?;
-    let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
+        .map_err(|error| ExecError::new(format!("run capability handshake failed: {error:?}")))?;
+    let input =
+        collect_input(args).map_err(|error| ExecError::with_io("cannot read input", &error))?;
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let mut config = AgentModelRunConfig::new(name)?;
@@ -12,7 +13,7 @@ pub(crate) fn run_agent(name: &str, args: &[OsString]) -> Result<(), String> {
         let message = missing_model_message(&config.ctx_root, &config.model, &config.model_path);
         return write_tool_start(&mut stdout, &config.run, name)
             .and_then(|()| write_tool_error(&mut stdout, &config.run, "ENOENT", &message))
-            .map_err(|error| format!("cannot write output: {error}"));
+            .map_err(|error| ExecError::with_io("cannot write output", &error));
     }
     run_agent_tool_loop(
         &mut config,
@@ -29,11 +30,11 @@ pub(crate) fn run_agent_tool_loop<W, M, T>(
     stdout: &mut W,
     mut run_model_once: M,
     mut execute_tool_call: T,
-) -> Result<(), String>
+) -> Result<(), ExecError>
 where
     W: Write,
-    M: FnMut(&AgentModelRunConfig, &str, &mut W) -> Result<AgentModelRunOutcome, String>,
-    T: FnMut(&AgentModelRunConfig, &AgentToolCall) -> Result<String, String>,
+    M: FnMut(&AgentModelRunConfig, &str, &mut W) -> Result<AgentModelRunOutcome, ExecError>,
+    T: FnMut(&AgentModelRunConfig, &AgentToolCall) -> Result<String, ExecError>,
 {
     let mut last_tool_signature = None;
     let mut last_tool_result: Option<(AgentToolCall, String)> = None;
@@ -54,7 +55,7 @@ where
                         &pair.1,
                     );
                 }
-                return Err(error);
+                return Err(ExecError::new(error));
             }
         };
         config.suppress_model_error_events = suppress_model_error_events;
@@ -74,8 +75,7 @@ where
                     &config.run,
                     "agent repeated the same tool call",
                     Some(&tool_call),
-                )
-                .map_err(|error| format!("cannot write output: {error}"));
+                );
             }
             write_agent_frames_for_tool_iteration(
                 stdout,
@@ -92,7 +92,7 @@ where
             write_tool_result_event(stdout, &config.run, &tool_call, &result)?;
             stdout
                 .flush()
-                .map_err(|error| format!("cannot write output: {error}"))?;
+                .map_err(|error| ExecError::new(format!("cannot write output: {error}")))?;
             config.push_tool_result(&tool_call, &result);
             last_tool_signature = Some(signature);
             last_tool_result = Some((tool_call, result));
@@ -103,8 +103,7 @@ where
                     &config.run,
                     "agent tool loop limit exceeded",
                     tool_call,
-                )
-                .map_err(|error| format!("cannot write output: {error}"));
+                );
             }
             continue;
         }
@@ -132,7 +131,7 @@ where
                 }
                 return Ok(());
             }
-            return Err("agent model failed".to_owned());
+            return Err(ExecError::new("agent model failed"));
         }
         write_agent_frames(stdout, &config.run, &outcome.frames)?;
         if outcome.success || frames_have_error(&outcome.frames) {
@@ -141,7 +140,7 @@ where
             }
             return Ok(());
         }
-        return Err("agent model failed".to_owned());
+        return Err(ExecError::new("agent model failed"));
     }
 
     Ok(())
@@ -371,7 +370,7 @@ pub(crate) struct AgentModelRunConfig {
 }
 
 impl AgentModelRunConfig {
-    fn new(agent: &str) -> Result<Self, String> {
+    fn new(agent: &str) -> Result<Self, ExecError> {
         let source =
             env::var_os("CTX_SOURCE").map_or_else(|| PathBuf::from(DEFAULT_SOURCE), PathBuf::from);
         let ctx_root =
@@ -383,7 +382,7 @@ impl AgentModelRunConfig {
         agent: &str,
         source: PathBuf,
         ctx_root: PathBuf,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, ExecError> {
         let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
         let session = env::var("CTX_SESSION").unwrap_or_else(|_error| "default".to_owned());
         let agent_dir = agent_model_control_dir(&source, agent);
@@ -407,7 +406,9 @@ impl AgentModelRunConfig {
         {
             requested_model
         } else {
-            return Err(format!("invalid model reference: {requested_model}"));
+            return Err(ExecError::new(format!(
+                "invalid model reference: {requested_model}"
+            )));
         };
         let primary_model = resolved_model_name(&ctx_root, &requested_model)?;
         let candidates = model_candidates(&ctx_root, &requested_model)?;
@@ -416,9 +417,9 @@ impl AgentModelRunConfig {
             MAX_RUNNER_CONTROL_BYTES,
             "runner",
         )
-        .map_err(|error| format!("cannot read agent window control: {error}"))?;
+        .map_err(|error| ExecError::with_io("cannot read agent window control", &error))?;
         let window_setting = AgentWindowSetting::parse_control(&window_content)
-            .ok_or_else(|| "invalid agent window control".to_owned())?;
+            .ok_or_else(|| ExecError::new("invalid agent window control"))?;
         let _inherited_budget = parse_agent_context_budget(
             env::var("CTX_CONTEXT_WINDOW_TOKENS").ok().as_deref(),
             env::var("CTX_CONTEXT_WINDOW_CHARS").ok().as_deref(),
@@ -439,10 +440,10 @@ impl AgentModelRunConfig {
             }
         }
         let (selected, context_budget) = selected.ok_or_else(|| {
-            format!(
+            ExecError::new(format!(
                 "no eligible model candidate for {requested_model}: {}",
                 rejected.join("; ")
-            )
+            ))
         })?;
         let model_path = selected.path.clone();
         let model = selected.name.clone();
@@ -505,10 +506,10 @@ pub(crate) fn candidate_window_budget(
     ctx_root: &Path,
     model: &str,
     setting: AgentWindowSetting,
-) -> Result<Option<AgentWindowBudget>, String> {
+) -> Result<Option<AgentWindowBudget>, ExecError> {
     let (provider, name) = model
         .split_once('/')
-        .ok_or_else(|| "invalid model candidate".to_owned())?;
+        .ok_or_else(|| ExecError::new("invalid model candidate"))?;
     let content = read_small_plain_text_file(
         &ctx_root
             .join("model")
@@ -517,47 +518,48 @@ pub(crate) fn candidate_window_budget(
         MAX_RUNNER_CONTROL_BYTES,
         "runner",
     )
-    .map_err(|error| format!("cannot read model context limit: {error}"))?;
+    .map_err(|error| ExecError::with_io("cannot read model context limit", &error))?;
     let limit = ModelContextLimit::parse_control(&content)
-        .ok_or_else(|| "invalid model context limit".to_owned())?;
+        .ok_or_else(|| ExecError::new("invalid model context limit"))?;
     let effective = setting
         .resolve(limit)
-        .map_err(|error| format!("ineligible context limit: {error:?}"))?;
+        .map_err(|error| ExecError::new(format!("ineligible context limit: {error:?}")))?;
     Ok(AgentWindowBudget::from_effective(effective))
 }
 
 pub(crate) fn parse_agent_context_budget(
     tokens: Option<&str>,
     chars: Option<&str>,
-) -> Result<Option<AgentWindowBudget>, String> {
+) -> Result<Option<AgentWindowBudget>, ExecError> {
     let (Some(tokens), Some(chars)) = (tokens, chars) else {
         return if tokens.is_none() && chars.is_none() {
             Ok(None)
         } else {
-            Err(
-                "invalid context window environment: token and character values must be paired"
-                    .to_owned(),
-            )
+            Err(ExecError::new(
+                "invalid context window environment: token and character values must be paired",
+            ))
         };
     };
     let token_value = tokens.parse::<u32>().map_err(|_error| {
-        "invalid context window environment: token value is not canonical decimal".to_owned()
+        ExecError::new("invalid context window environment: token value is not canonical decimal")
     })?;
     if token_value == 0 || tokens != token_value.to_string() {
-        return Err(
-            "invalid context window environment: token value is not canonical decimal".to_owned(),
-        );
+        return Err(ExecError::new(
+            "invalid context window environment: token value is not canonical decimal",
+        ));
     }
     let window = ModelContextLimit::known(token_value)
         .and_then(AgentWindowBudget::from_effective)
-        .ok_or_else(|| "invalid context window environment: token value is zero".to_owned())?;
+        .ok_or_else(|| ExecError::new("invalid context window environment: token value is zero"))?;
     let char_value = chars.parse::<usize>().map_err(|_error| {
-        "invalid context window environment: character value is not canonical decimal".to_owned()
+        ExecError::new(
+            "invalid context window environment: character value is not canonical decimal",
+        )
     })?;
     if chars != char_value.to_string() || char_value != window.total_chars() {
-        return Err(
-            "invalid context window environment: character value does not match tokens".to_owned(),
-        );
+        return Err(ExecError::new(
+            "invalid context window environment: character value does not match tokens",
+        ));
     }
     Ok(Some(window))
 }
@@ -565,7 +567,7 @@ pub(crate) fn parse_agent_context_budget(
 pub(crate) fn serialized_agent_messages(
     config: &AgentModelRunConfig,
     input: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ExecError> {
     let context = AgentPromptContext {
         template: config.prompt_template.clone(),
         rules: config.rules.clone(),
@@ -575,13 +577,14 @@ pub(crate) fn serialized_agent_messages(
         current_time_unix: config.current_time_unix.clone(),
     };
     let messages = agent_provider_messages(input, &config.agent, &config.system_prompt, &context);
-    serde_json::to_vec(&messages).map_err(|error| format!("cannot serialize agent prompt: {error}"))
+    serde_json::to_vec(&messages)
+        .map_err(|error| ExecError::new(format!("cannot serialize agent prompt: {error}")))
 }
 
 pub(crate) fn admit_agent_prompt(
     config: &AgentModelRunConfig,
     input: &str,
-) -> Result<bool, String> {
+) -> Result<bool, ExecError> {
     let Some(budget) = config.context_budget else {
         return Ok(true);
     };
