@@ -228,9 +228,8 @@ package version compiled into the current `ctx`. A mismatch is invalid input,
 exits 2, and performs no writes. Version compatibility is not an authority
 grant and does not start a runtime.
 
-Agent manifests may include the optional `abi` control with exactly `argv-v1`
-or `sdk-envelope-v1`. If it is absent, the installed agent uses the exact
-legacy `argv-v1` contract. Other values are rejected before publication.
+Agent manifests must include the `abi` control with exactly
+`sdk-envelope-v1`. Missing or other values are rejected before publication.
 
 User-tier tools install under `home/<effective-uid>/tool`; system tiers use
 `tool` and `agent`. The root ABI retains `home/<effective-uid>/agent`, but

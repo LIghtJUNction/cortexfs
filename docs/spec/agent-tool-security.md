@@ -82,14 +82,13 @@ parent  parent agent, session, or run that created this agent
 life    lifecycle ownership, default owned
 system.md user-editable agent instructions/persona. This is prompt text, not authority.
 prompt.template.md user-editable system prompt template. This is prompt text, not authority.
-abi     executable-agent launch ABI: argv-v1 or sdk-envelope-v1
+abi     required executable-agent launch ABI: sdk-envelope-v1
 approval hosted SDK direct-native mode: auto or ask; missing means auto
 ```
 
-The `abi` control is optional. Its absence means the exact legacy `argv-v1`
-contract; it must not be inferred from executable contents or other controls.
-`approval=ask` requires `abi=sdk-envelope-v1`; legacy argv agents cannot request
-this host-mediated exchange.
+The `abi` control is required and accepts only `sdk-envelope-v1`; it must not be
+inferred from executable contents or other controls. `approval=ask` uses this
+host-mediated exchange.
 
 The optional `tools` control declares the agent's static direct-native tool set.
 It is empty when missing or empty and otherwise contains one canonical tool

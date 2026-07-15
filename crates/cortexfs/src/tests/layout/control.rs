@@ -192,26 +192,31 @@ fn agent_object_layout_reports_bounded_read_failures_stably() {
 }
 
 #[test]
-fn agent_object_layout_requires_sdk_envelope_for_ask_approval() {
-    let root = clean_test_dir("object-layout-agent-approval-abi");
+fn agent_object_layout_requires_sdk_envelope_abi() {
+    let root = clean_test_dir("object-layout-agent-abi");
     create_complete_object_layout(&root, ObjectClass::Agent, "coder", "none");
     let control = root.join("agent/coder.d");
-    let issue = PathLayoutIssue::invalid_value(
-        "agent/coder.d/approval".to_owned(),
-        "invalid content".to_owned(),
-    );
-    write_text_file(&control.join("approval"), "ask\n");
+    write_text_file(&control.join("abi"), "sdk-envelope-v1\n");
+    assert!(inspect_object_layout(&root, ObjectClass::Agent, "coder").is_ok());
+
+    assert!(fs::remove_file(control.join("abi")).is_ok());
     assert!(
         inspect_object_layout(&root, ObjectClass::Agent, "coder")
             .issues()
-            .contains(&issue)
+            .contains(&PathLayoutIssue::missing(
+                "agent/coder.d/abi".to_owned(),
+                LayoutPathRole::ControlFile,
+            ))
     );
 
     write_text_file(&control.join("abi"), "argv-v1\n");
     assert!(
         inspect_object_layout(&root, ObjectClass::Agent, "coder")
             .issues()
-            .contains(&issue)
+            .contains(&PathLayoutIssue::invalid_value(
+                "agent/coder.d/abi".to_owned(),
+                "invalid content".to_owned(),
+            ))
     );
 
     write_text_file(&control.join("abi"), "sdk-envelope-v1\n");

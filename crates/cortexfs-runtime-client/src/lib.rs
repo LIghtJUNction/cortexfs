@@ -1,5 +1,8 @@
 //! Narrow client and shared wire protocol for a runtime capability socket.
 
+/// Hosted executable-agent invocation wire protocol.
+pub mod agent;
+
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::{BufRead, BufReader, Read, Write};

@@ -1,4 +1,5 @@
 use super::*;
+use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI};
 use nix::fcntl::{FcntlArg, fcntl};
 use std::os::fd::RawFd;
 
@@ -11,6 +12,7 @@ pub(crate) fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
     agent_executable: &fs::File,
     request: AgentExecutableRunRequest<'_>,
+    step: u8,
     control: Option<RunControlCommand<'_>>,
     provider_egress: Option<&Path>,
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
@@ -20,20 +22,11 @@ pub(crate) fn agent_executable_socket_command(
                 support::plain::proc_fd_path(agent_executable),
                 runtime.identity,
             );
-            apply_agent_executable_socket_env(&mut command, runtime, request);
+            apply_agent_executable_socket_env(&mut command, runtime, request, step);
             if let Some((_socket, environment)) = control {
                 command.envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
             }
-            command.arg(
-                request
-                    .envelope
-                    .map_or(request.input, |_| "--cortexfs-sdk-envelope-v1"),
-            );
-            command.stdin(if request.envelope.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            });
+            command.arg(AGENT_ENVELOPE_ARG).stdin(Stdio::piped());
             command.stdout(Stdio::piped()).process_group(0);
             Ok((command, None))
         }
@@ -58,9 +51,7 @@ pub(crate) fn agent_executable_socket_command(
                     mount_table,
                     cwd: request.cwd.unwrap_or(runtime.default_cwd),
                     debug: request.debug,
-                    input: request
-                        .envelope
-                        .map_or(request.input, |_| "--cortexfs-sdk-envelope-v1"),
+                    input: AGENT_ENVELOPE_ARG,
                     agent_executable_fd: agent_executable_fd.raw(),
                     agent_home_source_fd: agent_home_source_fd.raw(),
                     agent_home_sandbox_fd: agent_home_sandbox_fd.raw(),
@@ -69,16 +60,12 @@ pub(crate) fn agent_executable_socket_command(
                     provider_egress,
                 },
             ));
-            apply_agent_executable_socket_env(&mut command, runtime, request);
+            apply_agent_executable_socket_env(&mut command, runtime, request, step);
             if let Some((_socket, environment)) = control {
                 command.envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
             }
             command.stdout(Stdio::piped()).process_group(0);
-            command.stdin(if request.envelope.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            });
+            command.stdin(Stdio::piped());
             Ok((
                 command,
                 Some(vec![
@@ -130,6 +117,7 @@ pub(crate) fn apply_agent_executable_socket_env(
     command: &mut Command,
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
+    step: u8,
 ) {
     command
         .env_clear()
@@ -147,16 +135,9 @@ pub(crate) fn apply_agent_executable_socket_env(
         .env("CTX_ROOT", runtime.ctx_root)
         .env("CTX_SOURCE", runtime.source_root)
         .env("CTX_RUN_ID", request.run_id)
-        .env("CTX_SESSION", request.session);
-    if request.envelope.is_some() {
-        command
-            .env("CTX_AGENT_LAUNCH", "sdk-envelope-v1")
-            .env("CTX_AGENT_STEP", request.step.to_string());
-    } else {
-        command
-            .env("CTX_AGENT_HISTORY_MESSAGES", request.history_messages)
-            .env("CTX_AGENT_TOOL_CONTEXT", request.tool_context);
-    }
+        .env("CTX_SESSION", request.session)
+        .env("CTX_AGENT_LAUNCH", AGENT_LAUNCH_ABI)
+        .env("CTX_AGENT_STEP", step.to_string());
 }
 
 pub(crate) fn agent_executable_socket_bwrap_args(

@@ -46,15 +46,13 @@ for `/ctx/tool`. Installation creates the object but grants no agent access.
 
 ## Agent controls
 
-Supply explicit authority controls: `owner`, `uid`, `gid`, `groups`, `label`,
-`iso`, `parent`, `life`, `root`, `cwd`, `env`, `path`, `mount`, `model`, and
-`policy`. Optionally supply `system.md`, `prompt.template.md`, `meta.json`, and
-`tools`. `tools` is a newline-terminated, one-name-per-line static direct-native
+Supply explicit controls: `owner`, `uid`, `gid`, `groups`, `label`, `iso`,
+`parent`, `life`, `root`, `cwd`, `env`, `path`, `mount`, `model`, `abi`, and
+`policy`. Set `abi` to exactly `sdk-envelope-v1`. Optionally supply `approval`,
+`system.md`, `prompt.template.md`, `meta.json`, and `tools`. `tools` is a
+newline-terminated, one-name-per-line static direct-native
 set; every name still needs explicit matching agent- and tool-policy grants.
 The installer never synthesizes grants or writes tsh/session cache state.
-Optionally supply `abi` with exactly `argv-v1` or `sdk-envelope-v1`. Omitting
-`abi` means the exact legacy `argv-v1` launch contract; SDK envelope agents must
-opt in with `sdk-envelope-v1`.
 Do not supply runtime-owned `status`, `pid`, `log`, or socket state. The
 installer initializes the three runtime control files but never creates a
 socket.

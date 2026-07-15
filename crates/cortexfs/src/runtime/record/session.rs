@@ -476,16 +476,6 @@ pub(crate) fn resolve_active_session_cancel_run_locked(
     }))
 }
 
-pub(crate) fn transition_active_session_run(
-    dir: &Path,
-    run_id: &str,
-    terminal_state: &str,
-) -> SocketRecordResult<bool> {
-    let history = columnar::HistoryGuard::exclusive(dir)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    transition_active_session_run_locked(&history, dir, run_id, terminal_state)
-}
-
 pub(crate) fn touch_session(dir: &Path) -> SocketRecordResult<()> {
     write_session_file(dir, "updated_at", &unix_timestamp_text())
 }

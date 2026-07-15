@@ -687,8 +687,8 @@ fn agent_start_prepares_session_workspace_hint() {
 
 #[test]
 fn systemctl_main_pid_parser_ignores_missing_pid() {
-    assert_eq!(parse_systemctl_main_pid("0\n"), None);
-    assert_eq!(parse_systemctl_main_pid("12345\n"), Some("12345".to_owned()));
+    assert_eq!(parse_main_pid("0\n"), None);
+    assert_eq!(parse_main_pid("12345\n"), Some(12345));
 }
 
 #[test]
@@ -844,7 +844,7 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
 
 #[test]
 fn agent_start_process_command_uses_clean_runtime_environment() {
-    let command = AgentStartCommand {
+    let command = AgentLaunchCommand {
         program: "/usr/bin/systemd-run".to_owned(),
         args: vec!["--user".to_owned(), "/usr/bin/env".to_owned()],
     };

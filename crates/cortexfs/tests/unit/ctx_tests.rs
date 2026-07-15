@@ -1,5 +1,5 @@
 use super::{
-    AGENT_PROFILE_SCHEMA_V1, AgentArgs, AgentChildRow, AgentStartCommand,
+    AGENT_PROFILE_SCHEMA_V1, AgentArgs, AgentChildRow, AgentLaunchCommand,
     AgentMount, AgentNewArgs, AgentProcess, AgentProfile, AgentSessionGcArgs, AgentStartArgs,
     AgentUnixIdentity, BOOTSTRAP_REFERENCE_AGENT_SUMMARY_LINE, CTX_PROVIDER_CURL_BIN, Cli,
     CliError, Command, ControlLineIssue, FileCommand, LayoutPathRole, LsTarget, MAX_AGENT_EVENTS,
@@ -33,7 +33,6 @@ use super::{
     format_trajectory_issue, is_mount_point, json_string, latest_run_id, list_names,
     load_agent_profile, load_schedule_context, object_execution_command, open_executable_no_follow,
     parse, parse_agent_profile_text, parse_command, parse_oauth_callback_params,
-    parse_systemctl_main_pid,
     plain_sibling_mount_bin, read_agent_processes, read_ctx_status, read_file_to_string,
     read_oauth_callback_request_from_reader, read_optional_trimmed, read_provider_config_file,
     read_provider_config_from_dir, read_provider_secret_stdin_limited, read_status_agent_processes,
@@ -54,6 +53,7 @@ use super::{
     terminal_safe_text, terminal_socket_exists, waiting_diagnostic, write_agent_control_plain,
     write_agent_session_plain,
 };
+use cortexfs::parse_main_pid;
 use cortexfs::agent::launch::{AgentChatAliasState, ensure_agent_chat_socket};
 use cortexfs::{
     AGENT_CONTROL_FILES, AbiPathKind, AgentControlKind, AgentScheduleIssue,

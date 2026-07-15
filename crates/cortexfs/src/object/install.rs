@@ -50,9 +50,9 @@ const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "policy",
     "meta.json",
 ];
-const AGENT_AUTHORITY_CONTROLS: &[&str] = &[
+const AGENT_REQUIRED_CONTROLS: &[&str] = &[
     "owner", "uid", "gid", "groups", "label", "iso", "parent", "life", "root", "cwd", "env",
-    "path", "mount", "model", "policy",
+    "path", "mount", "model", "abi", "policy",
 ];
 
 thread_local! {
@@ -448,11 +448,6 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
         validate_object_control_content(class, name, &validated_value)
             .map_err(|_error| InstallError::invalid(format!("invalid control value: {name}")))?;
         match (class, name.as_str()) {
-            (ObjectClass::Agent, "abi")
-                if !matches!(value.as_str(), "argv-v1" | "sdk-envelope-v1") =>
-            {
-                return Err(InstallError::invalid("invalid control value: abi"));
-            }
             (ObjectClass::Agent, "approval") if !matches!(value.as_str(), "auto" | "ask") => {
                 return Err(InstallError::invalid("invalid control value: approval"));
             }
@@ -492,7 +487,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
     let required = if class == ObjectClass::Tool {
         TOOL_INSTALL_CONTROLS
     } else {
-        AGENT_AUTHORITY_CONTROLS
+        AGENT_REQUIRED_CONTROLS
     };
     for name in required {
         if !manifest.controls.contains_key(*name) {
@@ -500,17 +495,6 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
                 "missing required control: {name}"
             )));
         }
-    }
-    if class == ObjectClass::Agent
-        && manifest
-            .controls
-            .get("approval")
-            .is_some_and(|value| value == "ask")
-        && manifest.controls.get("abi").map(String::as_str) != Some("sdk-envelope-v1")
-    {
-        return Err(InstallError::invalid(
-            "approval ask requires abi sdk-envelope-v1",
-        ));
     }
     Ok(())
 }
@@ -983,6 +967,7 @@ mod tests {
                 "path": "/ctx/tool",
                 "mount": "/ctx\t/ctx\tro\trbind,nosuid,nodev",
                 "model": "main",
+                "abi": "sdk-envelope-v1",
                 "policy": "allow example_t model:main use"
             }
         })
@@ -1048,24 +1033,19 @@ mod tests {
         agent.schema = OBJECT_MANIFEST_SCHEMA_V2.to_owned();
         assert!(validate_manifest(&agent).is_err_and(|error| error.message().contains("version")));
         agent.schema = OBJECT_MANIFEST_SCHEMA_V1.to_owned();
-        agent
-            .controls
-            .insert("abi".to_owned(), "sdk-envelope-v2".to_owned());
+        agent.controls.remove("abi");
         assert!(validate_manifest(&agent).is_err());
-        for abi in ["argv-v1", "sdk-envelope-v1"] {
+        for abi in ["argv-v1", "sdk-envelope-v2"] {
             agent.controls.insert("abi".to_owned(), abi.to_owned());
-            assert!(validate_manifest(&agent).is_ok());
+            assert!(validate_manifest(&agent).is_err(), "{abi:?}");
         }
         agent
             .controls
-            .insert("approval".to_owned(), "ask".to_owned());
-        agent
-            .controls
-            .insert("abi".to_owned(), "argv-v1".to_owned());
-        assert!(validate_manifest(&agent).is_err());
-        agent
-            .controls
             .insert("abi".to_owned(), "sdk-envelope-v1".to_owned());
+        assert!(validate_manifest(&agent).is_ok());
+        agent
+            .controls
+            .insert("approval".to_owned(), "ask".to_owned());
         assert!(validate_manifest(&agent).is_ok());
         for tools in ["", "example.echo", "example.echo\nfs.read"] {
             agent.controls.insert("tools".to_owned(), tools.to_owned());

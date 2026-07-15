@@ -16,14 +16,14 @@ provider special case, watcher, queue, or alternate orchestration path.
 2. Use CodeGraph before text search when `.codegraph/` exists.
 3. Reuse the Rust SDK matching the object class:
    `cortexfs-tool-sdk` for tools and `cortexfs-agent-sdk` for agents.
-4. Implement one executable per object. Accept argv or stdin and emit canonical
-   JSONL. The Agent SDK entrypoint performs the runtime startup capability ping;
-   do not bypass it. Keep model-provider formats outside the extension contract.
+4. Implement one executable per object. Tools accept argv or stdin; agents
+   accept only the hosted typed invocation envelope. Emit canonical JSONL. The
+   Agent SDK entrypoint performs the runtime startup capability ping; do not
+   bypass it. Keep model-provider formats outside the extension contract.
    Treat `CTX_SOURCE` only as a candidate path: runtime receipt dev/inode/type
    is authoritative for durable writes.
-   Agent SDK extensions that consume the hosted typed invocation envelope must
-   set the agent control `abi` to `sdk-envelope-v1`; omitting `abi` selects the
-   exact legacy `argv-v1` launch contract. Follow the normative
+   Every Agent SDK extension must set the required agent control `abi` to
+   `sdk-envelope-v1`. Follow the normative
    [Agent Runtime envelope](../../../docs/spec/agent-runtime.md) rather than
    duplicating its schema in extension documentation.
 5. Create a strict `cortexfs.object/v2` manifest with an object SemVer and a

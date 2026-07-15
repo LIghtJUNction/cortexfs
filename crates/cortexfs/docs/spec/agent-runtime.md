@@ -79,10 +79,10 @@ Assistant text is derived from stable event frames and recorded back to the
 durable session. Raw messages and events remain ordinary files; context packs
 are rebuildable views.
 
-Before invoking an executable agent for a durable `send`, the socket runtime
-sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
-`messages.jsonl` history. This is prompt context only; it does not grant
-additional session authority.
+Before invoking an executable agent, the socket runtime writes exactly one
+`sdk-envelope-v1` frame to stdin. Its `history_messages` and `tool_context`
+fields carry bounded prompt context; the agent boundary does not expose legacy
+`CTX_AGENT_HISTORY_MESSAGES` or `CTX_AGENT_TOOL_CONTEXT` environment inputs.
 
 The socket-activated executable agent runtime observes the durable session state
 for the active run. When the matching `done/cancelled` event appears, it stops

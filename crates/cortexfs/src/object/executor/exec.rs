@@ -3,13 +3,6 @@ use std::ffi::OsStr;
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::FileTypeExt;
 
-pub(crate) fn execute_agent_tool_call(
-    config: &AgentModelRunConfig,
-    tool_call: &AgentToolCall,
-) -> Result<String, ExecError> {
-    execute_agent_tool_call_with(&AgentToolExecutionConfig::from_model(config), tool_call)
-}
-
 pub(crate) struct AgentToolExecutionConfig<'a> {
     pub(crate) agent: &'a str,
     pub(crate) source: &'a Path,
@@ -19,21 +12,6 @@ pub(crate) struct AgentToolExecutionConfig<'a> {
     pub(crate) inherit_control: bool,
     pub(crate) control: Option<AgentToolControl>,
     pub(crate) cancel: Option<(&'a Path, &'a str)>,
-}
-
-impl<'a> AgentToolExecutionConfig<'a> {
-    pub(crate) fn from_model(config: &'a AgentModelRunConfig) -> Self {
-        Self {
-            agent: &config.agent,
-            source: &config.source,
-            ctx_root: &config.ctx_root,
-            run: &config.run,
-            session: &config.session,
-            inherit_control: true,
-            control: None,
-            cancel: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -252,7 +230,7 @@ fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, Exe
     let parsed = parse_tool_stdout(&stdout)
         .map_err(|error| ExecError::new(trim_tool_result(error.message())))?;
     let mut result = match parsed {
-        ToolStdout::Legacy(text) | ToolStdout::SdkSuccess(text) => text,
+        ToolStdout::SdkSuccess(text) => text,
         ToolStdout::SdkError { mut content, error } => {
             if !content.is_empty() && !content.ends_with('\n') {
                 content.push('\n');
@@ -282,20 +260,20 @@ fn finish_agent_tool_output(output: &std::process::Output) -> Result<String, Exe
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum ToolStdout {
-    Legacy(String),
     SdkSuccess(String),
     SdkError { content: String, error: String },
 }
 
 pub(crate) fn parse_tool_stdout(output: &str) -> Result<ToolStdout, ExecError> {
     let Some(first_line) = output.lines().find(|line| !line.is_empty()) else {
-        return Ok(ToolStdout::Legacy(output.to_owned()));
+        return Err(ExecError::new("empty CortexFS Tool SDK output"));
     };
-    let Ok(first) = serde_json::from_str::<Value>(first_line) else {
-        return Ok(ToolStdout::Legacy(output.to_owned()));
-    };
+    let first = serde_json::from_str::<Value>(first_line)
+        .map_err(|_error| ExecError::new("invalid CortexFS Tool SDK JSONL start"))?;
     if first.get("type").and_then(Value::as_str) != Some("start") {
-        return Ok(ToolStdout::Legacy(output.to_owned()));
+        return Err(ExecError::new(
+            "CortexFS Tool SDK output must start with a start frame",
+        ));
     }
     let run = sdk_frame_string(&first, &["type", "run", "tool"], "run")?;
     let mut content = Vec::new();
@@ -372,6 +350,7 @@ fn render_sdk_content(content: &[Value]) -> Result<String, ExecError> {
     Ok(text)
 }
 
+/// Extracts and returns a required string field after validating exact frame keys.
 fn sdk_frame_string<'a>(frame: &'a Value, keys: &[&str], name: &str) -> Result<&'a str, ExecError> {
     sdk_exact_keys(frame, keys)?;
     frame

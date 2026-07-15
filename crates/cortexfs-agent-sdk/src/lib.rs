@@ -1,12 +1,9 @@
 //! SDK for implementing a `CortexFS` executable agent.
 //!
-//! `CortexFS` invokes an agent executable with user input in CLI arguments or
-//! stdin and runtime context in `CTX_*` environment variables. [`run_cli`]
-//! joins argument values with spaces; when no argument is present, it reads up
-//! to 1 MiB of stdin. The agent writes canonical event objects as JSONL to
-//! stdout. When the runtime supplies a complete `CTX_CONTROL_*` capability,
-//! [`run_cli`] performs the startup ping before emitting `start`; absent
-//! capability state permits standalone use and partial state fails closed.
+//! `CortexFS` invokes an agent executable with one hosted envelope on stdin and
+//! runtime context in `CTX_*` environment variables. The agent writes canonical
+//! event objects as JSONL to stdout. [`run_cli`] performs the startup ping before
+//! invoking agent logic; incomplete capability state fails closed.
 //! This crate deliberately exposes no dynamic-library ABI because the
 //! runtime executes agent files.
 
@@ -14,16 +11,12 @@ use serde_json::{Value, json};
 use std::env;
 use std::ffi::OsString;
 use std::fmt;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::process::ExitCode;
 
-/// Maximum input accepted from stdin by [`run_cli`].
-pub const MAX_CLI_STDIN_INPUT_BYTES: usize = 1024 * 1024;
-const HOSTED_ENVELOPE_ARG: &str = "--cortexfs-sdk-envelope-v1";
-const HOSTED_ENVELOPE_ENV: &str = "sdk-envelope-v1";
-const AGENT_INVOCATION_SCHEMA: &str = "cortexfs.agent-invocation/v1";
-const MAX_AGENT_CONTEXT_BYTES: usize = 64 * 1024;
-const MAX_AGENT_STEPS: u8 = 8;
+pub use cortexfs_runtime_client::agent::AgentToolObservation;
+use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI, read_agent_invocation};
+
 const MAX_AGENT_TOOL_ARGC: usize = 64;
 const MAX_AGENT_TOOL_ARG_BYTES: usize = 8 * 1024;
 const MAX_OBJECT_NAME_LEN: usize = 255;
@@ -42,7 +35,6 @@ pub struct AgentInvocation {
     tool_context: Option<String>,
     step: u8,
     observation: Option<AgentToolObservation>,
-    hosted: bool,
 }
 
 impl AgentInvocation {
@@ -60,7 +52,6 @@ impl AgentInvocation {
             tool_context: None,
             step: 0,
             observation: None,
-            hosted: false,
         }
     }
 
@@ -113,44 +104,6 @@ impl AgentInvocation {
     #[must_use]
     pub const fn observation(&self) -> Option<&AgentToolObservation> {
         self.observation.as_ref()
-    }
-}
-
-/// Authoritative host observation supplied to one continuation step.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentToolObservation {
-    tool_call_id: String,
-    name: String,
-    status: String,
-    content: String,
-    truncated: bool,
-}
-
-impl AgentToolObservation {
-    /// Returns the preceding call identifier.
-    #[must_use]
-    pub fn tool_call_id(&self) -> &str {
-        &self.tool_call_id
-    }
-    /// Returns the executed tool name.
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-    /// Returns `ok` or `error`.
-    #[must_use]
-    pub fn status(&self) -> &str {
-        &self.status
-    }
-    /// Returns the normalized authoritative result.
-    #[must_use]
-    pub fn content(&self) -> &str {
-        &self.content
-    }
-    /// Returns whether normalization truncated the result.
-    #[must_use]
-    pub const fn truncated(&self) -> bool {
-        self.truncated
     }
 }
 
@@ -245,7 +198,7 @@ impl AgentToolCallRequest {
 /// Terminal outcome of one executable-agent invocation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentOutcome {
-    /// Agent work completed and the SDK must emit the final `done` frame.
+    /// Agent work completed; the host finalizes the run lifecycle.
     Complete,
     /// Control returns to the host for exactly one authoritative tool execution.
     YieldToolCall(AgentToolCallRequest),
@@ -283,7 +236,7 @@ impl<W: Write> AgentEmitter<W> {
 
     /// Emits a custom canonical event using the current run id.
     ///
-    /// Lifecycle event types are reserved for [`run_agent`].
+    /// Lifecycle and capability event types are reserved for the host.
     pub fn event(&mut self, mut event: Value) -> AgentResult<()> {
         let has_tool_result = event_has_tool_result(&event);
         let object = event
@@ -309,14 +262,6 @@ impl<W: Write> AgentEmitter<W> {
         object.insert("run".to_owned(), Value::String(self.run_id.clone()));
         self.frame(&event)
             .map_err(|error| AgentError::new("EIO", error.to_string()))
-    }
-
-    fn error(&mut self, error: &AgentError) -> io::Result<()> {
-        self.frame(&json!({ "type": "error", "run": self.run_id, "code": error.code, "message": error.message }))
-    }
-
-    fn done(&mut self, status: &str) -> io::Result<()> {
-        self.frame(&json!({ "type": "done", "run": self.run_id, "status": status }))
     }
 
     fn tool_call(&mut self, request: &AgentToolCallRequest) -> AgentResult<()> {
@@ -348,49 +293,16 @@ pub trait Agent: fmt::Debug {
     ) -> AgentResult<AgentOutcome>;
 }
 
-/// Runs custom agent logic and completes the canonical event stream.
-pub fn run_agent(
-    agent: &dyn Agent,
-    invocation: &AgentInvocation,
-    writer: &mut dyn Write,
-) -> io::Result<()> {
-    run_agent_status(agent, invocation, writer, true).map(|_success| ())
-}
-
 fn run_agent_status(
     agent: &dyn Agent,
     invocation: &AgentInvocation,
     writer: &mut dyn Write,
-    lifecycle: bool,
-) -> io::Result<bool> {
+) -> bool {
     let mut output = AgentEmitter::new(invocation.run_id().to_owned(), writer);
-    if lifecycle {
-        output.frame(&json!({ "type": "start", "run": invocation.run_id() }))?;
-    }
     match agent.run(invocation, &mut output) {
-        Ok(AgentOutcome::Complete) => {
-            if lifecycle {
-                output.done("ok")?;
-            }
-            Ok(true)
-        }
-        Ok(AgentOutcome::YieldToolCall(request)) => {
-            if let Err(error) = output.tool_call(&request) {
-                if lifecycle {
-                    output.error(&error)?;
-                    output.done("error")?;
-                }
-                return Ok(false);
-            }
-            Ok(true)
-        }
-        Err(error) => {
-            if lifecycle {
-                output.error(&error)?;
-                output.done("error")?;
-            }
-            Ok(false)
-        }
+        Ok(AgentOutcome::Complete) => true,
+        Ok(AgentOutcome::YieldToolCall(request)) => output.tool_call(&request).is_ok(),
+        Err(_) => false,
     }
 }
 
@@ -400,47 +312,32 @@ where
     I: IntoIterator<Item = OsString>,
 {
     let args = args.into_iter().collect::<Vec<_>>();
-    let hosted = env::var("CTX_AGENT_LAUNCH").as_deref() == Ok(HOSTED_ENVELOPE_ENV)
-        && args.as_slice() == [OsString::from(HOSTED_ENVELOPE_ARG)];
-    let stdin = io::stdin();
-    let envelope = if hosted {
-        parse_hosted_envelope(stdin.lock()).ok()
-    } else {
-        None
-    };
-    if hosted && envelope.is_none() {
+    if env::var("CTX_AGENT_LAUNCH").as_deref() != Ok(AGENT_LAUNCH_ABI)
+        || args.as_slice() != [OsString::from(AGENT_ENVELOPE_ARG)]
+    {
         return ExitCode::from(2);
     }
-    let input = match envelope.as_ref() {
-        Some(envelope) => envelope.input.clone(),
-        None => match collect_input_from_reader(args, stdin.lock()) {
-            Ok(input) => input,
-            Err(_) => return ExitCode::from(2),
-        },
+    let stdin = io::stdin();
+    let Ok(envelope) = read_agent_invocation(stdin.lock()) else {
+        return ExitCode::from(2);
     };
     let Some(run_id) = env::var_os("CTX_RUN_ID").and_then(|value| value.into_string().ok()) else {
         return ExitCode::from(2);
     };
-    let mut invocation = AgentInvocation::new(run_id, input);
+    let mut invocation = AgentInvocation::new(run_id, envelope.input());
     invocation.agent = env_text("CTX_AGENT");
     invocation.session = env_text("CTX_SESSION");
     invocation.ctx_root = env_text("CTX_ROOT");
     invocation.source_root = env_text("CTX_SOURCE");
-    if let Some(envelope) = envelope {
-        if envelope.run != invocation.run_id
-            || env::var("CTX_AGENT_STEP").ok().as_deref() != Some(&envelope.step.to_string())
-        {
-            return ExitCode::from(2);
-        }
-        invocation.history_messages = Some(envelope.history_messages);
-        invocation.tool_context = Some(envelope.tool_context);
-        invocation.step = envelope.step;
-        invocation.observation = envelope.observation;
-        invocation.hosted = true;
-    } else {
-        invocation.history_messages = env_text("CTX_AGENT_HISTORY_MESSAGES");
-        invocation.tool_context = env_text("CTX_AGENT_TOOL_CONTEXT");
+    if envelope.run() != invocation.run_id
+        || env::var("CTX_AGENT_STEP").ok().as_deref() != Some(&envelope.step().to_string())
+    {
+        return ExitCode::from(2);
     }
+    invocation.history_messages = Some(envelope.history_messages().to_owned());
+    invocation.tool_context = Some(envelope.tool_context().to_owned());
+    invocation.step = envelope.step();
+    invocation.observation = envelope.observation().cloned();
     let Some(agent_name) = invocation.agent() else {
         return ExitCode::from(2);
     };
@@ -448,143 +345,11 @@ where
         return ExitCode::from(1);
     }
     let stdout = io::stdout();
-    match run_agent_status(agent, &invocation, &mut stdout.lock(), !invocation.hosted) {
-        Ok(true) => ExitCode::SUCCESS,
-        Ok(false) | Err(_) => ExitCode::from(1),
+    if run_agent_status(agent, &invocation, &mut stdout.lock()) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     }
-}
-
-struct HostedEnvelope {
-    run: String,
-    step: u8,
-    input: String,
-    history_messages: String,
-    tool_context: String,
-    observation: Option<AgentToolObservation>,
-}
-
-fn parse_hosted_envelope(reader: impl Read) -> AgentResult<HostedEnvelope> {
-    let limit = u64::try_from(MAX_CLI_STDIN_INPUT_BYTES.saturating_add(2))
-        .map_err(|_error| AgentError::invalid("hosted invocation input limit is invalid"))?;
-    let mut bytes = Vec::new();
-    reader
-        .take(limit)
-        .read_to_end(&mut bytes)
-        .map_err(|error| AgentError::new("EIO", error.to_string()))?;
-    if bytes.len() > MAX_CLI_STDIN_INPUT_BYTES
-        || bytes.last() != Some(&b'\n')
-        || bytes
-            .iter()
-            .take(bytes.len().saturating_sub(1))
-            .any(|byte| *byte == b'\n')
-    {
-        return Err(AgentError::invalid("invalid hosted invocation framing"));
-    }
-    bytes.pop();
-    let value: Value = serde_json::from_slice(&bytes)
-        .map_err(|_error| AgentError::invalid("invalid hosted invocation JSON"))?;
-    let object = exact_object(
-        &value,
-        &[
-            "schema",
-            "run",
-            "step",
-            "input",
-            "history_messages",
-            "tool_context",
-            "observation",
-        ],
-    )?;
-    if object.get("schema").and_then(Value::as_str) != Some(AGENT_INVOCATION_SCHEMA) {
-        return Err(AgentError::invalid("invalid hosted invocation schema"));
-    }
-    let run = required_string(object, "run")?;
-    let step = object
-        .get("step")
-        .and_then(Value::as_u64)
-        .and_then(|v| u8::try_from(v).ok())
-        .filter(|step| *step <= MAX_AGENT_STEPS)
-        .ok_or_else(|| AgentError::invalid("invalid hosted invocation step"))?;
-    let input = required_string(object, "input")?;
-    let history_messages = required_string(object, "history_messages")?;
-    let tool_context = required_string(object, "tool_context")?;
-    if history_messages.len() > MAX_AGENT_CONTEXT_BYTES
-        || tool_context.len() > MAX_AGENT_CONTEXT_BYTES
-    {
-        return Err(AgentError::invalid(
-            "hosted invocation context exceeds limit",
-        ));
-    }
-    let observation = parse_observation(object.get("observation"))?;
-    if (step == 0) != observation.is_none() {
-        return Err(AgentError::invalid(
-            "hosted invocation observation cardinality",
-        ));
-    }
-    Ok(HostedEnvelope {
-        run,
-        step,
-        input,
-        history_messages,
-        tool_context,
-        observation,
-    })
-}
-
-fn parse_observation(value: Option<&Value>) -> AgentResult<Option<AgentToolObservation>> {
-    let Some(value) = value.filter(|value| !value.is_null()) else {
-        return Ok(None);
-    };
-    let object = exact_object(
-        value,
-        &["tool_call_id", "name", "status", "content", "truncated"],
-    )?;
-    let tool_call_id = required_string(object, "tool_call_id")?;
-    let name = required_string(object, "name")?;
-    if !is_object_name(&tool_call_id) || !is_object_name(&name) {
-        return Err(AgentError::invalid("invalid observation identity"));
-    }
-    let status = required_string(object, "status")?;
-    if !matches!(status.as_str(), "ok" | "error") {
-        return Err(AgentError::invalid("invalid observation status"));
-    }
-    let content = required_string(object, "content")?;
-    if content.len() > 16 * 1024 {
-        return Err(AgentError::invalid("observation content exceeds limit"));
-    }
-    Ok(Some(AgentToolObservation {
-        tool_call_id,
-        name,
-        status,
-        content,
-        truncated: object
-            .get("truncated")
-            .and_then(Value::as_bool)
-            .ok_or_else(|| AgentError::invalid("invalid observation truncated"))?,
-    }))
-}
-
-fn exact_object<'a>(
-    value: &'a Value,
-    keys: &[&str],
-) -> AgentResult<&'a serde_json::Map<String, Value>> {
-    let object = value
-        .as_object()
-        .ok_or_else(|| AgentError::invalid("hosted invocation must be object"))?;
-    if object.len() != keys.len() || !object.keys().all(|key| keys.contains(&key.as_str())) {
-        return Err(AgentError::invalid(
-            "unknown or missing hosted invocation field",
-        ));
-    }
-    Ok(object)
-}
-
-fn required_string(object: &serde_json::Map<String, Value>, key: &str) -> AgentResult<String> {
-    object
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| AgentError::invalid(format!("invalid {key}")))
 }
 
 fn startup_handshake(agent: &str) -> Result<(), cortexfs_runtime_client::RuntimeClientError> {
@@ -654,31 +419,6 @@ fn env_text(name: &str) -> Option<String> {
     env::var_os(name).and_then(|value| value.into_string().ok())
 }
 
-fn collect_input_from_reader<I>(args: I, reader: impl Read) -> io::Result<String>
-where
-    I: IntoIterator<Item = OsString>,
-{
-    let input = args
-        .into_iter()
-        .map(|value| value.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if !input.is_empty() {
-        return Ok(input);
-    }
-    let limit = u64::try_from(MAX_CLI_STDIN_INPUT_BYTES.saturating_add(1))
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let mut input = String::new();
-    reader.take(limit).read_to_string(&mut input)?;
-    if input.len() > MAX_CLI_STDIN_INPUT_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "agent CLI stdin exceeds input limit",
-        ));
-    }
-    Ok(input)
-}
-
 /// Defines the executable entry point for an agent value.
 #[macro_export]
 macro_rules! cortexfs_agent_main {
@@ -699,10 +439,22 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
 
+    fn hosted_envelope(run: &str, step: u8) -> String {
+        serde_json::json!({
+            "schema": cortexfs_runtime_client::agent::AGENT_INVOCATION_SCHEMA,
+            "run": run, "step": step,
+            "input": "hello", "history_messages": "[]", "tool_context": "",
+            "observation": Value::Null
+        })
+        .to_string()
+            + "\n"
+    }
+
     #[test]
-    #[ignore = "subprocess entrypoint for startup handshake test"]
-    fn startup_handshake_subprocess() {
-        assert_eq!(run_cli(&Echo, [OsString::from("hi")]), ExitCode::SUCCESS);
+    #[ignore = "subprocess entrypoint for rejected hosted CLI tests"]
+    fn rejected_cli_subprocess() {
+        let arg = env::var_os("TEST_AGENT_ARG").unwrap_or_default();
+        assert_eq!(run_cli(&Echo, [arg]), ExitCode::from(2));
     }
 
     #[test]
@@ -725,7 +477,7 @@ mod tests {
     #[ignore = "subprocess entrypoint for hosted envelope test"]
     fn hosted_envelope_subprocess() {
         assert_eq!(
-            run_cli(&Echo, [OsString::from(HOSTED_ENVELOPE_ARG)]),
+            run_cli(&Echo, [OsString::from(AGENT_ENVELOPE_ARG)]),
             ExitCode::SUCCESS
         );
     }
@@ -755,16 +507,26 @@ mod tests {
                 Some("run-1".to_owned())
             })
         });
-        let output = std::process::Command::new(env::current_exe()?)
+        let mut child = std::process::Command::new(env::current_exe()?)
             .arg("--exact")
-            .arg("tests::startup_handshake_subprocess")
+            .arg("tests::hosted_envelope_subprocess")
             .arg("--ignored")
             .env("CTX_AGENT", "echo-agent")
             .env("CTX_SESSION", "live")
             .env("CTX_RUN_ID", "run-1")
+            .env("CTX_AGENT_LAUNCH", AGENT_LAUNCH_ABI)
+            .env("CTX_AGENT_STEP", "0")
             .env(&environment[0].0, &environment[0].1)
             .env(&environment[1].0, &environment[1].1)
-            .output()?;
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()?;
+        let Some(mut stdin) = child.stdin.take() else {
+            return Err(io::Error::other("child stdin unavailable").into());
+        };
+        stdin.write_all(hosted_envelope("run-1", 0).as_bytes())?;
+        drop(stdin);
+        let output = child.wait_with_output()?;
         assert!(output.status.success(), "{output:?}");
         assert!(matches!(
             startup_rx.recv_timeout(std::time::Duration::from_secs(1)),
@@ -859,35 +621,31 @@ mod tests {
     }
 
     #[test]
-    fn sdk_allows_standalone_and_rejects_partial_capability()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let binary = env::current_exe()?;
-        let standalone = std::process::Command::new(&binary)
-            .arg("--exact")
-            .arg("tests::startup_handshake_subprocess")
-            .arg("--ignored")
-            .env("CTX_AGENT", "echo-agent")
-            .env("CTX_RUN_ID", "run-1")
-            .env_remove("CTX_CONTROL_SOCKET")
-            .env_remove("CTX_CONTROL_TOKEN")
-            .status()?;
-        assert!(standalone.success());
-        let partial = std::process::Command::new(binary)
-            .arg("--exact")
-            .arg("tests::startup_handshake_subprocess")
-            .arg("--ignored")
-            .env("CTX_AGENT", "echo-agent")
-            .env("CTX_RUN_ID", "run-1")
-            .env("CTX_CONTROL_TOKEN", "partial")
-            .env_remove("CTX_CONTROL_SOCKET")
-            .output()?;
-        assert!(!partial.status.success());
-        assert!(
-            !partial
-                .stdout
-                .windows(b"\"type\":\"start\"".len())
-                .any(|bytes| bytes == b"\"type\":\"start\"")
-        );
+    fn sdk_requires_marker_and_launch_env_independently() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for (arg, launch) in [
+            ("wrong-marker", Some(AGENT_LAUNCH_ABI)),
+            (AGENT_ENVELOPE_ARG, None),
+            (AGENT_ENVELOPE_ARG, Some("wrong-abi")),
+        ] {
+            let mut command = std::process::Command::new(env::current_exe()?);
+            command
+                .arg("--exact")
+                .arg("tests::rejected_cli_subprocess")
+                .arg("--ignored")
+                .env("TEST_AGENT_ARG", arg)
+                .env("CTX_AGENT", "echo-agent")
+                .env("CTX_RUN_ID", "run-1")
+                .env_remove("CTX_CONTROL_SOCKET")
+                .env_remove("CTX_CONTROL_TOKEN");
+            if let Some(launch) = launch {
+                command.env("CTX_AGENT_LAUNCH", launch);
+            } else {
+                command.env_remove("CTX_AGENT_LAUNCH");
+            }
+            let output = command.output()?;
+            assert!(output.status.success(), "{arg} {launch:?}: {output:?}");
+        }
         Ok(())
     }
 
@@ -915,29 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn run_agent_emits_message_and_done() {
-        let mut bytes = Vec::new();
-        assert!(run_agent(&Echo, &AgentInvocation::new("r1", "hello"), &mut bytes).is_ok());
-        let frames: Vec<Value> = String::from_utf8(bytes)
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .collect();
-        assert_eq!(
-            frames,
-            vec![
-                json!({ "type": "start", "run": "r1" }),
-                json!({
-                    "type": "message", "run": "r1", "role": "assistant",
-                    "content": [{ "type": "text", "text": "hello" }]
-                }),
-                json!({ "type": "done", "run": "r1", "status": "ok" })
-            ]
-        );
-    }
-
-    #[test]
-    fn agent_error_emits_ordered_frames_and_fails_status() {
+    fn agent_error_returns_failure_without_host_frames() {
         #[derive(Debug)]
         struct Fail;
         impl Agent for Fail {
@@ -951,17 +687,12 @@ mod tests {
         }
 
         let mut bytes = Vec::new();
-        assert!(matches!(
-            run_agent_status(&Fail, &AgentInvocation::new("r1", ""), &mut bytes, true),
-            Ok(false)
+        assert!(!run_agent_status(
+            &Fail,
+            &AgentInvocation::new("r1", ""),
+            &mut bytes,
         ));
-        let types = String::from_utf8(bytes)
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .filter_map(|frame| frame.get("type")?.as_str().map(str::to_owned))
-            .collect::<Vec<_>>();
-        assert_eq!(types, ["start", "error", "done"]);
+        assert!(bytes.is_empty());
     }
 
     #[test]
@@ -998,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_yield_is_terminal_without_sdk_done() {
+    fn tool_yield_emits_only_the_host_request() {
         #[derive(Debug)]
         struct Yield;
         impl Agent for Yield {
@@ -1013,14 +744,18 @@ mod tests {
         }
 
         let mut bytes = Vec::new();
-        assert!(run_agent(&Yield, &AgentInvocation::new("r1", ""), &mut bytes).is_ok());
+        assert!(run_agent_status(
+            &Yield,
+            &AgentInvocation::new("r1", ""),
+            &mut bytes,
+        ));
         let frames = String::from_utf8(bytes).unwrap_or_default();
         let types = frames
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
             .filter_map(|frame| frame.get("type")?.as_str().map(str::to_owned))
             .collect::<Vec<_>>();
-        assert_eq!(types, ["start", "tool_call"]);
+        assert_eq!(types, ["tool_call"]);
     }
 
     #[test]
@@ -1045,57 +780,23 @@ mod tests {
     }
 
     #[test]
-    fn cli_input_accepts_argv_and_stdin_boundary() {
-        assert_eq!(
-            collect_input_from_reader(
-                [OsString::from("hello"), OsString::from("world")],
-                io::empty()
-            )
-            .unwrap_or_default(),
-            "hello world"
-        );
-        let input = vec![b'x'; MAX_CLI_STDIN_INPUT_BYTES];
-        assert_eq!(
-            collect_input_from_reader(std::iter::empty::<OsString>(), Cursor::new(input))
-                .unwrap_or_default()
-                .len(),
-            MAX_CLI_STDIN_INPUT_BYTES
-        );
-    }
-
-    #[test]
-    fn cli_input_rejects_oversized_stdin() {
-        let input = vec![b'x'; MAX_CLI_STDIN_INPUT_BYTES.saturating_add(1)];
-        let result = collect_input_from_reader(std::iter::empty::<OsString>(), Cursor::new(input));
-        assert!(matches!(result, Err(ref error) if error.kind() == io::ErrorKind::InvalidData));
-    }
-
-    #[test]
     fn hosted_envelope_is_strict_and_typed() -> Result<(), Box<dyn std::error::Error>> {
         let input = br#"{"schema":"cortexfs.agent-invocation/v1","run":"r1","step":1,"input":"hello","history_messages":"[]","tool_context":"","observation":{"tool_call_id":"call-1","name":"example.echo","status":"ok","content":"a","truncated":false}}
 "#;
-        let envelope = parse_hosted_envelope(Cursor::new(input)).map_err(|error| {
-            io::Error::other(format!(
-                "agent SDK test failure: {}: {}",
-                error.code(),
-                error.message()
-            ))
-        })?;
-        assert_eq!(envelope.step, 1);
+        let envelope = read_agent_invocation(Cursor::new(input))
+            .map_err(|error| io::Error::other(format!("agent SDK test failure: {error:?}")))?;
+        assert_eq!(envelope.step(), 1);
         assert_eq!(
-            envelope
-                .observation
-                .as_ref()
-                .map(AgentToolObservation::content),
+            envelope.observation().map(AgentToolObservation::content),
             Some("a")
         );
         let body = input
             .get(..input.len().saturating_sub(1))
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing envelope body"))?;
         for invalid in [body, b"{}\n".as_slice(), b"{}\n{}\n".as_slice()] {
-            assert!(parse_hosted_envelope(Cursor::new(invalid)).is_err());
+            assert!(read_agent_invocation(Cursor::new(invalid)).is_err());
         }
-        assert!(parse_hosted_envelope(Cursor::new(vec![0xff, b'\n'])).is_err());
+        assert!(read_agent_invocation(Cursor::new(vec![0xff, b'\n'])).is_err());
         let base: Value = serde_json::from_slice(body)?;
         for (field, value) in [
             ("schema", json!("wrong/v1")),
@@ -1103,7 +804,7 @@ mod tests {
             ("observation", Value::Null),
             (
                 "history_messages",
-                json!("x".repeat(MAX_AGENT_CONTEXT_BYTES + 1)),
+                json!("x".repeat(cortexfs_runtime_client::agent::MAX_AGENT_CONTEXT_BYTES + 1)),
             ),
         ] {
             let mut invalid = base.clone();
@@ -1113,7 +814,7 @@ mod tests {
                 .insert(field.to_owned(), value);
             let bytes = invalid.to_string() + "\n";
             assert!(
-                parse_hosted_envelope(Cursor::new(bytes)).is_err(),
+                read_agent_invocation(Cursor::new(bytes)).is_err(),
                 "{field}"
             );
         }
@@ -1125,13 +826,13 @@ mod tests {
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing observation"))?
             .insert("content".to_owned(), json!("x".repeat(16 * 1024 + 1)));
         let bytes = oversized_observation.to_string() + "\n";
-        assert!(parse_hosted_envelope(Cursor::new(bytes)).is_err());
+        assert!(read_agent_invocation(Cursor::new(bytes)).is_err());
         zero_with_observation
             .as_object_mut()
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid envelope"))?
             .insert("step".to_owned(), json!(0));
         let bytes = zero_with_observation.to_string() + "\n";
-        assert!(parse_hosted_envelope(Cursor::new(bytes)).is_err());
+        assert!(read_agent_invocation(Cursor::new(bytes)).is_err());
         Ok(())
     }
 
@@ -1139,15 +840,6 @@ mod tests {
     fn hosted_envelope_validates_run_and_step_without_lifecycle()
     -> Result<(), Box<dyn std::error::Error>> {
         let binary = env::current_exe()?;
-        let envelope = |run: &str, step: u8| {
-            serde_json::json!({
-                "schema": AGENT_INVOCATION_SCHEMA, "run": run, "step": step,
-                "input": "hello", "history_messages": "[]", "tool_context": "",
-                "observation": Value::Null
-            })
-            .to_string()
-                + "\n"
-        };
         for (run, env_step, success) in
             [("r1", "0", true), ("wrong", "0", false), ("r1", "1", false)]
         {
@@ -1158,7 +850,7 @@ mod tests {
                 .env("CTX_AGENT", "echo-agent")
                 .env("CTX_SESSION", "default")
                 .env("CTX_RUN_ID", "r1")
-                .env("CTX_AGENT_LAUNCH", HOSTED_ENVELOPE_ENV)
+                .env("CTX_AGENT_LAUNCH", AGENT_LAUNCH_ABI)
                 .env("CTX_AGENT_STEP", env_step)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
@@ -1166,7 +858,7 @@ mod tests {
             let Some(mut stdin) = child.stdin.take() else {
                 return Err(io::Error::other("child stdin unavailable").into());
             };
-            stdin.write_all(envelope(run, 0).as_bytes())?;
+            stdin.write_all(hosted_envelope(run, 0).as_bytes())?;
             drop(stdin);
             let output = child.wait_with_output()?;
             assert_eq!(output.status.success(), success, "{output:?}");
@@ -1178,15 +870,5 @@ mod tests {
             }
         }
         Ok(())
-    }
-
-    #[test]
-    fn envelope_looking_stdin_remains_plain_without_host_markers() {
-        let plain = "{\"schema\":\"cortexfs.agent-invocation/v1\"}\n";
-        assert_eq!(
-            collect_input_from_reader(std::iter::empty::<OsString>(), Cursor::new(plain))
-                .unwrap_or_default(),
-            plain
-        );
     }
 }

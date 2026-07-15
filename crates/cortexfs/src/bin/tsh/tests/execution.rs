@@ -100,6 +100,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
             ("path", "/ctx/tool\n"),
             ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev\n"),
             ("model", "local/chat\n"),
+            ("abi", "sdk-envelope-v1\n"),
             ("window", "auto\n"),
             ("policy", "allow coder_t model:local/chat use\n"),
         ] {

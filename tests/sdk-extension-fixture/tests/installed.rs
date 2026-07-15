@@ -79,54 +79,21 @@ mod tests {
     }
 
     #[test]
-    fn installed_agent_cli_joins_argv_and_emits_success_jsonl()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let root = install_fixture_agent()?;
-        let output = run_installed_agent(&root, &["hello", "world"], b"", "agent-cli-argv")?;
-
-        assert_eq!(
-            (
-                output.status.code(),
-                String::from_utf8(output.stdout)?,
-                output.stderr,
-            ),
-            (
-                Some(0),
-                concat!(
-                    "{\"run\":\"agent-cli-argv\",\"type\":\"start\"}\n",
-                    "{\"content\":[{\"text\":\"hello world\",\"type\":\"text\"}],\"role\":\"assistant\",\"run\":\"agent-cli-argv\",\"type\":\"message\"}\n",
-                    "{\"run\":\"agent-cli-argv\",\"status\":\"ok\",\"type\":\"done\"}\n",
-                )
-                .to_owned(),
-                Vec::new(),
-            )
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn installed_agent_cli_reads_stdin_when_argv_is_empty() -> Result<(), Box<dyn std::error::Error>>
+    fn installed_agent_cli_rejects_legacy_argv_and_stdin() -> Result<(), Box<dyn std::error::Error>>
     {
         let root = install_fixture_agent()?;
-        let output = run_installed_agent(&root, &[], b"from stdin", "agent-cli-stdin")?;
-
-        assert_eq!(
-            (
-                output.status.code(),
-                String::from_utf8(output.stdout)?,
-                output.stderr,
-            ),
-            (
-                Some(0),
-                concat!(
-                    "{\"run\":\"agent-cli-stdin\",\"type\":\"start\"}\n",
-                    "{\"content\":[{\"text\":\"from stdin\",\"type\":\"text\"}],\"role\":\"assistant\",\"run\":\"agent-cli-stdin\",\"type\":\"message\"}\n",
-                    "{\"run\":\"agent-cli-stdin\",\"status\":\"ok\",\"type\":\"done\"}\n",
-                )
-                .to_owned(),
-                Vec::new(),
-            )
-        );
+        let cases = [
+            (&["hello", "world"][..], &b""[..], "agent-cli-argv"),
+            (&[][..], &b"from stdin"[..], "agent-cli-stdin"),
+        ];
+        for (args, stdin, run) in cases {
+            let output = run_installed_agent(&root, args, stdin, run)?;
+            assert_eq!(
+                (output.status.code(), output.stdout, output.stderr),
+                (Some(2), Vec::new(), Vec::new()),
+                "legacy invocation {run} was accepted"
+            );
+        }
         Ok(())
     }
 

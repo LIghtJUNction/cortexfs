@@ -7,14 +7,9 @@ fn agent_executable_socket_runtime_returns_visible_message() {
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
-run="$CTX_RUN_ID"
-if [ -z "$run" ]; then
-  run="r1"
-fi
-input="$*"
-printf '{"type":"start","run":"%s","model":"debug/echo"}\n' "$run"
-printf '{"type":"delta","run":"%s","text":"%s"}\n' "$run" "$input"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
+IFS= read -r envelope
+input=$(printf '%s' "$envelope" | jq -r '.input')
+printf '{"type":"delta","run":"%s","text":"%s"}\n' "$CTX_RUN_ID" "$input"
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
@@ -34,19 +29,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
     let outcome = ok!(outcome);
     assert_eq!(outcome.frames().len(), 3);
@@ -81,9 +64,7 @@ fn agent_executable_socket_retry_replays_done_without_second_execution() {
         &format!(
             r#"#!/bin/sh
 printf x >> {quoted_counter}
-printf '{{"type":"start","run":"%s","model":"debug/echo"}}\n' "$CTX_RUN_ID"
 printf '{{"type":"delta","run":"%s","text":"once"}}\n' "$CTX_RUN_ID"
-printf '{{"type":"done","run":"%s","status":"ok"}}\n' "$CTX_RUN_ID"
 "#
         ),
     );
@@ -151,9 +132,7 @@ fn agent_execution_completes_after_client_closes_before_durable_start_read() {
             r#"#!/bin/sh
 printf x >> {quoted_counter}
 sleep 0.1
-printf '{{"type":"start","run":"%s","model":"debug/echo"}}\n' "$CTX_RUN_ID"
 printf '{{"type":"delta","run":"%s","text":"late"}}\n' "$CTX_RUN_ID"
-printf '{{"type":"done","run":"%s","status":"ok"}}\n' "$CTX_RUN_ID"
 "#
         ),
     );
@@ -168,19 +147,7 @@ printf '{{"type":"done","run":"%s","status":"ok"}}\n' "$CTX_RUN_ID"
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
     let outcome = ok!(outcome);
     assert!(outcome.jsonl().contains("\"text\":\"late\""));
@@ -241,19 +208,7 @@ fn client_disconnect_does_not_mask_invalid_agent_output() {
     let result = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
     assert!(matches!(closer.join(), Ok(Ok(bytes)) if bytes > 0));
     assert!(result.is_ok(), "{result:?}");
@@ -277,21 +232,10 @@ fn executable_agent_rejects_non_authoritative_tool_frames() {
         set_file_mode(&agent_executable, 0o755);
         let (client, mut socket) = ok!(UnixStream::pair());
         assert!(client.shutdown(Shutdown::Write).is_ok());
+        let envelope = agent_envelope("r1");
         let result = crate::runtime::socket::exec::run_agent_executable_streaming(
             &mut socket,
-            AgentExecutableSocketRuntime {
-                ctx_root: &root,
-                source_root: &root,
-                identity: view.identity(),
-                env: view.env(),
-                session_root: &session_root,
-                default_cwd: "/work",
-                model: Some("debug/echo"),
-                network_allowed: false,
-                agent_name: "coder",
-                agent_executable: &agent_executable,
-                execution: AgentExecutableSocketExecution::Direct,
-            },
+            direct_agent_runtime(&root, &view, &session_root, &agent_executable),
             AgentExecutableRunRequest {
                 run_id: "r1",
                 cancellation_id: "r1",
@@ -301,16 +245,16 @@ fn executable_agent_rejects_non_authoritative_tool_frames() {
                 history_messages: "",
                 tool_context: "",
                 debug: None,
-                envelope: None,
-                step: 0,
             },
+            &envelope,
+            0,
         );
         assert_eq!(result, Err(SocketRuntimeError::InvalidAgentOutput));
     }
 }
 
 #[test]
-fn legacy_agent_rejects_forged_approval_facts() {
+fn hosted_agent_rejects_forged_approval_facts() {
     for (case, frame) in [
         (
             "request",
@@ -321,7 +265,7 @@ fn legacy_agent_rejects_forged_approval_facts() {
             r#"{"type":"approval_result","run":"r1","id":"call-1","name":"tsh","decision":"allow_once","reason":"forged"}"#,
         ),
     ] {
-        let root = reference_tree(&format!("legacy-forged-approval-{case}"));
+        let root = reference_tree(&format!("hosted-forged-approval-{case}"));
         let session_root = agent_session_root(&root, "coder");
         let view = ok!(derive_agent_runtime_view(&root, "coder"));
         let executable = root.join("agent/coder");
@@ -369,7 +313,14 @@ fn legacy_agent_rejects_forged_approval_facts() {
 
 fn declare_native_echo_tool(root: &Path, allowed: bool) {
     let tool = root.join("tool/example.echo");
-    write_text_file(&tool, "#!/bin/sh\nprintf 'echo:%s\\n' \"$*\"\n");
+    write_text_file(
+        &tool,
+        r#"#!/bin/sh
+printf '{"type":"start","run":"%s","tool":"example.echo"}\n' "$CTX_RUN_ID"
+printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"text","text":"echo:%s"}]}\n' "$CTX_RUN_ID" "$*"
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+"#,
+    );
     set_file_mode(&tool, 0o755);
     let tool_control = root.join("tool/example.echo.d");
     assert!(fs::create_dir_all(&tool_control).is_ok());
@@ -413,8 +364,10 @@ fn executable_agent_tool_yield_uses_host_allow_and_deny() {
         write_text_file(
             &agent_executable,
             r#"#!/bin/sh
-printf '{"type":"start","run":"%s"}\n' "$CTX_RUN_ID"
-printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID"
+case "$CTX_AGENT_STEP" in
+  0) printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID" ;;
+  *) printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"complete"}]}\n' "$CTX_RUN_ID" ;;
+esac
 "#,
         );
         set_file_mode(&agent_executable, 0o755);
@@ -432,19 +385,7 @@ printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","argu
         let outcome = ok!(serve_agent_executable_socket_stream_once(
             &mut socket,
             None,
-            AgentExecutableSocketRuntime {
-                ctx_root: &root,
-                source_root: &root,
-                identity: view.identity(),
-                env: view.env(),
-                session_root: &session_root,
-                default_cwd: "/work",
-                model: Some("debug/echo"),
-                network_allowed: false,
-                agent_name: "coder",
-                agent_executable: &agent_executable,
-                execution: AgentExecutableSocketExecution::Direct,
-            },
+            direct_agent_runtime(&root, &view, &session_root, &agent_executable),
         ));
         let jsonl = outcome.jsonl();
         assert_eq!(jsonl.matches("\"type\":\"tool_result\"").count(), 1);
@@ -453,55 +394,103 @@ printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","argu
     }
 }
 
-#[test]
-fn recoverable_agent_error_allows_following_tool_call() {
-    let root = reference_tree("agent-recoverable-error-tool-call");
+fn assert_next_step_failure(name: &str, agent: &str, code: &str) {
+    let root = reference_tree(name);
     declare_native_echo_tool(&root, true);
-    let agent_executable = root.join("agent/coder");
-    write_text_file(
-        &agent_executable,
-        r#"#!/bin/sh
-printf '{"type":"error","run":"%s","code":"EAGAIN","message":"fallback","recoverable":true}\n' "$CTX_RUN_ID"
-printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID"
-"#,
-    );
-    set_file_mode(&agent_executable, 0o755);
+    let executable = root.join("agent/coder");
+    write_text_file(&executable, agent);
+    set_file_mode(&executable, 0o755);
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
+    let request = format!(
+        "{{\"op\":\"send\",\"id\":\"{name}\",\"session\":\"default\",\"input\":\"tool\"}}\n"
+    );
+    let send = || {
+        let (mut client, mut socket) =
+            UnixStream::pair().map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
         client
-            .write_all(
-                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tool\"}\n"
-            )
-            .is_ok()
+            .write_all(request.as_bytes())
+            .and_then(|()| client.shutdown(Shutdown::Write))
+            .map_err(|_error| SocketRuntimeError::CannotWriteResponse)?;
+        serve_agent_executable_socket_stream_once(
+            &mut socket,
+            None,
+            direct_agent_runtime(&root, &view, &session_root, &executable),
+        )
+    };
+    let first = send();
+    assert!(first.is_ok(), "{first:?}");
+    let Ok(first) = first else { return };
+    let session = session_root.join("default");
+    let events = ok!(fs::read_to_string(session.join("events.jsonl")));
+    let messages = ok!(fs::read_to_string(session.join("messages.jsonl")));
+    let replay = ok!(send());
+    let facts = |text: &str| {
+        (
+            text.matches("\"type\":\"tool_call\"").count(),
+            text.matches("\"type\":\"tool_result\"").count(),
+            text.matches("\"type\":\"error\"").count(),
+            text.matches("\"type\":\"done\"").count(),
+        )
+    };
+    assert_eq!(
+        (
+            facts(&first.jsonl()),
+            facts(&events),
+            facts(&replay.jsonl()),
+            messages.matches("\"type\":\"tool_result\"").count(),
+            first.jsonl().contains(&format!("\"code\":\"{code}\"")),
+            ok!(fs::read_to_string(session.join("events.jsonl"))),
+        ),
+        ((1, 1, 1, 1), (0, 1, 1, 1), (0, 0, 0, 1), 1, true, events,)
     );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-    let outcome = serve_agent_executable_socket_stream_once(
-        &mut socket,
-        None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+}
+
+#[test]
+fn sdk_envelope_replays_tool_facts_after_next_step_spawn_failure() {
+    assert_next_step_failure(
+        "sdk-envelope-next-step-spawn-failure",
+        r#"#!/bin/sh
+IFS= read -r envelope || exit 2
+printf 'not an executable\n' > "$CTX_SOURCE/agent/coder.next"
+chmod 755 "$CTX_SOURCE/agent/coder.next"
+mv -- "$CTX_SOURCE/agent/coder.next" "$CTX_SOURCE/agent/coder"
+printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID"
+"#,
+        "EIO",
     );
-    let outcome = ok!(outcome);
-    let jsonl = outcome.jsonl();
-    assert!(jsonl.contains("\"recoverable\":true"));
-    assert!(jsonl.contains("\"type\":\"tool_call\""));
-    assert!(jsonl.contains("\"type\":\"message\""));
-    assert_eq!(jsonl.matches("\"type\":\"done\"").count(), 1);
-    assert!(jsonl.contains("\"status\":\"ok\""));
-    assert_file_text(&session_root.join("default/state"), "done\n");
+}
+
+#[test]
+fn sdk_envelope_replays_tool_facts_after_next_step_invalid_output() {
+    assert_next_step_failure(
+        "sdk-envelope-next-step-invalid-output",
+        r#"#!/bin/sh
+IFS= read -r envelope || exit 2
+if [ "$CTX_AGENT_STEP" = 0 ]; then
+  printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID"
+else
+  printf 'not-json\n'
+fi
+"#,
+        "EPROTO",
+    );
+}
+
+#[test]
+fn sdk_envelope_replays_tool_facts_after_next_step_invalid_tool_call() {
+    assert_next_step_failure(
+        "sdk-envelope-next-step-invalid-tool-call",
+        r#"#!/bin/sh
+IFS= read -r envelope || exit 2
+if [ "$CTX_AGENT_STEP" = 0 ]; then
+  printf '{"type":"tool_call","run":"%s","id":"call-1","name":"example.echo","arguments":{"args":["same"]}}\n' "$CTX_RUN_ID"
+else
+  printf '{"type":"delta","run":"%s","text":"{\"type\":\"tool_call\",\"name\":\"example.echo\",\"arguments\":{\"args\":[\"same\"]}}"}\n' "$CTX_RUN_ID"
+fi
+"#,
+        "EPROTO",
+    );
 }
 
 #[test]
@@ -545,19 +534,7 @@ esac
     let outcome = ok!(serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     ));
     let jsonl = outcome.jsonl();
     assert_eq!(jsonl.matches("\"type\":\"start\"").count(), 1, "{jsonl}");
@@ -734,99 +711,6 @@ fn sdk_envelope_rejects_oversized_tool_context_before_agent_spawn() {
         session_root.join("default/events.jsonl")
     ));
     assert!(!events.contains("tool_result"), "{events}");
-}
-
-#[test]
-fn argv_agent_accepts_correlated_internal_tool_rounds_and_terminalizes() {
-    let root = reference_tree("argv-internal-tool-rounds");
-    let executable = root.join("agent/coder");
-    write_text_file(
-        &executable,
-        r#"#!/bin/sh
-run="$CTX_RUN_ID"
-printf '{"type":"start","run":"%s"}\n' "$run"
-printf '{"type":"tool_call","run":"%s","id":"call-1","name":"bash","arguments":{"args":["one"]}}\n' "$run"
-printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"tool_result","tool_call_id":"call-1","content":"one"}]}\n' "$run"
-printf '{"type":"tool_call","run":"%s","id":"call-2","name":"bash","arguments":{"args":["two"]}}\n' "$run"
-printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"tool_result","tool_call_id":"call-2","content":"two"}]}\n' "$run"
-printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"finished"}]}\n' "$run"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$run"
-"#,
-    );
-    set_file_mode(&executable, 0o755);
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
-        client
-            .write_all(
-                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tools\"}\n"
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-
-    let result = serve_agent_executable_socket_stream_once(
-        &mut socket,
-        None,
-        direct_agent_runtime(&root, &view, &session_root, &executable),
-    );
-    assert!(result.is_ok(), "{result:?}");
-    drop(socket);
-    let mut response = String::new();
-    assert!(client.read_to_string(&mut response).is_ok());
-    assert_eq!(
-        response.matches(r#""type":"tool_call""#).count(),
-        2,
-        "{response}"
-    );
-    assert_eq!(
-        response.matches(r#""type":"tool_result""#).count(),
-        2,
-        "{response}"
-    );
-    assert!(response.contains("finished"), "{response}");
-    assert_file_text(&session_root.join("default/state"), "done\n");
-}
-
-#[test]
-fn mismatched_internal_tool_result_returns_protocol_error_and_terminalizes() {
-    let root = reference_tree("argv-mismatched-tool-result");
-    let executable = root.join("agent/coder");
-    write_text_file(
-        &executable,
-        r#"#!/bin/sh
-run="$CTX_RUN_ID"
-printf '{"type":"start","run":"%s"}\n' "$run"
-printf '{"type":"tool_call","run":"%s","id":"call-1","name":"bash","arguments":{"args":["one"]}}\n' "$run"
-printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"tool_result","tool_call_id":"wrong","content":"forged"}]}\n' "$run"
-"#,
-    );
-    set_file_mode(&executable, 0o755);
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
-        client
-            .write_all(
-                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"tools\"}\n"
-            )
-            .is_ok()
-    );
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-
-    let result = serve_agent_executable_socket_stream_once(
-        &mut socket,
-        None,
-        direct_agent_runtime(&root, &view, &session_root, &executable),
-    );
-    assert!(result.is_ok(), "{result:?}");
-    drop(socket);
-    let mut response = String::new();
-    assert!(client.read_to_string(&mut response).is_ok());
-    assert!(response.contains(r#""code":"EPROTO""#), "{response}");
-    assert!(!response.contains("forged"), "{response}");
-    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]
@@ -1054,19 +938,7 @@ fn sdk_envelope_rejects_replay_and_ninth_call_before_execution() {
         let outcome = ok!(serve_agent_executable_socket_stream_once(
             &mut socket,
             None,
-            AgentExecutableSocketRuntime {
-                ctx_root: &root,
-                source_root: &root,
-                identity: view.identity(),
-                env: view.env(),
-                session_root: &session_root,
-                default_cwd: "/work",
-                model: Some("debug/echo"),
-                network_allowed: false,
-                agent_name: "coder",
-                agent_executable: &agent_executable,
-                execution: AgentExecutableSocketExecution::Direct,
-            },
+            direct_agent_runtime(&root, &view, &session_root, &agent_executable),
         ));
         let jsonl = outcome.jsonl();
         let expected_results = if replay { 1 } else { 8 };
@@ -1129,19 +1001,7 @@ esac
     let outcome = ok!(serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        }
+        direct_agent_runtime(&root, &view, &session_root, &executable)
     ));
     let jsonl = outcome.jsonl();
     assert_eq!(
@@ -1601,18 +1461,16 @@ fn owned_bwrap_completion_survives_client_disconnect() {
 }
 
 #[test]
-fn agent_executable_socket_runtime_records_terminal_provider_error() {
-    let root = reference_tree("agent-executable-provider-error");
+fn hosted_agent_process_error_is_durable() {
+    let root = reference_tree("hosted-agent-process-error");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
-        r#"#!/bin/sh
-printf '{"type":"start","run":"%s","model":"main"}\n' "$CTX_RUN_ID"
-printf '{"type":"error","run":"%s","code":"EIO","message":"provider request failed with exit status: 22: curl: (22) The requested URL returned error: 502"}\n' "$CTX_RUN_ID"
-printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
-"#,
+        r"#!/bin/sh
+exit 1
+",
     );
     set_file_mode(&agent_executable, 0o755);
     let pair = UnixStream::pair();
@@ -1653,7 +1511,7 @@ printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"error""#)
             && line.contains(&format!(r#""run":"{run}""#))
-            && line.contains("502")
+            && line.contains("agent process failed")
     }));
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"done""#)
@@ -1664,18 +1522,16 @@ printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
 }
 
 #[test]
-fn agent_executable_socket_runtime_keeps_error_after_partial_delta() {
-    let root = reference_tree("agent-executable-partial-provider-error");
+fn hosted_agent_error_keeps_partial_delta() {
+    let root = reference_tree("hosted-agent-partial-error");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
-printf '{"type":"start","run":"%s","model":"main"}\n' "$CTX_RUN_ID"
 printf '{"type":"delta","run":"%s","text":"partial"}\n' "$CTX_RUN_ID"
-printf '{"type":"error","run":"%s","code":"EIO","message":"provider request failed with exit status: 22: curl: (22) The requested URL returned error: 502"}\n' "$CTX_RUN_ID"
-printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
+exit 1
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
@@ -1716,7 +1572,7 @@ printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"error""#)
             && line.contains(&format!(r#""run":"{run}""#))
-            && line.contains("502")
+            && line.contains("agent process failed")
     }));
     assert!(events.lines().any(|line| {
         line.contains(r#""type":"done""#)
@@ -1732,7 +1588,7 @@ printf '{"type":"done","run":"%s","status":"error"}\n' "$CTX_RUN_ID"
 }
 
 #[test]
-fn agent_executable_socket_runtime_wraps_plain_text_after_visible_events() {
+fn hosted_agent_rejects_plain_text_after_visible_events() {
     let root = reference_tree("agent-plain-after-event");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
@@ -1740,7 +1596,6 @@ fn agent_executable_socket_runtime_wraps_plain_text_after_visible_events() {
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
-printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 printf '{"type":"delta","run":"%s","text":"before"}\n' "$CTX_RUN_ID"
 printf 'plain followup\n'
 "#,
@@ -1762,31 +1617,16 @@ printf 'plain followup\n'
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
     let outcome = ok!(outcome);
-    assert!(outcome.jsonl().contains(r#""text":"before""#));
-    assert!(outcome.jsonl().contains(r#""text":"plain followup""#));
-    assert_file_text(
-        &session_root.join("default").join("latest.md"),
-        "beforeplain followup\n",
-    );
+    assert!(outcome.jsonl().contains(r#""code":"EPROTO""#));
+    assert!(!outcome.jsonl().contains("plain followup"));
+    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]
-fn agent_executable_socket_runtime_records_untrusted_debug_frame_as_text() {
+fn hosted_agent_rejects_untrusted_debug_frame() {
     let root = reference_tree("agent-untrusted-debug-frame");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
@@ -1794,10 +1634,8 @@ fn agent_executable_socket_runtime_records_untrusted_debug_frame_as_text() {
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
-printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 printf '{"type":"delta","run":"%s","text":"before"}\n' "$CTX_RUN_ID"
 printf '{"type":"debug","elapsed_ms":0,"stage":"ATTACKER_UNAUDITED_SECRET"}\n'
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
@@ -1817,30 +1655,12 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
     let outcome = ok!(outcome);
-    assert!(!outcome.jsonl().contains(r#""type":"debug""#));
-    assert!(outcome.jsonl().contains("ATTACKER_UNAUDITED_SECRET"));
-    assert!(outcome.jsonl().contains(
-        r#""text":"{\"type\":\"debug\",\"elapsed_ms\":0,\"stage\":\"ATTACKER_UNAUDITED_SECRET\"}""#
-    ));
-    assert_file_text(
-        &session_root.join("default").join("latest.md"),
-        "before{\"type\":\"debug\",\"elapsed_ms\":0,\"stage\":\"ATTACKER_UNAUDITED_SECRET\"}\n",
-    );
+    assert!(outcome.jsonl().contains(r#""code":"EPROTO""#));
+    assert!(!outcome.jsonl().contains("ATTACKER_UNAUDITED_SECRET"));
+    assert_file_text(&session_root.join("default/state"), "error\n");
 }
 
 #[test]
@@ -1878,19 +1698,7 @@ fn agent_executable_socket_runtime_rejects_symlink_executable_without_running_ta
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
 
     assert_eq!(outcome, Err(SocketRuntimeError::InvalidAgentExecutable));
@@ -1927,19 +1735,7 @@ printf '\n'
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
 
     let outcome = ok!(outcome);
@@ -1967,9 +1763,7 @@ fn agent_executable_socket_runtime_passes_source_root() {
     write_text_file(
         &agent_executable,
         r#"#!/bin/sh
-printf '{"type":"start","run":"%s","agent":"coder"}\n' "$CTX_RUN_ID"
 printf '{"type":"delta","run":"%s","text":"%s"}\n' "$CTX_RUN_ID" "$CTX_SOURCE"
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     set_file_mode(&agent_executable, 0o755);
@@ -1989,19 +1783,7 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
-        AgentExecutableSocketRuntime {
-            ctx_root: &root,
-            source_root: &root,
-            identity: view.identity(),
-            env: view.env(),
-            session_root: &session_root,
-            default_cwd: "/work",
-            model: Some("debug/echo"),
-            network_allowed: false,
-            agent_name: "coder",
-            agent_executable: &agent_executable,
-            execution: AgentExecutableSocketExecution::Direct,
-        },
+        direct_agent_runtime(&root, &view, &session_root, &agent_executable),
     );
     let outcome = ok!(outcome);
     assert!(
@@ -2042,7 +1824,9 @@ test ! -f "$count" || n=$(cat "$count")
 n=$((n + 1))
 printf '%s\n' "$n" > "$count"
 printf '%s\n' '{"version":1,"tools":[{"name":"bash","path":"/ctx/tool/bash","description":"","schema":null,"dynamic_resident":true,"pinned":false,"last_used":1}]}' > "$state"
-printf loaded
+printf '{"type":"start","run":"%s","tool":"tsh"}\n' "$CTX_RUN_ID"
+printf '{"type":"message","run":"%s","role":"tool","content":[{"type":"text","text":"loaded"}]}\n' "$CTX_RUN_ID"
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
     set_file_mode(&tsh, 0o755);

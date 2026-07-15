@@ -21,22 +21,12 @@ pub(crate) fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>
     Ok(None)
 }
 
-pub(crate) fn tool_call_signature(tool_call: &AgentToolCall) -> String {
-    let args = tool_call_args_strings(tool_call).join("\u{1f}");
-    format!("{}\u{1e}{args}", tool_call.name)
-}
-
 pub(crate) fn tool_call_args_strings(tool_call: &AgentToolCall) -> Vec<String> {
     tool_call
         .args
         .iter()
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect()
-}
-
-pub(crate) fn tool_call_args_json(tool_call: &AgentToolCall) -> String {
-    serde_json::to_string(&tool_call_args_strings(tool_call))
-        .unwrap_or_else(|_error| "[]".to_owned())
 }
 
 pub(crate) fn tool_call_from_event_frame(frame: &str) -> Result<Option<AgentToolCall>, ExecError> {
