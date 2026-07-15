@@ -12,18 +12,17 @@ objects and files.
 There are three separate surfaces:
 
 ```text
-human chat       ctx agent repl/send/resume/cancel
+human chat       ctx agent chat/send/resume/cancel
 human terminal   ctx agent watch/attach
 agent tool use   tsh inside ctxterm
 ```
 
 They must not collapse into one interface.
 
-`ctx agent repl` is a human chat UI. It owns line editing, `Ctrl+C`, socket
-requests, assistant response rendering, and prompt re-display. Interactive REPL
-responses are buffered before printing so assistant output cannot corrupt the
-user's input buffer. `Ctrl+C` exits an idle REPL; while a run is active it first
-requests cancellation for that run and returns to the prompt.
+`ctx agent chat` starts `ctxchat`, which owns line editing, socket requests,
+assistant response rendering, and prompt re-display. Interactive chat responses
+are buffered before printing so assistant output cannot corrupt the user's input
+buffer. `Ctrl+C` exits an idle chat.
 
 `ctx agent send` is a non-interactive human command. It may stream assistant
 deltas as they arrive.
@@ -42,7 +41,7 @@ host `PATH`.
 commands:
 
 ```text
-agent.sh AGENT           -> ctx agent repl AGENT --session default
+agent.sh AGENT           -> ctx agent chat AGENT --session default
 agent.sh AGENT INPUT...  -> ctx agent send AGENT --session default INPUT...
 agent.sh --watch AGENT   -> ctx agent watch AGENT --session default
 agent.sh --attach AGENT  -> ctx agent attach AGENT --session default
@@ -58,7 +57,7 @@ The stable request flow is:
 
 ```text
 human
-  -> ctx agent repl/send
+  -> ctx agent chat/send
   -> agent/<name>.sock
   -> socket runtime
   -> durable session files
@@ -84,10 +83,6 @@ Before invoking an executable agent for a durable `send`, the socket runtime
 sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
 `messages.jsonl` history. This is prompt context only; it does not grant
 additional session authority.
-
-If a human sends `SIGINT` while a run is active, `ctx agent repl` sends a
-`cancel` request for the active run id and returns to the prompt. In an idle
-interactive REPL, `Ctrl+C` exits the REPL.
 
 The socket-activated executable agent runtime observes the durable session state
 for the active run. When the matching `done/cancelled` event appears, it stops
@@ -286,7 +281,7 @@ The runtime design is healthy when all of these are true:
 
 ```text
 agent.sh contains no protocol implementation beyond resolving ctx and execing ctx agent
-ctx agent repl is the default human chat UI
+ctx agent chat is the default human chat UI
 ctx agent watch is the read-only human path into ctxterm -> tsh
 ctx agent attach is the writable human path into ctxterm -> tsh
 tsh never falls back to host PATH

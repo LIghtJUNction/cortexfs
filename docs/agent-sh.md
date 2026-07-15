@@ -86,8 +86,8 @@ Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 ## Chat And Terminal
 
 `ctxchat` owns line editing, references, clipboard adapters, socket requests,
-and response rendering through the documented file/socket ABI. `ctx agent
-chat` and `ctx agent repl` exec `ctxchat` as compatibility adapters.
+and response rendering through the documented file/socket ABI. `ctx agent chat`
+execs `ctxchat`.
 
 Inside the chat shell, `/workspace` prints the host checkout mounted at
 `/workspace`; `/status` prints agent model, lifecycle, role, and workspace;

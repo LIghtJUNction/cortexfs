@@ -56,7 +56,7 @@ pub(crate) fn doctor_retired_reference_agents(root: &Path) -> Result<bool, CliEr
             "stale-user"
         };
         print_line(&format!(
-            "{status} agent/{name} (retired reference agent; run ctx update --check)"
+            "{status} agent/{name} (retired reference agent; run ctx bootstrap --check)"
         ))?;
     }
     Ok(retired.is_empty())
@@ -80,7 +80,7 @@ pub(crate) fn doctor_bootstrap_state(root: &Path) -> Result<bool, CliError> {
             let managed = state.managed_agents.join(",");
             let migrations = state.applied_migrations.join(",");
             print_line(&format!(
-                "invalid bootstrap state schema={} tree_version={} managed_agents={} migrations={} (run ctx update)",
+                "invalid bootstrap state schema={} tree_version={} managed_agents={} migrations={} (run ctx bootstrap)",
                 state.schema,
                 state.tree_version,
                 if managed.is_empty() { "none" } else { &managed },
@@ -93,7 +93,7 @@ pub(crate) fn doctor_bootstrap_state(root: &Path) -> Result<bool, CliError> {
             Ok(false)
         }
         None => {
-            print_line("missing bootstrap state (run ctx update)")?;
+            print_line("missing bootstrap state (run ctx bootstrap)")?;
             Ok(false)
         }
     }

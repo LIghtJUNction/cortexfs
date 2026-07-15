@@ -23,7 +23,6 @@ ctx abi
 ctx env
 ctx root
 ctx bootstrap
-ctx update
 ctx mount
 
 ctx ls
@@ -75,7 +74,7 @@ Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
-`ctx update [SOURCE]` is an alias for `ctx bootstrap [SOURCE]`. It updates the
+`ctx bootstrap [SOURCE]` updates the
 reference source tree only; it does not remount `/ctx`, start a watcher, or add
 a second refresh boundary.
 
@@ -85,17 +84,14 @@ their `ctx agent ...` forms:
 ```text
 ctx history AGENT
 ctx history AGENT --session SESSION
-ctx history AGENT SESSION
 ctx resume AGENT
 ctx resume AGENT --session SESSION
-ctx resume AGENT SESSION
 ctx send AGENT INPUT
 ctx send AGENT --session SESSION INPUT
-ctx send AGENT SESSION INPUT
 ```
 
 Omitting the session reads `session/index/current` first and falls back to
-`default`. The positional `SESSION` form remains accepted for compatibility.
+`default`. An explicit session uses `--session SESSION`.
 `ctx send` and `ctx resume` render assistant events the same way as
 `ctx agent send` and `ctx agent resume`; raw socket JSONL is reserved for lower
 level socket commands and explicit raw agent modes.

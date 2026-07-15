@@ -19,12 +19,10 @@ agent tool use   tsh inside ctxterm
 
 They must not collapse into one interface.
 
-`ctx agent chat` is the preferred human chat UI. `ctx agent repl` is a
-compatibility alias for the same UI. They own line editing, `Ctrl+C`, socket
-requests, assistant response rendering, and prompt re-display. Interactive chat
-responses are buffered before printing so assistant output cannot corrupt the
-user's input buffer. `Ctrl+C` exits an idle chat; while a run is active it first
-requests cancellation for that run and returns to the prompt.
+`ctx agent chat` starts `ctxchat`, which owns line editing, socket requests,
+assistant response rendering, and prompt re-display. Interactive chat responses
+are buffered before printing so assistant output cannot corrupt the user's input
+buffer. `Ctrl+C` exits an idle chat.
 
 `ctx agent send` is a non-interactive human command. It may stream assistant
 deltas as they arrive.
@@ -151,10 +149,6 @@ Before invoking an executable agent for a durable `send`, the socket runtime
 sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
 `messages.jsonl` history. This is prompt context only; it does not grant
 additional session authority.
-
-If a human sends `SIGINT` while a run is active, `ctx agent chat` sends a
-`cancel` request for the active run id and returns to the prompt. In an idle
-interactive chat, `Ctrl+C` exits the chat UI.
 
 The socket-activated executable agent runtime observes the durable session state
 for the active run. When the matching `done/cancelled` event appears, it stops
@@ -442,7 +436,7 @@ The runtime design is healthy when all of these are true:
 
 ```text
 agent.sh contains no protocol implementation beyond resolving ctx and execing ctx agent
-ctx agent chat is the default human chat UI; ctx agent repl is only a compatibility alias
+ctx agent chat is the default human chat UI
 ctx agent watch is the read-only human path into ctxterm -> tsh
 ctx agent attach is the writable human path into ctxterm -> tsh
 tsh never falls back to host PATH

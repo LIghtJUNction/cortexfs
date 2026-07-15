@@ -11,7 +11,7 @@ Request:
 
 ## Durable Run IDs
 
-Each production durable `send`, `chat`, and `repl` run ID is independently
+Each production durable `send` and `chat` run ID is independently
 generated from 128 bits of Linux system entropy and encoded as `ctx-` followed
 by exactly 32 lowercase hexadecimal characters. The probability of accidental
 reuse or collision is negligible. Short `r1`, `run-1`, and `msg-1` values in

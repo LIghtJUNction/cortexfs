@@ -300,10 +300,10 @@ home, and session state. New top-level agents should be created by
 `agent.create` with `parent=agent:architect`. Child agents created by other agents
 must still be attenuated from their direct parent.
 
-`base` is a retired reference-agent name. `ctx update` reports any remaining
+`base` is a retired reference-agent name. `ctx bootstrap` reports any remaining
 `base` object as `would_skip` and retains it for manual review; legacy trees
 have no manifest that can prove ownership and full control-tree integrity, so
-update must not delete it automatically.
+`ctx bootstrap` must not delete it automatically.
 
 The child appears as ordinary agent ABI:
 

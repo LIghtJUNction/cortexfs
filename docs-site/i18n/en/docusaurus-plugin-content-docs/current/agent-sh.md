@@ -1,7 +1,7 @@
 # agent.sh
 
-`agent.sh` is a tiny Linux compatibility frontend for the Rust-owned
-`ctx agent-sh` entrypoint. It is not the CortexFS runtime, a socket protocol
+`agent.sh` is a tiny Linux defaults frontend for the Rust-owned
+`ctx agent` commands. It is not the CortexFS runtime, a socket protocol
 implementation, a provider SDK, a scheduler, or a private chat database.
 
 It depends on Bash and one `ctx` binary. It does not use `nc`, `jq`, Python,
@@ -24,8 +24,8 @@ agent.sh --help
 
 ## Boundary
 
-`agent.sh` is an executable resolver, not an ABI reader. It resolves `ctx` and
-then execs `ctx agent-sh "$@"`. Legacy flag routing and validation live in Rust.
+`agent.sh` is a small defaults wrapper, not an ABI reader. It resolves `ctx` and
+then execs `ctx agent ...` with common defaults such as `--session default`.
 The stable paths below are the CortexFS state that `ctx` reads and writes:
 
 ```text
@@ -75,9 +75,9 @@ agent.sh --status coder
 agent.sh --raw coder "prompt"
 ```
 
-With no prompt, `agent.sh AGENT` opens the agent chat REPL through
-`ctx agent-sh AGENT`, which dispatches to `ctx agent repl AGENT`. With a prompt,
-`ctx agent-sh` dispatches to `ctx agent send AGENT`.
+With no prompt, `agent.sh AGENT` opens the agent chat UI through
+`ctx agent chat AGENT --session default`. With a prompt, it dispatches to
+`ctx agent send AGENT --session default`.
 
 Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 `agent.sh --attach AGENT` only when you want to join the terminal and see
@@ -85,11 +85,9 @@ Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 
 ## Chat And Terminal
 
-`ctx agent repl` owns line editing, interrupt handling, socket requests, and
-assistant response rendering. Interactive REPL responses are buffered before
-printing so model output does not corrupt the user's current input buffer.
-`Ctrl+C` exits an idle REPL. While a run is active it asks CortexFS to cancel
-that run and returns to the prompt.
+`ctxchat` owns line editing, references, clipboard adapters, socket requests,
+and response rendering through the documented file/socket ABI. `ctx agent chat`
+execs `ctxchat`. `Ctrl+C` exits an idle chat.
 
 `ctx agent send` is the non-interactive path and may stream assistant deltas as
 they arrive.

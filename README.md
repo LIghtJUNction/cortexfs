@@ -132,7 +132,7 @@ invoked through the same filesystem view.
 
 <p align="center">
   <a href="docs/assets/cortexfs-demo.mp4">
-    <img src="docs/assets/cortexfs-demo-poster.jpg" alt="Watch the CortexFS agent REPL demo" width="720">
+    <img src="docs/assets/cortexfs-demo-poster.jpg" alt="Watch the CortexFS agent chat demo" width="720">
   </a>
 </p>
 
