@@ -168,11 +168,7 @@ fn parses_bootstrap_and_mount_commands() {
     let update = cmd!("update");
     assert!(matches!(
         update,
-        Ok(Command::Bootstrap {
-            source: None,
-            dry_run: false,
-            check: false
-        })
+        Err(ref error) if error.code == 2 && error.message == "unknown command: update"
     ));
 
     let bootstrap_source = cmd!("bootstrap", "/tmp/cortexfs-source");
@@ -185,17 +181,7 @@ fn parses_bootstrap_and_mount_commands() {
         }) if source == Path::new("/tmp/cortexfs-source")
     ));
 
-    let update_source = cmd!("update", "/tmp/cortexfs-source");
-    assert!(matches!(
-        update_source,
-        Ok(Command::Bootstrap {
-            source: Some(ref source),
-            dry_run: false,
-            check: false
-        }) if source == Path::new("/tmp/cortexfs-source")
-    ));
-
-    let dry_run = cmd!("update", "--dry-run", "/tmp/cortexfs-source");
+    let dry_run = cmd!("bootstrap", "--dry-run", "/tmp/cortexfs-source");
     assert!(matches!(
         dry_run,
         Ok(Command::Bootstrap {
@@ -216,7 +202,7 @@ fn parses_bootstrap_and_mount_commands() {
     ));
 
     assert!(matches!(
-        cmd!("update", "--check", "--dry-run"),
+        cmd!("bootstrap", "--check", "--dry-run"),
         Err(ref error) if error.code == 2
     ));
 

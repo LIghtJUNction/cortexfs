@@ -14,13 +14,14 @@ pub(crate) fn parse_agent_session(
                     &format!("{command} --session requires a session name"),
                 )?);
             }
-            _ => session = Some(value),
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
         }
     }
     no_extra_args(values)?;
     Ok((agent, session))
 }
 
+/// Parse common `agent` subcommand arguments that require optional `--session`.
 pub(crate) fn parse_send(
     mut values: impl Iterator<Item = String>,
 ) -> Result<(String, Option<String>, String), CliError> {
@@ -29,7 +30,7 @@ pub(crate) fn parse_send(
     if rest.is_empty() {
         return Err(CliError::usage("send requires input text"));
     }
-    if matches!(rest.first().map(String::as_str), Some("--session" | "-s")) {
+    let session = if matches!(rest.first().map(String::as_str), Some("--session" | "-s")) {
         if rest.len() < 3 {
             return Err(CliError::usage(
                 "send --session requires a session and input text",
@@ -37,15 +38,14 @@ pub(crate) fn parse_send(
         }
         let session = rest.remove(1);
         rest.remove(0);
-        return Ok((agent, Some(session), rest.join(" ")));
-    }
-    if rest.len() == 1 {
-        return Ok((agent, None, rest.remove(0)));
-    }
-    let session = rest.remove(0);
-    Ok((agent, Some(session), rest.join(" ")))
+        Some(session)
+    } else {
+        None
+    };
+    Ok((agent, session, rest.join(" ")))
 }
 
+/// Parse `ctx agent <command>` invocations and dispatch to dedicated command parsers.
 #[expect(
     clippy::too_many_lines,
     reason = "flat agent subcommand dispatch keeps accepted flags auditable"
@@ -54,7 +54,7 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
     let mut values = args.into_iter();
     let command = required_arg(
         &mut values,
-        "agent requires new, apply, start, stop, status, env, ps, send, chat, repl, resume, history, output, pack, trajectory, session, prompt, tools, children, wait, cancel, watch, or attach",
+        "agent requires new, apply, start, stop, status, env, ps, send, chat, resume, history, output, pack, trajectory, session, prompt, tools, children, wait, cancel, watch, or attach",
     )?;
     let rest: Vec<String> = values.collect();
     if is_help_args(&rest) {
@@ -97,10 +97,9 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
                 approvals: parsed.approvals,
             }))
         }
-        "chat" | "repl" => {
-            let command = format!("agent {command}");
-            let parsed = parse_agent_session_raw_args(values, &command, true)?;
-            Ok(Command::Agent(AgentArgs::Repl {
+        "chat" => {
+            let parsed = parse_agent_session_raw_args(values, "agent chat", true)?;
+            Ok(Command::Agent(AgentArgs::Chat {
                 name: parsed.name,
                 session: parsed.session,
                 raw: parsed.raw,
@@ -175,6 +174,7 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
     }
 }
 
+/// Parse `ctx agent session` subcommands, including gc/select variants.
 pub(crate) fn parse_agent_session_admin(
     mut values: impl Iterator<Item = String>,
 ) -> Result<Command, CliError> {
@@ -208,6 +208,7 @@ pub(crate) fn parse_agent_session_admin(
     }
 }
 
+/// Parse arguments for `ctx agent session gc`.
 pub(crate) fn parse_agent_session_gc(
     mut values: impl Iterator<Item = String>,
 ) -> Result<AgentSessionGcArgs, CliError> {
@@ -253,6 +254,7 @@ pub(crate) fn parse_agent_session_gc(
     Ok(args)
 }
 
+/// Parse a generic `<agent> [--session NAME]` pattern.
 pub(crate) fn parse_agent_session_option_args(
     mut values: impl Iterator<Item = String>,
     command: &str,
@@ -273,6 +275,7 @@ pub(crate) fn parse_agent_session_option_args(
     Ok((name, session))
 }
 
+/// Parse `agent wait` command arguments: required child id plus optional session.
 pub(crate) fn parse_agent_wait_args(
     mut values: impl Iterator<Item = String>,
 ) -> Result<(String, Option<String>, String), CliError> {
@@ -295,6 +298,7 @@ pub(crate) fn parse_agent_wait_args(
     Ok((name, session, child))
 }
 
+/// Parse arguments shared by commands that accept raw mode and optional approvals.
 pub(crate) fn parse_agent_session_raw_args(
     mut values: impl Iterator<Item = String>,
     command: &str,
@@ -332,6 +336,7 @@ pub(crate) fn parse_agent_session_raw_args(
     })
 }
 
+/// Parsed representation of session-style agent inputs with approval/raw controls.
 pub(crate) struct ParsedAgentSessionRaw {
     pub(crate) name: String,
     pub(crate) session: Option<String>,
@@ -339,6 +344,7 @@ pub(crate) struct ParsedAgentSessionRaw {
     pub(crate) approvals: Vec<String>,
 }
 
+/// Parsed representation of `agent send` input arguments.
 pub(crate) struct ParsedAgentSend {
     pub(crate) name: String,
     pub(crate) session: Option<String>,
@@ -347,6 +353,7 @@ pub(crate) struct ParsedAgentSend {
     pub(crate) approvals: Vec<String>,
 }
 
+/// Parsed representation of `agent cancel` input arguments.
 pub(crate) struct ParsedAgentCancel {
     pub(crate) name: String,
     pub(crate) session: Option<String>,
@@ -354,6 +361,7 @@ pub(crate) struct ParsedAgentCancel {
     pub(crate) run: Option<String>,
 }
 
+/// Parse `agent send` invocation arguments.
 pub(crate) fn parse_agent_send_args(
     mut values: impl Iterator<Item = String>,
 ) -> Result<ParsedAgentSend, CliError> {
@@ -396,6 +404,7 @@ pub(crate) fn parse_agent_send_args(
     })
 }
 
+/// Parse `agent cancel` invocation arguments.
 pub(crate) fn parse_agent_cancel_args(
     mut values: impl Iterator<Item = String>,
 ) -> Result<ParsedAgentCancel, CliError> {
@@ -424,6 +433,7 @@ pub(crate) fn parse_agent_cancel_args(
     })
 }
 
+/// Parse `agent start` arguments and session/mount/startup options.
 pub(crate) fn parse_agent_start(
     mut values: impl Iterator<Item = String>,
 ) -> Result<AgentStartArgs, CliError> {
@@ -465,6 +475,7 @@ pub(crate) fn parse_agent_start(
     Ok(args)
 }
 
+/// Parse `agent new` arguments and optional profile fallback.
 pub(crate) fn parse_agent_new(
     mut values: impl Iterator<Item = String>,
 ) -> Result<AgentNewArgs, CliError> {
@@ -551,6 +562,7 @@ pub(crate) fn parse_agent_new(
     Ok(args)
 }
 
+/// Parse `agent apply` arguments.
 pub(crate) fn parse_agent_apply(
     mut values: impl Iterator<Item = String>,
 ) -> Result<AgentArgs, CliError> {
@@ -571,6 +583,7 @@ pub(crate) fn parse_agent_apply(
     Ok(AgentArgs::Apply { name, from })
 }
 
+/// Parse `NAME:read|write` shared mounts syntax into an `AgentShared` entry.
 pub(crate) fn parse_agent_shared(value: &str) -> Result<AgentShared, CliError> {
     let Some((name, access)) = value.split_once(':') else {
         return Err(CliError::usage(
@@ -588,7 +601,7 @@ mod approval_tests {
     use super::*;
 
     #[test]
-    fn send_and_repl_parse_repeatable_explicit_approvals() {
+    fn send_and_chat_parse_repeatable_explicit_approvals() {
         let send = parse_agent_send_args(
             [
                 "coder",
@@ -611,7 +624,7 @@ mod approval_tests {
             ["coder", "--approve", "example.echo"]
                 .into_iter()
                 .map(str::to_owned),
-            "agent repl",
+            "agent chat",
             true,
         );
         assert!(parsed.is_ok());

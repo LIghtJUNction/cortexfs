@@ -25,7 +25,7 @@ pub(crate) enum AgentArgs {
         raw: bool,
         approvals: Vec<String>,
     },
-    Repl {
+    Chat {
         name: String,
         session: Option<String>,
         raw: bool,
@@ -88,8 +88,6 @@ pub(crate) enum AgentArgs {
         session: Option<String>,
     },
 }
-
-pub(crate) const MAX_AGENT_REPL_STDIN_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct AgentNewArgs {
@@ -180,12 +178,12 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
                 approvals,
             },
         ),
-        AgentArgs::Repl {
+        AgentArgs::Chat {
             ref name,
             ref session,
             raw,
             ref approvals,
-        } => agent_repl(root, name, session.as_deref(), raw, approvals),
+        } => agent_chat(root, name, session.as_deref(), raw, approvals),
         AgentArgs::Resume {
             ref name,
             ref session,
