@@ -62,10 +62,8 @@ pub fn provider_host_from_base_url(base_url: &str) -> Option<String> {
     }
     if let Some(value) = rest.strip_prefix("https://") {
         rest = value;
-    } else if let Some(value) = rest.strip_prefix("http://") {
-        rest = value;
     } else {
-        return None;
+        rest = rest.strip_prefix("http://")?;
     }
     let authority = rest
         .split(['/', '?', '#'])
