@@ -1,6 +1,6 @@
 # Deterministic Linux quality gate for pull requests and main.
 # Required check names (after green on main): "CI / rust", "CI / docs"
-# Local pre-commit still uses cargo test; CI uses cargo-nextest for hang control.
+# Same cargo commands as .pre-commit-config.yaml / README Development.
 #
 # CI toolchain: latest stable (documented). Workspace MSRV remains 1.91 in
 # Cargo.toml for crates.io.
@@ -39,11 +39,6 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -59,10 +54,10 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-      # nextest: same workspace/features, per-test slow/terminate timeouts (see .config/nextest.toml).
-      - name: cargo nextest
+      # Same contract as pre-commit; hang risk bounded by cancel-test fixes + job timeout.
+      - name: cargo test
         timeout-minutes: 25
-        run: cargo nextest run --locked --workspace --all-features --profile ci
+        run: cargo test --locked --workspace --all-targets --all-features
 
   docs:
     name: docs
