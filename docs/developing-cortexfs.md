@@ -386,12 +386,31 @@ tool 上下文    load/pin 显式进入，未 pin 项由 W-TinyLFU 回收
 
 ## 本地验证
 
-常用检查：
+与 `.pre-commit-config.yaml` 和 GitHub Actions **CI** 工作流一致的检查：
 
 ```bash
-cargo test
-npm --prefix docs-site run build
+cargo fmt --all -- --check
+cargo check --locked --workspace --all-targets --all-features
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-targets --all-features
 ```
+
+文档站生产构建（独立于 Pages 部署；CI job 名 `docs`）：
+
+```bash
+cd docs-site && bun install --frozen-lockfile && bun run build
+```
+
+### CI 质量门
+
+- 工作流：`.github/workflows/ci.yml`（显示名 **CI**）
+- 触发：`pull_request` 与 `push` 到 `main`
+- 平台：Ubuntu（Linux / FUSE 目标）
+- Rust 工具链：工作区 MSRV `1.91`（`Cargo.toml` 的 `rust-version`）
+- 权限：`contents: read`
+- 超时：`rust` 45 分钟，`docs` 15 分钟；同一 PR 的新提交会取消未完成的 run
+- 分支保护建议要求的检查名：`CI / rust`、`CI / docs`
+- 本门禁不含真实 FUSE 挂载、systemd、bubblewrap、云供应商或 live model 冒烟
 
 FUSE 集成测试挂载点固定为：
 

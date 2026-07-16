@@ -1,0 +1,74 @@
+# Deterministic Linux quality gate for pull requests and main.
+# Required check names (after green on main): "CI / rust", "CI / docs"
+# Local contract matches .pre-commit-config.yaml and README Development.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain (MSRV)
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: "1.91"
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-rust
+          cache-on-failure: true
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --locked --workspace --all-targets --all-features
+
+      - name: cargo clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo test
+        run: cargo test --locked --workspace --all-targets --all-features
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install docs-site dependencies
+        working-directory: docs-site
+        run: bun install --frozen-lockfile
+
+      - name: Build Docusaurus
+        working-directory: docs-site
+        run: bun run build
