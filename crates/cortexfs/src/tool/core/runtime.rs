@@ -46,7 +46,7 @@ pub enum ObjectBootstrapError {
 pub enum ApiKeyResolutionError {
     /// Environment variable, service, or account name is invalid.
     InvalidName,
-    /// System keychain command failed in an unexpected way.
+    /// Secret-store command failed in an unexpected way.
     KeychainUnavailable,
 }
 
@@ -82,9 +82,9 @@ pub enum ReferenceTreeError {
     CannotLink,
     /// A documented socket path could not be created or conflicts with an existing path.
     CannotSocket(std::io::ErrorKind),
-    /// A deprecated reference-tree placeholder could not be removed.
+    /// A compatibility reference-tree placeholder could not be removed.
     CannotRemove,
-    /// A deprecated reference-tree alias could not be removed.
+    /// A compatibility reference-tree alias could not be removed.
     CannotUnlink,
 }
 

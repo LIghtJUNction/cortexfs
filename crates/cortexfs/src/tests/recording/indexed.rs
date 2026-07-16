@@ -1,3 +1,16 @@
+fn default_indexed_session(name: &str) -> (TestDir, PathBuf, PathBuf) {
+    let root = clean_test_dir(name);
+    let session_root = root.join("session");
+    let session = session_root.join("default");
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "");
+    write_text_file(&session.join("events.jsonl"), "");
+    write_text_file(&session_root.join("index/list"), "default\n");
+    write_text_file(&session_root.join("index/current"), "default\n");
+    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    (root, session_root, session)
+}
+
 #[test]
 fn indexed_socket_send_records_history_and_updates_session_index() {
     let root = clean_test_dir("indexed-socket-send");
@@ -132,16 +145,7 @@ fn indexed_cancel_uses_canonical_run_for_state_and_events() {
 
 #[test]
 fn indexed_socket_send_replays_without_changing_history_or_index() {
-    let root = clean_test_dir("indexed-socket-replay");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) = default_indexed_session("indexed-socket-replay");
     let request = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
     ));
@@ -182,16 +186,7 @@ fn indexed_socket_send_replays_without_changing_history_or_index() {
 
 #[test]
 fn indexed_socket_send_maps_client_id_to_canonical_durable_run_for_replay() {
-    let root = clean_test_dir("indexed-socket-client-run-map");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) = default_indexed_session("indexed-socket-client-run-map");
     let request = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"client-msg-id","session":"default","cwd":"/work/project","input":"hello"}"#,
     ));
@@ -321,16 +316,8 @@ fn indexed_socket_send_replay_repairs_index_after_post_commit_failure() {
 
 fn assert_indexed_socket_send_pair_recovers_after_start_failure(columnar_store: bool) {
     let backend = if columnar_store { "columnar" } else { "legacy" };
-    let root = clean_test_dir(&format!("indexed-socket-send-pair-{backend}"));
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) =
+        default_indexed_session(&format!("indexed-socket-send-pair-{backend}"));
     let baseline = if columnar_store {
         assert!(
             crate::support::columnar::append(
@@ -456,15 +443,8 @@ fn indexed_socket_send_pair_recovers_columnar_after_start_failure() {
 
 #[test]
 fn indexed_socket_send_pair_recovers_legacy_after_large_interleaved_growth() {
-    let root = clean_test_dir("indexed-socket-send-pair-legacy-large-interleave");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) =
+        default_indexed_session("indexed-socket-send-pair-legacy-large-interleave");
     let request = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"client-a","session":"default","cwd":"/work","input":"alpha"}"#,
     ));
@@ -545,15 +525,8 @@ fn indexed_socket_send_pair_recovers_legacy_after_large_interleaved_growth() {
 
 #[test]
 fn indexed_socket_send_pair_rejects_unexpected_fact_for_pending_run() {
-    let root = clean_test_dir("indexed-socket-send-pair-exact-fact");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) =
+        default_indexed_session("indexed-socket-send-pair-exact-fact");
     let request = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"client-msg-id","session":"default","cwd":"/work","input":"hello"}"#,
     ));
@@ -595,15 +568,8 @@ fn indexed_socket_send_pair_rejects_unexpected_fact_for_pending_run() {
 
 #[test]
 fn indexed_socket_send_pair_refuses_replaced_receipt_during_cleanup() {
-    let root = clean_test_dir("indexed-socket-send-pair-cleanup-replace");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) =
+        default_indexed_session("indexed-socket-send-pair-cleanup-replace");
     let request = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"client-msg-id","session":"default","cwd":"/work","input":"hello"}"#,
     ));
@@ -625,15 +591,7 @@ fn indexed_socket_send_pair_refuses_replaced_receipt_during_cleanup() {
 
 #[test]
 fn indexed_socket_send_claims_one_id_once_across_concurrent_runtimes() {
-    let root = clean_test_dir("indexed-socket-concurrent-claim");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) = default_indexed_session("indexed-socket-concurrent-claim");
     let request = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work","input":"hello"}"#,
     ));
@@ -686,16 +644,7 @@ fn indexed_socket_send_claims_one_id_once_across_concurrent_runtimes() {
 
 #[test]
 fn indexed_socket_send_rejects_conflicting_payload_without_changes() {
-    let root = clean_test_dir("indexed-socket-conflict");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) = default_indexed_session("indexed-socket-conflict");
     let original = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work/project","input":"hello"}"#,
     ));
@@ -818,15 +767,8 @@ fn indexed_socket_send_rejects_orphan_message_run_fact() {
 
 #[test]
 fn indexed_socket_send_rejects_noncanonical_done_status() {
-    let root = clean_test_dir("indexed-socket-invalid-done-status");
-    let session_root = root.join("session");
-    let session = session_root.join("default");
-    create_complete_session_layout(&session);
-    write_text_file(&session.join("messages.jsonl"), "");
-    write_text_file(&session.join("events.jsonl"), "");
-    write_text_file(&session_root.join("index/list"), "default\n");
-    write_text_file(&session_root.join("index/current"), "default\n");
-    assert!(fs::create_dir_all(session_root.join("index/by-cwd")).is_ok());
+    let (_root, session_root, session) =
+        default_indexed_session("indexed-socket-invalid-done-status");
     let request = ok!(parse_socket_request_frame(
         r#"{"op":"send","id":"msg-1","session":"default","cwd":"/work","input":"hello"}"#,
     ));

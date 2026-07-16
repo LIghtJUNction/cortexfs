@@ -74,7 +74,7 @@ pub fn is_worker_agent_name(agent_name: &str) -> bool {
 pub fn is_dedicated_worker_agent_name(agent_name: &str) -> bool {
     agent_name.starts_with("executor-") || agent_name.starts_with("worker-")
 }
-pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.5";
+pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.6";
 pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto-review";
 pub(crate) const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
 pub(crate) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";

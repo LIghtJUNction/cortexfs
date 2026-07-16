@@ -6,6 +6,18 @@ sidebar_label: 从安装开始
 
 # 从安装开始
 
+CortexFS 运行时生态周边与相关项目：
+
+- [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers): MCP 生态中可复用的参考服务集合。
+- [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol): MCP 协议规范与官方参考仓库。
+- [OpenHands/OpenHands](https://github.com/OpenHands/OpenHands): 面向软件开发的代理型工作流平台。
+- [crewAIInc/crewAI](https://github.com/crewaiInc/crewAI): 面向多智能体协作的框架。
+- [FoundationAgents/MetaGPT](https://github.com/FoundationAgents/MetaGPT): 面向协作式 Agent 团队的实现。
+- [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph): 构建可观测、可恢复 AI 工作流图的框架。
+- [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai): 类型安全的应用层 AI 开发框架。
+- [cberner/fuser](https://github.com/cberner/fuser): Rust FUSE 用户态实现抽象。
+- [libfuse/libfuse](https://github.com/libfuse/libfuse): Linux FUSE 内核/用户态参考接口。
+
 CortexFS 是一个 Linux 文件系统 ABI。先把它装起来，确认 `/ctx` 可用，再继续看
 agent、tool 和二次开发。
 

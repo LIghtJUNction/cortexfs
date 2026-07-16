@@ -178,8 +178,19 @@ pub(crate) fn parse_agent_command(args: Vec<String>) -> Result<Command, CliError
 pub(crate) fn parse_agent_session_admin(
     mut values: impl Iterator<Item = String>,
 ) -> Result<Command, CliError> {
-    let command = required_arg(&mut values, "agent session requires gc")?;
+    let command = required_arg(&mut values, "agent session requires archive, gc, or select")?;
+    let rest = values.collect::<Vec<_>>();
+    if is_help_args(&rest) {
+        return Ok(Command::HelpTopic(format!("agent session {command}")));
+    }
+    if command == "help" && rest.is_empty() {
+        return Ok(Command::HelpTopic("agent session".to_owned()));
+    }
+    let mut values = rest.into_iter();
     match command.as_str() {
+        "archive" => Ok(Command::Agent(AgentArgs::SessionArchive(
+            parse_agent_session_archive(values)?,
+        ))),
         "gc" => Ok(Command::Agent(AgentArgs::SessionGc(
             parse_agent_session_gc(values)?,
         ))),
@@ -208,6 +219,35 @@ pub(crate) fn parse_agent_session_admin(
     }
 }
 
+/// Parse arguments for `ctx agent session archive`.
+pub(crate) fn parse_agent_session_archive(
+    mut values: impl Iterator<Item = String>,
+) -> Result<AgentSessionArchiveArgs, CliError> {
+    let name = required_arg(&mut values, "agent session archive requires an agent name")?;
+    let session = required_arg(&mut values, "agent session archive requires a session name")?;
+    let mut archive_dir = None;
+    while let Some(value) = values.next() {
+        match value.as_str() {
+            "--archive-dir" => {
+                let path = PathBuf::from(required_arg(
+                    &mut values,
+                    "agent session archive --archive-dir requires a path",
+                )?);
+                if !path.is_absolute() {
+                    return Err(CliError::usage("--archive-dir must be an absolute path"));
+                }
+                archive_dir = Some(path);
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(AgentSessionArchiveArgs {
+        name,
+        session,
+        archive_dir,
+    })
+}
+
 /// Parse arguments for `ctx agent session gc`.
 pub(crate) fn parse_agent_session_gc(
     mut values: impl Iterator<Item = String>,
@@ -218,6 +258,7 @@ pub(crate) fn parse_agent_session_gc(
         dry_run: true,
         yes: false,
         delete: false,
+        archive_dir: None,
         keep: Vec::new(),
         patterns: Vec::new(),
         older_than_days: None,
@@ -230,6 +271,16 @@ pub(crate) fn parse_agent_session_gc(
                 args.dry_run = false;
             }
             "--delete" => args.delete = true,
+            "--archive-dir" => {
+                let path = PathBuf::from(required_arg(
+                    &mut values,
+                    "agent session gc --archive-dir requires a path",
+                )?);
+                if !path.is_absolute() {
+                    return Err(CliError::usage("--archive-dir must be an absolute path"));
+                }
+                args.archive_dir = Some(path);
+            }
             "--keep" => args.keep.push(required_arg(
                 &mut values,
                 "agent session gc --keep requires a session name",
@@ -250,6 +301,11 @@ pub(crate) fn parse_agent_session_gc(
             }
             _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
         }
+    }
+    if args.delete && args.archive_dir.is_some() {
+        return Err(CliError::usage(
+            "agent session gc --archive-dir cannot be used with --delete",
+        ));
     }
     Ok(args)
 }

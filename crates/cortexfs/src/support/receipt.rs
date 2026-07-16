@@ -6,7 +6,6 @@
     )
 )]
 
-use std::fmt;
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{Read, Result};
@@ -19,22 +18,13 @@ use super::plain::{open_plain_directory, proc_fd_path};
 const QUARANTINE_BYTES: usize = 32;
 const CHILD_BYTES: usize = 32;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum ReceiptError {
+    #[error("cannot create directory receipt")]
     CannotCreate,
+    #[error("directory receipt cleanup conflict")]
     CleanupConflict,
 }
-
-impl fmt::Display for ReceiptError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match *self {
-            Self::CannotCreate => "cannot create directory receipt",
-            Self::CleanupConflict => "directory receipt cleanup conflict",
-        })
-    }
-}
-
-impl std::error::Error for ReceiptError {}
 
 pub(crate) struct EmptyDirReceipt {
     path: PathBuf,
@@ -272,22 +262,13 @@ fn dir_quarantine_name(name: &str) -> std::result::Result<String, ReceiptError> 
     ))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub(crate) enum SocketReceiptError {
+    #[error("cannot create socket receipt")]
     Create,
+    #[error("socket receipt cleanup conflict")]
     Cleanup,
 }
-
-impl fmt::Display for SocketReceiptError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match *self {
-            Self::Create => "cannot create socket receipt",
-            Self::Cleanup => "socket receipt cleanup conflict",
-        })
-    }
-}
-
-impl std::error::Error for SocketReceiptError {}
 
 pub(crate) struct SocketReceipt {
     path: PathBuf,

@@ -66,16 +66,6 @@ pub(crate) fn ensure_reference_home_scaffold_ownership(
     Ok(())
 }
 
-pub(crate) fn remove_deprecated_reference_home_tool_aliases(
-    root: &Path,
-) -> Result<(), ReferenceTreeError> {
-    let alias = root.join("home").join("1000").join("tool").join("fs.read");
-    match read_reference_symlink(&alias) {
-        Ok(target) if target == Path::new("/ctx/tool/fs.read") => remove_reference_entry(&alias),
-        Ok(_) | Err(_) => Ok(()),
-    }
-}
-
 pub(crate) fn migrate_reference_legacy_session_meta_models(
     root: &Path,
 ) -> Result<(), ReferenceTreeError> {
@@ -225,20 +215,6 @@ pub(crate) fn read_reference_symlink(path: &Path) -> Result<PathBuf, ReferenceTr
         .ok_or(ReferenceTreeError::CannotUnlink)?;
     nix::fcntl::readlinkat(&directory, name)
         .map(PathBuf::from)
-        .map_err(|_error| ReferenceTreeError::CannotUnlink)
-}
-
-pub(crate) fn remove_reference_entry(path: &Path) -> Result<(), ReferenceTreeError> {
-    let Some(parent) = path.parent() else {
-        return Err(ReferenceTreeError::CannotUnlink);
-    };
-    let directory =
-        open_reference_dir(parent).map_err(|_error| ReferenceTreeError::CannotUnlink)?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ReferenceTreeError::CannotUnlink)?;
-    nix::unistd::unlinkat(&directory, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
         .map_err(|_error| ReferenceTreeError::CannotUnlink)
 }
 

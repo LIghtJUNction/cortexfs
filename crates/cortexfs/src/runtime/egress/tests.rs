@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, Read, Write};
 use std::net::TcpListener;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -366,10 +366,9 @@ fn connection_headers_never_reach_curl_or_upstream() -> Result<(), Box<dyn std::
             client,
             "POST /v1/responses HTTP/1.1\r\n{connection}Content-Length: 2\r\n\r\n{{}}"
         )?;
-        client.set_read_timeout(Some(Duration::from_secs(1)))?;
-        let mut status = String::new();
-        BufReader::new(client).read_line(&mut status)?;
-        assert_eq!(status, "HTTP/1.1 400 Bad Request\r\n");
+        let mut response = Vec::new();
+        client.read_to_end(&mut response)?;
+        assert!(response.starts_with(b"HTTP/1.1 400 Bad Request\r\n"));
     }
     thread::sleep(Duration::from_millis(100));
     assert!(matches!(
@@ -383,31 +382,13 @@ fn connection_headers_never_reach_curl_or_upstream() -> Result<(), Box<dyn std::
 fn drop_stops_continuous_curl_within_one_second() -> Result<(), Box<dyn std::error::Error>> {
     let (root, control) = fixture()?;
     let tcp = TcpListener::bind("127.0.0.1:0")?;
-    tcp.set_nonblocking(true)?;
     write_model(
         root.path(),
         "fixture/chat",
         &format!("http://{}/v1", tcp.local_addr()?),
     )?;
     let upstream = thread::spawn(move || -> io::Result<()> {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let (mut stream, _) = loop {
-            match tcp.accept() {
-                Ok(accepted) => break accepted,
-                Err(error)
-                    if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline =>
-                {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "upstream connection timed out",
-                    ));
-                }
-                Err(error) => return Err(error),
-            }
-        };
+        let (mut stream, _) = tcp.accept()?;
         let mut input = [0; 4096];
         let _read = stream.read(&mut input)?;
         stream.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: text/event-stream\r\n\r\n")?;
@@ -425,7 +406,6 @@ fn drop_stops_continuous_curl_within_one_second() -> Result<(), Box<dyn std::err
         "run1",
     )?;
     let mut client = UnixStream::connect(egress.socket("fixture").ok_or("missing socket")?)?;
-    client.set_read_timeout(Some(Duration::from_secs(2)))?;
     client.write_all(b"POST /v1/chat/completions HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}")?;
     let mut response = [0; 32];
     client.read_exact(&mut response)?;

@@ -1368,6 +1368,7 @@ fn index_start_claim(
     })
 }
 
+/// Merges a new claim value into an optional slot, returning whether it differs.
 fn merge_claim_fact<T: Eq>(slot: &mut Option<T>, value: T) -> bool {
     if let Some(current) = slot.as_ref() {
         current != &value
@@ -2075,6 +2076,7 @@ impl Default for Manifest {
     }
 }
 
+/// Acquires a lock for the history store and runs an action while it is held.
 fn with_store_lock<T>(
     session: &Path,
     mode: FlockArg,

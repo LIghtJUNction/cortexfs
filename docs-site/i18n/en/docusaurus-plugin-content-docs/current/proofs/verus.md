@@ -17,7 +17,7 @@ This harness was checked with upstream Verus release
 
 The current proof target is `proofs/verus/abi_name.rs`. It defines the
 standalone `is_valid_object_name` specification predicate for the 64-byte v1
-object-name rule from `docs/spec/object-abi.md`:
+object-name rule from `spec/object-abi.md`:
 
 ```text
 [a-zA-Z0-9][a-zA-Z0-9._+-]{0,63}

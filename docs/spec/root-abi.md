@@ -25,6 +25,13 @@ Stable root:
         ctx.provider.md
 ```
 
+`/ctx/shared/cortexfs-docs/man/*.md` are documentation mirrors and should match the
+corresponding normative `docs/spec/*.md` texts after documentation or ABI
+changes. Refresh them from the matching `ctx` release source tree with
+`ctx bootstrap` so runtime helpers do not keep stale references. If references
+stay stale, the installed `ctx` binary is still serving an older embedded manual
+bundle; install the matching binary build and rerun bootstrap.
+
 Meaning:
 
 ```text
@@ -57,7 +64,7 @@ tree.
 ## v1 Reference Tree
 
 This is the normative v1 shape. Concrete object names such as `debug/echo`,
-`openai/gpt-5.5`, `base`, `coder`, `reviewer`, `executor`, `worker`, `1000`, and
+`openai/gpt-5.6`, `base`, `coder`, `reviewer`, `executor`, `worker`, `1000`, and
 `project-a` are examples of valid entries.
 
 ```text
@@ -70,12 +77,12 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
     tsh
 
   model/
-    main -> /ctx/model/openai/gpt-5.5
+    main -> /ctx/model/openai/gpt-5.6
     helper -> /ctx/model/openai/codex-auto-review
-    fast -> /ctx/model/openai/gpt-5.5
-    reason -> /ctx/model/openai/gpt-5.5
-    code -> /ctx/model/openai/gpt-5.5
-    vision -> /ctx/model/openai/gpt-5.5
+    fast -> /ctx/model/openai/gpt-5.6
+    reason -> /ctx/model/openai/gpt-5.6
+    code -> /ctx/model/openai/gpt-5.6
+    vision -> /ctx/model/openai/gpt-5.6
 
     debug/
       echo
@@ -91,8 +98,8 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
         log
 
     openai/
-      gpt-4o
-      gpt-4o.d/
+      gpt-5.6
+      gpt-5.6.d/
         id
         driver
         cap
@@ -302,7 +309,7 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
       tool/
 
       model/
-        main -> /ctx/model/openai/gpt-5.5
+        main -> /ctx/model/openai/gpt-5.6
 
   shared/
     project-a/
@@ -368,10 +375,13 @@ diagnostics. They must not become root namespaces or CortexFS-defined framework
 configuration formats.
 
 MCP is specifically a tool source, not a root object. MCP-backed capabilities
-may be exposed as ordinary tools such as `tool/mcp.github.search_issues`.
-CortexFS does not define MCP server configuration files or formats. Those are
-ordinary files visible through the agent view; execution still goes through
-`tool/`, `CTX_PATH`, and policy.
+may be exposed as ordinary tools such as `tool/github.search_issues`, where the
+name is exactly `<server>.<remote_tool>`. Projection only writes manifest
+candidates; installation requires explicit `ctx object check` and
+`ctx object install --source ...`, and it grants no authority. CortexFS does
+not define MCP server configuration files or formats. Those are ordinary files
+visible through the agent view; execution still goes through `tool/`,
+`CTX_PATH`, and policy.
 
 The root rule:
 
@@ -456,12 +466,7 @@ inherited process `CTX_PATH`; otherwise `tsh` falls back to inherited
 Inside an agent terminal, the runtime-provided process `CTX_PATH` remains
 authoritative and is not overridden by `.tshrc`.
 
-## Legacy rc File
-
-`/ctx/AGENTS.rc` is not stable ABI. Strict clients must not depend on it. Agent
-startup must not execute it by default.
-
-Stable ABI expresses environment as data files:
+Stable ABI expresses agent environment as data files:
 
 ```text
 /ctx/agent/<name>.d/env    KEY=VALUE, one per line

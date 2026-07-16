@@ -32,7 +32,7 @@ ctx ls tool
 ctx ls home
 ctx ls shared/project-a
 
-ctx which model openai/gpt-4o
+ctx which model openai/gpt-5.6
 ctx which agent coder
 ctx which tool fs.read
 
@@ -42,7 +42,7 @@ ctx agent output coder
 ctx agent resume coder --session default
 ctx agent wait coder work-123 --session default
 
-ctx agent new reviewer --model openai/gpt-4o --tool fs.read
+ctx agent new reviewer --model openai/gpt-5.6 --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
 ctx agent start reviewer
 ctx agent stop reviewer
@@ -80,9 +80,8 @@ Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
-`ctx bootstrap [SOURCE]` updates the
-reference source tree only; it does not remount `/ctx`, start a watcher, or add
-a second refresh boundary.
+`ctx bootstrap [SOURCE]` updates the reference source tree only; it does not
+remount `/ctx`, start a watcher, or add a second refresh boundary.
 
 Optional flags:
 
@@ -112,7 +111,7 @@ ctx agent wait AGENT CHILD [--session SESSION]
 ```
 
 Omitting the session reads `session/index/current` first and falls back to
-`default`. An explicit session uses `--session SESSION`.
+`default`.
 `ctx send` and `ctx resume` render assistant events the same way as
 `ctx agent send` and `ctx agent resume`; raw socket JSONL is reserved for lower
 level socket commands and explicit raw agent modes.
@@ -317,16 +316,55 @@ Session terminals use:
 
 The ABI socket may be a symlink to a runtime socket. User-started terminals
 prefer `/run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock` so
-ordinary users do not need write access to `/ctx` or `/run/cortexfs`. Existing
-installations may still expose `/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock`.
-`ctx agent attach` tries the ABI path, the user runtime path, then the legacy
-runtime path.
+ordinary users do not need write access to `/ctx` or `/run/cortexfs`.
+Existing installations may still expose
+`/run/cortexfs/terminal/<uid>/<agent>/<session>/main.sock` as historical
+artifacts, but `ctx agent attach` does not use this legacy fallback anymore.
+`ctx agent attach` should try the ABI path first, then the user runtime path.
+If both locations are unavailable, it returns a socket-availability error.
 
 The corresponding human commands are:
 
 ```text
 ctx agent watch <agent> --session <session>
 ctx agent attach <agent> --session <session>
+```
+
+When auditing historical sessions, `terminal/main.sock` can appear as a broken
+symlink after the session ends. A broken socket is often runtime residue, commonly
+present in archived snapshots, and should not be treated as an ABI structural
+regression by itself. You can identify intentionally stale session sockets
+explicitly:
+
+```bash
+find /ctx/home/<uid>/agent -type l -path '*/session/*/terminal/main.sock' -print0 |
+  while IFS= read -r -d '' sock; do
+    [ -e "$sock" ] || printf 'BROKEN: %s\n' "$sock"
+  done
+```
+
+### `/ctx` runtime drift quick-check
+
+- List both supported socket forms for agents (symlink and direct socket):
+
+```bash
+find /ctx/agent -maxdepth 1 -type l -name '*.sock' -print
+find /ctx/agent -maxdepth 1 -type s -name '*.sock' -print
+```
+
+- Check reachability for terminal sockets and identify stale links:
+
+```bash
+find /ctx/home/<uid>/agent -type l -path '*/terminal/main.sock' -print0 |
+  while IFS= read -r -d '' sock; do
+    if [ -e "$sock" ]; then echo "live:$sock"; else echo "stale:$sock"; fi
+  done
+```
+
+- Inspect resolved runtime socket target for an agent path:
+
+```bash
+readlink -f "/ctx/agent/<agent>.sock" 2>/dev/null || stat "/ctx/agent/<agent>.sock"
 ```
 
 For standalone human sessions, `tsh` reads `CTX_HOME/.tshrc` before inherited
@@ -350,7 +388,7 @@ Examples:
 
 ```text
 ctx ls agent
-ctx cat model/openai/gpt-4o.d/cap
+ctx cat model/openai/gpt-5.6.d/cap
 ctx file type tool/fs.read
 ctx exec agent/coder "fix tests"
 ```
@@ -358,7 +396,7 @@ ctx exec agent/coder "fix tests"
 Object strings use ABI path form:
 
 ```text
-model/openai/gpt-4o
+model/openai/gpt-5.6
 agent/coder
 tool/fs.read
 ```
@@ -374,7 +412,7 @@ registry, or daemon catalog.
 `ctx which` finds executable objects by ABI class:
 
 ```text
-ctx which model openai/gpt-4o
+ctx which model openai/gpt-5.6
 ctx which agent coder
 ctx which tool fs.read
 ```
@@ -479,11 +517,9 @@ These commands read:
 
 `ctx agent trajectory` prints a validated ATIF projection. It correlates tool
 calls, observations, and token usage by run/call identity and does not create a
-second durable history. For legacy tool results whose call id has no matching
-event, projection preserves non-empty result content but clears the unproven
-`source_call_id`; empty unmatched results are dropped. The trajectory `extra`
-map records the stable `legacy_unmatched_tool_results` count. Projection does
-not invent a tool call or chat message. If validation still fails, the CLI lists
+second durable history. Only tool results carrying a run and a call id matching
+a canonical `tool_call` event are projected; unmatched results are dropped.
+Projection does not invent a tool call or chat message. If validation still fails, the CLI lists
 actionable issue locations (step/result/call id), capped at 16 entries with the
 remaining count reported. Session-derived source/call identifiers are escaped
 for terminal output, field-bounded, and each rendered issue is capped at 256
@@ -503,7 +539,7 @@ ctx provider oauth refresh PROVIDER
 `login` reads `/etc/cortexfs/providers.d/*.json`, uses the provider `oauth`
 block, creates a PKCE `S256` authorization request, waits on the configured
 localhost `redirect_uri`, exchanges the authorization code for tokens, and
-stores tokens in the system keychain:
+stores tokens in the system secret store:
 
 ```text
 service=cortexfs:<provider> account=oauth:access

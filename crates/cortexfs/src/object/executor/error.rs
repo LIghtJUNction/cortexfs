@@ -29,9 +29,3 @@ impl std::fmt::Display for ExecError {
 }
 
 impl std::error::Error for ExecError {}
-
-impl From<ExecError> for String {
-    fn from(error: ExecError) -> Self {
-        error.message
-    }
-}

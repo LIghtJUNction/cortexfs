@@ -1,7 +1,6 @@
 ---
-name: CortexFS Test
+name: cortexfs-test
 description: Use this skill when working in the CortexFS repository and the user asks to test CortexFS, test FUSE, test /ctx, test ctx, test agent.sh, run live tests, use Ollama or smollm2:135m, verify file/socket ABI behavior, check tests/mounts/cortexfs, inspect the systemd mount, update the AUR package, or diagnose mount/socket permission failures.
-version: 0.2.0
 ---
 
 # CortexFS Test
@@ -90,7 +89,7 @@ The current packaged system mount is systemd-level, not a user daemon:
 
 ```text
 /usr/lib/systemd/system/cortexfs.service
-/usr/bin/cortexfs-mount --source /var/lib/cortexfs/storage/v1-root /ctx
+/usr/bin/cortexfs-mount --source /var/lib/cortexfs/storage/current /ctx
 ```
 
 Check it with:
@@ -183,17 +182,17 @@ paths such as `home` or `shared/project-a`, it should list raw directory names.
 ## Socket And agent.sh Checks
 
 `agent.sh` is a thin client over `/ctx/agent/<agent>.sock`; it is not the
-CortexFS runtime and must not start listeners by itself.
+CortexFS runtime and must not start listeners itself.
 
 Interpret socket failures carefully:
 
 - `Permission denied` from `nc -U /ctx/agent/coder.sock` means Linux mode bits,
   ownership, FUSE `default_permissions`, or mount options blocked `connect(2)`
   before the runtime saw the request.
-- `Connection refused` means the socket path exists but no process is listening
-  on that socket.
-- A JSONL `{"type":"error","code":"EACCES",...}` frame means the socket
-  connected and the runtime/policy refused the operation.
+- `Connection refused` means the socket path exists but no process is
+  listening.
+- A JSONL `{"type":"error","code":"EACCES",...}` frame means socket
+  connected runtime/policy refused operation.
 
 Useful probes:
 
@@ -204,9 +203,41 @@ printf '{"op":"ping"}\n' | nc -U /ctx/agent/coder.sock
 ./agent.sh/agent.sh --raw --session default coder 'ping'
 ```
 
-Do not treat a reference-tree socket inode as proof that a runtime is listening.
-The reference tree can expose socket paths for ABI shape; live conversation
+Do not treat reference-tree socket inode as proof runtime listening.
+Reference trees can expose socket paths as ABI shape; live conversation
 requires a real listener.
+
+## Live Agent Execution Proof
+
+A static `tools` list proves discovery only; it does not prove the agent can
+execute tools, see workspace, or reach configured backend. Before claiming live
+ctx-agent test succeeded:
+
+1. Verify a real FUSE mount with `ctx status` plus `ctx doctor`.
+2. Probe canonical role path `ctx ping agent/ROLE`. Require exactly one JSON
+   `pong`, then require the first line of `ctx agent status ROLE` to be exactly
+   `idle`.
+3. Run a harmless tool through same agent/session and verify result in
+   trajectory events. Include a known workspace file in the probe so result
+   proves task workspace is actually visible.
+4. Capture the relevant process-tree chain (`systemd` unit and PIDs). Use it to
+   prove runtime-model backend handling; model response text alone is insufficient.
+
+If the task explicitly requires ctx-agent execution, do not fall back to host CLI
+like `codex`, `claude`, or other host-side agent CLIs. Stop and report failed
+proof instead.
+
+Obtain explicit authorization before real provider call, paid task, external job,
+or upload.
+
+Classify residue before cleanup; never delete by name through `/ctx`; retain
+report for every identity mismatch:
+
+- Session directory: use session GC preview and act only on exact selection.
+- Receipt-managed installed object: use object residue audit/cleanup; recheck its
+  receipt backing-generation `dev`/`ino` immediately before acting.
+- Incomplete agent control fragment owned by neither: retain report unless exact
+  cleanup procedure defines ownership.
 
 ## AUR Package Checks
 
@@ -283,8 +314,12 @@ Report:
 - whether the systemd service was enabled/active when relevant,
 - whether `allow_other` was present when testing non-root access,
 - whether a real runtime socket listener existed,
+- which canonical ping/status probes passed,
+- which real tool smoke proved execution and workspace visibility,
+- which process tree proved the runtime/model backend,
 - whether Ollama was reachable,
 - whether `smollm2:135m` was available,
 - whether a real FUSE mount was attempted,
 - whether AUR was installed, committed, or pushed,
+- whether cleanup was previewed and identity-bound,
 - any skipped step and the concrete reason.

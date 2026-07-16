@@ -64,6 +64,7 @@ pub(crate) use nofollow::*;
 pub(crate) use parse::*;
 pub(crate) use procfd::*;
 pub(crate) use repl::*;
+pub(crate) use search::*;
 pub(crate) use stderr::*;
 pub(crate) use terminal::*;
 pub(crate) use text::*;
@@ -174,10 +175,12 @@ repl:
   tools            list top-level visible tools and tool groups
   tools GROUP      list tools in a tool group, for example tools fs
   tools -l         list all visible tools with paths and descriptions
+  find QUERY...    search visible tool metadata without loading it
   which TOOL       print the resolved tool path
   type TOOL        explain whether TOOL is a builtin or visible tool
   command -v TOOL  print the command that tsh would run
   help TOOL        show metadata for a visible tool
+                    schema details appear only in help/load, not tools/find
   load TOOL        load tool metadata into this tsh context
   unload TOOL      remove unpinned tool metadata from this tsh context
   loads            list loaded tool context entries
@@ -335,6 +338,7 @@ pub(crate) use cortexfs::cli::nofollow;
 pub(crate) use cortexfs::cli::procfd;
 pub mod parse;
 pub mod repl;
+pub mod search;
 pub(crate) use cortexfs::cli::text;
 
 pub(crate) fn load_persistent_context(
@@ -483,7 +487,7 @@ pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<E
         .env("CTX_RUN_ID", &runtime.run)
         .env("CTX_SOURCE", &runtime.source)
         .env("CTX_TOOL_MODE", "cli")
-        .env("CTX_AUTHORIZED_OBJECT", format!("/ctx/tool/{name}"))
+        .env("CTX_AUTHORIZED_OBJECT", hit.path())
         .env("PATH", "/usr/bin:/bin")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

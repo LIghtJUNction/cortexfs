@@ -83,10 +83,9 @@ pub struct FuseV1Projection {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct VirtualExecObject {
-    pub(crate) class: ObjectClass,
-    pub(crate) name: String,
-    pub(crate) control_dir: PathBuf,
+pub(crate) struct ProjectedFile {
+    pub(crate) attr: FuseV1Attr,
+    pub(crate) content: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -10,6 +10,27 @@ fn assert_model_entries(projection: &FuseV1Projection, path: &str, expected: &[&
 }
 
 #[test]
+fn fuse_v1_projection_prefers_provider_backing_control_content() {
+    let root = clean_test_dir("fuse-v1-provider-backing-control");
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"]}"#,
+    );
+    write_text_file(&root.join("model/local/chat.d/effort"), "high\n");
+    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+
+    assert_eq!(
+        projection.read_to_string("model/local/chat.d/effort"),
+        Ok("high\n".to_owned())
+    );
+    assert!(matches!(
+        projection.getattr("model/local/chat.d/effort"),
+        Ok(ref attr) if attr.size() == 5 && attr.mode() == 0o644
+    ));
+}
+
+#[test]
 fn fuse_v1_projection_projects_configured_provider_models() {
     let root = reference_tree("fuse-v1-provider-model");
     let providers = root.join("providers.d");
@@ -26,7 +47,7 @@ fn fuse_v1_projection_projects_configured_provider_models() {
     );
     write_text_file(
         &cache.join("api.lmm.best.models.json"),
-        r#"{"models":["gpt-5.4","gpt-5.4-mini","gpt-5.5","bad/name"]}"#,
+        r#"{"models":["gpt-5.4","gpt-5.4-mini","gpt-5.6","bad/name"]}"#,
     );
     let projection = FuseV1Projection::new(&root)
         .with_provider_config_dir(&providers)
@@ -69,8 +90,8 @@ fn fuse_v1_projection_projects_configured_provider_models() {
             "gpt-5.4-mini",
             "gpt-5.4-mini.d",
             "gpt-5.4.d",
-            "gpt-5.5",
-            "gpt-5.5.d",
+            "gpt-5.6",
+            "gpt-5.6.d",
         ],
     );
 
@@ -117,7 +138,7 @@ fn fuse_v1_projection_projects_configured_provider_models() {
     );
     assert!(matches!(
         projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/fallback"),
-        Ok(ref content) if content.contains("api.lmm.best/gpt-5.5\n")
+        Ok(ref content) if content.contains("api.lmm.best/gpt-5.6\n")
     ));
     assert!(
         projection
@@ -244,7 +265,7 @@ fn fuse_v1_projection_skips_provider_with_invalid_local_limits() {
 
 #[test]
 fn fuse_v1_projection_keeps_debug_hook_dirs_disk_backed() {
-    let root = reference_tree("fuse-v1-debug-model-hooks");
+    let root = clean_test_dir("fuse-v1-debug-model-hooks");
     assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/pre.d")).is_ok());
     assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/post.d")).is_ok());
     let projection = FuseV1Projection::new(&root);

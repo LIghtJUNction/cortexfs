@@ -228,6 +228,7 @@ impl FuseV1Projection {
     }
 }
 
+/// Returns a `(alias, claim)` pair when paths and generated sibling marker match.
 fn socket_alias_claim_pair<'a>(alias: &'a str, claim: &'a str) -> Option<(&'a str, &'a str)> {
     let (alias_parent, alias_name) = alias.rsplit_once('/')?;
     let (claim_parent, claim_name) = claim.rsplit_once('/')?;

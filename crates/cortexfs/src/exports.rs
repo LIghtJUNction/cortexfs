@@ -40,8 +40,7 @@ pub use agent::window::{
     AgentEffectiveWindow, AgentWindowBudget, AgentWindowError, AgentWindowSetting,
 };
 pub use context::pack::{
-    ContextPackBuild, ContextPackBuildError, ContextPackBuiltItem, ContextPackIssue,
-    ContextPackReport, ContextPackSourceError, inspect_context_pack_json, rebuild_context_pack,
+    ContextPackIssue, ContextPackReport, ContextPackSourceError, inspect_context_pack_json,
     validate_context_pack_source,
 };
 pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTable};
@@ -83,10 +82,7 @@ pub use support::manuals::{
     cortexfs_manual,
 };
 pub use support::queue::{
-    SharedQueueClaim, SharedQueueClaimError, SharedQueueFinishError, SharedQueueLayoutIssue,
-    SharedQueueLayoutReport, SharedQueueOutcome, SharedQueueRecoverError,
-    claim_next_shared_queue_job, finish_shared_queue_job, inspect_shared_queue_layout,
-    recover_shared_queue_job,
+    SharedQueueLayoutIssue, SharedQueueLayoutReport, inspect_shared_queue_layout,
 };
 pub use support::schema::{ToolSchemaIssue, ToolSchemaReport, inspect_tool_schema_json};
 pub use support::session::{

@@ -332,7 +332,7 @@ must still be attenuated from their direct parent.
 `base` is a retired reference-agent name. `ctx bootstrap` reports any remaining
 `base` object as `would_skip` and retains it for manual review; legacy trees
 have no manifest that can prove ownership and full control-tree integrity, so
-`ctx bootstrap` must not delete it automatically.
+update must not delete it automatically.
 
 The child appears as ordinary agent ABI:
 
@@ -483,7 +483,7 @@ views of those paths, but not `/home/user`, `/etc`, `/var/log`, or
 `/shared/project-b` unless a supervisor authorizes them.
 
 Owned child agents are cancelled when the parent dies. Parent death cancels
-the child runtime, not the child's session history. See `17-child-agents.md`
+the child runtime, not the child's session history. See `child-agents.md`
 for handoff, result, and lifecycle rules.
 
 Names should stay short:

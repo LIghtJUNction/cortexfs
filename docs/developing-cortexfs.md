@@ -29,6 +29,16 @@ aimock-testing.md
 源码树命名（新模块使用 single-token 文件名；legacy kebab 仅兼容保留；禁止
 `mod.rs`；函数动词约定）见 [naming-guide.md](naming-guide.md)。
 
+工程分层（进程角色、crate/feature 目标、模块依赖方向、错误三层、迁移阶段）见
+[internal-architecture.md](internal-architecture.md) 与
+[architecture.md](architecture.md)。二次开发与重构必须遵守其中的层边界：例如
+`fuse` 不得调用 `object::executor`，`support` 不得依赖 `agent`/`runtime`，库代码
+不得反向依赖 `bin/*`。
+
+性能改动从 [Performance engineering boundary](internal-architecture.md#71-performance-engineering-boundary)
+进入；可执行的基线、噪声、p95/RSS、fallback 与独立审查流程只维护在
+`.agents/skills/cortexfs-performance/SKILL.md`，这里不复制第二份规范。
+
 根 ABI 只包含：
 
 ```text
@@ -128,6 +138,22 @@ ctx object install --source "$CTX_SOURCE" tool.manifest.json --tier user
 ctx object install --source "$CTX_SOURCE" agent.manifest.json --tier system
 ```
 
+外部 MCP stdio server 需要显式投影为普通 tool manifest；投影不安装、不授权，也不写
+`/ctx`。`ctxmcp` 以 stable MCP `2025-11-25` 为协议基线：
+
+```bash
+ctxmcp list --config "$HOME/.config/example/mcp.json" --server demo
+ctxmcp project --config "$HOME/.config/example/mcp.json" \
+  --runtime-config /workspace/.mcp.json --server demo --out ./mcp-manifests
+ctx object check ./mcp-manifests/demo.echo.manifest.json
+ctx object install --source "$CTX_SOURCE" \
+  ./mcp-manifests/demo.echo.manifest.json --tier user
+```
+
+生成名固定为 `<server>.<remote_tool>`，没有隐式 `mcp.` 前缀。`--runtime-config`
+必须是授权 tool 运行时可见的绝对路径；外部配置与 secret 不会复制进 manifest。显式
+安装只发布普通 tool 对象，不会授权任何 agent。
+
 `check` 不需要 source tree，也不写任何 backing state；它先执行与安装发布前相同的 manifest、
 control、artifact 类型、可执行权限和 SHA-256 校验。对 v2，`check` 和 `install`
 都会将 CortexFS compatibility mismatch 视为 invalid input：退出码为 2 且零写入。
@@ -156,8 +182,10 @@ candidate，先隐藏旧 executable，最后发布新 executable；commit 前失
 
 调用者必须在 `--yes` 前自行停稳对应 runtime 与同 authority writer；命令本身不负责
 stop/start runtime，也不授予 policy、创建 socket。安装与替换都会校验 executable SHA-256，
-不修改任何 agent policy；安装初始化规范要求的 status/pid/log，但不创建 socket。SDK 的 `DynamicTool` loader
-目前尚未被 core runtime 消费，不应把 metadata cache 描述成已完成的 dlopen 常驻实现。
+不修改任何 agent policy；安装初始化规范要求的 status/pid/log，但不创建 socket。SDK 扩展是普通
+executable JSONL endpoint；core runtime 不执行 dlopen，也不常驻原生库。
+这是 `0.2.0` 级 API 变更：`DynamicTool`、`Registry`、`ToolAbiV1` 与
+`cortexfs_tool_artifact!` 已退役，扩展统一使用 `cortexfs_tool_main!`。
 
 ## 扩展 agent
 
@@ -169,6 +197,10 @@ agent 是 policy-bound orchestrator。稳定路径是：
 /ctx/agent/<name>.d/
 /ctx/home/<uid>/agent/<name>/session/
 ```
+
+在不同部署里，`/ctx/agent/<name>.sock` 可能是到运行时目录
+（如 `/run/user/<uid>/cortexfs/agent/...`）的 owner-authorized symlink，也可能是系统侧直接提供的
+socket 节点；请按实际挂载进行探测，不要将其单一归因为“必须是某种形式”。
 
 agent 可以组织 tool loop、上下文、child task 和 handoff，但不要把这类编排概念提升成
 新的根 ABI。
@@ -250,6 +282,15 @@ context/pack.md    当前工作集，可重建
 context/refs.jsonl 被选中的文件、child result、检索结果
 ```
 
+agent 或其他 userspace runtime 负责选择内容、构造 pack，并通过同目录原子替换写入
+`context/pack.json` 与 `context/pack.md`。CortexFS 只负责 pack 形状与 source 校验、
+`/ctx` 可见性和文件持久性，不替 runtime 选择 prompt、估算预算或重建 pack。
+
+这是一个 0.2.0 级破坏性 API 退役：公开的 `rebuild_context_pack`、
+`ContextPackBuildError`、`ContextPackBuild` 和 `ContextPackBuiltItem`（以及它们的关联
+方法）被移除。userspace writer 可继续调用 `inspect_context_pack_json` 和
+`validate_context_pack_source` 检查产物。
+
 prompt 构造会合并 agent instruction、AGENTS.md 规则、skill 元数据、工具注入、历史消息和
 runtime contract。Skill 只先注入 `name`、`description`、`SKILL.md path`，最多占上下文
 窗口 2%；窗口未知时硬上限 8,000 字符。超限先缩短 description，再省略部分 skill 并给出
@@ -285,19 +326,20 @@ smollm2:135m
 如果该模型不存在，提示用户安装或拉取；不要静默换模型。用户明确要求测试自己配置的
 供应商或聚合 API 时，走现有 provider registry、route、secret 状态和统一提交语义。
 
-供应商 API key 的解析顺序固定为：
+供应商 API key 的解析顺序为：
 
 ```text
-1. root-owned CortexFS system secret store
-2. 未配置，返回稳定错误或无认证请求
+1. 约定的 provider 环境变量候选（若设置）
+2. root-owned CortexFS system secret store
+3. 未配置，返回稳定错误或无认证请求
 ```
 
 provider 配置不要声明环境变量名，用户也不需要手动配置环境变量名。API key 不注入
 agent sandbox 环境；model/object runner 在请求时直接读取
 `/var/lib/cortexfs/secrets/provider/<provider>/<slot>`。
 
-OAuth access token 也按同样原则处理：运行时内部变量优先，其次系统 keychain。provider
-配置可以声明 Authorization Code + PKCE 元数据；access token 默认保存在
+OAuth access token 也按同样原则处理：provider adapter 从系统密钥仓库读取；
+provider 配置可以声明 Authorization Code + PKCE 元数据；access token 默认保存在
 `service=cortexfs:<provider> account=oauth:access`，refresh token 默认保存在
 `account=oauth:refresh`。PKCE verifier、state、access token、refresh token 都不要写入
 `/ctx/model/*`、`.d/default` 或其他 ABI 文件。
@@ -319,7 +361,7 @@ npm run aimock:smoke
 /ctx/model/main                    稳定默认模型 alias
 /ctx/model/<provider>/<model>      provider adapter 投影出来的模型对象
 model/<name>.d/driver              driver/route 元数据
-provider registry/cache/keychain   runtime 内部状态，不进入根 ABI
+provider registry/cache/secret store   runtime 内部状态，不进入根 ABI
 ```
 
 换供应商时，用户改 model alias 或 route；agent 仍然只说“使用 model:main”。这样 provider
@@ -358,3 +400,28 @@ tests/mounts/cortexfs
 ```
 
 该目录只作为本地测试挂载点，不放源码、fixture 或持久化数据。
+
+## 参考项目与代码参考（按周检索）
+
+- [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)
+- [modelcontextprotocol filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
+- [rust-mcp-stack/rust-mcp-filesystem](https://github.com/rust-mcp-stack/rust-mcp-filesystem)
+- [opencrust multi-agent runtime](https://github.com/opencrust-org/opencrust)
+
+### 相关 issue / PR
+
+- CortexFS
+  - [#89](https://github.com/LIghtJUNction/cortexfs/pull/89)
+  - [#88](https://github.com/LIghtJUNction/cortexfs/pull/88)
+  - [#87](https://github.com/LIghtJUNction/cortexfs/pull/87)
+- modelcontextprotocol/filesystem server
+  - [#3232](https://github.com/modelcontextprotocol/servers/issues/3232)
+  - [#3402](https://github.com/modelcontextprotocol/servers/issues/3402)
+  - [#4208](https://github.com/modelcontextprotocol/servers/issues/4208)
+
+### 相似代码片段检索关键词
+
+- `provider registry` + `object` + `policy`
+- `Fuse` + `socket runtime` + `jsonl`
+- `atomic rename .req.json` + `outbox` + `audit append`
+- `model alias` + `route` + `secret store`

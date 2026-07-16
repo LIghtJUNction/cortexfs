@@ -50,6 +50,7 @@ pub(crate) fn refresh_model_limit_cache(cache_dir: &Path) -> Result<(), FuseV1Er
     runtime.block_on(refresh_timed(cache_dir, FETCH_TIMEOUT, fetch_catalog()))
 }
 
+/// Applies a cache refresh with a bounded timeout.
 async fn refresh_timed<F>(cache_dir: &Path, timeout: Duration, fetch: F) -> Result<(), FuseV1Error>
 where
     F: Future<Output = Result<Vec<u8>, FuseV1Error>>,
@@ -61,6 +62,7 @@ where
 }
 
 #[cfg(test)]
+/// Refreshes provider catalog cache from a preloaded response.
 async fn refresh_from<F>(cache_dir: &Path, fetch: F) -> Result<(), FuseV1Error>
 where
     F: Future<Output = Result<Vec<u8>, FuseV1Error>>,

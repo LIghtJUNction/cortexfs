@@ -138,6 +138,12 @@ stopped host-created agent may retain a real socket placeholder; start replaces
 it with the runtime alias. Start must fail before recording `ready` when either
 visible alias cannot be created and verified with `readlink`.
 
+Some deployments also keep an always-on system agent socket as a direct socket
+node at `/ctx/agent/<name>.sock`, rather than as a symlink to `/run/user/...`.
+Both representations are valid: runtime may expose the socket node directly or
+via an owner-authorized symlink for that agent.
+
+
 ## Extended Attributes
 
 FUSE exposes read-only `user.cortexfs.*` extended attributes so agents can

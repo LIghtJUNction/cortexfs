@@ -21,7 +21,7 @@ pub(crate) fn provider_runtime_driver(
             || !config
                 .formats
                 .iter()
-                .any(|format| matches!(format.trim(), "openai.chat" | "openai-compatible")))
+                .any(|format| format.trim() == "openai.chat"))
     {
         ProviderRuntimeDriver::OpenAiResponses
     } else {
@@ -156,11 +156,9 @@ fn model_runtime_drivers(
     drivers
         .iter()
         .map(|driver| match driver.as_str() {
-            "openai-chat" | "openai.chat" => Ok(ProviderRuntimeDriver::OpenAiChat),
-            "openai-responses" | "openai.responses" => Ok(ProviderRuntimeDriver::OpenAiResponses),
-            "anthropic-messages" | "anthropic.messages" => {
-                Ok(ProviderRuntimeDriver::AnthropicMessages)
-            }
+            "openai-chat" => Ok(ProviderRuntimeDriver::OpenAiChat),
+            "openai-responses" => Ok(ProviderRuntimeDriver::OpenAiResponses),
+            "anthropic-messages" => Ok(ProviderRuntimeDriver::AnthropicMessages),
             _ => Err(format!("unsupported model driver adapter: {driver}")),
         })
         .collect::<Result<Vec<_>, _>>()
@@ -361,6 +359,20 @@ mod driver_route_tests {
         assert_eq!(
             model_runtime_drivers(root.path(), "fixture", "model", true),
             Err("unsupported model driver adapter: vendor-magic".to_owned())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn format_names_are_not_driver_aliases() -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let control = root.path().join("model/fixture/model.d");
+        fs::create_dir_all(&control)?;
+        fs::write(control.join("driver"), "agent=openai.responses\n")?;
+
+        assert_eq!(
+            model_runtime_drivers(root.path(), "fixture", "model", true),
+            Err("unsupported model driver adapter: openai.responses".to_owned())
         );
         Ok(())
     }

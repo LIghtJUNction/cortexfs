@@ -13,7 +13,7 @@ pub(crate) fn agent_new_host_fallback(
     let uid = current_uid_text().map_err(CliError::unavailable)?;
     let groups = current_supplementary_groups_control()?;
     let model = args.models.first().map_or_else(
-        || default_agent_process_model(&args.name).to_owned(),
+        || default_agent_model_for_name(&args.name).to_owned(),
         Clone::clone,
     );
     let subject = agent_new_policy_subject(args);

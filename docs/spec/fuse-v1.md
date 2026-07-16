@@ -139,11 +139,16 @@ home/<uid>/agent/<name>/session/<session>/terminal/main.sock
 ```
 
 Targets must be absolute, remain below the matching uid runtime prefix, and
-match the visible agent/session name. Alias parents are opened without following
-symlinks. Creation, replacement, and unlink require the agent owner uid. A
-stopped host-created agent may retain a real socket placeholder; start replaces
+match visible agent/session name. Alias parents opened without following
+symlinks. Creation, replacement, unlink require agent owner uid. A
+stopped host-created agent may retain real socket placeholder; start replaces
 it with the runtime alias. Start must fail before recording `ready` when either
 visible alias cannot be created and verified with `readlink`.
+
+Some deployments also keep an always-on system agent socket as a direct socket
+node at `/ctx/agent/<name>.sock`, rather than a symlink to `/run/user/...`.
+Both representations are valid: runtime may expose the socket node directly or
+via an owner-authorized symlink for that agent.
 
 ## Extended Attributes
 

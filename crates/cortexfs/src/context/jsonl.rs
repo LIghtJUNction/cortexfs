@@ -52,6 +52,30 @@ pub(crate) enum JsonStringArrayField {
     Other(Value),
 }
 
+macro_rules! require_context_strings {
+    ($line:expr, $record:ident, $issues:expr; $($field:ident => $valid:path),+ $(,)?) => {{
+        $(require_context_string_field(
+            $line, $record.$field.as_ref(), stringify!($field), $issues, $valid,
+        );)+
+    }};
+}
+
+macro_rules! require_context_string_arrays {
+    ($line:expr, $record:ident, $issues:expr; $($field:ident => $valid:path),+ $(,)?) => {{
+        $(require_context_string_array_field(
+            $line, $record.$field.as_ref(), stringify!($field), $issues, $valid,
+        );)+
+    }};
+}
+
+macro_rules! require_context_numbers {
+    ($line:expr, $record:ident, $issues:expr; $($field:ident),+ $(,)?) => {{
+        $(require_context_number_field(
+            $line, $record.$field.as_ref(), stringify!($field), $issues,
+        );)+
+    }};
+}
+
 #[must_use]
 pub fn inspect_context_jsonl(kind: ContextJsonlKind, content: &str) -> ContextJsonlReport {
     let mut issues = Vec::new();
@@ -89,11 +113,25 @@ pub(crate) fn inspect_context_jsonl_line(
     };
 
     match kind {
-        ContextJsonlKind::Facts => inspect_fact_record(line_number, &record, issues),
-        ContextJsonlKind::Decisions => inspect_decision_record(line_number, &record, issues),
-        ContextJsonlKind::Refs => inspect_ref_record(line_number, &record, issues),
-        ContextJsonlKind::SwapIndex => inspect_swap_index_record(line_number, &record, issues),
-        ContextJsonlKind::DedupIndex => inspect_dedup_index_record(line_number, &record, issues),
+        ContextJsonlKind::Facts => require_context_strings!(line_number, record, issues;
+            id => is_object_name, text => is_nonempty_single_line, source => is_nonempty_single_line),
+        ContextJsonlKind::Decisions => require_context_strings!(line_number, record, issues;
+            id => is_object_name, decision => is_nonempty_single_line, source => is_nonempty_single_line),
+        ContextJsonlKind::Refs => require_context_strings!(line_number, record, issues;
+            id => is_object_name, path => is_stable_context_ref_path,
+            kind => is_context_ref_kind, summary => is_nonempty_single_line),
+        ContextJsonlKind::SwapIndex => {
+            require_context_strings!(line_number, record, issues;
+                id => is_context_hash_id, kind => is_swap_kind, source => is_swap_source,
+                summary => is_nonempty_single_line);
+            require_context_numbers!(line_number, record, issues; tokens);
+        }
+        ContextJsonlKind::DedupIndex => {
+            require_context_strings!(line_number, record, issues; hash => is_context_hash_id);
+            require_context_string_arrays!(line_number, record, issues;
+                refs => is_nonempty_single_line);
+            require_context_numbers!(line_number, record, issues; bytes, tokens);
+        }
     }
 }
 
@@ -110,122 +148,6 @@ pub(crate) struct ContextJsonlRecordJson {
     hash: Option<JsonStringField>,
     refs: Option<JsonStringArrayField>,
     bytes: Option<JsonU64Field>,
-}
-
-pub(crate) fn inspect_fact_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    inspect_text_source_record(line, record, "text", record.text.as_ref(), issues);
-}
-
-pub(crate) fn inspect_decision_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    inspect_text_source_record(line, record, "decision", record.decision.as_ref(), issues);
-}
-
-pub(crate) fn inspect_text_source_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    text_field: &str,
-    text_value: Option<&JsonStringField>,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_object_name);
-    require_context_string_field(
-        line,
-        text_value,
-        text_field,
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_string_field(
-        line,
-        record.source.as_ref(),
-        "source",
-        issues,
-        is_nonempty_single_line,
-    );
-}
-
-pub(crate) fn inspect_ref_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_object_name);
-    require_context_string_field(
-        line,
-        record.path.as_ref(),
-        "path",
-        issues,
-        is_stable_context_ref_path,
-    );
-    require_context_string_field(
-        line,
-        record.kind.as_ref(),
-        "kind",
-        issues,
-        is_context_ref_kind,
-    );
-    require_context_string_field(
-        line,
-        record.summary.as_ref(),
-        "summary",
-        issues,
-        is_nonempty_single_line,
-    );
-}
-
-pub(crate) fn inspect_swap_index_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(line, record.id.as_ref(), "id", issues, is_context_hash_id);
-    require_context_string_field(line, record.kind.as_ref(), "kind", issues, is_swap_kind);
-    require_context_string_field(
-        line,
-        record.source.as_ref(),
-        "source",
-        issues,
-        is_swap_source,
-    );
-    require_context_string_field(
-        line,
-        record.summary.as_ref(),
-        "summary",
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
-}
-
-pub(crate) fn inspect_dedup_index_record(
-    line: usize,
-    record: &ContextJsonlRecordJson,
-    issues: &mut Vec<ContextJsonlIssue>,
-) {
-    require_context_string_field(
-        line,
-        record.hash.as_ref(),
-        "hash",
-        issues,
-        is_context_hash_id,
-    );
-    require_context_string_array_field(
-        line,
-        record.refs.as_ref(),
-        "refs",
-        issues,
-        is_nonempty_single_line,
-    );
-    require_context_number_field(line, record.bytes.as_ref(), "bytes", issues);
-    require_context_number_field(line, record.tokens.as_ref(), "tokens", issues);
 }
 
 pub(crate) fn require_context_string_field(

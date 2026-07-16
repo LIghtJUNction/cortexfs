@@ -952,7 +952,8 @@ fn parse_parent(value: &str) -> Result<StopParent, StopError> {
 }
 
 /// Failure while planning or executing a receipt-bound agent stop.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+#[error("{message}")]
 pub struct StopError {
     message: String,
 }
@@ -965,14 +966,6 @@ impl StopError {
         }
     }
 }
-
-impl std::fmt::Display for StopError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for StopError {}
 
 /// A validated, post-order stop plan.
 ///

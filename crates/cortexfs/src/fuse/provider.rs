@@ -303,7 +303,7 @@ pub(crate) fn provider_drivers(formats: &[String]) -> Vec<String> {
     for format in formats {
         let driver = match format.trim() {
             "openai.responses" => "openai-responses",
-            "openai.chat" | "openai-compatible" => "openai-chat",
+            "openai.chat" => "openai-chat",
             _ => continue,
         };
         if seen.insert(driver) {
@@ -385,7 +385,7 @@ pub(crate) fn default_provider_model_fallback(
     default_model: Option<&str>,
 ) -> String {
     let requested = [
-        "gpt-5.5",
+        "gpt-5.6",
         "codex-auto-review",
         "gpt-5.3-codex-spark",
         "gpt-5.4",

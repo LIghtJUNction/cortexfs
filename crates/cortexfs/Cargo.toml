@@ -33,6 +33,7 @@ serde_yaml = "0.9"
 sha2 = "0.11.0"
 signal-hook = "0.4.4"
 tempfile = "3.27.0"
+thiserror = "2.0.18"
 tokio = { version = "1", default-features = false, features = ["rt", "time"] }
 xattr = "1.6.1"
 

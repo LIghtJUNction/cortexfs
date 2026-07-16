@@ -18,7 +18,18 @@ fn session_gc_storage_root_is_pinned_across_current_switch() {
     assert!(std::os::unix::fs::symlink("generations/new", root.join(".next")).is_ok());
     assert!(fs::rename(root.join(".next"), root.join("current")).is_ok());
 
-    assert!(matches!(pinned, Ok(Some(ref path)) if path == &generations.join("old").join(relative)));
+    assert!(matches!(&pinned, Ok(Some(path)) if path == &generations.join("old").join(relative)));
+
+    let pinned = pinned.ok().flatten();
+    assert!(pinned.is_some());
+    let archive = pinned
+        .as_deref()
+        .map(|path| gc_archive_agent_root(path, "coder", None));
+    assert_eq!(
+        archive,
+        Some(Ok(generations
+            .join("old/home/1000/archived_sessions/coder")))
+    );
 }
 
 fn create_agent_session_gc_fixture(root: &Path) -> PathBuf {
@@ -64,6 +75,7 @@ fn agent_session_gc_args(
         dry_run: !yes,
         yes,
         delete,
+        archive_dir: None,
         keep: keep.iter().map(|value| (*value).to_owned()).collect(),
         patterns: patterns
             .iter()
@@ -71,6 +83,16 @@ fn agent_session_gc_args(
             .collect(),
         older_than_days: None,
     }
+}
+
+/// Returns the default per-agent archive directory for a fixture session root.
+fn fixture_archive_root(session_root: &Path) -> PathBuf {
+    session_root
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .unwrap_or(session_root)
+        .join("archived_sessions/coder")
 }
 
 #[test]
@@ -97,6 +119,7 @@ fn parses_agent_session_gc_delete_command() {
             dry_run: false,
             yes: true,
             delete: true,
+            archive_dir: None,
             ref keep,
             ref patterns,
             older_than_days: Some(7),
@@ -104,6 +127,69 @@ fn parses_agent_session_gc_delete_command() {
             && keep == &vec!["keep-me".to_owned()]
             && patterns == &vec!["e2e-*".to_owned()]
     ));
+}
+
+#[test]
+/// Parses immediate session archive and its custom absolute root.
+fn parses_agent_session_archive_command() {
+    let command = cmd!(
+        "agent",
+        "session",
+        "archive",
+        "coder",
+        "release-run",
+        "--archive-dir",
+        "/tmp/cortexfs-archive"
+    );
+
+    assert!(matches!(
+        command,
+        Ok(Command::Agent(AgentArgs::SessionArchive(AgentSessionArchiveArgs {
+            ref name,
+            ref session,
+            archive_dir: Some(ref archive_dir),
+        }))) if name == "coder"
+            && session == "release-run"
+            && archive_dir == &PathBuf::from("/tmp/cortexfs-archive")
+    ));
+}
+
+#[test]
+/// Rejects archive roots that are ambiguous or incompatible with delete mode.
+fn rejects_invalid_session_archive_options() {
+    assert!(matches!(
+        cmd!("agent", "session", "archive", "coder", "run", "--archive-dir", "relative"),
+        Err(ref error) if error.code == 2 && error.message.contains("absolute")
+    ));
+    assert!(matches!(
+        cmd!("agent", "session", "gc", "coder", "--delete", "--archive-dir", "/tmp/archive"),
+        Err(ref error) if error.code == 2 && error.message.contains("cannot be used")
+    ));
+}
+
+#[test]
+/// Resolves nested session help requests to implemented help topics.
+fn parses_agent_session_archive_help_topics() {
+    assert!(matches!(
+        cmd!("agent", "session", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent session"
+    ));
+    assert!(matches!(
+        cmd!("agent", "session", "archive", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent session archive"
+    ));
+    assert!(matches!(
+        cmd!("agent", "session", "gc", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent session gc"
+    ));
+    assert!(matches!(
+        cmd!("agent", "session", "select", "--help"),
+        Ok(Command::HelpTopic(ref topic)) if topic == "agent session select"
+    ));
+    assert!(print_help_topic("agent session").is_ok());
+    assert!(print_help_topic("agent session archive").is_ok());
+    assert!(print_help_topic("agent session gc").is_ok());
+    assert!(print_help_topic("agent session select").is_ok());
 }
 
 #[test]
@@ -197,6 +283,7 @@ fn agent_session_gc_dry_run_has_no_archive_side_effect() {
     let args = agent_session_gc_args(false, false, &["e2e-*", "*smoke*"], &[]);
     assert!(agent_session_gc(&root, &args).is_ok());
 
+    assert!(!fixture_archive_root(&session_root).exists());
     assert!(!session_root.join(".archive").exists());
     assert!(session_root.join("e2e-old").is_dir());
     assert!(session_root.join("smoke-old").is_dir());
@@ -212,7 +299,7 @@ fn agent_session_gc_no_candidates_does_not_create_archive() {
     let args = agent_session_gc_args(false, true, &["missing-*"], &[]);
 
     assert!(agent_session_gc(&root, &args).is_ok());
-    assert!(!session_root.join(".archive").exists());
+    assert!(!fixture_archive_root(&session_root).exists());
 }
 
 #[test]
@@ -226,10 +313,210 @@ fn agent_session_gc_yes_archives_and_preserves_content() {
 
     assert!(!session_root.join("e2e-old").exists());
     assert!(
-        fs::read_to_string(session_root.join(".archive/e2e-old/messages.jsonl"))
+        fs::read_to_string(fixture_archive_root(&session_root).join("e2e-old/messages.jsonl"))
             .is_ok_and(|content| content == "history\n")
     );
     assert!(session_root.join("smoke-old").is_dir());
+}
+
+#[test]
+/// Archives one session immediately to the default external archive tree.
+fn agent_session_archive_uses_default_destination() {
+    let root = clean_test_dir("ctx-agent-session-archive-default");
+    let session_root = create_agent_session_gc_fixture(&root);
+    assert!(fs::write(session_root.join("manual/events.jsonl"), "raw-event\n").is_ok());
+    let args = AgentSessionArchiveArgs {
+        name: "coder".to_owned(),
+        session: "manual".to_owned(),
+        archive_dir: None,
+    };
+
+    assert!(agent_session_archive(&root, &args).is_ok());
+    assert!(!session_root.join("manual").exists());
+    assert_eq!(
+        fs::read_to_string(fixture_archive_root(&session_root).join("manual/events.jsonl"))
+            .ok()
+            .as_deref(),
+        Some("raw-event\n")
+    );
+    assert!(!session_root.join(".archive").exists());
+}
+
+#[test]
+/// Archives one session under a custom absolute archive root.
+fn agent_session_archive_uses_custom_destination() {
+    let root = clean_test_dir("ctx-agent-session-archive-custom");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let archive = root.join("external-archive");
+    let args = AgentSessionArchiveArgs {
+        name: "coder".to_owned(),
+        session: "manual".to_owned(),
+        archive_dir: Some(archive.clone()),
+    };
+
+    assert!(agent_session_archive(&root, &args).is_ok());
+    assert!(archive.join("coder/manual").is_dir());
+    assert!(!session_root.join("manual").exists());
+}
+
+#[test]
+/// Applies a custom archive root to GC archive mode.
+fn agent_session_gc_uses_custom_destination() {
+    let root = clean_test_dir("ctx-agent-session-gc-custom");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let archive = root.join("gc-archive");
+    let mut args = agent_session_gc_args(false, true, &["e2e-old"], &[]);
+    args.archive_dir = Some(archive.clone());
+
+    assert!(agent_session_gc(&root, &args).is_ok());
+    assert!(archive.join("coder/e2e-old").is_dir());
+    assert!(!session_root.join("e2e-old").exists());
+}
+
+#[test]
+/// Refuses protected and active sessions without creating an archive.
+fn agent_session_archive_refuses_current_default_and_active() {
+    let root = clean_test_dir("ctx-agent-session-archive-protected");
+    let session_root = create_agent_session_gc_fixture(&root);
+    assert!(fs::write(session_root.join("manual/state"), "active\n").is_ok());
+
+    for session in ["default", "current", "manual"] {
+        let args = AgentSessionArchiveArgs {
+            name: "coder".to_owned(),
+            session: session.to_owned(),
+            archive_dir: None,
+        };
+        assert!(agent_session_archive(&root, &args).is_err());
+        assert!(session_root.join(session).is_dir());
+    }
+    assert!(!fixture_archive_root(&session_root).exists());
+}
+
+/// Verifies an overlapping archive root fails without changing live state.
+fn assert_archive_overlap_refused(
+    root: &Path,
+    session_root: &Path,
+    archive_dir: PathBuf,
+    unexpected: &Path,
+) {
+    assert!(fs::write(session_root.join("manual/source"), "live\n").is_ok());
+    let list = fs::read_to_string(session_root.join("index/list")).unwrap_or_default();
+    let args = AgentSessionArchiveArgs {
+        name: "coder".to_owned(),
+        session: "manual".to_owned(),
+        archive_dir: Some(archive_dir),
+    };
+
+    let result = agent_session_archive(root, &args);
+    assert!(matches!(result, Err(ref error) if error.message.contains("overlaps live session")));
+    assert_eq!(
+        fs::read_to_string(session_root.join("manual/source"))
+            .ok()
+            .as_deref(),
+        Some("live\n")
+    );
+    assert_eq!(
+        fs::read_to_string(session_root.join("index/list"))
+            .ok()
+            .as_deref(),
+        Some(list.as_str())
+    );
+    assert!(!unexpected.exists());
+}
+
+#[test]
+/// Rejects an archive root equal to the live session root.
+fn agent_session_archive_rejects_equal_live_root() {
+    let root = clean_test_dir("ctx-agent-session-archive-overlap-equal");
+    let session_root = create_agent_session_gc_fixture(&root);
+    assert_archive_overlap_refused(
+        &root,
+        &session_root,
+        session_root.clone(),
+        &session_root.join("coder"),
+    );
+}
+
+#[test]
+/// Rejects an archive root inside a live session directory.
+fn agent_session_archive_rejects_inside_live_session() {
+    let root = clean_test_dir("ctx-agent-session-archive-overlap-inside");
+    let session_root = create_agent_session_gc_fixture(&root);
+    assert_archive_overlap_refused(
+        &root,
+        &session_root,
+        session_root.join("manual"),
+        &session_root.join("manual/coder"),
+    );
+}
+
+#[test]
+/// Rejects an archive agent root that is an ancestor of live sessions.
+fn agent_session_archive_rejects_live_ancestor() {
+    let root = clean_test_dir("ctx-agent-session-archive-overlap-ancestor");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let archive_root = session_root
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(&session_root)
+        .to_path_buf();
+    assert_archive_overlap_refused(
+        &root,
+        &session_root,
+        archive_root,
+        &session_root
+            .parent()
+            .unwrap_or(&session_root)
+            .join("manual"),
+    );
+}
+
+#[test]
+/// Rejects parent traversal in a custom archive path before mutation.
+fn agent_session_archive_rejects_parent_components() {
+    let root = clean_test_dir("ctx-agent-session-archive-parent-component");
+    let session_root = create_agent_session_gc_fixture(&root);
+    let args = AgentSessionArchiveArgs {
+        name: "coder".to_owned(),
+        session: "manual".to_owned(),
+        archive_dir: Some(root.join("archive/../elsewhere")),
+    };
+
+    assert!(matches!(
+        agent_session_archive(&root, &args),
+        Err(ref error) if error.message.contains("parent path components")
+    ));
+    assert!(session_root.join("manual").is_dir());
+    assert!(!root.join("archive").exists());
+}
+
+#[test]
+/// Applies the same live-tree overlap rejection to GC archive mode.
+fn agent_session_gc_rejects_overlapping_archive_root() {
+    let root = clean_test_dir("ctx-agent-session-gc-overlap");
+    let session_root = create_agent_session_gc_fixture(&root);
+    assert!(fs::write(session_root.join("e2e-old/source"), "live\n").is_ok());
+    let list = fs::read_to_string(session_root.join("index/list")).unwrap_or_default();
+    let mut args = agent_session_gc_args(false, true, &["e2e-old"], &[]);
+    args.archive_dir = Some(session_root.clone());
+
+    assert!(matches!(
+        agent_session_gc(&root, &args),
+        Err(ref error) if error.message.contains("overlaps live session")
+    ));
+    assert_eq!(
+        fs::read_to_string(session_root.join("e2e-old/source"))
+            .ok()
+            .as_deref(),
+        Some("live\n")
+    );
+    assert_eq!(
+        fs::read_to_string(session_root.join("index/list"))
+            .ok()
+            .as_deref(),
+        Some(list.as_str())
+    );
+    assert!(!session_root.join("coder").exists());
 }
 
 #[test]
@@ -237,8 +524,9 @@ fn agent_session_gc_archive_conflict_preserves_both_directories() {
     let root = clean_test_dir("ctx-agent-session-gc-archive-conflict");
     let session_root = create_agent_session_gc_fixture(&root);
     assert!(fs::write(session_root.join("e2e-old/source"), "live\n").is_ok());
-    assert!(fs::create_dir_all(session_root.join(".archive/e2e-old")).is_ok());
-    assert!(fs::write(session_root.join(".archive/e2e-old/sentinel"), "old\n").is_ok());
+    let archive = fixture_archive_root(&session_root);
+    assert!(fs::create_dir_all(archive.join("e2e-old")).is_ok());
+    assert!(fs::write(archive.join("e2e-old/sentinel"), "old\n").is_ok());
     let args = agent_session_gc_args(false, true, &["e2e-old"], &[]);
 
     assert!(agent_session_gc(&root, &args).is_err());
@@ -248,7 +536,7 @@ fn agent_session_gc_archive_conflict_preserves_both_directories() {
             .is_ok_and(|content| content == "live\n")
     );
     assert!(
-        fs::read_to_string(session_root.join(".archive/e2e-old/sentinel"))
+        fs::read_to_string(archive.join("e2e-old/sentinel"))
             .is_ok_and(|content| content == "old\n")
     );
 }
@@ -262,7 +550,7 @@ fn agent_session_gc_delete_yes_removes_without_archive() {
     assert!(agent_session_gc(&root, &args).is_ok());
 
     assert!(!session_root.join("e2e-old").exists());
-    assert!(!session_root.join(".archive").exists());
+    assert!(!fixture_archive_root(&session_root).exists());
     assert!(session_root.join("smoke-old").is_dir());
 }
 
@@ -277,7 +565,7 @@ fn agent_session_gc_protects_default_current_and_keep() {
     for session in ["default", "current", "e2e-keep"] {
         assert!(session_root.join(session).is_dir(), "{session} should remain");
         assert!(
-            !session_root.join(".archive").join(session).exists(),
+            !fixture_archive_root(&session_root).join(session).exists(),
             "{session} should not be archived"
         );
     }
@@ -298,7 +586,7 @@ fn agent_session_gc_protects_active_and_unsafe_state_but_accepts_missing_state()
 
     assert!(session_root.join("active-run").is_dir());
     assert!(session_root.join("unsafe-run").is_dir());
-    assert!(session_root.join(".archive/legacy-run").is_dir());
+    assert!(fixture_archive_root(&session_root).join("legacy-run").is_dir());
 }
 
 #[test]

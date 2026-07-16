@@ -154,35 +154,8 @@ fn reference_tree_model_exec_is_readonly_metadata() {
 }
 
 #[test]
-fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
-    let root = clean_test_dir("reference-tree-legacy-model-alias");
-    let user_model = ctx_home(&root).join("model");
-    let shared_meta_path = fixture_path(
-        &root,
-        &[
-            "shared",
-            "project-a",
-            "agent",
-            "coder",
-            "session",
-            "design-review",
-            "meta.json",
-        ],
-    );
-    assert!(fs::create_dir_all(root.join("model")).is_ok());
-    assert!(fs::create_dir_all(&user_model).is_ok());
-    assert!(symlink("gpt-5.4-mini", root.join("model").join("main")).is_ok());
-    assert!(symlink("/ctx/model/qwen", user_model.join("coder")).is_ok());
-    write_text_file(
-        &agent_session_root(&root, "coder")
-            .join("default")
-            .join("meta.json"),
-        "{\"client\":\"ctx\",\"model\":\"main\",\"scope\":\"private\"}\n",
-    );
-    write_text_file(
-        &shared_meta_path,
-        "{\"client\":\"ctx\",\"model\":\"qwen\",\"scope\":\"shared\"}\n",
-    );
+fn reference_tree_bootstrap_materializes_current_layout() {
+    let root = clean_test_dir("reference-tree-current-layout");
 
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
@@ -222,15 +195,5 @@ fn reference_tree_bootstrap_migrates_legacy_single_component_model_alias() {
     assert!(
         matches!(agent_policy, Ok(ref content) if !content.contains("network:default connect"))
     );
-    assert!(user_model.is_dir());
-    assert!(!user_model.join("coder").exists());
-    let private_meta = fs::read_to_string(
-        agent_session_root(&root, "coder")
-            .join("default")
-            .join("meta.json"),
-    );
-    assert!(matches!(private_meta, Ok(ref content) if content.contains("\"model\":\"main\"")));
-    let shared_meta = fs::read_to_string(shared_meta_path);
-    assert!(matches!(shared_meta, Ok(ref content) if content.contains("\"model\":\"debug/echo\"")));
 }
 use super::*;

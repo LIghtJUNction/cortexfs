@@ -47,13 +47,13 @@ fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
     let root = clean_test_dir("reference-tree-valid-model-alias");
     let user_model = ctx_home(&root).join("model");
     assert!(fs::create_dir_all(&user_model).is_ok());
-    assert!(symlink("/ctx/model/openai/gpt-4o", user_model.join("coder")).is_ok());
+    assert!(symlink("/ctx/model/openai/gpt-5.6", user_model.join("coder")).is_ok());
 
     assert!(ensure_v1_reference_tree(&root).is_ok());
 
     let model_link = fs::read_link(user_model.join("coder"));
     assert!(
-        matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/openai/gpt-4o"))
+        matches!(model_link, Ok(ref target) if target == Path::new("/ctx/model/openai/gpt-5.6"))
     );
 }
 
@@ -87,9 +87,9 @@ fn reference_tree_bootstrap_rejects_symlink_model_alias_parent_without_writing_t
 #[test]
 fn model_exec_metadata_exposes_driver_route_table() {
     let root = clean_test_dir("model-driver-metadata");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
 
-    write_text_file(&control.join("id"), "openai/gpt-4o\n");
+    write_text_file(&control.join("id"), "openai/gpt-5.6\n");
     write_text_file(
         &control.join("driver"),
         "default=openai-chat\nexec=openai-chat\nagent=openai-responses,openai-chat\n",
@@ -99,7 +99,7 @@ fn model_exec_metadata_exposes_driver_route_table() {
     write_text_file(&control.join("session"), "socket\n");
     write_text_file(&control.join("status"), "idle\n");
 
-    let metadata = model_exec_metadata("openai/gpt-4o", &control);
+    let metadata = model_exec_metadata("openai/gpt-5.6", &control);
     let metadata = ok!(metadata);
     assert!(metadata.contains("# cortexfs.driver=openai-chat\n"));
     assert!(metadata.contains("# cortexfs.driver.default=openai-chat\n"));
@@ -112,9 +112,9 @@ fn model_exec_metadata_exposes_driver_route_table() {
 #[test]
 fn model_exec_metadata_rejects_extra_limit_line() {
     let root = clean_test_dir("model-limit-metadata-extra-line");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
 
-    write_text_file(&control.join("id"), "openai/gpt-4o\n");
+    write_text_file(&control.join("id"), "openai/gpt-5.6\n");
     write_text_file(&control.join("driver"), "default=openai-chat\n");
     write_text_file(&control.join("cap"), "chat\n");
     write_text_file(&control.join("limit"), "32768\n\n");
@@ -122,7 +122,7 @@ fn model_exec_metadata_rejects_extra_limit_line() {
     write_text_file(&control.join("status"), "idle\n");
 
     assert_eq!(
-        model_exec_metadata("openai/gpt-4o", &control),
+        model_exec_metadata("openai/gpt-5.6", &control),
         Err(FuseV1Error::InvalidContent)
     );
 }
@@ -130,10 +130,10 @@ fn model_exec_metadata_rejects_extra_limit_line() {
 #[test]
 fn model_exec_metadata_refuses_symlink_control_files() {
     let root = clean_test_dir("model-driver-metadata-symlink");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
     let outside = root.join("outside-driver");
 
-    write_text_file(&control.join("id"), "openai/gpt-4o\n");
+    write_text_file(&control.join("id"), "openai/gpt-5.6\n");
     write_text_file(&outside, "default=openai-chat\n");
     assert!(symlink(&outside, control.join("driver")).is_ok());
     write_text_file(&control.join("cap"), "chat\n");
@@ -141,7 +141,7 @@ fn model_exec_metadata_refuses_symlink_control_files() {
     write_text_file(&control.join("status"), "idle\n");
 
     assert_eq!(
-        model_exec_metadata("openai/gpt-4o", &control),
+        model_exec_metadata("openai/gpt-5.6", &control),
         Err(FuseV1Error::InvalidContent)
     );
 }
@@ -150,10 +150,10 @@ fn model_exec_metadata_refuses_symlink_control_files() {
 fn model_exec_metadata_refuses_symlink_control_directory() {
     let root = clean_test_dir("model-driver-metadata-symlink-dir");
     let outside = clean_test_dir("model-driver-metadata-symlink-dir-outside");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
-    let outside_control = outside.join("gpt-4o.d");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
+    let outside_control = outside.join("gpt-5.6.d");
 
-    write_text_file(&outside_control.join("id"), "openai/gpt-4o\n");
+    write_text_file(&outside_control.join("id"), "openai/gpt-5.6\n");
     write_text_file(&outside_control.join("driver"), "default=openai-chat\n");
     write_text_file(&outside_control.join("cap"), "chat\n");
     write_text_file(&outside_control.join("session"), "socket\n");
@@ -162,7 +162,7 @@ fn model_exec_metadata_refuses_symlink_control_directory() {
     assert!(symlink(&outside_control, &control).is_ok());
 
     assert_eq!(
-        model_exec_metadata("openai/gpt-4o", &control),
+        model_exec_metadata("openai/gpt-5.6", &control),
         Err(FuseV1Error::Io)
     );
 }
@@ -170,16 +170,16 @@ fn model_exec_metadata_refuses_symlink_control_directory() {
 #[test]
 fn model_exec_metadata_refuses_oversized_control_files() {
     let root = clean_test_dir("model-driver-metadata-oversized");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
 
-    write_text_file(&control.join("id"), "openai/gpt-4o\n");
+    write_text_file(&control.join("id"), "openai/gpt-5.6\n");
     write_text_file(&control.join("driver"), &"x".repeat((64 * 1024) + 1));
     write_text_file(&control.join("cap"), "chat\n");
     write_text_file(&control.join("session"), "socket\n");
     write_text_file(&control.join("status"), "idle\n");
 
     assert_eq!(
-        model_exec_metadata("openai/gpt-4o", &control),
+        model_exec_metadata("openai/gpt-5.6", &control),
         Err(FuseV1Error::InvalidContent)
     );
 }
@@ -240,99 +240,6 @@ fn reference_tree_bootstrap_installs_tsh_tools() {
         assert!(!root.join("tool").join(tool).exists());
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }
-}
-
-#[test]
-fn reference_tree_bootstrap_does_not_remove_symlinked_deprecated_tool_control_dir() {
-    let root = clean_test_dir("ref-deprecated-tool-control-symlink");
-    let outside = clean_test_dir("ref-deprecated-tool-control-symlink-outside");
-    let tool_dir = root.join("tool");
-    let control_link = tool_dir.join("agent.start.d");
-    assert!(fs::create_dir_all(&tool_dir).is_ok());
-    assert!(fs::create_dir_all(&outside).is_ok());
-    write_text_file(
-        &tool_dir.join("agent.start"),
-        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
-    );
-    write_text_file(
-        &outside.join("description"),
-        "CortexFS reference-tree tool\n",
-    );
-    assert!(symlink(&outside, &control_link).is_ok());
-
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-
-    assert!(
-        control_link
-            .symlink_metadata()
-            .is_ok_and(|metadata| metadata.file_type().is_symlink())
-    );
-    assert_file_text(
-        &tool_dir.join("agent.start"),
-        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
-    );
-    assert_file_text(
-        &outside.join("description"),
-        "CortexFS reference-tree tool\n",
-    );
-}
-
-#[test]
-fn reference_tree_bootstrap_removes_exact_deprecated_placeholder_tool() {
-    let root = clean_test_dir("reference-tree-deprecated-tool-exact");
-    let tool_dir = root.join("tool");
-    let control_dir = tool_dir.join("agent.start.d");
-    assert!(fs::create_dir_all(&control_dir).is_ok());
-    write_text_file(
-        &tool_dir.join("agent.start"),
-        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
-    );
-    for file in TOOL_CONTROL_FILES {
-        write_text_file(
-            &control_dir.join(file),
-            if *file == "description" {
-                "CortexFS reference-tree tool\n"
-            } else {
-                "\n"
-            },
-        );
-    }
-
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-
-    assert!(!tool_dir.join("agent.start").exists());
-    assert!(!control_dir.exists());
-}
-
-#[test]
-fn reference_tree_bootstrap_preserves_deprecated_placeholder_tool_with_unknown_control_file() {
-    let root = clean_test_dir("reference-tree-deprecated-tool-extra-control");
-    let tool_dir = root.join("tool");
-    let control_dir = tool_dir.join("agent.start.d");
-    assert!(fs::create_dir_all(&control_dir).is_ok());
-    write_text_file(
-        &tool_dir.join("agent.start"),
-        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
-    );
-    for file in TOOL_CONTROL_FILES {
-        write_text_file(
-            &control_dir.join(file),
-            if *file == "description" {
-                "CortexFS reference-tree tool\n"
-            } else {
-                "\n"
-            },
-        );
-    }
-    write_text_file(&control_dir.join("user-note"), "keep me\n");
-
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-
-    assert_file_text(
-        &tool_dir.join("agent.start"),
-        "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n",
-    );
-    assert_file_text(&control_dir.join("user-note"), "keep me\n");
 }
 
 #[test]

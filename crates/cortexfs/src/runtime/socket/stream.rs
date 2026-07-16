@@ -1,4 +1,32 @@
-use super::*;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
+
+use super::SOCKET_REQUEST_READ_TIMEOUT;
+use crate::{
+    MAX_SOCKET_FRAME_BYTES, SocketRequestError, SocketRuntimeError, SocketRuntimeResponse,
+};
+
+mod timing;
+pub(super) use timing::{
+    apply_socket_debug_timing_env, is_socket_debug_timing_frame, socket_debug_timing_from_frame,
+    write_optional_socket_debug_timing_frame,
+};
+
+const SOCKET_READ_CHUNK_BYTES: usize = 8 * 1024;
+
+#[derive(Clone, Copy)]
+pub(crate) struct SocketDebugTiming {
+    pub(super) start_unix_ms: u128,
+    request_start_unix_ms: Option<u128>,
+}
+
+impl SocketDebugTiming {
+    pub(in crate::runtime::socket) fn with_request_baseline(mut self) -> Self {
+        self.request_start_unix_ms = Some(timing::current_unix_millis());
+        self
+    }
+}
 
 pub(crate) fn read_socket_request_frame_from_stream(
     stream: &mut UnixStream,
@@ -25,24 +53,45 @@ pub(crate) fn read_socket_request_frame_body(
     stream: &mut UnixStream,
 ) -> Result<String, SocketRuntimeError> {
     let mut buffer = Vec::new();
-    let mut byte = [0_u8; 1];
+    let mut chunk = [0_u8; SOCKET_READ_CHUNK_BYTES];
     loop {
-        match stream.read(&mut byte) {
-            Ok(0) => break,
-            Ok(_) => {
-                buffer.push(byte[0]);
-                if buffer.len() > MAX_SOCKET_FRAME_BYTES {
-                    return Err(SocketRuntimeError::Request(
-                        SocketRequestError::FrameTooLarge {
-                            bytes: buffer.len(),
-                        },
-                    ));
-                }
-                if byte[0] == b'\n' {
-                    break;
-                }
-            }
-            Err(_error) => return Err(SocketRuntimeError::CannotReadFrame),
+        let peeked = nix::sys::socket::recv(
+            stream.as_raw_fd(),
+            &mut chunk,
+            nix::sys::socket::MsgFlags::MSG_PEEK,
+        )
+        .map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+        if peeked == 0 {
+            break;
+        }
+        let peeked_chunk = chunk
+            .get(..peeked)
+            .ok_or(SocketRuntimeError::CannotReadFrame)?;
+        let read = peeked_chunk
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(peeked, |index| index + 1)
+            .min(
+                MAX_SOCKET_FRAME_BYTES
+                    .saturating_add(1)
+                    .saturating_sub(buffer.len()),
+            );
+        let consumed = chunk
+            .get_mut(..read)
+            .ok_or(SocketRuntimeError::CannotReadFrame)?;
+        stream
+            .read_exact(consumed)
+            .map_err(|_error| SocketRuntimeError::CannotReadFrame)?;
+        buffer.extend_from_slice(consumed);
+        if buffer.len() > MAX_SOCKET_FRAME_BYTES {
+            return Err(SocketRuntimeError::Request(
+                SocketRequestError::FrameTooLarge {
+                    bytes: buffer.len(),
+                },
+            ));
+        }
+        if buffer.last() == Some(&b'\n') {
+            break;
         }
     }
     String::from_utf8(buffer)
@@ -68,104 +117,4 @@ pub(crate) fn write_socket_frame(
         .and_then(|()| stream.write_all(b"\n"))
         .and_then(|()| stream.flush())
         .map_err(|_error| SocketRuntimeError::CannotWriteResponse)
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct SocketDebugTiming {
-    pub(crate) start_unix_ms: u128,
-    pub(crate) request_start_unix_ms: Option<u128>,
-}
-
-impl SocketDebugTiming {
-    pub(crate) fn with_request_baseline(mut self) -> Self {
-        self.request_start_unix_ms = Some(current_unix_millis());
-        self
-    }
-}
-
-pub(crate) fn socket_debug_timing_from_frame(frame: &str) -> Option<SocketDebugTiming> {
-    let value = serde_json::from_str::<Value>(frame).ok()?;
-    if value.get("debug").and_then(Value::as_bool) != Some(true) {
-        return None;
-    }
-    Some(SocketDebugTiming {
-        start_unix_ms: current_unix_millis(),
-        request_start_unix_ms: None,
-    })
-}
-
-pub(crate) fn current_unix_millis() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis())
-}
-
-pub(crate) fn write_socket_debug_timing_frame(
-    stream: &mut UnixStream,
-    timing: SocketDebugTiming,
-    stage: &str,
-) -> Result<(), SocketRuntimeError> {
-    let elapsed_ms = current_unix_millis().saturating_sub(timing.start_unix_ms);
-    let mut frame = serde_json::json!({
-        "type": "debug",
-        "stage": stage,
-        "elapsed_ms": elapsed_ms
-    });
-    if let Some(request_start_unix_ms) = timing.request_start_unix_ms
-        && let Some(object) = frame.as_object_mut()
-    {
-        object.insert(
-            "request_elapsed_ms".to_owned(),
-            serde_json::json!(current_unix_millis().saturating_sub(request_start_unix_ms)),
-        );
-    }
-    write_socket_frame(stream, &frame.to_string())
-}
-
-pub(crate) fn write_optional_socket_debug_timing_frame(
-    stream: &mut UnixStream,
-    timing: Option<SocketDebugTiming>,
-    stage: &str,
-) -> Result<(), SocketRuntimeError> {
-    if let Some(timing) = timing {
-        write_socket_debug_timing_frame(stream, timing, stage)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn apply_socket_debug_timing_env(
-    command: &mut Command,
-    timing: Option<SocketDebugTiming>,
-) {
-    if let Some(timing) = timing {
-        command.env("CTX_AGENT_DEBUG_TIMING", "1").env(
-            "CTX_AGENT_DEBUG_START_UNIX_MS",
-            timing.start_unix_ms.to_string(),
-        );
-    }
-}
-
-pub(crate) fn is_socket_debug_timing_frame(frame: &str, timing: Option<SocketDebugTiming>) -> bool {
-    if timing.is_none() {
-        return false;
-    }
-    let Ok(value) = serde_json::from_str::<Value>(frame) else {
-        return false;
-    };
-    let Some(object) = value.as_object() else {
-        return false;
-    };
-    if object.len() != 3 {
-        return false;
-    }
-    if value.get("type").and_then(Value::as_str) != Some("debug") {
-        return false;
-    }
-    if value.get("elapsed_ms").and_then(Value::as_u64).is_none() {
-        return false;
-    }
-    matches!(
-        value.get("stage").and_then(Value::as_str),
-        Some("agent_runner_ready" | "model_spawn_start" | "model_spawned" | "first_model_frame")
-    )
 }

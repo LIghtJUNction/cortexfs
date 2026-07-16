@@ -793,14 +793,19 @@ fn channel_directory_validation_accepts_nlink_one() {
     ));
 }
 
+fn create_active_child(
+    name: &str,
+) -> Result<(TestDir, crate::agent::child::ChildHandoffReceipt), ChildContextRecordError> {
+    let session = clean_test_dir(name);
+    create_complete_session_layout(&session);
+    let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work")?;
+    claim_child_handoff_active(&receipt, "worker", "run", None)?;
+    Ok((session, receipt))
+}
+
 #[test]
 fn finish_child_result_is_ordered_idempotent_and_terminal_safe() {
-    let session = clean_test_dir("finish-child-result");
-    create_complete_session_layout(&session);
-    let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
-    assert!(receipt.is_some());
-    let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-result"));
 
     assert!(
         crate::finish_child_result(
@@ -843,12 +848,7 @@ fn finish_child_result_is_ordered_idempotent_and_terminal_safe() {
 
 #[test]
 fn exclusive_finish_rejects_same_owner_without_mutation() {
-    let session = clean_test_dir("finish-child-exclusive-same-owner");
-    create_complete_session_layout(&session);
-    let receipt = ok!(publish_child_handoff(
-        &session, "worker", "worker", "run", "work"
-    ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-exclusive-same-owner"));
     assert_eq!(
         crate::runtime::record::child::finish_child_result_exclusive(
             &receipt,
@@ -869,12 +869,7 @@ fn exclusive_cancelled_finish_is_payload_bound_and_idempotent() {
     if !nix::unistd::Uid::effective().is_root() {
         return;
     }
-    let session = clean_test_dir("finish-child-exclusive-cancelled");
-    create_complete_session_layout(&session);
-    let receipt = ok!(publish_child_handoff(
-        &session, "worker", "worker", "run", "work"
-    ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-exclusive-cancelled"));
     assert!(
         nix::unistd::chown(
             receipt.path(),
@@ -920,12 +915,9 @@ fn finish_child_result_preserves_non_root_artifact_metadata() {
         (ChildContextStatus::Error, "error"),
         (ChildContextStatus::Cancelled, "cancelled"),
     ] {
-        let session = clean_test_dir(&format!("finish-child-metadata-{suffix}"));
-        create_complete_session_layout(&session);
-        let receipt = ok!(publish_child_handoff(
-            &session, "worker", "worker", "run", "work"
-        ));
-        assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+        let (_session, receipt) = ok!(create_active_child(&format!(
+            "finish-child-metadata-{suffix}"
+        )));
         assert!(fs::set_permissions(receipt.path(), fs::Permissions::from_mode(0o751)).is_ok());
         let channel_metadata = ok!(fs::symlink_metadata(receipt.path()));
         for (file, mode) in [
@@ -967,12 +959,7 @@ fn finish_child_result_preserves_non_root_artifact_metadata() {
 #[test]
 fn finish_child_result_rejects_target_replacement_and_cleans_temporary() {
     use crate::runtime::record::child::{ChildFinishStage, finish_child_result_with_hook};
-    let session = clean_test_dir("finish-child-target-race");
-    create_complete_session_layout(&session);
-    let receipt = ok!(publish_child_handoff(
-        &session, "worker", "worker", "run", "work"
-    ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-target-race"));
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1005,12 +992,7 @@ fn finish_child_result_rejects_target_replacement_and_cleans_temporary() {
 #[test]
 fn finish_child_result_exchange_conflict_preserves_unowned_artifacts() {
     use crate::runtime::record::child::{ChildFinishStage, finish_child_result_with_hook};
-    let session = clean_test_dir("finish-child-exchange-conflict");
-    create_complete_session_layout(&session);
-    let receipt = ok!(publish_child_handoff(
-        &session, "worker", "worker", "run", "work"
-    ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-exchange-conflict"));
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1045,12 +1027,7 @@ fn finish_child_result_exchange_conflict_preserves_unowned_artifacts() {
 #[test]
 fn finish_child_result_does_not_unlink_replaced_displaced_name() {
     use crate::runtime::record::child::{ChildFinishStage, finish_child_result_with_hook};
-    let session = clean_test_dir("finish-child-temp-cleanup-race");
-    create_complete_session_layout(&session);
-    let receipt = ok!(publish_child_handoff(
-        &session, "worker", "worker", "run", "work"
-    ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-temp-cleanup-race"));
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1100,12 +1077,7 @@ fn finish_child_result_does_not_unlink_replaced_displaced_name() {
 fn finish_child_result_surfaces_quarantine_unlink_failure() {
     use crate::runtime::record::child::{ChildFinishStage, finish_child_result_with_hook};
     use std::os::unix::fs::PermissionsExt;
-    let session = clean_test_dir("finish-child-unlink-failure");
-    create_complete_session_layout(&session);
-    let receipt = ok!(publish_child_handoff(
-        &session, "worker", "worker", "run", "work"
-    ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-unlink-failure"));
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1140,12 +1112,7 @@ fn finish_child_result_surfaces_quarantine_unlink_failure() {
 
 #[test]
 fn finish_child_result_rejects_replaced_channel_and_metadata() {
-    let session = clean_test_dir("finish-child-replaced");
-    create_complete_session_layout(&session);
-    let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
-    assert!(receipt.is_some());
-    let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-replaced"));
     let channel = receipt.path().to_path_buf();
     assert!(fs::remove_file(channel.join("agent")).is_ok());
     assert!(symlink("/dev/null", channel.join("agent")).is_ok());
@@ -1187,12 +1154,7 @@ fn finish_child_faults_never_publish_terminal_status() {
         ChildFinishStage::AfterRefsPublish,
         ChildFinishStage::BeforeStatus,
     ] {
-        let session = clean_test_dir(&format!("finish-child-fault-{fail:?}"));
-        create_complete_session_layout(&session);
-        let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
-        assert!(receipt.is_some());
-        let Some(receipt) = receipt else { return };
-        assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+        let (_session, receipt) = ok!(create_active_child(&format!("finish-child-fault-{fail:?}")));
         assert!(fs::set_permissions(receipt.path(), fs::Permissions::from_mode(0o751)).is_ok());
         let before = ok!(fs::symlink_metadata(receipt.path()));
         let result = finish_child_result_with_hook(
@@ -1224,12 +1186,7 @@ fn finish_child_faults_never_publish_terminal_status() {
 fn finish_child_result_surfaces_channel_restore_path_conflict() {
     use crate::runtime::record::child::{ChildFinishStage, finish_child_result_with_hook};
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let session = clean_test_dir("finish-child-lease-restore-conflict");
-    create_complete_session_layout(&session);
-    let receipt = ok!(publish_child_handoff(
-        &session, "worker", "worker", "run", "work"
-    ));
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-lease-restore-conflict"));
     assert!(fs::set_permissions(receipt.path(), fs::Permissions::from_mode(0o751)).is_ok());
     let before = ok!(fs::symlink_metadata(receipt.path()));
     let channel = receipt.path().to_path_buf();
@@ -1262,12 +1219,7 @@ fn finish_child_result_surfaces_channel_restore_path_conflict() {
 #[test]
 fn finish_child_cancelled_race_is_not_overwritten() {
     use crate::runtime::record::child::{ChildFinishStage, finish_child_result_with_hook};
-    let session = clean_test_dir("finish-child-cancel-race");
-    create_complete_session_layout(&session);
-    let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
-    assert!(receipt.is_some());
-    let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-cancel-race"));
     let channel = receipt.path().to_path_buf();
     let result = finish_child_result_with_hook(
         &receipt,
@@ -1292,12 +1244,7 @@ fn finish_child_cancelled_race_is_not_overwritten() {
 
 #[test]
 fn concurrent_finishers_never_mix_terminal_payloads() {
-    let session = clean_test_dir("finish-child-concurrent");
-    create_complete_session_layout(&session);
-    let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
-    assert!(receipt.is_some());
-    let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("finish-child-concurrent"));
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
     let mut joins = Vec::new();
     for (status, text) in [
@@ -1327,12 +1274,7 @@ fn concurrent_finishers_never_mix_terminal_payloads() {
 
 #[test]
 fn terminal_status_read_is_receipt_bound_to_channel_fields_and_status() {
-    let session = clean_test_dir("child-terminal-receipt");
-    create_complete_session_layout(&session);
-    let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
-    assert!(receipt.is_some());
-    let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("child-terminal-receipt"));
     assert!(
         crate::finish_child_result(
             &receipt,
@@ -1360,12 +1302,7 @@ fn terminal_status_read_is_receipt_bound_to_channel_fields_and_status() {
 
 #[test]
 fn terminal_status_read_rejects_replaced_agent_or_channel() {
-    let session = clean_test_dir("child-terminal-replaced");
-    create_complete_session_layout(&session);
-    let receipt = publish_child_handoff(&session, "worker", "worker", "run", "work").ok();
-    assert!(receipt.is_some());
-    let Some(receipt) = receipt else { return };
-    assert!(claim_child_handoff_active(&receipt, "worker", "run", None).is_ok());
+    let (_session, receipt) = ok!(create_active_child("child-terminal-replaced"));
     assert!(
         crate::finish_child_result(
             &receipt,

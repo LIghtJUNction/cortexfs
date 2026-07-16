@@ -23,4 +23,12 @@ fn non_worker_role_names_keep_main_default() {
         assert_eq!(default_agent_model_for_name(name), "main");
     }
 }
+
+#[test]
+fn bootstrap_model_driver_is_supported_by_runner() {
+    assert_eq!(
+        crate::object::bootstrap::default_model_control_value("fixture", "driver"),
+        "default=openai-chat"
+    );
+}
 use super::*;

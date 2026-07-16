@@ -1,4 +1,4 @@
-use crate::*;
+use std::{io::Read, process::Child, thread, time::Duration};
 
 pub(crate) fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
     let mut output = Vec::with_capacity(limit.min(8 * 1024));

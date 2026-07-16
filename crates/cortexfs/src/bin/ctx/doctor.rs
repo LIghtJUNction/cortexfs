@@ -1,5 +1,6 @@
 use crate::*;
 
+/// Run a complete health check for a ctx root and report ABI-level issues.
 pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
     let mut ok = true;
     if doctor_is_dir(root) {
@@ -46,6 +47,7 @@ pub(crate) fn doctor(root: &Path) -> Result<(), CliError> {
     }
 }
 
+/// Report retired reference agents and mark them as expected stale entries.
 pub(crate) fn doctor_retired_reference_agents(root: &Path) -> Result<bool, CliError> {
     let retired = list_present_retired_reference_agents(root);
     for name in &retired {
@@ -62,6 +64,7 @@ pub(crate) fn doctor_retired_reference_agents(root: &Path) -> Result<bool, CliEr
     Ok(retired.is_empty())
 }
 
+/// Validate bootstrap state file shape and output migration alignment status.
 pub(crate) fn doctor_bootstrap_state(root: &Path) -> Result<bool, CliError> {
     match read_bootstrap_state(root) {
         Some(state) if bootstrap_state_matches_target(&state) => {
@@ -99,6 +102,7 @@ pub(crate) fn doctor_bootstrap_state(root: &Path) -> Result<bool, CliError> {
     }
 }
 
+/// Validate object directories for each known object class.
 pub(crate) fn doctor_objects(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     for class in [ObjectClass::Model, ObjectClass::Agent, ObjectClass::Tool] {
@@ -114,6 +118,7 @@ pub(crate) fn doctor_objects(root: &Path) -> Result<bool, CliError> {
     Ok(ok)
 }
 
+/// Collect object names under a class directory, with provider/model flattening rules.
 pub(crate) fn object_names_for_doctor(
     dir: &Path,
     class: ObjectClass,
@@ -149,6 +154,7 @@ pub(crate) fn object_names_for_doctor(
     Ok(names)
 }
 
+/// Run layout inspection for one object and print either success or issues.
 pub(crate) fn doctor_object(root: &Path, class: ObjectClass, name: &str) -> Result<bool, CliError> {
     let report = inspect_object_layout(root, class, name);
     if report.is_ok() {
@@ -164,6 +170,7 @@ pub(crate) fn doctor_object(root: &Path, class: ObjectClass, name: &str) -> Resu
     }
 }
 
+/// Inspect all discovered sessions and report session-layout problems.
 pub(crate) fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     for (label, session_dir) in discover_session_dirs(root)? {
@@ -177,6 +184,7 @@ pub(crate) fn doctor_sessions(root: &Path) -> Result<bool, CliError> {
     Ok(ok)
 }
 
+/// Inspect all shared queue directories and aggregate shared-queue validation state.
 pub(crate) fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
     let mut ok = true;
     let shared = root.join("shared");
@@ -201,6 +209,7 @@ pub(crate) fn doctor_shared_queues(root: &Path) -> Result<bool, CliError> {
     Ok(ok)
 }
 
+/// Emit a report line for either an ok or invalid condition.
 pub(crate) fn print_doctor_report(label: &str, ok: bool, issues: &str) -> Result<bool, CliError> {
     if ok {
         print_line(&doctor_report_line("ok", label, None))?;
@@ -210,6 +219,7 @@ pub(crate) fn print_doctor_report(label: &str, ok: bool, issues: &str) -> Result
     Ok(ok)
 }
 
+/// Format a root status line for the checked namespace.
 pub(crate) fn doctor_root_line(status: &str, root: &Path) -> String {
     format!(
         "{} root {}",
@@ -218,14 +228,17 @@ pub(crate) fn doctor_root_line(status: &str, root: &Path) -> String {
     )
 }
 
+/// Format an unexpected-entry line for invalid top-level paths.
 pub(crate) fn doctor_unexpected_entry_line(entry: &str) -> String {
     format!("unexpected {}", terminal_safe_text(entry))
 }
 
+/// Format an object status line for class and object name.
 pub(crate) fn doctor_object_line(status: &str, class: ObjectClass, name: &str) -> String {
     format!("{} {}/{}", status, class.as_str(), terminal_safe_text(name))
 }
 
+/// Format an object error line including issue details.
 pub(crate) fn doctor_invalid_object_line(class: ObjectClass, name: &str, issues: &str) -> String {
     format!(
         "invalid {}/{}: {}",
@@ -235,6 +248,7 @@ pub(crate) fn doctor_invalid_object_line(class: ObjectClass, name: &str, issues:
     )
 }
 
+/// Format a generic report line with optional issue payload.
 pub(crate) fn doctor_report_line(status: &str, label: &str, issues: Option<&str>) -> String {
     let label = terminal_safe_text(label);
     issues.map_or_else(
@@ -243,6 +257,7 @@ pub(crate) fn doctor_report_line(status: &str, label: &str, issues: Option<&str>
     )
 }
 
+/// Discover session roots under both home and shared namespaces.
 pub(crate) fn discover_session_dirs(root: &Path) -> Result<Vec<(String, PathBuf)>, CliError> {
     let mut sessions = Vec::new();
     collect_home_sessions(root, &mut sessions)?;
@@ -251,6 +266,7 @@ pub(crate) fn discover_session_dirs(root: &Path) -> Result<Vec<(String, PathBuf)
     Ok(sessions)
 }
 
+/// Collect session entries from a per-user root path.
 pub(crate) fn collect_home_sessions(
     root: &Path,
     sessions: &mut Vec<(String, PathBuf)>,
@@ -265,6 +281,7 @@ pub(crate) fn collect_home_sessions(
     Ok(())
 }
 
+/// Collect session entries from shared space namespaces.
 pub(crate) fn collect_shared_sessions(
     root: &Path,
     sessions: &mut Vec<(String, PathBuf)>,
@@ -282,6 +299,7 @@ pub(crate) fn collect_shared_sessions(
     Ok(())
 }
 
+/// Collect agent/model sessions from a generic namespace prefix.
 pub(crate) fn collect_space_sessions(
     root: &Path,
     label_prefix: &str,
@@ -299,6 +317,7 @@ pub(crate) fn collect_space_sessions(
     )
 }
 
+/// Collect sessions for a given agent namespace root.
 pub(crate) fn collect_agent_sessions(
     agent_root: &Path,
     label_prefix: &str,
@@ -320,6 +339,7 @@ pub(crate) fn collect_agent_sessions(
     Ok(())
 }
 
+/// Collect sessions for a given provider/model namespace root.
 pub(crate) fn collect_model_sessions(
     model_root: &Path,
     label_prefix: &str,
@@ -354,6 +374,7 @@ pub(crate) fn collect_model_sessions(
     Ok(())
 }
 
+/// Collect all named session directories under a session root path.
 pub(crate) fn collect_named_sessions(
     session_root: &Path,
     label_prefix: &str,
@@ -374,16 +395,19 @@ pub(crate) fn collect_named_sessions(
     Ok(())
 }
 
+/// Test whether a path exists and is a file.
 pub(crate) fn doctor_is_file(path: &Path) -> bool {
     path.symlink_metadata()
         .is_ok_and(|metadata| metadata.is_file())
 }
 
+/// Test whether a path exists and is a directory.
 pub(crate) fn doctor_is_dir(path: &Path) -> bool {
     path.symlink_metadata()
         .is_ok_and(|metadata| metadata.is_dir())
 }
 
+/// Test whether a path exists without caring about file type.
 pub(crate) fn doctor_exists(path: &Path) -> bool {
     path.symlink_metadata().is_ok()
 }

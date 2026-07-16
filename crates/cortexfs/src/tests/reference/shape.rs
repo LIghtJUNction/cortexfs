@@ -44,6 +44,7 @@ fn reference_tree_socket_errors_report_specific_errno() {
 fn object_names_are_small_ascii_path_components() {
     assert!(is_object_name("echo"));
     assert!(is_object_name("fs.read"));
+    // Keep regression coverage for legacy placeholder-style tool names in object-name validation.
     assert!(is_object_name("mcp.github.search_issues"));
     assert!(is_object_name("agent_1+dev-2"));
     assert!(is_object_name(&"a".repeat(MAX_OBJECT_NAME_LEN)));
@@ -64,7 +65,7 @@ fn object_names_are_small_ascii_path_components() {
 #[test]
 fn abi_paths_classify_by_stable_shape() {
     for model in [
-        "openai/gpt-4o",
+        "openai/gpt-5.6",
         "openai/gpt-4.1",
         "anthropic/claude-sonnet-4",
         "google/gemini-2.5-pro",
@@ -142,6 +143,8 @@ fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
 fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     let root = clean_test_dir("reference-tree");
     let user_tool_dir = ctx_home(&root).join("tool");
+    // Regression coverage for legacy placeholder-style tool names in
+    // compatibility-era reference-tree layouts.
     for tool in ["mcp.github.search_issues", "agent.start", "agent.stop"] {
         assert!(
             install_executable_object_wrapper(
@@ -225,9 +228,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         assert!(!root.join("tool").join(tool).exists());
         assert!(!root.join("tool").join(format!("{tool}.d")).exists());
     }
+    // Bootstrap does not delete pre-existing tools without durable ownership proof.
     for tool in ["mcp.github.search_issues", "agent.start", "agent.stop"] {
-        assert!(!root.join("tool").join(tool).exists());
-        assert!(!root.join("tool").join(format!("{tool}.d")).exists());
+        assert!(root.join("tool").join(tool).is_file());
+        assert!(root.join("tool").join(format!("{tool}.d")).is_dir());
     }
 
     let schema = fs::read_to_string(root.join("tool").join("tsh.d/schema"));
@@ -241,7 +245,10 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(!private_session_root.join("default").exists());
 
     assert!(user_tool_dir.is_dir());
-    assert!(!user_tool_dir.join("fs.read").exists());
+    assert!(matches!(
+        fs::read_link(user_tool_dir.join("fs.read")),
+        Ok(ref target) if target == Path::new("/ctx/tool/fs.read")
+    ));
     let user_model_dir = ctx_home(&root).join("model");
     assert!(user_model_dir.is_dir());
     assert!(!user_model_dir.join("coder").exists());

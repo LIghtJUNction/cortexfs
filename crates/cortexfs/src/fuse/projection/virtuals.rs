@@ -7,37 +7,25 @@ impl FuseV1Projection {
         &self,
         abi_path: &str,
     ) -> Result<Option<FuseV1Attr>, FuseV1Error> {
-        if let Some((file_type, size, mode)) = self.virtual_model_entry(abi_path)? {
-            return Ok(Some(FuseV1Attr::with_owner(
-                abi_path.to_owned(),
-                file_type,
-                size,
-                mode,
-                0,
-                0,
-            )));
+        if (matches!(abi_path, "model/debug" | "model/debug/echo.d")
+            || abi_path.starts_with("model/debug/echo.d/"))
+            && self.backing_directory_exists(abi_path)?
+        {
+            return Ok(None);
         }
-        let Some(content) = self.virtual_object_content(abi_path)? else {
+        let Some(mut file) = self.projected_file(abi_path)? else {
             return Ok(None);
         };
-        let (uid, gid) = if Self::is_agent_wrapper_path(abi_path) {
+        if Self::is_agent_wrapper_path(abi_path) {
             let metadata = fs::symlink_metadata(self.resolve(abi_path)?)
                 .map_err(|error| fuse_metadata_error(&error))?;
             if metadata.file_type().is_symlink() || !metadata.is_file() {
                 return Err(FuseV1Error::InvalidPath);
             }
-            (metadata.uid(), metadata.gid())
-        } else {
-            (0, 0)
-        };
-        Ok(Some(FuseV1Attr::with_owner(
-            abi_path.to_owned(),
-            FuseV1FileType::Regular,
-            u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
-            0o555,
-            uid,
-            gid,
-        )))
+            file.attr.uid = metadata.uid();
+            file.attr.gid = metadata.gid();
+        }
+        Ok(Some(file.attr))
     }
 
     pub(crate) fn virtual_model_readdir(
@@ -174,146 +162,128 @@ impl FuseV1Projection {
         &self,
         abi_path: &str,
     ) -> Result<Option<String>, FuseV1Error> {
-        if let Some(content) = self.virtual_model_content(abi_path)? {
-            return Ok(Some(content));
-        }
-        let Some(object) = self.virtual_exec_object(abi_path) else {
-            return Ok(None);
-        };
-        object_exec_metadata(object.class, &object.name, &object.control_dir).map(Some)
+        Ok(self.projected_file(abi_path)?.and_then(|file| file.content))
     }
 
     pub(crate) fn virtual_model_content(
         &self,
         abi_path: &str,
     ) -> Result<Option<String>, FuseV1Error> {
-        if abi_path == format!("model/{MODEL_ROUTE_FILE}") {
-            let path = self.resolve(abi_path)?;
-            return match read_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
-                Ok(content) => Ok(Some(content)),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    Ok(Some(DEFAULT_MODEL_ROUTE.to_owned()))
-                }
-                Err(_error) => Err(FuseV1Error::Io),
-            };
+        self.virtual_object_content(abi_path)
+    }
+
+    fn projected_file(&self, abi_path: &str) -> Result<Option<ProjectedFile>, FuseV1Error> {
+        let kind = parse_abi_path(abi_path);
+        if let Some(file) = self.virtual_model_file(abi_path, kind)? {
+            return Ok(Some(file));
         }
-        if abi_path == "model/debug/echo" {
-            return Ok(Some(debug_echo_model_metadata()));
+        let Some((class, name)) = kind.executable_object() else {
+            return Ok(None);
+        };
+        let control_dir = self.root.join(class.as_str()).join(format!("{name}.d"));
+        if !fuse_v1_plain_dir_exists(&control_dir).unwrap_or(false) {
+            return Ok(None);
         }
-        if let Some(file) = abi_path.strip_prefix("model/debug/echo.d/") {
-            return Ok(debug_model_control_content(DEBUG_ECHO_MODEL, file));
+        let content = object_exec_metadata(class, &name, &control_dir)?;
+        projected_regular_file(abi_path, content, 0o555).map(Some)
+    }
+
+    fn virtual_model_file(
+        &self,
+        abi_path: &str,
+        kind: AbiPathKind<'_>,
+    ) -> Result<Option<ProjectedFile>, FuseV1Error> {
+        if let Some(alias) = model_alias_name(abi_path) {
+            let size = self.default_model_alias_target(alias)?.as_os_str().len();
+            return Ok(Some(ProjectedFile {
+                attr: FuseV1Attr::new(
+                    abi_path.to_owned(),
+                    FuseV1FileType::Symlink,
+                    u64::try_from(size).map_err(|_error| FuseV1Error::Io)?,
+                    0o777,
+                ),
+                content: None,
+            }));
         }
-        let Some(model) = projected_provider_model_for_exec(
-            &self.provider_config_dir,
-            &self.provider_model_cache_dir,
-            abi_path,
-        )?
-        else {
-            let Some((model, file)) = projected_provider_model_control_file(
+        let directory = || ProjectedFile {
+            attr: FuseV1Attr::new(abi_path.to_owned(), FuseV1FileType::Directory, 0, 0o755),
+            content: None,
+        };
+        match kind {
+            AbiPathKind::ModelRoute => {
+                let path = self.resolve(abi_path)?;
+                let content = match read_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
+                    Ok(content) => content,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        DEFAULT_MODEL_ROUTE.to_owned()
+                    }
+                    Err(_error) => return Err(FuseV1Error::Io),
+                };
+                projected_regular_file(abi_path, content, 0o644).map(Some)
+            }
+            AbiPathKind::ModelDir { provider: "debug" } => Ok(Some(directory())),
+            AbiPathKind::Unknown if abi_path == "model/debug/echo.d" => Ok(Some(directory())),
+            AbiPathKind::ModelDir { .. } => Ok(projected_provider_models_for_provider_path(
                 &self.provider_config_dir,
                 &self.provider_model_cache_dir,
                 abi_path,
             )?
-            else {
-                return Ok(None);
-            };
-            if let Some(content) = self.backing_control_content(abi_path)? {
-                return Ok(Some(content));
+            .map(|_models| directory())),
+            AbiPathKind::ObjectExec {
+                class: ObjectClass::Model,
+                ..
+            } if abi_path == "model/debug/echo" => {
+                projected_regular_file(abi_path, debug_echo_model_metadata(), 0o555).map(Some)
             }
-            return Ok(provider_model_control_content(&model, file));
-        };
-        Ok(Some(provider_model_metadata(&model)))
-    }
-
-    fn virtual_exec_object(&self, abi_path: &str) -> Option<VirtualExecObject> {
-        let (class, name) = parse_abi_path(abi_path).executable_object()?;
-        let name = name.into_owned();
-        let control_dir = self.root.join(class.as_str()).join(format!("{name}.d"));
-        if !fuse_v1_plain_dir_exists(&control_dir).ok()? {
-            return None;
-        }
-        Some(VirtualExecObject {
-            class,
-            name,
-            control_dir,
-        })
-    }
-
-    fn virtual_model_entry(
-        &self,
-        abi_path: &str,
-    ) -> Result<Option<(FuseV1FileType, u64, u32)>, FuseV1Error> {
-        match abi_path {
-            path if path == format!("model/{MODEL_ROUTE_FILE}") => {
-                let content = self.virtual_model_content(path)?.unwrap_or_default();
-                virtual_regular_entry(&content, 0o644)
-            }
-            path if model_alias_name(path).is_some() => Ok(Some((
-                FuseV1FileType::Symlink,
-                u64::try_from(
-                    self.default_model_alias_target(model_alias_name(path).unwrap_or_default())?
-                        .as_os_str()
-                        .len(),
-                )
-                .map_err(|_error| FuseV1Error::Io)?,
-                0o777,
-            ))),
-            "model/debug" | "model/debug/echo.d" if !self.backing_directory_exists(abi_path)? => {
-                Ok(Some((FuseV1FileType::Directory, 0, 0o755)))
-            }
-            "model/debug/echo" => virtual_regular_entry(&debug_echo_model_metadata(), 0o555),
-            path => {
-                if path.starts_with("model/debug/echo.d/") && self.backing_directory_exists(path)? {
+            AbiPathKind::ObjectExec {
+                class: ObjectClass::Model,
+                ..
+            } => projected_provider_model_for_exec(
+                &self.provider_config_dir,
+                &self.provider_model_cache_dir,
+                abi_path,
+            )?
+            .map(|model| provider_model_metadata(&model))
+            .map(|content| projected_regular_file(abi_path, content, 0o555))
+            .transpose(),
+            AbiPathKind::ObjectControl {
+                class: ObjectClass::Model,
+                ..
+            } if abi_path.starts_with("model/debug/echo.d/") => {
+                let Some(content) = abi_path
+                    .strip_prefix("model/debug/echo.d/")
+                    .and_then(|file| debug_model_control_content(DEBUG_ECHO_MODEL, file))
+                else {
                     return Ok(None);
-                }
-                if let Some(file) = path.strip_prefix("model/debug/echo.d/") {
-                    let Some(content) = debug_model_control_content(DEBUG_ECHO_MODEL, file) else {
-                        return Ok(None);
-                    };
-                    return virtual_regular_entry(&content, 0o644);
-                }
-                if projected_provider_models_for_provider_path(
-                    &self.provider_config_dir,
-                    &self.provider_model_cache_dir,
-                    path,
-                )?
-                .is_some()
-                {
-                    return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
-                }
-                if let Some(model) = projected_provider_model_for_exec(
-                    &self.provider_config_dir,
-                    &self.provider_model_cache_dir,
-                    path,
-                )? {
-                    let content = provider_model_metadata(&model);
-                    return virtual_regular_entry(&content, 0o555);
-                }
-                if projected_provider_model_control_dir(
-                    &self.provider_config_dir,
-                    &self.provider_model_cache_dir,
-                    path,
-                )?
-                .is_some()
-                {
-                    return Ok(Some((FuseV1FileType::Directory, 0, 0o755)));
-                }
+                };
+                projected_regular_file(abi_path, content, 0o644).map(Some)
+            }
+            AbiPathKind::ObjectControl {
+                class: ObjectClass::Model,
+                ..
+            } => {
                 let Some((model, file)) = projected_provider_model_control_file(
                     &self.provider_config_dir,
                     &self.provider_model_cache_dir,
-                    path,
+                    abi_path,
                 )?
                 else {
                     return Ok(None);
                 };
-                if let Some(content) = self.backing_control_content(path)? {
-                    return virtual_regular_entry(&content, 0o644);
-                }
-                let Some(content) = provider_model_control_content(&model, file) else {
-                    return Ok(None);
-                };
-                virtual_regular_entry(&content, 0o644)
+                let content = self
+                    .backing_control_content(abi_path)?
+                    .or_else(|| provider_model_control_content(&model, file));
+                content
+                    .map(|content| projected_regular_file(abi_path, content, 0o644))
+                    .transpose()
             }
+            AbiPathKind::Unknown => Ok(projected_provider_model_control_dir(
+                &self.provider_config_dir,
+                &self.provider_model_cache_dir,
+                abi_path,
+            )?
+            .map(|_model| directory())),
+            _ => Ok(None),
         }
     }
 
@@ -327,21 +297,18 @@ impl FuseV1Projection {
 
     fn backing_control_content(&self, abi_path: &str) -> Result<Option<String>, FuseV1Error> {
         let path = self.resolve(abi_path)?;
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(_error) => return Err(FuseV1Error::Io),
-        };
-        if metadata.is_dir() {
-            return Ok(None);
-        }
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(FuseV1Error::Io);
-        }
-        match read_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
-            Ok(content) => Ok(Some(content)),
+        match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(_error) => Err(FuseV1Error::Io),
+            Ok(metadata) if metadata.is_dir() => Ok(None),
+            Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
+                Err(FuseV1Error::Io)
+            }
+            Ok(_metadata) => match read_small_text_file(&path, MAX_FUSE_V1_SMALL_READ_BYTES) {
+                Ok(content) => Ok(Some(content)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(_error) => Err(FuseV1Error::Io),
+            },
         }
     }
 

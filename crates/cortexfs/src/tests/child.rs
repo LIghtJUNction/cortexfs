@@ -191,7 +191,7 @@ allow worker-fast_t tool:fs.read execute
     let child_policy = ok!(child_policy);
     let expanded_policy = PolicyV0::parse(
         "\
-allow worker-fast_t model:openai/gpt-5.5 use
+allow worker-fast_t model:openai/gpt-5.6 use
 allow worker-fast_t tool:fs.read execute
 ",
     );

@@ -22,7 +22,8 @@ pub(crate) fn read_symlink_target(path: &Path) -> Result<PathBuf> {
         .map_err(std::io::Error::from)
 }
 
-pub(crate) fn read_small_text_file(path: &Path, max_bytes: u64) -> Result<String> {
+#[doc(hidden)]
+pub fn read_small_text_file(path: &Path, max_bytes: u64) -> Result<String> {
     let file = open_plain_file(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
@@ -203,6 +204,54 @@ pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u3
     let mut file = fs::File::from(fd);
     file.write_all(content.as_bytes())?;
     file.sync_all()?;
+    parent.sync_all()
+}
+
+/// Atomically publishes one new plain file relative to a held directory fd.
+#[doc(hidden)]
+pub fn write_file_atomic_at(
+    parent: &fs::File,
+    name: &str,
+    content: &[u8],
+    mode: u32,
+) -> Result<()> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    let temp = format!(".{name}.tmp-{}", std::process::id());
+    let fd = nix::fcntl::openat(
+        parent,
+        temp.as_str(),
+        nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_EXCL
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut file = fs::File::from(fd);
+    let publish = file
+        .write_all(content)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| {
+            nix::fcntl::renameat2(
+                parent,
+                temp.as_str(),
+                parent,
+                name,
+                nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+            )
+            .map_err(std::io::Error::from)
+        });
+    if let Err(error) = publish {
+        let _ignored = nix::unistd::unlinkat(
+            parent,
+            temp.as_str(),
+            nix::unistd::UnlinkatFlags::NoRemoveDir,
+        );
+        return Err(error);
+    }
     parent.sync_all()
 }
 

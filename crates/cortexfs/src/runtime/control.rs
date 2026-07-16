@@ -36,19 +36,31 @@ pub struct RunCapability {
     consumed: AtomicBool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum RunCapabilityError {
+    #[error("cannot create run capability")]
     CannotCreate,
+    #[error("cannot accept run capability connection")]
     CannotAccept,
+    #[error("cannot read run capability frame")]
     CannotRead,
+    #[error("cannot write run capability frame")]
     CannotWrite,
+    #[error("invalid run capability frame")]
     InvalidFrame,
+    #[error("run capability peer denied")]
     PeerDenied,
+    #[error("run capability token denied")]
     TokenDenied,
+    #[error("run capability active run changed")]
     RunChanged,
+    #[error("run capability already consumed")]
     Replayed,
+    #[error("run capability request set full")]
     RequestSetFull,
+    #[error("run capability operation unsupported")]
     Unsupported,
+    #[error("run capability cleanup conflict")]
     CleanupConflict,
 }
 
@@ -537,6 +549,7 @@ fn reserve_request_id(
     Ok(())
 }
 
+/// Reads one newline-terminated JSON frame from the unix stream and decodes it.
 fn read_json_line<T: for<'de> Deserialize<'de>>(
     stream: &mut UnixStream,
 ) -> Result<T, RunCapabilityError> {
@@ -561,26 +574,6 @@ fn write_frame(stream: &mut UnixStream, frame: &impl Serialize) -> Result<(), Ru
         .map_err(|_error| RunCapabilityError::CannotWrite)
 }
 
-impl fmt::Display for RunCapabilityError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let message = match *self {
-            Self::CannotCreate => "cannot create run capability",
-            Self::CannotAccept => "cannot accept run capability connection",
-            Self::CannotRead => "cannot read run capability frame",
-            Self::CannotWrite => "cannot write run capability frame",
-            Self::InvalidFrame => "invalid run capability frame",
-            Self::PeerDenied => "run capability peer denied",
-            Self::TokenDenied => "run capability token denied",
-            Self::RunChanged => "run capability active run changed",
-            Self::Replayed => "run capability already consumed",
-            Self::RequestSetFull => "run capability request set full",
-            Self::Unsupported => "run capability operation unsupported",
-            Self::CleanupConflict => "run capability cleanup conflict",
-        };
-        f.write_str(message)
-    }
-}
-
 impl fmt::Debug for RunCapability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug = f.debug_struct("RunCapability");
@@ -600,8 +593,6 @@ impl fmt::Debug for RunCapability {
         debug.finish()
     }
 }
-
-impl std::error::Error for RunCapabilityError {}
 
 #[cfg(test)]
 mod tests {

@@ -75,11 +75,9 @@ versioned inside the session directory.
 observations, and usage. The projection is derived output, not a second durable
 history or submission path.
 
-Legacy tool results may reference a call id that has no corresponding
-`tool_call` event. Projection preserves non-empty result content, clears that
-unproven `source_call_id`, drops empty unmatched results, and records their
-count as `extra.legacy_unmatched_tool_results`. It does not synthesize a tool
-call or chat message.
+Tool results must carry a run and a call id matching a canonical `tool_call`
+event. Projection drops unmatched results and never synthesizes a tool call or
+chat message.
 
 History is session files. Do not add `/ctx/history`.
 Context runtime state stays under the session directory. Do not add
@@ -101,7 +99,7 @@ first and fall back to `default`. There is no separate `ctx latest` command.
 ## Session Index
 
 Reserved index files live under `session/index/` to avoid colliding with user
-session names such as `list`, `current`, or `by-cwd`.
+session names such as `list`, `current`, `by-cwd`, `by-hash`, or `by-uuid`.
 
 ```text
 session/
@@ -110,6 +108,10 @@ session/
     current
     by-cwd/
       <hash>
+    by-hash/
+      <hash>
+    by-uuid/
+      <uuid>
   default/
     messages.jsonl
     events.jsonl
@@ -127,10 +129,20 @@ Index file formats are fixed:
 index/list            one session name per line, newest updated_at first
 index/current         single value, current session name
 index/by-cwd/<hash>   single value, session name for that cwd
+index/by-hash/<hash>  single value, session name for that external hash
+index/by-uuid/<uuid>  single value, session name for that external uuid
 ```
 
-`index/by-cwd/<hash>` is not a symlink. That keeps the ABI identical across
-mounts and different backing stores.
+`index/by-cwd/<hash>`, `index/by-hash/<hash>`, and `index/by-uuid/<uuid>` are not
+symlinks. That keeps the ABI identical across mounts and different backing stores.
+
+Session garbage collection defaults to a no-write preview. Applying it with
+`--yes` archives each eligible live session by same-filesystem
+`RENAME_NOREPLACE` to `<session-root>/.archive/<session>` and removes exact
+references to that session from `index/list`, `index/by-cwd/`, `index/by-hash/`,
+and `index/by-uuid/`. The archive destination never overwrites an existing
+entry. Permanent deletion is opt-in and requires `--delete --yes`; `--delete`
+without `--yes` only changes the preview mode.
 
 Resume is not a root-level feature. Clients read the session index for the
 current agent:
@@ -139,6 +151,8 @@ current agent:
 /ctx/home/1000/agent/coder/session/index/list
 /ctx/home/1000/agent/coder/session/index/current
 /ctx/home/1000/agent/coder/session/index/by-cwd/<hash>
+/ctx/home/1000/agent/coder/session/index/by-hash/<hash>
+/ctx/home/1000/agent/coder/session/index/by-uuid/<uuid>
 ```
 
 Shared resume reads the matching index under `shared`. Temp sessions do not
@@ -159,4 +173,4 @@ The chroot root is only the runtime environment:
 Rebuilding the root, cleaning it, or switching runtime environment must not
 destroy session history.
 
-See `16-context.md` for context packs, compression, swap, and dedup rules.
+See `context-abi.md` for context packs, compression, swap, and dedup rules.

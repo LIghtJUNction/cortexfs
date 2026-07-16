@@ -57,7 +57,7 @@ tree.
 ## v1 Reference Tree
 
 This is the normative v1 shape. Concrete object names such as `debug/echo`,
-`openai/gpt-5.5`, `base`, `coder`, `reviewer`, `executor`, `1000`, and
+`openai/gpt-5.6`, `base`, `coder`, `reviewer`, `executor`, `1000`, and
 `project-a` are examples of valid entries.
 
 ```text
@@ -70,12 +70,12 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
     tsh
 
   model/
-    main -> /ctx/model/openai/gpt-5.5
+    main -> /ctx/model/openai/gpt-5.6
     helper -> /ctx/model/openai/codex-auto-review
-    fast -> /ctx/model/openai/gpt-5.5
-    reason -> /ctx/model/openai/gpt-5.5
-    code -> /ctx/model/openai/gpt-5.5
-    vision -> /ctx/model/openai/gpt-5.5
+    fast -> /ctx/model/openai/gpt-5.6
+    reason -> /ctx/model/openai/gpt-5.6
+    code -> /ctx/model/openai/gpt-5.6
+    vision -> /ctx/model/openai/gpt-5.6
 
     debug/
       echo
@@ -91,8 +91,8 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
         log
 
     openai/
-      gpt-4o
-      gpt-4o.d/
+      gpt-5.6
+      gpt-5.6.d/
         id
         driver
         cap
@@ -278,7 +278,7 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
       tool/
 
       model/
-        main -> /ctx/model/openai/gpt-5.5
+        main -> /ctx/model/openai/gpt-5.6
         coder -> /ctx/model/main
 
   shared/
@@ -454,3 +454,11 @@ env does not do shell expansion
 path builds the agent runtime CTX_PATH
 mount builds the agent mount namespace
 ```
+
+## External references
+
+- [Model Context Protocol](https://modelcontextprotocol.io/specification/)
+- [modelcontextprotocol/filesystem PRs](https://github.com/modelcontextprotocol/servers/pulls)
+- [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)
+- [Linux FUSE documentation](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
+- [Model filesystem examples from MCP ecosystem](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)

@@ -1,4 +1,3 @@
-use super::context::provider_name_from_config;
 use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -68,7 +67,7 @@ pub(crate) fn provider_config_from_dir(
         )
         .ok()?;
         let config = serde_json::from_str::<RunnerProviderConfig>(&content).ok()?;
-        if provider_name_from_config(&config.base_url, config.name.as_deref()).as_deref()
+        if cortexfs::provider_name_from_config(&config.base_url, config.name.as_deref()).as_deref()
             != Ok(provider)
         {
             continue;

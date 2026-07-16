@@ -386,6 +386,7 @@ fn empty_prompt_context() -> AgentPromptContext {
     }
 }
 
+/// Constructs a provider-candidate admission payload for one test request.
 fn candidate_admission<'a>(
     root: &'a Path,
     setting: AgentWindowSetting,

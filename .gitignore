@@ -29,3 +29,4 @@
 .codegraph
 /.tokensave/
 SWAP.md
+scripts/__pycache__/

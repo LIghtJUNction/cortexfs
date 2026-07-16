@@ -258,6 +258,9 @@ fn project_tools_are_visible_only_through_ctx_path_order() {
 fn mcp_backed_tool_is_ordinary_tool_and_still_requires_policy() {
     let root = clean_test_dir("tool-authority-mcp");
     let tools = root.join("tool");
+    // Backward-compatible regression fixture for legacy MCP placeholder naming.
+    // Runtime docs now prefer `github.search_issues`, but old placeholder
+    // trees still need explicit policy enforcement during transition.
     assert!(fs::create_dir_all(tools.join("mcp.github.search_issues.d")).is_ok());
     write_fixture_file(&tools.join("mcp.github.search_issues"), 0o755);
     write_text_file(

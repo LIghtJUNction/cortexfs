@@ -52,6 +52,7 @@ pub(crate) enum AgentArgs {
         name: String,
         session: Option<String>,
     },
+    SessionArchive(AgentSessionArchiveArgs),
     SessionGc(AgentSessionGcArgs),
     SessionSelect {
         name: String,
@@ -120,9 +121,18 @@ pub(crate) struct AgentSessionGcArgs {
     pub(crate) dry_run: bool,
     pub(crate) yes: bool,
     pub(crate) delete: bool,
+    pub(crate) archive_dir: Option<PathBuf>,
     pub(crate) keep: Vec<String>,
     pub(crate) patterns: Vec<String>,
     pub(crate) older_than_days: Option<u64>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+/// Arguments for archiving one durable agent session.
+pub(crate) struct AgentSessionArchiveArgs {
+    pub(crate) name: String,
+    pub(crate) session: String,
+    pub(crate) archive_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -205,6 +215,7 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             ref name,
             ref session,
         } => success(agent_trajectory(root, name, session.as_deref())),
+        AgentArgs::SessionArchive(ref args) => success(agent_session_archive(root, args)),
         AgentArgs::SessionGc(ref args) => success(agent_session_gc(root, args)),
         AgentArgs::SessionSelect {
             ref name,

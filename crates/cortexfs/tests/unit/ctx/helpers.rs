@@ -166,12 +166,6 @@ fn context_jsonl_path_kind(path: &str) -> Option<ContextJsonlKind> {
     parse_abi_path(path).context_jsonl_kind()
 }
 
-fn executable_object_path(path: &str) -> Option<(ObjectClass, String)> {
-    parse_abi_path(path)
-        .executable_object()
-        .map(|(class, name)| (class, name.into_owned()))
-}
-
 fn fixture_path(root: &Path, parts: &[&str]) -> PathBuf {
     let mut path = root.to_path_buf();
     path.extend(parts.iter().copied());

@@ -206,7 +206,7 @@ Example request:
 {
   "name": "reviewer",
   "label": "reviewer_t",
-  "model": ["openai/gpt-4o"],
+  "model": ["openai/gpt-5.6"],
   "tools": ["fs.read"],
   "shared": {
     "project-a": ["read"]
@@ -402,7 +402,7 @@ Examples:
 ```text
 allow coder_t tool:fs.read execute
 allow coder_t tool:shell.exec execute
-allow coder_t model:openai/gpt-4o use
+allow coder_t model:openai/gpt-5.6 use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
 allow coder_t agent:reviewer create

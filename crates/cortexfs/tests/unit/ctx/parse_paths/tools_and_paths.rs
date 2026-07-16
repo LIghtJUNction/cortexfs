@@ -16,8 +16,7 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
         let path = root.join("tool").join(tool);
         assert!(path.exists(), "{tool} executable missing");
         assert!(
-            fs::metadata(&path)
-                .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0),
+            fs::metadata(&path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0),
             "{tool} is not executable"
         );
     }
@@ -46,7 +45,10 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
     assert!(coder_prompt.contains("current workspace state"));
     assert!(!coder_prompt.contains("git status --short"));
     assert!(!coder_prompt.contains("find /workspace -name AGENTS.md -print"));
-    assert!(coder_prompt.contains("never overwrite, revert, delete, or reformat unrelated user changes"));
+    assert!(
+        coder_prompt
+            .contains("never overwrite, revert, delete, or reformat unrelated user changes")
+    );
     assert!(coder_prompt.contains("Never run destructive git commands"));
 }
 
@@ -55,8 +57,14 @@ fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
     assert!(ensure_v1_reference_tree(&root).is_ok());
     let control = root.join("agent").join("coder.d");
-    assert!(fs::write(control.join("system.md"), "Be precise.
-").is_ok());
+    assert!(
+        fs::write(
+            control.join("system.md"),
+            "Be precise.
+"
+        )
+        .is_ok()
+    );
     assert!(
         fs::write(
             control.join("prompt.template.md"),
@@ -100,7 +108,9 @@ fn shell_quote_arg_escapes_single_quotes() {
 
 #[test]
 fn cli_names_accept_abi_valid_uppercase_names() {
-    for name in ["NAME", "SESSION", "AGENT", "SOURCE", "TARGET", "PATH", "INPUT", "RUN"] {
+    for name in [
+        "NAME", "SESSION", "AGENT", "SOURCE", "TARGET", "PATH", "INPUT", "RUN",
+    ] {
         assert!(require_cli_name("agent name", name).is_ok(), "{name}");
         assert!(require_session_name(name).is_ok(), "{name}");
     }
@@ -114,16 +124,18 @@ fn session_names_reject_control_characters() {
 }
 
 fn contains_arg_pair(args: &[String], first: &str, second: &str) -> bool {
-    args.windows(2)
-        .any(|window| window.first().map(String::as_str) == Some(first)
-            && window.get(1).map(String::as_str) == Some(second))
+    args.windows(2).any(|window| {
+        window.first().map(String::as_str) == Some(first)
+            && window.get(1).map(String::as_str) == Some(second)
+    })
 }
 
 fn contains_arg_triplet(args: &[String], first: &str, second: &str, third: &str) -> bool {
-    args.windows(3)
-        .any(|window| window.first().map(String::as_str) == Some(first)
+    args.windows(3).any(|window| {
+        window.first().map(String::as_str) == Some(first)
             && window.get(1).map(String::as_str) == Some(second)
-            && window.get(2).map(String::as_str) == Some(third))
+            && window.get(2).map(String::as_str) == Some(third)
+    })
 }
 
 fn contains_ro_bind_stub(args: &[String], target: &str) -> bool {
@@ -213,7 +225,10 @@ fn parses_bootstrap_and_mount_commands() {
     ));
     assert!(matches!(
         cmd!("storage", "update"),
-        Ok(Command::StorageUpdate { storage: None, prune: false })
+        Ok(Command::StorageUpdate {
+            storage: None,
+            prune: false
+        })
     ));
     assert!(matches!(
         cmd!("storage", "update", "--prune", "/var/lib/cortexfs/storage"),
@@ -264,7 +279,14 @@ fn parses_tool_command_with_arguments() {
 
 #[test]
 fn parses_provider_oauth_commands() {
-    let login = cmd!("provider", "oauth", "login", "api.openai.com", "--timeout", "30");
+    let login = cmd!(
+        "provider",
+        "oauth",
+        "login",
+        "api.openai.com",
+        "--timeout",
+        "30"
+    );
     assert!(matches!(
         login,
         Ok(Command::Provider(ProviderArgs::Login {

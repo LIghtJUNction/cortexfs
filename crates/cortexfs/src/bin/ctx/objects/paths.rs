@@ -55,19 +55,14 @@ pub(crate) fn require_cli_name(label: &str, value: &str) -> Result<(), CliError>
 
 pub(crate) fn object_socket_path(root: &Path, path: &str) -> Result<PathBuf, CliError> {
     let abi_path = classify_input_path(root, path)?;
-    if !matches!(
-        classify_abi_path(&abi_path),
-        "ctx.model.exec" | "ctx.agent.exec"
-    ) {
+    let Some((class @ (ObjectClass::Model | ObjectClass::Agent), name)) =
+        parse_abi_path(&abi_path).executable_object()
+    else {
         return Err(CliError::usage(format!(
             "socket command requires model/NAME or agent/NAME: {path}"
         )));
-    }
-
-    let Some((class, name)) = abi_path.split_once('/') else {
-        return Err(CliError::usage(format!("invalid object path: {path}")));
     };
-    Ok(root.join(class).join(format!("{name}.sock")))
+    Ok(root.join(class.as_str()).join(format!("{name}.sock")))
 }
 
 pub(crate) fn current_session_name(session_root: &Path) -> Result<String, CliError> {

@@ -9,13 +9,8 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::Duration;
 
-use crate::agent::create::{
-    AgentCreatePaths, AgentRollbackConflict, AgentRollbackError, rollback_agent_files,
-};
-use crate::{
-    AgentUnixIdentity, ChildContextRecordError, ChildHandoffReceipt, claim_child_handoff_active,
-    rollback_child_handoff,
-};
+use crate::agent::create::AgentRollbackConflict;
+use crate::{AgentUnixIdentity, ChildContextRecordError};
 
 /// Persists receipt-bound cleanup evidence for one agent launch.
 pub fn persist_agent_launch_meta(
@@ -1821,55 +1816,6 @@ pub enum AgentLaunchTransactionError {
     HandoffConflict,
     /// The agent inode could not be safely rolled back.
     AgentConflict(AgentRollbackConflict),
-}
-
-/// Completes an already-created agent and pending handoff as one compensated launch.
-///
-/// On every failure the ordering is fixed: stop a returned launch receipt, roll
-/// back the handoff receipt, then roll back the agent receipt.
-#[expect(
-    dead_code,
-    reason = "wired when the remaining terminal launch closure is migrated"
-)]
-pub(crate) fn complete_child_launch(
-    agent: AgentCreatePaths,
-    handoff: &ChildHandoffReceipt,
-    child_agent: &str,
-    child_session: &str,
-    launch: impl FnOnce() -> Result<AgentLaunchReceipt, AgentLaunchError>,
-    stop: impl FnOnce(&AgentLaunchReceipt) -> Result<(), AgentLaunchError>,
-) -> Result<AgentLaunchReceipt, AgentLaunchTransactionError> {
-    let launched = match launch() {
-        Ok(receipt) => receipt,
-        Err(error) => {
-            rollback_created(agent, handoff)?;
-            return Err(AgentLaunchTransactionError::Launch(error));
-        }
-    };
-    if let Err(error) = claim_child_handoff_active(handoff, child_agent, child_session, None) {
-        if stop(&launched).is_err() {
-            return Err(AgentLaunchTransactionError::StopConflict);
-        }
-        rollback_created(agent, handoff)?;
-        return Err(AgentLaunchTransactionError::Claim(error));
-    }
-    Ok(launched)
-}
-
-#[expect(dead_code, reason = "used by the withheld launch coordinator")]
-fn rollback_created(
-    agent: AgentCreatePaths,
-    handoff: &ChildHandoffReceipt,
-) -> Result<(), AgentLaunchTransactionError> {
-    if rollback_child_handoff(handoff).is_err() {
-        return Err(AgentLaunchTransactionError::HandoffConflict);
-    }
-    match rollback_agent_files(agent) {
-        Ok(()) => Ok(()),
-        Err(AgentRollbackError::Conflict(conflict)) => {
-            Err(AgentLaunchTransactionError::AgentConflict(conflict))
-        }
-    }
 }
 
 /// Validated values needed to launch one agent runtime independently of CLI syntax.
