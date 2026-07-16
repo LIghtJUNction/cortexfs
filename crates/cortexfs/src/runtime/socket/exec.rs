@@ -271,12 +271,13 @@ pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
     let agent_process = agent_outcome.process;
     let agent_frames = agent_outcome.frames;
     if scope != SocketSessionScope::Temp {
-        record_approval_frames(&session_dir, &run_id, &agent_frames)
-            .map_err(SocketRuntimeError::Record)?;
-        record_tool_results_from_event_frames(&session_dir, &run_id, &agent_frames)
+        let batch = AgentFrameBatch::parse(&run_id, &agent_frames);
+        batch
+            .record(&session_dir, &run_id)
             .map_err(SocketRuntimeError::Record)?;
         if agent_process != AgentProcessOutcome::Cancelled
-            && !settle_agent_run_from_event_frames(&session_dir, &run_id, &agent_frames)
+            && !batch
+                .settle(&session_dir, &run_id)
                 .map_err(SocketRuntimeError::Record)?
         {
             return Err(SocketRuntimeError::Record(
@@ -402,9 +403,12 @@ fn handle_agent_tsh_request(
         frames.push(serde_json::json!({"type":"done", "run":run, "status":"ok"}).to_string());
     }
     let session_dir = runtime.session_root.join(session);
-    record_tool_results_from_event_frames(&session_dir, &run, &frames)
+    let batch = AgentFrameBatch::parse(&run, &frames);
+    batch
+        .record(&session_dir, &run)
         .map_err(SocketRuntimeError::Record)?;
-    if !settle_agent_run_from_event_frames(&session_dir, &run, &frames)
+    if !batch
+        .settle(&session_dir, &run)
         .map_err(SocketRuntimeError::Record)?
     {
         return Err(SocketRuntimeError::Record(

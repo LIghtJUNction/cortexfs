@@ -165,35 +165,6 @@ pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
     })
 }
 
-fn assistant_text_from_event_frames(run_id: &str, frames: &[String]) -> Option<String> {
-    let mut output = String::new();
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        if value.get("run").and_then(Value::as_str) != Some(run_id) {
-            continue;
-        }
-        let event_type = value.get("type").and_then(Value::as_str);
-        if matches!(event_type, Some("delta" | "reasoning_delta"))
-            && let Some(text) = value.get("text").and_then(Value::as_str)
-        {
-            output.push_str(text);
-            continue;
-        }
-        if matches!(event_type, Some("message" | "reasoning_message"))
-            && value.get("role").and_then(Value::as_str) == Some("assistant")
-            && let Some(text) = message_event_text(&value)
-        {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&text);
-        }
-    }
-    (!output.is_empty()).then_some(output)
-}
-
 enum AgentTerminal<'a> {
     Success {
         assistant: Option<String>,
@@ -205,198 +176,206 @@ enum AgentTerminal<'a> {
     },
 }
 
-/// Finds the final terminal status event and associated done marker for a run.
-fn agent_terminal_from_event_frames<'a>(
-    run_id: &str,
-    frames: &'a [String],
-) -> Option<AgentTerminal<'a>> {
-    let (done, success) = frames.iter().rev().find_map(|frame| {
-        let value = serde_json::from_str::<Value>(frame).ok()?;
-        if value.get("type").and_then(Value::as_str) != Some("done")
-            || value.get("run").and_then(Value::as_str) != Some(run_id)
-        {
-            return None;
-        }
-        match value.get("status").and_then(Value::as_str) {
-            Some("ok") => Some((frame.as_str(), true)),
-            Some("error") => Some((frame.as_str(), false)),
-            _ => None,
-        }
-    })?;
-    if success {
-        return Some(AgentTerminal::Success {
-            assistant: assistant_text_from_event_frames(run_id, frames),
-            done,
-        });
-    }
-    frames
-        .iter()
-        .rev()
-        .find(|frame| {
-            serde_json::from_str::<Value>(frame).is_ok_and(|value| {
-                value.get("type").and_then(Value::as_str) == Some("error")
-                    && value.get("run").and_then(Value::as_str) == Some(run_id)
-                    && value.get("recoverable").and_then(Value::as_bool) != Some(true)
-            })
-        })
-        .map(|error| AgentTerminal::Error {
-            error: error.as_str(),
-            done,
-        })
+struct AgentToolResult {
+    call: String,
+    name: Option<String>,
+    content: String,
 }
 
-pub(crate) fn settle_agent_run_from_event_frames(
-    session_dir: &Path,
-    run_id: &str,
-    frames: &[String],
-) -> Result<bool, SocketSessionRecordError> {
-    let Some(terminal) = agent_terminal_from_event_frames(run_id, frames) else {
-        return Ok(false);
-    };
-    require_socket_session_files(session_dir)?;
-    let history = columnar::HistoryGuard::exclusive(session_dir)
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    if !active_session_run_matches_locked(&history, session_dir, run_id)? {
-        return Ok(false);
-    }
-    history
-        .refresh_claims()
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    let terminal_state = match terminal {
-        AgentTerminal::Success {
-            assistant: Some(assistant),
-            done,
-        } => {
-            record_assistant_response_locked(&history, session_dir, run_id, &assistant, done)?;
-            "done"
-        }
-        AgentTerminal::Success {
-            assistant: None,
-            done,
-        } => {
-            history
-                .append(columnar::Stream::Events, &[done])
-                .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-            "done"
-        }
-        AgentTerminal::Error { error, done } => {
-            history
-                .append(columnar::Stream::Events, &[error, done])
-                .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-            "error"
-        }
-    };
-    history
-        .refresh_claims()
-        .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    transition_active_session_run_locked(&history, session_dir, run_id, terminal_state)
+pub(crate) struct AgentFrameBatch<'a> {
+    approvals: Vec<&'a str>,
+    tools: Vec<AgentToolResult>,
+    terminal: Option<AgentTerminal<'a>>,
 }
 
-pub(crate) fn record_tool_results_from_event_frames(
-    session_dir: &Path,
-    run_id: &str,
-    frames: &[String],
-) -> Result<(), SocketSessionRecordError> {
-    let mut calls = Vec::new();
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        if value.get("type").and_then(Value::as_str) != Some("tool_call") {
-            continue;
-        }
-        let Some(id) = value.get("id").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(name) = value.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        calls.push((id.to_owned(), name.to_owned()));
-    }
+impl<'a> AgentFrameBatch<'a> {
+    pub(crate) fn parse(run_id: &str, frames: &'a [String]) -> Self {
+        let mut approvals = Vec::new();
+        let mut calls = Vec::new();
+        let mut tools = Vec::new();
+        let mut assistant = String::new();
+        let mut error = None;
+        let mut done = None;
 
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        if value.get("type").and_then(Value::as_str) != Some("message")
-            || value.get("role").and_then(Value::as_str) != Some("tool")
-        {
-            continue;
-        }
-        let event_tool_name = value.get("name").and_then(Value::as_str);
-        let Some(parts) = value.get("content").and_then(Value::as_array) else {
-            continue;
-        };
-        for part in parts {
-            if part.get("type").and_then(Value::as_str) != Some("tool_result") {
+        for frame in frames {
+            let Ok(value) = serde_json::from_str::<Value>(frame) else {
+                continue;
+            };
+            let event = value.get("type").and_then(Value::as_str);
+            if value.get("run").and_then(Value::as_str) != Some(run_id) {
                 continue;
             }
-            let Some(tool_call_id) = part.get("tool_call_id").and_then(Value::as_str) else {
+            if event == Some("tool_call")
+                && let (Some(id), Some(name)) = (
+                    value.get("id").and_then(Value::as_str),
+                    value.get("name").and_then(Value::as_str),
+                )
+            {
+                calls.push((id.to_owned(), name.to_owned()));
+            }
+            push_tool_results(&mut tools, &value);
+            match event {
+                Some("approval_request" | "approval_result") => approvals.push(frame.as_str()),
+                Some("error")
+                    if value.get("recoverable").and_then(Value::as_bool) != Some(true) =>
+                {
+                    error = Some(frame.as_str());
+                }
+                Some("done") => match value.get("status").and_then(Value::as_str) {
+                    Some("ok") => done = Some((frame.as_str(), true)),
+                    Some("error") => done = Some((frame.as_str(), false)),
+                    _ => {}
+                },
+                _ => push_assistant_text(&mut assistant, &value),
+            }
+        }
+        for tool in &mut tools {
+            if tool.name.is_none() {
+                tool.name = calls
+                    .iter()
+                    .find(|call| call.0 == tool.call)
+                    .map(|call| call.1.clone());
+            }
+        }
+        let terminal = done.and_then(|(done, success)| {
+            if success {
+                Some(AgentTerminal::Success {
+                    assistant: (!assistant.is_empty()).then_some(assistant),
+                    done,
+                })
+            } else {
+                error.map(|error| AgentTerminal::Error { error, done })
+            }
+        });
+        Self {
+            approvals,
+            tools,
+            terminal,
+        }
+    }
+
+    pub(crate) fn record(
+        &self,
+        session_dir: &Path,
+        run_id: &str,
+    ) -> Result<(), SocketSessionRecordError> {
+        if !self.approvals.is_empty() {
+            require_socket_session_files(session_dir)?;
+            append_session_lines(session_dir, "events.jsonl", &self.approvals)?;
+        }
+        for tool in &self.tools {
+            let Some(name) = tool.name.as_deref() else {
                 continue;
             };
-            let Some(tool_name) = event_tool_name
-                .or_else(|| tool_name_for_call(&calls, tool_call_id).map(String::as_str))
-            else {
-                continue;
-            };
-            let content = tool_result_content_text(part.get("content"));
             record_tool_execution_result_to_session(
                 session_dir,
                 run_id,
-                tool_call_id,
-                tool_name,
-                &content,
+                &tool.call,
+                name,
+                &tool.content,
             )?;
         }
+        Ok(())
     }
-    Ok(())
+
+    pub(crate) fn settle(
+        self,
+        session_dir: &Path,
+        run_id: &str,
+    ) -> Result<bool, SocketSessionRecordError> {
+        let Some(terminal) = self.terminal else {
+            return Ok(false);
+        };
+        require_socket_session_files(session_dir)?;
+        let history = columnar::HistoryGuard::exclusive(session_dir)
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        if !active_session_run_matches_locked(&history, session_dir, run_id)? {
+            return Ok(false);
+        }
+        history
+            .refresh_claims()
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        let state = match terminal {
+            AgentTerminal::Success {
+                assistant: Some(assistant),
+                done,
+            } => {
+                record_assistant_response_locked(&history, session_dir, run_id, &assistant, done)?;
+                "done"
+            }
+            AgentTerminal::Success {
+                assistant: None,
+                done,
+            } => {
+                history
+                    .append(columnar::Stream::Events, &[done])
+                    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+                "done"
+            }
+            AgentTerminal::Error { error, done } => {
+                history
+                    .append(columnar::Stream::Events, &[error, done])
+                    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+                "error"
+            }
+        };
+        history
+            .refresh_claims()
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        transition_active_session_run_locked(&history, session_dir, run_id, state)
+    }
 }
 
-pub(crate) fn record_approval_frames(
-    session_dir: &Path,
-    run_id: &str,
-    frames: &[String],
-) -> Result<(), SocketSessionRecordError> {
-    let approval = frames
-        .iter()
-        .filter(|frame| {
-            serde_json::from_str::<Value>(frame).is_ok_and(|value| {
-                value.get("run").and_then(Value::as_str) == Some(run_id)
-                    && matches!(
-                        value.get("type").and_then(Value::as_str),
-                        Some("approval_request" | "approval_result")
-                    )
-            })
-        })
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    if approval.is_empty() {
-        return Ok(());
+fn push_tool_results(tools: &mut Vec<AgentToolResult>, value: &Value) {
+    if value.get("type").and_then(Value::as_str) != Some("message")
+        || value.get("role").and_then(Value::as_str) != Some("tool")
+    {
+        return;
     }
-    require_socket_session_files(session_dir)?;
-    append_session_lines(session_dir, "events.jsonl", &approval)
+    let name = value.get("name").and_then(Value::as_str).map(str::to_owned);
+    let Some(parts) = value.get("content").and_then(Value::as_array) else {
+        return;
+    };
+    for part in parts {
+        if part.get("type").and_then(Value::as_str) == Some("tool_result")
+            && let Some(call) = part.get("tool_call_id").and_then(Value::as_str)
+        {
+            let content = part.get("content").map_or_else(String::new, |content| {
+                content
+                    .as_str()
+                    .map_or_else(|| content.to_string(), str::to_owned)
+            });
+            tools.push(AgentToolResult {
+                call: call.to_owned(),
+                name: name.clone(),
+                content,
+            });
+        }
+    }
 }
 
-pub(crate) fn tool_name_for_call<'a>(
-    calls: &'a [(String, String)],
-    tool_call_id: &str,
-) -> Option<&'a String> {
-    calls
-        .iter()
-        .find_map(|call| (call.0 == tool_call_id).then_some(&call.1))
-}
-
-pub(crate) fn tool_result_content_text(content: Option<&Value>) -> String {
-    if let Some(value) = content.and_then(Value::as_str) {
-        return value.to_owned();
+fn push_assistant_text(output: &mut String, value: &Value) {
+    let event = value.get("type").and_then(Value::as_str);
+    if matches!(event, Some("delta" | "reasoning_delta"))
+        && let Some(text) = value.get("text").and_then(Value::as_str)
+    {
+        output.push_str(text);
+        return;
     }
-    content.map_or_else(String::new, Value::to_string)
+    if matches!(event, Some("message" | "reasoning_message"))
+        && value.get("role").and_then(Value::as_str) == Some("assistant")
+        && let Some(text) = message_event_text(value)
+    {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&text);
+    }
 }
 
 pub(crate) fn message_event_text(value: &Value) -> Option<String> {
-    let parts = value.get("content")?.as_array()?;
     let mut text = String::new();
-    for part in parts {
+    for part in value.get("content")?.as_array()? {
         if part.get("type").and_then(Value::as_str) == Some("text")
             && let Some(value) = part.get("text").and_then(Value::as_str)
         {
