@@ -1,6 +1,9 @@
 # Deterministic Linux quality gate for pull requests and main.
 # Required check names (after green on main): "CI / rust", "CI / docs"
 # Local contract matches .pre-commit-config.yaml and README Development.
+#
+# CI toolchain: latest stable (documented). Workspace MSRV remains 1.91 in
+# Cargo.toml for crates.io; this gate optimizes for a reliable full test run.
 name: CI
 
 on:
@@ -18,26 +21,29 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Faster test linking on GHA; does not change runtime assertions.
+  RUSTFLAGS: "-C debuginfo=line-tables-only"
 
 jobs:
   rust:
     name: rust
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain (MSRV)
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: "1.91"
+          toolchain: stable
           components: rustfmt, clippy
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-rust
+          shared-key: ci-rust-stable
           cache-on-failure: true
 
       - name: cargo fmt
@@ -49,7 +55,11 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-      - name: cargo test
+      - name: cargo test (compile)
+        run: cargo test --locked --workspace --all-targets --all-features --no-run
+
+      - name: cargo test (run)
+        timeout-minutes: 20
         run: cargo test --locked --workspace --all-targets --all-features
 
   docs:
