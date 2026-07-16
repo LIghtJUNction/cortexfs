@@ -4,18 +4,14 @@ use std::io::{BufRead, BufReader};
 use std::time::Instant;
 
 fn write_cancellable_partial_agent(executable: &Path) {
-    // Short cancellable wait so a missed cancel cannot hang the suite on CI.
+    // Bounded wait: TERM ends promptly; integer sleep stays portable on /bin/sh.
     write_text_file(
         executable,
         r#"#!/bin/sh
 trap 'exit 0' TERM INT
 printf '{"type":"delta","run":"%s","text":"partial"}\n' "$CTX_RUN_ID"
 touch "$CTX_SOURCE/cancel-ready"
-i=0
-while [ "$i" -lt 50 ]; do
-  sleep 0.1
-  i=$((i + 1))
-done
+sleep 5
 printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
 "#,
     );
@@ -84,7 +80,10 @@ fn cancel_after_partial_delta_persists_only_cancelled_done() {
     );
 
     let joined = cancel.join();
-    assert!(matches!(&joined, Ok(Some((true, _, _)))));
+    assert!(
+        matches!(&joined, Ok(Some((true, _, _)))),
+        "cancel observer failed: {joined:?}"
+    );
     let Ok(Some((_cancelled, mut response, mut client))) = joined else {
         return;
     };

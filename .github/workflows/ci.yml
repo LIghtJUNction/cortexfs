@@ -22,7 +22,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  RUSTFLAGS: "-C debuginfo=line-tables-only"
 
 jobs:
   rust:
@@ -32,6 +31,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -54,10 +58,10 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-      # Same contract as pre-commit; hang risk bounded by cancel-test fixes + job timeout.
+      # Same flags as pre-commit. Cap threads to reduce GHA fs races under load.
       - name: cargo test
         timeout-minutes: 25
-        run: cargo test --locked --workspace --all-targets --all-features
+        run: cargo test --locked --workspace --all-targets --all-features -- --test-threads=2
 
   docs:
     name: docs
