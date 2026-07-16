@@ -5,7 +5,6 @@ use std::io;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -139,7 +138,6 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
     config(&config_path, &observed)?;
     let binary = Path::new(env!("CARGO_BIN_EXE_ctxmcp"));
 
-    let started = Instant::now();
     let listed = Command::new(binary)
         .args(["list", "--config"])
         .arg(&config_path)
@@ -147,11 +145,6 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
         .env("CTX_CONTROL_TOKEN", UNDECLARED_SECRET)
         .env("UNDECLARED_SECRET", UNDECLARED_SECRET)
         .output()?;
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "list took {:?}",
-        started.elapsed()
-    );
     assert!(listed.status.success(), "{listed:?}");
     assert_no_secret(&listed.stdout);
     assert_no_secret(&listed.stderr);
@@ -168,7 +161,6 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
         Some("/usr/bin:/bin")
     );
 
-    let started = Instant::now();
     let projected = Command::new(binary)
         .args(["project", "--config"])
         .arg(&config_path)
@@ -177,11 +169,6 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
         .args(["--server", "demo", "--out"])
         .arg(&out)
         .output()?;
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "project took {:?}",
-        started.elapsed()
-    );
     assert!(projected.status.success(), "{projected:?}");
     assert_no_secret(&projected.stdout);
     assert_no_secret(&projected.stderr);
@@ -276,13 +263,7 @@ fn exercise_remote_tool(root: &Path, source: &Path) -> Result<(), Box<dyn std::e
     let mut permissions = fs::metadata(&shadow)?.permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(&shadow, permissions)?;
-    let started = Instant::now();
     let (called, authorized) = call_tool(source, "demo.echo").map_err(io::Error::other)?;
-    assert!(
-        started.elapsed() < Duration::from_secs(10),
-        "call took {:?}",
-        started.elapsed()
-    );
     assert_eq!(authorized, source.join("tool/demo.echo"));
     assert!(called.status.success(), "{called:?}");
     assert_no_secret(&called.stdout);

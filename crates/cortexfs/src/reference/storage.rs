@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use cortexfs_runtime_client::agent::is_agent_launch_abi;
 use nix::fcntl::{Flock, FlockArg};
 
 use super::bootstrap::{
@@ -192,6 +193,9 @@ fn validate_generation(root: &Path) -> Result<(), StorageUpdateError> {
     }
     for agent in REFERENCE_AGENTS {
         let control = root.join("agent").join(format!("{}.d", agent.name));
+        if !is_agent_launch_abi(&fs::read_to_string(control.join("abi"))?) {
+            return Err(StorageUpdateError::Invalid("agent abi is invalid"));
+        }
         let model = fs::read_to_string(control.join("model"))?;
         let model = model.trim();
         let policy = fs::read_to_string(control.join("policy"))?;
@@ -295,6 +299,26 @@ mod tests {
         validate_generation(&generation)?;
         assert_eq!(update_storage_generation(&storage)?, generation);
         assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn missing_or_invalid_agent_abi_stages_repaired_generation()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let storage = directory.path().join("storage");
+        for invalid in [None, Some("sdk-envelope-v2\n")] {
+            let generation = update_storage_generation(&storage)?;
+            let abi = generation.join("agent/coder.d/abi");
+            match invalid {
+                Some(content) => fs::write(&abi, content)?,
+                None => fs::remove_file(&abi)?,
+            }
+            let repaired = update_storage_generation(&storage)?;
+            assert_ne!(repaired, generation);
+            let abi = fs::read_to_string(repaired.join("agent/coder.d/abi"))?;
+            assert!(is_agent_launch_abi(&abi));
+        }
         Ok(())
     }
 
