@@ -406,9 +406,10 @@ cd docs-site && bun install --frozen-lockfile && bun run build
 - 工作流：`.github/workflows/ci.yml`（显示名 **CI**）
 - 触发：`pull_request` 与 `push` 到 `main`
 - 平台：Ubuntu（Linux / FUSE 目标）
-- Rust 工具链：CI 使用 **latest stable**（`dtolnay/rust-toolchain@stable`）；工作区 MSRV 仍为 `1.91`（`Cargo.toml` 的 `rust-version`）
+- Rust 工具链：CI 使用 **latest stable**；工作区 MSRV 仍为 `1.91`（`Cargo.toml` 的 `rust-version`）
 - 权限：`contents: read`
-- 超时：`rust` job 60 分钟（其中 `cargo test` 运行阶段 20 分钟），`docs` 15 分钟；同一 PR 的新提交会取消未完成的 run
+- 测试运行：CI 用 **cargo-nextest**（`.config/nextest.toml` profile `ci`：慢测 30s 标记、再 30s 终止），本地/pre-commit 仍用 `cargo test`
+- 超时：`rust` job 60 分钟（nextest 步骤 25 分钟），`docs` 15 分钟；同一 PR 的新提交会取消未完成的 run
 - 分支保护建议要求的检查名：`CI / rust`、`CI / docs`
 - 本门禁不含真实 FUSE 挂载、systemd、bubblewrap、云供应商或 live model 冒烟
 

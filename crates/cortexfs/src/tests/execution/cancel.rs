@@ -1,29 +1,10 @@
 use super::*;
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
-
-fn field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key)?.as_str()
-}
-
-fn parse_jsonl(text: &str) -> serde_json::Result<Vec<Value>> {
-    text.lines().map(serde_json::from_str).collect()
-}
-
-fn done_statuses(frames: &[Value], run: &str) -> Result<Vec<String>, &'static str> {
-    frames
-        .iter()
-        .filter(|value| field(value, "type") == Some("done") && field(value, "run") == Some(run))
-        .map(|value| {
-            field(value, "status")
-                .map(str::to_owned)
-                .ok_or("done missing status")
-        })
-        .collect()
-}
+use std::time::Instant;
 
 fn write_cancellable_partial_agent(executable: &Path) {
-    // Short cancellable wait: CI that misses cancel must not burn package timeouts.
+    // Short cancellable wait so a missed cancel cannot hang the suite on CI.
     write_text_file(
         executable,
         r#"#!/bin/sh
@@ -41,12 +22,6 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     set_file_mode(executable, 0o755);
 }
 
-fn set_stream_timeouts(stream: &UnixStream, seconds: u64) {
-    let timeout = Some(Duration::from_secs(seconds));
-    assert!(stream.set_read_timeout(timeout).is_ok());
-    assert!(stream.set_write_timeout(timeout).is_ok());
-}
-
 fn wait_delta_then_cancel(
     client: UnixStream,
     cancel_root: &Path,
@@ -54,18 +29,19 @@ fn wait_delta_then_cancel(
 ) -> Option<(bool, String, UnixStream)> {
     let mut reader = BufReader::new(client);
     let mut response = String::new();
+    let ready_deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
             Ok(0) | Err(_) => return None,
-            Ok(_n) => {}
+            Ok(_) => {}
         }
         response.push_str(&line);
-        let frame = serde_json::from_str::<Value>(&line).ok()?;
-        if field(&frame, "type") != Some("delta") {
+        let frame: Value = serde_json::from_str(&line).ok()?;
+        if json_str(&frame, "type") != Some("delta") {
             continue;
         }
-        for _ in 0..100 {
+        while Instant::now() < ready_deadline {
             if ready.exists() {
                 let cancelled = handle_socket_request_frame(
                     cancel_root,
@@ -89,13 +65,15 @@ fn cancel_after_partial_delta_persists_only_cancelled_done() {
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let executable = root.join("agent/coder");
     write_cancellable_partial_agent(&executable);
+
     let (mut client, mut socket) = ok!(UnixStream::pair());
-    // Bound both sides so a missed cancel/delta cannot hang the lib suite on CI.
     set_stream_timeouts(&client, 8);
     set_stream_timeouts(&socket, 8);
-    let request = b"{\"op\":\"send\",\"id\":\"cancel-partial-1\",\"session\":\"default\",\"input\":\"run\"}\n";
+    let request =
+        b"{\"op\":\"send\",\"id\":\"cancel-partial-1\",\"session\":\"default\",\"input\":\"run\"}\n";
     assert!(client.write_all(request).is_ok());
     assert!(client.shutdown(Shutdown::Write).is_ok());
+
     let cancel_root = session_root.clone();
     let ready = root.join("cancel-ready");
     let cancel = thread::spawn(move || wait_delta_then_cancel(client, &cancel_root, &ready));
@@ -104,6 +82,7 @@ fn cancel_after_partial_delta_persists_only_cancelled_done() {
         None,
         direct_agent_runtime(&root, &view, &session_root, &executable),
     );
+
     let joined = cancel.join();
     assert!(matches!(&joined, Ok(Some((true, _, _)))));
     let Ok(Some((_cancelled, mut response, mut client))) = joined else {
@@ -116,6 +95,7 @@ fn cancel_after_partial_delta_persists_only_cancelled_done() {
     let mut tail = String::new();
     let _ignored = client.read_to_string(&mut tail);
     response.push_str(&tail);
+
     let session = session_root.join("default");
     let events = ok!(crate::support::columnar::read_text(
         &session,
@@ -127,7 +107,7 @@ fn cancel_after_partial_delta_persists_only_cancelled_done() {
     let client_done = ok!(done_statuses(&response_frames, &run));
     let partial = response_frames
         .iter()
-        .any(|frame| field(frame, "text") == Some("partial"));
+        .any(|frame| json_str(frame, "text") == Some("partial"));
     assert_eq!(
         (
             statuses,

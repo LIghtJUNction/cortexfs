@@ -1,0 +1,10 @@
+# cargo-nextest configuration (https://nexte.st/)
+# Used by CI for hang-safe test runs; local `cargo test` remains the pre-commit contract.
+
+[profile.ci]
+fail-fast = true
+# Mark slow, then terminate so one hung test cannot burn the whole job.
+slow-timeout = { period = "30s", terminate-after = 2 }
+test-threads = "num-cpus"
+status-level = "fail"
+final-status-level = "flaky"

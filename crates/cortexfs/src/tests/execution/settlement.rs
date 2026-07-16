@@ -1,25 +1,4 @@
 use super::*;
-use serde_json::Value;
-
-fn field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key)?.as_str()
-}
-
-fn parse_jsonl(text: &str) -> serde_json::Result<Vec<Value>> {
-    text.lines().map(serde_json::from_str).collect()
-}
-
-fn done_statuses(frames: &[Value], run: &str) -> Result<Vec<String>, &'static str> {
-    frames
-        .iter()
-        .filter(|value| field(value, "type") == Some("done") && field(value, "run") == Some(run))
-        .map(|value| {
-            field(value, "status")
-                .map(str::to_owned)
-                .ok_or("done missing status")
-        })
-        .collect()
-}
 
 #[test]
 fn done_is_emitted_only_after_terminal_facts_are_durable() {
@@ -63,12 +42,12 @@ mv -- {session} {moved}
     assert!(
         frames
             .iter()
-            .any(|frame| field(frame, "type") == Some("error"))
+            .any(|frame| json_str(frame, "type") == Some("error"))
     );
     assert!(
         !frames
             .iter()
-            .any(|frame| field(frame, "type") == Some("done"))
+            .any(|frame| json_str(frame, "type") == Some("done"))
     );
 }
 
