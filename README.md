@@ -671,14 +671,31 @@ ctx agent output coder
 
 ## Development
 
-Build and test:
+Build and test (same contract as `.pre-commit-config.yaml` and the Linux CI gate):
 
 ```bash
-cargo fmt --check
+cargo fmt --all -- --check
 cargo check --locked --workspace --all-targets --all-features
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 ```
+
+Docs production build (independent of GitHub Pages deployment):
+
+```bash
+cd docs-site && bun install --frozen-lockfile && bun run build
+```
+
+### CI quality gate
+
+Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (name **CI**).
+
+| Required check name | Job | What it runs |
+| --- | --- | --- |
+| `CI / rust` | `rust` | The four Cargo commands above on Ubuntu, Rust **1.91** (workspace MSRV), `--locked` / `--workspace` / `--all-targets` / `--all-features` |
+| `CI / docs` | `docs` | `docs-site` Bun install + Docusaurus production build |
+
+After these checks are green on `main`, enable them as required branch-protection checks. Privileged FUSE mounts, live providers, and systemd smoke tests stay out of this gate.
 
 Run the deterministic agent tool-loop smoke without a live model:
 
