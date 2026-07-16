@@ -27,7 +27,7 @@ pub(crate) fn parse_openai_chat_content(output: &[u8]) -> Result<String, String>
 pub(crate) fn openai_chat_tool_call_content(value: &Value) -> Option<String> {
     let function = value.get("function")?;
     let name = function.get("name").and_then(Value::as_str)?;
-    if !is_object_name(name) {
+    if !provider_function_name_is_compatible(name) {
         return None;
     }
     let id = value
@@ -105,7 +105,7 @@ pub(crate) fn openai_response_tool_call_content(value: &Value) -> Option<String>
         return None;
     }
     let name = value.get("name").and_then(Value::as_str)?;
-    if !is_object_name(name) {
+    if !provider_function_name_is_compatible(name) {
         return None;
     }
     let id = value
@@ -256,5 +256,41 @@ mod responses_tests {
         assert_eq!(value.get("id"), Some(&json!("call_123")));
         assert_eq!(value.get("name"), Some(&json!("tsh")));
         assert_eq!(value.pointer("/arguments/args/0"), Some(&json!("tools")));
+    }
+
+    #[test]
+    fn provider_tool_call_parser_rejects_undeclarable_function_names() {
+        let chat = json!({
+            "choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "function": {
+                            "name": "shell.exec",
+                            "arguments": "{\"args\":[\"date\"]}"
+                        }
+                    }]
+                }
+            }]
+        })
+        .to_string();
+        let responses = json!({
+            "output": [{
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "shell.exec",
+                "arguments": "{\"args\":[\"date\"]}"
+            }]
+        })
+        .to_string();
+
+        assert_eq!(
+            parse_openai_chat_content(chat.as_bytes()),
+            Err("provider response missing content".to_owned())
+        );
+        assert_eq!(
+            parse_openai_response_content(responses.as_bytes()),
+            Err("provider response missing content".to_owned())
+        );
     }
 }
