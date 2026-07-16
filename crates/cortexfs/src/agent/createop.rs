@@ -523,12 +523,13 @@ impl ChildCreateOps for ProductionOps<'_> {
     fn publish_handoff(&mut self, _agent: &Self::Agent) -> ChildCreateResult<Self::Handoff> {
         #[cfg(test)]
         if CAPTURE_MATERIALIZED_CHILD_WINDOW_ENABLED.with(std::cell::Cell::get) {
-            let content = fs::read_to_string(
-                self.source
-                    .join("agent")
-                    .join(format!("{}.d/window", self.name)),
-            )
-            .map_err(|_error| child_error("EIO", "cannot capture child window"))?;
+            // Prefer in-memory override over disk re-read (avoids CI races).
+            let content = self
+                .overrides
+                .iter()
+                .find(|pair| pair.0 == "window")
+                .map(|pair| format!("{}\n", pair.1.trim_end_matches('\n')))
+                .ok_or_else(|| child_error("EIO", "cannot capture child window"))?;
             CAPTURE_MATERIALIZED_CHILD_WINDOW.with(|capture| capture.replace(Some(content)));
             return Err(child_error("EAGAIN", "captured materialized child window"));
         }
