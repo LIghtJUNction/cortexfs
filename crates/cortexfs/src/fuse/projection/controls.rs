@@ -30,15 +30,20 @@ pub(crate) fn validate_model_control_write(
     }
 }
 
-pub(crate) fn virtual_regular_entry(
-    content: &str,
+pub(crate) fn projected_regular_file(
+    abi_path: &str,
+    content: String,
     mode: u32,
-) -> Result<Option<(FuseV1FileType, u64, u32)>, FuseV1Error> {
-    Ok(Some((
-        FuseV1FileType::Regular,
-        u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
-        mode,
-    )))
+) -> Result<ProjectedFile, FuseV1Error> {
+    Ok(ProjectedFile {
+        attr: FuseV1Attr::new(
+            abi_path.to_owned(),
+            FuseV1FileType::Regular,
+            u64::try_from(content.len()).map_err(|_error| FuseV1Error::Io)?,
+            mode,
+        ),
+        content: Some(content),
+    })
 }
 
 pub(crate) fn projected_metadata_mode(abi_path: &str, metadata: &fs::Metadata) -> u32 {

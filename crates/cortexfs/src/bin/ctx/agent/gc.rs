@@ -1,6 +1,6 @@
 use crate::*;
 
-const SESSION_ARCHIVE_DIR: &str = ".archive";
+const SESSION_ARCHIVE_DIR: &str = "archived_sessions";
 const MAX_SESSION_GC_STATE_BYTES: u64 = 64;
 const MAX_SESSION_GC_INDEX_BYTES: u64 = 64 * 1024;
 const SYSTEM_STORAGE_ROOT: &str = "/var/lib/cortexfs/storage/current";
@@ -28,6 +28,7 @@ const DEFAULT_SESSION_GC_PATTERNS: &[&str] = &[
 
 pub(crate) fn agent_session_gc(root: &Path, args: &AgentSessionGcArgs) -> Result<(), CliError> {
     require_cli_name("agent name", &args.name)?;
+    validate_gc_archive_args(args.delete, args.archive_dir.as_deref())?;
     for keep in &args.keep {
         require_cli_name("session name", keep)?;
     }
@@ -60,22 +61,63 @@ pub(crate) fn agent_session_gc(root: &Path, args: &AgentSessionGcArgs) -> Result
         return Ok(());
     }
 
-    let sources = preflight_gc_sources(&session_root, &candidates)?;
-    let existing_archive = if args.delete {
-        None
-    } else {
-        preflight_gc_archive(&session_root, &candidates)?
-    };
-    let mut index = preflight_gc_index(&session_root, &candidates)?;
-    let archive = if args.delete {
-        None
-    } else {
-        Some(open_gc_archive(&session_root, existing_archive)?)
-    };
+    let archive = (!args.delete)
+        .then(|| gc_archive_agent_root(&session_root, &args.name, args.archive_dir.as_deref()))
+        .transpose()?;
+    apply_gc_candidates(&session_root, archive.as_deref(), args.delete, &candidates)
+}
+
+/// Archives exactly one inactive, non-current durable session.
+pub(crate) fn agent_session_archive(
+    root: &Path,
+    args: &AgentSessionArchiveArgs,
+) -> Result<(), CliError> {
+    require_cli_name("agent name", &args.name)?;
+    require_cli_name("session name", &args.session)?;
+    validate_gc_archive_args(false, args.archive_dir.as_deref())?;
+    let session_root = gc_session_root(root, &args.name)?;
+    let _index_guard = SessionIndexGuard::exclusive(&session_root).map_err(|error| {
+        CliError::unavailable(format!("cannot lock session index: {}", error.errno()))
+    })?;
+    let current = current_session_name(&session_root)?;
+    if args.session == "default" || args.session == current {
+        return Err(CliError::unavailable(format!(
+            "refusing to archive protected session: {}",
+            args.session
+        )));
+    }
+    let candidates = vec![args.session.clone()];
+    if gc_active_or_unsafe(&session_root.join(&args.session)) {
+        return Err(CliError::unavailable(format!(
+            "refusing to archive active or unsafe session: {}",
+            args.session
+        )));
+    }
+    let archive = gc_archive_agent_root(&session_root, &args.name, args.archive_dir.as_deref())?;
+    apply_gc_candidates(&session_root, Some(&archive), false, &candidates)
+}
+
+/// Applies archive or delete to an already selected set of sessions.
+fn apply_gc_candidates(
+    session_root: &Path,
+    archive_path: Option<&Path>,
+    delete: bool,
+    candidates: &[String],
+) -> Result<(), CliError> {
+    let sources = preflight_gc_sources(session_root, candidates)?;
+    let existing_archive = archive_path
+        .map(|archive| preflight_gc_archive(archive, candidates))
+        .transpose()?
+        .flatten();
+    let mut index = preflight_gc_index(session_root, candidates)?;
+    let archive = archive_path
+        .map(|path| open_gc_archive(session_root, path, existing_archive))
+        .transpose()?;
+    let archive_display = archive_path.unwrap_or(session_root);
 
     for source in sources {
         let transaction = stage_gc_index(&index, &source.name)?;
-        let claim = match claim_gc_source(&session_root, &source) {
+        let claim = match claim_gc_source(session_root, &source) {
             Ok(claim) => claim,
             Err(error) => {
                 return Err(gc_rollback_error(
@@ -85,8 +127,8 @@ pub(crate) fn agent_session_gc(root: &Path, args: &AgentSessionGcArgs) -> Result
             }
         };
         let result = archive.as_ref().map_or_else(
-            || delete_gc_source(&session_root, &source, &claim),
-            |archive| archive_gc_source(&session_root, archive, &source, &claim),
+            || delete_gc_source(session_root, &source, &claim),
+            |archive| archive_gc_source(session_root, archive_display, archive, &source, &claim),
         );
         if let Err(failure) = result {
             match failure {
@@ -95,7 +137,7 @@ pub(crate) fn agent_session_gc(root: &Path, args: &AgentSessionGcArgs) -> Result
                     return Err(gc_rollback_error(error, cleanup));
                 }
                 GcSourceFailure::Rollbackable(error) => {
-                    let source_rollback = restore_gc_source(&session_root, &source, &claim);
+                    let source_rollback = restore_gc_source(session_root, &source, &claim);
                     let index_rollback = rollback_gc_index(&index, &transaction);
                     return Err(gc_rollback_error(
                         error,
@@ -105,10 +147,75 @@ pub(crate) fn agent_session_gc(root: &Path, args: &AgentSessionGcArgs) -> Result
             }
         }
         commit_gc_index(&mut index, transaction)?;
-        let action = if args.delete { "deleted" } else { "archived" };
+        let action = if delete { "deleted" } else { "archived" };
         print_line(&format!("{action} {}", terminal_safe_text(&source.name)))?;
     }
     Ok(())
+}
+
+/// Validates archive options at the execution boundary.
+fn validate_gc_archive_args(delete: bool, archive_dir: Option<&Path>) -> Result<(), CliError> {
+    if delete && archive_dir.is_some() {
+        return Err(CliError::usage(
+            "agent session gc --archive-dir cannot be used with --delete",
+        ));
+    }
+    if archive_dir.is_some_and(|path| !path.is_absolute()) {
+        return Err(CliError::usage("--archive-dir must be an absolute path"));
+    }
+    Ok(())
+}
+
+/// Resolves the per-agent archive directory.
+pub(crate) fn gc_archive_agent_root(
+    session_root: &Path,
+    agent: &str,
+    archive_dir: Option<&Path>,
+) -> Result<PathBuf, CliError> {
+    let root = match archive_dir {
+        Some(path) => normalize_gc_path(path)?,
+        None => session_root
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .ok_or_else(|| CliError::unavailable("cannot resolve owning CTX_HOME"))?
+            .join(SESSION_ARCHIVE_DIR),
+    };
+    let archive = normalize_gc_path(&root.join(agent))?;
+    let live = normalize_gc_path(session_root)?;
+    if archive.starts_with(&live) || live.starts_with(&archive) {
+        return Err(CliError::unavailable(format!(
+            "session archive dir overlaps live session storage: {}",
+            archive.display()
+        )));
+    }
+    Ok(archive)
+}
+
+/// Lexically normalizes a path while rejecting parent traversal.
+fn normalize_gc_path(path: &Path) -> Result<PathBuf, CliError> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .map_err(|error| CliError::unavailable(format!("cannot resolve current dir: {error}")))?
+            .join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::RootDir | std::path::Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
+                return Err(CliError::usage(
+                    "--archive-dir must not contain parent path components",
+                ));
+            }
+        }
+    }
+    Ok(normalized)
 }
 
 pub(crate) fn agent_session_select(
@@ -335,11 +442,10 @@ fn preflight_gc_sources(
 }
 
 fn preflight_gc_archive(
-    session_root: &Path,
+    archive: &Path,
     candidates: &[String],
 ) -> Result<Option<fs::File>, CliError> {
-    let archive = session_root.join(SESSION_ARCHIVE_DIR);
-    let directory = match open_plain_directory(&archive) {
+    let directory = match open_plain_directory(archive) {
         Ok(directory) => directory,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
@@ -349,27 +455,6 @@ fn preflight_gc_archive(
             )));
         }
     };
-    let session_directory = open_plain_directory(session_root).map_err(|error| {
-        CliError::unavailable(format!(
-            "cannot open session root {}: {error}",
-            session_root.display()
-        ))
-    })?;
-    let session_metadata = session_directory.metadata().map_err(|error| {
-        CliError::unavailable(format!(
-            "cannot stat session root {}: {error}",
-            session_root.display()
-        ))
-    })?;
-    let archive_metadata = directory.metadata().map_err(|error| {
-        CliError::unavailable(format!("cannot stat {}: {error}", archive.display()))
-    })?;
-    if session_metadata.dev() != archive_metadata.dev() {
-        return Err(CliError::unavailable(format!(
-            "session archive is on another filesystem: {}",
-            archive.display()
-        )));
-    }
     for session in candidates {
         match nix::sys::stat::fstatat(
             &directory,
@@ -394,17 +479,53 @@ fn preflight_gc_archive(
     Ok(Some(directory))
 }
 
-fn open_gc_archive(session_root: &Path, existing: Option<fs::File>) -> Result<fs::File, CliError> {
-    if let Some(existing) = existing {
-        return Ok(existing);
-    }
-    let archive = session_root.join(SESSION_ARCHIVE_DIR);
-    cortexfs::support::plain::create_plain_dir_exclusive(&archive, 0o700).map_err(|error| {
-        CliError::unavailable(format!(
-            "cannot create session archive {}: {error}",
+fn open_gc_archive(
+    session_root: &Path,
+    archive: &Path,
+    existing: Option<fs::File>,
+) -> Result<fs::File, CliError> {
+    let directory = if let Some(existing) = existing {
+        existing
+    } else {
+        create_plain_directory(
+            archive,
+            0o700,
+            "session archive path is not a plain directory",
+            "session archive path contains a non-directory entry",
+            "invalid session archive directory name",
+        )
+        .map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot create session archive {}: {error}",
+                archive.display()
+            ))
+        })?;
+        open_plain_directory(archive).map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot open session archive {}: {error}",
+                archive.display()
+            ))
+        })?
+    };
+    let session_dev = open_plain_directory(session_root)
+        .and_then(|directory| directory.metadata())
+        .map_err(|error| {
+            CliError::unavailable(format!(
+                "cannot stat session root {}: {error}",
+                session_root.display()
+            ))
+        })?
+        .dev();
+    let archive_dev = directory.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", archive.display()))
+    })?;
+    if session_dev != archive_dev.dev() {
+        return Err(CliError::unavailable(format!(
+            "session archive is on another filesystem: {}",
             archive.display()
-        ))
-    })
+        )));
+    }
+    Ok(directory)
 }
 
 fn validate_gc_source(session_root: &Path, source: &GcSource) -> Result<(), CliError> {
@@ -583,6 +704,7 @@ fn restore_gc_source(
 
 fn archive_gc_source(
     session_root: &Path,
+    archive_path: &Path,
     archive: &fs::File,
     source: &GcSource,
     claim: &GcSourceClaim,
@@ -613,7 +735,7 @@ fn archive_gc_source(
         .map_err(|error| {
             GcSourceFailure::Committed(CliError::unavailable(format!(
                 "cannot sync session archive {}: {error}",
-                session_root.join(SESSION_ARCHIVE_DIR).display()
+                archive_path.display()
             )))
         })
 }

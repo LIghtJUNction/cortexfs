@@ -95,7 +95,7 @@ pub fn provider_oauth_refresh_token_env_name(provider: &str) -> String {
     format!("CTX_{}_OAUTH_REFRESH_TOKEN", provider_env_label(provider))
 }
 
-/// Returns the system keychain service name for a provider.
+/// Returns the system secret-store service name for a provider.
 #[must_use]
 pub fn provider_keychain_service(provider: &str) -> String {
     format!("cortexfs:{provider}")

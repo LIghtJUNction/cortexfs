@@ -52,20 +52,6 @@ pub(crate) fn agent_runtime_socket(
         .join("main.sock"))
 }
 
-pub(crate) fn agent_legacy_runtime_socket(
-    root: &Path,
-    name: &str,
-    session: &str,
-) -> Result<PathBuf, CliError> {
-    Ok(PathBuf::from("/run")
-        .join("cortexfs")
-        .join("terminal")
-        .join(current_uid_for_ctx(root)?)
-        .join(name)
-        .join(session)
-        .join("main.sock"))
-}
-
 pub(crate) fn ensure_best_effort_visible_terminal_socket(
     visible_socket: &Path,
     runtime_socket: &Path,

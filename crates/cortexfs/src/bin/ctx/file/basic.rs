@@ -4,10 +4,7 @@ const PROJECTED_CAT_CHUNK_BYTES: usize = 64 * 1024;
 
 pub(crate) fn exec_object(root: &Path, path: &str, args: &[String]) -> Result<ExitCode, CliError> {
     let abi_path = classify_input_path(root, path)?;
-    if !matches!(
-        classify_abi_path(&abi_path),
-        "ctx.model.exec" | "ctx.agent.exec" | "ctx.tool.exec"
-    ) {
+    if parse_abi_path(&abi_path).executable_object().is_none() {
         return Err(CliError::usage(format!(
             "exec requires model/NAME, agent/NAME, or tool/NAME: {path}"
         )));

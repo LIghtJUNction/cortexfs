@@ -80,7 +80,8 @@ pub(crate) fn append_schema_help(text: &mut String, schema: &str) {
 
 pub(crate) fn command_not_found<T>(name: &str) -> Result<T, TshError> {
     Err(TshError::unavailable(format!(
-        "{name}: command not found\ntry: tools"
+        "{name}: command not found\ntry: find {}",
+        terminal_safe_text(name)
     )))
 }
 

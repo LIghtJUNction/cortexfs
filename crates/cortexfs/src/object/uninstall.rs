@@ -1,11 +1,12 @@
 use super::install::{InstallError, InstallTier, create_stage, install_class_path};
 use super::receipt::{EntryKind, EntryReceipt, InspectedObject, inspect_object};
 use super::residue::cleanup_residue;
+use super::swap::{
+    PairProgress, PairStep, quarantine_pair, relative_stage, require_entry, restore_exact,
+    sync_dirs,
+};
 #[cfg(test)]
 use super::swap::{create_foreign_control, create_foreign_executable};
-use super::swap::{
-    move_exact, relative_stage, require_entry, require_missing, restore_exact, sync_dirs,
-};
 use crate::ObjectClass;
 use crate::support::plain::{open_plain_directory, proc_fd_path};
 
@@ -104,139 +105,71 @@ fn quarantine_object(
     let class = &inspected.class_fd;
     let name = inspected.name();
     let control_name = format!("{name}.d");
-    require_entry(class, name, executable, EntryKind::Executable)?;
-    require_entry(class, &control_name, control, EntryKind::Directory)?;
-
-    move_exact(
-        class,
-        name,
-        stage,
-        "executable",
-        executable,
-        EntryKind::Executable,
-    )?;
-    if let Err(detail) = sync_dirs(class, stage) {
-        return Err(rollback_moves(
-            class,
-            stage,
-            name,
-            &control_name,
-            executable,
-            control,
-            true,
-            false,
-            &detail,
-        ));
+    let source = [name, control_name.as_str()];
+    let target = ["executable", "control"];
+    let receipt = [executable, control];
+    let dirs = [class, stage];
+    let mut progress = PairProgress::default();
+    loop {
+        progress = quarantine_pair(dirs, source, target, receipt, progress);
+        if let Some(detail) = progress.detail.take() {
+            if !progress.completed[0] {
+                return Err(detail);
+            }
+            return Err(rollback_moves(
+                class, stage, source, receipt, &progress, &detail,
+            ));
+        }
+        match progress.phase {
+            PairStep::ExecutableSynced if fault == 1 => {
+                #[cfg(test)]
+                create_foreign_executable(class, name)?;
+            }
+            PairStep::ControlSynced if fault == 2 => {
+                #[cfg(test)]
+                create_foreign_control(class, &control_name)?;
+            }
+            PairStep::Complete => break,
+            _ => {}
+        }
     }
-    if fault == 1 {
-        #[cfg(test)]
-        create_foreign_executable(class, name)?;
-    }
-    if let Err(detail) = require_missing(class, name) {
-        return Err(rollback_moves(
-            class,
-            stage,
-            name,
-            &control_name,
-            executable,
-            control,
-            true,
-            false,
-            &detail,
-        ));
-    }
-
-    if let Err(detail) = move_exact(
-        class,
-        &control_name,
-        stage,
-        "control",
-        control,
-        EntryKind::Directory,
-    ) {
-        return Err(rollback_moves(
-            class,
-            stage,
-            name,
-            &control_name,
-            executable,
-            control,
-            true,
-            false,
-            &detail,
-        ));
-    }
-    if let Err(detail) = sync_dirs(class, stage) {
-        return Err(rollback_moves(
-            class,
-            stage,
-            name,
-            &control_name,
-            executable,
-            control,
-            true,
-            true,
-            &detail,
-        ));
-    }
-    if fault == 2 {
-        #[cfg(test)]
-        create_foreign_control(class, &control_name)?;
-    }
-    let postcheck = require_missing(class, name)
-        .and_then(|()| require_missing(class, &control_name))
-        .and_then(|()| require_stage(stage, executable, control))
-        .and_then(|()| sync_dirs(class, stage));
+    let postcheck =
+        require_stage(stage, executable, control).and_then(|()| sync_dirs(class, stage));
     if let Err(detail) = postcheck {
         return Err(rollback_moves(
-            class,
-            stage,
-            name,
-            &control_name,
-            executable,
-            control,
-            true,
-            true,
-            &detail,
+            class, stage, source, receipt, &progress, &detail,
         ));
     }
     Ok(())
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "rollback keeps both exact object receipts and path roles explicit"
-)]
 fn rollback_moves(
     class: &fs::File,
     stage: &fs::File,
-    name: &str,
-    control_name: &str,
-    executable: EntryReceipt,
-    control: EntryReceipt,
-    executable_moved: bool,
-    control_moved: bool,
+    source: [&str; 2],
+    receipt: [EntryReceipt; 2],
+    progress: &PairProgress,
     detail: &str,
 ) -> String {
-    if control_moved
+    if progress.completed[1]
         && let Err(error) = restore_exact(
             stage,
             "control",
             class,
-            control_name,
-            control,
+            source[1],
+            receipt[1],
             EntryKind::Directory,
         )
     {
         return format!("{detail}; control rollback failed: {error}");
     }
-    if executable_moved
+    if progress.completed[0]
         && let Err(error) = restore_exact(
             stage,
             "executable",
             class,
-            name,
-            executable,
+            source[0],
+            receipt[0],
             EntryKind::Executable,
         )
     {

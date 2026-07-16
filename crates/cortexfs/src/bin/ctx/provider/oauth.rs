@@ -1,10 +1,12 @@
 use crate::*;
 
+/// Default curl binary used for OAuth token exchange.
 pub(crate) const CTX_PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
 const OAUTH_CALLBACK_RESPONSE_BODY: &str =
     "CortexFS OAuth login complete. You may close this tab.\n";
 const MAX_OAUTH_TOKEN_RESPONSE_BYTES: u64 = 1024 * 1024;
 
+/// Starts OAuth login flow for a provider and waits for callback completion.
 pub(crate) fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
     let pkce = oauth_pkce_from_system_entropy()?;
@@ -49,6 +51,7 @@ pub(crate) fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<
     print_line("oauth login ok")
 }
 
+/// Returns the static confirmation text shown to callback browsers.
 pub(crate) fn oauth_callback_response() -> String {
     format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\n\r\n{}",
@@ -57,6 +60,7 @@ pub(crate) fn oauth_callback_response() -> String {
     )
 }
 
+/// Checks and prints OAuth token presence for a provider.
 pub(crate) fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
     let service = provider_keychain_service(provider);
@@ -72,6 +76,7 @@ pub(crate) fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
     ))
 }
 
+/// Accepts the incoming OAuth callback socket connection.
 pub(crate) fn accept_oauth_callback(
     listener: &std::net::TcpListener,
     deadline: std::time::Instant,
@@ -94,6 +99,7 @@ pub(crate) fn accept_oauth_callback(
     }
 }
 
+/// Refreshes OAuth credentials using existing refresh token.
 pub(crate) fn provider_oauth_refresh(provider: &str) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
     let service = provider_keychain_service(provider);
@@ -106,6 +112,7 @@ pub(crate) fn provider_oauth_refresh(provider: &str) -> Result<(), CliError> {
     print_line("oauth refresh ok")
 }
 
+/// Loads provider OAuth configuration from provider directory.
 pub(crate) fn provider_oauth_config(
     provider: &str,
 ) -> Result<cortexfs::OAuthProviderConfig, CliError> {
@@ -118,6 +125,7 @@ pub(crate) fn provider_oauth_config(
     Ok(config)
 }
 
+/// Executes token exchange against configured OAuth token endpoint.
 pub(crate) fn exchange_oauth_token(
     token_url: &str,
     form: &str,
@@ -165,12 +173,14 @@ pub(crate) fn exchange_oauth_token(
         .map_err(|_error| CliError::unavailable("invalid oauth token response"))
 }
 
+/// Returns the base `curl` process configuration for OAuth exchange.
 pub(crate) fn ctx_provider_curl_command() -> ProcessCommand {
     let mut command = ProcessCommand::new(CTX_PROVIDER_CURL_BIN);
     command.env_clear().arg("-q").arg("--config").arg("-");
     command
 }
 
+/// Persists exchanged OAuth tokens to keychain-backed storage.
 pub(crate) fn store_oauth_tokens(
     provider: &str,
     config: &cortexfs::OAuthProviderConfig,
@@ -186,10 +196,12 @@ pub(crate) fn store_oauth_tokens(
     Ok(())
 }
 
+/// Checks whether a secret entry exists in the keychain.
 pub(crate) fn keychain_has_secret(service: &str, account: &str) -> Result<bool, CliError> {
     keychain_get_secret(service, account).map(|value| value.is_some())
 }
 
+/// Retrieves an optional secret value from the keychain.
 pub(crate) fn keychain_get_secret(
     service: &str,
     account: &str,
@@ -197,38 +209,42 @@ pub(crate) fn keychain_get_secret(
     let entry = match keyring::Entry::new(service, account) {
         Ok(entry) => entry,
         Err(keyring::Error::NoDefaultStore) => return Ok(None),
-        Err(_error) => return Err(CliError::unavailable("system keychain unavailable")),
+        Err(_error) => return Err(CliError::unavailable("system secret store unavailable")),
     };
     match entry.get_password() {
         Ok(secret) if secret.is_empty() => Ok(None),
         Ok(secret) => Ok(Some(secret)),
         Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_error) => Err(CliError::unavailable("system keychain unavailable")),
+        Err(_error) => Err(CliError::unavailable("system secret store unavailable")),
     }
 }
 
+/// Stores a secret value into keychain for service and account.
 pub(crate) fn keychain_set_secret(
     service: &str,
     account: &str,
     secret: &str,
 ) -> Result<(), CliError> {
     let entry = keyring::Entry::new(service, account)
-        .map_err(|_error| CliError::unavailable("system keychain unavailable"))?;
+        .map_err(|_error| CliError::unavailable("system secret store unavailable"))?;
     entry
         .set_password(secret)
-        .map_err(|_error| CliError::unavailable("system keychain unavailable"))
+        .map_err(|_error| CliError::unavailable("system secret store unavailable"))
 }
 
+/// Returns the keychain service namespace for provider credentials.
 pub(crate) fn provider_keychain_service(provider: &str) -> String {
     format!("cortexfs:{provider}")
 }
 
+/// Derives PKCE challenge materials from secure entropy.
 pub(crate) fn oauth_pkce_from_system_entropy() -> Result<cortexfs::OAuthPkce, CliError> {
     let entropy = read_system_entropy(32)?;
     cortexfs::OAuthPkce::from_entropy(&entropy)
         .map_err(|_error| CliError::unavailable("cannot create oauth pkce verifier"))
 }
 
+/// Generates an OAuth state value from secure entropy.
 pub(crate) fn oauth_state_from_system_entropy() -> Result<String, CliError> {
     Ok(hex_bytes(&read_system_entropy(16)?))
 }

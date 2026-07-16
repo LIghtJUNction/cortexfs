@@ -210,12 +210,6 @@ pub(super) fn agent_session_root(root: &Path, agent: &str) -> PathBuf {
     agent_home(root, agent).join("session")
 }
 
-pub(super) fn create_shared_queue_layout(queue: &Path) {
-    for dir in SHARED_QUEUE_REQUIRED_DIRS {
-        assert!(fs::create_dir_all(queue.join(dir)).is_ok());
-    }
-}
-
 pub(super) fn mount_table_for_target(target: &Path, mode: &str, options: &str) -> MountTable {
     mount_table_for_source_target(&target.display().to_string(), target, mode, options)
 }
@@ -285,6 +279,8 @@ pub(super) fn create_complete_object_layout(
             ""
         } else if class == ObjectClass::Model && *file == "limit" {
             "unknown"
+        } else if class == ObjectClass::Model && *file == "driver" {
+            "default=openai-chat"
         } else if class == ObjectClass::Tool && *file == "schema" {
             "{\"type\":\"object\"}"
         } else if class == ObjectClass::Agent {

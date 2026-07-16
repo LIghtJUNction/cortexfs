@@ -105,6 +105,37 @@ fn context_jsonl_accepts_spec_record_shapes() {
 }
 
 #[test]
+fn context_jsonl_preserves_field_issue_order() {
+    let cases: &[(ContextJsonlKind, &[&str])] = &[
+        (ContextJsonlKind::Facts, &["id", "text", "source"]),
+        (ContextJsonlKind::Decisions, &["id", "decision", "source"]),
+        (ContextJsonlKind::Refs, &["id", "path", "kind", "summary"]),
+        (
+            ContextJsonlKind::SwapIndex,
+            &["id", "kind", "source", "summary", "tokens"],
+        ),
+        (
+            ContextJsonlKind::DedupIndex,
+            &["hash", "refs", "bytes", "tokens"],
+        ),
+    ];
+    for &(kind, expected) in cases {
+        let report = inspect_context_jsonl(kind, "{}\n");
+        let actual = report
+            .issues()
+            .iter()
+            .map(|issue| match *issue {
+                ContextJsonlIssue::MissingStringField { ref field, .. }
+                | ContextJsonlIssue::MissingNumberField { ref field, .. }
+                | ContextJsonlIssue::MissingStringArrayField { ref field, .. } => field.as_str(),
+                _ => "unexpected issue",
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
 fn context_jsonl_rejects_invalid_records() {
     let facts = inspect_context_jsonl(
         ContextJsonlKind::Facts,

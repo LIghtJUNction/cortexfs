@@ -1,4 +1,4 @@
-use crate::*;
+use crate::is_object_name;
 
 #[must_use]
 pub fn policy_subject_from_label(label: &str) -> Option<&str> {

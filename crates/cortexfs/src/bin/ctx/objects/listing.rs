@@ -41,12 +41,7 @@ pub(crate) fn resolve_ls_path(root: &Path, target: &LsTarget) -> Result<LsPath, 
 
     let resolved = resolve_abi_path(root, &path)?;
     let abi_path = classify_input_path(root, &path)?;
-    let object_class = match abi_path.as_str() {
-        "model" => Some(ObjectClass::Model),
-        "agent" => Some(ObjectClass::Agent),
-        "tool" => Some(ObjectClass::Tool),
-        _ => None,
-    };
+    let object_class = ObjectClass::parse(&abi_path);
 
     Ok(LsPath {
         path: resolved,

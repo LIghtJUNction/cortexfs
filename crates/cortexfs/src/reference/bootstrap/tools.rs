@@ -129,9 +129,6 @@ cache_capacity=32
 window_percent=1
 ";
 
-pub(crate) const DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS: &[&str] =
-    &["mcp.github.search_issues", "agent.start", "agent.stop"];
-
 pub(crate) fn reference_tool_stub_script(name: &str) -> Option<&'static str> {
     match name {
         "tsh" => Some(reference_exec_named_tool_script("tsh")),

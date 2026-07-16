@@ -37,6 +37,10 @@ The stable paths below are the CortexFS state that `ctx` reads and writes:
 /ctx/shared
 ```
 
+In some deployments, `/ctx/agent/<agent>.sock` is an owner-authorized symlink
+to a user runtime socket, and in some deployments it may be a direct socket
+node. Probe the live mount before assuming one implementation form.
+
 `/ctx/tool` is the system tool tier. `/ctx/home/<uid>/tool` is the user's own
 tool tier, not a place for default symlink copies of system tools. An actual
 agent runtime may see a filtered in-memory FUSE projection of these tiers.

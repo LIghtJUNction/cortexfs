@@ -153,10 +153,6 @@ pub(crate) fn read_agent_processes(root: &Path) -> Result<Vec<AgentProcess>, Cli
     Ok(processes)
 }
 
-pub(crate) fn default_agent_process_model(name: &str) -> &'static str {
-    default_agent_model_for_name(name)
-}
-
 pub(crate) fn agent_object_path(root: &Path, agent: &str) -> PathBuf {
     root.join("agent").join(agent)
 }
@@ -347,7 +343,7 @@ pub(crate) fn read_agent_model_for_context(
     context: &str,
 ) -> Result<String, CliError> {
     let model = read_agent_control_trimmed(control, "model")?
-        .unwrap_or_else(|| default_agent_process_model(control_agent_name(control)).to_owned());
+        .unwrap_or_else(|| default_agent_model_for_name(control_agent_name(control)).to_owned());
     if !(is_model_name(&model) || is_model_alias(&model)) {
         return Err(CliError::usage(format!(
             "invalid {context} model for {}: {model}",

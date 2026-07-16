@@ -286,8 +286,8 @@ name.d/     small control files
 Examples:
 
 ```text
-/ctx/model/openai/gpt-5.4-mini
-/ctx/model/openai/gpt-5.4-mini.d/driver
+/ctx/model/openai/gpt-5.6
+/ctx/model/openai/gpt-5.6.d/driver
 /ctx/agent/coder
 /ctx/agent/coder.sock
 /ctx/agent/coder.d/policy
@@ -301,7 +301,7 @@ Models live under `/ctx/model/<provider>/<model>`:
 
 ```text
 /ctx/model/debug/echo
-/ctx/model/openai/gpt-5.4-mini
+/ctx/model/openai/gpt-5.6
 /ctx/model/anthropic/claude-sonnet-4
 /ctx/model/google/gemini-2.5-pro
 ```
@@ -310,16 +310,16 @@ They are executable files. You can call a model path directly for one-shot
 inference:
 
 ```bash
-/ctx/model/openai/gpt-5.4-mini "explain this error"
-echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.4-mini
-ctx exec model/openai/gpt-5.4-mini "summarize README.md"
+/ctx/model/openai/gpt-5.6 "explain this error"
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.6
+ctx exec model/openai/gpt-5.6 "summarize README.md"
 ```
 
 `/ctx/model/main` is the conventional default model alias. It is only a symlink,
 not a privileged registry entry. Change the symlink to change the default model:
 
 ```bash
-ln -sfn /ctx/model/openai/gpt-5.4-mini /ctx/home/$(id -u)/model/main
+ln -sfn /ctx/model/openai/gpt-5.6 /ctx/home/$(id -u)/model/main
 ```
 
 Provider API differences are handled below the filesystem ABI. CortexFS keeps
@@ -508,9 +508,7 @@ foreign inodes and may leave auditable safety residue.
 
 `/ctx`, `CTX_ROOT`, and `--root` describe the ABI projection, not a writable
 installation target. `tsh.config` controls the visible tool metadata context size; pinned
-entries are protected from automatic context eviction. The Tool SDK also
-defines a `DynamicTool` loader, but the core runtime does not yet consume that
-loader or keep native libraries resident.
+entries are protected from automatic context eviction.
 
 Tool metadata printed to a terminal is escaped so untrusted descriptions and
 schemas cannot inject terminal control sequences.
@@ -587,23 +585,31 @@ Clients should read `session/index/current`, `session/index/list`, and
 `session/index/by-cwd/*` instead of maintaining a second hidden history store.
 
 Session garbage collection is dry-run by default. `--yes` archives matching
-live sessions under the backing store's internal `.archive/` directory;
-permanent deletion requires the explicit `--delete --yes` combination.
+live sessions outside the live session tree under
+`$CTX_HOME/archived_sessions/<agent>/<session>/`; permanent deletion requires
+the explicit `--delete --yes` combination. Use `--archive-dir /absolute/path`
+to choose another non-overlapping archive root, or archive one session
+immediately with `ctx agent session archive AGENT SESSION`.
 `default`, the current session, every session whose plain bounded `state` is
 `active`, and every explicit `--keep` name are always protected:
 
 ```bash
 ctx agent session gc coder --dry-run
+ctx agent session archive coder release-investigation
+ctx agent session archive coder old-run --archive-dir /srv/cortexfs-archive
 ctx agent session gc coder --dry-run --match '*' --keep release-investigation
 ctx agent session gc coder --yes --match '*smoke*' --older-than-days 7 --keep release-investigation
+ctx agent session gc coder --yes --archive-dir /srv/cortexfs-archive --match 'e2e-*'
 ctx agent session gc coder --delete --dry-run --match '*'
 ctx agent session gc coder --delete --yes --match '*smoke*' --older-than-days 30
 ```
 
 Review the complete mode-specific dry-run list before adding `--yes`. Without
 `--match`, GC uses conservative test-session patterns rather than treating
-every session as disposable. `.archive/` is backing-store internals, not a new
-`/ctx` root ABI namespace. There is no restore command.
+every session as disposable. `archived_sessions/` is outside the live session
+tree and is not a new `/ctx` root ABI namespace. Archived directories preserve
+the complete original session tree and raw JSONL files unchanged. There is no
+restore command.
 
 Provider failures are durable session facts. When a run terminates with an
 error, CortexFS records the original provider `error` frame followed by
@@ -618,7 +624,7 @@ Policy v0 is a minimal allowlist:
 ```text
 allow coder_t tool:tsh execute
 allow coder_t tool:fs.read execute
-allow coder_t model:openai/gpt-5.4-mini use
+allow coder_t model:openai/gpt-5.6 use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
 ```
@@ -698,3 +704,45 @@ scripts/verify-verus.sh
 
 Current proofs cover the v1 object-name ABI predicate; see
 [docs/proofs/verus.md](docs/proofs/verus.md).
+
+## External references
+
+### Projects
+- [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)
+- [modelcontextprotocol/filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
+- [j0hanz/filesystem-mcp](https://github.com/j0hanz/filesystem-mcp)
+- [rust-mcp-stack/rust-mcp-filesystem](https://github.com/rust-mcp-stack/rust-mcp-filesystem)
+- [mark3labs/mcp-filesystem-server](https://github.com/mark3labs/mcp-filesystem-server)
+- [cyanheads/filesystem-mcp-server](https://github.com/cyanheads/filesystem-mcp-server)
+- [TexasFortress-AI/rs_filesystem](https://github.com/TexasFortress-AI/rs_filesystem)
+- [colinrozzi/fs-mcp-server](https://github.com/colinrozzi/fs-mcp-server)
+- [corporatepiyush/mcp-filesystem-rust](https://github.com/corporatepiyush/mcp-filesystem-rust)
+- [rawr-ai/mcp-filesystem](https://github.com/rawr-ai/mcp-filesystem)
+- [safurrier/mcp-filesystem](https://github.com/safurrier/mcp-filesystem)
+- [SylphxAI/filesystem-mcp](https://github.com/SylphxAI/filesystem-mcp)
+- [QuantGeekDev/mcp-filesystem](https://github.com/QuantGeekDev/mcp-filesystem)
+- [efforthye/fast-filesystem-mcp](https://github.com/efforthye/fast-filesystem-mcp)
+- [lileeei/sand-mcp-fs](https://github.com/lileeei/sand-mcp-fs)
+- [proofmath-owner/ai-filesystem-mcp](https://github.com/proofmath-owner/ai-filesystem-mcp)
+- [github/github-mcp-server](https://github.com/github/github-mcp-server)
+- [conikeec/mcpr](https://github.com/conikeec/mcpr)
+- [strawgate/filesystem-operations-mcp](https://github.com/strawgate/filesystem-operations-mcp)
+- [webconsulting/mcp-server-wsl-filesystem](https://github.com/webconsulting/mcp-server-wsl-filesystem)
+- [avelino/mcp](https://github.com/avelino/mcp)
+- [wonker007/surgicalfs-mcpserver](https://github.com/wonker007/surgicalfs-mcpserver)
+
+### CortexFS MCP
+
+- CortexFS PR:
+  - [#89](https://github.com/LIghtJUNction/cortexfs/pull/89)
+  - [#88](https://github.com/LIghtJUNction/cortexfs/pull/88)
+  - [#87](https://github.com/LIghtJUNction/cortexfs/pull/87)
+- MCP PR/Issue references moved to source comments:
+  - `crates/cortexfs-tool-sdk/src/lib.rs`
+
+### Spec references
+- [Model Context Protocol (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [Model Context Protocol (2025-03-26)](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
+- [Linux FUSE documentation](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
+- [mount.fuse page](https://manpages.ubuntu.com/manpages/jammy/man8/mount.fuse.8.html)
+- [MCP security and authorization](https://modelcontextprotocol.io/docs/tutorials/security/authorization)

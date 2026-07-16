@@ -265,7 +265,7 @@ pub(crate) fn child_path_rejects_special_or_escaped_names() {
 #[test]
 pub(crate) fn socket_overlay_preserves_request_owner_for_sticky_agent_directory() {
     let root = unique_mount_test_dir("socket-overlay-owner");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(fs::create_dir_all(root.join("agent")).is_ok());
     let fs = CortexFuse::new(root.to_path_buf());
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };
@@ -294,6 +294,33 @@ pub(crate) fn socket_overlay_preserves_request_owner_for_sticky_agent_directory(
         fs.projected_getattr("agent/scratch.sock"),
         Ok(ref attr) if attr.uid() == 1234
     ));
+}
+
+#[test]
+pub(crate) fn backing_node_precedes_overlay_for_getattr_and_lookup() {
+    let root = unique_mount_test_dir("socket-overlay-backing-precedence");
+    assert!(fs::create_dir_all(root.join("agent")).is_ok());
+    assert!(fs::write(root.join("agent/backed.sock"), "disk\n").is_ok());
+    let fs = CortexFuse::new(root.to_path_buf());
+    assert!(fs.is_ok());
+    let Ok(fs) = fs else { return };
+    assert_eq!(
+        fs.insert_socket_overlay("agent/backed.sock", 1234, 2345, 0o777),
+        Ok(())
+    );
+    let direct = fs.projected_node_for_path("agent/backed.sock");
+    let parent = fs.projected_node_for_path("agent");
+    let lookup = parent.and_then(|parent| fs.projected_lookup(&parent, "backed.sock"));
+
+    assert!(matches!(
+        (&direct, &lookup),
+        (Ok(left), Ok(right))
+            if left == right && left.attr().file_type() == FuseV1FileType::Regular
+    ));
+    assert_eq!(
+        fs.projected_getattr("agent/backed.sock"),
+        direct.map(|node| node.attr)
+    );
 }
 
 #[test]
@@ -611,7 +638,9 @@ pub(crate) fn statfs_reports_backing_source_capacity() {
 #[test]
 pub(crate) fn xattrs_describe_virtual_memory_and_disk_backing() {
     let root = unique_mount_test_dir("xattrs");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(fs::create_dir_all(root.join("tool/tsh.d")).is_ok());
+    assert!(fs::write(root.join("tool/tsh"), "#!/bin/sh\n").is_ok());
+    assert!(fs::write(root.join("tool/tsh.d/schema"), "{}\n").is_ok());
     let fs = CortexFuse::new(root.to_path_buf());
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };

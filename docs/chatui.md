@@ -5,6 +5,10 @@ reads documented `/ctx` files and exchanges newline-delimited JSON with
 `/ctx/agent/<agent>.sock`. UI settings and themes belong in plain files or
 environment variables; the runtime does not require a UI database.
 
+`/ctx/agent/<agent>.sock` may be an owner-authorized runtime symlink or a direct
+socket node depending on deployment. Probe the mounted tree before assuming one
+implementation form; use `readlink -f`/`nc -U` as runtime-sensitive probes.
+
 Durable history lives below
 `/ctx/home/<uid>/agent/<agent>/session/<session>/`: `messages.jsonl` contains
 messages, `events.jsonl` contains events, `latest.md` is a convenience view,

@@ -1339,7 +1339,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
     ));
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.5"))
+        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
     );
     assert_eq!(
         projection.readlink("model/helper"),
@@ -1365,7 +1365,7 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
     assert!(projection.remove_model_alias("model/main").is_ok());
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.5"))
+        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
     );
     let debug_node = projection.lookup(&model_node, "debug");
     assert!(matches!(
@@ -1472,6 +1472,24 @@ fn fuse_v1_projection_exposes_reference_tree_ops() {
 }
 
 #[test]
+fn fuse_v1_projection_inspection_never_executes_object_wrapper() {
+    let root = clean_test_dir("fuse-v1-inspection-no-exec");
+    let marker = root.join("projection-executed");
+    assert!(fs::create_dir_all(root.join("tool/probe.d")).is_ok());
+    write_text_file(
+        &root.join("tool/probe"),
+        &format!("#!/bin/sh\ntouch {}\n", marker.display()),
+    );
+    set_file_mode(&root.join("tool/probe"), 0o755);
+    let projection =
+        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+
+    assert!(projection.getattr("tool/probe").is_ok());
+    assert!(projection.read_to_string("tool/probe").is_ok());
+    assert!(!marker.exists());
+}
+
+#[test]
 fn fuse_v1_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
     let root = reference_tree("fuse-v1-model-alias-temp");
     let projection =
@@ -1546,7 +1564,7 @@ fn fuse_v1_projection_model_alias_rejects_symlink_model_directory_without_touchi
 
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.5"))
+        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
     );
     assert_eq!(
         projection.set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4")),

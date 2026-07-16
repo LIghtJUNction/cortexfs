@@ -71,11 +71,13 @@ fn ctx_executable_open_refuses_symlink_targets() {
 fn provider_config_reader_lists_plain_config_dir() {
     let root = clean_test_dir("ctx-provider-config-reader-dir");
     assert!(fs::create_dir_all(&root).is_ok());
-    assert!(fs::write(
-        root.join("local.json"),
-        "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
-    )
-    .is_ok());
+    assert!(
+        fs::write(
+            root.join("local.json"),
+            "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
+        )
+        .is_ok()
+    );
 
     assert!(read_provider_config_from_dir("local", &root).is_ok());
 }
@@ -86,11 +88,13 @@ fn provider_config_reader_rejects_symlink_config_dir() {
     let outside = clean_test_dir("ctx-provider-config-reader-dir-symlink-outside");
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(fs::write(
-        outside.join("local.json"),
-        "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
-    )
-    .is_ok());
+    assert!(
+        fs::write(
+            outside.join("local.json"),
+            "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
+        )
+        .is_ok()
+    );
     assert!(std::os::unix::fs::symlink(&outside, root.join("providers.d")).is_ok());
 
     assert!(read_provider_config_from_dir("local", &root.join("providers.d")).is_err());
@@ -105,7 +109,10 @@ fn provider_secret_stdin_reader_accepts_input_at_limit() {
         MAX_PROVIDER_SECRET_STDIN_BYTES,
     );
 
-    assert_eq!(read.unwrap_or_default().len(), MAX_PROVIDER_SECRET_STDIN_BYTES);
+    assert_eq!(
+        read.unwrap_or_default().len(),
+        MAX_PROVIDER_SECRET_STDIN_BYTES
+    );
 }
 
 #[test]
@@ -126,11 +133,13 @@ fn provider_config_file_reader_refuses_symlink_intermediate_directory() {
     let outside = clean_test_dir("ctx-provider-config-reader-intermediate-outside");
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(fs::create_dir_all(outside.join("providers.d")).is_ok());
-    assert!(fs::write(
-        outside.join("providers.d/local.json"),
-        "{\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
-    )
-    .is_ok());
+    assert!(
+        fs::write(
+            outside.join("providers.d/local.json"),
+            "{\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
+        )
+        .is_ok()
+    );
     assert!(std::os::unix::fs::symlink(&outside, root.join("etc")).is_ok());
 
     assert!(read_provider_config_file(&root.join("etc/providers.d/local.json")).is_err());
@@ -174,12 +183,9 @@ fn provider_config_atomic_write_rejects_symlink_parent_directory() {
     assert!(atomic_write_provider_config(&path, "{\"base_url\":\"http://new/v1\"}\n").is_err());
     assert!(!outside.join("local.json").exists());
     assert!(!fs::read_dir(&outside).map_or(true, |entries| {
-        entries.filter_map(Result::ok).any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".tmp")
-        })
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().starts_with(".tmp"))
     }));
 }
 
@@ -195,14 +201,13 @@ fn provider_config_atomic_write_rejects_symlink_intermediate_directory() {
 
     assert!(atomic_write_provider_config(&path, "{\"base_url\":\"http://new/v1\"}\n").is_err());
     assert!(!outside.join("providers.d/local.json").exists());
-    assert!(!fs::read_dir(outside.join("providers.d")).map_or(true, |entries| {
-        entries.filter_map(Result::ok).any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".tmp")
+    assert!(
+        !fs::read_dir(outside.join("providers.d")).map_or(true, |entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|entry| entry.file_name().to_string_lossy().starts_with(".tmp"))
         })
-    }));
+    );
 }
 
 #[test]

@@ -17,23 +17,45 @@ use std::process::ExitCode;
 pub use cortexfs_runtime_client::agent::AgentToolObservation;
 use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI, read_agent_invocation};
 
+/// Maximum number of arguments supported by a single tool call.
+///
+/// Keeping this explicit avoids argv vector overrun in child processes.
 const MAX_AGENT_TOOL_ARGC: usize = 64;
+/// Maximum total byte budget for serialized tool-call arguments.
+///
+/// This is enforced before launch to prevent transport fragmentation.
 const MAX_AGENT_TOOL_ARG_BYTES: usize = 8 * 1024;
+/// Maximum length of stable object identifiers (agent and tool names).
+///
+/// The value aligns with filesystem-safe identifier conventions used by the runtime.
 const MAX_OBJECT_NAME_LEN: usize = 255;
+/// Maximum child input size accepted by handoff flow.
+///
+/// Exceeding this is rejected up-front instead of truncating invocation text.
 const MAX_CHILD_INPUT_BYTES: usize = 8 * 1024;
 
 /// Inputs supplied to one executable-agent run.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentInvocation {
+    /// Run ID from `CTX_RUN_ID`.
     run_id: String,
+    /// User input payload.
     input: String,
+    /// Agent name from environment binding.
     agent: Option<String>,
+    /// Session name from environment binding.
     session: Option<String>,
+    /// Optional `CTX_ROOT` binding.
     ctx_root: Option<String>,
+    /// Optional `CTX_SOURCE` binding.
     source_root: Option<String>,
+    /// Optional historical context for this run.
     history_messages: Option<String>,
+    /// Optional tool-context context for continuation.
     tool_context: Option<String>,
+    /// Current continuation step.
     step: u8,
+    /// Optional prior observation for step > 0.
     observation: Option<AgentToolObservation>,
 }
 
@@ -110,7 +132,9 @@ impl AgentInvocation {
 /// Error returned by custom agent logic.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentError {
+    /// Stable errno-style code.
     code: String,
+    /// Human-readable diagnostic text.
     message: String,
 }
 
@@ -170,6 +194,10 @@ impl AgentToolCallRequest {
         Ok(request)
     }
 
+    /// Validates tool call identifiers and argument constraints before use.
+    ///
+    /// Validation uses a stable object-name rule and keeps invocation payload
+    /// bounded to avoid oversized argv or malformed transitions.
     fn validate(&self) -> AgentResult<()> {
         if !is_object_name(&self.id) {
             return Err(AgentError::invalid("invalid tool_call id"));
@@ -264,6 +292,10 @@ impl<W: Write> AgentEmitter<W> {
             .map_err(|error| AgentError::new("EIO", error.to_string()))
     }
 
+    /// Emits the canonical host event that requests a tool execution.
+    ///
+    /// The request is revalidated at emit time so the host always receives a
+    /// fully safe payload.
     fn tool_call(&mut self, request: &AgentToolCallRequest) -> AgentResult<()> {
         request.validate()?;
         self.frame(&json!({
@@ -276,6 +308,8 @@ impl<W: Write> AgentEmitter<W> {
         .map_err(|error| AgentError::new("EIO", error.to_string()))
     }
 
+    /// Writes one JSON frame and flushes it so host readers observe progress
+    /// deterministically.
     fn frame(&mut self, value: &Value) -> io::Result<()> {
         serde_json::to_writer(&mut self.writer, value)?;
         self.writer.write_all(b"\n")?;
@@ -293,6 +327,7 @@ pub trait Agent: fmt::Debug {
     ) -> AgentResult<AgentOutcome>;
 }
 
+/// Runs one invocation and converts the typed outcome into a success boolean.
 fn run_agent_status(
     agent: &dyn Agent,
     invocation: &AgentInvocation,
@@ -352,6 +387,7 @@ where
     }
 }
 
+/// Checks startup compatibility with runtime capability ping before executing the agent.
 fn startup_handshake(agent: &str) -> Result<(), cortexfs_runtime_client::RuntimeClientError> {
     cortexfs_runtime_client::ping_from_environment(agent).map(|_| ())
 }
@@ -390,6 +426,10 @@ pub fn create_child(
     )
 }
 
+/// Validates names used for child and tool call identifiers.
+///
+/// The same naming rule is shared by child creation and tool routing to avoid
+/// ambiguous object identifiers.
 fn is_object_name(name: &str) -> bool {
     if name.is_empty()
         || name.len() > MAX_OBJECT_NAME_LEN
@@ -403,6 +443,10 @@ fn is_object_name(name: &str) -> bool {
     })
 }
 
+/// Detects whether an event already carries canonical tool-result payload.
+///
+/// This filter rejects re-encoding mistakes where a tool response is
+/// accidentally emitted as free-form agent event content.
 fn event_has_tool_result(event: &Value) -> bool {
     event.get("role").and_then(Value::as_str) == Some("tool")
         || event
@@ -415,6 +459,9 @@ fn event_has_tool_result(event: &Value) -> bool {
             })
 }
 
+/// Reads an environment variable as UTF-8 when present.
+///
+/// Non-UTF-8 values are ignored to keep environment parsing fail-safe.
 fn env_text(name: &str) -> Option<String> {
     env::var_os(name).and_then(|value| value.into_string().ok())
 }
@@ -439,6 +486,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
 
+    /// Builds a hosted invocation envelope for subprocess-level tests.
     fn hosted_envelope(run: &str, step: u8) -> String {
         serde_json::json!({
             "schema": cortexfs_runtime_client::agent::AGENT_INVOCATION_SCHEMA,

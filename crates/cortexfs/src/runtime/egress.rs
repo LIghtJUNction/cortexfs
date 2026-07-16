@@ -30,30 +30,21 @@ pub(crate) fn is_provider_model(ctx_root: &Path, model: &str) -> Result<bool, Pr
 }
 
 /// Stable failure while planning or creating a provider egress boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
 pub enum ProviderEgressError {
+    #[error("invalid provider egress run")]
     InvalidRun,
+    #[error("invalid provider egress model")]
     InvalidModel,
+    #[error("missing provider egress control")]
     MissingControl,
+    #[error("invalid provider egress base URL")]
     InvalidBaseUrl,
+    #[error("conflicting provider egress authority")]
     AuthorityConflict,
+    #[error("cannot create provider egress boundary")]
     CannotCreate,
 }
-
-impl fmt::Display for ProviderEgressError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match *self {
-            Self::InvalidRun => "invalid provider egress run",
-            Self::InvalidModel => "invalid provider egress model",
-            Self::MissingControl => "missing provider egress control",
-            Self::InvalidBaseUrl => "invalid provider egress base URL",
-            Self::AuthorityConflict => "conflicting provider egress authority",
-            Self::CannotCreate => "cannot create provider egress boundary",
-        })
-    }
-}
-
-impl std::error::Error for ProviderEgressError {}
 
 #[derive(Debug, Eq, PartialEq)]
 struct ProviderTarget {

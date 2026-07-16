@@ -23,7 +23,7 @@ impl Tool for FsReadTool {
         if path.is_empty() {
             return Err(ToolError::invalid("missing path"));
         }
-        match read_regular_utf8_file(Path::new(&path), MAX_FS_READ_BYTES) {
+        match read_small_text_file(Path::new(&path), MAX_FS_READ_BYTES) {
             Ok(content) => output
                 .message(&content)
                 .map_err(|error| ToolError::new("EIO", error.to_string())),
@@ -95,13 +95,9 @@ pub(crate) fn run_fs_read_cli(args: &[OsString], writer: &mut dyn Write) -> io::
         writeln!(io::stderr(), "fs.read: missing path")?;
         return Ok(ExitCode::from(2));
     };
-    let content = read_regular_utf8_file(&PathBuf::from(path), MAX_FS_READ_BYTES)?;
+    let content = read_small_text_file(&PathBuf::from(path), MAX_FS_READ_BYTES)?;
     writer.write_all(content.as_bytes())?;
     Ok(ExitCode::SUCCESS)
-}
-
-pub(crate) fn read_regular_utf8_file(path: &Path, max_bytes: u64) -> io::Result<String> {
-    read_small_text_file(path, max_bytes)
 }
 
 pub(crate) fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
@@ -176,7 +172,7 @@ pub(crate) fn replace_exactly_once(path: &Path, old: &str, new: &str) -> io::Res
             "old text must not be empty",
         ));
     }
-    let content = read_regular_utf8_file(path, MAX_FS_READ_BYTES)?;
+    let content = read_small_text_file(path, MAX_FS_READ_BYTES)?;
     let mut matches = content.match_indices(old);
     let Some((_start, _matched)) = matches.next() else {
         return Err(io::Error::new(

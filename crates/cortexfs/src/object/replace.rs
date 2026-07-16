@@ -4,11 +4,12 @@ use super::install::{
 };
 use super::receipt::{EntryKind, EntryReceipt, InspectedObject, entry_matches, inspect_object};
 use super::residue::cleanup_residue;
+use super::swap::{
+    PairProgress, move_exact, quarantine_pair, relative_stage, require_entry, require_missing,
+    restore_exact, sync_dirs,
+};
 #[cfg(test)]
 use super::swap::{create_foreign_control, create_foreign_executable, set_recreated_source};
-use super::swap::{
-    move_exact, relative_stage, require_entry, require_missing, restore_exact, sync_dirs,
-};
 use crate::ObjectClass;
 use crate::support::plain::open_plain_directory;
 
@@ -49,25 +50,10 @@ pub struct ReplaceReport {
     pub applied: bool,
 }
 
-#[derive(Clone, Copy)]
-struct Pair {
-    executable: EntryReceipt,
-    control: EntryReceipt,
-}
-
-#[derive(Clone, Copy, Default, Eq, PartialEq)]
-enum MoveState {
-    #[default]
-    Original,
-    Moved,
-}
-
 #[derive(Default)]
 struct SwapState {
-    old_executable: MoveState,
-    old_control: MoveState,
-    new_control: MoveState,
-    new_executable: MoveState,
+    old: [bool; 2],
+    new: [bool; 2],
 }
 
 struct ReplaceContext<'a> {
@@ -75,8 +61,8 @@ struct ReplaceContext<'a> {
     stage: &'a fs::File,
     name: &'a str,
     control_name: &'a str,
-    old: Pair,
-    new: Pair,
+    old: [EntryReceipt; 2],
+    new: [EntryReceipt; 2],
 }
 
 struct StageReceipt<'a> {
@@ -163,20 +149,17 @@ pub fn replace_object(
         stage: &staged.directory,
         name: &name,
         control_name: &control_name,
-        old: Pair {
-            executable: EntryReceipt {
+        old: [
+            EntryReceipt {
                 dev: inspected.executable_dev(),
                 ino: inspected.executable_ino(),
             },
-            control: EntryReceipt {
+            EntryReceipt {
                 dev: inspected.control_dev(),
                 ino: inspected.control_ino(),
             },
-        },
-        new: Pair {
-            executable: staged.executable_receipt,
-            control: staged.control_receipt,
-        },
+        ],
+        new: [staged.executable_receipt, staged.control_receipt],
     };
     let mut state = SwapState::default();
     if let Err(detail) = transact(&context, &mut state) {
@@ -239,134 +222,91 @@ fn validate_mode(
     }
 }
 
-fn track_move(
-    result: Result<(), String>,
-    target: &fs::File,
-    target_name: &str,
-    receipt: EntryReceipt,
-    kind: EntryKind,
-    state: &mut MoveState,
-) -> Result<(), String> {
-    if entry_matches(target, target_name, receipt, kind) {
-        *state = MoveState::Moved;
-    }
-    result
-}
-
 fn transact(context: &ReplaceContext<'_>, state: &mut SwapState) -> Result<(), String> {
-    require_entry(
-        context.class,
-        context.name,
-        context.old.executable,
-        EntryKind::Executable,
-    )?;
-    require_entry(
-        context.class,
-        context.control_name,
-        context.old.control,
-        EntryKind::Directory,
-    )?;
-
-    track_move(
-        move_exact(
-            context.class,
-            context.name,
-            context.stage,
-            "old-executable",
-            context.old.executable,
-            EntryKind::Executable,
-        ),
-        context.stage,
-        "old-executable",
-        context.old.executable,
-        EntryKind::Executable,
-        &mut state.old_executable,
-    )?;
-    sync_dirs(context.class, context.stage)?;
+    let source = [context.name, context.control_name];
+    let target = ["old-executable", "old-control"];
+    let receipt = context.old;
+    let dirs = [context.class, context.stage];
+    let mut progress = PairProgress::default();
+    macro_rules! advance_old {
+        () => {
+            progress = quarantine_pair(dirs, source, target, receipt, progress);
+            state.old = progress.observed;
+            if let Some(detail) = progress.detail.take() {
+                return Err(detail);
+            }
+        };
+    }
+    advance_old!();
     #[cfg(test)]
     inject_foreign(context, FaultPoint::OldExecutable)?;
-    require_missing(context.class, context.name)?;
+    advance_old!();
     #[cfg(test)]
     record(context, "old-executable");
 
-    track_move(
-        move_exact(
-            context.class,
-            context.control_name,
-            context.stage,
-            "old-control",
-            context.old.control,
-            EntryKind::Directory,
-        ),
-        context.stage,
-        "old-control",
-        context.old.control,
-        EntryKind::Directory,
-        &mut state.old_control,
-    )?;
-    sync_dirs(context.class, context.stage)?;
+    advance_old!();
     #[cfg(test)]
     inject_foreign(context, FaultPoint::OldControl)?;
-    require_missing(context.class, context.name)?;
-    require_missing(context.class, context.control_name)?;
+    advance_old!();
     #[cfg(test)]
     record(context, "old-control");
 
-    track_move(
-        move_exact(
-            context.stage,
-            "control",
-            context.class,
-            context.control_name,
-            context.new.control,
-            EntryKind::Directory,
-        ),
+    let [new_executable, new_control] = context.new;
+    let moved = move_exact(
+        context.stage,
+        "control",
         context.class,
         context.control_name,
-        context.new.control,
+        new_control,
         EntryKind::Directory,
-        &mut state.new_control,
-    )?;
+    );
+    state.new[1] = entry_matches(
+        context.class,
+        context.control_name,
+        new_control,
+        EntryKind::Directory,
+    );
+    moved?;
     sync_dirs(context.class, context.stage)?;
     #[cfg(test)]
     inject_foreign(context, FaultPoint::NewControl)?;
     require_entry(
         context.class,
         context.control_name,
-        context.new.control,
+        new_control,
         EntryKind::Directory,
     )?;
     require_missing(context.stage, "control")?;
     #[cfg(test)]
     record(context, "new-control");
 
-    track_move(
-        move_exact(
-            context.stage,
-            "executable",
-            context.class,
-            context.name,
-            context.new.executable,
-            EntryKind::Executable,
-        ),
+    let moved = move_exact(
+        context.stage,
+        "executable",
         context.class,
         context.name,
-        context.new.executable,
+        new_executable,
         EntryKind::Executable,
-        &mut state.new_executable,
-    )?;
+    );
+    state.new[0] = entry_matches(
+        context.class,
+        context.name,
+        new_executable,
+        EntryKind::Executable,
+    );
+    moved?;
     #[cfg(test)]
     inject_foreign(context, FaultPoint::NewExecutable)?;
     require_entry(
         context.class,
         context.name,
-        context.new.executable,
+        new_executable,
         EntryKind::Executable,
     )?;
     require_entry(
         context.class,
         context.control_name,
-        context.new.control,
+        new_control,
         EntryKind::Directory,
     )?;
     require_missing(context.stage, "executable")?;
@@ -386,49 +326,53 @@ fn rollback(
     detail: &str,
 ) -> InstallError {
     let mut issues = Vec::new();
-    if state.new_executable == MoveState::Moved
+    let [old_executable, old_control] = context.old;
+    let [new_executable, new_control] = context.new;
+    let [old_executable_moved, old_control_moved] = state.old;
+    let [new_executable_moved, new_control_moved] = state.new;
+    if new_executable_moved
         && let Err(error) = move_exact(
             context.class,
             context.name,
             context.stage,
             "failed-executable",
-            context.new.executable,
+            new_executable,
             EntryKind::Executable,
         )
     {
         issues.push(format!("new executable rollback failed: {error}"));
     }
-    if state.new_control == MoveState::Moved
+    if new_control_moved
         && let Err(error) = move_exact(
             context.class,
             context.control_name,
             context.stage,
             "failed-control",
-            context.new.control,
+            new_control,
             EntryKind::Directory,
         )
     {
         issues.push(format!("new control rollback failed: {error}"));
     }
-    if state.old_control == MoveState::Moved
+    if old_control_moved
         && let Err(error) = restore_exact(
             context.stage,
             "old-control",
             context.class,
             context.control_name,
-            context.old.control,
+            old_control,
             EntryKind::Directory,
         )
     {
         issues.push(format!("old control restore failed: {error}"));
     }
-    if state.old_executable == MoveState::Moved
+    if old_executable_moved
         && let Err(error) = restore_exact(
             context.stage,
             "old-executable",
             context.class,
             context.name,
-            context.old.executable,
+            old_executable,
             EntryKind::Executable,
         )
     {
@@ -441,13 +385,13 @@ fn rollback(
         && entry_matches(
             context.class,
             context.name,
-            context.old.executable,
+            old_executable,
             EntryKind::Executable,
         )
         && entry_matches(
             context.class,
             context.control_name,
-            context.old.control,
+            old_control,
             EntryKind::Directory,
         );
     if restored {
@@ -558,6 +502,7 @@ fn inject_foreign(context: &ReplaceContext<'_>, point: FaultPoint) -> Result<(),
     if !enabled {
         return Ok(());
     }
+    let [new_executable, new_control] = context.new;
     match point {
         FaultPoint::OldExecutable => create_foreign_executable(context.class, context.name),
         FaultPoint::OldControl => create_foreign_control(context.class, context.control_name),
@@ -567,7 +512,7 @@ fn inject_foreign(context: &ReplaceContext<'_>, point: FaultPoint) -> Result<(),
                 context.control_name,
                 context.stage,
                 "fault-new-control",
-                context.new.control,
+                new_control,
                 EntryKind::Directory,
             )?;
             create_foreign_control(context.class, context.control_name)
@@ -578,7 +523,7 @@ fn inject_foreign(context: &ReplaceContext<'_>, point: FaultPoint) -> Result<(),
                 context.name,
                 context.stage,
                 "fault-new-executable",
-                context.new.executable,
+                new_executable,
                 EntryKind::Executable,
             )?;
             create_foreign_executable(context.class, context.name)

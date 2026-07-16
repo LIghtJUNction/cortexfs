@@ -1,7 +1,6 @@
 ---
 name: cortexfs-extension-development
 description: This skill should be used when the user asks to "build a CortexFS tool", "create a CortexFS agent", "package a CortexFS extension", "write a cortexfs.object/v1 or cortexfs.object/v2 manifest", "install an external tool", or "install an external agent".
-version: 0.1.0
 ---
 
 # CortexFS Extension Development

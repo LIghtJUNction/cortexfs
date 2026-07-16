@@ -36,6 +36,11 @@ pub(crate) fn run_repl(
                     report_repl_error(&error)?;
                 }
             }
+            Some("find") => {
+                if let Err(error) = repl_find(root, &words) {
+                    report_repl_error(&error)?;
+                }
+            }
             Some("which") => {
                 if let Err(error) = repl_which(root, &words) {
                     report_repl_error(&error)?;
@@ -123,6 +128,7 @@ pub(crate) fn run_builtin_once(
         "exit" | "quit" => parse_exit_code(&words),
         "help" => repl_help(root, &words).map(|()| ExitCode::SUCCESS),
         "tools" => repl_tools(root, &words).map(|()| ExitCode::SUCCESS),
+        "find" => repl_find(root, &words).map(|()| ExitCode::SUCCESS),
         "which" => repl_which(root, &words).map(|()| ExitCode::SUCCESS),
         "type" => repl_type(root, &words).map(|()| ExitCode::SUCCESS),
         "command" => repl_command(root, &words).map(|()| ExitCode::SUCCESS),

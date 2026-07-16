@@ -3,7 +3,7 @@ fn agent_schedule_accepts_bounded_dag_react_plan_with_parent_permissions() {
     let policy = ok!(PolicyV0::parse(
         "\
 allow planner_t tool:fs.read execute
-allow planner_t model:openai/gpt-5.5 use
+allow planner_t model:openai/gpt-5.6 use
 allow planner_t agent:reviewer create
 allow planner_t session:default write
 "
@@ -19,7 +19,7 @@ allow planner_t session:default write
       "agent": "planner",
       "requires": [
         {"class": "tool", "name": "fs.read", "permission": "execute"},
-        {"class": "model", "name": "openai/gpt-5.5", "permission": "use"}
+        {"class": "model", "name": "openai/gpt-5.6", "permission": "use"}
       ]
     },
     {

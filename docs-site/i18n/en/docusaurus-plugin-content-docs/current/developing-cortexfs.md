@@ -135,6 +135,11 @@ An agent is a policy-bound orchestrator. Stable paths are:
 /ctx/home/<uid>/agent/<name>/session/
 ```
 
+In some deployments, `/ctx/agent/<name>.sock` is an owner-authorized symlink
+into the user runtime path (for example `/run/user/<uid>/cortexfs/agent/...`),
+and in some deployments it may be a direct socket node. Probe the live mount
+before assuming a single implementation form.
+
 Agents may organize tool loops, context, child tasks, and handoff, but those
 orchestration concepts should not become new root ABI.
 
@@ -211,6 +216,18 @@ context/pack.md    current working set, rebuildable
 context/refs.jsonl selected files, child results, search results
 ```
 
+The agent or another userspace runtime selects content, constructs the pack, and
+writes `context/pack.json` and `context/pack.md` by same-directory atomic
+replacement. CortexFS owns pack shape and source validation, `/ctx` visibility,
+and file durability; it does not select prompts, estimate budgets, or rebuild
+packs for the runtime.
+
+This is a 0.2.0-class breaking API retirement: the public
+`rebuild_context_pack`, `ContextPackBuildError`, `ContextPackBuild`, and
+`ContextPackBuiltItem` symbols, including their associated methods, are removed.
+Userspace writers may still validate their outputs with
+`inspect_context_pack_json` and `validate_context_pack_source`.
+
 Prompt construction merges agent instruction, AGENTS.md rules, skill metadata,
 tool injection, message history, and the runtime contract. Skill metadata starts
 with `name`, `description`, and `SKILL.md path`. It may use at most 2% of the
@@ -253,23 +270,21 @@ switch models. When a user explicitly asks to test their configured provider or
 aggregation API, use the existing provider registry, routes, secret state, and
 unified commit semantics.
 
-Provider API key resolution order is fixed:
+Provider API key resolution is:
 
 ```text
-1. environment variable named by provider config
-2. system keychain, for example service=cortexfs:<provider> account=default
+1. provider environment candidates (if present)
+2. root-owned CortexFS system secret store
 3. unconfigured, return a stable error
 ```
 
+
 Do not write secrets into `/ctx/model/*`, `.d/default`, or any other ABI file.
-
-OAuth access tokens follow the same principle: environment variables first,
-then the system keychain. Provider configuration may declare Authorization
-Code + PKCE metadata. By default, the access token is stored under
-`service=cortexfs:<provider> account=oauth:access`, and the refresh token under
-`account=oauth:refresh`. PKCE verifier, state, access token, and refresh token
+OAuth access tokens follow the same principle: provider adapters read secret state from the system secret store.
+Provider configuration may declare Authorization Code + PKCE metadata.
+By default, the access token is stored under `service=cortexfs:<provider> account=oauth:access`, and refresh token under
+`account=oauth:refresh`. PKCE verifier, state, access token, refresh token
 must not be written into `/ctx/model/*`, `.d/default`, or any other ABI file.
-
 When you need to test an OpenAI-compatible provider path without calling a
 cloud API, use this repository's aimock fixture:
 
@@ -288,7 +303,7 @@ The multi-API compatibility boundary is:
 /ctx/model/main                    stable default model alias
 /ctx/model/<provider>/<model>      model objects projected by provider adapters
 model/<name>.d/driver              driver/route metadata
-provider registry/cache/keychain   runtime state, not root ABI
+provider registry/cache/secret store   runtime state, not root ABI
 ```
 
 When switching providers, users update a model alias or route. Agents can keep
@@ -330,3 +345,28 @@ tests/mounts/cortexfs
 
 This directory is only a local test mount point. Do not put source, fixtures,
 or persistent data there.
+
+## Reference Projects and Similar Code (keyword checks)
+
+- [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)
+- [modelcontextprotocol filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
+- [rust-mcp-stack/rust-mcp-filesystem](https://github.com/rust-mcp-stack/rust-mcp-filesystem)
+- [opencrust multi-agent runtime](https://github.com/opencrust-org/opencrust)
+
+### Related issue / PR
+
+- CortexFS
+  - [#89](https://github.com/LIghtJUNction/cortexfs/pull/89)
+  - [#88](https://github.com/LIghtJUNction/cortexfs/pull/88)
+  - [#87](https://github.com/LIghtJUNction/cortexfs/pull/87)
+- modelcontextprotocol/filesystem server
+  - [#3232](https://github.com/modelcontextprotocol/servers/issues/3232)
+  - [#3402](https://github.com/modelcontextprotocol/servers/issues/3402)
+  - [#4208](https://github.com/modelcontextprotocol/servers/issues/4208)
+
+### Similar code-search keywords
+
+- `provider registry` + `object` + `policy`
+- `Fuse` + `socket runtime` + `jsonl`
+- `atomic rename .req.json` + `outbox` + `audit append`
+- `model alias` + `route` + `secret store`

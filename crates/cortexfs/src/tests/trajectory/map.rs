@@ -268,61 +268,10 @@ fn validate_trajectory_rejects_unknown_observation_source_call() {
 }
 
 #[test]
-fn legacy_unmatched_tool_result_keeps_content_without_unproven_call_id() {
-    let trajectory = trajectory_from_session_jsonl(
-        r#"{"role":"tool","content":[{"type":"tool_result","tool_call_id":"missing-call","content":"legacy output"}]}"#,
-        "",
-        None,
-        None,
-    );
-
-    assert!(validate_trajectory(&trajectory).is_ok());
-    let result = trajectory
-        .steps
-        .first()
-        .and_then(|step| step.observation.as_ref())
-        .and_then(|observation| observation.results.first());
-    let Some(result) = result else {
-        return;
-    };
-    assert_eq!(result.content.as_deref(), Some("legacy output"));
-    assert_eq!(result.source_call_id, None);
-    assert_eq!(
-        trajectory
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("legacy_unmatched_tool_results"))
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
-}
-
-#[test]
-fn legacy_unmatched_empty_tool_result_is_dropped() {
-    let trajectory = trajectory_from_session_jsonl(
-        r#"{"role":"tool","content":[{"type":"tool_result","tool_call_id":"missing-call"}]}"#,
-        "",
-        None,
-        None,
-    );
-
-    assert!(trajectory.steps.is_empty());
-    assert!(validate_trajectory(&trajectory).is_ok());
-    assert_eq!(
-        trajectory
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("legacy_unmatched_tool_results"))
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
-}
-
-#[test]
-fn partially_matched_legacy_tool_results_only_clear_unmatched_id() {
+fn unmatched_tool_results_are_dropped() {
     let trajectory = trajectory_from_session_jsonl(
         r#"{"role":"assistant","run":"run-a","content":"working"}
-{"role":"tool","run":"run-a","content":[{"type":"tool_result","tool_call_id":"call-a","content":"matched"},{"type":"tool_result","tool_call_id":"missing-call","content":"legacy"}]}"#,
+{"role":"tool","run":"run-a","content":[{"type":"tool_result","tool_call_id":"call-a","content":"matched"},{"type":"tool_result","tool_call_id":"missing-call","content":"invalid"}]}"#,
         r#"{"type":"tool_call","run":"run-a","id":"call-a","name":"fs.read","arguments":{}}"#,
         None,
         None,
@@ -339,17 +288,8 @@ fn partially_matched_legacy_tool_results_only_clear_unmatched_id() {
         result.source_call_id.as_deref() == Some("call-a")
             && result.content.as_deref() == Some("matched")
     }));
-    assert!(results.iter().any(|result| {
-        result.source_call_id.is_none() && result.content.as_deref() == Some("legacy")
-    }));
-    assert_eq!(
-        trajectory
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("legacy_unmatched_tool_results"))
-            .and_then(serde_json::Value::as_u64),
-        Some(1)
-    );
+    assert_eq!(results.len(), 1);
+    assert!(trajectory.extra.is_none());
 }
 
 #[test]
@@ -387,7 +327,7 @@ fn trajectory_reused_call_ids_match_by_run_without_deduplication() {
 }
 
 #[test]
-fn legacy_tool_messages_consume_reused_call_ids_in_stable_order() {
+fn tool_messages_without_run_are_dropped() {
     let trajectory = trajectory_from_session_jsonl(
         r#"{"role":"tool","content":[{"type":"tool_result","tool_call_id":"same","content":"first"}]}
 {"role":"tool","content":[{"type":"tool_result","tool_call_id":"same","content":"second"}]}"#,
@@ -397,17 +337,6 @@ fn legacy_tool_messages_consume_reused_call_ids_in_stable_order() {
         None,
     );
 
-    let runs = trajectory
-        .steps
-        .iter()
-        .filter_map(|step| {
-            step.extra
-                .as_ref()
-                .and_then(|extra| extra.get("run"))
-                .and_then(serde_json::Value::as_str)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(runs, vec!["run-a", "run-b"]);
     assert_eq!(
         trajectory
             .steps
@@ -417,11 +346,17 @@ fn legacy_tool_messages_consume_reused_call_ids_in_stable_order() {
             .count(),
         2
     );
+    assert!(
+        trajectory
+            .steps
+            .iter()
+            .all(|step| step.observation.is_none())
+    );
     assert!(validate_trajectory(&trajectory).is_ok());
 }
 
 #[test]
-fn multi_run_usage_does_not_guess_legacy_agent_steps() {
+fn multi_run_usage_does_not_guess_unscoped_agent_steps() {
     let trajectory = trajectory_from_session_jsonl(
         r#"{"role":"assistant","content":"first"}
 {"role":"assistant","content":"second"}"#,

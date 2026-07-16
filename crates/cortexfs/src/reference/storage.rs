@@ -18,11 +18,13 @@ pub const SYSTEM_STORAGE_DIR: &str = "/var/lib/cortexfs/storage";
 pub const SYSTEM_STORAGE_CURRENT: &str = "/var/lib/cortexfs/storage/current";
 
 /// Error while staging or atomically selecting a storage generation.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum StorageUpdateError {
     /// Storage layout or staged reference-tree validation failed.
+    #[error("{0}")]
     Invalid(&'static str),
     /// A filesystem or clone operation failed.
+    #[error("{0}")]
     Io(std::io::Error),
 }
 
@@ -31,17 +33,6 @@ impl From<std::io::Error> for StorageUpdateError {
         Self::Io(error)
     }
 }
-
-impl std::fmt::Display for StorageUpdateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            Self::Invalid(message) => f.write_str(message),
-            Self::Io(ref error) => error.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for StorageUpdateError {}
 
 /// Stages, validates, and atomically selects the next reference-tree generation.
 pub fn update_storage_generation(storage: &Path) -> Result<PathBuf, StorageUpdateError> {
@@ -61,7 +52,6 @@ pub fn update_storage_generation_with_prune(
         StorageUpdateError::Invalid("storage update is already running")
     })?;
 
-    adopt_legacy(storage, &generations)?;
     let current = current_generation(storage, &generations)?;
     if let Some(current) = current.as_deref()
         && validate_generation(current).is_ok()
@@ -133,43 +123,6 @@ fn stage_generation(
     sync_dir(generations)?;
     switch_current(storage, Path::new("generations").join(name))?;
     Ok(generation)
-}
-
-fn adopt_legacy(storage: &Path, generations: &Path) -> Result<(), StorageUpdateError> {
-    let current = storage.join("current");
-    if fs::symlink_metadata(&current).is_ok() {
-        return Ok(());
-    }
-    let legacy = storage.join("v1-root");
-    let adopted = generations.join("adopted-v1");
-    let adopted_metadata = fs::symlink_metadata(&adopted);
-    match fs::symlink_metadata(&legacy) {
-        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-            if adopted_metadata.is_ok() {
-                return Err(StorageUpdateError::Invalid(
-                    "adopted legacy generation exists",
-                ));
-            }
-            fs::rename(&legacy, &adopted)?;
-            sync_dir(generations)?;
-            sync_dir(storage)?;
-            switch_current(storage, PathBuf::from("generations/adopted-v1"))
-        }
-        Ok(_) => Err(StorageUpdateError::Invalid(
-            "legacy storage root is not a plain directory",
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => match adopted_metadata {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                switch_current(storage, PathBuf::from("generations/adopted-v1"))
-            }
-            Ok(_) => Err(StorageUpdateError::Invalid(
-                "adopted legacy generation is not a plain directory",
-            )),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-        },
-        Err(error) => Err(error.into()),
-    }
 }
 
 fn current_generation(
@@ -330,114 +283,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v2_adoption_stages_v3_with_coherent_agent_models_and_policies()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn fresh_storage_stages_canonical_generation() -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let storage = directory.path().join("storage");
-        let legacy = storage.join("v1-root");
-        fs::create_dir_all(&legacy)?;
-        ensure_v1_reference_tree(&legacy)
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        let state = legacy.join(super::super::bootstrap::BOOTSTRAP_STATE_REL);
-        let content =
-            fs::read_to_string(&state)?.replace("\"tree_version\": 3", "\"tree_version\": 2");
-        fs::write(&state, content)?;
-        fs::write(legacy.join("agent/reviewer.d/model"), "helper\n")?;
-        fs::write(
-            legacy.join("agent/reviewer.d/policy"),
-            fs::read_to_string(legacy.join("agent/reviewer.d/policy"))?
-                .replace("model:main", "model:helper"),
-        )?;
-        let session = legacy.join("home/1000/agent/reviewer/session/kept");
-        fs::create_dir_all(&session)?;
-        fs::write(session.join("user.txt"), "keep\n")?;
-        symlink("/ctx/model/local/custom", legacy.join("model/code"))?;
-
         let generation = update_storage_generation_with_prune(&storage, true)?;
 
-        assert!(!storage.join("generations/adopted-v1").exists());
         assert_eq!(
             fs::read_link(storage.join("current"))?,
             generation.strip_prefix(&storage)?
         );
-        assert_eq!(
-            fs::read_to_string(generation.join("home/1000/agent/reviewer/session/kept/user.txt"))?,
-            "keep\n"
-        );
-        assert_eq!(
-            fs::read_link(generation.join("model/code"))?,
-            Path::new("/ctx/model/local/custom")
-        );
-        for agent in REFERENCE_AGENTS {
-            let control = generation.join("agent").join(format!("{}.d", agent.name));
-            let model = fs::read_to_string(control.join("model"))?;
-            let model = model.trim();
-            let policy = fs::read_to_string(control.join("policy"))?;
-            let expected = format!("allow {}_t model:{model} use", agent.name);
-            let grants = policy
-                .lines()
-                .filter(|line| line.contains(" model:") && line.ends_with(" use"))
-                .collect::<Vec<_>>();
-            assert_eq!(grants, [expected.as_str()], "{}", agent.name);
-        }
-        assert_eq!(
-            fs::read_to_string(generation.join("agent/reviewer.d/model"))?,
-            "main\n"
-        );
-        assert_eq!(
-            fs::read_to_string(generation.join("agent/worker.d/model"))?,
-            format!("{}\n", crate::DEFAULT_WORKER_MODEL)
-        );
+        validate_generation(&generation)?;
         assert_eq!(update_storage_generation(&storage)?, generation);
         assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 1);
-        Ok(())
-    }
-
-    #[test]
-    fn failed_stage_keeps_adopted_legacy_current() -> Result<(), Box<dyn std::error::Error>> {
-        let directory = tempfile::tempdir()?;
-        let storage = directory.path().join("storage");
-        let legacy = storage.join("v1-root");
-        let outside = directory.path().join("outside");
-        fs::create_dir_all(&legacy)?;
-        fs::create_dir_all(&outside)?;
-        fs::write(legacy.join("user-data"), "keep\n")?;
-        symlink(&outside, legacy.join("model"))?;
-
-        assert!(update_storage_generation(&storage).is_err());
-
-        assert_eq!(
-            fs::read_link(storage.join("current"))?,
-            Path::new("generations/adopted-v1")
-        );
-        assert_eq!(
-            fs::read_to_string(storage.join("generations/adopted-v1/user-data"))?,
-            "keep\n"
-        );
-        assert!(!storage.join("v1-root").exists());
-        assert!(fs::read_dir(storage.join("generations"))?.all(|entry| {
-            entry
-                .ok()
-                .is_some_and(|entry| !entry.file_name().to_string_lossy().starts_with(".stage-"))
-        }));
-        Ok(())
-    }
-
-    #[test]
-    fn adopted_generation_without_current_recovers_after_crash()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let directory = tempfile::tempdir()?;
-        let storage = directory.path().join("storage");
-        let adopted = storage.join("generations/adopted-v1");
-        fs::create_dir_all(&adopted)?;
-        ensure_v1_reference_tree(&adopted)
-            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-
-        assert_eq!(update_storage_generation(&storage)?, adopted);
-        assert_eq!(
-            fs::read_link(storage.join("current"))?,
-            Path::new("generations/adopted-v1")
-        );
         Ok(())
     }
 

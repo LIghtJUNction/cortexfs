@@ -1,23 +1,23 @@
 #[test]
 fn model_session_control_decides_socket_requirement() {
     let root = clean_test_dir("object-layout-model-session");
-    create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
+    create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6", "none");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
 
-    let no_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
+    let no_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6");
     assert!(no_socket.is_ok());
 
     write_text_file(&control.join("session"), "socket\n");
-    let missing_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
+    let missing_socket = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6");
     assert!(missing_socket.issues().contains(&PathLayoutIssue::missing(
-        "model/openai/gpt-4o.sock".to_owned(),
+        "model/openai/gpt-5.6.sock".to_owned(),
         LayoutPathRole::Socket
     )));
 
     write_text_file(&control.join("session"), "native_thread\n");
-    let invalid = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
+    let invalid = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6");
     assert!(invalid.issues().contains(&PathLayoutIssue::invalid_value(
-        "model/openai/gpt-4o.d/session".to_owned(),
+        "model/openai/gpt-5.6.d/session".to_owned(),
         "native_thread".to_owned()
     )));
 }
@@ -48,18 +48,7 @@ fn model_capabilities_accept_only_stable_words() {
 }
 
 #[test]
-fn model_driver_routes_support_legacy_and_use_case_specific_drivers() {
-    let legacy = parse_model_driver_routes("debug\n");
-    let legacy = ok!(legacy);
-    assert_eq!(
-        legacy.drivers_for(ModelDriverUseCase::Exec),
-        Some([String::from("debug")].as_slice())
-    );
-    assert_eq!(
-        legacy.primary_driver_for(ModelDriverUseCase::Agent),
-        Some("debug")
-    );
-
+fn model_driver_routes_support_use_case_specific_drivers() {
     let routed = parse_model_driver_routes(
         "\
 default=openai-chat
@@ -96,6 +85,10 @@ fn model_driver_routes_reject_invalid_route_tables() {
         Err(ModelDriverRouteError::Empty)
     );
     assert_eq!(
+        parse_model_driver_routes("debug\n"),
+        Err(ModelDriverRouteError::MissingEquals { line: 1 })
+    );
+    assert_eq!(
         parse_model_driver_routes("direct=openai-chat\n"),
         Err(ModelDriverRouteError::UnknownUseCase {
             line: 1,
@@ -125,13 +118,13 @@ fn model_driver_routes_reject_invalid_route_tables() {
 #[test]
 fn model_object_layout_rejects_provider_private_capabilities() {
     let root = clean_test_dir("object-layout-model-cap");
-    create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
+    create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6", "none");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
     write_text_file(&control.join("cap"), "chat\nnative_thread\n");
 
-    let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
+    let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6");
     assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
-        "model/openai/gpt-4o.d/cap".to_owned(),
+        "model/openai/gpt-5.6.d/cap".to_owned(),
         "native_thread".to_owned()
     )));
 }
@@ -139,13 +132,13 @@ fn model_object_layout_rejects_provider_private_capabilities() {
 #[test]
 fn model_object_layout_rejects_invalid_driver_routes() {
     let root = clean_test_dir("object-layout-model-driver");
-    create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-4o", "none");
-    let control = root.join("model").join("openai").join("gpt-4o.d");
+    create_complete_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6", "none");
+    let control = root.join("model").join("openai").join("gpt-5.6.d");
     write_text_file(&control.join("driver"), "agent=/bin/sh\n");
 
-    let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-4o");
+    let report = inspect_object_layout(&root, ObjectClass::Model, "openai/gpt-5.6");
     assert!(report.issues().contains(&PathLayoutIssue::invalid_value(
-        "model/openai/gpt-4o.d/driver".to_owned(),
+        "model/openai/gpt-5.6.d/driver".to_owned(),
         "line 1 invalid driver /bin/sh".to_owned()
     )));
 }

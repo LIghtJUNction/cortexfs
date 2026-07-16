@@ -173,7 +173,8 @@ pub(crate) fn validate_tool_control_content(
 ) -> Result<(), ObjectBootstrapError> {
     match file {
         "schema" if inspect_tool_schema_json(content).is_ok() => Ok(()),
-        "schema" => Err(ObjectBootstrapError::InvalidControlValue),
+        "mcp" if object::mcp::validate_locator(content) => Ok(()),
+        "schema" | "mcp" => Err(ObjectBootstrapError::InvalidControlValue),
         _ if !content.contains('\0') => Ok(()),
         _ => Err(ObjectBootstrapError::InvalidControlValue),
     }
@@ -194,7 +195,7 @@ pub(crate) fn default_object_control_value(
 pub(crate) fn default_model_control_value(object_name: &str, file: &str) -> String {
     match file {
         "id" => object_name.to_owned(),
-        "driver" => "rig".to_owned(),
+        "driver" => "default=openai-chat".to_owned(),
         "cap" => "chat\nstream".to_owned(),
         "effort" => ModelEffort::Auto.as_control_value().to_owned(),
         "fallback" => "\n".to_owned(),

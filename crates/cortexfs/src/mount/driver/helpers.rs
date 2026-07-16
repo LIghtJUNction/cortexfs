@@ -47,6 +47,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
         .map_err(|error| format!("mount failed: {error}"))
 }
 
+/// Mounts once, runs an optional refresh hook, and returns the mounted session.
 fn mount_before_refresh<T>(
     mount: impl FnOnce() -> Result<T, String>,
     refresh: impl FnOnce() -> Result<(), String>,
@@ -162,14 +163,7 @@ mod session_append_create_receipt_tests {
 
 impl CortexFuse {
     pub(crate) fn projected_getattr(&self, path: &str) -> Result<FuseV1Attr, FuseV1Error> {
-        match self.projection.getattr(path) {
-            Ok(attr) => Ok(attr),
-            Err(FuseV1Error::NotFound) => self
-                .socket_overlay(path)?
-                .map(|overlay| socket_attr(path, overlay.mode, overlay.uid, overlay.gid))
-                .ok_or(FuseV1Error::NotFound),
-            Err(error) => Err(error),
-        }
+        self.projected_node_for_path(path).map(|node| node.attr)
     }
 
     pub(crate) fn projected_node_for_path(&self, path: &str) -> Result<FuseV1Node, FuseV1Error> {
@@ -203,18 +197,8 @@ impl CortexFuse {
         parent: &FuseV1Node,
         name: &str,
     ) -> Result<FuseV1Node, FuseV1Error> {
-        match self.projection.lookup(parent, name) {
-            Ok(node) => Ok(node),
-            Err(FuseV1Error::NotFound) => {
-                let Some(path) = child_path(parent.abi_path(), name) else {
-                    return Err(FuseV1Error::InvalidPath);
-                };
-                self.socket_overlay(&path)?
-                    .map(|overlay| socket_node(&path, overlay.mode, overlay.uid, overlay.gid))
-                    .ok_or(FuseV1Error::NotFound)
-            }
-            Err(error) => Err(error),
-        }
+        let path = child_path(parent.abi_path(), name).ok_or(FuseV1Error::InvalidPath)?;
+        self.projected_node_for_path(&path)
     }
 
     pub(crate) fn projected_readdir(&self, path: &str) -> Result<Vec<FuseV1DirEntry>, FuseV1Error> {
@@ -235,15 +219,15 @@ impl CortexFuse {
         Ok(entries)
     }
 
-    pub(crate) fn has_socket_overlay(&self, path: &str) -> Result<bool, FuseV1Error> {
-        Ok(self.socket_overlay(path)?.is_some())
-    }
-
     pub(crate) fn socket_overlay(&self, path: &str) -> Result<Option<SocketOverlay>, FuseV1Error> {
         self.socket_overlays
             .lock()
             .map_err(|_error| FuseV1Error::Io)
             .map(|sockets| sockets.get(path).copied())
+    }
+
+    pub(crate) fn has_socket_overlay(&self, path: &str) -> Result<bool, FuseV1Error> {
+        Ok(self.socket_overlay(path)?.is_some())
     }
 
     pub(crate) fn insert_socket_overlay(
@@ -413,7 +397,7 @@ impl CortexFuse {
         let backing_exists = backing_metadata.is_some();
         let backing_is_dir = backing_metadata
             .is_some_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
-        let overlay = self.has_socket_overlay(path)?;
+        let overlay = self.socket_overlay(path)?.is_some();
         let virtual_projection =
             self.is_virtual_projection_path(path, backing_exists, backing_is_dir, overlay);
         let (origin, storage, virtual_value) = if overlay {
@@ -463,25 +447,15 @@ impl CortexFuse {
         backing_is_dir: bool,
         overlay: bool,
     ) -> bool {
-        if overlay {
-            return true;
-        }
-        if path.strip_prefix("model/").is_some_and(is_model_alias) {
-            return !backing_exists || self.projection.readlink(path).is_ok();
-        }
-        if path == "model/debug" || path.starts_with("model/debug/echo.d/") {
-            return !backing_is_dir;
-        }
-        if path == "model/debug/echo" {
-            return true;
-        }
-        if matches!(classify_abi_path(path), "ctx.agent.exec" | "ctx.tool.exec") {
-            return true;
-        }
-        if !backing_exists && self.projection.getattr(path).is_ok() {
-            return true;
-        }
-        false
+        overlay
+            || path.strip_prefix("model/").is_some_and(|name| {
+                is_model_alias(name) && (!backing_exists || self.projection.readlink(path).is_ok())
+            })
+            || ((path == "model/debug" || path.starts_with("model/debug/echo.d/"))
+                && !backing_is_dir)
+            || path == "model/debug/echo"
+            || matches!(classify_abi_path(path), "ctx.agent.exec" | "ctx.tool.exec")
+            || (!backing_exists && self.projection.getattr(path).is_ok())
     }
 
     pub(crate) fn node_for_dir_entry(
@@ -644,15 +618,11 @@ pub(crate) fn is_projected_socket_path(path: &str) -> bool {
     )
 }
 
-pub(crate) fn socket_attr(path: &str, mode: u32, uid: u32, gid: u32) -> FuseV1Attr {
-    FuseV1Attr::with_owner(path.to_owned(), FuseV1FileType::Socket, 0, mode, uid, gid)
-}
-
 pub(crate) fn socket_node(path: &str, mode: u32, uid: u32, gid: u32) -> FuseV1Node {
     FuseV1Node::new(
         socket_inode(path),
         path.to_owned(),
-        socket_attr(path, mode, uid, gid),
+        FuseV1Attr::with_owner(path.to_owned(), FuseV1FileType::Socket, 0, mode, uid, gid),
     )
 }
 

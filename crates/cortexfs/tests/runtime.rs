@@ -218,12 +218,10 @@ mod tests {
         let source = root.path().join("source");
         let ctx = env!("CARGO_BIN_EXE_ctx");
         let runtime = env!("CARGO_BIN_EXE_cortexfs-agent-runtime");
-        let runner = env!("CARGO_BIN_EXE_cortexfs-object-runner");
         for program in [
             "/usr/bin/bwrap",
             "/usr/bin/systemd-socket-activate",
             runtime,
-            runner,
         ] {
             require_program(Path::new(program))?;
         }
@@ -235,9 +233,14 @@ mod tests {
                 .into_owned()
                 .into());
         }
-        let installed_runner = source.join("bin/cortexfs-object-runner");
-        fs::copy(runner, &installed_runner)?;
-        fs::set_permissions(&installed_runner, fs::Permissions::from_mode(0o755))?;
+        // Wrappers exec /ctx/bin/cortexfs-object-runner; plant the workspace-built
+        // runner so envelope ABI matches this tree (system /usr/bin may lag).
+        let runner = env!("CARGO_BIN_EXE_cortexfs-object-runner");
+        fs::copy(runner, source.join("bin/cortexfs-object-runner"))?;
+        fs::set_permissions(
+            source.join("bin/cortexfs-object-runner"),
+            fs::Permissions::from_mode(0o755),
+        )?;
         let agent = source.join("agent/reviewer");
         assert!(fs::read_to_string(&agent)?.contains("cortexfs-object-runner"));
         fs::write(source.join("agent/reviewer.d/model"), "debug/echo\n")?;

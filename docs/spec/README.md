@@ -78,11 +78,18 @@ fuse-v1.md              first FUSE projection shape
 object-abi.md           executable, socket, and .d object triple
 model-abi.md            one model ABI, model exec, model socket, event stream
 session-abi.md          durable history and session indexes
-16-context.md           context pack, compression, swap, dedup, and GC
+context-abi.md           context pack, compression, swap, dedup, and GC
 agent-tool-security.md  agent identity, view, mount, and creation
-agent-runtime.md        end-to-end agent runtime, chat, terminal, tsh, sandbox
+agent-runtime.md        end-to-end agent runtime, REPL, terminal, tsh, sandbox
 tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
-17-child-agents.md      child handoff, attenuation, owned lifecycle, cancellation
+child-agents.md      child handoff, attenuation, owned lifecycle, cancellation
 ctx-coreutils.md        ctx command contract
 phase-1.md              v1 migration target and acceptance checks
 ```
+
+## External references
+
+- CortexFS v1 normative docs and implementation in this repository.
+- [Model Context Protocol](https://modelcontextprotocol.io/specification/)
+- [Linux FUSE project docs](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
+- [mcp-filesystem implementations](https://github.com/search?q=mcp-filesystem)

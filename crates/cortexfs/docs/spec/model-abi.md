@@ -15,7 +15,7 @@ There is only one model ABI:
 providers, `<provider>` is the original provider identity:
 
 ```text
-/ctx/model/openai/gpt-4o
+/ctx/model/openai/gpt-5.6
 /ctx/model/anthropic/claude-sonnet-4
 /ctx/model/google/gemini-2.5-pro
 ```
@@ -25,7 +25,7 @@ For a custom domain base URL without a declared original provider mapping,
 `https://api.lmm.best:9000/` projects models under:
 
 ```text
-/ctx/model/api.lmm.best/gpt-5.4-mini
+/ctx/model/api.lmm.best/gpt-5.6
 ```
 
 Address-like endpoints such as `127.0.0.1`, `::1`, or `localhost` MUST set an
@@ -37,13 +37,13 @@ name, not a transport address. For example:
 {
   "name": "local",
   "base_url": "http://127.0.0.1:8317/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "gpt-5.6",
   "enabled": true,
   "formats": ["openai.chat", "openai.responses"]
 }
 ```
 
-This projects as `/ctx/model/local/gpt-5.4-mini`.
+This projects as `/ctx/model/local/gpt-5.6`.
 
 The custom base URL is provider-adapter configuration, not a root ABI namespace.
 It may be shown in `model/<provider>/<model>.d/default` for inspection, but
@@ -60,12 +60,12 @@ Example:
 
 ```text
 /ctx/model/
-  main -> /ctx/model/openai/gpt-5.5
+  main -> /ctx/model/openai/gpt-5.6
   helper -> /ctx/model/openai/codex-auto-review
-  fast -> /ctx/model/openai/gpt-5.5
-  reason -> /ctx/model/openai/gpt-5.5
-  code -> /ctx/model/openai/gpt-5.5
-  vision -> /ctx/model/openai/gpt-5.5
+  fast -> /ctx/model/openai/gpt-5.6
+  reason -> /ctx/model/openai/gpt-5.6
+  code -> /ctx/model/openai/gpt-5.6
+  vision -> /ctx/model/openai/gpt-5.6
   debug/
     echo
     echo.d/
@@ -79,8 +79,8 @@ Example:
       status
       log
   openai/
-    gpt-4o
-    gpt-4o.d/
+    gpt-5.6
+    gpt-5.6.d/
       id
       driver
       cap
@@ -220,7 +220,7 @@ google     Gemini through Google's OpenAI-compatible endpoint; `gemini` is an al
 
 The `codex` alias installs the OpenAI preset and projects Codex-recommended
 OpenAI models under the canonical provider path, for example
-`/ctx/model/openai/gpt-5.5`. It does not create `/ctx/model/codex` or a second
+`/ctx/model/openai/gpt-5.6`. It does not create `/ctx/model/codex` or a second
 provider namespace.
 
 The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
@@ -252,8 +252,8 @@ are local debug metadata and do not imply a provider default.
 
 ```bash
 /ctx/model/debug/echo "hello"
-echo "hello" | /ctx/model/openai/gpt-4o
-echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-4o
+echo "hello" | /ctx/model/openai/gpt-5.6
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.6
 ```
 
 Semantics:
@@ -444,3 +444,12 @@ agent policy decides whether execution is allowed
 Model processes must not receive project mounts, tool credentials, or write
 access outside runtime-owned cache. Provider tool calling must not become a
 backdoor around agent policy.
+
+## External references
+
+- [Model Context Protocol (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [Model Context Protocol (2025-03-26)](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
+- [modelcontextprotocol/filesystem issues](https://github.com/modelcontextprotocol/servers/issues/)
+- [mark3labs/mcp-filesystem-server](https://github.com/mark3labs/mcp-filesystem-server)
+- [rust-mcp-stack/rust-mcp-filesystem](https://github.com/rust-mcp-stack/rust-mcp-filesystem)
+- [Linux FUSE documentation](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)

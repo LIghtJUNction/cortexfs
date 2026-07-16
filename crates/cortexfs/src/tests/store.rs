@@ -1,5 +1,18 @@
 static LEGACY_SNAPSHOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+fn store_session(root: &Path) -> PathBuf {
+    let session_root = agent_session_root(root, "coder");
+    let layout = ensure_durable_session_layout(
+        &session_root,
+        "default",
+        "/work",
+        Some("main"),
+        SocketSessionScope::Private,
+    );
+    assert!(layout.is_ok(), "{layout:?}");
+    session_root.join("default")
+}
+
 #[test]
 fn session_history_stream_maps_only_abi_marker_paths() {
     assert_eq!(
@@ -28,15 +41,7 @@ fn session_history_stream_maps_only_abi_marker_paths() {
 #[test]
 fn legacy_history_read_does_not_create_store_on_read_only_session() {
     let root = reference_tree("legacy-history-read-only");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let messages = "{\"role\":\"user\",\"content\":\"hello\"}\n";
     write_text_file(&session.join("messages.jsonl"), messages);
     assert!(fs::set_permissions(&session, fs::Permissions::from_mode(0o555)).is_ok());
@@ -72,15 +77,7 @@ fn assert_legacy_snapshot_rechecks_created_lock(store_exists: bool) {
         "missing-store"
     };
     let root = reference_tree(&format!("legacy-history-snapshot-lock-{case}"));
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let old_message = r#"{"role":"user","run":"old","content":"old"}"#;
     let old_event = r#"{"type":"start","id":"old","run":"old","scope":"private","cwd":"/work"}"#;
     let new_message = r#"{"role":"assistant","run":"new","content":"new"}"#;
@@ -141,15 +138,7 @@ fn legacy_history_snapshot_rechecks_lock_created_in_existing_store() {
 fn assert_legacy_append_rejects_changed_marker(replace: bool) {
     let case = if replace { "replace" } else { "truncate" };
     let root = reference_tree(&format!("legacy-history-append-{case}"));
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let messages = session.join("messages.jsonl");
     let original = r#"{"role":"user","run":"first","content":"hello"}"#;
     let start = r#"{"type":"start","id":"first","run":"first","scope":"private","cwd":"/work"}"#;
@@ -195,15 +184,7 @@ fn legacy_history_guard_rejects_truncated_marker_before_claim_or_append() {
 #[test]
 fn legacy_history_guard_sequential_append_is_immediately_complete() {
     let root = reference_tree("legacy-history-sequential-append");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let user = r#"{"role":"user","run":"first","content":"hello"}"#;
     let start = r#"{"type":"start","id":"first","run":"first","scope":"private","cwd":"/work"}"#;
     let guard = ok!(super::columnar::HistoryGuard::exclusive(&session));
@@ -236,15 +217,7 @@ fn legacy_history_guard_sequential_append_is_immediately_complete() {
 #[test]
 fn legacy_history_guard_keeps_snapshot_across_first_columnar_writer() {
     let root = reference_tree("legacy-history-first-writer-snapshot");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let old = r#"{"role":"user","run":"old","content":"legacy"}"#;
     let new = r#"{"role":"assistant","run":"new","content":"committed"}"#;
     let old_history = format!("{old}\n");
@@ -297,15 +270,7 @@ fn legacy_history_guard_keeps_snapshot_across_first_columnar_writer() {
 #[test]
 fn session_store_columnar_guard_does_not_fall_back_when_manifest_disappears() {
     let root = reference_tree("session-store-columnar-guard-manifest");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     ok!(super::columnar::append(
         &session,
         super::columnar::Stream::Messages,
@@ -335,15 +300,7 @@ fn session_store_columnar_guard_does_not_fall_back_when_manifest_disappears() {
 #[test]
 fn session_claim_index_scans_legacy_history_once() {
     let root = reference_tree("session-claim-legacy-once");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     write_text_file(
         &session.join("messages.jsonl"),
         "{\"role\":\"user\",\"run\":\"claim-1\",\"content\":\"hello\"}\n",
@@ -372,15 +329,7 @@ fn session_claim_index_scans_legacy_history_once() {
 #[test]
 fn session_claim_cursor_replays_idempotently_after_cursor_failure() {
     let root = reference_tree("session-claim-cursor-recovery");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     write_text_file(
         &session.join("messages.jsonl"),
         "{\"role\":\"user\",\"run\":\"claim-1\",\"content\":\"hello\"}\n",
@@ -402,15 +351,7 @@ fn session_claim_cursor_replays_idempotently_after_cursor_failure() {
 #[test]
 fn session_claim_cursor_survives_columnar_migration() {
     let root = reference_tree("session-claim-columnar-migration");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     write_text_file(
         &session.join("messages.jsonl"),
         "{\"role\":\"user\",\"run\":\"claim-1\",\"content\":\"hello\"}\n",
@@ -442,15 +383,7 @@ fn session_claim_cursor_survives_columnar_migration() {
 #[test]
 fn session_store_recovers_durable_wal_as_exact_jsonl() {
     let root = reference_tree("session-store-wal");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let line = r#"{"role":"user","content":"hello"}"#;
 
     ok!(super::columnar::append(
@@ -474,15 +407,7 @@ fn session_store_flush_writes_readable_parquet_schema() {
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     let root = reference_tree("session-store-parquet");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let line = r#"{"role":"assistant","run":"run-1","content":"ok"}"#;
     ok!(super::columnar::append(
         &session,
@@ -526,15 +451,7 @@ fn session_store_flush_writes_readable_parquet_schema() {
 #[test]
 fn session_store_read_at_crosses_parquet_shards() {
     let root = reference_tree("session-store-cross-shard");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..130)
         .map(|ordinal| format!(r#"{{"type":"delta","ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -573,15 +490,7 @@ fn session_store_read_at_crosses_parquet_shards() {
 #[test]
 fn session_store_first_write_migrates_legacy_jsonl() {
     let root = reference_tree("session-store-legacy");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let old_message = r#"{"role":"user","content":"legacy"}"#;
     let old_event = r#"{"type":"start","run":"old"}"#;
     assert!(fs::write(session.join("messages.jsonl"), format!("{old_message}\n")).is_ok());
@@ -623,15 +532,7 @@ fn session_store_first_write_migrates_legacy_jsonl() {
 #[test]
 fn session_store_tail_is_bounded_and_keeps_recent_lines() {
     let root = reference_tree("session-store-tail");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..260)
         .map(|ordinal| format!(r#"{{"role":"user","ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -678,15 +579,7 @@ fn session_store_export_writes_readable_parquet_dataset() {
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
     let root = reference_tree("session-store-export");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..300)
         .map(|ordinal| format!(r#"{{"type":"message","ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -728,15 +621,7 @@ fn session_store_append_during_prune_keeps_both_rows() {
     use std::sync::{Arc, Barrier, mpsc};
 
     let root = reference_tree("session-store-concurrent-prune");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let first = r#"{"role":"user","content":"first"}"#;
     let second = r#"{"role":"user","content":"second"}"#;
     ok!(super::columnar::append(
@@ -786,15 +671,7 @@ fn session_store_ignores_torn_wal_tail_and_recovers_on_append() {
     use std::fs::OpenOptions;
 
     let root = reference_tree("session-store-torn-wal");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let first = r#"{"role":"user","content":"first"}"#;
     let second = r#"{"role":"assistant","content":"second"}"#;
     ok!(super::columnar::append(
@@ -826,15 +703,7 @@ fn session_store_ignores_torn_wal_tail_and_recovers_on_append() {
 #[test]
 fn session_store_wal_staging_without_manifest_keeps_raw_history_authoritative() {
     let root = reference_tree("session-store-wal-staging");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let prefix = r#"{"role":"user","run":"first","content":"valid"}"#;
     let raw = format!("{prefix}\n{{\"role\":\"assistant\"");
     assert!(fs::write(session.join("messages.jsonl"), &raw).is_ok());
@@ -898,15 +767,7 @@ fn session_store_wal_staging_without_manifest_keeps_raw_history_authoritative() 
 #[test]
 fn session_store_wal_staging_keeps_guard_append_and_claims_on_raw_history() {
     let root = reference_tree("session-store-wal-staging-raw-append");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let user = r#"{"role":"user","run":"first","content":"hello"}"#;
     let start = r#"{"type":"start","id":"first","run":"first","scope":"private","cwd":"/work"}"#;
     let raw_events = format!("{start}\n{{\"type\":\"usage\"");
@@ -947,15 +808,7 @@ fn session_store_rejects_invalid_committed_wal_frame() {
     use std::fs::OpenOptions;
 
     let root = reference_tree("session-store-invalid-wal");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     ok!(super::columnar::append(
         &session,
         super::columnar::Stream::Events,
@@ -974,15 +827,7 @@ fn session_store_rejects_invalid_committed_wal_frame() {
 #[test]
 fn session_store_rejects_payload_with_newline() {
     let root = reference_tree("session-store-newline-payload");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
 
     let result = super::columnar::append(&session, super::columnar::Stream::Messages, &["{}\n{}"]);
     assert!(result.is_err_and(|error| error.kind() == std::io::ErrorKind::InvalidInput));
@@ -991,15 +836,7 @@ fn session_store_rejects_payload_with_newline() {
 #[test]
 fn session_store_rejects_invalid_batch_before_creating_or_appending() {
     let root = reference_tree("session-store-invalid-batch-atomic");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let messages_before = fs::read(session.join("messages.jsonl")).unwrap_or_default();
     let events_before = fs::read(session.join("events.jsonl")).unwrap_or_default();
 
@@ -1023,15 +860,7 @@ fn session_store_rejects_invalid_batch_before_creating_or_appending() {
 #[test]
 fn session_store_accepts_256kib_payload_and_rejects_next_byte() {
     let root = reference_tree("session-store-row-boundary");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let accepted = format!("\"{}\"", r"\\".repeat((256 * 1024 - 2) / 2));
     let rejected = format!("\"{}\"", "a".repeat(256 * 1024 - 1));
 
@@ -1049,15 +878,7 @@ fn session_store_accepts_256kib_payload_and_rejects_next_byte() {
 #[test]
 fn session_store_manifest_uses_fixed_width_indexes() {
     let root = reference_tree("session-store-fixed-index");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     ok!(super::columnar::append(
         &session,
         super::columnar::Stream::Messages,
@@ -1084,15 +905,7 @@ fn session_store_manifest_uses_fixed_width_indexes() {
 #[test]
 fn session_store_tail_reads_index_in_logarithmic_time() {
     let root = reference_tree("session-store-index-logarithmic");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..4096)
         .map(|ordinal| format!(r#"{{"ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -1123,15 +936,7 @@ fn session_store_ignores_orphan_index_tail_and_shard() {
     use std::fs::OpenOptions;
 
     let root = reference_tree("session-store-orphan-index");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let line = r#"{"role":"user","content":"committed"}"#;
     ok!(super::columnar::append(
         &session,
@@ -1167,15 +972,7 @@ fn session_store_deduplicates_committed_rows_left_in_wal() {
     use std::fs::OpenOptions;
 
     let root = reference_tree("session-store-committed-wal");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let first = r#"{"role":"user","content":"first"}"#;
     let second = r#"{"role":"assistant","content":"second"}"#;
     ok!(super::columnar::append(
@@ -1212,15 +1009,7 @@ fn session_store_deduplicates_committed_rows_left_in_wal() {
 #[test]
 fn session_store_tightens_store_permissions() {
     let root = reference_tree("session-store-permissions");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let store = session.join(".store");
     assert!(fs::create_dir_all(store.join("data")).is_ok());
     assert!(fs::create_dir_all(store.join("index")).is_ok());
@@ -1257,15 +1046,7 @@ fn session_store_rejects_symlinked_storage_paths() {
     for kind in ["store", "data", "index", "wal"] {
         let name = format!("session-store-symlink-{kind}");
         let root = reference_tree(&name);
-        let session_root = root.join("home/1000/agent/coder/session");
-        ok!(ensure_durable_session_layout(
-            &session_root,
-            "default",
-            "/work",
-            Some("main"),
-            SocketSessionScope::Private,
-        ));
-        let session = session_root.join("default");
+        let session = store_session(&root);
         let store = session.join(".store");
         let outside = root.join(format!("outside-{kind}"));
         let result = match kind {
@@ -1303,15 +1084,7 @@ fn session_store_rejects_symlinked_storage_paths() {
 #[test]
 fn session_store_export_preserves_existing_output() {
     let root = reference_tree("session-store-export-existing");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     ok!(super::columnar::append(
         &session,
         super::columnar::Stream::Messages,
@@ -1331,15 +1104,7 @@ fn session_store_export_preserves_existing_output() {
 #[test]
 fn session_store_export_copy_failure_is_atomic_and_retryable() {
     let root = reference_tree("session-store-export-failure");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..200)
         .map(|ordinal| format!(r#"{{"ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -1372,15 +1137,7 @@ fn session_store_export_copy_failure_is_atomic_and_retryable() {
 #[test]
 fn session_store_export_rejects_symlinked_parent() {
     let root = reference_tree("session-store-export-parent");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     ok!(super::columnar::append(
         &session,
         super::columnar::Stream::Messages,
@@ -1400,15 +1157,7 @@ fn session_store_export_rejects_symlinked_parent() {
 #[test]
 fn session_store_auto_flushes_on_row_threshold() {
     let root = reference_tree("session-store-auto-row-flush");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..128)
         .map(|ordinal| format!(r#"{{"ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -1438,15 +1187,7 @@ fn session_store_auto_flushes_on_row_threshold() {
 #[test]
 fn session_store_auto_flushes_on_payload_threshold() {
     let root = reference_tree("session-store-auto-byte-flush");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let payload = format!("\"{}\"", "a".repeat(256 * 1024 - 2));
     let lines = (0..16).map(|_index| payload.as_str()).collect::<Vec<_>>();
 
@@ -1463,15 +1204,7 @@ fn session_store_auto_flushes_on_payload_threshold() {
 #[test]
 fn session_store_large_append_leaves_bounded_wal() {
     let root = reference_tree("session-store-bounded-wal");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..1000)
         .map(|ordinal| format!(r#"{{"ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -1492,15 +1225,7 @@ fn session_store_large_append_leaves_bounded_wal() {
 fn session_store_unique_temps_survive_stale_files_and_failures() {
     for failure in ["write", "shard-rename", "prune-rename"] {
         let root = reference_tree(&format!("session-store-temp-{failure}"));
-        let session_root = root.join("home/1000/agent/coder/session");
-        ok!(ensure_durable_session_layout(
-            &session_root,
-            "default",
-            "/work",
-            Some("main"),
-            SocketSessionScope::Private,
-        ));
-        let session = session_root.join("default");
+        let session = store_session(&root);
         let store = session.join(".store");
         assert!(fs::create_dir_all(store.join("data")).is_ok());
         assert!(
@@ -1552,15 +1277,7 @@ fn session_store_unique_temps_survive_stale_files_and_failures() {
 #[test]
 fn session_store_fixed_index_offset_boundaries() {
     let root = reference_tree("session-store-index-boundaries");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let lines = (0..256)
         .map(|ordinal| format!(r#"{{"ordinal":{ordinal}}}"#))
         .collect::<Vec<_>>();
@@ -1623,15 +1340,7 @@ fn session_store_fixed_index_offset_boundaries() {
 #[test]
 fn session_store_fixed_indexes_keep_streams_independent() {
     let root = reference_tree("session-store-index-streams");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
     let messages = [r#"{"role":"user"}"#, r#"{"role":"assistant"}"#];
     let events = [r#"{"type":"start"}"#, r#"{"type":"done"}"#];
     ok!(super::columnar::append(
@@ -1768,15 +1477,7 @@ fn session_store_lock_child() {
 #[test]
 fn session_store_flock_coordinates_real_processes() {
     let root = reference_tree("session-store-process-lock");
-    let session_root = root.join("home/1000/agent/coder/session");
-    ok!(ensure_durable_session_layout(
-        &session_root,
-        "default",
-        "/work",
-        Some("main"),
-        SocketSessionScope::Private,
-    ));
-    let session = session_root.join("default");
+    let session = store_session(&root);
 
     let (exclusive_child, mut exclusive) = ok!(spawn_session_store_lock_child(
         &session,

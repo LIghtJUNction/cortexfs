@@ -71,10 +71,10 @@ short user aliases use symlinks
 Example:
 
 ```text
-/ctx/model/openai/gpt-4o
-/ctx/model/openai/gpt-4o.d/id = openai/gpt-4o
+/ctx/model/openai/gpt-5.6
+/ctx/model/openai/gpt-5.6.d/id = openai/gpt-5.6
 
-/ctx/home/1000/model/main -> /ctx/model/openai/gpt-4o
+/ctx/home/1000/model/main -> /ctx/model/openai/gpt-5.6
 ```
 
 Alias resolution:
@@ -90,23 +90,25 @@ If `coder` needs its own default parameters, create a real object instead of a
 symlink overlay:
 
 ```text
-/ctx/model/openai/gpt-4o-coder
-/ctx/model/openai/gpt-4o-coder.d/id
-/ctx/model/openai/gpt-4o-coder.d/default
+/ctx/model/openai/gpt-5.6
+/ctx/model/openai/gpt-5.6.d/id
+/ctx/model/openai/gpt-5.6.d/default
 ```
 
 ## Exec Protocol
 
-`model/<provider>/<model>`, `agent/<name>`, and `tool/<name>` are executable
-files. They must accept argv or stdin input:
+Executable agents use the required `agent/<name>.d/abi` control. Its only v1
+value is `sdk-envelope-v1`; the runtime supplies the typed invocation described
+by the [Agent Runtime specification](agent-runtime.md).
+
+`model/<provider>/<model>` and `tool/<name>` are executable files that accept
+argv or stdin input. Agent executables are host-launched through the SDK
+envelope rather than called with user argv:
 
 ```bash
-/ctx/model/openai/gpt-4o "hello"
-echo "hello" | /ctx/model/openai/gpt-4o
-echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-4o
-
-/ctx/agent/coder "fix this project"
-echo '{"task":"fix tests"}' | /ctx/agent/coder
+/ctx/model/openai/gpt-5.6 "hello"
+echo "hello" | /ctx/model/openai/gpt-5.6
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.6
 
 /ctx/tool/fs.read '{"path":"README.md"}'
 echo '{"path":"README.md"}' | /ctx/tool/fs.read
@@ -115,7 +117,7 @@ echo '{"path":"README.md"}' | /ctx/tool/fs.read
 stdout should be JSONL:
 
 ```jsonl
-{"type":"start","run":"r1","model":"openai/gpt-4o"}
+{"type":"start","run":"r1","model":"openai/gpt-5.6"}
 {"type":"delta","run":"r1","text":"hello"}
 {"type":"done","run":"r1","status":"ok"}
 ```
@@ -174,7 +176,7 @@ Requests:
 Responses:
 
 ```jsonl
-{"type":"start","id":"event-id","run":"run-id","model":"openai/gpt-4o"}
+{"type":"start","id":"event-id","run":"run-id","model":"openai/gpt-5.6"}
 {"type":"delta","id":"event-id","run":"run-id","text":"..."}
 {"type":"message","id":"event-id","run":"run-id","role":"assistant","content":[{"type":"text","text":"..."}]}
 {"type":"error","run":"run-id","code":"EACCES","message":"permission denied"}
@@ -192,8 +194,9 @@ closed         private/shared sessions are not deleted
 ```
 
 The durable agent object may use `agent/<name>.sock` as a stopped placeholder.
-When started, the visible path is an owner-authorized symlink to the live socket
-below `/run/user/<uid>/cortexfs/agent/`. Terminal sessions similarly expose
+When started, the visible agent socket may be an owner-authorized symlink to the
+live socket below `/run/user/<uid>/cortexfs/agent/`, or a direct socket node at
+`/ctx/agent/<name>.sock` in some deployments. Terminal sessions expose
 `home/<uid>/agent/<name>/session/<session>/terminal/main.sock` as a symlink to
 the matching runtime terminal socket. A start is not ready until both requested
 visible aliases have been created and verified.

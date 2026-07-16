@@ -2,6 +2,7 @@ pub mod bootstrap;
 pub(crate) mod executor;
 pub mod install;
 pub mod layout;
+mod mcp;
 pub mod metadata;
 pub mod receipt;
 pub mod replace;
@@ -28,6 +29,7 @@ where
             formatter.write_str("a non-null value")
         }
 
+        /// Deserializes and returns the inner value for present non-null inputs.
         fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
         where
             D: serde::Deserializer<'de>,
@@ -35,6 +37,7 @@ where
             T::deserialize(deserializer)
         }
 
+        /// Rejects explicit JSON `null` values for this field.
         fn visit_none<E>(self) -> Result<Self::Value, E>
         where
             E: serde::de::Error,
@@ -42,6 +45,7 @@ where
             Err(E::custom("null is not allowed"))
         }
 
+        /// Rejects unit-like JSON values for this non-unit target type.
         fn visit_unit<E>(self) -> Result<Self::Value, E>
         where
             E: serde::de::Error,

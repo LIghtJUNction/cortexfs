@@ -32,7 +32,7 @@ ctx ls tool
 ctx ls home
 ctx ls shared/project-a
 
-ctx which model openai/gpt-4o
+ctx which model openai/gpt-5.6
 ctx which agent coder
 ctx which tool fs.read
 
@@ -41,7 +41,7 @@ ctx agent history coder
 ctx agent output coder
 ctx agent resume coder --session default
 
-ctx agent new reviewer --model openai/gpt-4o --tool fs.read
+ctx agent new reviewer --model openai/gpt-5.6 --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
 ctx agent start reviewer
 ctx agent stop reviewer
@@ -74,9 +74,8 @@ Socket conveniences such as `ctx send`, `ctx chat`, `ctx connect`, `ctx ping`,
 and `ctx cancel` may exist, but they must be thin wrappers over the same socket
 ABI.
 
-`ctx bootstrap [SOURCE]` updates the
-reference source tree only; it does not remount `/ctx`, start a watcher, or add
-a second refresh boundary.
+`ctx bootstrap [SOURCE]` updates the reference source tree only; it does not
+remount `/ctx`, start a watcher, or add a second refresh boundary.
 
 Top-level agent session shortcuts follow the same current-session default as
 their `ctx agent ...` forms:
@@ -208,7 +207,7 @@ Examples:
 
 ```text
 ctx ls agent
-ctx cat model/openai/gpt-4o.d/cap
+ctx cat model/openai/gpt-5.6.d/cap
 ctx file type tool/fs.read
 ctx exec agent/coder "fix tests"
 ```
@@ -216,7 +215,7 @@ ctx exec agent/coder "fix tests"
 Object strings use ABI path form:
 
 ```text
-model/openai/gpt-4o
+model/openai/gpt-5.6
 agent/coder
 tool/fs.read
 ```
@@ -232,7 +231,7 @@ registry, or daemon catalog.
 `ctx which` finds executable objects by ABI class:
 
 ```text
-ctx which model openai/gpt-4o
+ctx which model openai/gpt-5.6
 ctx which agent coder
 ctx which tool fs.read
 ```

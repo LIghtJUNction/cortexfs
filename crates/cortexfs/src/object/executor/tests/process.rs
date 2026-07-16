@@ -211,7 +211,7 @@ fn agent_model_output_rejects_too_many_frames() -> Result<(), Box<dyn std::error
 }
 
 #[test]
-fn oversized_prompt_returns_e2big_before_opening_model() -> Result<(), String> {
+fn oversized_prompt_returns_e2big_before_opening_model() -> Result<(), ExecError> {
     let mut config = test_agent_run_config();
     config.model_path = PathBuf::from("/definitely/not/a/model");
     config.context_budget = AgentWindowBudget::from_effective(

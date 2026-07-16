@@ -25,7 +25,8 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 pub(crate) const OBJECT_MANIFEST_SCHEMA_V1: &str = "cortexfs.object/v1";
 pub(crate) const OBJECT_MANIFEST_SCHEMA_V2: &str = "cortexfs.object/v2";
 const MAX_OBJECT_MANIFEST_BYTES: u64 = 1024 * 1024;
-const TOOL_INSTALL_CONTROLS: &[&str] = &["description", "schema", "cap", "policy"];
+const TOOL_INSTALL_CONTROLS: &[&str] = &["description", "schema", "cap", "policy", "mcp"];
+const TOOL_REQUIRED_CONTROLS: &[&str] = &["description", "schema", "cap", "policy"];
 const AGENT_INSTALL_CONTROLS: &[&str] = &[
     "owner",
     "uid",
@@ -485,7 +486,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), InstallError> {
         }
     }
     let required = if class == ObjectClass::Tool {
-        TOOL_INSTALL_CONTROLS
+        TOOL_REQUIRED_CONTROLS
     } else {
         AGENT_REQUIRED_CONTROLS
     };

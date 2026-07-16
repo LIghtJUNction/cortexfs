@@ -1,7 +1,9 @@
 #[macro_export]
+/// Declares a small CLI error type with stable exit-style payloads.
 macro_rules! define_simple_cli_error {
     ($name:ident) => {
         #[derive(Debug, Eq, PartialEq)]
+        /// Generated CLI error struct for `$name`.
         struct $name {
             code: u8,
             message: String,

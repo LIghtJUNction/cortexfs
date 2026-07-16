@@ -30,6 +30,11 @@ Common object shapes:
 The named file executes work, the matching `.sock` handles stateful JSONL
 interaction, and the matching `.d/` directory stores small control files.
 
+On some deployments, `/ctx/agent/<name>.sock` is an owner-authorized symlink
+to a user runtime socket; on some system deployments it may also be a direct
+socket node. Treat both as valid implementation forms and probe with `nc -U` or
+`readlink` according to what the mount currently exposes.
+
 ## Call A Model Directly
 
 Start with the echo model while debugging:
@@ -90,8 +95,10 @@ state. `agent wait` is a non-blocking waitpid-shaped reader: while the child is
 `result.md`. These commands do not start background listeners, polling loops,
 or a second submission entrance.
 Provider secrets are not written into model files or `.d/` control
-directories; provider adapters resolve API keys from environment variables,
-the system keychain, then the unconfigured state.
+directories; provider adapters resolve API keys from provider environment
+candidates first (if set), then the CortexFS system secret store
+(`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`). If a required
+credential is absent, the model is considered `unconfigured`.
 
 Install file-based presets for common providers first:
 
@@ -135,10 +142,9 @@ model(embedding-*) -> local-socket
 fallback: proxy
 ```
 
-`key(office)` means another credential slot for the same provider. CortexFS
-first checks the matching environment variable, then the system keychain entry
-`service=cortexfs:<provider> account=office`. Without `key(...)`, it uses
-`account=default`.
+`key(office)` means another credential slot for the same provider and
+selects `/var/lib/cortexfs/secrets/provider/<provider>/office`.
+Without `key(...)`, CortexFS uses the `default` slot.
 
 ## Manage Agents
 
@@ -147,7 +153,7 @@ stopping agents still goes through ordinary tools or file ABI; it does not add
 a workflow entrance:
 
 ```bash
-ctx agent new reviewer --model openai/gpt-4o --tool fs.read
+ctx agent new reviewer --model openai/gpt-5.6 --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
 ctx agent new --from .cortexfs/agents/reviewer/agent.yaml
 ctx agent apply reviewer --from reviewer
@@ -168,7 +174,7 @@ schema: cortexfs.agent.profile/v1
 name: reviewer
 description: code review agent
 instructions: Review diffs carefully.
-model: openai/gpt-4o
+model: openai/gpt-5.6
 tools: [fs.read]
 parent: agent:architect
 ```

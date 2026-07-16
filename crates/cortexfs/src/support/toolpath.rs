@@ -128,15 +128,35 @@ impl ToolPath {
     /// Lists executable tool hits in lookup order. Non-executable files,
     /// sockets, and control directories are not hits.
     pub fn list(&self) -> Result<Vec<ToolHit>, ToolPathError> {
+        self.list_limited(usize::MAX, usize::MAX)
+    }
+
+    /// Lists at most `hit_limit` executable hits while inspecting at most
+    /// `scan_limit` directory entries across all search tiers.
+    pub fn list_limited(
+        &self,
+        hit_limit: usize,
+        scan_limit: usize,
+    ) -> Result<Vec<ToolHit>, ToolPathError> {
         let mut hits = Vec::new();
+        let mut scanned = 0;
         for dir in &self.dirs {
-            append_tool_hits(dir, &mut hits)?;
+            append_tool_hits(dir, &mut hits, hit_limit, scan_limit, &mut scanned)?;
+            if hits.len() >= hit_limit || scanned >= scan_limit {
+                break;
+            }
         }
         Ok(hits)
     }
 }
 
-pub(crate) fn append_tool_hits(dir: &Path, hits: &mut Vec<ToolHit>) -> Result<(), ToolPathError> {
+pub(crate) fn append_tool_hits(
+    dir: &Path,
+    hits: &mut Vec<ToolHit>,
+    hit_limit: usize,
+    scan_limit: usize,
+    scanned: &mut usize,
+) -> Result<(), ToolPathError> {
     let directory = match open_plain_directory(dir) {
         Ok(directory) => directory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -150,13 +170,18 @@ pub(crate) fn append_tool_hits(dir: &Path, hits: &mut Vec<ToolHit>) -> Result<()
 
     let mut local = Vec::new();
     for entry in entries {
+        if *scanned >= scan_limit {
+            break;
+        }
         let entry = entry.map_err(|_error| ToolPathError::CannotReadDirectory)?;
+        *scanned = scanned.saturating_add(1);
         let name = entry.file_name().to_string_lossy().into_owned();
         if is_object_name(&name) && fd_entry_is_executable_file(&directory, &name) {
             local.push(ToolHit::new(dir.join(&name)));
         }
     }
     local.sort_by(|left, right| left.path.cmp(&right.path));
+    local.truncate(hit_limit.saturating_sub(hits.len()));
     hits.extend(local);
     Ok(())
 }
@@ -177,4 +202,50 @@ pub fn is_executable_file(path: &Path) -> bool {
 pub(crate) fn fd_entry_is_executable_file(parent_dir: &File, name: &str) -> bool {
     nix::sys::stat::fstatat(parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
         .is_ok_and(|stat| stat.st_mode & libc::S_IFMT == libc::S_IFREG && stat.st_mode & 0o111 != 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io;
+
+    fn executable(path: &Path) -> io::Result<()> {
+        fs::write(path, "#!/bin/sh\n")?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+    }
+
+    #[test]
+    fn bounded_listing_separates_scan_and_hit_limits() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        fs::create_dir_all(&first)?;
+        fs::create_dir_all(&second)?;
+        for index in 0..128 {
+            fs::write(first.join(format!("junk-{index:03}")), "junk")?;
+        }
+        executable(&second.join("later"))?;
+        let path = ToolPath::new([first, second]);
+        assert!(
+            path.list_limited(8, 64)
+                .map_err(|error| { io::Error::other(format!("cannot list tools: {error:?}")) })?
+                .is_empty()
+        );
+
+        let tier = root.path().join("tier");
+        fs::create_dir_all(&tier)?;
+        for name in ["zulu", "alpha", "middle"] {
+            executable(&tier.join(name))?;
+        }
+        let hits = ToolPath::new([tier])
+            .list_limited(2, 32)
+            .map_err(|error| io::Error::other(format!("cannot list tools: {error:?}")))?;
+        assert_eq!(
+            hits.iter()
+                .filter_map(|hit| hit.path().file_name()?.to_str())
+                .collect::<Vec<_>>(),
+            ["alpha", "middle"]
+        );
+        Ok(())
+    }
 }

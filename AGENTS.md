@@ -1,10 +1,15 @@
 不要使用mod.rs
 请使用cargo add新增依赖，不要手动编辑文件添加依赖
-先去阅读规范（如有）：docs/DESIGN.md（Google Labs visual design system 格式）、docs/architecture.md（工程架构入口）、docs/spec/（规范性 ABI）。
+先去阅读规范（如有）：docs/DESIGN.md（Google Labs visual design system 格式）、docs/architecture.md（工程架构入口）、docs/internal-architecture.md（内部层/crate/错误/迁移）、docs/spec/（规范性 ABI）。
 文件 / 模块 / 函数命名约定见 docs/naming-guide.md（`crates/cortexfs/src` 新模块用内核风格单 token 文件名，禁止 `-`/`_` 作模块 stem，禁止 `mod.rs`；函数仍 `snake_case` 且宜短）。
+模块依赖只允许同层或向下（见 internal-architecture.md §4）；禁止 fuse→executor、support→agent/runtime、library→bin。库内新增错误不要用 `Result<_, String>`；进程本地可用 `ExecError` 一类 shell，稳定领域失败用 enum + Display + Error。
 开发触发事件以 Git commit 为唯一边界；不要新增后台监听、轮询或热加载子命令。
 文件系统 ABI 只使用当前规范里的短单数顶层目录；不要新增 chan/job/hook/workflow 这类第二套提交或编排入口。
 统一提交语义是：写临时文件，同目录原子 rename 成 `*.req.json`，从 outbox 读取结果，向 audit 追加事实。
+
+文档单一真相：`docs/` 是 canonical 源；`docs-site/i18n/en/` 只保留与 canonical 内容不同的真实翻译。禁止复制逐字相同的英文占位文件，缺失条目由 Docusaurus locale fallback 提供。
+Rust 规模统一由 `scripts/source-budget.sh` 门控：新增/变更需遵守 120 行上限、测试底线与 all/prod 预算。
+性能改动必须使用 `.agents/skills/cortexfs-performance`：先建立可复现 release 基线与噪声，收益须超过 `max(3%, 2×noise)` 且满足任务的 p95/RSS 门槛；禁止 `unsafe`、`target-cpu=native`、全局 `target-feature` 和默认 CUDA，任何可选加速都必须保留等价 CPU fallback 与缓存一致性，并由独立 reviewer 审核原始数据和 diff。
 
 去重与复用约定：
 - 新增或修改 Rust 逻辑前，先查已有 helper、模块和相邻实现；有 `.codegraph/` 时先用 CodeGraph 定位同义实现，再决定是否写新代码。

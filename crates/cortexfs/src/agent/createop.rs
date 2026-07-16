@@ -101,6 +101,7 @@ trait ChildCreateOps {
     fn rollback_agent(&mut self, agent: Self::Agent) -> ChildCreateResult<()>;
 }
 
+/// Executes the child creation sequence and rolls back on intermediate failures.
 fn coordinate_child_phases<O: ChildCreateOps>(ops: &mut O) -> ChildCreateResult<O::Launch> {
     let agent = ops.create_agent()?;
     let handoff = match ops.publish_handoff(&agent) {
@@ -136,6 +137,7 @@ fn coordinate_child_phases<O: ChildCreateOps>(ops: &mut O) -> ChildCreateResult<
     Ok(launch)
 }
 
+/// Checks authorization and, if allowed, runs the child phase coordination.
 fn coordinate_authorized_child<O: ChildCreateOps>(
     authorized: bool,
     ops: &mut O,
@@ -237,6 +239,7 @@ impl Tool for AgentCreateTool {
     }
 }
 
+/// Reads a required string field from a JSON object or returns an error.
 fn required_string<'a>(
     object: &'a Map<String, serde_json::Value>,
     field: &str,
@@ -262,40 +265,8 @@ pub(crate) fn create_child(
     let run = runtime_field("CTX_RUN_ID")?;
     let source = PathBuf::from(runtime_field("CTX_SOURCE")?);
     let root = PathBuf::from(runtime_field("CTX_ROOT")?);
-    create_child_context_inner(
+    create_child_context(
         &source, &root, &parent, &session, &run, name, None, None, None, handoff, life,
-    )
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "explicit trusted runtime context excludes request-supplied authority"
-)]
-pub(crate) fn create_child_context(
-    source: &Path,
-    root: &Path,
-    parent: &str,
-    session: &str,
-    run: &str,
-    name: &str,
-    requested_child_session: Option<&str>,
-    requested_tool_path: Option<&str>,
-    requested_window: Option<u32>,
-    handoff: &str,
-    life: &str,
-) -> ChildCreateResult<(String, u32)> {
-    create_child_context_inner(
-        source,
-        root,
-        parent,
-        session,
-        run,
-        name,
-        requested_child_session,
-        requested_tool_path,
-        requested_window,
-        handoff,
-        life,
     )
 }
 
@@ -308,7 +279,7 @@ pub(crate) fn create_child_context(
     clippy::redundant_pub_crate,
     reason = "runtime socket execution consumes this transaction across module boundaries"
 )]
-fn create_child_context_inner(
+pub(crate) fn create_child_context(
     source: &Path,
     root: &Path,
     parent: &str,
@@ -480,7 +451,6 @@ fn create_child_context_inner(
         model: &model,
         parent_session,
         handoff,
-        durable_agent: false,
     };
     let launch = coordinate_authorized_child(true, &mut ops)?;
     Ok((child_session, launch.pid))
@@ -507,7 +477,6 @@ struct ProductionOps<'a> {
     model: &'a str,
     parent_session: PathBuf,
     handoff: &'a str,
-    durable_agent: bool,
 }
 
 impl ChildCreateOps for ProductionOps<'_> {
@@ -548,7 +517,6 @@ impl ChildCreateOps for ProductionOps<'_> {
         {
             return rollback_create(paths, child_error("EIO", "cannot secure child session"));
         }
-        self.durable_agent = false;
         Ok(paths)
     }
 
@@ -658,9 +626,6 @@ impl ChildCreateOps for ProductionOps<'_> {
     }
 
     fn rollback_agent(&mut self, agent: Self::Agent) -> ChildCreateResult<()> {
-        if self.durable_agent {
-            return Ok(());
-        }
         crate::agent::create::rollback_agent_files(agent).map_err(|error| match error {
             crate::agent::create::AgentRollbackError::Conflict(conflict) => child_error(
                 "EIO",
@@ -989,6 +954,7 @@ fn stop_child_with(
     system().map_err(|_error| child_error("EIO", "child system socket cleanup conflict"))
 }
 
+/// Rolls back partially created child resources and returns the original failure.
 fn rollback_create<T>(
     paths: crate::agent::create::AgentCreatePaths,
     error: AgentChildCreateError,
@@ -2113,7 +2079,6 @@ allow coder_t agent:window-child start\n",
             model: "debug/echo",
             parent_session,
             handoff: "run",
-            durable_agent: false,
         };
         let receipt = ops.publish_handoff(&agent);
         assert!(receipt.is_ok());
@@ -2168,7 +2133,6 @@ allow coder_t agent:window-child start\n",
             model: "debug/echo",
             parent_session: parent_session.clone(),
             handoff: "run",
-            durable_agent: false,
         };
         let result = ops.publish_handoff(&agent);
         assert!(result.is_err());

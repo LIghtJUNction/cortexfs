@@ -19,10 +19,11 @@ agent tool use   tsh inside ctxterm
 
 They must not collapse into one interface.
 
-`ctx agent chat` starts `ctxchat`, which owns line editing, socket requests,
-assistant response rendering, and prompt re-display. Interactive chat responses
-are buffered before printing so assistant output cannot corrupt the user's input
-buffer. `Ctrl+C` exits an idle chat.
+`ctx agent chat` is the human chat UI. It owns line editing, `Ctrl+C`, socket
+requests, assistant response rendering, and prompt re-display. Interactive chat
+responses are buffered before printing so assistant output cannot corrupt the
+user's input buffer. `Ctrl+C` exits an idle chat; while a run is active it first
+requests cancellation for that run and returns to the prompt.
 
 `ctx agent send` is a non-interactive human command. It may stream assistant
 deltas as they arrive.
@@ -143,10 +144,14 @@ The root-authoritative system socket accepts the agent owner UID or UID 0 for
 internal child dispatch and stop. This UID 0 exception does not apply to the
 receipt-bound per-run capability socket, which remains owner-UID only.
 
-Before invoking an executable agent, the socket runtime writes exactly one
-`sdk-envelope-v1` frame to stdin. Its `history_messages` and `tool_context`
-fields carry bounded prompt context; the agent boundary does not expose legacy
-`CTX_AGENT_HISTORY_MESSAGES` or `CTX_AGENT_TOOL_CONTEXT` environment inputs.
+Before invoking an executable agent for a durable `send`, the socket runtime
+sets `CTX_AGENT_HISTORY_MESSAGES` from the selected session's bounded
+`messages.jsonl` history. This is prompt context only; it does not grant
+additional session authority.
+
+If a human sends `SIGINT` while a run is active, `ctx agent chat` sends a
+`cancel` request for the active run id and returns to the prompt. In an idle
+interactive chat, `Ctrl+C` exits the chat UI.
 
 The socket-activated executable agent runtime observes the durable session state
 for the active run. When the matching `done/cancelled` event appears, it stops
@@ -180,8 +185,8 @@ User-started terminals may place the real socket under:
 /run/user/<uid>/cortexfs/terminal/<agent>/<session>/main.sock
 ```
 
-`ctx agent attach` should try the ABI path, then the user runtime path, then
-the legacy runtime path.
+`ctx agent attach` should try the ABI path first, then the user runtime path.
+If both locations are unavailable, it returns a socket-availability error.
 
 ## Sandbox Contract
 

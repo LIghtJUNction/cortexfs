@@ -139,4 +139,4 @@ The chroot root is only the runtime environment:
 Rebuilding the root, cleaning it, or switching runtime environment must not
 destroy session history.
 
-See `16-context.md` for context packs, compression, swap, and dedup rules.
+See `context-abi.md` for context packs, compression, swap, and dedup rules.

@@ -13,6 +13,105 @@ thread_local! {
     static RECREATED_SOURCE: Cell<Option<&'static str>> = const { Cell::new(None) };
 }
 
+#[derive(Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) enum PairStep {
+    #[default]
+    Start,
+    ExecutableSynced,
+    ExecutableMissing,
+    ControlSynced,
+    Complete,
+}
+
+#[derive(Default)]
+pub(super) struct PairProgress {
+    pub(super) phase: PairStep,
+    pub(super) completed: [bool; 2],
+    pub(super) observed: [bool; 2],
+    pub(super) detail: Option<String>,
+}
+
+pub(super) fn quarantine_pair(
+    dirs: [&fs::File; 2],
+    source: [&str; 2],
+    target: [&str; 2],
+    receipt: [EntryReceipt; 2],
+    mut progress: PairProgress,
+) -> PairProgress {
+    let [class, stage] = dirs;
+    let [source_executable, source_control] = source;
+    let [target_executable, target_control] = target;
+    let [executable, control] = receipt;
+    let [completed_executable, completed_control] = progress.completed;
+    let [observed_executable, observed_control] = progress.observed;
+    macro_rules! attempt {
+        ($operation:expr) => {
+            if let Err(detail) = $operation {
+                progress.detail = Some(detail);
+                return progress;
+            }
+        };
+    }
+    match progress.phase {
+        PairStep::Start | PairStep::ExecutableMissing => {
+            let (source_name, target_name, entry, kind, synced) = match progress.phase {
+                PairStep::Start => {
+                    attempt!(require_entry(
+                        class,
+                        source_executable,
+                        executable,
+                        EntryKind::Executable,
+                    ));
+                    attempt!(require_entry(
+                        class,
+                        source_control,
+                        control,
+                        EntryKind::Directory,
+                    ));
+                    (
+                        source_executable,
+                        target_executable,
+                        executable,
+                        EntryKind::Executable,
+                        PairStep::ExecutableSynced,
+                    )
+                }
+                _ => (
+                    source_control,
+                    target_control,
+                    control,
+                    EntryKind::Directory,
+                    PairStep::ControlSynced,
+                ),
+            };
+            let result = move_exact(class, source_name, stage, target_name, entry, kind);
+            let observed = entry_matches(stage, target_name, entry, kind);
+            progress.observed = match progress.phase {
+                PairStep::Start => [observed, observed_control],
+                _ => [observed_executable, observed],
+            };
+            attempt!(result);
+            progress.completed = match progress.phase {
+                PairStep::Start => [true, completed_control],
+                _ => [completed_executable, true],
+            };
+            attempt!(sync_dirs(class, stage));
+            progress.phase = synced;
+        }
+        PairStep::ExecutableSynced => {
+            attempt!(require_missing(class, source_executable));
+            progress.phase = PairStep::ExecutableMissing;
+        }
+        PairStep::ControlSynced => {
+            attempt!(require_missing(class, source_executable));
+            attempt!(require_missing(class, source_control));
+            progress.phase = PairStep::Complete;
+        }
+        PairStep::Complete => {}
+    }
+    progress
+}
+
 pub(super) fn relative_stage(
     root: &Path,
     class: &Path,

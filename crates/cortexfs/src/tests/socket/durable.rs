@@ -84,7 +84,7 @@ fn durable_session_layout_helper_creates_inspectable_session_and_index() {
         &session_root,
         "default",
         "/work/project",
-        Some("openai/gpt-4o"),
+        Some("openai/gpt-5.6"),
         SocketSessionScope::Private,
     );
     assert!(updated.is_ok());

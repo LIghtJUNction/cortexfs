@@ -47,7 +47,7 @@ pub enum OAuthError {
 }
 
 impl OAuthProviderConfig {
-    /// Returns the system keychain account used for OAuth access tokens.
+    /// Returns the system secret-store account used for OAuth access tokens.
     #[must_use]
     pub fn access_account(&self) -> &str {
         self.access_token_account
@@ -55,7 +55,7 @@ impl OAuthProviderConfig {
             .unwrap_or("oauth:access")
     }
 
-    /// Returns the system keychain account used for OAuth refresh tokens.
+    /// Returns the system secret-store account used for OAuth refresh tokens.
     #[must_use]
     pub fn refresh_account(&self) -> &str {
         self.refresh_token_account
@@ -180,7 +180,8 @@ pub fn parse_oauth_token_response(body: &[u8]) -> Result<OAuthTokenResponse, OAu
     Ok(response)
 }
 
-/// Resolves an OAuth access token with generated environment before system keychain.
+/// Resolves an OAuth access token from provider env candidates first,
+/// then the system secret store.
 pub fn resolve_oauth_access_token(
     provider: &str,
     config: &OAuthProviderConfig,

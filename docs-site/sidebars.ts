@@ -12,6 +12,8 @@ const sidebars: SidebarsConfig = {
       items: [
         {type: 'doc', id: 'DESIGN', label: '设计说明'},
         {type: 'doc', id: 'CTX', label: 'ctx Coreutils 设计'},
+        {type: 'doc', id: 'architecture', label: '系统架构'},
+        {type: 'doc', id: 'internal-architecture', label: '内部工程架构'},
         {type: 'doc', id: 'agent-sh', label: 'agent.sh'},
         {type: 'doc', id: 'aimock-testing', label: 'AIMock 测试'},
         {

@@ -343,6 +343,7 @@ pub fn generated_sibling_name(target: &str, kind: &str, attempt: u8) -> String {
 }
 
 #[must_use]
+/// Parses a generated sibling target marker and returns the base target name.
 pub fn generated_sibling_target<'a>(name: &'a str, kind: &str) -> Option<&'a str> {
     let rest = name.strip_prefix('.')?;
     let marker = format!(".{kind}-");

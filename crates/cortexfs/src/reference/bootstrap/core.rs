@@ -22,11 +22,9 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
         }
         ensure_reference_agent(root, agent.name, agent.parent, &agent_groups)?;
     }
-    remove_deprecated_reference_placeholder_tools(root)?;
     ensure_reference_global_tools(root)?;
     ensure_reference_docs(root)?;
     ensure_reference_home(root)?;
-    remove_deprecated_reference_home_tool_aliases(root)?;
     migrate_reference_legacy_session_meta_models(root)?;
     apply_precomputed_reference_tree_upgrade(root, plan)?;
     Ok(ReferenceTreeBootstrap::new(root.to_path_buf()))
@@ -258,19 +256,6 @@ pub(crate) fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError
             ),
         )?;
         set_reference_executable(&path)?;
-    }
-    remove_deprecated_reference_bin_te(root)?;
-    Ok(())
-}
-
-pub(crate) fn remove_deprecated_reference_bin_te(root: &Path) -> Result<(), ReferenceTreeError> {
-    let path = root.join("bin").join("te");
-    let Ok(content) = support::plain::read_small_text_file(&path, MAX_REFERENCE_SESSION_META_BYTES)
-    else {
-        return Ok(());
-    };
-    if content.contains("# CortexFS reference-tree te placeholder.") {
-        remove_reference_entry(&path).map_err(|_error| ReferenceTreeError::CannotRemove)?;
     }
     Ok(())
 }
@@ -580,192 +565,6 @@ pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), Reference
     Ok(())
 }
 
-pub(crate) fn remove_deprecated_reference_placeholder_tools(
-    root: &Path,
-) -> Result<(), ReferenceTreeError> {
-    for tool in DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS {
-        remove_deprecated_reference_placeholder_tool(root, tool)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn remove_deprecated_reference_placeholder_tool(
-    root: &Path,
-    name: &str,
-) -> Result<(), ReferenceTreeError> {
-    let executable = root.join("tool").join(name);
-    let control_dir = root.join("tool").join(format!("{name}.d"));
-    if fs::symlink_metadata(&executable).is_err() && fs::symlink_metadata(&control_dir).is_err() {
-        return Ok(());
-    }
-    if !is_deprecated_reference_placeholder_tool(&executable, &control_dir) {
-        return Ok(());
-    }
-    remove_reference_entry(&executable).map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    remove_deprecated_reference_placeholder_control_dir(&control_dir)?;
-    Ok(())
-}
-
-pub(crate) fn remove_deprecated_reference_placeholder_control_dir(
-    control_dir: &Path,
-) -> Result<(), ReferenceTreeError> {
-    let control_dir_file =
-        open_reference_dir(control_dir).map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    for file in TOOL_CONTROL_FILES {
-        nix::unistd::unlinkat(
-            &control_dir_file,
-            *file,
-            nix::unistd::UnlinkatFlags::NoRemoveDir,
-        )
-        .map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    }
-    remove_deprecated_reference_placeholder_hook_dir(&control_dir_file)?;
-    let Some(parent) = control_dir.parent() else {
-        return Err(ReferenceTreeError::CannotRemove);
-    };
-    let parent_dir =
-        open_reference_dir(parent).map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    let name = control_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ReferenceTreeError::CannotRemove)?;
-    nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::RemoveDir)
-        .map_err(|_error| ReferenceTreeError::CannotRemove)
-}
-
-pub(crate) fn remove_deprecated_reference_placeholder_hook_dir(
-    control_dir_file: &fs::File,
-) -> Result<(), ReferenceTreeError> {
-    let Ok(hook_dir_fd) = nix::fcntl::openat(
-        control_dir_file,
-        OBJECT_HOOK_DIR,
-        nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    ) else {
-        return Ok(());
-    };
-    let hook_dir = fs::File::from(hook_dir_fd);
-    for phase in OBJECT_HOOK_PHASE_DIRS {
-        nix::unistd::unlinkat(&hook_dir, *phase, nix::unistd::UnlinkatFlags::RemoveDir)
-            .map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    }
-    nix::unistd::unlinkat(
-        control_dir_file,
-        OBJECT_HOOK_DIR,
-        nix::unistd::UnlinkatFlags::RemoveDir,
-    )
-    .map_err(|_error| ReferenceTreeError::CannotRemove)
-}
-
-pub(crate) fn is_deprecated_reference_placeholder_tool(
-    executable: &Path,
-    control_dir: &Path,
-) -> bool {
-    if !control_dir
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.is_dir())
-    {
-        return false;
-    }
-    let Ok(wrapper) =
-        support::plain::read_small_text_file(executable, MAX_REFERENCE_SESSION_META_BYTES)
-    else {
-        return false;
-    };
-    let Ok(description) = support::plain::read_small_text_file(
-        &control_dir.join("description"),
-        MAX_REFERENCE_SESSION_META_BYTES,
-    ) else {
-        return false;
-    };
-    ((wrapper.contains("# CortexFS generated object wrapper.\n")
-        && wrapper.contains("exec '/bin/false' \"$0\" \"$@\"\n"))
-        || wrapper
-            == "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n")
-        && description.trim_end_matches('\n') == "CortexFS reference-tree tool"
-        && deprecated_placeholder_tool_control_dir_is_exact(control_dir)
-}
-
-pub(crate) fn deprecated_placeholder_tool_control_dir_is_exact(control_dir: &Path) -> bool {
-    let Ok(control_dir_file) = open_reference_dir(control_dir) else {
-        return false;
-    };
-    let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&control_dir_file)) else {
-        return false;
-    };
-    let mut seen = Vec::new();
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let Some(file_name) = file_name.to_str() else {
-            return false;
-        };
-        if !TOOL_CONTROL_FILES.contains(&file_name) {
-            if file_name == OBJECT_HOOK_DIR && deprecated_placeholder_hook_dir_is_exact(control_dir)
-            {
-                continue;
-            }
-            return false;
-        }
-        let Ok(stat) = nix::sys::stat::fstatat(
-            &control_dir_file,
-            file_name,
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        ) else {
-            return false;
-        };
-        if stat.st_mode & libc::S_IFMT != libc::S_IFREG {
-            return false;
-        }
-        seen.push(file_name.to_owned());
-    }
-    TOOL_CONTROL_FILES
-        .iter()
-        .all(|required| seen.iter().any(|file| file == required))
-}
-
-pub(crate) fn deprecated_placeholder_hook_dir_is_exact(control_dir: &Path) -> bool {
-    let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
-    if !hook_dir
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
-    {
-        return false;
-    }
-    let Ok(hook_dir_file) = open_reference_dir(&hook_dir) else {
-        return false;
-    };
-    let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&hook_dir_file)) else {
-        return false;
-    };
-    let mut seen = Vec::new();
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let Some(file_name) = file_name.to_str() else {
-            return false;
-        };
-        if !OBJECT_HOOK_PHASE_DIRS.contains(&file_name) {
-            return false;
-        }
-        let Ok(stat) = nix::sys::stat::fstatat(
-            &hook_dir_file,
-            file_name,
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        ) else {
-            return false;
-        };
-        if stat.st_mode & libc::S_IFMT != libc::S_IFDIR {
-            return false;
-        }
-        seen.push(file_name.to_owned());
-    }
-    OBJECT_HOOK_PHASE_DIRS
-        .iter()
-        .all(|required| seen.iter().any(|file| file == required))
-}
-
 #[cfg(test)]
 mod reference_model_tests {
     use super::*;
@@ -848,7 +647,7 @@ mod reference_model_tests {
                 provider: "api.test".to_owned(),
                 model: "gpt-main".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
@@ -858,7 +657,7 @@ mod reference_model_tests {
                 provider: "api.test".to_owned(),
                 model: "codex-auto-review".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
@@ -868,7 +667,7 @@ mod reference_model_tests {
                 provider: "api.test".to_owned(),
                 model: "turbo-fast".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
@@ -878,7 +677,7 @@ mod reference_model_tests {
                 provider: "api.test".to_owned(),
                 model: "deep".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nreasoning".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
@@ -888,7 +687,7 @@ mod reference_model_tests {
                 provider: "api.test".to_owned(),
                 model: "code-pro".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
@@ -898,7 +697,7 @@ mod reference_model_tests {
                 provider: "api.test".to_owned(),
                 model: "multimodal".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nvision".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),

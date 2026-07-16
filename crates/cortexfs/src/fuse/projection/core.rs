@@ -7,10 +7,11 @@ use crate::support::plain::{
 
 #[cfg(test)]
 thread_local! {
-    static AGENT_WINDOW_LOCK_HOOK: std::cell::RefCell<Option<mpsc::Sender<()>>> =
-        const { std::cell::RefCell::new(None) };
+static AGENT_WINDOW_LOCK_HOOK: std::cell::RefCell<Option<mpsc::Sender<()>>> =
+    const { std::cell::RefCell::new(None) };
 }
 
+/// Refreshes discovery and catalog caches, failing if either update fails.
 fn refresh_provider_caches<D, C>(discovery: D, catalog: C) -> Result<(), FuseV1Error>
 where
     D: FnOnce() -> Result<(), FuseV1Error>,

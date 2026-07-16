@@ -86,6 +86,7 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
         let control = tree.join("agent/coder.d");
         assert!(fs::create_dir_all(&control).is_ok());
         for (name, value) in [
+            ("abi", "sdk-envelope-v1\n"),
             ("owner", "1000\n"),
             ("uid", "1000\n"),
             ("gid", "1000\n"),
@@ -100,7 +101,6 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
             ("path", "/ctx/tool\n"),
             ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev\n"),
             ("model", "local/chat\n"),
-            ("abi", "sdk-envelope-v1\n"),
             ("window", "auto\n"),
             ("policy", "allow coder_t model:local/chat use\n"),
         ] {
@@ -225,6 +225,7 @@ pub(crate) fn tsh_persistent_cache_rejects_missing_runtime_receipt()
         let control = root.join("agent/coder.d");
         assert!(fs::create_dir_all(&control).is_ok());
         for (name, value) in [
+            ("abi", "sdk-envelope-v1\n"),
             ("owner", "1000\n"),
             ("uid", "1000\n"),
             ("gid", "1000\n"),
@@ -239,6 +240,7 @@ pub(crate) fn tsh_persistent_cache_rejects_missing_runtime_receipt()
             ("path", "/ctx/tool\n"),
             ("mount", "/ctx\t/ctx\tro\trbind,nosuid,nodev\n"),
             ("model", "main\n"),
+            ("window", "auto\n"),
             ("policy", "allow coder_t model:main use\n"),
         ] {
             assert!(fs::write(control.join(name), value).is_ok());

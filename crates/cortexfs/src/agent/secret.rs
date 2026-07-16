@@ -1,7 +1,7 @@
 use crate::*;
 
-/// Resolves an API key with the stable priority: environment, system keychain,
-/// then unconfigured.
+/// Resolves an API key with the stable priority:
+/// provider env candidates, system secret store, then unconfigured.
 pub fn resolve_api_key(
     env_name: &str,
     service: &str,
@@ -11,7 +11,7 @@ pub fn resolve_api_key(
 }
 
 /// Resolves an API key from candidate environment variables with the stable
-/// priority: environment, system keychain, then unconfigured.
+/// priority: environment, system secret store, then unconfigured.
 pub fn resolve_api_key_from_env_names(
     env_names: &[String],
     service: &str,

@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/cortexfs",
-    "crates/cortexfs-agent-sdk",
+    "crates/cortexfs-agent-sdk", "crates/cortexfs-mcp",
     "crates/cortexfs-runtime-client",
     "crates/cortexfs-tool-sdk",
     "tests/sdk-extension-fixture",

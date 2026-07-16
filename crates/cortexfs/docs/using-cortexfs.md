@@ -41,7 +41,7 @@ echo "summarize this file" | /ctx/model/main
 
 切换默认模型时改 `/ctx/model/main` alias，而不是在根目录新增 provider 专用入口。
 默认参考树提供 `architect`、`coder`、`reviewer`、`worker` 四个初始可用 agent：
-`architect`、`coder`、`reviewer` 使用 `model/main`（默认 `openai/gpt-5.5`），
+`architect`、`coder`、`reviewer` 使用 `model/main`（默认 `openai/gpt-5.6`），
 `worker` 默认使用 `api.lmm.best/gpt-5.3-codex-spark`。`model/helper` 保留为兼容
 alias；`fast`、`reason`、`code`、`vision` 是能力 alias，找不到匹配模型时回落到
 当前 `main` target。
@@ -105,13 +105,13 @@ fallback: proxy
 {
   "name": "local",
   "base_url": "http://127.0.0.1:8317/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "gpt-5.6",
   "enabled": true,
   "formats": ["openai.chat", "openai.responses"]
 }
 ```
 
-对应模型路径是 `/ctx/model/local/gpt-5.4-mini`。密钥写入
+对应模型路径是 `/ctx/model/local/gpt-5.6`。密钥写入
 `service=cortexfs:local account=default`；不需要在 provider JSON 里写明文密钥。
 
 ## 管理 agent
@@ -120,7 +120,7 @@ fallback: proxy
 ABI，不引入新的 workflow 入口：
 
 ```bash
-ctx agent new reviewer --model openai/gpt-4o --tool fs.read
+ctx agent new reviewer --model openai/gpt-5.6 --tool fs.read
 ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
 ctx agent start reviewer --session default
 ctx agent status reviewer
