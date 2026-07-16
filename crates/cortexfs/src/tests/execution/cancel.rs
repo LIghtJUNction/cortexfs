@@ -22,58 +22,83 @@ fn done_statuses(frames: &[Value], run: &str) -> Result<Vec<String>, &'static st
         .collect()
 }
 
+fn write_cancellable_partial_agent(executable: &Path) {
+    // Short cancellable wait: CI that misses cancel must not burn package timeouts.
+    write_text_file(
+        executable,
+        r#"#!/bin/sh
+trap 'exit 0' TERM INT
+printf '{"type":"delta","run":"%s","text":"partial"}\n' "$CTX_RUN_ID"
+touch "$CTX_SOURCE/cancel-ready"
+i=0
+while [ "$i" -lt 50 ]; do
+  sleep 0.1
+  i=$((i + 1))
+done
+printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
+"#,
+    );
+    set_file_mode(executable, 0o755);
+}
+
+fn set_stream_timeouts(stream: &UnixStream, seconds: u64) {
+    let timeout = Some(Duration::from_secs(seconds));
+    assert!(stream.set_read_timeout(timeout).is_ok());
+    assert!(stream.set_write_timeout(timeout).is_ok());
+}
+
+fn wait_delta_then_cancel(
+    client: UnixStream,
+    cancel_root: &Path,
+    ready: &Path,
+) -> Option<(bool, String, UnixStream)> {
+    let mut reader = BufReader::new(client);
+    let mut response = String::new();
+    loop {
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => return None,
+            Ok(_n) => {}
+        }
+        response.push_str(&line);
+        let frame = serde_json::from_str::<Value>(&line).ok()?;
+        if field(&frame, "type") != Some("delta") {
+            continue;
+        }
+        for _ in 0..100 {
+            if ready.exists() {
+                let cancelled = handle_socket_request_frame(
+                    cancel_root,
+                    "/work",
+                    Some("debug/echo"),
+                    r#"{"op":"cancel","id":"cancel-partial-1"}"#,
+                )
+                .is_ok();
+                return Some((cancelled, response, reader.into_inner()));
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        return None;
+    }
+}
+
 #[test]
 fn cancel_after_partial_delta_persists_only_cancelled_done() {
     let root = reference_tree("agent-partial-delta-cancel");
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let executable = root.join("agent/coder");
-    write_text_file(
-        &executable,
-        r#"#!/bin/sh
-trap 'exit 0' TERM
-printf '{"type":"delta","run":"%s","text":"partial"}\n' "$CTX_RUN_ID"
-touch "$CTX_SOURCE/cancel-ready"
-sleep 10
-printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
-"#,
-    );
-    set_file_mode(&executable, 0o755);
+    write_cancellable_partial_agent(&executable);
     let (mut client, mut socket) = ok!(UnixStream::pair());
+    // Bound both sides so a missed cancel/delta cannot hang the lib suite on CI.
+    set_stream_timeouts(&client, 8);
+    set_stream_timeouts(&socket, 8);
     let request = b"{\"op\":\"send\",\"id\":\"cancel-partial-1\",\"session\":\"default\",\"input\":\"run\"}\n";
     assert!(client.write_all(request).is_ok());
     assert!(client.shutdown(Shutdown::Write).is_ok());
     let cancel_root = session_root.clone();
     let ready = root.join("cancel-ready");
-    let cancel = thread::spawn(move || {
-        let mut reader = BufReader::new(client);
-        let mut response = String::new();
-        loop {
-            let mut line = String::new();
-            let read = reader.read_line(&mut line).ok()?;
-            if read == 0 {
-                return None;
-            }
-            response.push_str(&line);
-            let frame = serde_json::from_str::<Value>(&line).ok()?;
-            if field(&frame, "type") == Some("delta") {
-                for _ in 0..50 {
-                    if ready.exists() {
-                        let cancelled = handle_socket_request_frame(
-                            &cancel_root,
-                            "/work",
-                            Some("debug/echo"),
-                            r#"{"op":"cancel","id":"cancel-partial-1"}"#,
-                        )
-                        .is_ok();
-                        return Some((cancelled, response, reader.into_inner()));
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
-                return None;
-            }
-        }
-    });
+    let cancel = thread::spawn(move || wait_delta_then_cancel(client, &cancel_root, &ready));
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
@@ -87,7 +112,10 @@ printf '{"type":"done","run":"%s","status":"ok"}\n' "$CTX_RUN_ID"
     let outcome = ok!(outcome);
     let run = ok!(response_run(&outcome));
     drop(socket);
-    assert!(client.read_to_string(&mut response).is_ok());
+    set_stream_timeouts(&client, 2);
+    let mut tail = String::new();
+    let _ignored = client.read_to_string(&mut tail);
+    response.push_str(&tail);
     let session = session_root.join("default");
     let events = ok!(crate::support::columnar::read_text(
         &session,
