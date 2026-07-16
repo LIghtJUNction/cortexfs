@@ -692,7 +692,7 @@ Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (name **CI**).
 
 | Required check name | Job | What it runs |
 | --- | --- | --- |
-| `CI / rust` | `rust` | Ubuntu, **latest stable** Rust: `fmt` / `check` / `clippy` (same flags as above), then **cargo-nextest** (`--locked --workspace --all-features`, hang timeouts in `.config/nextest.toml`). Local pre-commit still uses `cargo test`. |
+| `CI / rust` | `rust` | Ubuntu, **latest stable** Rust: the four Cargo commands above (`--locked` / `--workspace` / `--all-targets` / `--all-features`) |
 | `CI / docs` | `docs` | `docs-site` Bun install + Docusaurus production build |
 
 After these checks are green on `main`, enable them as required branch-protection checks. Privileged FUSE mounts, live providers, and systemd smoke tests stay out of this gate.
