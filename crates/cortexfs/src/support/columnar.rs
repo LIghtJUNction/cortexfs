@@ -1597,7 +1597,7 @@ fn repair_marker_tail(
     snapshot
         .file
         .read_exact_at(&mut final_byte, current_length.saturating_sub(1))?;
-    if final_byte == [b'\n'] {
+    if final_byte == *b"\n" {
         return snapshot.verify_current(path);
     }
 
