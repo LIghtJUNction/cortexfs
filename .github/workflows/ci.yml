@@ -22,9 +22,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Fixture agents are #!/bin/sh scripts under temp dirs. Prefer an exec-capable
-  # workspace tmp so noexec mounts (some GHA/tmp layouts) cannot yield CannotRunAgent.
-  TMPDIR: ${{ github.workspace }}/.ci-tmp
 
 jobs:
   rust:
@@ -39,7 +36,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends bubblewrap
-          mkdir -p "${{ github.workspace }}/.ci-tmp"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
@@ -63,9 +59,14 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       # Same flags as pre-commit. Cap threads to reduce GHA fs races under load.
+      # TMPDIR only for tests: fixture #!/bin/sh agents must live on an exec mount.
       - name: cargo test
         timeout-minutes: 25
-        run: cargo test --locked --workspace --all-targets --all-features -- --test-threads=2
+        env:
+          TMPDIR: ${{ runner.temp }}/cortexfs-tests
+        run: |
+          mkdir -p "$TMPDIR"
+          cargo test --locked --workspace --all-targets --all-features -- --test-threads=2
 
   docs:
     name: docs
