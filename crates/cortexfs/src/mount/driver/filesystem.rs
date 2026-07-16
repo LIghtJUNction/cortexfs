@@ -113,10 +113,7 @@ impl Filesystem for CortexFuse {
                     reply.error(errno(error));
                     return;
                 }
-                match self.projected_getattr(&path) {
-                    Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
-                    Err(error) => reply.error(errno(error)),
-                }
+                self.reply_projected_attr(ino, &path, reply);
                 return;
             }
             if FuseV1Projection::is_socket_alias_path(&path) {
@@ -127,10 +124,7 @@ impl Filesystem for CortexFuse {
                     reply.error(errno(error));
                     return;
                 }
-                match self.projected_getattr(&path) {
-                    Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
-                    Err(error) => reply.error(errno(error)),
-                }
+                self.reply_projected_attr(ino, &path, reply);
                 return;
             }
             if let Err(error) = self.projection.set_layout_mode(&path, mode, req.uid()) {

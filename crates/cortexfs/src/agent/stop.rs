@@ -402,13 +402,27 @@ fn require_receipt_keys(value: &serde_json::Value, expected: &[&str]) -> Result<
 
 pub fn plan_temp_cleanup(context: &StopContext, name: &str) -> Result<TempCleanupPlan, StopError> {
     let agent_root = context.source.join("agent");
-    preflight_cleanup_directory(&agent_root, context.owner_uid)?;
+    plan_temp_cleanup_paths(
+        context.owner_uid,
+        &agent_root,
+        &agent_root.join(name),
+        &agent_root.join(format!("{name}.sock")),
+        &agent_root.join(format!("{name}.d")),
+    )
+}
+
+/// Plans temp agent cleanup for explicit object/socket/control paths.
+pub fn plan_temp_cleanup_paths(
+    owner_uid: u32,
+    agent_root: &std::path::Path,
+    object: &std::path::Path,
+    socket: &std::path::Path,
+    control_dir: &std::path::Path,
+) -> Result<TempCleanupPlan, StopError> {
+    preflight_cleanup_directory(agent_root, owner_uid)?;
     let mut entries = Vec::new();
-    for path in [
-        agent_root.join(name),
-        agent_root.join(format!("{name}.sock")),
-    ] {
-        match fs::symlink_metadata(&path) {
+    for path in [object, socket] {
+        match fs::symlink_metadata(path) {
             Ok(metadata) if metadata.file_type().is_dir() => {
                 return Err(StopError::new(format!(
                     "temp agent path is not a file or socket: {}",
@@ -416,7 +430,7 @@ pub fn plan_temp_cleanup(context: &StopContext, name: &str) -> Result<TempCleanu
                 )));
             }
             Ok(metadata) => entries.push(TempCleanupEntry {
-                path,
+                path: path.to_owned(),
                 directory: false,
                 dev: metadata.dev(),
                 ino: metadata.ino(),
@@ -431,11 +445,7 @@ pub fn plan_temp_cleanup(context: &StopContext, name: &str) -> Result<TempCleanu
             }
         }
     }
-    plan_temp_cleanup_tree(
-        &agent_root.join(format!("{name}.d")),
-        context.owner_uid,
-        &mut entries,
-    )?;
+    plan_temp_cleanup_tree(control_dir, owner_uid, &mut entries)?;
     Ok(TempCleanupPlan { entries })
 }
 
