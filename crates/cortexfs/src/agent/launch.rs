@@ -1205,28 +1205,14 @@ pub fn remove_exact_socket_alias(visible_socket: &Path, runtime_socket: &Path) -
 }
 
 fn open_owned_alias_parent(path: &Path) -> io::Result<fs::File> {
-    let directory = crate::support::plain::open_plain_directory(path)?;
-    let metadata = directory.metadata()?;
-    if metadata.uid() != nix::unistd::geteuid().as_raw()
-        || metadata.permissions().mode() & 0o022 != 0
-    {
-        return Err(io::Error::from(io::ErrorKind::PermissionDenied));
-    }
-    Ok(directory)
+    require_owned_alias_dir(crate::support::plain::open_plain_directory(path)?)
 }
 
 fn open_owned_alias_child(parent: &fs::File, name: &str) -> io::Result<fs::File> {
-    let directory = nix::fcntl::openat(
-        parent,
-        name,
-        nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map(fs::File::from)
-    .map_err(io::Error::from)?;
+    require_owned_alias_dir(crate::support::plain::open_directory_at(parent, name)?)
+}
+
+fn require_owned_alias_dir(directory: fs::File) -> io::Result<fs::File> {
     let metadata = directory.metadata()?;
     if metadata.uid() != nix::unistd::geteuid().as_raw()
         || metadata.permissions().mode() & 0o022 != 0
@@ -1393,32 +1379,15 @@ pub fn stop_system_agent_socket(
     if !receipt.owned_start {
         return Ok(());
     }
-    let Some(before) = system_unit_state(&receipt.unit) else {
-        return Ok(());
-    };
-    if matches!(before.active.as_str(), "inactive" | "failed") {
-        return Ok(());
-    }
-    if before.invocation != receipt.invocation {
-        return Err(AgentLaunchError::StopConflict);
-    }
-    let status = systemctl_system(&["stop", &receipt.unit])
-        .status()
-        .map_err(|_error| AgentLaunchError::StopConflict)?;
-    if !status.success() {
-        return Err(AgentLaunchError::StopConflict);
-    }
-    for _ in 0..50 {
-        match system_unit_state(&receipt.unit) {
-            None => return Ok(()),
-            Some(state) if state.active == "inactive" || state.active == "failed" => return Ok(()),
-            Some(state) if state.invocation != receipt.invocation => {
-                return Err(AgentLaunchError::StopConflict);
-            }
-            Some(_) => thread::sleep(Duration::from_millis(20)),
-        }
-    }
-    Err(AgentLaunchError::StopConflict)
+    stop_unit_generation(
+        || system_unit_state(&receipt.unit).map(|s| (s.active, s.invocation)),
+        &receipt.invocation,
+        || {
+            systemctl_system(&["stop", &receipt.unit])
+                .status()
+                .map_err(|_error| AgentLaunchError::StopConflict)
+        },
+    )
 }
 
 /// Preflights an exact system socket generation without mutating it.
@@ -1483,28 +1452,41 @@ pub fn launch_receipt(
 
 /// Stops only the exact service generation represented by `receipt`.
 pub fn stop_launch(receipt: &AgentLaunchReceipt) -> Result<(), AgentLaunchError> {
-    let Some(before) = unit_state(&receipt.identity, &receipt.unit) else {
+    let service = format!("{}.service", receipt.unit);
+    stop_unit_generation(
+        || unit_state(&receipt.identity, &receipt.unit).map(|s| (s.active, s.invocation)),
+        &receipt.invocation,
+        || {
+            systemctl_user(&receipt.identity, &["stop", &service])
+                .map_err(|_error| AgentLaunchError::StopConflict)?
+                .status()
+                .map_err(|_error| AgentLaunchError::StopConflict)
+        },
+    )
+}
+
+fn stop_unit_generation(
+    mut poll: impl FnMut() -> Option<(String, String)>,
+    expected_invocation: &str,
+    stop: impl FnOnce() -> Result<std::process::ExitStatus, AgentLaunchError>,
+) -> Result<(), AgentLaunchError> {
+    let Some((active, invocation)) = poll() else {
         return Ok(());
     };
-    if matches!(before.active.as_str(), "inactive" | "failed") {
+    if matches!(active.as_str(), "inactive" | "failed") {
         return Ok(());
     }
-    if before.invocation != receipt.invocation {
+    if invocation != expected_invocation {
         return Err(AgentLaunchError::StopConflict);
     }
-    let service = format!("{}.service", receipt.unit);
-    let status = systemctl_user(&receipt.identity, &["stop", &service])
-        .map_err(|_error| AgentLaunchError::StopConflict)?
-        .status()
-        .map_err(|_error| AgentLaunchError::StopConflict)?;
-    if !status.success() {
+    if !stop()?.success() {
         return Err(AgentLaunchError::StopConflict);
     }
     for _ in 0..50 {
-        match unit_state(&receipt.identity, &receipt.unit) {
+        match poll() {
             None => return Ok(()),
-            Some(state) if state.active == "inactive" || state.active == "failed" => return Ok(()),
-            Some(state) if state.invocation != receipt.invocation => {
+            Some((active, _)) if matches!(active.as_str(), "inactive" | "failed") => return Ok(()),
+            Some((_, invocation)) if invocation != expected_invocation => {
                 return Err(AgentLaunchError::StopConflict);
             }
             Some(_) => thread::sleep(Duration::from_millis(20)),
@@ -1890,38 +1872,9 @@ pub fn terminal_command(
             workspace.source.clone(),
         ]);
     }
-    command.args.extend([
-        "--die-with-parent".to_owned(),
-        "--unshare-pid".to_owned(),
-        "--unshare-net".to_owned(),
-        "--proc".to_owned(),
-        "/proc".to_owned(),
-        "--dev".to_owned(),
-        "/dev".to_owned(),
-        "--tmpfs".to_owned(),
-        "/tmp".to_owned(),
-        "--dir".to_owned(),
-        "/run".to_owned(),
-        "--dir".to_owned(),
-        "/home".to_owned(),
-        "--ro-bind".to_owned(),
-        "/usr".to_owned(),
-        "/usr".to_owned(),
-        "--ro-bind".to_owned(),
-        "/etc".to_owned(),
-        "/etc".to_owned(),
-        "--tmpfs".to_owned(),
-        "/etc/profile.d".to_owned(),
-        "--symlink".to_owned(),
-        "usr/bin".to_owned(),
-        "/bin".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib64".to_owned(),
-    ]);
+    command
+        .args
+        .extend(crate::support::bwrap::host_rootfs_args(true));
     if let Some(runtime_dir) = socket.parent() {
         command.args.extend([
             "--bind".to_owned(),

@@ -325,16 +325,7 @@ impl RunCapability {
                 input,
                 life,
             } => {
-                if !constant_time_eq(token.as_bytes(), self.token.as_bytes()) {
-                    return Err(RunCapabilityError::TokenDenied);
-                }
-                if !legal_request_id(&request_id) {
-                    return Err(RunCapabilityError::InvalidFrame);
-                }
-                if current_run().as_deref() != Some(self.run.as_str()) {
-                    return Err(RunCapabilityError::RunChanged);
-                }
-                reserve_request_id(stream, seen, &request_id)?;
+                self.authorize_request(stream, seen, &token, &request_id, &mut *current_run)?;
                 if agent != self.agent || session != self.session || run != self.run {
                     let _ignored = write_error_frame(stream, request_id, "EINVAL");
                     return Err(RunCapabilityError::InvalidFrame);
@@ -376,16 +367,7 @@ impl RunCapability {
                 };
             }
         };
-        if !constant_time_eq(token.as_bytes(), self.token.as_bytes()) {
-            return Err(RunCapabilityError::TokenDenied);
-        }
-        if !legal_request_id(&request_id) {
-            return Err(RunCapabilityError::InvalidFrame);
-        }
-        if current_run().as_deref() != Some(self.run.as_str()) {
-            return Err(RunCapabilityError::RunChanged);
-        }
-        reserve_request_id(stream, seen, &request_id)?;
+        self.authorize_request(stream, seen, &token, &request_id, &mut *current_run)?;
         write_frame(
             stream,
             &ResponseFrame::Pong {
@@ -394,6 +376,26 @@ impl RunCapability {
             },
         )?;
         Ok(request_id)
+    }
+
+    fn authorize_request(
+        &self,
+        stream: &mut UnixStream,
+        seen: &mut HashSet<String>,
+        token: &str,
+        request_id: &str,
+        current_run: &mut dyn FnMut() -> Option<String>,
+    ) -> Result<(), RunCapabilityError> {
+        if !constant_time_eq(token.as_bytes(), self.token.as_bytes()) {
+            return Err(RunCapabilityError::TokenDenied);
+        }
+        if !legal_request_id(request_id) {
+            return Err(RunCapabilityError::InvalidFrame);
+        }
+        if current_run().as_deref() != Some(self.run.as_str()) {
+            return Err(RunCapabilityError::RunChanged);
+        }
+        reserve_request_id(stream, seen, request_id)
     }
 
     pub fn ping(&self, request_id: &str) -> Result<(), RunCapabilityError> {
@@ -501,13 +503,8 @@ fn control_timeout() -> Duration {
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    let mut difference = left.len() ^ right.len();
-    for index in 0..left.len().max(right.len()) {
-        difference |= usize::from(
-            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
-        );
-    }
-    difference == 0
+    use subtle::ConstantTimeEq;
+    bool::from(left.ct_eq(right))
 }
 
 fn legal_request_id(request_id: &str) -> bool {

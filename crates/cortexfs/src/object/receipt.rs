@@ -421,49 +421,19 @@ fn validate_receipt(
 }
 
 fn open_directory(parent: &fs::File, name: &str) -> Result<fs::File, InstallError> {
-    nix::fcntl::openat(
-        parent,
-        name,
-        nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map(fs::File::from)
-    .map_err(|error| {
+    crate::support::plain::open_directory_at(parent, name).map_err(|error| {
         InstallError::unavailable(format!("cannot open installed object controls: {error}"))
     })
 }
 
 fn open_executable(parent: &fs::File, name: &str) -> Result<fs::File, InstallError> {
-    nix::fcntl::openat(
-        parent,
-        name,
-        nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_NONBLOCK
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map(fs::File::from)
-    .map_err(|error| {
+    crate::support::plain::open_file_at(parent, name).map_err(|error| {
         InstallError::unavailable(format!("cannot open installed object executable: {error}"))
     })
 }
 
 fn open_receipt(control: &fs::File) -> Result<fs::File, InstallError> {
-    nix::fcntl::openat(
-        control,
-        INSTALL_RECEIPT_FILE,
-        nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_NONBLOCK
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map(fs::File::from)
-    .map_err(|error| {
+    crate::support::plain::open_file_at(control, INSTALL_RECEIPT_FILE).map_err(|error| {
         InstallError::unavailable(format!("cannot open object install receipt: {error}"))
     })
 }

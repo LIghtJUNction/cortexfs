@@ -1,3 +1,4 @@
+pub mod bwrap;
 pub mod columnar;
 pub mod control;
 pub mod index;

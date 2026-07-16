@@ -756,17 +756,9 @@ fn mkdirat(parent: &fs::File, name: &str, mode: u32) -> Result<(), InstallError>
 }
 
 fn openat_dir(parent: &fs::File, name: &str) -> Result<fs::File, InstallError> {
-    nix::fcntl::openat(
-        parent,
-        name,
-        nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map(fs::File::from)
-    .map_err(|error| InstallError::unavailable(format!("cannot open staged directory: {error}")))
+    crate::support::plain::open_directory_at(parent, name).map_err(|error| {
+        InstallError::unavailable(format!("cannot open staged directory: {error}"))
+    })
 }
 
 pub(crate) fn rename_noreplace(

@@ -107,39 +107,20 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                 reply.error(Errno::EINVAL);
                 return;
             };
-            match self.projection.remove_layout_file(&layout_path, req.uid()) {
-                Ok(()) => {
-                    if let Err(error) = self.forget_path(&layout_path) {
-                        reply.error(errno(error));
-                        return;
-                    }
-                    reply.ok();
-                    return;
-                }
-                Err(FuseV1Error::NotControlFile) => {}
-                Err(error) => {
-                    reply.error(errno(error));
-                    return;
-                }
-            }
-            match self
-                .projection
-                .remove_socket_alias_claim(&layout_path, req.uid())
-            {
-                Ok(()) => {
-                    if let Err(error) = self.forget_path(&layout_path) {
-                        reply.error(errno(error));
-                        return;
-                    }
-                    reply.ok();
-                    return;
-                }
-                Err(FuseV1Error::NotControlFile) => {}
-                Err(error) => {
-                    reply.error(errno(error));
-                    return;
-                }
-            }
+            let Some(reply) = self.try_remove_control_then_ok(
+                &layout_path,
+                |path| self.projection.remove_layout_file(path, req.uid()),
+                reply,
+            ) else {
+                return;
+            };
+            let Some(reply) = self.try_remove_control_then_ok(
+                &layout_path,
+                |path| self.projection.remove_socket_alias_claim(path, req.uid()),
+                reply,
+            ) else {
+                return;
+            };
             let path = match self.socket_alias_child_path(parent, name) {
                 Ok(path) => path,
                 Err(_error) => match self.socket_child_path(parent, name) {
