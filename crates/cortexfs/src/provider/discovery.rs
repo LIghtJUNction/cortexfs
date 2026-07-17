@@ -1,7 +1,7 @@
 use crate::*;
 
-use crate::support::plain::{create_plain_dir, read_small_text_file};
 use crate::support::command::CURL;
+use crate::support::plain::{create_plain_dir, read_small_text_file};
 
 const MAX_PROVIDER_MODEL_RESPONSE_BYTES: u64 = 1024 * 1024;
 const MAX_PROVIDER_MODEL_CACHE_BYTES: u64 = 1024 * 1024;
@@ -170,9 +170,7 @@ pub(crate) fn provider_models_url(base_url: &str) -> String {
 
 #[cfg(test)]
 mod provider_model_discovery_tests {
-    use super::{
-        CURL, FuseError, curl_command, curl_config_quote, refresh_provider_model_cache,
-    };
+    use super::{CURL, FuseError, curl_command, curl_config_quote, refresh_provider_model_cache};
     use std::fs;
     use std::os::unix::fs::symlink;
 

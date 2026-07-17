@@ -1,7 +1,7 @@
 use super::*;
 
-use crate::support::plain::{open_plain_directory, read_small_text_file};
 use crate::support::command::SETPRIV;
+use crate::support::plain::{open_plain_directory, read_small_text_file};
 
 pub(crate) fn command_for_agent_identity(
     program: impl AsRef<std::ffi::OsStr>,
@@ -72,11 +72,10 @@ mod identity_tests {
         if nix::unistd::geteuid().is_root() {
             return Ok(());
         }
-        let mut command =
-            command_for_agent_identity(
-                crate::support::command::ID,
-                &AgentUnixIdentity::new(65_534, 65_534, [1]),
-            );
+        let mut command = command_for_agent_identity(
+            crate::support::command::ID,
+            &AgentUnixIdentity::new(65_534, 65_534, [1]),
+        );
         command.arg("-u");
         let output = command.output()?;
         assert!(output.status.success());
