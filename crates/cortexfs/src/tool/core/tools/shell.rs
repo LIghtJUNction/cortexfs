@@ -181,7 +181,7 @@ pub(crate) fn shell_exec_command() -> Command {
     let mut command = Command::new(SHELL_EXEC_SHELL);
     command
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", crate::support::command::TRUSTED_PATH)
         .env("GIT_OPTIONAL_LOCKS", "0");
     command
 }

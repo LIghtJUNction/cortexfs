@@ -138,7 +138,7 @@ pub(crate) fn agent_model_command(
     command
         .arg(input)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", crate::support::command::TRUSTED_PATH)
         .env("CTX_ROOT", &config.ctx_root)
         .env("CTX_SOURCE", &config.source)
         .env("CTX_RUN_ID", &config.run)

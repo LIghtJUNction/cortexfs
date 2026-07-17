@@ -319,8 +319,8 @@ pub(crate) fn plain_sibling_mount_bin(current_exe: &Path) -> Option<PathBuf> {
         .then_some(sibling)
 }
 
-const CORTEXFS_MOUNT_PROGRAM: &str = "/usr/bin/cortexfs-mount";
-const TRUSTED_SETSID_BIN: &str = "/usr/bin/setsid";
+const CORTEXFS_MOUNT_PROGRAM: &str = cortexfs::support::command::CORTEXFS_MOUNT;
+const TRUSTED_SETSID_BIN: &str = cortexfs::support::command::SETSID;
 
 pub(crate) fn spawn_mount_process(
     mount_bin: &Path,
@@ -354,7 +354,7 @@ pub(crate) fn detached_mount_command(
         .arg(source)
         .arg(mountpoint)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin");
+        .env("PATH", cortexfs::support::command::TRUSTED_PATH);
     command
 }
 
@@ -369,7 +369,7 @@ pub(crate) fn direct_mount_command(
         .arg(source)
         .arg(mountpoint)
         .env_clear()
-        .env("PATH", "/usr/bin:/bin");
+        .env("PATH", cortexfs::support::command::TRUSTED_PATH);
     command
 }
 

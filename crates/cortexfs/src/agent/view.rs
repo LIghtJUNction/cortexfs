@@ -335,7 +335,10 @@ pub(crate) fn derive_agent_runtime_env(
         ),
         ("CTX_HOME".to_owned(), ctx_home.display().to_string()),
         ("HOME".to_owned(), home.display().to_string()),
-        ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+        (
+            "PATH".to_owned(),
+            crate::support::command::TRUSTED_PATH.to_owned(),
+        ),
         ("CTX_PATH".to_owned(), ctx_path.to_owned()),
     ];
     if let Some(budget) = AgentWindowBudget::from_effective(effective_window) {

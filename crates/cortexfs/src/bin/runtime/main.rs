@@ -34,7 +34,7 @@ use listenfd::ListenFd;
 use nix::sys::stat::{Mode, fchmod};
 
 const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
-const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
+const BWRAP_PROGRAM: &str = cortexfs::support::command::BWRAP;
 const RUN_CONTROL_DIR: &str = "/run/cortexfs/control";
 
 pub(crate) use cortexfs::cli::stderr;

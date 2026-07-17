@@ -641,7 +641,7 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
         request.authorized_object.as_os_str().to_owned(),
         OsString::from("--setenv"),
         OsString::from("PATH"),
-        OsString::from("/usr/bin:/bin"),
+        OsString::from(crate::support::command::TRUSTED_PATH),
     ]);
     if let Some(control) = request.control {
         let socket = &control.target;

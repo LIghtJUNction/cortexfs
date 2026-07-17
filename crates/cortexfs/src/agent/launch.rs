@@ -299,7 +299,7 @@ impl UserManagerIdentity {
     }
 
     fn direct_command(&self, program: &Path, args: &[String]) -> Command {
-        let mut command = Command::new("/usr/bin/env");
+        let mut command = Command::new(crate::support::command::ENV);
         command.arg("-i");
         self.append_environment(&mut command);
         command.arg(program).args(args);
@@ -307,7 +307,7 @@ impl UserManagerIdentity {
     }
 
     fn setpriv_command(&self, program: &Path, args: &[String]) -> Command {
-        let mut command = Command::new("/usr/bin/setpriv");
+        let mut command = Command::new(crate::support::command::SETPRIV);
         command.args(["--reuid", self.uid.to_string().as_str()]);
         command.args(["--regid", self.gid.to_string().as_str()]);
         if self.groups.is_empty() {
@@ -324,7 +324,7 @@ impl UserManagerIdentity {
         command.args([
             "--bounding-set=-all",
             "--no-new-privs",
-            "/usr/bin/env",
+            crate::support::command::ENV,
             "-i",
         ]);
         self.append_environment(&mut command);
@@ -335,7 +335,7 @@ impl UserManagerIdentity {
 
     fn append_environment(&self, command: &mut Command) {
         command
-            .arg("PATH=/usr/bin:/bin")
+            .arg(format!("PATH={}", crate::support::command::TRUSTED_PATH))
             .arg(format!("XDG_RUNTIME_DIR={}", self.runtime.display()))
             .arg(format!(
                 "DBUS_SESSION_BUS_ADDRESS=unix:path={}",
@@ -1859,7 +1859,7 @@ pub fn terminal_command(
     unit: &str,
 ) -> AgentLaunchCommand {
     let mut command = AgentLaunchCommand {
-        program: "/usr/bin/systemd-run".to_owned(),
+        program: crate::support::command::SYSTEMD_RUN.to_owned(),
         args: vec![
             "--user".to_owned(),
             "--unit".to_owned(),
@@ -1868,10 +1868,10 @@ pub fn terminal_command(
             "Restart=always".to_owned(),
             "--property".to_owned(),
             "RestartSec=250ms".to_owned(),
-            "/usr/bin/env".to_owned(),
+            crate::support::command::ENV.to_owned(),
             "-i".to_owned(),
-            "PATH=/usr/bin:/bin".to_owned(),
-            "/usr/bin/bwrap".to_owned(),
+            format!("PATH={}", crate::support::command::TRUSTED_PATH),
+            crate::support::command::BWRAP.to_owned(),
             "--clearenv".to_owned(),
         ],
     };
@@ -1964,7 +1964,7 @@ pub fn terminal_command(
     command.args.extend([
         "--chdir".to_owned(),
         request.cwd.clone(),
-        "/usr/bin/ctxterm".to_owned(),
+        crate::support::command::CTXTERM.to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
         "--no-stdio".to_owned(),
@@ -2023,11 +2023,17 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
         ("HOME".to_owned(), "/home/agent".to_owned()),
         ("USER".to_owned(), view.agent_name().to_owned()),
         ("LOGNAME".to_owned(), view.agent_name().to_owned()),
-        ("SHELL".to_owned(), "/usr/bin/bash".to_owned()),
+        (
+            "SHELL".to_owned(),
+            crate::support::command::BASH.to_owned(),
+        ),
         ("TERM".to_owned(), "xterm-256color".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned()),
-        ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+        (
+            "PATH".to_owned(),
+            crate::support::command::TRUSTED_PATH.to_owned(),
+        ),
     ];
     for pair in view.env() {
         if !env.iter().any(|entry| entry.0 == pair.0) {
@@ -2054,7 +2060,7 @@ pub fn chat_socket_command(
     runtime_program: &Path,
 ) -> AgentLaunchCommand {
     AgentLaunchCommand {
-        program: "/usr/bin/systemd-run".to_owned(),
+        program: crate::support::command::SYSTEMD_RUN.to_owned(),
         args: vec![
             "--user".to_owned(),
             "--unit".to_owned(),
@@ -2083,7 +2089,9 @@ pub fn launch_process_for(
 
 /// Retains only environment required to contact the current user's systemd manager.
 pub fn set_user_systemd_client_env(command: &mut Command) {
-    command.env_clear().env("PATH", "/usr/bin:/bin");
+    command
+        .env_clear()
+        .env("PATH", crate::support::command::TRUSTED_PATH);
     for key in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
         if let Some(value) = env::var_os(key) {
             command.env(key, value);
@@ -2156,14 +2164,18 @@ pub fn reset_socket_unit_for(identity: &AgentUnixIdentity, unit: &str) {
 fn systemctl_user(identity: &AgentUnixIdentity, arguments: &[&str]) -> io::Result<Command> {
     let mut argv = vec!["--user".to_owned()];
     argv.extend(arguments.iter().map(ToString::to_string));
-    user_manager_command(identity, Path::new("/usr/bin/systemctl"), &argv)
+    user_manager_command(
+        identity,
+        Path::new(crate::support::command::SYSTEMCTL),
+        &argv,
+    )
 }
 
 fn systemctl_system(arguments: &[&str]) -> Command {
-    let mut command = Command::new("/usr/bin/systemctl");
+    let mut command = Command::new(crate::support::command::SYSTEMCTL);
     command
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", crate::support::command::TRUSTED_PATH)
         .arg("--no-ask-password")
         .args(arguments);
     command

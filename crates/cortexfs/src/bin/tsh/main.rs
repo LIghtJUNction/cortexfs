@@ -488,7 +488,7 @@ pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<E
         .env("CTX_SOURCE", &runtime.source)
         .env("CTX_TOOL_MODE", "cli")
         .env("CTX_AUTHORIZED_OBJECT", hit.path())
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", cortexfs::support::command::TRUSTED_PATH)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());

@@ -33,7 +33,7 @@ pub(crate) fn provider_oauth_login(
         .iter()
         .any(|name| env::var_os(name).is_some_and(|value| !value.is_empty()))
     {
-        let _ignored = ProcessCommand::new("/usr/bin/xdg-open")
+        let _ignored = ProcessCommand::new(cortexfs::support::command::XDG_OPEN)
             .arg(&auth_url)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
