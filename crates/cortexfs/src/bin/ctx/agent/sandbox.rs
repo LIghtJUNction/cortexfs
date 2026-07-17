@@ -19,10 +19,10 @@ pub(crate) fn agent_start_systemd_command(
             "Restart=always".to_owned(),
             "--property".to_owned(),
             "RestartSec=250ms".to_owned(),
-            "/usr/bin/env".to_owned(),
+            cortexfs::support::command::ENV.to_owned(),
             "-i".to_owned(),
-            "PATH=/usr/bin:/bin".to_owned(),
-            "/usr/bin/bwrap".to_owned(),
+            format!("PATH={}", cortexfs::support::command::TRUSTED_PATH),
+            cortexfs::support::command::BWRAP.to_owned(),
         ],
     };
     command
@@ -79,7 +79,7 @@ pub(crate) fn agent_runtime_program() -> String {
             return sibling.display().to_string();
         }
     }
-    "/usr/bin/cortexfs-agent-runtime".to_owned()
+    cortexfs::support::command::CORTEXFS_AGENT_RUNTIME.to_owned()
 }
 
 pub(crate) fn agent_start_process_command(
@@ -136,7 +136,10 @@ pub(crate) fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(S
         ("HOME".to_owned(), AGENT_SANDBOX_HOME.to_owned()),
         ("USER".to_owned(), view.agent_name().to_owned()),
         ("LOGNAME".to_owned(), view.agent_name().to_owned()),
-        ("SHELL".to_owned(), "/usr/bin/bash".to_owned()),
+        (
+            "SHELL".to_owned(),
+            cortexfs::support::command::BASH.to_owned(),
+        ),
         ("TERM".to_owned(), "xterm-256color".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned()),
@@ -273,7 +276,7 @@ pub(crate) fn agent_bwrap_args(
     bwrap.extend([
         "--chdir".to_owned(),
         sandbox_cwd,
-        "/usr/bin/ctxterm".to_owned(),
+        cortexfs::support::command::CTXTERM.to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
         "--no-stdio".to_owned(),
@@ -349,7 +352,7 @@ pub(crate) fn agent_start_mounts_with_default_source(
     mounts
 }
 
-const SYSTEMD_RUN_PROGRAM: &str = "/usr/bin/systemd-run";
+const SYSTEMD_RUN_PROGRAM: &str = cortexfs::support::command::SYSTEMD_RUN;
 
 #[derive(Clone, Copy)]
 enum AgentGitMask {

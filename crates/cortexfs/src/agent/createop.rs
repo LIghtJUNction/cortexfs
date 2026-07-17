@@ -1860,7 +1860,7 @@ allow coder_t agent:window-child start\n",
             format!("cortexfs-agent@{child}.socket"),
             format!("cortexfs-agent-{child}-{session}-terminal.service"),
         ] {
-            let output = std::process::Command::new("/usr/bin/systemctl")
+            let output = std::process::Command::new(crate::support::command::SYSTEMCTL)
                 .args(["show", "--property=ActiveState", "--value", &unit])
                 .output();
             assert!(output.is_ok());

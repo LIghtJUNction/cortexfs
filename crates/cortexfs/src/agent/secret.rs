@@ -107,7 +107,7 @@ pub(crate) fn system_keychain_secret(
     }
 }
 
-pub(crate) const SECRET_TOOL_PROGRAM: &str = "/usr/bin/secret-tool";
+pub(crate) const SECRET_TOOL_PROGRAM: &str = crate::support::command::SECRET_TOOL;
 const MAX_SECRET_TOOL_OUTPUT_BYTES: usize = 8 * 1024;
 const SECRET_TOOL_TIMEOUT_SECONDS: u64 = 5;
 

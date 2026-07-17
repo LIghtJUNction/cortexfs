@@ -8,8 +8,8 @@ pub use abi::constants::{
     MAX_FUSE_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES, MODEL_ALIASES,
     MODEL_CONTROL_FILES, OBJECT_HOOK_DIR, OBJECT_HOOK_PHASE_DIRS, ROOT_ENTRIES,
     SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, STABLE_MODEL_CAPABILITIES,
-    TOOL_CONTROL_FILES, default_agent_model_for_name, is_dedicated_worker_agent_name,
-    is_model_alias, is_worker_agent_name,
+    SYSTEM_PROVIDER_CONFIG_DIR, TOOL_CONTROL_FILES, default_agent_model_for_name,
+    is_dedicated_worker_agent_name, is_model_alias, is_worker_agent_name,
 };
 pub use abi::path::{
     AbiPathKind, ObjectClass, classify_abi_path, is_model_name, is_object_name, is_root_entry,

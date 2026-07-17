@@ -44,10 +44,10 @@ pub(crate) fn run_cli_tool(name: &str, args: &[OsString]) -> Result<ExitCode, Ex
 
 pub(crate) fn passthrough_tool_program(name: &str) -> Option<&'static str> {
     match name {
-        "bash" => Some("/usr/bin/bash"),
-        "tmux" => Some("/usr/bin/tmux"),
-        "zellij" => Some("/usr/bin/zellij"),
-        "tsh" => Some("/usr/bin/tsh"),
+        "bash" => Some(crate::support::command::BASH),
+        "tmux" => Some(crate::support::command::TMUX),
+        "zellij" => Some(crate::support::command::ZELLIJ),
+        "tsh" => Some(crate::support::command::TSH),
         _ => None,
     }
 }
@@ -63,7 +63,10 @@ pub(crate) fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), 
         ))
     })?;
     let mut command = Command::new(program);
-    command.args(args).env_clear().env("PATH", "/usr/bin:/bin");
+    command
+        .args(args)
+        .env_clear()
+        .env("PATH", crate::support::command::TRUSTED_PATH);
     for key in passthrough_tool_runtime_env_keys() {
         if let Some(value) = env::var_os(key) {
             command.env(key, value);

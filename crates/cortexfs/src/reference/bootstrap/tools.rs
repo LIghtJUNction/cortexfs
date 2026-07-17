@@ -12,7 +12,7 @@ pub(crate) struct ReferenceToolSpec {
 pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
     ReferenceToolSpec {
         name: "tsh",
-        wrapper_target: "/bin/false",
+        wrapper_target: crate::support::command::FALSE,
         description: "CortexFS tool shell. Resolve and run tools through CTX_PATH.",
         schema: r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",

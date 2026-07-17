@@ -1,11 +1,11 @@
 use crate::*;
 
 use crate::support::plain::{create_plain_dir, read_small_text_file};
+use crate::support::command::CURL;
 
 const MAX_PROVIDER_MODEL_RESPONSE_BYTES: u64 = 1024 * 1024;
 const MAX_PROVIDER_MODEL_CACHE_BYTES: u64 = 1024 * 1024;
 const MAX_PROVIDER_MODEL_COUNT: usize = 256;
-const CURL_BIN: &str = "/usr/bin/curl";
 
 pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Result<(), FuseError> {
     create_plain_dir(cache_dir).map_err(|_error| FuseError::Io)?;
@@ -135,7 +135,7 @@ pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseErr
 }
 
 pub(crate) fn curl_command() -> Command {
-    let mut command = Command::new(CURL_BIN);
+    let mut command = Command::new(CURL);
     command.env_clear().arg("-q").arg("--config").arg("-");
     command
 }
@@ -171,7 +171,7 @@ pub(crate) fn provider_models_url(base_url: &str) -> String {
 #[cfg(test)]
 mod provider_model_discovery_tests {
     use super::{
-        CURL_BIN, FuseError, curl_command, curl_config_quote, refresh_provider_model_cache,
+        CURL, FuseError, curl_command, curl_config_quote, refresh_provider_model_cache,
     };
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -179,7 +179,7 @@ mod provider_model_discovery_tests {
     #[test]
     fn provider_model_discovery_uses_absolute_curl_path() {
         let command = curl_command();
-        assert_eq!(command.get_program(), CURL_BIN);
+        assert_eq!(command.get_program(), CURL);
         assert_eq!(
             command
                 .get_args()
