@@ -1894,34 +1894,13 @@ pub fn terminal_command(
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
         "--unshare-net".to_owned(),
-        "--proc".to_owned(),
-        "/proc".to_owned(),
-        "--dev".to_owned(),
-        "/dev".to_owned(),
-        "--tmpfs".to_owned(),
-        "/tmp".to_owned(),
-        "--dir".to_owned(),
-        "/run".to_owned(),
-        "--dir".to_owned(),
-        "/home".to_owned(),
-        "--ro-bind".to_owned(),
-        "/usr".to_owned(),
-        "/usr".to_owned(),
-        "--ro-bind".to_owned(),
-        "/etc".to_owned(),
-        "/etc".to_owned(),
-        "--tmpfs".to_owned(),
-        "/etc/profile.d".to_owned(),
-        "--symlink".to_owned(),
-        "usr/bin".to_owned(),
-        "/bin".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib64".to_owned(),
     ]);
+    command
+        .args
+        .extend(crate::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    command
+        .args
+        .extend(crate::support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
     if let Some(runtime_dir) = socket.parent() {
         command.args.extend([
             "--bind".to_owned(),

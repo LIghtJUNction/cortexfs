@@ -528,34 +528,9 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from("--clearenv"),
         OsString::from("--die-with-parent"),
         OsString::from("--unshare-pid"),
-        OsString::from("--proc"),
-        OsString::from("/proc"),
-        OsString::from("--dev"),
-        OsString::from("/dev"),
-        OsString::from("--tmpfs"),
-        OsString::from("/tmp"),
-        OsString::from("--dir"),
-        OsString::from("/run"),
-        OsString::from("--dir"),
-        OsString::from("/home"),
-        OsString::from("--ro-bind"),
-        OsString::from("/usr"),
-        OsString::from("/usr"),
-        OsString::from("--ro-bind"),
-        OsString::from("/etc"),
-        OsString::from("/etc"),
-        OsString::from("--tmpfs"),
-        OsString::from("/etc/profile.d"),
-        OsString::from("--symlink"),
-        OsString::from("usr/bin"),
-        OsString::from("/bin"),
-        OsString::from("--symlink"),
-        OsString::from("usr/lib"),
-        OsString::from("/lib"),
-        OsString::from("--symlink"),
-        OsString::from("usr/lib"),
-        OsString::from("/lib64"),
     ];
+    args.extend(BWRAP_PROCESS_SETUP_ARGS.map(OsString::from));
+    args.extend(BWRAP_SYSTEM_LAYOUT_ARGS.map(OsString::from));
     if !request.network_allowed {
         args.push(OsString::from("--unshare-net"));
     }
