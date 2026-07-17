@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::support::command::SETPRIV;
+use crate::support::command::{ID, SETPRIV};
 use crate::support::plain::{open_plain_directory, read_small_text_file};
 
 pub(crate) fn command_for_agent_identity(
@@ -44,19 +44,19 @@ mod identity_tests {
             return Ok(());
         }
         let identity = AgentUnixIdentity::new(65_534, 65_534, [1]);
-        let mut command = command_for_agent_identity(crate::support::command::ID, &identity);
+        let mut command = command_for_agent_identity(ID, &identity);
         command.arg("-u");
         let uid = command.output()?;
         assert!(uid.status.success());
         assert_eq!(String::from_utf8(uid.stdout)?.trim(), "65534");
 
-        let mut command = command_for_agent_identity(crate::support::command::ID, &identity);
+        let mut command = command_for_agent_identity(ID, &identity);
         command.arg("-g");
         let gid = command.output()?;
         assert!(gid.status.success());
         assert_eq!(String::from_utf8(gid.stdout)?.trim(), "65534");
 
-        let mut command = command_for_agent_identity(crate::support::command::ID, &identity);
+        let mut command = command_for_agent_identity(ID, &identity);
         command.arg("-G");
         let groups = command.output()?;
         assert!(groups.status.success());
@@ -73,7 +73,7 @@ mod identity_tests {
             return Ok(());
         }
         let mut command = command_for_agent_identity(
-            crate::support::command::ID,
+            ID,
             &AgentUnixIdentity::new(65_534, 65_534, [1]),
         );
         command.arg("-u");
