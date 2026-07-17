@@ -209,7 +209,7 @@ fn create_complete_agent_control(root: &Path, name: &str) {
 }
 
 fn ensure_runtime_model_fixture(root: &Path) {
-    let models = ensure_v1_runtime_models(root);
+    let models = ensure_runtime_models(root);
     assert!(models.is_ok(), "{models:?}");
     let worker_model = Path::new(DEFAULT_WORKER_MODEL);
     let worker_limit = root

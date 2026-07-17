@@ -112,7 +112,7 @@ pub(crate) fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io:
             .collect::<Vec<_>>()
             .join(" ")
     } else {
-        read_text_from_stdin_limited(io::stdin(), MAX_FUSE_V1_SMALL_WRITE_BYTES)?
+        read_text_from_stdin_limited(io::stdin(), MAX_FUSE_SMALL_WRITE_BYTES)?
     };
     write_text_file_atomic(Path::new(path), &content)?;
     writeln!(writer, "written")?;

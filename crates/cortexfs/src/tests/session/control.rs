@@ -1,5 +1,5 @@
 #[test]
-fn session_controls_accept_fixed_v1_values() {
+fn session_controls_accept_fixed_values() {
     assert!(inspect_session_control(SessionControlKind::State, "active\n").is_ok());
     assert!(inspect_session_control(SessionControlKind::State, "cancelled\n").is_ok());
     assert!(inspect_session_control(SessionControlKind::Cwd, "/work/project\n").is_ok());

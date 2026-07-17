@@ -28,5 +28,6 @@
 *.pid
 .codegraph
 /.tokensave/
+/.omo/
 SWAP.md
 scripts/__pycache__/

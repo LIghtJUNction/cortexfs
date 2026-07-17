@@ -14,7 +14,7 @@ mod tests {
     use cortexfs::object::install::{InstallTier, install_object};
     use cortexfs::{
         AgentExecutableSocketExecution, AgentExecutableSocketRuntime, ObjectClass,
-        derive_agent_runtime_view, ensure_v1_reference_tree, ensure_v1_runtime_models,
+        derive_agent_runtime_view, ensure_reference_tree, ensure_runtime_models,
         inspect_object_layout, serve_agent_executable_socket_stream_once,
     };
     use serde_json::{Value, json};
@@ -209,7 +209,7 @@ mod tests {
 
     fn install_fixture_tool() -> Result<FixtureRoot, Box<dyn std::error::Error>> {
         let root = FixtureRoot::new()?;
-        ensure_v1_reference_tree(root.path()).map_err(|error| {
+        ensure_reference_tree(root.path()).map_err(|error| {
             std::io::Error::other(format!("cannot bootstrap fixture tree: {error:?}"))
         })?;
         let package = root.path().join("package");
@@ -237,7 +237,7 @@ mod tests {
 
     fn install_fixture_agent() -> Result<FixtureRoot, Box<dyn std::error::Error>> {
         let root = install_fixture_tool()?;
-        ensure_v1_runtime_models(root.path()).map_err(|error| {
+        ensure_runtime_models(root.path()).map_err(|error| {
             std::io::Error::other(format!(
                 "cannot materialize fixture runtime models: {error:?}"
             ))

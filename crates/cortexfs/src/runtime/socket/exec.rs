@@ -1622,8 +1622,8 @@ mod completion_tests {
         runner: &Path,
         address: std::net::SocketAddr,
     ) -> io::Result<()> {
-        ensure_v1_reference_tree(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
-        ensure_v1_runtime_models(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
+        ensure_reference_tree(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
+        ensure_runtime_models(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
         fs::copy(runner, root.join("bin/cortexfs-object-runner"))?;
         fs::set_permissions(
             root.join("bin/cortexfs-object-runner"),
@@ -1754,8 +1754,8 @@ mod completion_tests {
     fn owned_child_channel_uses_canonical_parent_home() {
         let root = completion_root("canonical-child-channel");
         let _ignored = fs::remove_dir_all(&root);
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-        assert!(ensure_v1_runtime_models(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
+        assert!(ensure_runtime_models(&root).is_ok());
         let parent = derive_agent_runtime_view(&root, "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
@@ -1777,8 +1777,8 @@ mod completion_tests {
     fn owned_child_channel_rejects_parent_owner_mismatch() {
         let root = completion_root("child-channel-owner-mismatch");
         let _ignored = fs::remove_dir_all(&root);
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-        assert!(ensure_v1_runtime_models(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
+        assert!(ensure_runtime_models(&root).is_ok());
         let parent = derive_agent_runtime_view(&root, "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {

@@ -481,8 +481,8 @@ mod user_manager_tests {
     #[test]
     fn system_socket_visible_path_matches_backing_agent_socket_abi() {
         assert_eq!(
-            system_agent_visible_socket(std::path::Path::new("/storage/v1-root"), "child"),
-            std::path::Path::new("/storage/v1-root/agent/child.sock")
+            system_agent_visible_socket(std::path::Path::new("/storage/root"), "child"),
+            std::path::Path::new("/storage/root/agent/child.sock")
         );
     }
 

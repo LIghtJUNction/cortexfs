@@ -3,7 +3,7 @@ use crate::*;
 /// Effective-authority refusal reason for tool execution.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolExecutionDenial {
-    /// Tool name is not a valid v1 object name.
+    /// Tool name is not a valid object name.
     InvalidToolName,
     /// No executable tool was found through `CTX_PATH`.
     ToolNotFound,
@@ -173,7 +173,7 @@ impl SessionAccess {
 /// Effective-authority refusal reason for shared-space access.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SharedAccessDenial {
-    /// Shared-space name is not a valid v1 object name.
+    /// Shared-space name is not a valid object name.
     InvalidSharedName,
     /// Path is not a stable shared-space path for the named space.
     WrongSharedPath,

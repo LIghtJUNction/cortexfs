@@ -8,15 +8,16 @@ use crate::SocketRuntimeError;
 
 /// Parses a JSON frame and returns timing metadata only for valid debug frames.
 ///
-/// 功能：识别带有 `debug: true` 的帧并创建阶段计时上下文。
+/// Recognizes frames with `debug: true` and creates a per-stage timing context.
 ///
-/// 类似实现：line-based 调试埋点常见于进程 socket 协议场景。
-/// 相关讨论：
-/// - MCP 运行时诊断与超时处理思路
+/// Similar patterns: line-based debug probes are common in socket protocol
+/// runtime environments.
+/// Related references:
+/// - MCP runtime diagnostics and timeout handling.
 ///   [https://github.com/modelcontextprotocol/servers/pull/4479](https://github.com/modelcontextprotocol/servers/pull/4479)
 ///   [https://github.com/modelcontextprotocol/servers/pull/4208](https://github.com/modelcontextprotocol/servers/pull/4208)
-/// - MCP request-id 与异常恢复可观测性：[#3404](https://github.com/modelcontextprotocol/servers/issues/3404)
-/// - JSON 消息健壮性与长度保护案例：[#4207](https://github.com/modelcontextprotocol/servers/issues/4207)、[#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
+/// - MCP request-id and fault-recovery observability: [#3404](https://github.com/modelcontextprotocol/servers/issues/3404)
+/// - JSON message resilience and length-protection examples: [#4207](https://github.com/modelcontextprotocol/servers/issues/4207), [#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
 pub(in crate::runtime::socket) fn socket_debug_timing_from_frame(
     frame: &str,
 ) -> Option<SocketDebugTiming> {
@@ -40,12 +41,13 @@ pub(super) fn current_unix_millis() -> u128 {
 
 /// Emits a debug timing frame with elapsed milliseconds for the given stage.
 ///
-/// 功能：将阶段耗时按 JSONL 帧写回 socket，供上层审计与可视化。
-/// 相关项目：
+/// Function: writes stage elapsed milliseconds as JSONL frames to the socket so
+/// upper layers can audit and visualize timing.
+/// Related projects:
 /// - [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
 /// - [mark3labs/mcp-filesystem-server](https://github.com/mark3labs/mcp-filesystem-server)
 /// - [rust-mcp-stack/rust-mcp-sdk issue discussion #141](https://github.com/rust-mcp-stack/rust-mcp-sdk/issues/141)
-/// - MCP JSON 解析/可恢复性案例：[#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
+/// - MCP JSON parsing/recovery case study: [#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
 fn write_socket_debug_timing_frame(
     stream: &mut std::os::unix::net::UnixStream,
     timing: SocketDebugTiming,
@@ -72,9 +74,9 @@ fn write_socket_debug_timing_frame(
 /// Keeps timing emission behind `write_socket_frame` to match existing socket
 /// framing semantics.
 ///
-/// 相关 PR：
+/// Related PRs:
 /// - MCP filesystem server fixes around debug/transport handling [#4411](https://github.com/modelcontextprotocol/servers/pull/4411)
-/// - MCP transport 观测与 request-id 关联讨论 [#3404](https://github.com/modelcontextprotocol/servers/issues/3404)
+/// - MCP transport observation and request-id correlation discussion [#3404](https://github.com/modelcontextprotocol/servers/issues/3404)
 pub(in crate::runtime::socket) fn write_optional_socket_debug_timing_frame(
     stream: &mut std::os::unix::net::UnixStream,
     timing: Option<SocketDebugTiming>,
@@ -89,9 +91,9 @@ pub(in crate::runtime::socket) fn write_optional_socket_debug_timing_frame(
 /// Applies debug timing settings from environment variables when enabled.
 /// Mirrors process-environment integration points used by `ctxagent` launcher.
 ///
-/// 相关 PR：
+/// Related PRs:
 /// - project PR [#89](https://github.com/LIghtJUNction/cortexfs/pull/89)
-/// - MCP message 可恢复性与异常隔离讨论：[#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
+/// - MCP message resilience and isolation discussion: [#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
 pub(in crate::runtime::socket) fn apply_socket_debug_timing_env(
     command: &mut Command,
     timing: Option<SocketDebugTiming>,
@@ -106,8 +108,8 @@ pub(in crate::runtime::socket) fn apply_socket_debug_timing_env(
 
 /// Returns true when a frame has debug timing event shape.
 ///
-/// 参考：
-/// - JSONL 调试消息与阶段粒度上报惯例：
+/// References:
+/// - JSONL debug event framing and stage-level reporting conventions:
 ///   - [modelcontextprotocol/servers #4479](https://github.com/modelcontextprotocol/servers/pull/4479)
 ///   - [modelcontextprotocol/servers #4232](https://github.com/modelcontextprotocol/servers/issues/4232)
 pub(in crate::runtime::socket) fn is_socket_debug_timing_frame(

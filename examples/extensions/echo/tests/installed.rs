@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use cortexfs::object::install::{InstallTier, install_object};
 use cortexfs::{
     AgentExecutableSocketExecution, AgentExecutableSocketRuntime, derive_agent_runtime_view,
-    ensure_v1_reference_tree, serve_agent_executable_socket_stream_once,
+    ensure_reference_tree, serve_agent_executable_socket_stream_once,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -20,7 +20,7 @@ static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
 #[test]
 fn canonical_echo_installs_and_runs_two_native_calls() -> Result<(), Box<dyn std::error::Error>> {
     let root = FixtureRoot::new()?;
-    ensure_v1_reference_tree(root.path()).map_err(|error| {
+    ensure_reference_tree(root.path()).map_err(|error| {
         io::Error::other(format!(
             "cannot bootstrap canonical echo fixture: {error:?}"
         ))

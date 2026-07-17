@@ -1,0 +1,30 @@
+{
+  "title": {
+    "message": "CortexFS",
+    "description": "The title in the navbar"
+  },
+  "item.label.Docs": {
+    "message": "文档",
+    "description": "Navbar item with label Docs"
+  },
+  "item.label.Install": {
+    "message": "安装",
+    "description": "Navbar item with label Install"
+  },
+  "item.label.Usage": {
+    "message": "使用",
+    "description": "Navbar item with label Usage"
+  },
+  "item.label.agent.sh": {
+    "message": "agent.sh",
+    "description": "Navbar item with label agent.sh"
+  },
+  "item.label.GitHub": {
+    "message": "GitHub",
+    "description": "Navbar item with label GitHub"
+  },
+  "logo.alt": {
+    "message": "CortexFS",
+    "description": "The alt text of navbar logo"
+  }
+}
