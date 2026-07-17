@@ -2023,10 +2023,7 @@ fn terminal_env(view: &crate::AgentRuntimeView) -> Vec<(String, String)> {
         ("HOME".to_owned(), "/home/agent".to_owned()),
         ("USER".to_owned(), view.agent_name().to_owned()),
         ("LOGNAME".to_owned(), view.agent_name().to_owned()),
-        (
-            "SHELL".to_owned(),
-            crate::support::command::BASH.to_owned(),
-        ),
+        ("SHELL".to_owned(), crate::support::command::BASH.to_owned()),
         ("TERM".to_owned(), "xterm-256color".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned()),
