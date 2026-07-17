@@ -73,17 +73,8 @@ jobs:
       - name: cargo test (run)
         timeout-minutes: 25
         run: |
-          set -euo pipefail
-          mapfile -t packages < <(cargo metadata --format-version=1 --no-deps \
-            | python3 -c 'import json,sys; m=json.load(sys.stdin); print("\n".join(p["name"] for p in m["packages"] if p["id"].startswith("path+")))')
-          for package in "${packages[@]}"; do
-            echo "::group::cargo test -p ${package}"
-            # 180s wall clock per package; local full suite is ~30s.
-            timeout --signal=TERM --kill-after=30s 180s \
-              cargo test --locked -p "${package}" --all-targets --all-features \
-              -- --test-threads=2
-            echo "::endgroup::"
-          done
+          cargo test --locked --workspace --all-targets --all-features \
+            -- --test-threads=2
 
   docs:
     name: docs
