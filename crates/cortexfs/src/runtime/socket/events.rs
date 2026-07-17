@@ -1,8 +1,8 @@
 use super::*;
 
-use crate::support::command::SETPRIV;
 #[cfg(test)]
 use crate::support::command::ID;
+use crate::support::command::SETPRIV;
 use crate::support::plain::{open_plain_directory, read_small_text_file};
 
 pub(crate) fn command_for_agent_identity(
