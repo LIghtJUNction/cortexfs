@@ -1,5 +1,33 @@
 use std::{io::Read, process::Child, thread, time::Duration};
 
+/// Ordered bubblewrap process mounts appended after namespace flags.
+pub const BWRAP_PROCESS_SETUP_ARGS: [&str; 8] = [
+    "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/run",
+];
+
+/// Ordered bubblewrap mounts and links for the base system layout.
+pub const BWRAP_SYSTEM_LAYOUT_ARGS: [&str; 19] = [
+    "--dir",
+    "/home",
+    "--ro-bind",
+    "/usr",
+    "/usr",
+    "--ro-bind",
+    "/etc",
+    "/etc",
+    "--tmpfs",
+    "/etc/profile.d",
+    "--symlink",
+    "usr/bin",
+    "/bin",
+    "--symlink",
+    "usr/lib",
+    "/lib",
+    "--symlink",
+    "usr/lib",
+    "/lib64",
+];
+
 pub(crate) fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
     let mut output = Vec::with_capacity(limit.min(8 * 1024));
     let mut buffer = [0_u8; 8 * 1024];
