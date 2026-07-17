@@ -30,10 +30,15 @@ pub enum StopAction {
 }
 
 #[derive(Debug)]
+#[expect(
+    clippy::partial_pub_fields,
+    reason = "held descriptor is private receipt integrity state"
+)]
 pub struct StopFileReceipt {
     pub path: PathBuf,
     pub dev: u64,
     pub ino: u64,
+    file: fs::File,
 }
 
 #[derive(Debug)]
@@ -78,12 +83,17 @@ pub struct TempCleanupPlan {
 }
 
 #[derive(Debug)]
+#[expect(
+    clippy::partial_pub_fields,
+    reason = "held descriptor is private receipt integrity state"
+)]
 pub struct TempCleanupEntry {
     pub path: PathBuf,
     pub directory: bool,
     pub dev: u64,
     pub ino: u64,
     pub kind: u32,
+    file: fs::File,
 }
 
 #[derive(Debug)]
@@ -127,6 +137,7 @@ pub fn bind_file(path: &std::path::Path, write: bool) -> Result<StopFileReceipt,
         path: path.to_owned(),
         dev: metadata.dev(),
         ino: metadata.ino(),
+        file,
     })
 }
 
@@ -139,6 +150,9 @@ pub fn bind_control(control: &std::path::Path) -> Result<StopControlReceipts, St
 }
 
 fn open_file(receipt: &StopFileReceipt, append: bool) -> Result<fs::File, StopError> {
+    let held = receipt.file.metadata().map_err(|error| {
+        StopError::new(format!("cannot stat {}: {error}", receipt.path.display()))
+    })?;
     let mut options = fs::OpenOptions::new();
     options
         .write(true)
@@ -150,7 +164,11 @@ fn open_file(receipt: &StopFileReceipt, append: bool) -> Result<fs::File, StopEr
     let metadata = file.metadata().map_err(|error| {
         StopError::new(format!("cannot stat {}: {error}", receipt.path.display()))
     })?;
-    if !metadata.is_file() || (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino) {
+    if !held.is_file()
+        || (held.dev(), held.ino()) != (receipt.dev, receipt.ino)
+        || !metadata.is_file()
+        || (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino)
+    {
         return Err(StopError::new(format!(
             "stop receipt conflict: {}",
             receipt.path.display()
@@ -165,7 +183,13 @@ pub fn verify_file(receipt: &StopFileReceipt, append: bool) -> Result<(), StopEr
 
 pub fn verify_read_file(receipt: &StopFileReceipt) -> Result<(), StopError> {
     let current = bind_file(&receipt.path, false)?;
-    if (current.dev, current.ino) != (receipt.dev, receipt.ino) {
+    let held = receipt.file.metadata().map_err(|error| {
+        StopError::new(format!("cannot stat {}: {error}", receipt.path.display()))
+    })?;
+    if !held.is_file()
+        || (held.dev(), held.ino()) != (receipt.dev, receipt.ino)
+        || (current.dev, current.ino) != (receipt.dev, receipt.ino)
+    {
         return Err(StopError::new(format!(
             "stop receipt conflict: {}",
             receipt.path.display()
@@ -429,13 +453,16 @@ pub fn plan_temp_cleanup_paths(
                     path.display()
                 )));
             }
-            Ok(metadata) => entries.push(TempCleanupEntry {
-                path: path.to_owned(),
-                directory: false,
-                dev: metadata.dev(),
-                ino: metadata.ino(),
-                kind: metadata.mode() & libc::S_IFMT,
-            }),
+            Ok(metadata) => {
+                let entry = bind_temp_cleanup_entry(path)?;
+                if entry.directory || metadata.file_type().is_dir() {
+                    return Err(StopError::new(format!(
+                        "temp agent path is not a file or socket: {}",
+                        path.display()
+                    )));
+                }
+                entries.push(entry);
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(StopError::new(format!(
@@ -470,25 +497,43 @@ fn plan_temp_cleanup_tree(
         if metadata.file_type().is_dir() {
             plan_temp_cleanup_tree(&path, owner_uid, entries)?;
         } else {
-            entries.push(TempCleanupEntry {
-                path,
-                directory: false,
-                dev: metadata.dev(),
-                ino: metadata.ino(),
-                kind: metadata.mode() & libc::S_IFMT,
-            });
+            entries.push(bind_temp_cleanup_entry(&path)?);
         }
     }
-    let metadata = fs::symlink_metadata(directory)
-        .map_err(|error| StopError::new(format!("cannot stat {}: {error}", directory.display())))?;
-    entries.push(TempCleanupEntry {
-        path: directory.to_owned(),
-        directory: true,
+    entries.push(bind_temp_cleanup_entry(directory)?);
+    Ok(())
+}
+
+fn bind_temp_cleanup_entry(path: &std::path::Path) -> Result<TempCleanupEntry, StopError> {
+    let flags =
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC;
+    let file = nix::fcntl::open(path, flags, nix::sys::stat::Mode::empty())
+        .map(fs::File::from)
+        .map_err(|error| StopError::new(format!("cannot bind {}: {error}", path.display())))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| StopError::new(format!("cannot stat {}: {error}", path.display())))?;
+    let visible = fs::symlink_metadata(path)
+        .map_err(|error| StopError::new(format!("cannot stat {}: {error}", path.display())))?;
+    if (
+        metadata.dev(),
+        metadata.ino(),
+        metadata.mode() & libc::S_IFMT,
+    ) != (visible.dev(), visible.ino(), visible.mode() & libc::S_IFMT)
+    {
+        return Err(StopError::new(format!(
+            "temp cleanup receipt conflict: {}",
+            path.display()
+        )));
+    }
+    Ok(TempCleanupEntry {
+        path: path.to_owned(),
+        directory: metadata.is_dir(),
         dev: metadata.dev(),
         ino: metadata.ino(),
         kind: metadata.mode() & libc::S_IFMT,
-    });
-    Ok(())
+        file,
+    })
 }
 
 fn preflight_cleanup_directory(path: &std::path::Path, owner_uid: u32) -> Result<(), StopError> {
@@ -532,15 +577,17 @@ pub fn execute_temp_cleanup(plan: TempCleanupPlan) -> Result<(), StopError> {
 }
 
 fn verify_temp_cleanup_entry(entry: &TempCleanupEntry) -> Result<(), StopError> {
-    let metadata = fs::symlink_metadata(&entry.path).map_err(|error| {
+    let held = entry.file.metadata().map_err(|error| {
         StopError::new(format!("cannot stat {}: {error}", entry.path.display()))
     })?;
-    if (
-        metadata.dev(),
-        metadata.ino(),
-        metadata.mode() & libc::S_IFMT,
-    ) != (entry.dev, entry.ino, entry.kind)
-        || metadata.file_type().is_dir() != entry.directory
+    let visible = fs::symlink_metadata(&entry.path).map_err(|error| {
+        StopError::new(format!("cannot stat {}: {error}", entry.path.display()))
+    })?;
+    if (held.dev(), held.ino(), held.mode() & libc::S_IFMT) != (entry.dev, entry.ino, entry.kind)
+        || held.file_type().is_dir() != entry.directory
+        || (visible.dev(), visible.ino(), visible.mode() & libc::S_IFMT)
+            != (entry.dev, entry.ino, entry.kind)
+        || visible.file_type().is_dir() != entry.directory
     {
         return Err(StopError::new(format!(
             "temp cleanup receipt conflict: {}",
@@ -1231,15 +1278,8 @@ mod tests {
         fs::create_dir_all(&root)?;
         let path = root.join("agent");
         fs::write(&path, "old")?;
-        let metadata = fs::symlink_metadata(&path)?;
         let plan = TempCleanupPlan {
-            entries: vec![TempCleanupEntry {
-                path: path.clone(),
-                directory: false,
-                dev: metadata.dev(),
-                ino: metadata.ino(),
-                kind: metadata.mode() & libc::S_IFMT,
-            }],
+            entries: vec![bind_temp_cleanup_entry(&path)?],
         };
         fs::remove_file(&path)?;
         fs::write(&path, "replacement")?;

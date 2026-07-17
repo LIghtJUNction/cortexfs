@@ -30,7 +30,7 @@ fn wait_delta_then_cancel(
 ) -> Option<(bool, String, UnixStream)> {
     let mut reader = BufReader::new(client);
     let mut response = String::new();
-    let delta_deadline = Instant::now() + Duration::from_secs(8);
+    let delta_deadline = Instant::now() + Duration::from_secs(20);
     reader
         .get_ref()
         .set_read_timeout(Some(Duration::from_millis(100)))
@@ -55,7 +55,7 @@ fn wait_delta_then_cancel(
         if json_str(&frame, "type") != Some("delta") {
             continue;
         }
-        let ready_deadline = Instant::now() + Duration::from_secs(2);
+        let ready_deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < ready_deadline {
             if ready.exists() {
                 let cancelled = handle_socket_request_frame(

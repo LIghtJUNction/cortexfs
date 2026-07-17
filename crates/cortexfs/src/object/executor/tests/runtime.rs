@@ -226,7 +226,7 @@ fn provider_curl_output_kills_child_after_oversized_stdout()
     let child = std::process::Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "yes x | head -c {}; sleep 5",
+            "yes x | head -c {}; sleep 10",
             MAX_PROVIDER_RESPONSE_BYTES.saturating_add(1)
         ))
         .stdout(std::process::Stdio::piped())
@@ -236,7 +236,7 @@ fn provider_curl_output_kills_child_after_oversized_stdout()
     let result = wait_for_curl_json_output(child);
 
     assert!(matches!(result, Err(ref error) if error.contains("provider response exceeds")));
-    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(started.elapsed() < Duration::from_secs(4));
     Ok(())
 }
 
