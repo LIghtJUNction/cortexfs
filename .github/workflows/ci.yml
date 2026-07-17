@@ -73,6 +73,8 @@ jobs:
           CARGO_HOME: /tmp/cortexfs-test-cargo
           CARGO_TARGET_DIR: /tmp/cortexfs-test-target
         run: |
+          sudo chmod o+x "$HOME" "$HOME/.cargo" "$HOME/.cargo/bin"
+          sudo chmod -R o+rX "$HOME/.rustup"
           sudo install -d -o 1000 -g 1000 "$CARGO_HOME" "$CARGO_TARGET_DIR"
           sudo setpriv --reuid=1000 --regid=1000 --clear-groups env \
             PATH="$PATH" HOME="$HOME" CARGO_HOME="$CARGO_HOME" \
