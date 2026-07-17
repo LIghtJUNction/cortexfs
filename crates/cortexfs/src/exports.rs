@@ -58,13 +58,20 @@ pub use provider::name::{
     provider_host_from_base_url, provider_keychain_service, provider_name_from_base_url,
     provider_name_from_config, provider_oauth_access_token_env_name,
     provider_oauth_refresh_token_env_name, provider_system_secret_exists,
-    read_provider_system_secret, read_provider_system_secret_for_model,
+    read_provider_system_secret, read_provider_system_secret_for_model, selected_model_provider,
     store_provider_system_secret,
 };
 pub use provider::oauth::{
-    OAuthError, OAuthPkce, OAuthProviderConfig, OAuthTokenResponse, oauth_authorization_code_form,
-    oauth_authorization_url, oauth_refresh_token_form, parse_oauth_token_response,
-    resolve_oauth_access_token, resolve_oauth_access_token_with,
+    CODEX_CLIENT_ID, CODEX_DEVICE_REDIRECT_URI, CODEX_DEVICE_TOKEN_URL, CODEX_DEVICE_USER_URL,
+    CODEX_DEVICE_VERIFY_URL, DeviceCode, OAuthCredential, OAuthError, OAuthPkce,
+    OAuthProviderConfig, OAuthTokenResponse, OAuthTokenState, codex_oauth_config,
+    exchange_oauth_token, exchange_oauth_token_with, oauth_account_id,
+    oauth_authorization_code_form, oauth_authorization_url, oauth_keychain_secret,
+    oauth_needs_refresh, oauth_post, oauth_refresh_token_form, oauth_token_state,
+    parse_oauth_token_response, poll_device_code_with, read_codex_system, request_device_code_with,
+    resolve_codex_system, resolve_codex_with, resolve_oauth_access_token,
+    resolve_oauth_access_token_with, resolve_oauth_credential, store_codex_system,
+    store_codex_with, store_oauth_tokens,
 };
 pub use reference::storage::{
     SYSTEM_STORAGE_CURRENT, SYSTEM_STORAGE_DIR, StorageUpdateError, pin_storage_source,

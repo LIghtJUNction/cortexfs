@@ -45,7 +45,8 @@ pub fn read_provider_system_secret_for_model(
     }))
 }
 
-pub(crate) fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
+#[must_use]
+pub fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
     let model = model.trim();
     if model.contains('/') {
         return model.split_once('/').and_then(|(provider, model)| {

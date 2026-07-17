@@ -107,13 +107,19 @@ fn parse_request(
                 }
                 expect_continue = true;
             }
-            "authorization" | "x-api-key" | "anthropic-version" | "content-type" | "accept" => {
-                if headers.iter().any(|header| header.0 == name) {
-                    return Err(invalid("duplicate provider HTTP header"));
+            "authorization" | "x-api-key" | "anthropic-version" | "content-type" | "accept"
+            | "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
+                if !matches!(
+                    name.as_str(),
+                    "chatgpt-account-id" | "originator" | "session-id" | "user-agent"
+                ) || target.provider == "codex" =>
+            {
+                if headers.iter().any(|header| header.0 == name) || value.is_empty() {
+                    return Err(invalid("invalid provider HTTP header"));
                 }
                 headers.push((name, value.to_owned()));
             }
-            "user-agent" | "host" => {}
+            "host" | "user-agent" => {}
             "transfer-encoding"
             | "upgrade"
             | "proxy-authorization"

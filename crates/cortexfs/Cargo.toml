@@ -13,6 +13,7 @@ categories.workspace = true
 [dependencies]
 arrow-array = "59.1.0"
 arrow-schema = "59.1.0"
+base64 = "0.22.1"
 cortexfs-runtime-client = { version = "0.1.7", path = "../cortexfs-runtime-client" }
 cortexfs-tool-sdk = { version = "0.1.0", path = "../cortexfs-tool-sdk" }
 fuser = "0.17.0"
@@ -23,7 +24,7 @@ models-dev = { version = "0.1.1", default-features = false, features = ["rustls-
 nix = { version = "0.31.3", features = ["fs", "signal", "socket", "term", "user"] }
 parquet = { version = "59.1.0", default-features = false, features = ["arrow"] }
 portable-pty = "0.9.0"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 rustyline = "18.0.1"
 semver = "1.0.28"
 serde = { version = "1.0.228", features = ["derive"] }
