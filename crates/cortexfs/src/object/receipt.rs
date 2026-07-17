@@ -421,7 +421,7 @@ fn validate_receipt(
 }
 
 fn open_directory(parent: &fs::File, name: &str) -> Result<fs::File, InstallError> {
-    crate::support::plain::open_directory_at(parent, name).map_err(|error| {
+    crate::support::plain::open_directory_at(parent, std::ffi::OsStr::new(name)).map_err(|error| {
         InstallError::unavailable(format!("cannot open installed object controls: {error}"))
     })
 }

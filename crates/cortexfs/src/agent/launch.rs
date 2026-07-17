@@ -1209,7 +1209,10 @@ fn open_owned_alias_parent(path: &Path) -> io::Result<fs::File> {
 }
 
 fn open_owned_alias_child(parent: &fs::File, name: &str) -> io::Result<fs::File> {
-    require_owned_alias_dir(crate::support::plain::open_directory_at(parent, name)?)
+    require_owned_alias_dir(crate::support::plain::open_directory_at(
+        parent,
+        std::ffi::OsStr::new(name),
+    )?)
 }
 
 fn require_owned_alias_dir(directory: fs::File) -> io::Result<fs::File> {

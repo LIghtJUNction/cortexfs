@@ -69,9 +69,8 @@ jobs:
       - name: cargo test
         timeout-minutes: 25
         env:
-          TMPDIR: ${{ runner.temp }}/cortexfs-tests
+          TMPDIR: /tmp
         run: |
-          mkdir -p "$TMPDIR"
           cargo test --locked --workspace --all-targets --all-features -- --test-threads=2
 
   docs:

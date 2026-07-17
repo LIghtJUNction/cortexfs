@@ -27,6 +27,7 @@ pub fn provider_name_from_config(
     base_url: &str,
     name: Option<&str>,
 ) -> Result<String, ProviderNameError> {
+    let host = provider_host_from_base_url(base_url).ok_or(ProviderNameError::MissingHost)?;
     if let Some(name) = name.map(str::trim).filter(|value| !value.is_empty()) {
         return if is_object_name(name) {
             Ok(name.to_owned())
@@ -35,7 +36,6 @@ pub fn provider_name_from_config(
         };
     }
 
-    let host = provider_host_from_base_url(base_url).ok_or(ProviderNameError::MissingHost)?;
     if provider_host_requires_name(&host) {
         return Err(ProviderNameError::MissingNameForAddress);
     }
@@ -58,7 +58,10 @@ pub fn provider_name_from_base_url(base_url: &str) -> Option<String> {
 pub fn provider_host_from_base_url(base_url: &str) -> Option<String> {
     let base_url = base_url.trim();
     // Reject control bytes before parsing so injection payloads never reach the URL parser.
-    if base_url.bytes().any(|byte| byte.is_ascii_control()) {
+    if base_url
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte == b'\\')
+    {
         return None;
     }
     // Require a non-empty authority (reject WHATWG oddities like `https:///v1`).
