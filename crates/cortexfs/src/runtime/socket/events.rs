@@ -72,10 +72,8 @@ mod identity_tests {
         if nix::unistd::geteuid().is_root() {
             return Ok(());
         }
-        let mut command = command_for_agent_identity(
-            ID,
-            &AgentUnixIdentity::new(65_534, 65_534, [1]),
-        );
+        let mut command =
+            command_for_agent_identity(ID, &AgentUnixIdentity::new(65_534, 65_534, [1]));
         command.arg("-u");
         let output = command.output()?;
         assert!(output.status.success());
