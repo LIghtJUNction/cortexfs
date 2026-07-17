@@ -1,6 +1,10 @@
 use super::*;
 use serde_json::Value;
+use std::fs;
 use std::io::{BufRead, BufReader};
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::Instant;
 
 fn write_cancellable_partial_agent(executable: &Path) {
@@ -121,4 +125,64 @@ fn cancel_after_partial_delta_persists_only_cancelled_done() {
             true
         )
     );
+}
+
+#[test]
+fn wait_capped_child_output_timeout_does_not_wait_for_escaped_pipe_holder()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let pid_file = temp.path().join("escaped.pid");
+    let mut child = Command::new("/usr/bin/sh")
+        .arg("-c")
+        .arg(r#"/usr/bin/setsid /usr/bin/sh -c 'echo $$ > "$PID_FILE"; sleep 30' & sleep 30"#)
+        .env("PID_FILE", &pid_file)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn()?;
+    let escaped_pid = {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Ok(text) = fs::read_to_string(&pid_file)
+                && let Ok(pid) = text.trim().parse::<i32>()
+                && pid > 1
+            {
+                break pid;
+            }
+            if Instant::now() >= deadline {
+                crate::support::process::terminate_process_group(&mut child);
+                let _ignored = child.wait();
+                return Err("escaped grandchild did not publish its PID".into());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let (finished_tx, finished_rx) = mpsc::sync_channel(1);
+    let waiter = thread::spawn(move || {
+        let result = crate::support::process::wait_capped_child_output(
+            &mut child,
+            crate::support::process::CappedOutputWait {
+                max_output_bytes: 64,
+                timeout: Duration::from_millis(100),
+                capture_stderr: false,
+                drain_timeout: None,
+                terminate_group_after_exit: false,
+            },
+            || false,
+        );
+        let _ignored = finished_tx.send(());
+        result
+    });
+
+    let bounded = finished_rx.recv_timeout(Duration::from_secs(2));
+    crate::support::process::signal_process_group(escaped_pid, nix::sys::signal::Signal::SIGKILL);
+    let result = waiter
+        .join()
+        .map_err(|_panic| "capped-output waiter panicked")?;
+    bounded.map_err(|error| format!("capped-output wait was not bounded: {error}"))?;
+    assert!(matches!(
+        result,
+        Err(crate::support::process::CappedOutputError::TimedOut)
+    ));
+    Ok(())
 }

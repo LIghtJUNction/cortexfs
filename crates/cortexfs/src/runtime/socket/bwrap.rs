@@ -154,14 +154,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
             .to_string(),
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
-        "--proc".to_owned(),
-        "/proc".to_owned(),
-        "--dev".to_owned(),
-        "/dev".to_owned(),
-        "--tmpfs".to_owned(),
-        "/tmp".to_owned(),
-        "--dir".to_owned(),
-        "/run".to_owned(),
+    ];
+    bwrap.extend(support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    bwrap.extend([
         "--dir".to_owned(),
         "/run/cortexfs".to_owned(),
         "--perms".to_owned(),
@@ -169,26 +164,8 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--ro-bind-data".to_owned(),
         request.agent_executable_fd.to_string(),
         SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
-        "--dir".to_owned(),
-        "/home".to_owned(),
-        "--ro-bind".to_owned(),
-        "/usr".to_owned(),
-        "/usr".to_owned(),
-        "--ro-bind".to_owned(),
-        "/etc".to_owned(),
-        "/etc".to_owned(),
-        "--tmpfs".to_owned(),
-        "/etc/profile.d".to_owned(),
-        "--symlink".to_owned(),
-        "usr/bin".to_owned(),
-        "/bin".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib64".to_owned(),
-    ];
+    ]);
+    bwrap.extend(support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
     }

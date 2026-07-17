@@ -211,7 +211,7 @@ pub fn peer_credentials(stream: &UnixStream) -> Result<PeerCredentials, PeerCred
         .map_err(|_error| PeerCredentialError::CannotRead)
 }
 
-/// Ensures `session_root/<session>/` has the durable v1 session layout.
+/// Ensures `session_root/<session>/` has the durable session layout.
 ///
 /// This creates only documented session files, context directories, and the
 /// reserved `session/index` files. Existing files are preserved; the helper

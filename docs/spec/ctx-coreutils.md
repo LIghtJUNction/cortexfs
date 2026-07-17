@@ -13,9 +13,9 @@ with ordinary Unix-shaped operations.
 `ctx` operates on `/ctx`. It does not have to live inside `/ctx`. Install it in
 the normal system `PATH`, for example `/usr/bin/ctx` or `~/.local/bin/ctx`.
 
-## v1 Commands
+## Stable Commands
 
-Keep v1 small:
+Keep the command surface small:
 
 ```text
 ctx status
@@ -98,13 +98,13 @@ Optional flags:
 
 ```text
 ctx bootstrap --check [SOURCE]     report tree_version, missing agents, retired leftovers
-ctx bootstrap --dry-run [SOURCE]   show would_ensure / would_skip / would_write (no writes)
+ctx bootstrap --dry-run [SOURCE]   show ordered migrations and reconcile/state actions (no writes)
 ```
 
-Default bootstrap materializes `architect` / `coder` / `reviewer`, writes
+Default bootstrap materializes `architect` / `coder` / `reviewer` / `worker`, writes
 `bin/cortexfs.bootstrap.json` (`schema`, `tree_version`, `managed_agents`,
-`applied_migrations`) only when state differs. Retired `base` / `worker` /
-`executor` objects are reported and retained for manual review because legacy
+`applied_migrations`) only when state differs. Retired `base` / `executor`
+objects are reported and retained for manual review because legacy
 trees have no manifest proving ownership and full control-tree integrity.
 Session history under `home/` is never deleted by bootstrap.
 
@@ -135,7 +135,7 @@ terminal and does not enter `tsh`; humans use `ctx agent watch` or
 `--approve TOOL`. In non-raw mode the client answers a hosted SDK
 `approval_request` with `allow_once` only when its exact tool name is in this
 explicit list; every other name is denied. There is no blanket approval or TTY
-prompt in v1. Raw clients and clients without this handler close their write
+prompt in the stable protocol. Raw clients and clients without this handler close their write
 half and therefore fail closed for `approval=ask`.
 
 `ctx agent wait` is a non-blocking waitpid-shaped reader for a parent-owned
@@ -414,7 +414,7 @@ control objects inspectable. When the child agent is the backing runtime for a
 pending or active parent `context/child/<child>/` channel, the fallback records
 that parent-side child result as `cancelled` so `ctx agent wait` observes the
 terminal state. It must not invent a new lifecycle namespace or queue.
-Retired reference agents `base`, `worker`, and `executor` are manual-review
+Retired reference agents `base` and `executor` are manual-review
 objects: child discovery excludes them before reading legacy ownership fields,
 so stop cascade never changes their controls, status, or child result channels.
 Before any unit reset or control write, fallback stop validates the complete
@@ -444,7 +444,7 @@ prints tab-separated `child`, child-channel `status`, backing `agent`,
 child-channel `session`, backing agent `parent_session`, backing agent
 `parent_run`, backing agent `model`, backing agent `life`, backing agent `role`,
 backing agent `status`, live parent `ppid`, and backing agent `pid` (`-` when absent). `role`
-derives from the v1 worker-role name convention; the other backing-agent columns
+derives from the stable worker-role name convention; the other backing-agent columns
 are ordinary `agent/<agent>.d/*` controls, so worker task state and its parent
 session/run attachment are
 inspectable without copying runtime state into the parent context.

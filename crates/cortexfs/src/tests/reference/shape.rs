@@ -140,7 +140,7 @@ fn abi_path_classifier_rejects_forbidden_root_and_bad_names() {
 }
 
 #[test]
-fn reference_tree_bootstrap_materializes_documented_v1_shape() {
+fn reference_tree_bootstrap_materializes_documented_shape() {
     let root = clean_test_dir("reference-tree");
     let user_tool_dir = ctx_home(&root).join("tool");
     // Regression coverage for legacy placeholder-style tool names in
@@ -166,7 +166,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
         .is_ok()
     );
 
-    let bootstrapped = ensure_v1_reference_tree(&root);
+    let bootstrapped = ensure_reference_tree(&root);
     let bootstrapped = ok!(bootstrapped);
     assert_eq!(bootstrapped.root(), root.as_path());
 
@@ -256,7 +256,7 @@ fn reference_tree_bootstrap_materializes_documented_v1_shape() {
     assert!(root.join("shared").is_dir());
     assert!(!root.join("shared").join("project-a").exists());
 
-    assert_eq!(ensure_v1_reference_tree(&root), Ok(bootstrapped));
+    assert_eq!(ensure_reference_tree(&root), Ok(bootstrapped));
 }
 
 fn assert_reference_agents(root: &Path) {
@@ -342,7 +342,7 @@ fn reference_tree_bootstrap_accepts_socket_symlink_without_changing_target() {
     assert!(fs::create_dir_all(root.join("agent")).is_ok());
     assert!(symlink(&outside_socket, root.join("agent").join("coder.sock")).is_ok());
 
-    let bootstrapped = ensure_v1_reference_tree(&root);
+    let bootstrapped = ensure_reference_tree(&root);
 
     assert!(bootstrapped.is_ok());
     assert!(

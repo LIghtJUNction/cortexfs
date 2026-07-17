@@ -14,7 +14,7 @@ use nix::libc;
 /// Error while resolving tool lookup through `CTX_PATH`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolPathError {
-    /// Tool name is not a valid v1 object name.
+    /// Tool name is not a valid object name.
     InvalidName,
     /// Reading a lookup directory failed for a reason other than it not existing.
     CannotReadDirectory,
@@ -75,7 +75,7 @@ impl ToolPath {
         )
     }
 
-    /// Returns the v1 default path: global tools first, then user tools.
+    /// Returns the default path: global tools first, then user tools.
     #[must_use]
     pub fn default(root: &Path, home: &Path) -> Self {
         Self::new([root.join("tool"), home.join("tool")])

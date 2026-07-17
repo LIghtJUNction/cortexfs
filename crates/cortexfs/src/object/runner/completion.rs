@@ -185,33 +185,33 @@ fn call_provider_driver(
         .map_err(ProviderCompletionError::fallback)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
-            let key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
+            let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
                 input,
-                api_key: key,
+                credential: credential.as_ref(),
                 effort,
             };
             stream_or_complete(
                 call_openai_chat_streaming(&route.transport, &request, run, stdout),
-                || call_openai_chat(&route.transport, &request),
+                || call_openai_chat(&route.transport, &request, run),
                 run,
                 stdout,
             )
         }
         ProviderRuntimeDriver::OpenAiResponses => {
-            let key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
+            let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
                 input,
-                api_key: key,
+                credential: credential.as_ref(),
                 effort,
             };
             stream_or_complete(
                 call_openai_responses_streaming(&route.transport, &request, run, stdout),
-                || call_openai_responses(&route.transport, &request),
+                || call_openai_responses(&route.transport, &request, run),
                 run,
                 stdout,
             )

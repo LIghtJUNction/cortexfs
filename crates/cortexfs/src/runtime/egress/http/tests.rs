@@ -9,12 +9,50 @@ use std::time::{Duration, Instant};
 use super::*;
 
 fn target(base: &str) -> ProviderTarget {
+    provider_target("fixture", base)
+}
+
+fn provider_target(provider: &str, base: &str) -> ProviderTarget {
     ProviderTarget {
-        provider: "fixture".to_owned(),
+        provider: provider.to_owned(),
         base_url: format!("http://example.test{base}"),
         authority: "http://example.test".to_owned(),
         base_path: base.to_owned(),
     }
+}
+
+#[test]
+fn parser_forwards_codex_metadata_only_for_codex_target() -> io::Result<()> {
+    let input = b"POST /backend-api/codex/responses HTTP/1.1\r\nAuthorization: Bearer access\r\nChatGPT-Account-Id: account\r\nOriginator: ctx\r\nSession-Id: run-1\r\nUser-Agent: cortexfs/test\r\nContent-Length: 2\r\n\r\n{}";
+    let mut output = Vec::new();
+    let request = parse_request(
+        &mut BufReader::new(Cursor::new(input)),
+        &mut output,
+        &provider_target("codex", "/backend-api/codex"),
+    )?;
+    assert_eq!(
+        request
+            .headers
+            .iter()
+            .map(|header| header.0.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "authorization",
+            "chatgpt-account-id",
+            "originator",
+            "session-id",
+            "user-agent"
+        ]
+    );
+    assert!(
+        parse_request(
+            &mut BufReader::new(Cursor::new(input)),
+            &mut Vec::new(),
+            &provider_target("fixture", "/backend-api/codex")
+        )
+        .is_err()
+    );
+    Ok(())
 }
 
 fn parse(input: &[u8], base: &str) -> io::Result<(Request, Vec<u8>)> {

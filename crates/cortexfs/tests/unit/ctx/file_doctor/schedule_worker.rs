@@ -161,7 +161,7 @@ fn write_worker_schedule_plan(session: &Path) {
 }
 
 fn create_pending_worker_handoff(root: &Path, test_name: &str) -> PathBuf {
-    let ensured = ensure_v1_reference_tree(root);
+    let ensured = ensure_reference_tree(root);
     assert!(ensured.is_ok(), "{ensured:?}");
     enable_dynamic_worker_fixture(root);
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");

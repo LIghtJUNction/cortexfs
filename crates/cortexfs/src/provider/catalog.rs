@@ -7,7 +7,7 @@ use models_dev::ModelsDevResponse;
 use serde::{Deserialize, Serialize};
 
 use crate::support::plain::{create_plain_dir, read_small_text_file};
-use crate::{AtomicReplaceOutcome, FuseV1Error, atomic_replace_text_outcome, is_object_name};
+use crate::{AtomicReplaceOutcome, FuseError, atomic_replace_text_outcome, is_object_name};
 
 const CACHE_FILE: &str = "model-limits.json";
 const CACHE_SCHEMA: &str = "cortexfs.model-limits/v1";
@@ -42,87 +42,87 @@ pub(crate) fn cached_model_limits(cache_dir: &Path) -> BTreeMap<String, u32> {
     cache.models
 }
 
-pub(crate) fn refresh_model_limit_cache(cache_dir: &Path) -> Result<(), FuseV1Error> {
+pub(crate) fn refresh_model_limit_cache(cache_dir: &Path) -> Result<(), FuseError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
     runtime.block_on(refresh_timed(cache_dir, FETCH_TIMEOUT, fetch_catalog()))
 }
 
 /// Applies a cache refresh with a bounded timeout.
-async fn refresh_timed<F>(cache_dir: &Path, timeout: Duration, fetch: F) -> Result<(), FuseV1Error>
+async fn refresh_timed<F>(cache_dir: &Path, timeout: Duration, fetch: F) -> Result<(), FuseError>
 where
-    F: Future<Output = Result<Vec<u8>, FuseV1Error>>,
+    F: Future<Output = Result<Vec<u8>, FuseError>>,
 {
     let body = tokio::time::timeout(timeout, fetch)
         .await
-        .map_err(|_error| FuseV1Error::Io)??;
+        .map_err(|_error| FuseError::Io)??;
     publish_cache(cache_dir, &body)
 }
 
 #[cfg(test)]
 /// Refreshes provider catalog cache from a preloaded response.
-async fn refresh_from<F>(cache_dir: &Path, fetch: F) -> Result<(), FuseV1Error>
+async fn refresh_from<F>(cache_dir: &Path, fetch: F) -> Result<(), FuseError>
 where
-    F: Future<Output = Result<Vec<u8>, FuseV1Error>>,
+    F: Future<Output = Result<Vec<u8>, FuseError>>,
 {
     let bytes = fetch.await?;
     publish_cache(cache_dir, &bytes)
 }
 
-fn publish_cache(cache_dir: &Path, bytes: &[u8]) -> Result<(), FuseV1Error> {
+fn publish_cache(cache_dir: &Path, bytes: &[u8]) -> Result<(), FuseError> {
     let response = serde_json::from_slice::<ModelsDevResponse>(bytes)
-        .map_err(|_error| FuseV1Error::InvalidContent)?;
+        .map_err(|_error| FuseError::InvalidContent)?;
     let cache = cache_from_response(response)?;
-    let content = serde_json::to_string(&cache).map_err(|_error| FuseV1Error::Io)? + "\n";
-    if u64::try_from(content.len()).map_err(|_error| FuseV1Error::TooLarge)? > MAX_CACHE_BYTES {
-        return Err(FuseV1Error::TooLarge);
+    let content = serde_json::to_string(&cache).map_err(|_error| FuseError::Io)? + "\n";
+    if u64::try_from(content.len()).map_err(|_error| FuseError::TooLarge)? > MAX_CACHE_BYTES {
+        return Err(FuseError::TooLarge);
     }
-    create_plain_dir(cache_dir).map_err(|_error| FuseV1Error::Io)?;
+    create_plain_dir(cache_dir).map_err(|_error| FuseError::Io)?;
     match atomic_replace_text_outcome(&model_limit_cache_path(cache_dir), &content) {
         Ok(AtomicReplaceOutcome::Synced | AtomicReplaceOutcome::PublishedUnsynced(_)) => Ok(()),
-        Err(_error) => Err(FuseV1Error::Io),
+        Err(_error) => Err(FuseError::Io),
     }
 }
 
-async fn fetch_catalog() -> Result<Vec<u8>, FuseV1Error> {
+async fn fetch_catalog() -> Result<Vec<u8>, FuseError> {
     let client = reqwest::Client::builder()
         .build()
-        .map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
     let mut response = client
         .get(CATALOG_URL)
         .send()
         .await
         .and_then(reqwest::Response::error_for_status)
-        .map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_error| FuseV1Error::Io)? {
+    while let Some(chunk) = response.chunk().await.map_err(|_error| FuseError::Io)? {
         append_chunk(&mut body, &chunk, MAX_RESPONSE_BYTES)?;
     }
     Ok(body)
 }
 
-fn append_chunk(body: &mut Vec<u8>, chunk: &[u8], limit: usize) -> Result<(), FuseV1Error> {
+fn append_chunk(body: &mut Vec<u8>, chunk: &[u8], limit: usize) -> Result<(), FuseError> {
     if body.len() > limit || chunk.len() > limit.saturating_sub(body.len()) {
-        return Err(FuseV1Error::TooLarge);
+        return Err(FuseError::TooLarge);
     }
     body.extend_from_slice(chunk);
     Ok(())
 }
 
-fn cache_from_response(response: ModelsDevResponse) -> Result<ModelLimitCache, FuseV1Error> {
+fn cache_from_response(response: ModelsDevResponse) -> Result<ModelLimitCache, FuseError> {
     let mut models = BTreeMap::new();
     for (provider_key, provider) in response.providers {
         if !is_object_name(&provider_key) {
-            return Err(FuseV1Error::InvalidContent);
+            return Err(FuseError::InvalidContent);
         }
         for (model_key, model) in provider.models {
             if !is_object_name(&model_key) || model.limit.context == 0 {
                 continue;
             }
             if models.len() >= MAX_CACHE_ENTRIES {
-                return Err(FuseV1Error::TooLarge);
+                return Err(FuseError::TooLarge);
             }
             models.insert(format!("{provider_key}/{model_key}"), model.limit.context);
         }
@@ -135,7 +135,7 @@ fn cache_from_response(response: ModelsDevResponse) -> Result<ModelLimitCache, F
     Ok(cache)
 }
 
-fn validate_cache(cache: &ModelLimitCache) -> Result<(), FuseV1Error> {
+fn validate_cache(cache: &ModelLimitCache) -> Result<(), FuseError> {
     if cache.schema != CACHE_SCHEMA
         || cache.models.is_empty()
         || cache.models.len() > MAX_CACHE_ENTRIES
@@ -149,7 +149,7 @@ fn validate_cache(cache: &ModelLimitCache) -> Result<(), FuseV1Error> {
                 })
         })
     {
-        return Err(FuseV1Error::InvalidContent);
+        return Err(FuseError::InvalidContent);
     }
     Ok(())
 }
@@ -233,7 +233,7 @@ mod tests {
     fn response_conversion_uses_exact_map_keys_and_rejects_zero() -> TestResult<()> {
         assert!(matches!(
             cache_from_response(one_model(0)?),
-            Err(FuseV1Error::InvalidContent)
+            Err(FuseError::InvalidContent)
         ));
 
         let Ok(cache) = cache_from_response(one_model(272_000)?) else {
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(body.len(), MAX_RESPONSE_BYTES);
         assert_eq!(
             append_chunk(&mut body, b"x", MAX_RESPONSE_BYTES),
-            Err(FuseV1Error::TooLarge)
+            Err(FuseError::TooLarge)
         );
         assert_eq!(body.len(), MAX_RESPONSE_BYTES);
     }
@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(cache.models.len(), MAX_CACHE_ENTRIES);
         assert!(matches!(
             cache_from_response(models(MAX_CACHE_ENTRIES + 1)?),
-            Err(FuseV1Error::TooLarge)
+            Err(FuseError::TooLarge)
         ));
         Ok(())
     }
@@ -292,7 +292,7 @@ mod tests {
             .build()?;
         assert!(
             runtime
-                .block_on(refresh_from(dir.path(), async { Err(FuseV1Error::Io) }))
+                .block_on(refresh_from(dir.path(), async { Err(FuseError::Io) }))
                 .is_err()
         );
         assert_eq!(fs::read(&path)?, prior);

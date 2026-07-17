@@ -29,12 +29,15 @@ const MAX_OBSERVATION_BYTES: usize = 16 * 1024;
 
 /// Reads and validates one newline-terminated invocation envelope frame from a stream.
 ///
-/// 兼容策略：
-/// - 一帧一行读入，`read_to_end` + 最大长度限制防止粘包/超大包导致阻塞。
-/// - 长度与换行校验失败直接返回 `InvalidFrame`，避免跨协议边界污染状态机。
-/// - 逐字段校验（schema/步骤/上下文长度/观察对象）是可复用的最小安全闭包。
+/// Compatibility strategy:
+/// - Read exactly one frame per line, with `read_to_end` plus hard size limits to
+///   block sticky frames and oversized payload stalls.
+/// - Reject immediately on frame length or newline checks that do not match, returning
+///   `InvalidFrame` before protocol state is perturbed.
+/// - Validate each field (`schema` / `step` / context limits / observation) as the
+///   smallest reusable safety envelope.
 ///
-/// 相关问题与实现参考：
+/// Issue and implementation references:
 /// - [modelcontextprotocol/servers#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
 /// - [modelcontextprotocol/servers#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 /// - [modelcontextprotocol/servers#3505](https://github.com/modelcontextprotocol/servers/pull/3505)
@@ -77,12 +80,13 @@ pub fn read_agent_invocation(
 
 /// Returns whether a tool observation violates the wire contract.
 ///
-/// 约束检查点：
-/// - 工具名称、`tool_call_id` 不能使用容易混淆的尾缀；
-/// - status 仅允许 `ok` 与 `error`；
-/// - content 超限与空白名都会触发拒绝，避免下游注入和误解析。
+/// Validation guardrails:
+/// - `tool_call_id` and tool names must not use confusing suffixes.
+/// - `status` must be either `ok` or `error`.
+/// - Empty names and oversized content are rejected to avoid downstream injection
+///   and parse ambiguity.
 ///
-/// 参考实现：
+/// Reference implementations:
 /// - [modelcontextprotocol/servers pull #4480](https://github.com/modelcontextprotocol/servers/pull/4480)
 /// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
 /// - [mark3labs/mcp-filesystem-server main branch](https://github.com/mark3labs/mcp-filesystem-server)
@@ -98,12 +102,13 @@ fn invalid_observation(value: &AgentToolObservation) -> bool {
 
 /// Returns whether a tool-call identifier or tool name is canonical.
 ///
-/// 该规则与 MCP 文件系统场景中的「工具名可解析、可追踪」目标一致。
-/// - 禁止空名与过长名字。
-/// - 首字符禁用特殊符号，避免与路径与命名空间语义混淆。
-/// - 显式排除 `.sock` / `.d` 后缀，避免路径类标识冲突。
+/// This rule follows the MCP filesystem requirement that tool names remain parseable and
+/// traceable.
+/// - Empty names and overlong names are rejected.
+/// - Special characters are forbidden in first position to avoid path and namespace ambiguity.
+/// - `.sock` and `.d` suffixes are explicitly rejected to avoid filesystem-style collisions.
 ///
-/// 相似逻辑：
+/// Related implementations:
 /// - [rust-fs-mcp tool naming in response and catalog](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l556)
 /// - [Model Context Protocol schema tooling naming fields](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-06-18/schema.ts)
 /// - [OpenAI Codex tool call matching issue #2550](https://github.com/microsoft/autogen/issues/2550)

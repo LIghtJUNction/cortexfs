@@ -1,16 +1,21 @@
 use crate::*;
 
-/// Default curl binary used for OAuth token exchange.
-pub(crate) const CTX_PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
 const OAUTH_CALLBACK_RESPONSE_BODY: &str =
     "CortexFS OAuth login complete. You may close this tab.\n";
-const MAX_OAUTH_TOKEN_RESPONSE_BYTES: u64 = 1024 * 1024;
 
 /// Starts OAuth login flow for a provider and waits for callback completion.
-pub(crate) fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<(), CliError> {
+pub(crate) fn provider_oauth_login(
+    provider: &str,
+    timeout_secs: u64,
+    device: bool,
+) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
-    let pkce = oauth_pkce_from_system_entropy()?;
-    let state = oauth_state_from_system_entropy()?;
+    if device {
+        return provider_oauth_device_login(provider, &config, timeout_secs);
+    }
+    let pkce = cortexfs::OAuthPkce::from_entropy(&read_system_entropy(32)?)
+        .map_err(|_error| CliError::unavailable("cannot create oauth pkce verifier"))?;
+    let state = hex_bytes(&read_system_entropy(16)?);
     let auth_url = cortexfs::oauth_authorization_url(&config, &state, &pkce)
         .map_err(|_error| CliError::usage("invalid provider oauth config"))?;
     let callback = parse_oauth_redirect_uri(&config.redirect_uri)?;
@@ -24,66 +29,26 @@ pub(crate) fn provider_oauth_login(provider: &str, timeout_secs: u64) -> Result<
 
     print_line("open this URL in your browser:")?;
     print_line(&auth_url)?;
+    if ["DISPLAY", "WAYLAND_DISPLAY"]
+        .iter()
+        .any(|name| env::var_os(name).is_some_and(|value| !value.is_empty()))
+    {
+        let _ignored = ProcessCommand::new("/usr/bin/xdg-open")
+            .arg(&auth_url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    }
     print_line(&format!(
         "waiting for OAuth callback on {} for {}s",
         config.redirect_uri, timeout_secs
     ))?;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-    let mut stream = accept_oauth_callback(&listener, deadline)?;
-    let request = read_oauth_callback_request(&mut stream, deadline)?;
-    let params = parse_oauth_callback_params(&request, &callback.path)?;
-    if params.state.as_deref() != Some(state.as_str()) {
-        return Err(CliError::usage("oauth callback state mismatch"));
-    }
-    let code = params
-        .code
-        .ok_or_else(|| CliError::usage("oauth callback missing code"))?;
-    let response = oauth_callback_response();
-    stream
-        .write_all(response.as_bytes())
-        .map_err(|error| CliError::unavailable(format!("cannot write oauth callback: {error}")))?;
-
-    let form = cortexfs::oauth_authorization_code_form(&config, &code, &pkce)
-        .map_err(|_error| CliError::usage("invalid oauth authorization code exchange"))?;
-    let token = exchange_oauth_token(&config.token_url, &form)?;
-    store_oauth_tokens(provider, &config, &token)?;
-    print_line("oauth login ok")
-}
-
-/// Returns the static confirmation text shown to callback browsers.
-pub(crate) fn oauth_callback_response() -> String {
-    format!(
-        "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\n\r\n{}",
-        OAUTH_CALLBACK_RESPONSE_BODY.len(),
-        OAUTH_CALLBACK_RESPONSE_BODY
-    )
-}
-
-/// Checks and prints OAuth token presence for a provider.
-pub(crate) fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
-    let config = provider_oauth_config(provider)?;
-    let service = provider_keychain_service(provider);
-    let access = keychain_has_secret(&service, config.access_account())?;
-    let refresh = keychain_has_secret(&service, config.refresh_account())?;
-    print_line(&format!(
-        "oauth access_token={}",
-        if access { "configured" } else { "missing" }
-    ))?;
-    print_line(&format!(
-        "oauth refresh_token={}",
-        if refresh { "configured" } else { "missing" }
-    ))
-}
-
-/// Accepts the incoming OAuth callback socket connection.
-pub(crate) fn accept_oauth_callback(
-    listener: &std::net::TcpListener,
-    deadline: std::time::Instant,
-) -> Result<std::net::TcpStream, CliError> {
-    loop {
+    let mut stream = loop {
         match listener.accept() {
-            Ok((stream, _addr)) => return Ok(stream),
+            Ok((stream, _)) => break stream,
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 if std::time::Instant::now() >= deadline {
                     return Err(CliError::unavailable("oauth callback timed out"));
@@ -96,23 +61,112 @@ pub(crate) fn accept_oauth_callback(
                 )));
             }
         }
+    };
+    let request = read_oauth_callback_request(&mut stream, deadline)?;
+    let params = parse_oauth_callback_params(&request, &callback.path)?;
+    if params.state.as_deref() != Some(state.as_str()) {
+        return Err(CliError::usage("oauth callback state mismatch"));
     }
+    let code = params
+        .code
+        .ok_or_else(|| CliError::usage("oauth callback missing code"))?;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\n\r\n{}",
+        OAUTH_CALLBACK_RESPONSE_BODY.len(),
+        OAUTH_CALLBACK_RESPONSE_BODY
+    );
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| CliError::unavailable(format!("cannot write oauth callback: {error}")))?;
+
+    let form = cortexfs::oauth_authorization_code_form(&config, &code, &pkce)
+        .map_err(|_error| CliError::usage("invalid oauth authorization code exchange"))?;
+    let token = cortexfs::exchange_oauth_token(&config, &form)
+        .map_err(|_error| CliError::unavailable("oauth token exchange failed"))?;
+    persist_oauth_tokens(provider, &config, &token)?;
+    print_line("oauth login ok")
 }
 
-/// Refreshes OAuth credentials using existing refresh token.
+fn provider_oauth_device_login(
+    provider: &str,
+    config: &cortexfs::OAuthProviderConfig,
+    timeout_secs: u64,
+) -> Result<(), CliError> {
+    let post = |url: &str, body: &str| cortexfs::oauth_post(url, "application/json", body, 30);
+    let device = cortexfs::request_device_code_with(post)
+        .map_err(|_error| CliError::unavailable("oauth device code request failed"))?;
+    print_line(&format!(
+        "open {} and enter code {}",
+        cortexfs::CODEX_DEVICE_VERIFY_URL,
+        device.code
+    ))?;
+    let token = cortexfs::poll_device_code_with(
+        &device,
+        timeout_secs,
+        post,
+        |url, body| cortexfs::oauth_post(url, "application/x-www-form-urlencoded", body, 30),
+        |seconds| std::thread::sleep(Duration::from_secs(seconds)),
+    )
+    .map_err(|_error| CliError::unavailable("oauth device code login failed"))?;
+    persist_oauth_tokens(provider, config, &token)?;
+    print_line("oauth login ok")
+}
+
+pub(crate) fn provider_oauth_status(provider: &str) -> Result<(), CliError> {
+    let config = provider_oauth_config(provider)?;
+    let system = oauth_uses_system_store(&config)?;
+    let stored = system
+        .then(|| {
+            cortexfs::read_codex_system()
+                .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))
+        })
+        .transpose()?
+        .flatten()
+        .is_some();
+    let service = cortexfs::provider_keychain_service(provider);
+    for (label, slot) in [
+        ("access_token", config.access_account()),
+        ("refresh_token", config.refresh_account()),
+        ("account_id", "oauth:account"),
+        ("expires_at", "oauth:expires-at"),
+    ] {
+        let present = if system {
+            stored
+        } else {
+            cortexfs::oauth_keychain_secret(&service, slot)
+                .map_err(|_error| CliError::unavailable("system secret store unavailable"))?
+                .is_some()
+        };
+        print_line(&format!(
+            "oauth {label}={}",
+            if present { "configured" } else { "missing" }
+        ))?;
+    }
+    Ok(())
+}
+
 pub(crate) fn provider_oauth_refresh(provider: &str) -> Result<(), CliError> {
     let config = provider_oauth_config(provider)?;
-    let service = provider_keychain_service(provider);
-    let refresh = keychain_get_secret(&service, config.refresh_account())?
-        .ok_or_else(|| CliError::unavailable("oauth refresh token is not configured"))?;
+    let refresh = if oauth_uses_system_store(&config)? {
+        cortexfs::read_codex_system()
+            .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?
+            .map(|state| state.refresh_token)
+    } else {
+        cortexfs::oauth_keychain_secret(
+            &cortexfs::provider_keychain_service(provider),
+            config.refresh_account(),
+        )
+        .map_err(|_error| CliError::unavailable("system secret store unavailable"))?
+    }
+    .ok_or_else(|| CliError::unavailable("oauth refresh token is not configured"))?;
     let form = cortexfs::oauth_refresh_token_form(&config, &refresh)
         .map_err(|_error| CliError::usage("invalid oauth refresh config"))?;
-    let token = exchange_oauth_token(&config.token_url, &form)?;
-    store_oauth_tokens(provider, &config, &token)?;
+    let token = cortexfs::exchange_oauth_token(&config, &form)
+        .map_err(|_error| CliError::unavailable("oauth token exchange failed"))?;
+    persist_oauth_tokens(provider, &config, &token)?;
     print_line("oauth refresh ok")
 }
 
-/// Loads provider OAuth configuration from provider directory.
 pub(crate) fn provider_oauth_config(
     provider: &str,
 ) -> Result<cortexfs::OAuthProviderConfig, CliError> {
@@ -125,126 +179,24 @@ pub(crate) fn provider_oauth_config(
     Ok(config)
 }
 
-/// Executes token exchange against configured OAuth token endpoint.
-pub(crate) fn exchange_oauth_token(
-    token_url: &str,
-    form: &str,
-) -> Result<cortexfs::OAuthTokenResponse, CliError> {
-    let mut child = ctx_provider_curl_command()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| CliError::unavailable(format!("cannot start curl: {error}")))?;
-    let Some(mut stdin) = child.stdin.take() else {
-        terminate_process_child(&mut child);
-        return Err(CliError::unavailable("cannot write curl config"));
-    };
-    let config = format!(
-        "fail\nsilent\nshow-error\nmax-time = 30\nrequest = POST\nurl = {}\nheader = {}\ndata = {}\n",
-        curl_config_quote(token_url)?,
-        curl_config_quote("Content-Type: application/x-www-form-urlencoded")?,
-        curl_config_quote(form)?,
-    );
-    stdin
-        .write_all(config.as_bytes())
-        .map_err(|error| CliError::unavailable(format!("cannot write curl config: {error}")))?;
-    drop(stdin);
-    let Some(stdout) = child.stdout.take() else {
-        terminate_process_child(&mut child);
-        return Err(CliError::unavailable("cannot read curl output"));
-    };
-    let mut limited = stdout.take(MAX_OAUTH_TOKEN_RESPONSE_BYTES + 1);
-    let mut output = Vec::new();
-    limited
-        .read_to_end(&mut output)
-        .map_err(|error| CliError::unavailable(format!("cannot read token response: {error}")))?;
-    if u64::try_from(output.len()).unwrap_or(u64::MAX) > MAX_OAUTH_TOKEN_RESPONSE_BYTES {
-        terminate_process_child(&mut child);
-        return Err(CliError::unavailable("oauth token response too large"));
-    }
-    let status = child
-        .wait()
-        .map_err(|error| CliError::unavailable(format!("cannot run curl: {error}")))?;
-    if !status.success() {
-        return Err(CliError::unavailable("oauth token exchange failed"));
-    }
-    cortexfs::parse_oauth_token_response(&output)
-        .map_err(|_error| CliError::unavailable("invalid oauth token response"))
-}
-
-/// Returns the base `curl` process configuration for OAuth exchange.
-pub(crate) fn ctx_provider_curl_command() -> ProcessCommand {
-    let mut command = ProcessCommand::new(CTX_PROVIDER_CURL_BIN);
-    command.env_clear().arg("-q").arg("--config").arg("-");
-    command
-}
-
-/// Persists exchanged OAuth tokens to keychain-backed storage.
-pub(crate) fn store_oauth_tokens(
+fn persist_oauth_tokens(
     provider: &str,
     config: &cortexfs::OAuthProviderConfig,
     token: &cortexfs::OAuthTokenResponse,
 ) -> Result<(), CliError> {
-    let service = provider_keychain_service(provider);
-    keychain_set_secret(&service, config.access_account(), &token.access_token)?;
-    if let Some(refresh) = token.refresh_token.as_deref()
-        && !refresh.trim().is_empty()
-    {
-        keychain_set_secret(&service, config.refresh_account(), refresh)?;
+    let now = current_time_unix();
+    if oauth_uses_system_store(config)? {
+        let retained = cortexfs::read_codex_system()
+            .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?;
+        let state = cortexfs::oauth_token_state(token, retained.as_ref(), now)
+            .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))?;
+        return cortexfs::store_codex_system(&state)
+            .map_err(|_error| CliError::unavailable("oauth credential store unavailable"));
     }
-    Ok(())
+    cortexfs::store_oauth_tokens(provider, config, token, now)
+        .map_err(|_error| CliError::unavailable("oauth credential store unavailable"))
 }
 
-/// Checks whether a secret entry exists in the keychain.
-pub(crate) fn keychain_has_secret(service: &str, account: &str) -> Result<bool, CliError> {
-    keychain_get_secret(service, account).map(|value| value.is_some())
-}
-
-/// Retrieves an optional secret value from the keychain.
-pub(crate) fn keychain_get_secret(
-    service: &str,
-    account: &str,
-) -> Result<Option<String>, CliError> {
-    let entry = match keyring::Entry::new(service, account) {
-        Ok(entry) => entry,
-        Err(keyring::Error::NoDefaultStore) => return Ok(None),
-        Err(_error) => return Err(CliError::unavailable("system secret store unavailable")),
-    };
-    match entry.get_password() {
-        Ok(secret) if secret.is_empty() => Ok(None),
-        Ok(secret) => Ok(Some(secret)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(_error) => Err(CliError::unavailable("system secret store unavailable")),
-    }
-}
-
-/// Stores a secret value into keychain for service and account.
-pub(crate) fn keychain_set_secret(
-    service: &str,
-    account: &str,
-    secret: &str,
-) -> Result<(), CliError> {
-    let entry = keyring::Entry::new(service, account)
-        .map_err(|_error| CliError::unavailable("system secret store unavailable"))?;
-    entry
-        .set_password(secret)
-        .map_err(|_error| CliError::unavailable("system secret store unavailable"))
-}
-
-/// Returns the keychain service namespace for provider credentials.
-pub(crate) fn provider_keychain_service(provider: &str) -> String {
-    format!("cortexfs:{provider}")
-}
-
-/// Derives PKCE challenge materials from secure entropy.
-pub(crate) fn oauth_pkce_from_system_entropy() -> Result<cortexfs::OAuthPkce, CliError> {
-    let entropy = read_system_entropy(32)?;
-    cortexfs::OAuthPkce::from_entropy(&entropy)
-        .map_err(|_error| CliError::unavailable("cannot create oauth pkce verifier"))
-}
-
-/// Generates an OAuth state value from secure entropy.
-pub(crate) fn oauth_state_from_system_entropy() -> Result<String, CliError> {
-    Ok(hex_bytes(&read_system_entropy(16)?))
+fn oauth_uses_system_store(config: &cortexfs::OAuthProviderConfig) -> Result<bool, CliError> {
+    Ok(config.is_codex() && current_uid_text().map_err(CliError::unavailable)? == "0")
 }

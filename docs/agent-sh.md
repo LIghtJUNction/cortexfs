@@ -117,7 +117,7 @@ to print raw JSONL events.
 
 ## Sessions
 
-`agent.sh` never stores private history. It reads the v1 session tree:
+`agent.sh` never stores private history. It reads the stable session tree:
 
 ```text
 $CTX_HOME/agent/<agent>/session/index/current

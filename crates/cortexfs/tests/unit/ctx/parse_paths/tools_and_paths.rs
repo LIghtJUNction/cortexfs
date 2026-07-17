@@ -10,7 +10,7 @@ fn bootstrap_output_lists_all_reference_agents() {
 fn reference_bootstrap_gives_coder_source_editing_tools() {
     let root = clean_test_dir("ctx-reference-coder-source-tools");
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     for tool in ["fs.read", "fs.write", "fs.replace", "shell.exec"] {
         let path = root.join("tool").join(tool);
@@ -55,7 +55,7 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
 #[test]
 fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let control = root.join("agent").join("coder.d");
     assert!(
         fs::write(
@@ -289,11 +289,13 @@ fn parses_provider_oauth_commands() {
     );
     assert!(matches!(
         login,
-        Ok(Command::Provider(ProviderArgs::Login {
-            ref provider,
-            timeout
-        })) if provider == "api.openai.com" && timeout == 30
+        Ok(Command::Provider(ProviderArgs::Login(ref provider, 30, false)))
+            if provider == "api.openai.com"
     ));
+    assert!(
+        matches!(cmd!("provider", "oauth", "login", "codex", "--device"),
+        Ok(Command::Provider(ProviderArgs::Login(ref provider, 120, true))) if provider == "codex")
+    );
 
     let status = cmd!("provider", "oauth", "status", "api.openai.com");
     assert!(matches!(
@@ -345,6 +347,18 @@ fn parses_provider_preset_commands() {
 }
 
 #[test]
+fn codex_preset_is_separate_and_responses_only() {
+    let codex = provider_preset("codex").map(|preset| preset.config);
+    let openai = provider_preset("openai").map(|preset| preset.config);
+    assert!(
+        matches!(codex, Ok(config) if config.contains("chatgpt.com/backend-api/codex") && config.contains(r#""formats": ["openai.responses"]"#))
+    );
+    assert!(
+        matches!(openai, Ok(config) if config.contains("api.openai.com/v1") && !config.contains("oauth"))
+    );
+}
+
+#[test]
 fn parses_provider_secret_commands() {
     assert!(matches!(
         cmd!("provider", "secret", "set", "local"),
@@ -365,7 +379,7 @@ fn parses_provider_secret_commands() {
 #[test]
 fn tool_command_runs_core_tool_cli_at_selected_root() {
     let root = clean_test_dir("ctx-tool-command-core");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let mut output = Vec::new();
     let result = run_visible_tool_with_writer(
@@ -387,7 +401,7 @@ fn tool_command_runs_core_tool_cli_at_selected_root() {
 #[test]
 fn tool_command_requires_core_tool_to_be_visible() {
     let root = clean_test_dir("ctx-tool-command-core-hidden");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     assert!(fs::remove_file(root.join("tool").join("tsh.config")).is_ok());
 
     let result = run_visible_tool_with_writer(

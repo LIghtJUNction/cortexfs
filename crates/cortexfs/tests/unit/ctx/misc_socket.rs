@@ -10,13 +10,15 @@ fn ctx_latest_run_id_refuses_symlink_events() {
         .join("session")
         .join("default");
     create_complete_session_layout(&session);
-    write_text_file(&outside.join("events.jsonl"), "{\"type\":\"start\",\"run\":\"outside\"}\n");
+    write_text_file(
+        &outside.join("events.jsonl"),
+        "{\"type\":\"start\",\"run\":\"outside\"}\n",
+    );
     assert!(fs::remove_file(session.join("events.jsonl")).is_ok());
-    assert!(std::os::unix::fs::symlink(
-        outside.join("events.jsonl"),
-        session.join("events.jsonl")
-    )
-    .is_ok());
+    assert!(
+        std::os::unix::fs::symlink(outside.join("events.jsonl"), session.join("events.jsonl"))
+            .is_ok()
+    );
 
     assert!(latest_run_id(&root, "coder", "default").is_err());
     assert_eq!(
@@ -64,7 +66,11 @@ fn agent_terminal_runtime_dir_refuses_symlink_parent() {
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(std::os::unix::fs::symlink(&outside, root.join("cortexfs").join("terminal")).is_ok());
 
-    let path = root.join("cortexfs").join("terminal").join("coder").join("default");
+    let path = root
+        .join("cortexfs")
+        .join("terminal")
+        .join("coder")
+        .join("default");
 
     assert!(create_agent_terminal_runtime_dir(&path).is_err());
     assert!(!outside.join("coder").exists());
@@ -82,11 +88,13 @@ fn ensure_agent_terminal_socket_rejects_symlink_runtime_parent() {
     let outside = clean_test_dir("ctx-agent-terminal-socket-runtime-symlink-outside");
     assert!(fs::create_dir_all(root.join("runtime").join("cortexfs")).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(std::os::unix::fs::symlink(
-        &outside,
-        root.join("runtime").join("cortexfs").join("terminal")
-    )
-    .is_ok());
+    assert!(
+        std::os::unix::fs::symlink(
+            &outside,
+            root.join("runtime").join("cortexfs").join("terminal")
+        )
+        .is_ok()
+    );
     let visible_socket = root.join("visible").join("main.sock");
     let runtime_socket = root
         .join("runtime")
@@ -107,11 +115,13 @@ fn ensure_agent_terminal_socket_rejects_symlink_runtime_parent_with_existing_tar
     let outside = clean_test_dir("ctx-agent-terminal-socket-runtime-existing-symlink-outside");
     assert!(fs::create_dir_all(root.join("runtime").join("cortexfs")).is_ok());
     assert!(fs::create_dir_all(outside.join("coder").join("default")).is_ok());
-    assert!(std::os::unix::fs::symlink(
-        &outside,
-        root.join("runtime").join("cortexfs").join("terminal")
-    )
-    .is_ok());
+    assert!(
+        std::os::unix::fs::symlink(
+            &outside,
+            root.join("runtime").join("cortexfs").join("terminal")
+        )
+        .is_ok()
+    );
     let visible_socket = root.join("visible").join("main.sock");
     let runtime_socket = root
         .join("runtime")
@@ -122,11 +132,13 @@ fn ensure_agent_terminal_socket_rejects_symlink_runtime_parent_with_existing_tar
         .join("main.sock");
 
     assert!(ensure_agent_terminal_socket(&visible_socket, &runtime_socket).is_err());
-    assert!(!outside
-        .join("coder")
-        .join("default")
-        .join(".empty-shell-startup")
-        .exists());
+    assert!(
+        !outside
+            .join("coder")
+            .join("default")
+            .join(".empty-shell-startup")
+            .exists()
+    );
     assert!(!visible_socket.exists());
 }
 
@@ -143,11 +155,12 @@ fn ensure_agent_terminal_socket_rejects_symlink_visible_parent_without_writing_t
 
     assert!(ensure_agent_terminal_socket(&visible_socket, &runtime_socket).is_err());
     assert!(!outside.join("main.sock").exists());
-    assert!(root
-        .join("visible")
-        .join("terminal")
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.file_type().is_symlink()));
+    assert!(
+        root.join("visible")
+            .join("terminal")
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    );
 }
 
 #[test]
@@ -172,8 +185,7 @@ fn remove_stale_socket_rejects_symlink_parent_without_removing_target_socket()
     let listener = std::os::unix::net::UnixListener::bind(&outside_socket)?;
     assert!(std::os::unix::fs::symlink(&outside, root.join("runtime")).is_ok());
 
-    let Err(error) = remove_stale_socket(&root.join("runtime").join("main.sock"))
-    else {
+    let Err(error) = remove_stale_socket(&root.join("runtime").join("main.sock")) else {
         return Err("symlink parent must fail".into());
     };
 
@@ -217,7 +229,9 @@ fn agent_chat_request_socket_prefers_runtime_socket_over_visible_socket()
 
     let selected_socket = match agent_chat_request_socket(&root, "coder") {
         Ok(socket) => socket,
-        Err(error) => return Err(format!("chat request socket should be available: {error:?}").into()),
+        Err(error) => {
+            return Err(format!("chat request socket should be available: {error:?}").into());
+        }
     };
     assert_eq!(selected_socket, runtime_socket);
 
@@ -233,39 +247,18 @@ fn socket_bind_path_rejects_symlink_parent() {
     let outside = clean_test_dir("ctx-terminal-socket-bind-parent-symlink-outside");
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(fs::create_dir_all(outside.join("runtime")).is_ok());
-    assert!(std::os::unix::fs::symlink(
-        outside.join("runtime").join("main.sock"),
-        outside.join("main.sock")
-    )
-    .is_ok());
+    assert!(
+        std::os::unix::fs::symlink(
+            outside.join("runtime").join("main.sock"),
+            outside.join("main.sock")
+        )
+        .is_ok()
+    );
     assert!(std::os::unix::fs::symlink(&outside, root.join("visible")).is_ok());
 
     let socket = root.join("visible").join("main.sock");
 
     assert_eq!(socket_bind_path(&socket), socket);
-}
-
-#[test]
-fn provider_oauth_uses_absolute_curl_path() {
-    let command = ctx_provider_curl_command();
-    assert_eq!(command.get_program(), CTX_PROVIDER_CURL_BIN);
-    assert_eq!(
-        command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>(),
-        ["-q", "--config", "-"]
-    );
-    assert!(command.get_envs().next().is_none());
-}
-
-#[test]
-fn provider_oauth_curl_quote_rejects_line_breaks() {
-    assert!(curl_config_quote("https://oauth.example/token").is_ok());
-    assert!(curl_config_quote("https://oauth.example/token\noutput = /tmp/leak").is_err());
-    assert!(curl_config_quote("grant_type=refresh_token\rheader = injected").is_err());
-    assert!(curl_config_quote("Authorization: Bearer \u{1b}]52;c;payload").is_err());
-    assert!(curl_config_quote("abc\0def").is_err());
 }
 
 #[test]
@@ -318,24 +311,11 @@ fn oauth_callback_reader_maps_idle_timeout_to_callback_timeout() {
 }
 
 #[test]
-fn oauth_callback_parser_requires_http_version() {
-    let parsed = parse_oauth_callback_params("GET /callback?code=ok&state=s\n\n", "/callback");
-
-    assert!(matches!(parsed, Err(ref error) if error.code == 2));
-}
-
-#[test]
-fn oauth_callback_parser_rejects_extra_request_line_fields() {
-    let parsed =
-        parse_oauth_callback_params("GET /callback?code=ok&state=s HTTP/1.1 extra\n\n", "/callback");
-
-    assert!(matches!(parsed, Err(ref error) if error.code == 2));
-}
-
-#[test]
 fn oauth_callback_parser_accepts_http_1_request_line() {
-    let parsed =
-        parse_oauth_callback_params("GET /callback?code=ok&state=s HTTP/1.1\r\n\r\n", "/callback");
+    let parsed = parse_oauth_callback_params(
+        "GET /callback?code=ok&state=s HTTP/1.1\r\n\r\n",
+        "/callback",
+    );
 
     assert!(matches!(
         parsed,
@@ -346,46 +326,83 @@ fn oauth_callback_parser_accepts_http_1_request_line() {
 }
 
 #[test]
-fn oauth_callback_parser_rejects_repeated_code() {
-    let parsed =
-        parse_oauth_callback_params("GET /callback?code=one&code=two HTTP/1.1\r\n\r\n", "/callback");
-
-    assert!(matches!(parsed, Err(ref error) if error.code == 2));
-}
-
-#[test]
-fn oauth_callback_parser_rejects_repeated_state() {
-    let parsed = parse_oauth_callback_params(
+fn oauth_callback_parser_rejects_invalid_request_lines_and_parameters() {
+    for request in [
+        "GET /callback?code=ok&state=s\n\n",
+        "GET /callback?code=ok&state=s HTTP/1.1 extra\n\n",
+        "GET /callback?code=one&code=two HTTP/1.1\r\n\r\n",
         "GET /callback?code=ok&state=one&state=two HTTP/1.1\r\n\r\n",
-        "/callback",
+        "GET /callback?code=&state=s HTTP/1.1\r\n\r\n",
+        "GET /callback?code=ok&state= HTTP/1.1\r\n\r\n",
+    ] {
+        assert!(
+            matches!(parse_oauth_callback_params(request, "/callback"), Err(ref error) if error.code == 2)
+        );
+    }
+}
+
+#[test]
+fn device_code_handles_slow_down_pending_and_exchange() -> Result<(), cortexfs::OAuthError> {
+    let device = cortexfs::request_device_code_with(|url, body| {
+        assert_eq!(url, cortexfs::CODEX_DEVICE_USER_URL);
+        assert!(body.contains(cortexfs::CODEX_CLIENT_ID));
+        Ok((
+            200,
+            br#"{"device_auth_id":"id","user_code":"ABCD","interval":"1"}"#.to_vec(),
+        ))
+    });
+    let device = device?;
+    assert_eq!(
+        (device.code.as_str(), device.interval.as_str()),
+        ("ABCD", "1")
     );
-
-    assert!(matches!(parsed, Err(ref error) if error.code == 2));
-}
-
-#[test]
-fn oauth_callback_parser_rejects_empty_code() {
-    let parsed =
-        parse_oauth_callback_params("GET /callback?code=&state=s HTTP/1.1\r\n\r\n", "/callback");
-
-    assert!(matches!(parsed, Err(ref error) if error.code == 2));
-}
-
-#[test]
-fn oauth_callback_parser_rejects_empty_state() {
-    let parsed =
-        parse_oauth_callback_params("GET /callback?code=ok&state= HTTP/1.1\r\n\r\n", "/callback");
-
-    assert!(matches!(parsed, Err(ref error) if error.code == 2));
+    let calls = Cell::new(0);
+    let mut waits = Vec::new();
+    let token = cortexfs::poll_device_code_with(
+        &device,
+        20,
+        |_url, _body| {
+            let call = calls.get();
+            calls.set(call + 1);
+            Ok(match call {
+            0 => (429, br#"{"error":"slow_down"}"#.to_vec()),
+            1 => (403, br#"{"error":"authorization_pending"}"#.to_vec()),
+            _ => (200, br#"{"authorization_code":"auth","code_verifier":"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk","code_challenge":"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"}"#.to_vec()),
+        })
+        },
+        |url, form| {
+            assert_eq!(url, "https://auth.openai.com/oauth/token");
+            assert!(
+                form.contains("redirect_uri=https%3A%2F%2Fauth.openai.com%2Fdeviceauth%2Fcallback")
+            );
+            Ok((
+                200,
+                br#"{"access_token":"access","refresh_token":"refresh"}"#.to_vec(),
+            ))
+        },
+        |seconds| waits.push(seconds),
+    );
+    assert_eq!(
+        token.map(|value| value.access_token),
+        Ok("access".to_owned())
+    );
+    assert_eq!(waits, [6, 6]);
+    Ok(())
 }
 
 #[test]
 fn current_session_name_falls_back_to_default_when_index_is_unreadable() {
     let root = clean_test_dir("ctx-current-session-unreadable");
     let index = root.join("index");
-    assert!(fs::create_dir_all(&index).is_ok(), "failed to create session index directory");
+    assert!(
+        fs::create_dir_all(&index).is_ok(),
+        "failed to create session index directory"
+    );
     let current = index.join("current");
-    assert!(fs::write(&current, "custom\n").is_ok(), "failed to write current session override");
+    assert!(
+        fs::write(&current, "custom\n").is_ok(),
+        "failed to write current session override"
+    );
     assert!(
         fs::set_permissions(&current, fs::Permissions::from_mode(0o000)).is_ok(),
         "failed to set current session file unreadable"

@@ -165,7 +165,7 @@ pub fn authorize_session_access(
 
 /// Decides whether a requested child agent is attenuated from its parent.
 ///
-/// v1 supports owned and temporary children. This check keeps child creation in
+/// The stable ABI supports owned and temporary children. This check keeps child creation in
 /// the ordinary agent object/control-file ABI while proving that the child
 /// cannot expand identity, groups, policy, mount visibility, or tool lookup.
 /// The returned tool path is the exact centrally authorized value to

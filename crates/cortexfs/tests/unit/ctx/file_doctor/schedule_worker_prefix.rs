@@ -1,7 +1,7 @@
 #[test]
 fn schedule_handoff_agent_model_defaults_worker_prefixes_to_spark() {
     let root = clean_test_dir("ctx-schedule-missing-worker-prefix-model");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
 
     for agent in ["worker-fast", "executor-fast"] {
@@ -31,7 +31,7 @@ fn schedule_handoff_agent_model_defaults_worker_prefixes_to_spark() {
 fn schedule_status_defaults_worker_prefix_to_spark_when_policy_allows_it() {
     for agent in ["worker-fast", "executor-fast"] {
         let root = clean_test_dir(&format!("ctx-schedule-{agent}-status"));
-        assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
         enable_dynamic_worker_fixture(&root);
         assert!(fs::copy(root.join("agent/worker"), root.join(format!("agent/{agent}"))).is_ok());
         let executable = root.join("agent").join(agent);
