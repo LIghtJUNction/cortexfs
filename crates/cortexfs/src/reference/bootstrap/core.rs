@@ -267,14 +267,8 @@ pub(crate) fn ensure_reference_agent(
     parent: Option<&str>,
     groups: &str,
 ) -> Result<(), ReferenceTreeError> {
-    install_executable_object_wrapper(
-        root,
-        ObjectClass::Agent,
-        name,
-        support::command::FALSE,
-        &[],
-    )
-    .map_err(ReferenceTreeError::Object)?;
+    install_executable_object_wrapper(root, ObjectClass::Agent, name, support::command::FALSE, &[])
+        .map_err(ReferenceTreeError::Object)?;
     let control = root.join("agent").join(format!("{name}.d"));
     let label = format!("user_u:agent_r:{name}_t:s0\n");
     let home_root = format!("/ctx/home/1000/agent/{name}/root\n");
