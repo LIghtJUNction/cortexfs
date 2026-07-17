@@ -185,18 +185,18 @@ fn call_provider_driver(
         .map_err(ProviderCompletionError::fallback)?;
     match driver {
         ProviderRuntimeDriver::OpenAiChat => {
-            let key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
+            let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
                 input,
-                api_key: key,
+                credential: credential.as_ref(),
                 effort,
             };
             match call_openai_chat_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
-                    let completion = call_openai_chat(&route.transport, &request)
+                    let completion = call_openai_chat(&route.transport, &request, run)
                         .map_err(ProviderCompletionError::fallback)?;
                     write_text_completion(stdout, run, &completion).map_err(|error| {
                         ProviderCompletionError::no_fallback(format!(
@@ -211,18 +211,18 @@ fn call_provider_driver(
             }
         }
         ProviderRuntimeDriver::OpenAiResponses => {
-            let key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
+            let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
                 .map_err(ProviderCompletionError::fallback)?;
             let request = OpenAiProviderRequest {
                 model,
                 input,
-                api_key: key,
+                credential: credential.as_ref(),
                 effort,
             };
             match call_openai_responses_streaming(&route.transport, &request, run, stdout) {
                 Ok(()) => Ok(()),
                 Err(error) if error.can_fallback => {
-                    let completion = call_openai_responses(&route.transport, &request)
+                    let completion = call_openai_responses(&route.transport, &request, run)
                         .map_err(ProviderCompletionError::fallback)?;
                     write_text_completion(stdout, run, &completion).map_err(|error| {
                         ProviderCompletionError::no_fallback(format!(
