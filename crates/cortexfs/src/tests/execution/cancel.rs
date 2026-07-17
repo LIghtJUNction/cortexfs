@@ -13,6 +13,7 @@ fn write_cancellable_partial_agent(executable: &Path) {
         executable,
         r#"#!/bin/sh
 trap 'exit 0' TERM INT
+sleep 3
 printf '{"type":"delta","run":"%s","text":"partial"}\n' "$CTX_RUN_ID"
 touch "$CTX_SOURCE/cancel-ready"
 sleep 5
@@ -29,18 +30,32 @@ fn wait_delta_then_cancel(
 ) -> Option<(bool, String, UnixStream)> {
     let mut reader = BufReader::new(client);
     let mut response = String::new();
-    let ready_deadline = Instant::now() + Duration::from_secs(2);
+    let delta_deadline = Instant::now() + Duration::from_secs(8);
+    reader
+        .get_ref()
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .ok()?;
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => return None,
+            Ok(0) => return None,
             Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) && Instant::now() < delta_deadline => {}
+            Err(_) => return None,
+        }
+        if line.is_empty() {
+            continue;
         }
         response.push_str(&line);
         let frame: Value = serde_json::from_str(&line).ok()?;
         if json_str(&frame, "type") != Some("delta") {
             continue;
         }
+        let ready_deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < ready_deadline {
             if ready.exists() {
                 let cancelled = handle_socket_request_frame(

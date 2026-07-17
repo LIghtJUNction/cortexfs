@@ -503,8 +503,13 @@ fn control_timeout() -> Duration {
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    use subtle::ConstantTimeEq;
-    bool::from(left.ct_eq(right))
+    let mut difference = left.len() ^ right.len();
+    for index in 0..left.len().max(right.len()) {
+        difference |= usize::from(
+            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
+        );
+    }
+    difference == 0
 }
 
 fn legal_request_id(request_id: &str) -> bool {

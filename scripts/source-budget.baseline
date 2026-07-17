@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=120157
-prod=76491
+all=120305
+prod=76571
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo.rs
 922 crates/cortexfs-agent-sdk/src/lib.rs
@@ -25,7 +25,7 @@ prod=76491
 225 crates/cortexfs/src/agent/control.rs
 527 crates/cortexfs/src/agent/create.rs
 2322 crates/cortexfs/src/agent/createop.rs
-2180 crates/cortexfs/src/agent/launch.rs
+2183 crates/cortexfs/src/agent/launch.rs
 22 crates/cortexfs/src/agent/prompt.rs
 125 crates/cortexfs/src/agent/prompt/history.rs
 55 crates/cortexfs/src/agent/prompt/read.rs
@@ -188,7 +188,7 @@ prod=76491
 241 crates/cortexfs/src/object/metadata.rs
 536 crates/cortexfs/src/object/receipt.rs
 549 crates/cortexfs/src/object/replace.rs
-356 crates/cortexfs/src/object/residue.rs
+352 crates/cortexfs/src/object/residue.rs
 149 crates/cortexfs/src/object/residue/audit.rs
 482 crates/cortexfs/src/object/residue/cleanup.rs
 199 crates/cortexfs/src/object/residue/plan.rs
@@ -214,7 +214,7 @@ prod=76491
 182 crates/cortexfs/src/provider/model/routes.rs
 14 crates/cortexfs/src/provider/name.rs
 154 crates/cortexfs/src/provider/name/files.rs
-93 crates/cortexfs/src/provider/name/names.rs
+96 crates/cortexfs/src/provider/name/names.rs
 156 crates/cortexfs/src/provider/name/secrets.rs
 89 crates/cortexfs/src/provider/name/selection.rs
 631 crates/cortexfs/src/provider/oauth.rs
@@ -228,7 +228,7 @@ prod=76491
 244 crates/cortexfs/src/reference/helpers/sessions.rs
 393 crates/cortexfs/src/reference/storage.rs
 5 crates/cortexfs/src/runtime.rs
-1081 crates/cortexfs/src/runtime/control.rs
+1086 crates/cortexfs/src/runtime/control.rs
 269 crates/cortexfs/src/runtime/egress.rs
 483 crates/cortexfs/src/runtime/egress/http.rs
 11 crates/cortexfs/src/runtime/record.rs
@@ -254,10 +254,10 @@ prod=76491
 91 crates/cortexfs/src/support/manuals.rs
 167 crates/cortexfs/src/support/message.rs
 17 crates/cortexfs/src/support/path.rs
-483 crates/cortexfs/src/support/plain.rs
-298 crates/cortexfs/src/support/process.rs
+481 crates/cortexfs/src/support/plain.rs
+309 crates/cortexfs/src/support/process.rs
 25 crates/cortexfs/src/support/queue.rs
-478 crates/cortexfs/src/support/receipt.rs
+542 crates/cortexfs/src/support/receipt.rs
 56 crates/cortexfs/src/support/schema.rs
 269 crates/cortexfs/src/support/session.rs
 311 crates/cortexfs/src/support/stream.rs

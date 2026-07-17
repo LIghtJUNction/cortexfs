@@ -756,7 +756,7 @@ fn mkdirat(parent: &fs::File, name: &str, mode: u32) -> Result<(), InstallError>
 }
 
 fn openat_dir(parent: &fs::File, name: &str) -> Result<fs::File, InstallError> {
-    crate::support::plain::open_directory_at(parent, name).map_err(|error| {
+    crate::support::plain::open_directory_at(parent, std::ffi::OsStr::new(name)).map_err(|error| {
         InstallError::unavailable(format!("cannot open staged directory: {error}"))
     })
 }

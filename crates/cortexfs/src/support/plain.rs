@@ -5,6 +5,7 @@
 
 use std::fs;
 
+use std::ffi::OsStr;
 use std::io::{Read, Result, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
@@ -150,7 +151,7 @@ pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> R
         nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
     )
     .map_err(std::io::Error::from)?;
-    let created = match open_directory_at(parent, name) {
+    let created = match open_directory_at(parent, OsStr::new(name)) {
         Ok(created) => created,
         Err(error) => {
             let _ignored = remove_plain_dir_at(parent, name);
@@ -392,7 +393,7 @@ pub(crate) fn sync_plain_dir(path: &Path) -> Result<()> {
 
 /// Opens a plain directory relative to a held parent directory fd (no-follow).
 #[doc(hidden)]
-pub fn open_directory_at(parent: &fs::File, name: &str) -> Result<fs::File> {
+pub fn open_directory_at(parent: &fs::File, name: &OsStr) -> Result<fs::File> {
     nix::fcntl::openat(
         parent,
         name,
@@ -433,9 +434,6 @@ pub fn open_plain_directory(path: &Path) -> Result<fs::File> {
         match component {
             std::path::Component::RootDir | std::path::Component::CurDir => {}
             std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
                 directory = open_directory_at(&directory, name)?;
             }
             std::path::Component::ParentDir | std::path::Component::Prefix(_) => {

@@ -2,8 +2,10 @@ use super::{
     ResidueConflict, ResidueEligibility, ResidueError, ResidueKind, apply_cleanup, audit_residue,
     cleanup_residue, prepare_cleanup,
 };
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, symlink};
 use std::path::Path;
 
@@ -93,6 +95,25 @@ fn cleanup_exact_receipt_removes_tree_but_preserves_symlink_target()
     assert_eq!(report.entries, 5);
     assert!(!stage.exists());
     assert_eq!(fs::read(&target)?, b"keep");
+    Ok(())
+}
+
+#[test]
+fn audit_and_cleanup_accept_non_utf8_descendants() -> Result<(), Box<dyn std::error::Error>> {
+    let root = fixture()?;
+    let relative = Path::new("tool/.cortexfs-install-non-utf8");
+    let stage = root.path().join(relative);
+    let nested = stage.join(OsStr::from_bytes(b"nested-\xff"));
+    fs::create_dir_all(&nested)?;
+    fs::write(nested.join(OsStr::from_bytes(b"file-\xfe")), b"data")?;
+    let (dev, ino) = stage_receipt(&stage)?;
+
+    let reports = audit_residue(root.path())?;
+    assert!(reports.iter().any(|report| report.path == relative));
+    let report = cleanup_residue(root.path(), relative, dev, ino, true)?;
+
+    assert_eq!(report.entries, 3);
+    assert!(!stage.exists());
     Ok(())
 }
 

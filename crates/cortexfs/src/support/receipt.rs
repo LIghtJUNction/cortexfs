@@ -6,6 +6,7 @@
     )
 )]
 
+use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::{Read, Result};
@@ -13,7 +14,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 
-use super::plain::{open_plain_directory, proc_fd_path};
+use super::plain::{open_directory_at, open_plain_directory, proc_fd_path};
 
 const QUARANTINE_BYTES: usize = 32;
 const CHILD_BYTES: usize = 32;
@@ -30,6 +31,7 @@ pub(crate) struct EmptyDirReceipt {
     path: PathBuf,
     parent: (u64, u64),
     child: (u64, u64),
+    child_fd: File,
 }
 
 impl EmptyDirReceipt {
@@ -64,6 +66,19 @@ impl EmptyDirReceipt {
                 return Err(ReceiptError::CannotCreate);
             }
         };
+        let child_fd = match open_directory_at(&parent, OsStr::new(&name)) {
+            Ok(file)
+                if file
+                    .metadata()
+                    .is_ok_and(|metadata| (metadata.dev(), metadata.ino()) == child) =>
+            {
+                file
+            }
+            Ok(_) | Err(_) => {
+                let _cleanup = quarantine_dir(&parent, &name, child);
+                return Err(ReceiptError::CannotCreate);
+            }
+        };
         if configure_dir(
             directory,
             &parent,
@@ -81,10 +96,18 @@ impl EmptyDirReceipt {
             path: directory.join(name),
             parent: parent_identity,
             child,
+            child_fd,
         })
     }
 
     pub(crate) fn cleanup(&self) -> std::result::Result<(), ReceiptError> {
+        let child_metadata = self
+            .child_fd
+            .metadata()
+            .map_err(|_error| ReceiptError::CleanupConflict)?;
+        if (child_metadata.dev(), child_metadata.ino()) != self.child {
+            return Err(ReceiptError::CleanupConflict);
+        }
         let parent_path = self.path.parent().ok_or(ReceiptError::CleanupConflict)?;
         let parent =
             open_plain_directory(parent_path).map_err(|_error| ReceiptError::CleanupConflict)?;
@@ -274,6 +297,7 @@ pub(crate) struct SocketReceipt {
     path: PathBuf,
     dev: u64,
     ino: u64,
+    socket_fd: File,
 }
 
 impl SocketReceipt {
@@ -305,6 +329,13 @@ impl SocketReceipt {
                 return Err(error);
             }
         };
+        let socket_fd = match open_socket_at(&parent, name, identity) {
+            Ok(file) => file,
+            Err(error) => {
+                let _cleanup = quarantine(&parent, name, identity);
+                return Err(error);
+            }
+        };
         if let Err(error) = configure(directory, &parent, parent_identity, name, identity, owner) {
             let _cleanup = quarantine(&parent, name, identity);
             return Err(error);
@@ -314,12 +345,20 @@ impl SocketReceipt {
                 path,
                 dev: identity.0,
                 ino: identity.1,
+                socket_fd,
             },
             listener,
         ))
     }
 
     pub(crate) fn cleanup(&self) -> std::result::Result<(), SocketReceiptError> {
+        let metadata = self
+            .socket_fd
+            .metadata()
+            .map_err(|_error| SocketReceiptError::Cleanup)?;
+        if (metadata.dev(), metadata.ino()) != (self.dev, self.ino) {
+            return Err(SocketReceiptError::Cleanup);
+        }
         let parent_path = self.path.parent().ok_or(SocketReceiptError::Cleanup)?;
         let parent =
             open_plain_directory(parent_path).map_err(|_error| SocketReceiptError::Cleanup)?;
@@ -390,6 +429,31 @@ fn socket_identity(
         return Err(SocketReceiptError::Create);
     }
     Ok((stat.st_dev, stat.st_ino))
+}
+
+fn open_socket_at(
+    parent: &File,
+    name: &str,
+    expected: (u64, u64),
+) -> std::result::Result<File, SocketReceiptError> {
+    let fd = nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_PATH | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map_err(|_error| SocketReceiptError::Create)?;
+    let file = File::from(fd);
+    let metadata = file
+        .metadata()
+        .map_err(|_error| SocketReceiptError::Create)?;
+    let kind = nix::sys::stat::SFlag::from_bits_truncate(metadata.mode());
+    if (metadata.dev(), metadata.ino()) != expected
+        || !kind.contains(nix::sys::stat::SFlag::S_IFSOCK)
+    {
+        return Err(SocketReceiptError::Create);
+    }
+    Ok(file)
 }
 
 fn require_identity(

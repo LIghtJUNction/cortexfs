@@ -271,13 +271,9 @@ fn open_dir_at(
     name: &OsStr,
     expected: Receipt,
 ) -> Result<fs::File, ResidueError> {
-    let name_str = name
-        .to_str()
-        .ok_or_else(|| ResidueError::unavailable("cannot open residue directory: invalid name"))?;
-    let directory =
-        crate::support::plain::open_directory_at(parent, name_str).map_err(|error| {
-            ResidueError::unavailable(format!("cannot open residue directory: {error}"))
-        })?;
+    let directory = crate::support::plain::open_directory_at(parent, name).map_err(|error| {
+        ResidueError::unavailable(format!("cannot open residue directory: {error}"))
+    })?;
     let metadata = directory.metadata().map_err(|error| {
         ResidueError::unavailable(format!("cannot inspect residue directory: {error}"))
     })?;
