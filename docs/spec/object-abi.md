@@ -24,9 +24,9 @@ name.d/
 hooks that run after the object action. This is an object-local convention under
 `agent` and `tool`; it does not create a `/ctx/hook` root namespace. Model
 control directories stay limited to provider/model controls and do not carry
-empty hook trees. v1 defines the directory shape only. Implementations may keep
+empty hook trees. The stable ABI defines the directory shape only. Implementations may keep
 compiled hook state in process memory, but development refresh is still a Git
-commit/runtime restart boundary; CortexFS v1 does not define background
+commit/runtime restart boundary; CortexFS does not define background
 watchers, polling, or hot reload.
 
 Do not expand one object into `profile/`, `runtime/`, `policy/`, `control/`,
@@ -97,7 +97,7 @@ symlink overlay:
 
 ## Exec Protocol
 
-Executable agents use the required `agent/<name>.d/abi` control. Its only v1
+Executable agents use the required `agent/<name>.d/abi` control. Its accepted
 value is `sdk-envelope-v1`; the runtime supplies the typed invocation described
 by the [Agent Runtime specification](agent-runtime.md).
 
@@ -210,7 +210,7 @@ visible aliases have been created and verified.
 Hard socket rules:
 
 ```text
-max frame size       v1 is 1 MiB; larger frames return EMSGSIZE
+max frame size       1 MiB; larger frames return EMSGSIZE
 unknown fields       must be ignored
 unknown op           returns EINVAL
 after disconnect     private/shared sessions continue by default; temp sessions may be cancelled

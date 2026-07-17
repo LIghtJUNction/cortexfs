@@ -7,7 +7,7 @@ fn reference_tree_bootstrap_ignores_symlink_session_meta_during_migration() {
     write_text_file(&outside.join("meta.json"), "{\"model\":\"legacy\"}\n");
     assert!(symlink(outside.join("meta.json"), session.join("meta.json")).is_ok());
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     assert!(
         session
@@ -34,7 +34,7 @@ fn reference_tree_bootstrap_ignores_symlink_session_dir_during_migration() {
     );
     assert!(symlink(&outside, agent.join("session")).is_ok());
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     assert_file_text(
         &outside.join("default").join("meta.json"),
@@ -49,7 +49,7 @@ fn reference_tree_bootstrap_preserves_valid_provider_model_alias() {
     assert!(fs::create_dir_all(&user_model).is_ok());
     assert!(symlink("/ctx/model/openai/gpt-5.6", user_model.join("coder")).is_ok());
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let model_link = fs::read_link(user_model.join("coder"));
     assert!(
@@ -63,7 +63,7 @@ fn reference_tree_bootstrap_preserves_existing_canonical_model_aliases() {
     assert!(fs::create_dir_all(root.join("model")).is_ok());
     assert!(symlink("/ctx/model/local/custom", root.join("model/code")).is_ok());
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     assert!(matches!(
         fs::read_link(root.join("model/code")),
@@ -80,7 +80,7 @@ fn reference_tree_bootstrap_rejects_symlink_model_alias_parent_without_writing_t
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(symlink(&outside, user.join("model")).is_ok());
 
-    assert!(ensure_v1_reference_tree(&root).is_err());
+    assert!(ensure_reference_tree(&root).is_err());
     assert!(!outside.join("coder").exists());
 }
 
@@ -123,7 +123,7 @@ fn model_exec_metadata_rejects_extra_limit_line() {
 
     assert_eq!(
         model_exec_metadata("openai/gpt-5.6", &control),
-        Err(FuseV1Error::InvalidContent)
+        Err(FuseError::InvalidContent)
     );
 }
 
@@ -142,7 +142,7 @@ fn model_exec_metadata_refuses_symlink_control_files() {
 
     assert_eq!(
         model_exec_metadata("openai/gpt-5.6", &control),
-        Err(FuseV1Error::InvalidContent)
+        Err(FuseError::InvalidContent)
     );
 }
 
@@ -163,7 +163,7 @@ fn model_exec_metadata_refuses_symlink_control_directory() {
 
     assert_eq!(
         model_exec_metadata("openai/gpt-5.6", &control),
-        Err(FuseV1Error::Io)
+        Err(FuseError::Io)
     );
 }
 
@@ -180,7 +180,7 @@ fn model_exec_metadata_refuses_oversized_control_files() {
 
     assert_eq!(
         model_exec_metadata("openai/gpt-5.6", &control),
-        Err(FuseV1Error::InvalidContent)
+        Err(FuseError::InvalidContent)
     );
 }
 
@@ -253,7 +253,7 @@ fn root_bootstrap_chowns_reference_home_symlinks_without_following_targets() {
     let target = target_dir.join("root-owned-target");
     assert!(fs::create_dir_all(&target_dir).is_ok());
     assert!(fs::write(&target, "keep root owner\n").is_ok());
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let link = root
         .join("home")
@@ -268,7 +268,7 @@ fn root_bootstrap_chowns_reference_home_symlinks_without_following_targets() {
     assert_eq!(target_before.uid(), 0);
     assert_eq!(target_before.gid(), 0);
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let link_metadata = ok!(fs::symlink_metadata(&link));
     assert!(link_metadata.file_type().is_symlink());
@@ -287,7 +287,7 @@ fn root_bootstrap_assigns_reference_home_to_agent_identity() {
     }
 
     let root = clean_test_dir("reference-tree-home-ownership");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     for path in [
         root.join("home").join("1000"),

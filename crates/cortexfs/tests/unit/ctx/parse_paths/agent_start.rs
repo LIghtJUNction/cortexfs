@@ -106,7 +106,7 @@ fn run_bwrap_script(mut args: Vec<String>, script: &str) -> Option<std::process:
 
 fn agent_bwrap_test_args(args: &AgentStartArgs, mounts: &[AgentMount]) -> Option<Vec<String>> {
     let root = clean_test_dir("ctx-agent-git-bwrap-args");
-    ensure_v1_reference_tree(&root).ok()?;
+    ensure_reference_tree(&root).ok()?;
     ensure_runtime_model_fixture(&root);
     let view = derive_agent_runtime_view(&root, "coder").ok()?;
     let socket = root.join("runtime").join("main.sock");
@@ -120,7 +120,7 @@ fn run_agent_bwrap(
     script: &str,
 ) -> Option<(Vec<String>, std::process::Output)> {
     let root = clean_test_dir("ctx-agent-git-bwrap-run");
-    ensure_v1_reference_tree(&root).ok()?;
+    ensure_reference_tree(&root).ok()?;
     ensure_runtime_model_fixture(&root);
     if let Some(policy) = policy {
         write_text_file(&root.join("agent").join("coder.d").join("mount"), policy);
@@ -155,7 +155,7 @@ fn agent_terminal_socket_uses_session_terminal_main_socket() {
 #[test]
 fn agent_start_builds_sandboxed_terminal_command() {
     let root = clean_test_dir("ctx-agent-start-bwrap-view");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     ensure_runtime_model_fixture(&root);
     write_text_file(
         &root.join("agent").join("coder.d").join("env"),
@@ -639,7 +639,7 @@ fn agent_start_records_ready_status_and_start_event() {
 fn agent_start_prepares_session_workspace_hint() {
     let root = clean_test_dir("ctx-agent-start-session-workspace");
     let workspace = clean_test_dir("ctx-agent-start-session-workspace-source");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     ensure_runtime_model_fixture(&root);
     let view = derive_agent_runtime_view(&root, "coder");
     assert!(view.is_ok(), "reference coder view: {view:?}");
@@ -778,7 +778,7 @@ fn agent_start_no_default_workspace_does_not_guess_git_mount() {
 #[test]
 fn agent_start_systemd_command_uses_sanitized_environment() {
     let root = clean_test_dir("ctx-agent-start-systemd-view");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     ensure_runtime_model_fixture(&root);
     let view = derive_agent_runtime_view(&root, "coder");
     assert!(view.is_ok(), "reference coder view: {view:?}");

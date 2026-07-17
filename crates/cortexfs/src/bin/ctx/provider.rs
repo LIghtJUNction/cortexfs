@@ -14,10 +14,9 @@ pub mod secrets;
 
 pub(crate) fn provider_command(args: &ProviderArgs) -> Result<ExitCode, CliError> {
     match *args {
-        ProviderArgs::Login {
-            ref provider,
-            timeout,
-        } => provider_oauth_login(provider, timeout).map(|()| ExitCode::SUCCESS),
+        ProviderArgs::Login(ref provider, timeout, device) => {
+            provider_oauth_login(provider, timeout, device).map(|()| ExitCode::SUCCESS)
+        }
         ProviderArgs::Status { ref provider } => {
             provider_oauth_status(provider).map(|()| ExitCode::SUCCESS)
         }

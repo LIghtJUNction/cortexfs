@@ -1,5 +1,5 @@
 [Unit]
-Description=CortexFS v1 FUSE mount
+Description=CortexFS FUSE mount
 Documentation=file:/usr/share/doc/cortexfs-git/README.md
 After=local-fs.target
 

@@ -30,9 +30,9 @@ use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::{
-    AbiPathKind, FUSE_V1_ROOT_INODE, FuseV1Attr, FuseV1DirEntry, FuseV1Error, FuseV1FileType,
-    FuseV1Node, FuseV1Projection, MAX_FUSE_V1_SMALL_READ_BYTES, MAX_FUSE_V1_SMALL_WRITE_BYTES,
-    classify_abi_path, is_object_name, parse_abi_path,
+    AbiPathKind, FUSE_ROOT_INODE, FuseAttr, FuseDirEntry, FuseError, FuseFileType, FuseNode,
+    FuseProjection, MAX_FUSE_SMALL_READ_BYTES, MAX_FUSE_SMALL_WRITE_BYTES, classify_abi_path,
+    is_object_name, parse_abi_path,
 };
 use fuser::{
     AccessFlags, BsdFileFlags, Config, CopyFileRangeFlags, Errno, FileAttr, FileHandle, FileType,
@@ -51,7 +51,7 @@ pub(crate) use crate::cli::stderr;
 
 #[derive(Debug)]
 struct CortexFuse {
-    projection: FuseV1Projection,
+    projection: FuseProjection,
     paths: Mutex<HashMap<u64, String>>,
     lookup_counts: Mutex<HashMap<u64, u64>>,
     socket_overlays: Mutex<HashMap<String, SocketOverlay>>,
@@ -66,7 +66,7 @@ struct SocketOverlay {
 
 impl CortexFuse {
     fn new(root: PathBuf) -> Result<Self, String> {
-        let projection = FuseV1Projection::new(root);
+        let projection = FuseProjection::new(root);
         let root_node = projection
             .root_node()
             .map_err(|error| format!("invalid source root: {}", error.errno()))?;
@@ -80,35 +80,32 @@ impl CortexFuse {
         })
     }
 
-    fn path_for_inode(&self, inode: INodeNo) -> Result<String, FuseV1Error> {
+    fn path_for_inode(&self, inode: INodeNo) -> Result<String, FuseError> {
         self.paths
             .lock()
-            .map_err(|_error| FuseV1Error::Io)?
+            .map_err(|_error| FuseError::Io)?
             .get(&inode.0)
             .cloned()
-            .ok_or(FuseV1Error::NotFound)
+            .ok_or(FuseError::NotFound)
     }
 
-    fn remember(&self, node: &FuseV1Node) -> Result<(), FuseV1Error> {
+    fn remember(&self, node: &FuseNode) -> Result<(), FuseError> {
         self.paths
             .lock()
-            .map_err(|_error| FuseV1Error::Io)?
+            .map_err(|_error| FuseError::Io)?
             .insert(node.inode(), node.abi_path().to_owned());
         Ok(())
     }
 
-    fn remember_lookup(&self, node: &FuseV1Node) -> Result<(), FuseV1Error> {
+    fn remember_lookup(&self, node: &FuseNode) -> Result<(), FuseError> {
         self.remember(node)?;
-        let mut counts = self
-            .lookup_counts
-            .lock()
-            .map_err(|_error| FuseV1Error::Io)?;
+        let mut counts = self.lookup_counts.lock().map_err(|_error| FuseError::Io)?;
         *counts.entry(node.inode()).or_insert(0) += 1;
         drop(counts);
         Ok(())
     }
 
-    fn reply_entry(&self, node: &FuseV1Node, reply: ReplyEntry) {
+    fn reply_entry(&self, node: &FuseNode, reply: ReplyEntry) {
         if let Err(error) = self.remember_lookup(node) {
             reply.error(errno(error));
             return;
@@ -116,14 +113,11 @@ impl CortexFuse {
         reply.entry(&TTL, &file_attr(node.inode(), node.attr()), Generation(0));
     }
 
-    fn forget_inode(&self, inode: INodeNo, nlookup: u64) -> Result<(), FuseV1Error> {
-        if inode.0 == FUSE_V1_ROOT_INODE {
+    fn forget_inode(&self, inode: INodeNo, nlookup: u64) -> Result<(), FuseError> {
+        if inode.0 == FUSE_ROOT_INODE {
             return Ok(());
         }
-        let mut counts = self
-            .lookup_counts
-            .lock()
-            .map_err(|_error| FuseV1Error::Io)?;
+        let mut counts = self.lookup_counts.lock().map_err(|_error| FuseError::Io)?;
         let remove_path = match counts.get_mut(&inode.0) {
             Some(count) if *count > nlookup => {
                 *count -= nlookup;
@@ -139,25 +133,25 @@ impl CortexFuse {
         if remove_path {
             self.paths
                 .lock()
-                .map_err(|_error| FuseV1Error::Io)?
+                .map_err(|_error| FuseError::Io)?
                 .remove(&inode.0);
         }
         Ok(())
     }
 
-    fn forget_path(&self, path: &str) -> Result<(), FuseV1Error> {
+    fn forget_path(&self, path: &str) -> Result<(), FuseError> {
         self.paths
             .lock()
-            .map_err(|_error| FuseV1Error::Io)?
+            .map_err(|_error| FuseError::Io)?
             .retain(|_inode, known| known != path);
         Ok(())
     }
 
-    fn rename_path(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
+    fn rename_path(&self, from: &str, to: &str) -> Result<(), FuseError> {
         for known in self
             .paths
             .lock()
-            .map_err(|_error| FuseV1Error::Io)?
+            .map_err(|_error| FuseError::Io)?
             .values_mut()
         {
             if known == from {
@@ -195,7 +189,7 @@ macro_rules! create_session_layout_child_or_reply {
             .projection
             .$method(&path, $req.uid(), $req.gid(), $mode)
         {
-            $reply.error(if matches!(error, FuseV1Error::NotControlFile) {
+            $reply.error(if matches!(error, FuseError::NotControlFile) {
                 readonly_mutation_errno()
             } else {
                 errno(error)

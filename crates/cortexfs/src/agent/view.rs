@@ -1,9 +1,11 @@
 use crate::*;
 use std::collections::BTreeSet;
 
+use cortexfs_runtime_client::agent::is_agent_launch_abi;
+
 use crate::support::plain::{open_plain_directory, read_small_text_file};
 
-/// Derives an agent runtime view from the frozen v1 control files.
+/// Derives an agent runtime view from the stable control files.
 ///
 /// A same-named user agent control directory under
 /// `CTX_HOME/agent/<agent_name>.d/` or
@@ -15,7 +17,7 @@ use crate::support::plain::{open_plain_directory, read_small_text_file};
 /// The returned environment always contains the runtime-owned `CTX_ROOT`,
 /// `CTX_PROVIDER_CONFIG_DIR`, `CTX_HOME`, `HOME`, and `CTX_PATH` values derived
 /// from the ABI controls.
-/// The `env` control is validated as data, but v1 does not let it add process
+/// The `env` control is validated as data, but the stable ABI does not let it add process
 /// variables. Runtime environment authority is fixed here and by the sandbox
 /// launcher so text config cannot expand the authority established by `path`,
 /// `mount`, and `policy`.
@@ -74,7 +76,7 @@ pub fn derive_agent_runtime_view(
     let policy = PolicyV0::parse(&policy_content)
         .map_err(|_error| AgentRuntimeViewError::InvalidControlFile("policy".to_owned()))?;
     let declared_tools = parse_agent_tools_control(&control_dir)?;
-    if read_required_agent_control_value(&control_dir, "abi")? != "sdk-envelope-v1" {
+    if !is_agent_launch_abi(&read_required_agent_control_value(&control_dir, "abi")?) {
         return Err(AgentRuntimeViewError::InvalidControlFile("abi".to_owned()));
     }
     let approval = parse_agent_approval_control(&control_dir)?;

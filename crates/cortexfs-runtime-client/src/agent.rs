@@ -18,35 +18,23 @@ pub use wire::read_agent_invocation;
 /// This string is checked for inbound envelope compatibility before dispatch,
 /// preventing implicit fallback to legacy ad-hoc command payloads.
 ///
-/// 参考：
+/// Reference:
 /// - MCP fileserver compatibility issues: [#4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 /// - MCP payload size edge cases: [#4206](https://github.com/modelcontextprotocol/servers/issues/4206)
 /// - [rust-fs-mcp protocol lifecycle](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#request-lifecycle)
 /// - [MCP newline-delimited stdio model](https://github.com/orgs/modelcontextprotocol/discussions/364)
 pub const AGENT_INVOCATION_SCHEMA: &str = "cortexfs.agent-invocation/v1";
 
-/// Marker selecting the ABI for SDK-hosted launched agents.
-///
-/// Runtime uses this as the entry marker to keep envelope-mode launches consistent,
-/// instead of implicitly accepting legacy command-only invocations.
-///
-/// 设计意图：
-/// - 约束新/旧启动链路在同一 ABI 入口，避免 `--entry` 与裸参数混用导致的兼容性漂移。
-/// - 与 MCP 的一次请求一次响应观念一致：运行时只接受可识别协议边界的载荷。
-///
-/// 关联实现/讨论：
-/// - [modelcontextprotocol/servers PR #4480](https://github.com/modelcontextprotocol/servers/pull/4480)
-/// - [CortexFS PR #87](https://github.com/LIghtJUNction/cortexfs/pull/87)
-/// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
+/// Marker selecting the ABI for SDK-hosted agent launches.
 pub const AGENT_LAUNCH_ABI: &str = "sdk-envelope-v1";
 
+/// Returns whether `value` is the launch ABI, with one optional trailing newline.
+#[must_use]
+pub fn is_agent_launch_abi(value: &str) -> bool {
+    value == AGENT_LAUNCH_ABI || value.strip_suffix('\n') == Some(AGENT_LAUNCH_ABI)
+}
+
 /// Entry argument shared by host and envelope-mode child processes.
-///
-/// It is emitted by runtimes that support structured invocation envelopes.
-///
-/// 相似代码：
-/// - [rust-fs-mcp line-based protocol loop](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l385)
-/// - [rawr-ai/mcp-filesystem project entry transport examples](https://github.com/rawr-ai/mcp-filesystem#readme)
 pub const AGENT_ENVELOPE_ARG: &str = "--cortexfs-sdk-envelope-v1";
 
 /// Maximum JSON-encoded invocation payload bytes (excluding newline framing).
@@ -58,7 +46,7 @@ pub const MAX_AGENT_INVOCATION_BYTES: usize = 1024 * 1024;
 
 /// Maximum bytes retained for history/context snapshots in an invocation payload.
 ///
-/// 这类上下文体积上限与 JSON-RPC 逐包处理模式一致，常见做法可见：
+/// Context size limits here follow packetized JSON-RPC processing patterns; common practice is shown below:
 /// - [Rust MCP filesystem truncation flag](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#l557)
 pub const MAX_AGENT_CONTEXT_BYTES: usize = 64 * 1024;
 
@@ -67,7 +55,7 @@ pub const MAX_AGENT_CONTEXT_BYTES: usize = 64 * 1024;
 /// This is intentionally bounded to avoid runaway loop-like continuation chains
 /// while allowing short multi-step tool use patterns.
 ///
-/// 相关实现参考：
+/// Related implementations:
 /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 /// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
 pub const MAX_AGENT_STEPS: u8 = 8;
@@ -86,7 +74,7 @@ struct Nullable<T>(Option<T>);
 /// Each invocation is a single JSON object with bounded fields for compatibility
 /// with socket framed transports.
 ///
-/// 行为与引用：
+/// Behavioral and source references:
 /// - [RFC for MCP request identifiers](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-06-18/schema.ts)
 /// - [rust-fs-mcp request lifecycle](https://docs.rs/crate/rust-fs-mcp/0.1.7/source/architecture.md#request-lifecycle)
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -110,7 +98,7 @@ pub struct AgentInvocationEnvelope {
 
 /// Tool observation metadata appended between continuation steps.
 ///
-/// 验证逻辑参考：
+/// Validation logic reference:
 /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 /// - [CortexFS PR #87](https://github.com/LIghtJUNction/cortexfs/pull/87)
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -148,7 +136,7 @@ impl AgentInvocationEnvelope {
 
     /// Current continuation step (zero means initial invocation).
     ///
-    /// 类似处理：
+    /// Similar handling:
     /// - [deepwiki rust-sdk request/response patterns](https://deepwiki.com/modelcontextprotocol/rust-sdk/7-advanced-topics)
     #[must_use]
     pub const fn step(&self) -> u8 {

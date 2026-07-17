@@ -30,48 +30,6 @@ pub fn dir_args_for_parent(path: &str) -> Vec<String> {
     }
 }
 
-/// Base host rootfs view shared by agent sandboxes.
-///
-/// When `unshare_net` is true, inserts `--unshare-net` immediately after
-/// `--unshare-pid` (matching historical agent/sandbox argument order).
-#[must_use]
-pub fn host_rootfs_args(unshare_net: bool) -> Vec<String> {
-    let mut args = vec!["--die-with-parent".to_owned(), "--unshare-pid".to_owned()];
-    if unshare_net {
-        args.push("--unshare-net".to_owned());
-    }
-    args.extend([
-        "--proc".to_owned(),
-        "/proc".to_owned(),
-        "--dev".to_owned(),
-        "/dev".to_owned(),
-        "--tmpfs".to_owned(),
-        "/tmp".to_owned(),
-        "--dir".to_owned(),
-        "/run".to_owned(),
-        "--dir".to_owned(),
-        "/home".to_owned(),
-        "--ro-bind".to_owned(),
-        "/usr".to_owned(),
-        "/usr".to_owned(),
-        "--ro-bind".to_owned(),
-        "/etc".to_owned(),
-        "/etc".to_owned(),
-        "--tmpfs".to_owned(),
-        "/etc/profile.d".to_owned(),
-        "--symlink".to_owned(),
-        "usr/bin".to_owned(),
-        "/bin".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib64".to_owned(),
-    ]);
-    args
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

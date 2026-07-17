@@ -1,5 +1,5 @@
 #[test]
-fn agent_controls_accept_fixed_v1_values() {
+fn agent_controls_accept_fixed_values() {
     assert!(inspect_agent_control(AgentControlKind::Owner, "1000\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Uid, "1000\n").is_ok());
     assert!(inspect_agent_control(AgentControlKind::Gid, "100\n").is_ok());

@@ -524,12 +524,16 @@ pub(crate) fn visible_workspace_source(workspace: PathBuf) -> PathBuf {
 
 pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> {
     let cwd = request.cwd.to_str().unwrap_or("/workspace");
-    let mut args = vec![OsString::from("--clearenv")];
-    args.extend(
-        crate::support::bwrap::host_rootfs_args(!request.network_allowed)
-            .into_iter()
-            .map(OsString::from),
-    );
+    let mut args = vec![
+        OsString::from("--clearenv"),
+        OsString::from("--die-with-parent"),
+        OsString::from("--unshare-pid"),
+    ];
+    args.extend(BWRAP_PROCESS_SETUP_ARGS.map(OsString::from));
+    args.extend(BWRAP_SYSTEM_LAYOUT_ARGS.map(OsString::from));
+    if !request.network_allowed {
+        args.push(OsString::from("--unshare-net"));
+    }
     args.extend(optional_dev_toolchain_bind_args());
     args.extend(agent_tool_env_bwrap_args(request));
     if let Some(control) = request.control {

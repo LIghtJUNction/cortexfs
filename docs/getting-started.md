@@ -1,29 +1,17 @@
 ---
 id: getting-started
-title: 从安装开始
-sidebar_label: 从安装开始
+title: Start With Installation
+sidebar_label: Start With Installation
 ---
 
-# 从安装开始
+# Start With Installation
 
-CortexFS 运行时生态周边与相关项目：
+CortexFS is a Linux filesystem ABI. Install it first, confirm `/ctx` is usable,
+then move on to agents, tools, and extension points.
 
-- [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers): MCP 生态中可复用的参考服务集合。
-- [modelcontextprotocol/modelcontextprotocol](https://github.com/modelcontextprotocol/modelcontextprotocol): MCP 协议规范与官方参考仓库。
-- [OpenHands/OpenHands](https://github.com/OpenHands/OpenHands): 面向软件开发的代理型工作流平台。
-- [crewAIInc/crewAI](https://github.com/crewaiInc/crewAI): 面向多智能体协作的框架。
-- [FoundationAgents/MetaGPT](https://github.com/FoundationAgents/MetaGPT): 面向协作式 Agent 团队的实现。
-- [langchain-ai/langgraph](https://github.com/langchain-ai/langgraph): 构建可观测、可恢复 AI 工作流图的框架。
-- [pydantic/pydantic-ai](https://github.com/pydantic/pydantic-ai): 类型安全的应用层 AI 开发框架。
-- [cberner/fuser](https://github.com/cberner/fuser): Rust FUSE 用户态实现抽象。
-- [libfuse/libfuse](https://github.com/libfuse/libfuse): Linux FUSE 内核/用户态参考接口。
+## Install
 
-CortexFS 是一个 Linux 文件系统 ABI。先把它装起来，确认 `/ctx` 可用，再继续看
-agent、tool 和二次开发。
-
-## 安装
-
-Arch Linux 用户可以直接安装 AUR 包：
+Arch Linux users can install the AUR package directly:
 
 ```bash
 paru -S cortexfs-git
@@ -32,20 +20,22 @@ ctx doctor
 ctx --help
 ```
 
-`ctx doctor` 应该告诉你挂载点、基础目录、默认模型 alias 和 agent runtime 状态是否
-可用。`ctx --help` 会列出当前构建支持的子命令，包括 `ctx agent`、`ctx file`、
-`ctx send`、`ctx exec` 和 socket 相关便利命令。默认 live test 不依赖外部云 API。
+`ctx doctor` should report whether the mount, base directories, default model
+alias, and agent runtime state are available. `ctx --help` lists the
+subcommands supported by the current build, including `ctx agent`, `ctx file`,
+`ctx send`, `ctx exec`, and socket conveniences. The default live test does not
+depend on an external cloud API.
 
-## 认识 `/ctx`
+## Meet `/ctx`
 
-安装后先看根目录：
+After installation, inspect the root:
 
 ```bash
 ctx status
 ctx ls
 ```
 
-你会看到少量稳定入口：
+You should see a small stable set of entries:
 
 ```text
 status
@@ -57,21 +47,24 @@ home/
 shared/
 ```
 
-这就是 CortexFS 的核心取舍：根目录只保留稳定对象类，不把 provider、workflow、
-database、MCP registry 或 skill registry 做成新的顶层 ABI。
+That is the core CortexFS tradeoff: the root keeps only stable object classes.
+Provider, workflow, database, MCP registry, and skill registry details do not
+become new top-level ABI entries.
 
-## 设置 shell 环境
+## Set Shell Environment
 
-大多数命令会自动推导默认值。需要显式配置时使用：
+Most commands infer these defaults automatically. Configure them explicitly
+when needed:
 
 ```bash
 eval "$(ctx env)"
 ```
 
-这会设置 `CTX_ROOT`、`CTX_HOME`、`CTX_PATH`，并把 `/ctx/bin` 放入普通 shell
-`PATH`。`CTX_PATH` 只用于 CortexFS tool 查找，不用于查找 model 或 agent。
+This sets `CTX_ROOT`, `CTX_HOME`, `CTX_PATH`, and adds `/ctx/bin` to the normal
+shell `PATH`. `CTX_PATH` is only for CortexFS tool lookup; it is not used to
+find models or agents.
 
-## 第一次检查对象
+## First Object Checks
 
 ```bash
 ctx ls model
@@ -83,14 +76,16 @@ ctx file type tool/fs.read
 ctx file tool/fs.read
 ```
 
-`model/debug/echo` 是最小调试模型，只回显输入，适合确认本机安装和 ABI 路径都正常。
+`model/debug/echo` is the smallest debug model. It echoes input and is useful
+for confirming that local installation and ABI paths work.
 
-## 启动一个 agent 终端
+## Start An Agent Terminal
 
-`ctx agent start` 会通过 `systemd-run --user` 启动 `ctxterm -> tsh`，并放进 bwrap
-sandbox。默认会把当前目录以读写方式挂到 agent 看到的 `/workspace`；如果当前目录
-包含 `.git`，会额外把它覆盖挂载为 `/workspace/.git` 只读。agent 的 `pwd` 默认是
-`/workspace`，但 `HOME` 是沙箱自己的 `/home/agent`：
+`ctx agent start` uses `systemd-run --user` to start `ctxterm -> tsh` inside a
+bwrap sandbox. By default, it mounts the caller's current directory read-write
+at `/workspace`. If the current directory contains `.git`, it is additionally
+over-mounted read-only at `/workspace/.git`. The agent starts with `pwd` set to
+`/workspace`, while `HOME` is the sandbox's own `/home/agent`:
 
 ```bash
 ctx agent start coder --session default
@@ -98,7 +93,8 @@ ctx agent watch coder --session default
 ctx agent attach coder --session default
 ```
 
-`watch` 只观察终端输出；`attach` 会加入终端并写入 stdin。需要额外挂载时显式声明：
+`watch` only observes terminal output; `attach` joins the terminal and writes
+stdin. Declare additional mounts explicitly:
 
 ```bash
 ctx agent start coder --session docs \
@@ -107,10 +103,11 @@ ctx agent start coder --session docs \
   --cwd /workspace
 ```
 
-`tsh` 不是 host shell。它只按 `CTX_PATH` 查找 `/ctx/tool`、`/ctx/home/<uid>/tool`
-等 CortexFS tool。`bash`、`tmux`、`zellij` 也必须作为 tool 可见后才可执行。
+`tsh` is not a host shell. It only looks up CortexFS tools through `CTX_PATH`,
+such as `/ctx/tool` and `/ctx/home/<uid>/tool`. `bash`, `tmux`, and `zellij`
+must also be visible as tools before they can run.
 
-## 下一步
+## Next Step
 
-继续读 [日常使用](using-cortexfs.md)，从 `ctx`、`agent.sh`、共享目录和 session
-历史开始。
+Continue with [Daily Usage](using-cortexfs.md): `ctx`, `agent.sh`, shared
+directories, and session history.

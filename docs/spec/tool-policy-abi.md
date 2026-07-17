@@ -1,6 +1,6 @@
 # Tool, Shared, Policy, and Logs ABI
 
-This file continues [agent-tool-security.md](agent-tool-security.md). It keeps
+This file continues [agent-tool-security.md](./agent-tool-security). It keeps
 the tool ABI, MCP projection rules, shared-space rules, policy v0, and log
 placement separate from agent identity and mount setup.
 
@@ -175,7 +175,7 @@ output. A tool may decide that empty argv is invalid, but `tsh` must not reject
 empty argv for ordinary visible tools before the tool runs. The native agent
 mode uses structured JSON input and JSONL tool frames. Executable plugins run
 through the same authorized object path as other tools. The Tool SDK defines a
-dynamic-library ABI, but v1 core does not yet load it; `load` and `pin`
+dynamic-library ABI, but the current core does not load it; `load` and `pin`
 currently affect metadata context/cache and must not force terminal CLI
 commands to emit structured frames.
 
@@ -513,7 +513,7 @@ unknown permission returns EINVAL
 missing object returns ENOENT or EACCES
 ```
 
-Fixed v1 permission set:
+Fixed permission set:
 
 ```text
 tool:    execute
@@ -525,7 +525,7 @@ agent:   create start stop read write
 network: connect
 ```
 
-Agent policy uses concrete names in v1:
+Agent policy uses concrete names:
 
 ```text
 allow coder_t agent:reviewer create
@@ -538,7 +538,7 @@ Do not add glob, inheritance, variables, or templates:
 allow coder_t agent:* create
 ```
 
-The only v1 network object name is `default`:
+The only stable network object name is `default`:
 
 ```text
 allow coder_t network:default connect

@@ -769,7 +769,7 @@ fn call_test_provider_sse_at(
         unix_socket: None,
     };
     let mut output = Vec::new();
-    let result = runner::call_openai_sse_streaming(&target, None, "{}", api, "run-1", &mut output);
+    let result = runner::call_openai_sse_streaming(&target, &[], "{}", api, "run-1", &mut output);
     let _ignored = stop.send(());
     let requests = server
         .join()

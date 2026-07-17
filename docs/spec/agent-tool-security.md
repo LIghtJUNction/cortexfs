@@ -210,7 +210,7 @@ stopping
 dead
 ```
 
-v1 does not introduce a global daemon. Prefer each agent process owning its own
+The stable ABI does not introduce a global daemon. Prefer each agent process owning its own
 socket, pid, log, and sessions. A future supervisor is implementation detail.
 It must not add another root directory.
 
@@ -315,7 +315,7 @@ An agent can create another agent only through normal CortexFS objects and
 policy checks. There is no root-level `spawn/`, `factory/`, or
 `agent-template/`.
 
-`architect` is the ordinary root agent for v1 lineage:
+`architect` is the ordinary root agent for lineage:
 
 ```text
 /ctx/agent/architect
@@ -360,7 +360,7 @@ The child appears as ordinary agent ABI:
   log
 ```
 
-`parent` is a small text file. v1 should keep it simple:
+`parent` is a small text file. Keep it simple:
 
 ```text
 agent:architect
@@ -373,7 +373,7 @@ or, when needed:
 agent:coder session:default run:01H...
 ```
 
-Do not turn lineage into a separate tree in v1.
+Do not turn lineage into a separate tree.
 
 Child defaults:
 

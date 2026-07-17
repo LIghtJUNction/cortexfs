@@ -39,16 +39,13 @@ pub(crate) fn call_openai_chat_streaming(
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
-    let target = chat_completions_target(transport);
+    let (target, headers) = openai_request_target(transport, request.credential, false, run)
+        .map_err(|message| StreamFailure {
+            message,
+            can_fallback: false,
+        })?;
     let body = openai_chat_body(request.model, request.input, true, request.effort);
-    call_openai_sse_streaming(
-        &target,
-        request.api_key,
-        &body,
-        OpenAiStreamApi::Chat,
-        run,
-        stdout,
-    )
+    call_openai_sse_streaming(&target, &headers, &body, OpenAiStreamApi::Chat, run, stdout)
 }
 pub(crate) fn call_openai_responses_streaming(
     transport: &ResolvedTransport,
@@ -56,11 +53,15 @@ pub(crate) fn call_openai_responses_streaming(
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
-    let target = responses_target(transport);
+    let (target, headers) = openai_request_target(transport, request.credential, true, run)
+        .map_err(|message| StreamFailure {
+            message,
+            can_fallback: false,
+        })?;
     let body = openai_responses_body(request.model, request.input, true, request.effort);
     call_openai_sse_streaming(
         &target,
-        request.api_key,
+        &headers,
         &body,
         OpenAiStreamApi::Responses,
         run,
@@ -73,16 +74,17 @@ pub(crate) fn call_openai_responses_streaming(
 )]
 pub(crate) fn call_openai_sse_streaming(
     target: &CurlJsonTarget,
-    api_key: Option<&str>,
+    headers: &[String],
     body: &str,
     api: OpenAiStreamApi,
     run: &str,
     stdout: &mut impl Write,
 ) -> Result<(), StreamFailure> {
-    let mut child = start_curl_json(target, api_key, body).map_err(|message| StreamFailure {
-        message,
-        can_fallback: true,
-    })?;
+    let mut child =
+        start_curl_json_with_headers(target, headers, body).map_err(|message| StreamFailure {
+            message,
+            can_fallback: true,
+        })?;
     let (child_stdout, stderr_reader) = provider_stream_pipes(&mut child)?;
     let mut text_emitter = OpenAiStreamTextEmitter::new(run);
     let mut tool_call_stream = OpenAiToolCallStream::default();

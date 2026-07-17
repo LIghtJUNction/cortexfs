@@ -2,7 +2,7 @@ use crate::*;
 
 #[derive(Debug)]
 pub(crate) enum ProviderArgs {
-    Login { provider: String, timeout: u64 },
+    Login(String, u64, bool),
     Status { provider: String },
     Refresh { provider: String },
     SecretSet { provider: String, slot: String },
@@ -56,8 +56,10 @@ pub(crate) fn parse_provider_oauth_command(
         "login" => {
             let provider = required_arg(&mut values, "provider oauth login requires a provider")?;
             let mut timeout = 120;
+            let mut device = false;
             while let Some(value) = values.next() {
                 match value.as_str() {
+                    "--device" => device = true,
                     "--timeout" => {
                         let raw = required_arg(
                             &mut values,
@@ -70,7 +72,9 @@ pub(crate) fn parse_provider_oauth_command(
                     _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
                 }
             }
-            Ok(Command::Provider(ProviderArgs::Login { provider, timeout }))
+            Ok(Command::Provider(ProviderArgs::Login(
+                provider, timeout, device,
+            )))
         }
         "status" => {
             let provider = required_arg(&mut values, "provider oauth status requires a provider")?;

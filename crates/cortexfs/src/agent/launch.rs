@@ -481,8 +481,8 @@ mod user_manager_tests {
     #[test]
     fn system_socket_visible_path_matches_backing_agent_socket_abi() {
         assert_eq!(
-            system_agent_visible_socket(std::path::Path::new("/storage/v1-root"), "child"),
-            std::path::Path::new("/storage/v1-root/agent/child.sock")
+            system_agent_visible_socket(std::path::Path::new("/storage/root"), "child"),
+            std::path::Path::new("/storage/root/agent/child.sock")
         );
     }
 
@@ -1872,9 +1872,17 @@ pub fn terminal_command(
             workspace.source.clone(),
         ]);
     }
+    command.args.extend([
+        "--die-with-parent".to_owned(),
+        "--unshare-pid".to_owned(),
+        "--unshare-net".to_owned(),
+    ]);
     command
         .args
-        .extend(crate::support::bwrap::host_rootfs_args(true));
+        .extend(crate::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    command
+        .args
+        .extend(crate::support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
     if let Some(runtime_dir) = socket.parent() {
         command.args.extend([
             "--bind".to_owned(),

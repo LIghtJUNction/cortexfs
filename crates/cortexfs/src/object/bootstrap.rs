@@ -1,6 +1,7 @@
 use crate::*;
+use cortexfs_runtime_client::agent::{AGENT_LAUNCH_ABI, is_agent_launch_abi};
 
-/// Installs a v1 executable object wrapper plus required `.d` control files.
+/// Installs an executable object wrapper plus required `.d` control files.
 ///
 /// The wrapper is a small POSIX shell `exec` shim to an existing runtime,
 /// script, or tool command. This helper does not start sockets, providers, or
@@ -150,7 +151,7 @@ pub(crate) fn validate_agent_bootstrap_control_content(
     content: &str,
 ) -> Result<(), ObjectBootstrapError> {
     let valid = match file {
-        "abi" => matches!(content, "sdk-envelope-v1" | "sdk-envelope-v1\n"),
+        "abi" => is_agent_launch_abi(content),
         "tools" => inspect_agent_tools_control(content).is_ok(),
         "meta.json" => serde_json::from_str::<Value>(content).is_ok_and(|value| value.is_object()),
         "system.md" | "prompt.template.md" => !content.contains('\0'),
@@ -207,7 +208,7 @@ pub(crate) fn default_model_control_value(object_name: &str, file: &str) -> Stri
 
 pub(crate) fn default_agent_control_value(object_name: &str, file: &str) -> String {
     match file {
-        "abi" => "sdk-envelope-v1".to_owned(),
+        "abi" => AGENT_LAUNCH_ABI.to_owned(),
         "owner" | "uid" | "gid" => "0".to_owned(),
         "label" => format!("user_u:agent_r:{object_name}_t:s0"),
         "iso" => "shared".to_owned(),

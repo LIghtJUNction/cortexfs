@@ -197,7 +197,13 @@ pub(crate) fn agent_bwrap_args(
     if let Some(workspace) = agent_start_workspace_source(cli_mounts) {
         bwrap.extend(["--setenv".to_owned(), "CTX_WORKSPACE".to_owned(), workspace]);
     }
-    bwrap.extend(cortexfs::support::bwrap::host_rootfs_args(true));
+    bwrap.extend([
+        "--die-with-parent".to_owned(),
+        "--unshare-pid".to_owned(),
+        "--unshare-net".to_owned(),
+    ]);
+    bwrap.extend(cortexfs::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    bwrap.extend(cortexfs::support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
     if let Some(runtime_dir) = socket_runtime_dir(socket) {
         bwrap.extend([
             "--bind".to_owned(),

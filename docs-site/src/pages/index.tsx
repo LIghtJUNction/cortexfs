@@ -82,7 +82,7 @@ const zh: Copy = {
   github: 'GitHub',
   proofLabel: 'CortexFS 运行时证据',
   proofs: ['7 个稳定根名称', '通过 FUSE 挂载', '受策略约束', '持久 JSONL'],
-  rootLabel: '冻结的 v1 根 ABI',
+  rootLabel: '稳定的根 ABI',
   rootAria: 'CortexFS 稳定根名称',
   curtain: {
     sceneLabel: '交互式 CortexFS 挂载对象视图',
@@ -115,7 +115,7 @@ const zh: Copy = {
       title: '模型是纯推理文件',
       text:
         '读取文件得到元数据，执行文件完成一次推理。供应商连接与 API 格式差异留在统一模型 ABI 之后。',
-      code: '/ctx/model/main',
+      code: '/ctx/model/main → gpt-5.6-sol · kimi-k3',
     },
     {
       name: 'agent',
@@ -169,8 +169,8 @@ const zh: Copy = {
   quickLink: '阅读完整安装文档',
   closingLabel: '让 runtime 回到 Unix',
   closingTitle: '小到足以审计，实用到足以构建。',
-  closingText: '从 v1 spec 理解稳定边界，在 GitHub 查看实现，或直接挂载 /ctx 开始使用。',
-  readSpec: '阅读 v1 Spec',
+  closingText: '从规范理解稳定边界，在 GitHub 查看实现，或直接挂载 /ctx 开始使用。',
+  readSpec: '阅读规范',
 };
 
 const en: Copy = {
@@ -185,7 +185,7 @@ const en: Copy = {
   github: 'GitHub',
   proofLabel: 'CortexFS runtime proof',
   proofs: ['7 stable root names', 'FUSE mounted', 'policy-bound', 'durable JSONL'],
-  rootLabel: 'Frozen v1 root ABI',
+  rootLabel: 'Stable root ABI',
   rootAria: 'CortexFS stable root names',
   curtain: {
     sceneLabel: 'Interactive CortexFS mount object view',
@@ -218,7 +218,7 @@ const en: Copy = {
       title: 'Models are pure inference files',
       text:
         'Read the file for metadata; execute it for one-shot inference. Provider connections and API formats stay behind the unified model ABI.',
-      code: '/ctx/model/main',
+      code: '/ctx/model/main → gpt-5.6-sol · kimi-k3',
     },
     {
       name: 'agent',
@@ -275,12 +275,12 @@ const en: Copy = {
   closingLabel: 'Bring the runtime back to Unix',
   closingTitle: 'Small enough to audit. Useful enough to build on.',
   closingText:
-    'Read the v1 spec for the stable boundary, inspect the implementation on GitHub, or mount /ctx and start using it.',
-  readSpec: 'Read the v1 spec',
+    'Read the specification for the stable boundary, inspect the implementation on GitHub, or mount /ctx and start using it.',
+  readSpec: 'Read the specification',
 };
 
 function BrandLockup(): ReactElement {
-  const logoSrc = useBaseUrl('/img/cortexfs-logo.jpg');
+  const logoSrc = useBaseUrl('/img/cortexfs-logo.svg');
   return (
     <div className="cortexBrandLockup" aria-label="CortexFS">
       <img src={logoSrc} alt="" />

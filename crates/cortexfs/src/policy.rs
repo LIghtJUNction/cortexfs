@@ -13,13 +13,13 @@ pub enum PolicyError {
     InvalidObject,
     /// Subject type or object name is invalid.
     InvalidName,
-    /// Object class is not in the fixed v1 set.
+    /// Object class is not in the fixed set.
     UnknownClass,
     /// Permission is not valid for the object class.
     UnknownPermission,
 }
 
-/// Fixed v1 policy object classes.
+/// Fixed policy object classes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicyObjectClass {
     /// Tool executable capability.
@@ -39,7 +39,7 @@ pub enum PolicyObjectClass {
 }
 
 impl PolicyObjectClass {
-    /// Parses a fixed v1 policy object class.
+    /// Parses a fixed policy object class.
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
@@ -55,7 +55,7 @@ impl PolicyObjectClass {
     }
 }
 
-/// Fixed v1 policy permissions.
+/// Fixed policy permissions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicyPermission {
     /// Execute a tool.

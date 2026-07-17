@@ -1,18 +1,3 @@
-//! Narrow client and shared wire protocol for a runtime capability socket.
-//!
-//! The runtime-client module keeps wire framing and validation concerns isolated from
-//! agent control policy, allowing protocol behavior to be audited as a stable ABI
-//! boundary.
-//!
-//! 相关实现：
-//! - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-//!   （帧类型匹配与兼容行为）
-//! - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-//!   （`request_id` 相关约束）
-//! - [rust-mcp-stack/rust-mcp-sdk PR #80](https://github.com/rust-mcp-stack/rust-mcp-sdk/pull/80)
-//!   （newline framed 控制帧实践）
-
-/// Agent-specific runtime-client helpers for creating and pinging child agents.
 pub mod agent;
 
 use serde::{Deserialize, Serialize};
@@ -22,49 +7,18 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Maximum serialized response frame size for one socket read path, in bytes.
-///
-/// The bound avoids unbounded buffering if peers send oversized payloads or if
-/// framing is malformed. It is intentionally strict to keep read-side memory and
-/// parser behavior predictable.
 const MAX_FRAME_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// Runtime wire protocol errors returned by the runtime capability socket client.
-///
-/// The variants intentionally use stable, user-facing error buckets so protocol,
-/// transport, and authorization failures can be handled without stringly-typed checks.
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-///   （错误码分类实践）
-/// - [modelcontextprotocol/servers #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-///   （响应配对失败场景）
-/// - [CortexFS PR #87](https://github.com/LIghtJUNction/cortexfs/pull/87)
 pub enum RuntimeClientError {
-    /// Request/response inputs are malformed or violate protocol constraints.
     InvalidEnvironment,
-    /// Runtime control socket could not be reached.
     CannotConnect,
-    /// Socket write failed while sending a control frame.
     CannotWrite,
-    /// Socket read timed out or could not consume a response frame.
     CannotRead,
-    /// Wire response is invalidly shaped or fails serde parsing.
     InvalidFrame,
-    /// Runtime rejected request with a structured provider/runtime reason.
     Rejected(String),
 }
 
-/// Generates a legal request identifier from operating-system entropy.
-///
-/// The identifier is `{prefix}-{hex}` with 128-bit random data encoded as 32 hex chars.
-/// The prefix and final length are validated before entropy is requested.
-///
-/// 相关实现：
-/// - [rawr-ai/mcp-filesystem](https://github.com/rawr-ai/mcp-filesystem)
-/// - [mark3labs/mcp-filesystem-server](https://github.com/mark3labs/mcp-filesystem-server)
-/// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
 pub fn fresh_request_id(prefix: &str) -> Result<String, RuntimeClientError> {
     if prefix.is_empty()
         || !prefix
@@ -88,86 +42,37 @@ pub fn fresh_request_id(prefix: &str) -> Result<String, RuntimeClientError> {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "op", deny_unknown_fields)]
-/// Runtime control request frames sent over the capability socket.
-///
-/// Request frames are versionless in this module scope and must remain minimal to
-/// preserve forward-compatibility between runtime and test fixtures.
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers pull #4480](https://github.com/modelcontextprotocol/servers/pull/4480)
-/// - [modelcontextprotocol/servers issue #1237](https://github.com/modelcontextprotocol/servers/issues/1237)
 pub enum RequestFrame {
     #[serde(rename = "ping")]
-    /// Heartbeat request used for startup validation and source reconciliation.
-    ///
-    /// This maps to `pong` responses in the control plane and is used to confirm
-    /// agent/session/run identity before child execution.
-    ///
-    /// 相关实现：
-    /// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-    /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
     Ping {
-        /// Runtime authorization token.
         token: String,
-        /// Request identifier used for response correlation.
         request_id: String,
-        /// Agent identity that initiated the ping.
         agent: String,
-        /// Session identity that initiated the ping.
         session: String,
-        /// Run identifier for the current agent session lineage.
         run: String,
     },
     #[serde(rename = "agent.create")]
-    /// Child-agent create request carrying identity, runtime command, and lifetime inputs.
-    ///
-    /// Mirrors `agent.create` flows consumed by the runtime socket server and tested
-    /// by the same wire-level invariants used in `agent.create` issue/PR flows.
-    ///
-    /// 相关实现：
-    /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-    /// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
     CreateChild {
-        /// Runtime authorization token.
         token: String,
-        /// Request identifier used for response correlation.
         request_id: String,
-        /// Parent agent name requesting child creation.
         agent: String,
-        /// Parent session name requesting child creation.
         session: String,
-        /// Parent run identifier for lineage tracking.
         run: String,
-        /// Child object name allocated inside this control namespace.
         child: String,
-        /// Child session namespace for the newly-created child.
         child_session: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        /// Optional child filesystem path override.
         path: Option<String>,
         #[serde(
             default,
             deserialize_with = "deserialize_present_u32",
             skip_serializing_if = "Option::is_none"
         )]
-        /// Optional PTY window hint in columns/rows semantics.
         window: Option<u32>,
-        /// Text input payload for the child invocation.
         input: String,
-        /// Requested child lifetime, e.g. `temp`, `owned`.
         life: String,
     },
 }
 
-/// Deserializes an optional `u32`, mapping a present value to `Some`.
-/// Treats explicit JSON `window` values as numeric and preserves absence as `None`.
-///
-/// This helper enforces strict numeric parsing so malformed values are rejected
-/// early instead of being silently defaulted.
-///
-/// 相关实现：MCP 客户端/服务端参数反序列化中对可选字段的显式区分。
-/// - [rust-mcp-stack/rust-mcp-sdk](https://github.com/rust-mcp-stack/rust-mcp-sdk)
-/// - [CortexFS PR #88](https://github.com/LIghtJUNction/cortexfs/pull/88)
 fn deserialize_present_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -177,140 +82,57 @@ where
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-/// Result of a successful child-creation request.
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-/// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
 pub struct CreateChildResult {
-    /// Child object identifier allocated by the runtime.
     pub child: String,
-    /// Child session identifier allocated by the runtime.
     pub child_session: String,
-    /// Child process id of spawned child agent/runtime.
     pub pid: u32,
 }
 
-/// Runtime child-creation request fields assembled from environment or caller inputs.
-///
-/// Keeping this as a borrowed view avoids duplicate allocations when environment
-/// reads already own references for the same logical request scope.
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers issue #1237](https://github.com/modelcontextprotocol/servers/issues/1237)
-/// - [CortexFS PR #88](https://github.com/LIghtJUNction/cortexfs/pull/88)
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CreateChildEnvironmentRequest<'a> {
-    /// Request id supplied by caller-generated nonce space.
     pub request_id: &'a str,
-    /// Child object name from the parent create command.
     pub child: &'a str,
-    /// Child session name from the parent create command.
     pub child_session: &'a str,
-    /// Optional child filesystem path override.
     pub path: Option<&'a str>,
-    /// Optional PTY window hint, in columns/rows semantics.
     pub window: Option<u32>,
-    /// User input text carried by the create request.
     pub input: &'a str,
-    /// Requested life mode (`temp`, `owned`, etc.).
     pub life: &'a str,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
-/// Snapshot of the source root published by a successful ping.
-/// The receipt is only emitted for successful ping handshakes.
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-/// - [rawr-ai/mcp-filesystem](https://github.com/rawr-ai/mcp-filesystem)
 pub struct RuntimeSourceReceipt {
-    /// Absolute source path attached to the receipt.
     pub path: String,
-    /// Source file-system device id.
     pub dev: u64,
-    /// Source file-system inode number.
     pub ino: u64,
-    /// Source kind marker used to gate ABI assumptions.
     pub kind: RuntimeSourceKind,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-/// Stable source-kind families for receipt metadata.
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers issue #4232](https://github.com/modelcontextprotocol/servers/issues/4232)
-/// - [modelcontextprotocol/servers issue #4208](https://github.com/modelcontextprotocol/servers/issues/4208)
 pub enum RuntimeSourceKind {
-    /// Source directory is a plain directory.
     PlainDirectory,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", deny_unknown_fields)]
-/// Runtime control response frames produced by the capability host.
-///
-/// 响应体采用固定 `type` 进行解码分派，配套 `request_id` 做请求关联。
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers issue #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-/// - [modelcontextprotocol/servers issue #3404](https://github.com/modelcontextprotocol/servers/issues/3404)
 pub enum ResponseFrame {
     #[serde(rename = "pong")]
-    /// Startup/health response may carry source receipt.
-    ///
-    /// This pairs with `RequestFrame::Ping`.
-    ///
-    /// 相关实现：
-    /// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-    /// - [modelcontextprotocol/go-sdk discussion #364](https://github.com/orgs/modelcontextprotocol/discussions/364)
     Pong {
-        /// Request identifier from the matching ping request.
         request_id: String,
-        /// Optional source receipt metadata if runtime returns it.
         receipt: Option<RuntimeSourceReceipt>,
     },
     #[serde(rename = "error")]
-    /// Standardized protocol-level failure with errno-like code payload.
-    ///
-    /// This mirrors the control daemon error transport and feeds `RunCapabilityError`.
-    ///
-    /// 相关实现：
-    /// - [modelcontextprotocol/servers issue #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-    /// - [rust-mcp-stack/rust-mcp-sdk PR #87](https://github.com/rust-mcp-stack/rust-mcp-sdk/pull/87)
-    Error {
-        /// Request identifier from the matching request.
-        request_id: String,
-        /// Runtime errno-like rejection payload.
-        errno: String,
-    },
+    Error { request_id: String, errno: String },
     #[serde(rename = "agent.created")]
-    /// Success response for `agent.create`, returning concrete child identity metadata.
-    ///
-    /// This directly maps to `CreateChildResult`.
-    ///
-    /// 相关实现：
-    /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-    /// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
     ChildCreated {
-        /// Request identifier from the matching request.
         request_id: String,
-        /// Child creation result metadata.
         result: CreateChildResult,
     },
 }
 
 impl RequestFrame {
     #[must_use]
-    /// Returns the request identifier carried by this frame.
-    ///
-    /// Used by `request` to detect response/request correlation across the socket.
-    ///
-    /// 相关实现：
-    /// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-    /// - [MCP transport spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
     pub fn request_id(&self) -> &str {
         match *self {
             Self::Ping { ref request_id, .. } | Self::CreateChild { ref request_id, .. } => {
@@ -320,17 +142,6 @@ impl RequestFrame {
     }
 }
 
-/// Sends one wire frame, waits for one bounded response, and validates protocol pairing.
-///
-/// 该函数是本模块的关键边界：它写入单帧请求、读取单帧响应，并验证：
-/// 1) response 类型与 request 的匹配性；
-/// 2) `request_id` 的回环一致性；
-/// 3) 帧尺寸和换行分隔边界。
-///
-/// 相关实现：
-/// - [orgs/modelcontextprotocol discussions #364](https://github.com/orgs/modelcontextprotocol/discussions/364)
-/// - [modelcontextprotocol/servers issue #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-/// - [modelcontextprotocol/servers pull #80](https://github.com/modelcontextprotocol/servers/pull/80)
 pub fn request(socket: &Path, frame: &RequestFrame) -> Result<ResponseFrame, RuntimeClientError> {
     let mut stream =
         UnixStream::connect(socket).map_err(|_error| RuntimeClientError::CannotConnect)?;
@@ -380,19 +191,6 @@ pub fn request(socket: &Path, frame: &RequestFrame) -> Result<ResponseFrame, Run
     Ok(response)
 }
 
-/// Sends a ping frame to query source receipt and returns optional source metadata.
-///
-/// In startup handshakes this is treated as an optional capability check:
-/// - `Ok(Some(_))` when runtime replies with source metadata.
-/// - `Ok(None)` when protocol is intentionally not present.
-/// - `Err(_)` for transport or protocol mismatch.
-///
-/// 相关讨论：
-/// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-///   （路径/参数边界与兼容策略讨论）
-/// - [modelcontextprotocol/servers issue #1237](https://github.com/modelcontextprotocol/servers/issues/1237)
-///   （HTTP 响应与原始帧内容约束）
-/// - [CortexFS PR #87](https://github.com/LIghtJUNction/cortexfs/pull/87)
 pub fn ping(
     socket: &Path,
     token: &str,
@@ -421,15 +219,6 @@ pub fn ping(
     clippy::too_many_arguments,
     reason = "wire helper keeps capability and parent identity fields explicit"
 )]
-/// Sends a child-agent create request through the control socket.
-///
-/// 调用前会先执行快速参数防御（如 `window == 0`），然后通过 `request` 做统一
-/// 的帧写入、读边界与类型配对校验。
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-/// - [CortexFS PR #88](https://github.com/LIghtJUNction/cortexfs/pull/88)
-/// - [modelcontextprotocol/servers pull #4480](https://github.com/modelcontextprotocol/servers/pull/4480)
 pub fn create_child(
     socket: &Path,
     token: &str,
@@ -469,16 +258,6 @@ pub fn create_child(
     }
 }
 
-/// Builds a child-create request from environment variables and dispatches it to the control socket.
-///
-/// This helper mirrors legacy env-driven invocations and fails closed when any required
-/// variable is missing or malformed.
-///
-/// 相关安全讨论：
-/// - [CortexFS PR #87](https://github.com/LIghtJUNction/cortexfs/pull/87)
-/// - [modelcontextprotocol/servers pull #4480](https://github.com/modelcontextprotocol/servers/pull/4480)
-/// - [mark3labs/mcp-filesystem-server](https://github.com/mark3labs/mcp-filesystem-server)
-/// - [rawr-ai/mcp-filesystem](https://github.com/rawr-ai/mcp-filesystem)
 pub fn create_child_from_environment(
     request: CreateChildEnvironmentRequest<'_>,
 ) -> Result<CreateChildResult, RuntimeClientError> {
@@ -508,16 +287,6 @@ pub fn create_child_from_environment(
     )
 }
 
-/// Performs optional startup ping from caller environment variables.
-///
-/// If both `CTX_CONTROL_SOCKET` and `CTX_CONTROL_TOKEN` are present, this performs
-/// a startup compatibility ping; if neither is present, it becomes no-op.
-/// Mixed presence of exactly one variable fails closed.
-///
-/// 相关实现：
-/// - [modelcontextprotocol/servers issue #4206](https://github.com/modelcontextprotocol/servers/issues/4206)
-/// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
-/// - [CortexFS PR #89](https://github.com/LIghtJUNction/cortexfs/pull/89)
 pub fn ping_from_environment(
     agent: &str,
 ) -> Result<Option<RuntimeSourceReceipt>, RuntimeClientError> {
@@ -550,11 +319,6 @@ mod tests {
     use std::process::Command;
     use std::thread;
 
-    /// Builds a stable ping-request fixture used by most request-path tests.
-    ///
-    /// 参考：
-    /// - [modelcontextprotocol/servers issue #4207](https://github.com/modelcontextprotocol/servers/issues/4207)
-    /// - [modelcontextprotocol/servers issue #1770](https://github.com/modelcontextprotocol/servers/issues/1770)
     fn ping_frame() -> RequestFrame {
         RequestFrame::Ping {
             token: "token".to_owned(),
@@ -565,13 +329,6 @@ mod tests {
         }
     }
 
-    /// 启动临时 Unix socket 并返回一次 `request()` 的完整解析结果。
-    ///
-    /// 该 helper 把 peer 侧响应固定成单帧输入，便于对照 request/response 配对逻辑。
-    ///
-    /// 参考：
-    /// - [modelcontextprotocol/go-sdk discussion #364](https://github.com/orgs/modelcontextprotocol/discussions/364)
-    /// - [modelcontextprotocol/servers pull #80](https://github.com/modelcontextprotocol/servers/pull/80)
     fn response(bytes: Vec<u8>) -> Result<ResponseFrame, RuntimeClientError> {
         let root = tempfile::tempdir().map_err(|_error| RuntimeClientError::CannotConnect)?;
         let socket = root.path().join("control.sock");
@@ -590,7 +347,6 @@ mod tests {
         result
     }
 
-    /// 校验响应 id 与响应类型错配时返回 `InvalidFrame`，防止“看起来成功但语义不对”。
     #[test]
     fn rejects_wrong_id_and_response_type() {
         assert_eq!(
@@ -600,7 +356,6 @@ mod tests {
         assert_eq!(response(b"{\"type\":\"agent.created\",\"request_id\":\"request-1\",\"result\":{\"child\":\"c\",\"child_session\":\"s\",\"pid\":1}}\n".to_vec()), Err(RuntimeClientError::InvalidFrame));
     }
 
-    /// 校验带 source receipt 的 ping 响应解析，确保 `kind` 与 `receipt` 原样透传。
     #[test]
     fn ping_returns_authoritative_source_receipt() {
         let response = response(b"{\"type\":\"pong\",\"request_id\":\"request-1\",\"receipt\":{\"path\":\"/source\",\"dev\":7,\"ino\":9,\"kind\":\"plain-directory\"}}\n".to_vec());

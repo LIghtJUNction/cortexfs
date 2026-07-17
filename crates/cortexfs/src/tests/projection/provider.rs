@@ -1,4 +1,4 @@
-fn assert_model_entries(projection: &FuseV1Projection, path: &str, expected: &[&str]) {
+fn assert_model_entries(projection: &FuseProjection, path: &str, expected: &[&str]) {
     let entries = projection.readdir(path);
     assert!(entries.is_ok());
     let names = entries
@@ -10,15 +10,15 @@ fn assert_model_entries(projection: &FuseV1Projection, path: &str, expected: &[&
 }
 
 #[test]
-fn fuse_v1_projection_prefers_provider_backing_control_content() {
-    let root = clean_test_dir("fuse-v1-provider-backing-control");
+fn fuse_projection_prefers_provider_backing_control_content() {
+    let root = clean_test_dir("fuse-provider-backing-control");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("local.json"),
         r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"]}"#,
     );
     write_text_file(&root.join("model/local/chat.d/effort"), "high\n");
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     assert_eq!(
         projection.read_to_string("model/local/chat.d/effort"),
@@ -31,8 +31,8 @@ fn fuse_v1_projection_prefers_provider_backing_control_content() {
 }
 
 #[test]
-fn fuse_v1_projection_projects_configured_provider_models() {
-    let root = reference_tree("fuse-v1-provider-model");
+fn fuse_projection_projects_configured_provider_models() {
+    let root = reference_tree("fuse-provider-model");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
     write_text_file(
@@ -49,7 +49,7 @@ fn fuse_v1_projection_projects_configured_provider_models() {
         &cache.join("api.lmm.best.models.json"),
         r#"{"models":["gpt-5.4","gpt-5.4-mini","gpt-5.6","bad/name"]}"#,
     );
-    let projection = FuseV1Projection::new(&root)
+    let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
@@ -122,7 +122,7 @@ fn fuse_v1_projection_projects_configured_provider_models() {
     let hooks_attr = projection.getattr("model/api.lmm.best/gpt-5.4-mini.d/hooks");
     assert!(matches!(
         hooks_attr,
-        Ok(ref attr) if attr.file_type() == FuseV1FileType::Directory
+        Ok(ref attr) if attr.file_type() == FuseFileType::Directory
     ));
     let hook_entries = projection.readdir("model/api.lmm.best/gpt-5.4-mini.d/hooks");
     assert_eq!(
@@ -154,8 +154,8 @@ fn fuse_v1_projection_projects_configured_provider_models() {
 }
 
 #[test]
-fn fuse_v1_projection_uses_the_explicit_custom_model_context_limit() {
-    let root = reference_tree("fuse-v1-provider-model-limit");
+fn fuse_projection_uses_the_explicit_custom_model_context_limit() {
+    let root = reference_tree("fuse-provider-model-limit");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("local.json"),
@@ -169,7 +169,7 @@ fn fuse_v1_projection_uses_the_explicit_custom_model_context_limit() {
 }
 "#,
     );
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     assert_eq!(
         projection.read_to_string("model/local/custom-model.d/limit"),
@@ -182,8 +182,8 @@ fn fuse_v1_projection_uses_the_explicit_custom_model_context_limit() {
 }
 
 #[test]
-fn fuse_v1_projection_prefers_local_limit_over_catalog_cache() {
-    let root = reference_tree("fuse-v1-provider-local-limit-priority");
+fn fuse_projection_prefers_local_limit_over_catalog_cache() {
+    let root = reference_tree("fuse-provider-local-limit-priority");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
     write_text_file(
@@ -194,7 +194,7 @@ fn fuse_v1_projection_prefers_local_limit_over_catalog_cache() {
         &cache.join("model-limits.json"),
         r#"{"schema":"cortexfs.model-limits/v1","models":{"local/chat":65536}}"#,
     );
-    let projection = FuseV1Projection::new(&root)
+    let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
@@ -205,8 +205,8 @@ fn fuse_v1_projection_prefers_local_limit_over_catalog_cache() {
 }
 
 #[test]
-fn fuse_v1_projection_uses_catalog_limit_without_local_override() {
-    let root = reference_tree("fuse-v1-provider-catalog-limit");
+fn fuse_projection_uses_catalog_limit_without_local_override() {
+    let root = reference_tree("fuse-provider-catalog-limit");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
     write_text_file(
@@ -217,7 +217,7 @@ fn fuse_v1_projection_uses_catalog_limit_without_local_override() {
         &cache.join("model-limits.json"),
         r#"{"schema":"cortexfs.model-limits/v1","models":{"local/chat":65536}}"#,
     );
-    let projection = FuseV1Projection::new(&root)
+    let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
@@ -228,14 +228,14 @@ fn fuse_v1_projection_uses_catalog_limit_without_local_override() {
 }
 
 #[test]
-fn fuse_v1_projection_uses_unknown_limit_without_catalog_cache() {
-    let root = reference_tree("fuse-v1-provider-unknown-limit");
+fn fuse_projection_uses_unknown_limit_without_catalog_cache() {
+    let root = reference_tree("fuse-provider-unknown-limit");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("local.json"),
         r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"]}"#,
     );
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     assert_eq!(
         projection.read_to_string("model/local/chat.d/limit"),
@@ -244,9 +244,9 @@ fn fuse_v1_projection_uses_unknown_limit_without_catalog_cache() {
 }
 
 #[test]
-fn fuse_v1_projection_skips_provider_with_invalid_local_limits() {
+fn fuse_projection_skips_provider_with_invalid_local_limits() {
     for (case, limits) in [("zero", r#"{"chat":0}"#), ("foreign", r#"{"other":32768}"#)] {
-        let root = reference_tree(&format!("fuse-v1-provider-invalid-limit-{case}"));
+        let root = reference_tree(&format!("fuse-provider-invalid-limit-{case}"));
         let providers = root.join("providers.d");
         write_text_file(
             &providers.join("local.json"),
@@ -254,21 +254,18 @@ fn fuse_v1_projection_skips_provider_with_invalid_local_limits() {
                 r#"{{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"],"model_limits":{limits}}}"#
             ),
         );
-        let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+        let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
-        assert_eq!(
-            projection.getattr("model/local"),
-            Err(FuseV1Error::NotFound)
-        );
+        assert_eq!(projection.getattr("model/local"), Err(FuseError::NotFound));
     }
 }
 
 #[test]
-fn fuse_v1_projection_keeps_debug_hook_dirs_disk_backed() {
-    let root = clean_test_dir("fuse-v1-debug-model-hooks");
+fn fuse_projection_keeps_debug_hook_dirs_disk_backed() {
+    let root = clean_test_dir("fuse-debug-model-hooks");
     assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/pre.d")).is_ok());
     assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/post.d")).is_ok());
-    let projection = FuseV1Projection::new(&root);
+    let projection = FuseProjection::new(&root);
 
     for path in [
         "model/debug",
@@ -280,7 +277,7 @@ fn fuse_v1_projection_keeps_debug_hook_dirs_disk_backed() {
         let attr = projection.getattr(path);
         assert!(matches!(
             attr,
-            Ok(ref attr) if attr.file_type() == FuseV1FileType::Directory
+            Ok(ref attr) if attr.file_type() == FuseFileType::Directory
         ));
     }
     let hook_entries = projection.readdir("model/debug/echo.d/hooks");
@@ -294,11 +291,11 @@ fn fuse_v1_projection_keeps_debug_hook_dirs_disk_backed() {
 }
 
 #[test]
-fn fuse_v1_projection_rejects_symlink_provider_model_control_dir() {
-    let root = reference_tree("fuse-v1-provider-model-control-symlink");
+fn fuse_projection_rejects_symlink_provider_model_control_dir() {
+    let root = reference_tree("fuse-provider-model-control-symlink");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
-    let outside = clean_test_dir("fuse-v1-provider-model-control-symlink-outside");
+    let outside = clean_test_dir("fuse-provider-model-control-symlink-outside");
     write_text_file(
         &providers.join("api.lmm.best.json"),
         r#"{
@@ -323,13 +320,13 @@ fn fuse_v1_projection_rejects_symlink_provider_model_control_dir() {
         )
         .is_ok()
     );
-    let projection = FuseV1Projection::new(&root)
+    let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
     assert_eq!(
         projection.write_control_file("model/api.lmm.best/gpt-5.4-mini.d/effort", "high\n"),
-        Err(FuseV1Error::Io)
+        Err(FuseError::Io)
     );
     assert!(!outside.join("effort").exists());
     assert!(
@@ -342,8 +339,8 @@ fn fuse_v1_projection_rejects_symlink_provider_model_control_dir() {
 }
 
 #[test]
-fn fuse_v1_projection_requires_name_for_address_provider() {
-    let root = reference_tree("fuse-v1-address-provider-requires-name");
+fn fuse_projection_requires_name_for_address_provider() {
+    let root = reference_tree("fuse-address-provider-requires-name");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("local.json"),
@@ -355,17 +352,14 @@ fn fuse_v1_projection_requires_name_for_address_provider() {
 }
 "#,
     );
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
-    assert_eq!(
-        projection.readdir("model"),
-        Err(FuseV1Error::InvalidContent)
-    );
+    assert_eq!(projection.readdir("model"), Err(FuseError::InvalidContent));
 }
 
 #[test]
-fn fuse_v1_projection_uses_configured_provider_name_for_address_provider() {
-    let root = reference_tree("fuse-v1-address-provider-named");
+fn fuse_projection_uses_configured_provider_name_for_address_provider() {
+    let root = reference_tree("fuse-address-provider-named");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("local.json"),
@@ -378,7 +372,7 @@ fn fuse_v1_projection_uses_configured_provider_name_for_address_provider() {
 }
 "#,
     );
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     let model_entries = projection.readdir("model");
     assert!(model_entries.is_ok());
@@ -400,8 +394,8 @@ fn fuse_v1_projection_uses_configured_provider_name_for_address_provider() {
 }
 
 #[test]
-fn fuse_v1_projection_ignores_symlink_provider_configs() {
-    let root = reference_tree("fuse-v1-symlink-provider-config");
+fn fuse_projection_ignores_symlink_provider_configs() {
+    let root = reference_tree("fuse-symlink-provider-config");
     let providers = root.join("providers.d");
     let outside = root.join("outside-provider.json");
     write_text_file(
@@ -417,7 +411,7 @@ fn fuse_v1_projection_ignores_symlink_provider_configs() {
     );
     assert!(fs::create_dir_all(&providers).is_ok());
     assert!(symlink(&outside, providers.join("local.json")).is_ok());
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     let model_entries = projection.readdir("model");
     assert!(model_entries.is_ok());
@@ -432,17 +426,14 @@ fn fuse_v1_projection_ignores_symlink_provider_configs() {
             "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
         ]
     );
-    assert_eq!(
-        projection.getattr("model/local"),
-        Err(FuseV1Error::NotFound)
-    );
+    assert_eq!(projection.getattr("model/local"), Err(FuseError::NotFound));
 }
 
 #[test]
-fn fuse_v1_projection_rejects_symlink_provider_config_dir() {
-    let root = reference_tree("fuse-v1-symlink-provider-config-dir");
+fn fuse_projection_rejects_symlink_provider_config_dir() {
+    let root = reference_tree("fuse-symlink-provider-config-dir");
     let providers = root.join("providers.d");
-    let outside = clean_test_dir("fuse-v1-symlink-provider-config-dir-outside");
+    let outside = clean_test_dir("fuse-symlink-provider-config-dir-outside");
     write_text_file(
         &outside.join("local.json"),
         r#"{
@@ -455,15 +446,15 @@ fn fuse_v1_projection_rejects_symlink_provider_config_dir() {
 "#,
     );
     assert!(symlink(&outside, &providers).is_ok());
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
-    assert_eq!(projection.readdir("model"), Err(FuseV1Error::Io));
-    assert_eq!(projection.getattr("model/local"), Err(FuseV1Error::Io));
+    assert_eq!(projection.readdir("model"), Err(FuseError::Io));
+    assert_eq!(projection.getattr("model/local"), Err(FuseError::Io));
 }
 
 #[test]
-fn fuse_v1_projection_ignores_symlink_provider_model_cache() {
-    let root = reference_tree("fuse-v1-symlink-provider-model-cache");
+fn fuse_projection_ignores_symlink_provider_model_cache() {
+    let root = reference_tree("fuse-symlink-provider-model-cache");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
     let outside = root.join("outside-provider-cache.json");
@@ -481,7 +472,7 @@ fn fuse_v1_projection_ignores_symlink_provider_model_cache() {
     write_text_file(&outside, r#"{"models":["leaked"]}"#);
     assert!(fs::create_dir_all(&cache).is_ok());
     assert!(symlink(&outside, cache.join("local.models.json")).is_ok());
-    let projection = FuseV1Projection::new(&root)
+    let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
@@ -495,16 +486,16 @@ fn fuse_v1_projection_ignores_symlink_provider_model_cache() {
     assert_eq!(provider_names, ["base", "base.d"]);
     assert_eq!(
         projection.getattr("model/local/leaked"),
-        Err(FuseV1Error::NotFound)
+        Err(FuseError::NotFound)
     );
 }
 
 #[test]
-fn fuse_v1_projection_ignores_symlink_provider_model_cache_dir() {
-    let root = reference_tree("fuse-v1-symlink-provider-model-cache-dir");
+fn fuse_projection_ignores_symlink_provider_model_cache_dir() {
+    let root = reference_tree("fuse-symlink-provider-model-cache-dir");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
-    let outside = clean_test_dir("fuse-v1-symlink-provider-model-cache-dir-outside");
+    let outside = clean_test_dir("fuse-symlink-provider-model-cache-dir-outside");
     write_text_file(
         &providers.join("local.json"),
         r#"{
@@ -521,7 +512,7 @@ fn fuse_v1_projection_ignores_symlink_provider_model_cache_dir() {
         r#"{"models":["leaked"]}"#,
     );
     assert!(symlink(&outside, &cache).is_ok());
-    let projection = FuseV1Projection::new(&root)
+    let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
@@ -535,13 +526,13 @@ fn fuse_v1_projection_ignores_symlink_provider_model_cache_dir() {
     assert_eq!(provider_names, ["base", "base.d"]);
     assert_eq!(
         projection.getattr("model/local/leaked"),
-        Err(FuseV1Error::NotFound)
+        Err(FuseError::NotFound)
     );
 }
 
 #[test]
-fn fuse_v1_projection_ignores_oversized_provider_model_cache() {
-    let root = reference_tree("fuse-v1-oversized-provider-model-cache");
+fn fuse_projection_ignores_oversized_provider_model_cache() {
+    let root = reference_tree("fuse-oversized-provider-model-cache");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
     write_text_file(
@@ -559,7 +550,7 @@ fn fuse_v1_projection_ignores_oversized_provider_model_cache() {
         &cache.join("api.lmm.best.models.json"),
         &format!(r#"{{"models":["gpt-cache"],"padding":"{oversized_padding}"}}"#),
     );
-    let projection = FuseV1Projection::new(&root)
+    let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
@@ -574,8 +565,8 @@ fn fuse_v1_projection_ignores_oversized_provider_model_cache() {
 }
 
 #[test]
-fn fuse_v1_projection_skips_disabled_provider_models() {
-    let root = reference_tree("fuse-v1-disabled-provider-model");
+fn fuse_projection_skips_disabled_provider_models() {
+    let root = reference_tree("fuse-disabled-provider-model");
     let providers = root.join("providers.d");
     write_text_file(
         &providers.join("api.lmm.best.json"),
@@ -587,7 +578,7 @@ fn fuse_v1_projection_skips_disabled_provider_models() {
 }
 "#,
     );
-    let projection = FuseV1Projection::new(&root).with_provider_config_dir(&providers);
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     let model_entries = projection.readdir("model");
     assert!(model_entries.is_ok());
@@ -604,7 +595,7 @@ fn fuse_v1_projection_skips_disabled_provider_models() {
     );
     assert_eq!(
         projection.getattr("model/api.lmm.best"),
-        Err(FuseV1Error::NotFound)
+        Err(FuseError::NotFound)
     );
 }
 use super::*;

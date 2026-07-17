@@ -138,7 +138,7 @@ adding root ABI classes, workflow engines, or background watchers.
 ```text
 spec/README.md
 spec/root-abi.md
-spec/fuse-v1.md
+spec/fuse.md
 spec/object-abi.md
 spec/model-abi.md
 spec/session-abi.md
@@ -148,10 +148,10 @@ spec/agent-runtime.md
 spec/tool-policy-abi.md
 spec/child-agents.md
 spec/ctx-coreutils.md
-spec/phase-1.md
+spec/rolling-upgrades.md
 ```
 
-## v1 red line
+## Stable ABI red line
 
 ```text
 Do not let /ctx become a directory mirror of an AI platform database.

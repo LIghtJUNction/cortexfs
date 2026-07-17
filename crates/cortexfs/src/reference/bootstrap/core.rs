@@ -1,13 +1,14 @@
 use super::*;
 
-/// Materializes the documented v1 reference tree under `root`.
+/// Materializes the documented reference tree under `root`.
 ///
 /// This is a filesystem bootstrap helper for tests, local inspection, and
 /// simple demos. It creates ABI-visible files, control directories, symlinks,
 /// session skeletons, shared queue directories, and Unix socket path entries.
 /// It does not start agents, models, MCP servers, providers, or a supervisor.
-pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
+pub fn ensure_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
     let plan = plan_reference_tree_upgrade(root);
+    reject_unsupported_version(&plan)?;
     let agent_groups = reference_agent_groups(1000, 1000);
     create_reference_root(root)?;
     ensure_reference_bin(root)?;
@@ -37,7 +38,7 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
 /// sandboxes bind the backing source tree at `/ctx`. This helper keeps the
 /// backing source tree aligned for runtime execution without making the pure
 /// reference-tree bootstrap depend on host provider state.
-pub fn ensure_v1_runtime_models(root: &Path) -> Result<(), ReferenceTreeError> {
+pub fn ensure_runtime_models(root: &Path) -> Result<(), ReferenceTreeError> {
     ensure_reference_models(root)
 }
 
@@ -479,7 +480,7 @@ Your human role name is Architect.
 Act as the parent planner and architecture coordinator for the default agent tree.
 Keep task decomposition explicit in session files; delegate implementation to `coder` as the primary implementer, simple bounded execution to `worker`, and independent verification to `reviewer`.
 Minimize coordination cost: merge small work, split only when implementation and review responsibilities are genuinely distinct.
-Preserve the CortexFS v1 ABI shape; do not add root namespaces, background schedulers, polling loops, watchers, or hot reload paths.
+Preserve the stable CortexFS ABI shape; do not add root namespaces, background schedulers, polling loops, watchers, or hot reload paths.
 Prefer concrete files, command evidence, and current repository state over speculative architecture.
 "
         .to_owned(),

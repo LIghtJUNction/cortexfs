@@ -14,7 +14,7 @@ pub enum ModelCapabilityIssue {
         /// Capability word from the file.
         capability: String,
     },
-    /// Capability word is not in the stable v1 semantic capability set.
+    /// Capability word is not in the stable semantic capability set.
     Unknown {
         /// One-based line number in `cap`.
         line: usize,
@@ -348,7 +348,7 @@ impl ModelCapabilityRegistry {
     }
 }
 
-/// Inspects a `model/<provider>/<model>.d/cap` file body for stable v1 capability words.
+/// Inspects a `model/<provider>/<model>.d/cap` file body for stable capability words.
 #[must_use]
 pub fn inspect_model_capabilities(content: &str) -> ModelCapabilityReport {
     let mut issues = Vec::new();

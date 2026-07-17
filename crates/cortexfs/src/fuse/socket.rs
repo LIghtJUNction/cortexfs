@@ -1,6 +1,6 @@
 use crate::*;
 
-impl FuseV1Projection {
+impl FuseProjection {
     /// Persists one owner-authorized agent socket placeholder.
     pub fn create_socket_placeholder(
         &self,
@@ -8,16 +8,16 @@ impl FuseV1Projection {
         uid: u32,
         gid: u32,
         mode: u32,
-    ) -> Result<FuseV1Node, FuseV1Error> {
+    ) -> Result<FuseNode, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         let Some(SocketAlias::Agent { agent }) = SocketAlias::parse(&normalized) else {
-            return Err(FuseV1Error::NotControlFile);
+            return Err(FuseError::NotControlFile);
         };
         self.authorize_agent_owner(agent, uid)?;
         let path = self.resolve(&normalized)?;
         let created = support::plain::ensure_socket_placeholder(&path, mode)
-            .map_err(|_error| FuseV1Error::Io)?;
-        if let Err(error) = Self::chown_fuse_v1_plain_path(&path, uid, gid) {
+            .map_err(|_error| FuseError::Io)?;
+        if let Err(error) = Self::chown_fuse_plain_path(&path, uid, gid) {
             if created {
                 let _ignored = self.remove_socket_alias(&normalized, uid);
             }
@@ -40,24 +40,24 @@ impl FuseV1Projection {
         abi_path: &str,
         uid: u32,
         mode: u32,
-    ) -> Result<(), FuseV1Error> {
+    ) -> Result<(), FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        let alias = SocketAlias::parse(&normalized).ok_or(FuseV1Error::NotControlFile)?;
+        let alias = SocketAlias::parse(&normalized).ok_or(FuseError::NotControlFile)?;
         alias.authorize(self, uid)?;
         let path = self.resolve(&normalized)?;
-        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
-        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?;
+        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseError::Io)?;
+        let name = plain_file_name(&path).map_err(|_error| FuseError::InvalidPath)?;
         let stat =
             nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-                .map_err(|_error| FuseV1Error::Io)?;
+                .map_err(|_error| FuseError::Io)?;
         if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
             .contains(nix::sys::stat::SFlag::S_IFSOCK)
         {
-            return Err(FuseV1Error::InvalidPath);
+            return Err(FuseError::InvalidPath);
         }
         if stat.st_uid != uid {
-            return Err(FuseV1Error::PermissionDenied);
+            return Err(FuseError::PermissionDenied);
         }
         nix::sys::stat::fchmodat(
             &parent_dir,
@@ -65,8 +65,8 @@ impl FuseV1Projection {
             nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
             nix::sys::stat::FchmodatFlags::NoFollowSymlink,
         )
-        .map_err(|_error| FuseV1Error::Io)?;
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+        .map_err(|_error| FuseError::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)
     }
 
     /// Persists one owner-authorized runtime socket alias.
@@ -76,25 +76,25 @@ impl FuseV1Projection {
         target: &Path,
         uid: u32,
         gid: u32,
-    ) -> Result<FuseV1Node, FuseV1Error> {
+    ) -> Result<FuseNode, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        let alias = SocketAlias::parse(&normalized).ok_or(FuseV1Error::NotControlFile)?;
+        let alias = SocketAlias::parse(&normalized).ok_or(FuseError::NotControlFile)?;
         alias.authorize(self, uid)?;
         alias.validate_target(target, uid)?;
         let path = self.resolve(&normalized)?;
-        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
-        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?;
+        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseError::Io)?;
+        let name = plain_file_name(&path).map_err(|_error| FuseError::InvalidPath)?;
         let created = match nix::fcntl::readlinkat(&parent_dir, name).map(PathBuf::from) {
             Ok(existing) if existing == target => false,
-            Ok(_existing) => return Err(FuseV1Error::InvalidPath),
+            Ok(_existing) => return Err(FuseError::InvalidPath),
             Err(nix::errno::Errno::ENOENT) => {
                 nix::unistd::symlinkat(target, &parent_dir, name)
-                    .map_err(|_error| FuseV1Error::Io)?;
+                    .map_err(|_error| FuseError::Io)?;
                 true
             }
-            Err(nix::errno::Errno::EINVAL) => return Err(FuseV1Error::InvalidPath),
-            Err(_error) => return Err(FuseV1Error::Io),
+            Err(nix::errno::Errno::EINVAL) => return Err(FuseError::InvalidPath),
+            Err(_error) => return Err(FuseError::Io),
         };
         if nix::unistd::fchownat(
             &parent_dir,
@@ -106,11 +106,11 @@ impl FuseV1Projection {
         .is_err()
         {
             remove_created_socket_entry(&parent_dir, name, created);
-            return Err(FuseV1Error::Io);
+            return Err(FuseError::Io);
         }
         if parent_dir.sync_all().is_err() {
             remove_created_socket_entry(&parent_dir, name, created);
-            return Err(FuseV1Error::Io);
+            return Err(FuseError::Io);
         }
         match self.node_for_path(&normalized) {
             Ok(node) => Ok(node),
@@ -122,14 +122,14 @@ impl FuseV1Projection {
     }
 
     /// Removes one owner-authorized runtime socket alias or placeholder.
-    pub fn remove_socket_alias(&self, abi_path: &str, uid: u32) -> Result<(), FuseV1Error> {
+    pub fn remove_socket_alias(&self, abi_path: &str, uid: u32) -> Result<(), FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        let alias = SocketAlias::parse(&normalized).ok_or(FuseV1Error::NotControlFile)?;
+        let alias = SocketAlias::parse(&normalized).ok_or(FuseError::NotControlFile)?;
         alias.authorize(self, uid)?;
         let path = self.resolve(&normalized)?;
-        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
-        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?;
+        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseError::Io)?;
+        let name = plain_file_name(&path).map_err(|_error| FuseError::InvalidPath)?;
         let stat = match nix::sys::stat::fstatat(
             &parent_dir,
             name,
@@ -137,15 +137,15 @@ impl FuseV1Projection {
         ) {
             Ok(stat) => stat,
             Err(nix::errno::Errno::ENOENT) => return Ok(()),
-            Err(_error) => return Err(FuseV1Error::Io),
+            Err(_error) => return Err(FuseError::Io),
         };
         let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
         if kind != nix::sys::stat::SFlag::S_IFLNK && kind != nix::sys::stat::SFlag::S_IFSOCK {
-            return Err(FuseV1Error::InvalidPath);
+            return Err(FuseError::InvalidPath);
         }
         nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
-            .map_err(|_error| FuseV1Error::Io)?;
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+            .map_err(|_error| FuseError::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)
     }
 
     /// Returns whether the path is one of the two writable socket-alias shapes.
@@ -164,9 +164,9 @@ impl FuseV1Projection {
 
     /// Validates ownership for one writable socket-alias shape.
     #[doc(hidden)]
-    pub fn authorize_socket_alias(&self, abi_path: &str, uid: u32) -> Result<(), FuseV1Error> {
+    pub fn authorize_socket_alias(&self, abi_path: &str, uid: u32) -> Result<(), FuseError> {
         SocketAlias::parse(abi_path)
-            .ok_or(FuseV1Error::NotControlFile)?
+            .ok_or(FuseError::NotControlFile)?
             .authorize(self, uid)
     }
 
@@ -177,25 +177,25 @@ impl FuseV1Projection {
         from: &str,
         to: &str,
         uid: u32,
-    ) -> Result<(), FuseV1Error> {
+    ) -> Result<(), FuseError> {
         let from = normalize_fuse_abi_path(from)?;
         let to = normalize_fuse_abi_path(to)?;
         let (alias_path, claim_path) = socket_alias_claim_pair(&from, &to)
             .or_else(|| socket_alias_claim_pair(&to, &from))
-            .ok_or(FuseV1Error::NotControlFile)?;
+            .ok_or(FuseError::NotControlFile)?;
         SocketAlias::parse(alias_path)
-            .ok_or(FuseV1Error::NotControlFile)?
+            .ok_or(FuseError::NotControlFile)?
             .authorize(self, uid)?;
 
         let from_path = self.resolve(&from)?;
         let to_path = self.resolve(&to)?;
-        let parent = from_path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let parent = from_path.parent().ok_or(FuseError::InvalidPath)?;
         if to_path.parent() != Some(parent) || self.resolve(claim_path)?.parent() != Some(parent) {
-            return Err(FuseV1Error::InvalidPath);
+            return Err(FuseError::InvalidPath);
         }
-        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let from_name = plain_file_name(&from_path).map_err(|_error| FuseV1Error::InvalidPath)?;
-        let to_name = plain_file_name(&to_path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseError::Io)?;
+        let from_name = plain_file_name(&from_path).map_err(|_error| FuseError::InvalidPath)?;
+        let to_name = plain_file_name(&to_path).map_err(|_error| FuseError::InvalidPath)?;
         require_socket_claim_entry(&parent_dir, from_name)?;
         nix::fcntl::renameat2(
             &parent_dir,
@@ -205,26 +205,26 @@ impl FuseV1Projection {
             nix::fcntl::RenameFlags::RENAME_NOREPLACE,
         )
         .map_err(rename_socket_claim_error)?;
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)
     }
 
     /// Removes one owner-authorized generated socket claim.
     #[doc(hidden)]
-    pub fn remove_socket_alias_claim(&self, abi_path: &str, uid: u32) -> Result<(), FuseV1Error> {
+    pub fn remove_socket_alias_claim(&self, abi_path: &str, uid: u32) -> Result<(), FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        let alias_path = socket_alias_for_claim(&normalized).ok_or(FuseV1Error::NotControlFile)?;
+        let alias_path = socket_alias_for_claim(&normalized).ok_or(FuseError::NotControlFile)?;
         SocketAlias::parse(&alias_path)
-            .ok_or(FuseV1Error::NotControlFile)?
+            .ok_or(FuseError::NotControlFile)?
             .authorize(self, uid)?;
 
         let path = self.resolve(&normalized)?;
-        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
-        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseV1Error::Io)?;
-        let name = plain_file_name(&path).map_err(|_error| FuseV1Error::InvalidPath)?;
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?;
+        let parent_dir = open_plain_directory(parent).map_err(|_error| FuseError::Io)?;
+        let name = plain_file_name(&path).map_err(|_error| FuseError::InvalidPath)?;
         require_socket_claim_entry(&parent_dir, name)?;
         nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
             .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)
     }
 }
 
@@ -245,20 +245,20 @@ fn socket_alias_for_claim(claim: &str) -> Option<String> {
     SocketAlias::parse(&alias).is_some().then_some(alias)
 }
 
-fn require_socket_claim_entry(parent: &fs::File, name: &str) -> Result<(), FuseV1Error> {
+fn require_socket_claim_entry(parent: &fs::File, name: &str) -> Result<(), FuseError> {
     let stat = nix::sys::stat::fstatat(parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
         .map_err(|error| fuse_metadata_error(&std::io::Error::from(error)))?;
     let kind = nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode);
     (kind == nix::sys::stat::SFlag::S_IFLNK || kind == nix::sys::stat::SFlag::S_IFSOCK)
         .then_some(())
-        .ok_or(FuseV1Error::InvalidPath)
+        .ok_or(FuseError::InvalidPath)
 }
 
-fn rename_socket_claim_error(error: nix::errno::Errno) -> FuseV1Error {
+fn rename_socket_claim_error(error: nix::errno::Errno) -> FuseError {
     match error {
-        nix::errno::Errno::EEXIST => FuseV1Error::AlreadyExists,
-        nix::errno::Errno::ENOENT => FuseV1Error::NotFound,
-        _ => FuseV1Error::Io,
+        nix::errno::Errno::EEXIST => FuseError::AlreadyExists,
+        nix::errno::Errno::ENOENT => FuseError::NotFound,
+        _ => FuseError::Io,
     }
 }
 
@@ -307,34 +307,34 @@ impl<'a> SocketAlias<'a> {
         }
     }
 
-    fn authorize(self, projection: &FuseV1Projection, uid: u32) -> Result<(), FuseV1Error> {
+    fn authorize(self, projection: &FuseProjection, uid: u32) -> Result<(), FuseError> {
         match self {
             Self::Agent { agent } => projection.authorize_agent_owner(agent, uid),
             Self::Terminal {
                 home_uid, agent, ..
             } if home_uid == uid => projection.authorize_agent_owner(agent, uid),
-            Self::Terminal { .. } => Err(FuseV1Error::PermissionDenied),
+            Self::Terminal { .. } => Err(FuseError::PermissionDenied),
         }
     }
 
-    fn validate_target(self, target: &Path, uid: u32) -> Result<(), FuseV1Error> {
-        let components = absolute_socket_components(target).ok_or(FuseV1Error::InvalidPath)?;
+    fn validate_target(self, target: &Path, uid: u32) -> Result<(), FuseError> {
+        let components = absolute_socket_components(target).ok_or(FuseError::InvalidPath)?;
         let uid = uid.to_string();
         match self {
             Self::Agent { agent } => {
                 let prefix = ["run", "user", uid.as_str(), "cortexfs", "agent"];
                 let rest = components
                     .strip_prefix(prefix.as_slice())
-                    .ok_or(FuseV1Error::InvalidPath)?;
+                    .ok_or(FuseError::InvalidPath)?;
                 let expected = format!("{agent}.sock");
                 let Some((socket, scope)) = rest.split_last() else {
-                    return Err(FuseV1Error::InvalidPath);
+                    return Err(FuseError::InvalidPath);
                 };
                 if scope.is_empty()
                     || *socket != expected
                     || !scope.iter().all(|part| is_object_name(part))
                 {
-                    return Err(FuseV1Error::InvalidPath);
+                    return Err(FuseError::InvalidPath);
                 }
                 Ok(())
             }
@@ -351,7 +351,7 @@ impl<'a> SocketAlias<'a> {
                 ];
                 (components == expected)
                     .then_some(())
-                    .ok_or(FuseV1Error::InvalidPath)
+                    .ok_or(FuseError::InvalidPath)
             }
         }
     }

@@ -1,31 +1,31 @@
 {
-  "link.title.核心": {
-    "message": "Core",
-    "description": "The title of the footer links column with title=核心 in the footer"
+  "link.title.Core": {
+    "message": "核心",
+    "description": "The title of the footer links column with title=Core in the footer"
   },
   "link.title.Clients": {
     "message": "Clients",
     "description": "The title of the footer links column with title=Clients in the footer"
   },
-  "link.title.项目": {
-    "message": "Project",
-    "description": "The title of the footer links column with title=项目 in the footer"
+  "link.title.Project": {
+    "message": "项目",
+    "description": "The title of the footer links column with title=Project in the footer"
   },
-  "link.item.label.安装": {
-    "message": "Install",
-    "description": "The label of footer link with label=安装 linking to /docs/getting-started"
+  "link.item.label.Install": {
+    "message": "安装",
+    "description": "The label of footer link with label=Install linking to /docs/getting-started"
   },
-  "link.item.label.使用 CortexFS": {
-    "message": "Use CortexFS",
-    "description": "The label of footer link with label=使用 CortexFS linking to /docs/using-cortexfs"
+  "link.item.label.Use CortexFS": {
+    "message": "使用 CortexFS",
+    "description": "The label of footer link with label=Use CortexFS linking to /docs/using-cortexfs"
   },
-  "link.item.label.二次开发": {
-    "message": "Develop",
-    "description": "The label of footer link with label=二次开发 linking to /docs/developing-cortexfs"
+  "link.item.label.Develop": {
+    "message": "二次开发",
+    "description": "The label of footer link with label=Develop linking to /docs/developing-cortexfs"
   },
-  "link.item.label.设计": {
-    "message": "Design",
-    "description": "The label of footer link with label=设计 linking to /docs/DESIGN"
+  "link.item.label.Design": {
+    "message": "设计",
+    "description": "The label of footer link with label=Design linking to /docs/DESIGN"
   },
   "link.item.label.Root ABI": {
     "message": "Root ABI",
@@ -42,6 +42,10 @@
   "link.item.label.agent.sh": {
     "message": "agent.sh",
     "description": "The label of footer link with label=agent.sh linking to /docs/agent-sh"
+  },
+  "link.item.label.Chat UI ABI": {
+    "message": "Chat UI ABI",
+    "description": "The label of footer link with label=Chat UI ABI linking to /docs/chatui"
   },
   "link.item.label.Session ABI": {
     "message": "Session ABI",

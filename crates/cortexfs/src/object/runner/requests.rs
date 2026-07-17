@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::curl::run_curl_json;
+use super::curl::run_curl_json_with_headers;
 use super::*;
 use cortexfs::{derive_agent_runtime_view, is_object_name};
 use serde_json::Value;
@@ -9,16 +9,17 @@ use std::path::{Path, PathBuf};
 pub(crate) struct OpenAiProviderRequest<'a> {
     pub(crate) model: &'a str,
     pub(crate) input: &'a str,
-    pub(crate) api_key: Option<&'a str>,
+    pub(crate) credential: Option<&'a ProviderCredential>,
     pub(crate) effort: cortexfs::ModelEffort,
 }
 pub(crate) fn call_openai_chat(
     transport: &ResolvedTransport,
     request: &OpenAiProviderRequest<'_>,
+    run: &str,
 ) -> Result<ProviderTextCompletion, String> {
-    let target = chat_completions_target(transport);
+    let (target, headers) = openai_request_target(transport, request.credential, false, run)?;
     let body = openai_chat_body(request.model, request.input, false, request.effort);
-    let output = run_curl_json(&target, request.api_key, &body)?;
+    let output = run_curl_json_with_headers(&target, &headers, &body)?;
     Ok(ProviderTextCompletion {
         content: parse_openai_chat_content(&output)?,
         usage: parse_provider_usage(&output)?,
@@ -27,10 +28,11 @@ pub(crate) fn call_openai_chat(
 pub(crate) fn call_openai_responses(
     transport: &ResolvedTransport,
     request: &OpenAiProviderRequest<'_>,
+    run: &str,
 ) -> Result<ProviderTextCompletion, String> {
-    let target = responses_target(transport);
+    let (target, headers) = openai_request_target(transport, request.credential, true, run)?;
     let body = openai_responses_body(request.model, request.input, false, request.effort);
-    let output = run_curl_json(&target, request.api_key, &body)?;
+    let output = run_curl_json_with_headers(&target, &headers, &body)?;
     Ok(ProviderTextCompletion {
         content: parse_openai_response_content(&output)?,
         usage: parse_provider_usage(&output)?,
@@ -42,7 +44,7 @@ pub(crate) fn call_anthropic_messages(
     input: &str,
     credential: &ProviderCredential,
 ) -> Result<ProviderTextCompletion, String> {
-    let target = anthropic_messages_target(transport);
+    let target = provider_target(transport, "messages");
     let body = json!({
         "model": model,
         "max_tokens": 4096,
