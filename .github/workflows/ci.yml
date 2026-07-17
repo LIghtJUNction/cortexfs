@@ -64,7 +64,7 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-      # Same flags as pre-commit. Cap threads to reduce GHA fs races under load.
+      # Same flags as pre-commit. Serialize timing and approval protocol fixtures.
       # TMPDIR only for tests: fixture #!/bin/sh agents must live on an exec mount.
       - name: cargo test
         timeout-minutes: 25
@@ -79,7 +79,7 @@ jobs:
           sudo setpriv --reuid=1000 --regid=1000 --clear-groups env \
             PATH="$PATH" HOME="$HOME" CARGO_HOME="$CARGO_HOME" \
             CARGO_TARGET_DIR="$CARGO_TARGET_DIR" TMPDIR="$TMPDIR" \
-            cargo test --locked --workspace --all-targets --all-features -- --test-threads=2
+            cargo test --locked --workspace --all-targets --all-features -- --test-threads=1
 
   docs:
     name: docs
