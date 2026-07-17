@@ -165,7 +165,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.agent_executable_fd.to_string(),
         SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
     ]);
-    bwrap.extend(support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
+    bwrap.extend(support::process::bwrap_system_layout_args());
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
     }
