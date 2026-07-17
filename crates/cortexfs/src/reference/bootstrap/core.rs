@@ -271,7 +271,7 @@ pub(crate) fn ensure_reference_agent(
         root,
         ObjectClass::Agent,
         name,
-        crate::support::command::FALSE,
+        support::command::FALSE,
         &[],
     )
     .map_err(ReferenceTreeError::Object)?;

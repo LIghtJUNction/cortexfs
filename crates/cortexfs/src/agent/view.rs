@@ -337,7 +337,7 @@ pub(crate) fn derive_agent_runtime_env(
         ("HOME".to_owned(), home.display().to_string()),
         (
             "PATH".to_owned(),
-            crate::support::command::TRUSTED_PATH.to_owned(),
+            support::command::TRUSTED_PATH.to_owned(),
         ),
         ("CTX_PATH".to_owned(), ctx_path.to_owned()),
     ];
