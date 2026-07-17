@@ -14,14 +14,6 @@ pub(crate) fn provider_request_attempts() -> usize {
     PROVIDER_REQUEST_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-pub(crate) fn run_curl_json(
-    target: &CurlJsonTarget,
-    api_key: Option<&str>,
-    body: &str,
-) -> Result<Vec<u8>, String> {
-    let headers = openai_headers(api_key);
-    run_curl_json_with_headers(target, &headers, body)
-}
 pub(crate) fn run_curl_json_with_headers(
     target: &CurlJsonTarget,
     headers: &[String],
@@ -46,19 +38,6 @@ pub(crate) fn provider_request_failure_message(output: &std::process::Output) ->
         return format!("provider request failed with {}: {stderr}", output.status);
     }
     format!("provider request failed with {}", output.status)
-}
-pub(crate) fn start_curl_json(
-    target: &CurlJsonTarget,
-    api_key: Option<&str>,
-    body: &str,
-) -> Result<Child, String> {
-    let headers = openai_headers(api_key);
-    start_curl_json_with_headers(target, &headers, body)
-}
-pub(crate) fn openai_headers(api_key: Option<&str>) -> Vec<String> {
-    api_key.map_or_else(Vec::new, |api_key| {
-        vec![format!("Authorization: Bearer {api_key}")]
-    })
 }
 pub(crate) fn start_curl_json_with_headers(
     target: &CurlJsonTarget,

@@ -289,11 +289,13 @@ fn parses_provider_oauth_commands() {
     );
     assert!(matches!(
         login,
-        Ok(Command::Provider(ProviderArgs::Login {
-            ref provider,
-            timeout
-        })) if provider == "api.openai.com" && timeout == 30
+        Ok(Command::Provider(ProviderArgs::Login(ref provider, 30, false)))
+            if provider == "api.openai.com"
     ));
+    assert!(
+        matches!(cmd!("provider", "oauth", "login", "codex", "--device"),
+        Ok(Command::Provider(ProviderArgs::Login(ref provider, 120, true))) if provider == "codex")
+    );
 
     let status = cmd!("provider", "oauth", "status", "api.openai.com");
     assert!(matches!(
