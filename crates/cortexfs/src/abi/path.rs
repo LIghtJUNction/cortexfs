@@ -130,7 +130,7 @@ pub(crate) fn is_object_name_for_class(class: ObjectClass, name: &str) -> bool {
 /// the filesystem ABI remains the path shape and stable type strings.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AbiPathKind<'a> {
-    /// Path does not match any stable v1 ABI shape.
+    /// Path does not match any stable ABI shape.
     Unknown,
     /// `model/<provider>`.
     ModelDir { provider: &'a str },

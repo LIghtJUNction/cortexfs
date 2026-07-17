@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-/// Stable agent control file kind with fixed v1 value syntax.
+/// Stable agent control file kind with fixed value syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentControlKind {
     /// `agent/<name>.d/owner`: owning Linux uid.
@@ -38,7 +38,7 @@ pub enum AgentControlKind {
 }
 
 impl AgentControlKind {
-    /// Parses an agent control file name with fixed v1 syntax.
+    /// Parses an agent control file name with fixed syntax.
     #[must_use]
     pub fn parse(file_name: &str) -> Option<Self> {
         match file_name {
@@ -69,7 +69,7 @@ pub struct AgentControlReport {
 
 impl_issue_report!(AgentControlReport, ControlLineIssue);
 
-/// Inspects a fixed-format v1 agent control file body.
+/// Inspects a fixed-format agent control file body.
 #[must_use]
 pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentControlReport {
     match kind {

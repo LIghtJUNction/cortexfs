@@ -6,14 +6,14 @@ const MAX_OBJECT_METADATA_CONTROL_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_ECHO_MODEL_STDIN_BYTES: usize = 1024 * 1024;
 
 /// Returns executable metadata text for a model object.
-pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
+pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseError> {
     if !is_model_name(name) {
-        return Err(FuseV1Error::InvalidPath);
+        return Err(FuseError::InvalidPath);
     }
     let id = read_object_control_for_metadata(control_dir, "id")?;
     let driver_content = read_object_control_for_metadata(control_dir, "driver")?;
     let driver_routes =
-        parse_model_driver_routes(&driver_content).map_err(|_error| FuseV1Error::InvalidContent)?;
+        parse_model_driver_routes(&driver_content).map_err(|_error| FuseError::InvalidContent)?;
     let driver = driver_routes
         .primary_driver_for(ModelDriverUseCase::Default)
         .unwrap_or("");
@@ -58,9 +58,9 @@ pub fn model_exec_metadata(name: &str, control_dir: &Path) -> Result<String, Fus
 }
 
 /// Returns executable metadata text for a tool object.
-pub fn tool_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
+pub fn tool_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseError> {
     if !is_object_name(name) {
-        return Err(FuseV1Error::InvalidPath);
+        return Err(FuseError::InvalidPath);
     }
     let declared_name = read_object_control_for_metadata(control_dir, "name")
         .unwrap_or_else(|_error| name.to_owned());
@@ -81,9 +81,9 @@ pub fn tool_exec_metadata(name: &str, control_dir: &Path) -> Result<String, Fuse
 }
 
 /// Returns executable metadata text for an agent object.
-pub fn agent_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseV1Error> {
+pub fn agent_exec_metadata(name: &str, control_dir: &Path) -> Result<String, FuseError> {
     if !is_object_name(name) {
-        return Err(FuseV1Error::InvalidPath);
+        return Err(FuseError::InvalidPath);
     }
     let owner = read_object_control_for_metadata(control_dir, "owner").unwrap_or_default();
     let uid = read_object_control_for_metadata(control_dir, "uid").unwrap_or_default();
@@ -111,7 +111,7 @@ pub(crate) fn object_exec_metadata(
     class: ObjectClass,
     name: &str,
     control_dir: &Path,
-) -> Result<String, FuseV1Error> {
+) -> Result<String, FuseError> {
     match class {
         ObjectClass::Model => model_exec_metadata(name, control_dir),
         ObjectClass::Agent => agent_exec_metadata(name, control_dir),
@@ -151,10 +151,10 @@ pub(crate) fn model_metadata_owner(name: &str, driver: &str) -> &'static str {
     }
 }
 
-pub(crate) fn model_metadata_context_length(limit: &str) -> Result<String, FuseV1Error> {
+pub(crate) fn model_metadata_context_length(limit: &str) -> Result<String, FuseError> {
     ModelContextLimit::parse_control(limit)
         .map(|limit| limit.to_string())
-        .ok_or(FuseV1Error::InvalidContent)
+        .ok_or(FuseError::InvalidContent)
 }
 
 /// Runs the built-in debug echo model and writes canonical JSONL.
@@ -208,7 +208,7 @@ pub(crate) fn read_echo_model_stdin_limited(
 pub(crate) fn read_object_control_for_metadata(
     control_dir: &Path,
     file: &str,
-) -> Result<String, FuseV1Error> {
+) -> Result<String, FuseError> {
     read_object_control_body_for_metadata(control_dir, file)
         .map(|content| content.trim_end_matches('\n').to_owned())
 }
@@ -216,19 +216,19 @@ pub(crate) fn read_object_control_for_metadata(
 fn read_object_control_body_for_metadata(
     control_dir: &Path,
     file: &str,
-) -> Result<String, FuseV1Error> {
+) -> Result<String, FuseError> {
     let path = control_dir.join(file);
     let metadata =
         plain::path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
     if !metadata.is_file() || metadata.len() > MAX_OBJECT_METADATA_CONTROL_BYTES {
-        return Err(FuseV1Error::InvalidContent);
+        return Err(FuseError::InvalidContent);
     }
-    let len = usize::try_from(metadata.len()).map_err(|_error| FuseV1Error::InvalidContent)?;
+    let len = usize::try_from(metadata.len()).map_err(|_error| FuseError::InvalidContent)?;
     let mut file = plain::open_plain_file(&path).map_err(|error| fuse_metadata_error(&error))?;
     let mut content = vec![0; len];
     file.read_exact(&mut content)
         .map_err(|error| fuse_metadata_error(&error))?;
-    String::from_utf8(content).map_err(|_error| FuseV1Error::InvalidContent)
+    String::from_utf8(content).map_err(|_error| FuseError::InvalidContent)
 }
 
 pub(crate) fn is_valid_env_key(value: &str) -> bool {

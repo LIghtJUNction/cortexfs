@@ -23,7 +23,7 @@ use super::{
     provider_messages_for_agent, provider_request_attempts, provider_request_failure_message,
     provider_route, provider_runtime_driver, provider_secret_from_inherited_fd_with_env,
     provider_secret_from_runtime_file_with_env, provider_secret_from_runtime_value_with_env,
-    provider_transport, read_limited_input_text, read_provider_stream_line,
+    provider_target, provider_transport, read_limited_input_text, read_provider_stream_line,
     read_runtime_provider_secret_file, read_small_plain_text_file, reset_provider_request_attempts,
     resolve_model_alias, resolved_model_path, run, run_agent_model_once,
     run_agent_model_once_with_timeout, run_core_tool_cli, run_passthrough_tool,

@@ -2,7 +2,7 @@ use super::*;
 
 fn reference_tree(name: &str) -> TestDir {
     let root = super::reference_tree(name);
-    let models = crate::ensure_v1_runtime_models(&root);
+    let models = crate::ensure_runtime_models(&root);
     assert!(models.is_ok(), "{models:?}");
     root
 }

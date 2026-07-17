@@ -36,9 +36,9 @@ using, which files it can access, which tools it can execute, what its terminal
 is doing, and which state survives the session. Agents wake through systemd
 socket activation, so idle agents remain reachable without a polling loop.
 
-[Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [v1 spec](docs/spec/README.md)
+[Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [specification](docs/spec/README.md)
 
-The v1 shape is intentionally small:
+The stable shape is intentionally small:
 
 ```text
 /ctx/status
@@ -50,7 +50,7 @@ The v1 shape is intentionally small:
 /ctx/shared
 ```
 
-For the normative ABI, start with the [v1 specification](docs/spec/README.md)
+For the normative ABI, start with the [specification](docs/spec/README.md)
 and [architecture guide](docs/architecture.md). [docs/DESIGN.md](docs/DESIGN.md)
 defines the visual system for CortexFS documentation and demos, not the ABI.
 
@@ -168,7 +168,7 @@ The root stays small, the model tree stays provider-neutral, and agent context i
 ordinary visible state instead of hidden SDK state. CortexFS is a way to peer
 through the filesystem boundary and see what is happening inside agent software.
 
-![CortexFS v1 ABI map](docs/assets/cortexfs-abi-map.svg)
+![CortexFS ABI map](docs/assets/cortexfs-abi-map.svg)
 
 ## Quick Start
 
@@ -719,7 +719,7 @@ change the runtime Cargo workspace. Install the upstream `verus` binary from
 scripts/verify-verus.sh
 ```
 
-Current proofs cover the v1 object-name ABI predicate; see
+Current proofs cover the stable object-name ABI predicate; see
 [docs/proofs/verus.md](docs/proofs/verus.md).
 
 ## External references

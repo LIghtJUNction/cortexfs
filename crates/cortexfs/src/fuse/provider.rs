@@ -51,7 +51,7 @@ const MAX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
 pub(crate) fn projected_provider_models(
     config_dir: &Path,
     cache_dir: &Path,
-) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Vec<ProjectedProviderModel>, FuseError> {
     let configs = read_provider_configs(config_dir)?;
     let catalog_limits = provider::catalog::cached_model_limits(cache_dir);
     let mut projected = Vec::new();
@@ -109,24 +109,24 @@ pub(crate) struct ProviderConfigEntry {
 
 pub(crate) fn read_provider_configs(
     config_dir: &Path,
-) -> Result<Vec<ProviderConfigEntry>, FuseV1Error> {
+) -> Result<Vec<ProviderConfigEntry>, FuseError> {
     let directory = match open_plain_directory(config_dir) {
         Ok(directory) => directory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_error) => return Err(FuseV1Error::Io),
+        Err(_error) => return Err(FuseError::Io),
     };
     let entries = match fs::read_dir(support::plain::proc_fd_path(&directory)) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_error) => return Err(FuseV1Error::Io),
+        Err(_error) => return Err(FuseError::Io),
     };
     let mut configs = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
+        let entry = entry.map_err(|_error| FuseError::Io)?;
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_error| FuseV1Error::InvalidPath)?;
+            .map_err(|_error| FuseError::InvalidPath)?;
         let Some(extension) = Path::new(&name)
             .extension()
             .and_then(|value| value.to_str())
@@ -166,7 +166,7 @@ pub(crate) fn projected_provider_models_for_provider(
     config_dir: &Path,
     cache_dir: &Path,
     provider: &str,
-) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Vec<ProjectedProviderModel>, FuseError> {
     Ok(projected_provider_models(config_dir, cache_dir)?
         .into_iter()
         .filter(|model| model.provider == provider)
@@ -177,7 +177,7 @@ pub(crate) fn projected_provider_models_for_provider_path(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &str,
-) -> Result<Option<Vec<ProjectedProviderModel>>, FuseV1Error> {
+) -> Result<Option<Vec<ProjectedProviderModel>>, FuseError> {
     let Some(provider) = abi_path.strip_prefix("model/") else {
         return Ok(None);
     };
@@ -196,7 +196,7 @@ pub(crate) fn projected_provider_model_for_exec(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &str,
-) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Option<ProjectedProviderModel>, FuseError> {
     let Some(model_name) = model_exec_name(abi_path) else {
         return Ok(None);
     };
@@ -209,7 +209,7 @@ pub(crate) fn projected_provider_model_control_dir(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &str,
-) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Option<ProjectedProviderModel>, FuseError> {
     let Some(model_name) = abi_path
         .strip_prefix("model/")
         .and_then(|path| path.strip_suffix(".d"))
@@ -228,7 +228,7 @@ pub(crate) fn projected_provider_model_control_file<'a>(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &'a str,
-) -> Result<Option<(ProjectedProviderModel, &'a str)>, FuseV1Error> {
+) -> Result<Option<(ProjectedProviderModel, &'a str)>, FuseError> {
     let Some((dir, file)) = abi_path.rsplit_once('/') else {
         return Ok(None);
     };
@@ -271,9 +271,9 @@ pub(crate) fn append_provider_model_name(
     }
 }
 
-pub(crate) fn projected_provider_name(config: &ProviderConfig) -> Result<String, FuseV1Error> {
+pub(crate) fn projected_provider_name(config: &ProviderConfig) -> Result<String, FuseError> {
     provider_name_from_config(&config.base_url, config.name.as_deref())
-        .map_err(|_error| FuseV1Error::InvalidContent)
+        .map_err(|_error| FuseError::InvalidContent)
 }
 
 pub(crate) fn normalize_provider_base_url(base_url: &str) -> String {
@@ -406,17 +406,17 @@ pub(crate) fn default_provider_model_fallback(
     fallback
 }
 
-pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {
-    let directory = open_plain_directory(model_root).map_err(|_error| FuseV1Error::Io)?;
+pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseError> {
+    let directory = open_plain_directory(model_root).map_err(|_error| FuseError::Io)?;
     let entries =
-        fs::read_dir(support::plain::proc_fd_path(&directory)).map_err(|_error| FuseV1Error::Io)?;
+        fs::read_dir(support::plain::proc_fd_path(&directory)).map_err(|_error| FuseError::Io)?;
     let mut names = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
+        let entry = entry.map_err(|_error| FuseError::Io)?;
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_error| FuseV1Error::InvalidPath)?;
+            .map_err(|_error| FuseError::InvalidPath)?;
         let stat = nix::sys::stat::fstatat(
             &directory,
             name.as_str(),

@@ -128,7 +128,7 @@ impl SessionIndexUpdateError {
 
 impl_issue_report!(SessionIndexReport, ControlLineIssue);
 
-/// Inspects a fixed-format v1 session index file.
+/// Inspects a fixed-format session index file.
 #[must_use]
 pub fn inspect_session_index(kind: SessionIndexKind, content: &str) -> SessionIndexReport {
     match kind {

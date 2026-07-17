@@ -7,11 +7,8 @@ const MAX_PROVIDER_MODEL_CACHE_BYTES: u64 = 1024 * 1024;
 const MAX_PROVIDER_MODEL_COUNT: usize = 256;
 const CURL_BIN: &str = "/usr/bin/curl";
 
-pub fn refresh_provider_model_cache(
-    config_dir: &Path,
-    cache_dir: &Path,
-) -> Result<(), FuseV1Error> {
-    create_plain_dir(cache_dir).map_err(|_error| FuseV1Error::Io)?;
+pub fn refresh_provider_model_cache(config_dir: &Path, cache_dir: &Path) -> Result<(), FuseError> {
+    create_plain_dir(cache_dir).map_err(|_error| FuseError::Io)?;
     for config in read_provider_configs(config_dir)? {
         if !config.config.enabled {
             continue;
@@ -33,7 +30,7 @@ pub fn refresh_provider_model_cache(
         }
         let content = serde_json::json!({ "models": models }).to_string() + "\n";
         atomic_replace_text(&provider_model_cache_path(cache_dir, &provider), &content)
-            .map_err(|_error| FuseV1Error::Io)?;
+            .map_err(|_error| FuseError::Io)?;
     }
     Ok(())
 }
@@ -89,22 +86,22 @@ struct ProviderModelListItem {
 pub(crate) fn fetch_provider_models(
     base_url: &str,
     api_key: &str,
-) -> Result<Vec<String>, FuseV1Error> {
+) -> Result<Vec<String>, FuseError> {
     let output = run_curl_json(&provider_models_url(base_url), api_key)?;
     let list =
-        serde_json::from_slice::<ProviderModelList>(&output).map_err(|_error| FuseV1Error::Io)?;
+        serde_json::from_slice::<ProviderModelList>(&output).map_err(|_error| FuseError::Io)?;
     Ok(list.data.into_iter().map(|model| model.id).collect())
 }
 
-pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseV1Error> {
+pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseError> {
     let mut child = curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
     let Some(mut stdin) = child.stdin.take() else {
-        return Err(FuseV1Error::Io);
+        return Err(FuseError::Io);
     };
     let config = format!(
         "fail\nsilent\nshow-error\nmax-time = 20\nurl = {}\nheader = {}\n",
@@ -113,27 +110,27 @@ pub(crate) fn run_curl_json(url: &str, api_key: &str) -> Result<Vec<u8>, FuseV1E
     );
     stdin
         .write_all(config.as_bytes())
-        .map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
     drop(stdin);
     let Some(stdout) = child.stdout.take() else {
         terminate_child(&mut child);
-        return Err(FuseV1Error::Io);
+        return Err(FuseError::Io);
     };
     let mut limited = stdout.take(MAX_PROVIDER_MODEL_RESPONSE_BYTES + 1);
     let mut output = Vec::new();
     limited
         .read_to_end(&mut output)
-        .map_err(|_error| FuseV1Error::Io)?;
-    let output_len = u64::try_from(output.len()).map_err(|_error| FuseV1Error::TooLarge)?;
+        .map_err(|_error| FuseError::Io)?;
+    let output_len = u64::try_from(output.len()).map_err(|_error| FuseError::TooLarge)?;
     if output_len > MAX_PROVIDER_MODEL_RESPONSE_BYTES {
         terminate_child(&mut child);
-        return Err(FuseV1Error::TooLarge);
+        return Err(FuseError::TooLarge);
     }
-    let status = child.wait().map_err(|_error| FuseV1Error::Io)?;
+    let status = child.wait().map_err(|_error| FuseError::Io)?;
     if status.success() {
         Ok(output)
     } else {
-        Err(FuseV1Error::Io)
+        Err(FuseError::Io)
     }
 }
 
@@ -152,11 +149,11 @@ pub(crate) fn terminate_child(child: &mut Child) {
     }
 }
 
-pub(crate) fn curl_config_quote(value: &str) -> Result<String, FuseV1Error> {
+pub(crate) fn curl_config_quote(value: &str) -> Result<String, FuseError> {
     let mut quoted = String::from("\"");
     for character in value.chars() {
         if character.is_ascii_control() {
-            return Err(FuseV1Error::InvalidContent);
+            return Err(FuseError::InvalidContent);
         }
         if matches!(character, '"' | '\\') {
             quoted.push('\\');
@@ -174,7 +171,7 @@ pub(crate) fn provider_models_url(base_url: &str) -> String {
 #[cfg(test)]
 mod provider_model_discovery_tests {
     use super::{
-        CURL_BIN, FuseV1Error, curl_command, curl_config_quote, refresh_provider_model_cache,
+        CURL_BIN, FuseError, curl_command, curl_config_quote, refresh_provider_model_cache,
     };
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -217,7 +214,7 @@ mod provider_model_discovery_tests {
 
         assert_eq!(
             refresh_provider_model_cache(&config, &cache),
-            Err(FuseV1Error::Io)
+            Err(FuseError::Io)
         );
         assert!(
             cache
@@ -245,7 +242,7 @@ mod provider_model_discovery_tests {
 
         assert_eq!(
             refresh_provider_model_cache(&config, &cache),
-            Err(FuseV1Error::Io)
+            Err(FuseError::Io)
         );
         assert!(!outside.join("existing").join("cache").exists());
 

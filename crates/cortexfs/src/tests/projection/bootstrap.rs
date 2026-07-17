@@ -3,7 +3,7 @@ fn reference_tree_bootstrap_rejects_conflicting_symlink_and_socket_paths() {
     let root = clean_test_dir("reference-tree-conflict");
     write_text_file(&root.join("agent").join("coder.sock"), "not socket\n");
     assert!(matches!(
-        ensure_v1_reference_tree(&root),
+        ensure_reference_tree(&root),
         Err(ReferenceTreeError::CannotSocket(_))
     ));
 }
@@ -20,7 +20,7 @@ fn reference_tree_bootstrap_replaces_stale_socket_symlink() {
         .is_ok()
     );
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let metadata = fs::symlink_metadata(root.join("agent").join("coder.sock"));
     assert!(matches!(metadata, Ok(ref metadata) if metadata.file_type().is_socket()));
 }
@@ -31,7 +31,7 @@ fn reference_tree_bootstrap_repairs_plain_socket_placeholder_owner() {
         return;
     }
     let root = clean_test_dir("reference-tree-socket-owner-upgrade");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let socket = root.join("agent/coder.sock");
     assert!(
         nix::unistd::fchownat(
@@ -44,7 +44,7 @@ fn reference_tree_bootstrap_repairs_plain_socket_placeholder_owner() {
         .is_ok()
     );
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     assert!(matches!(
         fs::symlink_metadata(socket),
         Ok(metadata) if metadata.uid() == 1000 && metadata.gid() == 1000
@@ -194,8 +194,8 @@ fn object_layout_accepts_model_agent_and_tool_triples() {
 #[test]
 fn fuse_projection_exposes_object_hook_directories() {
     let root = clean_test_dir("fuse-projection-object-hooks");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let projection = FuseV1Projection::new(root.as_path());
+    assert!(ensure_reference_tree(&root).is_ok());
+    let projection = FuseProjection::new(root.as_path());
 
     let model_entries = ok!(projection.readdir("model/debug/echo.d"));
     assert!(

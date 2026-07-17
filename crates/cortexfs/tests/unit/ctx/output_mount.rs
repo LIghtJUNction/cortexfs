@@ -2,6 +2,108 @@ use std::sync::Mutex;
 
 static TEST_CWD_LOCK: Mutex<()> = Mutex::new(());
 
+fn legacy_default_source(parent: &Path) -> PathBuf {
+    let legacy = parent.join("v1-root");
+    assert!(fs::create_dir_all(&legacy).is_ok());
+    assert!(fs::write(legacy.join("sentinel"), "keep\n").is_ok());
+    legacy
+}
+
+#[test]
+fn bootstrap_check_keeps_legacy_default_source_unchanged() {
+    let parent = clean_test_dir("ctx-bootstrap-check-legacy");
+    let legacy = legacy_default_source(&parent);
+
+    assert!(bootstrap_reference_tree_default(&parent, false, true).is_ok());
+    assert_eq!(
+        fs::read_to_string(legacy.join("sentinel")).unwrap_or_default(),
+        "keep\n"
+    );
+    assert!(!parent.join("root").exists());
+}
+
+#[test]
+fn bootstrap_dry_run_keeps_legacy_default_source_unchanged() {
+    let parent = clean_test_dir("ctx-bootstrap-dry-legacy");
+    let legacy = legacy_default_source(&parent);
+
+    assert!(bootstrap_reference_tree_default(&parent, true, false).is_ok());
+    assert_eq!(
+        fs::read_to_string(legacy.join("sentinel")).unwrap_or_default(),
+        "keep\n"
+    );
+    assert!(!parent.join("root").exists());
+}
+
+#[test]
+fn default_source_adoption_returns_canonical_without_creating() {
+    let parent = clean_test_dir("ctx-source-adopt-empty");
+
+    assert_eq!(
+        adopt_default_source_root(&parent),
+        Ok(parent.join("root"))
+    );
+    assert!(!parent.exists());
+}
+
+#[test]
+fn default_source_adoption_renames_legacy_plain_directory() {
+    let parent = clean_test_dir("ctx-source-adopt-legacy");
+    let legacy = parent.join("v1-root");
+    assert!(fs::create_dir_all(&legacy).is_ok());
+    assert!(fs::write(legacy.join("state"), "kept\n").is_ok());
+
+    assert_eq!(
+        adopt_default_source_root(&parent),
+        Ok(parent.join("root"))
+    );
+    assert!(!legacy.exists());
+    assert_eq!(
+        fs::read_to_string(parent.join("root/state")).unwrap_or_default(),
+        "kept\n"
+    );
+}
+
+#[test]
+fn default_source_adoption_rejects_conflicting_roots_without_mutation() {
+    let parent = clean_test_dir("ctx-source-adopt-conflict");
+    let legacy = parent.join("v1-root");
+    let canonical = parent.join("root");
+    assert!(fs::create_dir_all(&legacy).is_ok());
+    assert!(fs::create_dir_all(&canonical).is_ok());
+
+    assert!(adopt_default_source_root(&parent).is_err());
+    assert!(legacy.is_dir());
+    assert!(canonical.is_dir());
+}
+
+#[test]
+fn default_source_adoption_rejects_legacy_symlink_without_following() {
+    let parent = clean_test_dir("ctx-source-adopt-symlink");
+    let outside = clean_test_dir("ctx-source-adopt-outside");
+    assert!(fs::create_dir_all(&parent).is_ok());
+    assert!(fs::create_dir_all(&outside).is_ok());
+    assert!(std::os::unix::fs::symlink(&outside, parent.join("v1-root")).is_ok());
+
+    assert!(adopt_default_source_root(&parent).is_err());
+    assert!(parent.join("v1-root").symlink_metadata().is_ok_and(|metadata| metadata.file_type().is_symlink()));
+    assert!(!parent.join("root").exists());
+}
+
+#[test]
+fn default_source_adoption_rejects_legacy_file() {
+    let parent = clean_test_dir("ctx-source-adopt-file");
+    assert!(fs::create_dir_all(&parent).is_ok());
+    assert!(fs::write(parent.join("v1-root"), "keep\n").is_ok());
+
+    assert!(adopt_default_source_root(&parent).is_err());
+    assert_eq!(
+        fs::read_to_string(parent.join("v1-root")).unwrap_or_default(),
+        "keep\n"
+    );
+    assert!(!parent.join("root").exists());
+}
+
 #[test]
 fn absolute_existing_path_resolves_relative_mountpoints() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = TEST_CWD_LOCK.lock()?;

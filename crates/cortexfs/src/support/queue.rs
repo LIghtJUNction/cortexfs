@@ -14,7 +14,7 @@ pub struct SharedQueueLayoutReport {
 
 impl_issue_report!(SharedQueueLayoutReport, PathLayoutIssue);
 
-/// Inspects a shared project queue for the v1 recommended directory shape.
+/// Inspects a shared project queue for the recommended directory shape.
 #[must_use]
 pub fn inspect_shared_queue_layout(queue_dir: &Path) -> SharedQueueLayoutReport {
     let mut issues = Vec::new();

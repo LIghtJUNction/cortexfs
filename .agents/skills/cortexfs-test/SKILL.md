@@ -134,11 +134,11 @@ Mount a local reference tree with:
 ```bash
 cargo run -p cortexfs --bin ctx -- bootstrap
 cargo run -p cortexfs --bin cortexfs-mount -- \
-  --source "$HOME/.local/share/cortexfs/v1-root" \
+  --source "$HOME/.local/share/cortexfs/root" \
   tests/mounts/cortexfs
 ```
 
-After mounting, inspect the v1 ABI shape:
+After mounting, inspect the stable ABI shape:
 
 ```bash
 find tests/mounts/cortexfs -maxdepth 2 -print

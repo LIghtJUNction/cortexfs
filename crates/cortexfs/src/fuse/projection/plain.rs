@@ -1,20 +1,20 @@
 use super::*;
 
-pub(crate) fn fuse_file_type_from_mode(mode: libc::mode_t) -> FuseV1FileType {
+pub(crate) fn fuse_file_type_from_mode(mode: libc::mode_t) -> FuseFileType {
     match mode & libc::S_IFMT {
-        libc::S_IFDIR => FuseV1FileType::Directory,
-        libc::S_IFREG => FuseV1FileType::Regular,
-        libc::S_IFLNK => FuseV1FileType::Symlink,
-        libc::S_IFSOCK => FuseV1FileType::Socket,
-        _ => FuseV1FileType::Other,
+        libc::S_IFDIR => FuseFileType::Directory,
+        libc::S_IFREG => FuseFileType::Regular,
+        libc::S_IFLNK => FuseFileType::Symlink,
+        libc::S_IFSOCK => FuseFileType::Socket,
+        _ => FuseFileType::Other,
     }
 }
 
-pub(crate) fn fuse_v1_plain_dir_exists(path: &Path) -> Result<bool, FuseV1Error> {
+pub(crate) fn fuse_plain_dir_exists(path: &Path) -> Result<bool, FuseError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_dir() => Ok(true),
-        Ok(_metadata) => Err(FuseV1Error::Io),
+        Ok(_metadata) => Err(FuseError::Io),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(_error) => Err(FuseV1Error::Io),
+        Err(_error) => Err(FuseError::Io),
     }
 }

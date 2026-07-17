@@ -124,7 +124,7 @@ fn file_check_validates_shared_and_model_session_layouts() {
 #[test]
 fn doctor_validates_reference_tree_objects_sessions_and_queue() {
     let root = clean_test_dir("ctx-doctor-reference-tree");
-    let ensured = ensure_v1_reference_tree(&root);
+    let ensured = ensure_reference_tree(&root);
     assert!(ensured.is_ok());
 
     assert!(doctor(&root).is_ok());
@@ -133,7 +133,7 @@ fn doctor_validates_reference_tree_objects_sessions_and_queue() {
 #[test]
 fn doctor_rejects_missing_or_drifted_bootstrap_state() {
     let root = clean_test_dir("ctx-doctor-bootstrap-state");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     assert_eq!(doctor_bootstrap_state(&root), Ok(true));
 
     assert!(fs::remove_file(root.join("bin/cortexfs.bootstrap.json")).is_ok());
@@ -151,7 +151,7 @@ fn doctor_rejects_missing_or_drifted_bootstrap_state() {
 #[test]
 fn doctor_counts_present_retired_agents_as_failure() {
     let root = clean_test_dir("ctx-doctor-retired-agent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     write_text_file(&root.join("agent/base"), "#!/bin/sh\n");
 
     assert_eq!(doctor_retired_reference_agents(&root), Ok(false));
@@ -161,7 +161,7 @@ fn doctor_counts_present_retired_agents_as_failure() {
 #[test]
 fn doctor_reports_reference_tree_layout_breakage() {
     let root = clean_test_dir("ctx-doctor-reference-tree-bad");
-    let ensured = ensure_v1_reference_tree(&root);
+    let ensured = ensure_reference_tree(&root);
     assert!(ensured.is_ok());
     assert!(fs::remove_file(root.join("tool").join("tsh.d").join("schema")).is_ok());
     assert!(
@@ -184,7 +184,7 @@ fn doctor_reports_reference_tree_layout_breakage() {
 fn doctor_rejects_symlink_root_entries_without_following() {
     let root = clean_test_dir("ctx-doctor-root-symlink-entry");
     let outside = clean_test_dir("ctx-doctor-root-symlink-entry-outside");
-    let ensured = ensure_v1_reference_tree(&root);
+    let ensured = ensure_reference_tree(&root);
     assert!(ensured.is_ok());
     assert!(fs::remove_dir_all(root.join("shared")).is_ok());
     assert!(fs::create_dir_all(outside.join("shared").join("project-a")).is_ok());

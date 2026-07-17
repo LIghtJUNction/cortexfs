@@ -470,7 +470,7 @@ grants no tool permission.
 
 ## Canonical Event Stream
 
-v1 model and agent streams use these event types:
+Model and agent streams use these event types:
 
 ```text
 start

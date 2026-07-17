@@ -16,7 +16,7 @@ This harness was checked with upstream Verus release
 ## Current coverage
 
 The current proof target is `proofs/verus/abi_name.rs`. It defines the
-standalone `is_valid_object_name` specification predicate for the 64-byte v1
+standalone `is_valid_object_name` specification predicate for the stable 64-byte
 object-name rule from `docs/spec/object-abi.md`:
 
 ```text

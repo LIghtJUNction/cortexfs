@@ -28,7 +28,7 @@ fn create_child_channel(
 fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
     let root = clean_test_dir("ctx-agent-wait-reaps-dead-worker");
     let pid = std::process::id().to_string();
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     write_text_file(&root.join("agent/coder.d/pid"), &format!("{pid}\n"));
     let child = create_child_channel(&root, "work-123", "worker", "default", "active", "");
     write_text_file(
@@ -75,7 +75,7 @@ fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
 fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
     for agent in ["worker-fast", "executor-fast"] {
         let root = clean_test_dir(&format!("ctx-agent-wait-{agent}-spark"));
-        assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
         let child = create_child_channel(&root, "work-fast", agent, "default", "active", "");
         let control = root.join("agent").join(format!("{agent}.d"));
         assert!(fs::create_dir_all(&control).is_ok());
@@ -116,7 +116,7 @@ fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
 #[test]
 fn agent_child_rows_default_missing_worker_model_to_spark() {
     let root = clean_test_dir("ctx-child-row-missing-worker-model");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
     assert!(fs::remove_file(root.join("agent/worker.d/model")).is_ok());
     write_text_file(&root.join("agent/worker.d/status"), "idle\n");
@@ -152,7 +152,7 @@ fn agent_child_rows_default_missing_worker_model_to_spark() {
 #[test]
 fn agent_child_rows_rejects_invalid_child_agent_metadata() {
     let root = clean_test_dir("ctx-child-row-invalid-child-agent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let _child = create_child_channel(
         &root,
         "work-123",
@@ -173,7 +173,7 @@ fn agent_child_rows_rejects_invalid_child_agent_metadata() {
 #[test]
 fn agent_child_rows_rejects_mismatched_backing_parent() {
     let root = clean_test_dir("ctx-child-row-bad-parent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let _child = create_child_channel(
         &root,
         "work-123",
@@ -196,7 +196,7 @@ fn agent_child_rows_rejects_mismatched_backing_parent() {
 #[test]
 fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
     let root = clean_test_dir("ctx-agent-wait-invalid-child-session");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let _child = create_child_channel(
         &root,
         "work-123",
@@ -217,7 +217,7 @@ fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
 #[test]
 fn agent_wait_rejects_mismatched_terminal_backing_parent() {
     let root = clean_test_dir("ctx-agent-wait-bad-parent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let _child = create_child_channel(
         &root,
         "work-123",
@@ -243,7 +243,7 @@ fn agent_wait_rejects_mismatched_terminal_backing_parent() {
 #[test]
 fn agent_wait_rejects_invalid_backing_lifecycle() {
     let root = clean_test_dir("ctx-agent-wait-invalid-backing-life");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let _child = create_child_channel(
         &root,
         "work-123",
@@ -269,7 +269,7 @@ fn agent_wait_rejects_invalid_backing_lifecycle() {
 #[test]
 fn agent_wait_rejects_invalid_backing_model() {
     let root = clean_test_dir("ctx-agent-wait-invalid-backing-model");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let _child = create_child_channel(
         &root,
         "work-123",
@@ -295,7 +295,7 @@ fn agent_wait_rejects_invalid_backing_model() {
 #[test]
 fn agent_wait_reaps_active_child_when_parent_session_is_omitted() {
     let root = clean_test_dir("ctx-wait-reaps-dead-no-session");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let child = create_child_channel(&root, "work-123", "worker", "default", "active", "");
     write_text_file(&root.join("agent/worker.d/parent"), "agent:coder run:r1\n");
     write_text_file(&root.join("agent/worker.d/status"), "dead\n");
@@ -319,7 +319,7 @@ fn agent_wait_reaps_active_child_when_parent_session_is_omitted() {
 #[test]
 fn agent_wait_reaps_active_child_when_backing_worker_pid_is_stale() {
     let root = clean_test_dir("ctx-agent-wait-reaps-stale-worker");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let child = create_child_channel(&root, "work-stale", "worker", "default", "active", "");
     write_text_file(
         &root.join("agent/worker.d/parent"),

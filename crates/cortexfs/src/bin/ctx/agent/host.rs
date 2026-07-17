@@ -40,7 +40,7 @@ pub(crate) fn agent_new_host_fallback(
             "\
 You are CortexFS agent `{}`.
 Use available `tsh` tools for implementation work. For clear coding requests, do not stop at a plan: inspect the workspace, make the smallest safe edit, run focused verification, and report exact files and commands.
-Open-ended project iteration requests are clear coding requests. When the user says `迭代本项目`, `bootstrap`, `self-improve`, `improve this project`, or asks to make the project better without narrower target, do not ask what to do. Inspect project rules, git status, and relevant files; choose one small safe improvement; verify it; report evidence.
+Open-ended project iteration requests are clear coding requests. When the user says `iterate this project`, `bootstrap`, `self-improve`, `improve this project`, or asks to make the project better without a narrower target, do not ask what to do. Inspect project rules, git status, and relevant files; choose one small safe improvement; verify it; report evidence.
 Ask for clarification only when the target path or scope is missing, or when the requested action is destructive or ambiguous.
 ",
             args.name

@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=119948
-prod=76505
+all=120388
+prod=76711
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo.rs
 922 crates/cortexfs-agent-sdk/src/lib.rs
@@ -10,7 +10,7 @@ prod=76505
 610 crates/cortexfs-mcp/src/project.rs
 204 crates/cortexfs-mcp/src/tool.rs
 223 crates/cortexfs-runtime-client/src/agent.rs
-122 crates/cortexfs-runtime-client/src/agent/wire.rs
+127 crates/cortexfs-runtime-client/src/agent/wire.rs
 569 crates/cortexfs-runtime-client/src/lib.rs
 36 crates/cortexfs-tool-sdk/examples/echo.rs
 596 crates/cortexfs-tool-sdk/src/lib.rs
@@ -42,7 +42,7 @@ prod=76505
 296 crates/cortexfs/src/agent/schedule/types.rs
 226 crates/cortexfs/src/agent/secret.rs
 1242 crates/cortexfs/src/agent/stop.rs
-433 crates/cortexfs/src/agent/view.rs
+446 crates/cortexfs/src/agent/view.rs
 319 crates/cortexfs/src/agent/window.rs
 344 crates/cortexfs/src/authority.rs
 646 crates/cortexfs/src/authority/helpers.rs
@@ -68,7 +68,7 @@ prod=76505
 317 crates/cortexfs/src/bin/ctx/file/check.rs
 357 crates/cortexfs/src/bin/ctx/format.rs
 1001 crates/cortexfs/src/bin/ctx/install.rs
-162 crates/cortexfs/src/bin/ctx/main.rs
+163 crates/cortexfs/src/bin/ctx/main.rs
 9 crates/cortexfs/src/bin/ctx/objects.rs
 5 crates/cortexfs/src/bin/ctx/objects/events.rs
 289 crates/cortexfs/src/bin/ctx/objects/events/diagnostics.rs
@@ -77,8 +77,8 @@ prod=76505
 191 crates/cortexfs/src/bin/ctx/objects/paths.rs
 86 crates/cortexfs/src/bin/ctx/objects/stream.rs
 7 crates/cortexfs/src/bin/ctx/output.rs
-604 crates/cortexfs/src/bin/ctx/output/help.rs
-281 crates/cortexfs/src/bin/ctx/output/mount.rs
+605 crates/cortexfs/src/bin/ctx/output/help.rs
+383 crates/cortexfs/src/bin/ctx/output/mount.rs
 158 crates/cortexfs/src/bin/ctx/output/status.rs
 9 crates/cortexfs/src/bin/ctx/parse.rs
 693 crates/cortexfs/src/bin/ctx/parse/agent.rs
@@ -139,20 +139,20 @@ prod=76505
 140 crates/cortexfs/src/context/source.rs
 119 crates/cortexfs/src/exports.rs
 6 crates/cortexfs/src/fuse.rs
-237 crates/cortexfs/src/fuse/alias.rs
+236 crates/cortexfs/src/fuse/alias.rs
 119 crates/cortexfs/src/fuse/path.rs
 9 crates/cortexfs/src/fuse/projection.rs
-58 crates/cortexfs/src/fuse/projection/controls.rs
-1313 crates/cortexfs/src/fuse/projection/core.rs
+55 crates/cortexfs/src/fuse/projection/controls.rs
+1300 crates/cortexfs/src/fuse/projection/core.rs
 20 crates/cortexfs/src/fuse/projection/plain.rs
-330 crates/cortexfs/src/fuse/projection/virtuals.rs
+331 crates/cortexfs/src/fuse/projection/virtuals.rs
 435 crates/cortexfs/src/fuse/provider.rs
 374 crates/cortexfs/src/fuse/socket.rs
 259 crates/cortexfs/src/fuse/types.rs
 17 crates/cortexfs/src/imports.rs
 655 crates/cortexfs/src/lib.rs
 9 crates/cortexfs/src/mount.rs
-303 crates/cortexfs/src/mount/driver.rs
+297 crates/cortexfs/src/mount/driver.rs
 285 crates/cortexfs/src/mount/driver/alias.rs
 630 crates/cortexfs/src/mount/driver/filesystem.rs
 664 crates/cortexfs/src/mount/driver/helpers.rs
@@ -209,7 +209,7 @@ prod=76505
 18 crates/cortexfs/src/policy/subject.rs
 14 crates/cortexfs/src/provider.rs
 336 crates/cortexfs/src/provider/catalog.rs
-254 crates/cortexfs/src/provider/discovery.rs
+251 crates/cortexfs/src/provider/discovery.rs
 458 crates/cortexfs/src/provider/model.rs
 182 crates/cortexfs/src/provider/model/routes.rs
 14 crates/cortexfs/src/provider/name.rs
@@ -220,13 +220,13 @@ prod=76505
 631 crates/cortexfs/src/provider/oauth.rs
 3 crates/cortexfs/src/reference.rs
 9 crates/cortexfs/src/reference/bootstrap.rs
-765 crates/cortexfs/src/reference/bootstrap/core.rs
+766 crates/cortexfs/src/reference/bootstrap/core.rs
 149 crates/cortexfs/src/reference/bootstrap/tools.rs
-264 crates/cortexfs/src/reference/bootstrap/upgrade.rs
+322 crates/cortexfs/src/reference/bootstrap/upgrade.rs
 7 crates/cortexfs/src/reference/helpers.rs
 233 crates/cortexfs/src/reference/helpers/filesystem.rs
 244 crates/cortexfs/src/reference/helpers/sessions.rs
-348 crates/cortexfs/src/reference/storage.rs
+393 crates/cortexfs/src/reference/storage.rs
 5 crates/cortexfs/src/runtime.rs
 1084 crates/cortexfs/src/runtime/control.rs
 269 crates/cortexfs/src/runtime/egress.rs
@@ -242,7 +242,7 @@ prod=76505
 1937 crates/cortexfs/src/runtime/socket/exec.rs
 157 crates/cortexfs/src/runtime/socket/session.rs
 120 crates/cortexfs/src/runtime/socket/stream.rs
-136 crates/cortexfs/src/runtime/socket/stream/timing.rs
+138 crates/cortexfs/src/runtime/socket/stream/timing.rs
 341 crates/cortexfs/src/runtime/types.rs
 20 crates/cortexfs/src/support.rs
 2935 crates/cortexfs/src/support/columnar.rs
@@ -268,7 +268,7 @@ prod=76505
 251 crates/cortexfs/src/support/trajectory/validate.rs
 2 crates/cortexfs/src/tool.rs
 2 crates/cortexfs/src/tool/core.rs
-151 crates/cortexfs/src/tool/core/runtime.rs
+154 crates/cortexfs/src/tool/core/runtime.rs
 123 crates/cortexfs/src/tool/core/tools.rs
 262 crates/cortexfs/src/tool/core/tools/config.rs
 264 crates/cortexfs/src/tool/core/tools/files.rs
