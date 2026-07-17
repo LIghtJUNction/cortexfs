@@ -369,29 +369,22 @@ fn sdk_envelope_cancel_during_tool_has_no_result_or_respawn() {
     let (mut client, mut socket) = ok!(UnixStream::pair());
     assert!(client.write_all(b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"cancel tool\"}\n").is_ok());
     assert!(client.shutdown(Shutdown::Write).is_ok());
-    let watch = root.to_path_buf();
+    let ready = root.join("tool-ready");
     let cancel_root = session_root.clone();
     let cancel = thread::spawn(move || {
-        let status = std::process::Command::new("/usr/bin/inotifywait")
-            .args([
-                "--quiet",
-                "--timeout",
-                "3",
-                "--event",
-                "create",
-                "--include",
-                "tool-ready",
-            ])
-            .arg(watch)
-            .status();
-        status.is_ok_and(|status| status.success())
-            && handle_socket_request_frame(
-                &cancel_root,
-                "/work",
-                Some("debug/echo"),
-                r#"{"op":"cancel","id":"r1"}"#,
-            )
-            .is_ok()
+        for _ in 0..100 {
+            if ready.exists() {
+                return handle_socket_request_frame(
+                    &cancel_root,
+                    "/work",
+                    Some("debug/echo"),
+                    r#"{"op":"cancel","id":"r1"}"#,
+                )
+                .is_ok();
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        false
     });
     let outcome = serve_agent_executable_socket_stream_once(
         &mut socket,

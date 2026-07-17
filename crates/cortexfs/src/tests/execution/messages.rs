@@ -1058,6 +1058,7 @@ esac
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let (mut client, mut socket) = ok!(UnixStream::pair());
+    set_stream_timeouts(&client, 5);
     let mut reader = ok!(client.try_clone());
     let responder = std::thread::spawn(move || -> std::io::Result<()> {
         client.write_all(
@@ -1159,6 +1160,7 @@ esac
     let session = session_root.join("default");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let (mut client, mut socket) = ok!(UnixStream::pair());
+    set_stream_timeouts(&client, 5);
     let mut reader = ok!(client.try_clone());
     let responder = std::thread::spawn(move || -> std::io::Result<()> {
         client.write_all(
@@ -1235,6 +1237,7 @@ esac
         let session_root = agent_session_root(&root, "coder");
         let view = ok!(derive_agent_runtime_view(&root, "coder"));
         let (mut client, mut socket) = ok!(UnixStream::pair());
+        set_stream_timeouts(&client, 5);
         let mut reader = ok!(client.try_clone());
         let responder = std::thread::spawn(move || -> std::io::Result<()> {
             client.write_all(
