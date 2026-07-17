@@ -11,7 +11,7 @@ pub const BWRAP_PROCESS_SETUP_ARGS: [&str; 8] = [
 ];
 
 /// Ordered bubblewrap mounts and links for the base system layout.
-pub const BWRAP_SYSTEM_LAYOUT_ARGS: [&str; 19] = [
+const BWRAP_SYSTEM_LAYOUT_ARGS: [&str; 16] = [
     "--dir",
     "/home",
     "--ro-bind",
@@ -28,10 +28,21 @@ pub const BWRAP_SYSTEM_LAYOUT_ARGS: [&str; 19] = [
     "--symlink",
     "usr/lib",
     "/lib",
-    "--symlink",
-    "usr/lib",
-    "/lib64",
 ];
+
+/// Base system layout plus a host-accurate `/lib64`.
+///
+/// A `usr/lib` symlink works on Arch, but Ubuntu keeps the dynamic loader under
+/// `/usr/lib/x86_64-linux-gnu`, so the real `/lib64` must be bound when present.
+pub fn bwrap_system_layout_args() -> Vec<String> {
+    let mut args: Vec<String> = BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned).into();
+    if std::path::Path::new("/lib64").exists() {
+        args.extend(["--ro-bind", "/lib64", "/lib64"].map(str::to_owned));
+    } else {
+        args.extend(["--symlink", "usr/lib", "/lib64"].map(str::to_owned));
+    }
+    args
+}
 
 pub(crate) fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8> {
     let mut output = Vec::with_capacity(limit.min(8 * 1024));

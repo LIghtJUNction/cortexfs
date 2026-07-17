@@ -530,7 +530,7 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from("--unshare-pid"),
     ];
     args.extend(BWRAP_PROCESS_SETUP_ARGS.map(OsString::from));
-    args.extend(BWRAP_SYSTEM_LAYOUT_ARGS.map(OsString::from));
+    args.extend(bwrap_system_layout_args().into_iter().map(OsString::from));
     if !request.network_allowed {
         args.push(OsString::from("--unshare-net"));
     }

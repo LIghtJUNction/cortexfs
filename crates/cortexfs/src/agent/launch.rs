@@ -1882,7 +1882,7 @@ pub fn terminal_command(
         .extend(crate::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
     command
         .args
-        .extend(crate::support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
+        .extend(crate::support::process::bwrap_system_layout_args());
     if let Some(runtime_dir) = socket.parent() {
         command.args.extend([
             "--bind".to_owned(),
