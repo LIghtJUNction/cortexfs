@@ -1,4 +1,4 @@
-//! Trusted host command locations shared by CortexFS process boundaries.
+//! Trusted host command locations shared by `CortexFS` process boundaries.
 //!
 //! These are policy defaults rather than caller-controlled configuration:
 //! commands using them clear the inherited environment to prevent `PATH`
