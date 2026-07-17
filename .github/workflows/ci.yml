@@ -34,6 +34,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # bwrap is required by agent/sandbox tests and is absent on ubuntu-latest.
+      # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor, which
+      # breaks bwrap, so allow them for the runner user.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
