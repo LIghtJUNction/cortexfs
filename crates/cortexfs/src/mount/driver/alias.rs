@@ -43,13 +43,13 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     return;
                 }
             };
-            if FuseV1Projection::is_socket_alias_path(&path)
+            if FuseProjection::is_socket_alias_path(&path)
                 && let Err(error) = self.projection.authorize_socket_alias(&path, req.uid())
             {
                 reply.error(errno(error));
                 return;
             }
-            if FuseV1Projection::is_socket_alias_path(&path) {
+            if FuseProjection::is_socket_alias_path(&path) {
                 match self.projection.create_socket_placeholder(
                     &path,
                     req.uid(),
@@ -66,7 +66,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     reply.error(Errno::EEXIST);
                     return;
                 }
-                Err(FuseV1Error::NotFound) => {}
+                Err(FuseError::NotFound) => {}
                 Err(error) => {
                     reply.error(errno(error));
                     return;
@@ -116,7 +116,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     reply.ok();
                     return;
                 }
-                Err(FuseV1Error::NotControlFile) => {}
+                Err(FuseError::NotControlFile) => {}
                 Err(error) => {
                     reply.error(errno(error));
                     return;
@@ -134,7 +134,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     reply.ok();
                     return;
                 }
-                Err(FuseV1Error::NotControlFile) => {}
+                Err(FuseError::NotControlFile) => {}
                 Err(error) => {
                     reply.error(errno(error));
                     return;
@@ -150,7 +150,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     }
                 },
             };
-            let socket_alias = FuseV1Projection::is_socket_alias_path(&path);
+            let socket_alias = FuseProjection::is_socket_alias_path(&path);
             if socket_alias
                 && let Err(error) = self.projection.authorize_socket_alias(&path, req.uid())
             {
@@ -186,7 +186,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                 return;
             }
             match self.projection.getattr(&path) {
-                Ok(attr) if attr.file_type() == FuseV1FileType::Socket => {
+                Ok(attr) if attr.file_type() == FuseFileType::Socket => {
                     if remove_backing_socket_entry(self.projection.root(), &path).is_err() {
                         reply.error(Errno::EIO);
                         return;
@@ -275,7 +275,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
             };
             match self.rename_owner_path(&from, &to, req.uid(), flags) {
                 Ok(()) => reply.ok(),
-                Err(FuseV1Error::NotControlFile) if flags.is_empty() => {
+                Err(FuseError::NotControlFile) if flags.is_empty() => {
                     reply.error(readonly_mutation_errno());
                 }
                 Err(error) => reply.error(errno(error)),

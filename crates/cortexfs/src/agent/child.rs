@@ -1,6 +1,6 @@
 use crate::*;
 
-/// v1 child lifecycle value.
+/// Stable child lifecycle value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChildLifecycle {
     /// Parent-owned durable child. The parent owns cancellation and history.
@@ -130,7 +130,7 @@ pub enum ChildAgentDenial {
     ParentMismatch,
     /// Parent reference syntax is invalid.
     InvalidParentRef,
-    /// Child lifecycle is not a supported v1 value.
+    /// Child lifecycle is not a supported value.
     UnsupportedLifecycle,
     /// Child uid or gid differs from the parent without supervisor authority.
     IdentityExpansion,
@@ -147,9 +147,9 @@ pub enum ChildAgentDenial {
 /// Runtime-owned child cancellation failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OwnedChildCancellationError {
-    /// Parent agent name is not a valid v1 object name.
+    /// Parent agent name is not a valid object name.
     InvalidParentName,
-    /// Child agent name is not a valid v1 object name.
+    /// Child agent name is not a valid object name.
     InvalidChildName,
     /// The child session directory is missing durable history files.
     MissingChildHistory,

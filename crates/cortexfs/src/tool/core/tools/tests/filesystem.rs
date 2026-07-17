@@ -276,26 +276,26 @@ pub(crate) fn fs_write_cli_uses_atomic_writer() {
 
 #[test]
 pub(crate) fn fs_write_stdin_reader_accepts_input_at_limit() {
-    let content = "x".repeat(crate::MAX_FUSE_V1_SMALL_WRITE_BYTES);
+    let content = "x".repeat(crate::MAX_FUSE_SMALL_WRITE_BYTES);
 
     let read = read_text_from_stdin_limited(
         Cursor::new(content.as_bytes()),
-        crate::MAX_FUSE_V1_SMALL_WRITE_BYTES,
+        crate::MAX_FUSE_SMALL_WRITE_BYTES,
     );
 
     assert_eq!(
         read.unwrap_or_default().len(),
-        crate::MAX_FUSE_V1_SMALL_WRITE_BYTES
+        crate::MAX_FUSE_SMALL_WRITE_BYTES
     );
 }
 
 #[test]
 pub(crate) fn fs_write_stdin_reader_rejects_input_over_limit() {
-    let content = "x".repeat(crate::MAX_FUSE_V1_SMALL_WRITE_BYTES + 1);
+    let content = "x".repeat(crate::MAX_FUSE_SMALL_WRITE_BYTES + 1);
 
     let read = read_text_from_stdin_limited(
         Cursor::new(content.as_bytes()),
-        crate::MAX_FUSE_V1_SMALL_WRITE_BYTES,
+        crate::MAX_FUSE_SMALL_WRITE_BYTES,
     );
 
     assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));

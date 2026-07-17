@@ -1,12 +1,12 @@
-# CortexFS v1 Spec
+# CortexFS Specification
 
-This directory is the normative CortexFS v1 ABI spec.
+This directory is the normative CortexFS ABI specification.
 
 CortexFS turns an AI runtime into a small Linux filesystem interface. Paths are
 ABI. Executable things are files. Control state lives next to the object in
 `<name>.d/`. Stateful interaction uses `<name>.sock`.
 
-The v1 shape is:
+The stable shape is:
 
 ```text
 /ctx/
@@ -54,7 +54,7 @@ Rig      owns: provider connections, API format compatibility, model calls, stre
 agent    owns: tool loops, context shaping, child task handoff, whether to execute tools
 ```
 
-CortexFS v1 does not define these as root ABI:
+CortexFS does not define these as root ABI:
 
 ```text
 provider registry
@@ -73,8 +73,8 @@ control root
 Spec files:
 
 ```text
-root-abi.md             frozen /ctx root, v1 reference tree, and basic file rules
-fuse-v1.md              first FUSE projection shape
+root-abi.md             frozen /ctx root, stable reference tree, and basic file rules
+fuse.md                 FUSE projection shape
 object-abi.md           executable, socket, and .d object triple
 model-abi.md            one model ABI, model exec, model socket, event stream
 session-abi.md          durable history and session indexes
@@ -84,12 +84,12 @@ agent-runtime.md        end-to-end agent runtime, REPL, terminal, tsh, sandbox
 tool-policy-abi.md      tool ABI, MCP projection, shared, policy, logs
 child-agents.md      child handoff, attenuation, owned lifecycle, cancellation
 ctx-coreutils.md        ctx command contract
-phase-1.md              v1 migration target and acceptance checks
+rolling-upgrades.md     rolling reference-tree update and storage switch rules
 ```
 
 ## External references
 
-- CortexFS v1 normative docs and implementation in this repository.
+- CortexFS normative docs and implementation in this repository.
 - [Model Context Protocol](https://modelcontextprotocol.io/specification/)
 - [Linux FUSE project docs](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
 - [mcp-filesystem implementations](https://github.com/search?q=mcp-filesystem)

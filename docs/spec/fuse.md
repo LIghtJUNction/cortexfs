@@ -1,4 +1,4 @@
-# FUSE v1 Shape
+# FUSE Projection
 
 `/ctx` is the FUSE ABI view. The backend is intentionally not ABI.
 
@@ -16,7 +16,7 @@ FUSE projects that state into `/ctx`. Dynamic files may behave like `/proc`;
 durable files may be backed by ordinary files. Clients must not care whether a
 path comes from a local file, generated runtime state, or a later backend.
 
-v1 FUSE should stay small:
+The FUSE projection should stay small:
 
 ```text
 readdir
@@ -32,7 +32,7 @@ session files
 read-only CortexFS extended attributes
 ```
 
-Do not add these to v1 FUSE:
+Do not add these to the FUSE projection:
 
 ```text
 distributed backend
@@ -78,6 +78,7 @@ agent/<name>.d/path    durable
 agent/<name>.d/mount   durable
 agent/<name>.d/model   durable
 agent/<name>.d/system.md durable
+agent/<name>.d/abi       required executable launch ABI: sdk-envelope-v1
 agent/<name>.d/policy  durable
 agent/<name>.d/log     dynamic or durable, implementation choice
 tool/<name>            dynamic executable entry
@@ -118,6 +119,12 @@ request uid. Atomic rename is same-directory only, accepts the generated
 known control file or wrapper. Symlinks, escaped paths, another user's agent,
 unknown controls, and arbitrary files under `agent/` or `home/` fail.
 
+Agent control directories admit writes only from their owner uid. CortexFS
+therefore treats processes sharing that uid as one security subject. On FUSE,
+path-derived synthetic inode numbers cannot be compared across an atomic
+temporary path and its target; the remaining same-uid lost-update window is not
+a cross-uid authorization boundary and does not grant another owner access.
+
 ## Runtime Socket Aliases
 
 Agent start binds live sockets below `/run/user/<uid>/cortexfs/` and persists
@@ -132,17 +139,16 @@ home/<uid>/agent/<name>/session/<session>/terminal/main.sock
 ```
 
 Targets must be absolute, remain below the matching uid runtime prefix, and
-match the visible agent/session name. Alias parents are opened without following
-symlinks. Creation, replacement, and unlink require the agent owner uid. A
-stopped host-created agent may retain a real socket placeholder; start replaces
+match visible agent/session name. Alias parents opened without following
+symlinks. Creation, replacement, unlink require agent owner uid. A
+stopped host-created agent may retain real socket placeholder; start replaces
 it with the runtime alias. Start must fail before recording `ready` when either
 visible alias cannot be created and verified with `readlink`.
 
 Some deployments also keep an always-on system agent socket as a direct socket
-node at `/ctx/agent/<name>.sock`, rather than as a symlink to `/run/user/...`.
+node at `/ctx/agent/<name>.sock`, rather than a symlink to `/run/user/...`.
 Both representations are valid: runtime may expose the socket node directly or
 via an owner-authorized symlink for that agent.
-
 
 ## Extended Attributes
 
@@ -179,7 +185,7 @@ files; `setxattr` and `removexattr` must fail.
 
 ## Directory Removal
 
-FUSE v1 supports `rmdir` only for empty durable plain directories under
+FUSE supports `rmdir` only for empty durable plain directories under
 `home/<uid>/...` and `shared/<space>/...`.
 
 It must not remove `/ctx`, top-level ABI directories, global object projections,

@@ -119,7 +119,7 @@ impl Filesystem for CortexFuse {
                 }
                 return;
             }
-            if FuseV1Projection::is_socket_alias_path(&path) {
+            if FuseProjection::is_socket_alias_path(&path) {
                 if let Err(error) =
                     self.projection
                         .set_socket_placeholder_mode(&path, req.uid(), mode)
@@ -134,7 +134,7 @@ impl Filesystem for CortexFuse {
                 return;
             }
             if let Err(error) = self.projection.set_layout_mode(&path, mode, req.uid()) {
-                reply.error(if matches!(error, FuseV1Error::NotControlFile) {
+                reply.error(if matches!(error, FuseError::NotControlFile) {
                     readonly_mutation_errno()
                 } else {
                     errno(error)
@@ -327,7 +327,7 @@ impl Filesystem for CortexFuse {
             return;
         };
         let result = match self.projection.remove_empty_layout_dir(&path, req.uid()) {
-            Err(FuseV1Error::NotControlFile) => self.projection.remove_empty_plain_dir(&path),
+            Err(FuseError::NotControlFile) => self.projection.remove_empty_plain_dir(&path),
             result => result,
         };
         match result {
@@ -384,7 +384,7 @@ impl Filesystem for CortexFuse {
         }
         let path = path_for_inode_or_reply!(self, ino, reply);
         match self.projected_getattr(&path) {
-            Ok(attr) if attr.file_type() == FuseV1FileType::Directory => {
+            Ok(attr) if attr.file_type() == FuseFileType::Directory => {
                 reply.opened(FileHandle(0), FopenFlags::empty());
             }
             Ok(_attr) => reply.error(Errno::ENOTDIR),

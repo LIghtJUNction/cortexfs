@@ -60,7 +60,7 @@ pub struct SessionLayoutReport {
 impl_issue_report!(SessionLayoutReport, PathLayoutIssue);
 impl_issue_report!(SessionControlReport, ControlLineIssue);
 
-/// Inspects a durable session directory for the v1 transparency/context layout.
+/// Inspects a durable session directory for the stable transparency/context layout.
 #[must_use]
 pub fn inspect_session_layout(session_dir: &Path) -> SessionLayoutReport {
     let mut issues = Vec::new();
@@ -117,7 +117,7 @@ pub(crate) fn inspect_session_control_files(session_dir: &Path, issues: &mut Vec
     }
 }
 
-/// Inspects a fixed-format v1 durable session control file body.
+/// Inspects a fixed-format durable session control file body.
 #[must_use]
 pub fn inspect_session_control(kind: SessionControlKind, content: &str) -> SessionControlReport {
     match kind {

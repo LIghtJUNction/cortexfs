@@ -41,6 +41,9 @@ jobs:
         working-directory: docs-site
         run: bun install --frozen-lockfile
 
+      - name: Audit docs/i18n sync
+        run: ./scripts/sync-docs-audit.sh
+
       - name: Build Docusaurus
         working-directory: docs-site
         run: bun run build

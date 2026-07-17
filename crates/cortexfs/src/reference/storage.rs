@@ -9,7 +9,7 @@ use cortexfs_runtime_client::agent::is_agent_launch_abi;
 use nix::fcntl::{Flock, FlockArg};
 
 use super::bootstrap::{
-    BootstrapAction, REFERENCE_AGENTS, bootstrap_state_matches_target, ensure_v1_reference_tree,
+    BootstrapAction, REFERENCE_AGENTS, bootstrap_state_matches_target, ensure_reference_tree,
     plan_reference_tree_upgrade, read_bootstrap_state,
 };
 
@@ -115,7 +115,7 @@ fn stage_generation(
             ));
         }
     }
-    ensure_v1_reference_tree(stage)
+    ensure_reference_tree(stage)
         .map_err(|_error| StorageUpdateError::Invalid("cannot bootstrap staged generation"))?;
     validate_generation(stage)?;
 
@@ -183,7 +183,10 @@ fn validate_generation(root: &Path) -> Result<(), StorageUpdateError> {
         .any(|action| {
             matches!(
                 action,
-                BootstrapAction::EnsureAgent { .. } | BootstrapAction::WriteState { .. }
+                BootstrapAction::ApplyMigration { .. }
+                    | BootstrapAction::EnsureAgent { .. }
+                    | BootstrapAction::RejectVersion { .. }
+                    | BootstrapAction::WriteState { .. }
             )
         })
     {
@@ -193,7 +196,8 @@ fn validate_generation(root: &Path) -> Result<(), StorageUpdateError> {
     }
     for agent in REFERENCE_AGENTS {
         let control = root.join("agent").join(format!("{}.d", agent.name));
-        if !is_agent_launch_abi(&fs::read_to_string(control.join("abi"))?) {
+        let abi = fs::read_to_string(control.join("abi"))?;
+        if !is_agent_launch_abi(&abi) {
             return Err(StorageUpdateError::Invalid("agent abi is invalid"));
         }
         let model = fs::read_to_string(control.join("model"))?;
@@ -284,6 +288,8 @@ fn sync_dir(path: &Path) -> Result<(), StorageUpdateError> {
 mod tests {
     use std::os::unix::fs::symlink;
 
+    use cortexfs_runtime_client::agent::AGENT_LAUNCH_ABI;
+
     use super::*;
 
     #[test]
@@ -303,21 +309,60 @@ mod tests {
     }
 
     #[test]
+    fn version_four_current_stages_version_five_once() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let storage = directory.path().join("storage");
+        let version_four = update_storage_generation(&storage)?;
+        let state = crate::BootstrapState {
+            schema: 1,
+            tree_version: 4,
+            managed_agents: REFERENCE_AGENTS
+                .iter()
+                .map(|agent| agent.name.to_owned())
+                .collect(),
+            applied_migrations: vec![crate::MIGRATION_RETIRED_AGENTS.to_owned()],
+        };
+        fs::write(
+            version_four.join(crate::BOOTSTRAP_STATE_REL),
+            format!("{}\n", serde_json::to_string_pretty(&state)?),
+        )?;
+
+        let version_five = update_storage_generation(&storage)?;
+        assert_ne!(version_five, version_four);
+        assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 2);
+        assert!(matches!(
+            read_bootstrap_state(&version_five),
+            Some(state)
+                if state.tree_version == 5
+                    && state.applied_migrations
+                        == [crate::MIGRATION_RETIRED_AGENTS, crate::MIGRATION_ROLLING_TREE]
+        ));
+
+        assert_eq!(update_storage_generation(&storage)?, version_five);
+        assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 2);
+        Ok(())
+    }
+
+    #[test]
     fn missing_or_invalid_agent_abi_stages_repaired_generation()
     -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let storage = directory.path().join("storage");
+        let mut generation = update_storage_generation(&storage)?;
         for invalid in [None, Some("sdk-envelope-v2\n")] {
-            let generation = update_storage_generation(&storage)?;
             let abi = generation.join("agent/coder.d/abi");
-            match invalid {
-                Some(content) => fs::write(&abi, content)?,
-                None => fs::remove_file(&abi)?,
+            if let Some(content) = invalid {
+                fs::write(abi, content)?;
+            } else {
+                fs::remove_file(abi)?;
             }
             let repaired = update_storage_generation(&storage)?;
             assert_ne!(repaired, generation);
-            let abi = fs::read_to_string(repaired.join("agent/coder.d/abi"))?;
-            assert!(is_agent_launch_abi(&abi));
+            assert_eq!(
+                fs::read_to_string(repaired.join("agent/coder.d/abi"))?,
+                format!("{AGENT_LAUNCH_ABI}\n")
+            );
+            generation = repaired;
         }
         Ok(())
     }
@@ -335,7 +380,7 @@ mod tests {
         fs::write(new.join("status"), "new\n")?;
         symlink("generations/old", storage.join("current"))?;
         let pinned = pin_storage_source(&storage.join("current"))?;
-        let projection = crate::FuseV1Projection::new(&pinned);
+        let projection = crate::FuseProjection::new(&pinned);
 
         symlink("generations/new", storage.join(".next"))?;
         fs::rename(storage.join(".next"), storage.join("current"))?;

@@ -7,9 +7,7 @@ use std::os::unix::net::UnixListener;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cortexfs::{
-    FUSE_V1_ROOT_INODE, FuseV1Attr, FuseV1Error, FuseV1FileType, ensure_v1_reference_tree,
-};
+use cortexfs::{FUSE_ROOT_INODE, FuseAttr, FuseError, FuseFileType, ensure_reference_tree};
 use fuser::{AccessFlags, Errno, FileType, INodeNo, OpenFlags};
 
 use super::{
@@ -20,9 +18,9 @@ use super::{
 
 #[test]
 pub(crate) fn file_attr_maps_projection_attributes_to_fuser_attributes() {
-    let attr = FuseV1Attr::new(
+    let attr = FuseAttr::new(
         "tool/fs.read".to_owned(),
-        FuseV1FileType::Regular,
+        FuseFileType::Regular,
         1025,
         0o644,
     );
@@ -39,7 +37,7 @@ pub(crate) fn file_attr_maps_projection_attributes_to_fuser_attributes() {
 
 #[test]
 pub(crate) fn file_attr_uses_directory_link_count() {
-    let attr = FuseV1Attr::new("agent".to_owned(), FuseV1FileType::Directory, 0, 0o755);
+    let attr = FuseAttr::new("agent".to_owned(), FuseFileType::Directory, 0, 0o755);
     let mapped = file_attr(78, &attr);
 
     assert_eq!(mapped.kind, FileType::Directory);
@@ -50,12 +48,12 @@ pub(crate) fn file_attr_uses_directory_link_count() {
 #[test]
 pub(crate) fn fuse_errno_maps_projection_errors_to_linux_errno() {
     let cases = [
-        (FuseV1Error::NotFound, Errno::ENOENT),
-        (FuseV1Error::NotDirectory, Errno::ENOTDIR),
-        (FuseV1Error::NotFile, Errno::EISDIR),
-        (FuseV1Error::InvalidPath, Errno::EINVAL),
-        (FuseV1Error::AlreadyExists, Errno::EEXIST),
-        (FuseV1Error::PermissionDenied, Errno::EACCES),
+        (FuseError::NotFound, Errno::ENOENT),
+        (FuseError::NotDirectory, Errno::ENOTDIR),
+        (FuseError::NotFile, Errno::EISDIR),
+        (FuseError::InvalidPath, Errno::EINVAL),
+        (FuseError::AlreadyExists, Errno::EEXIST),
+        (FuseError::PermissionDenied, Errno::EACCES),
     ];
     for (error, expected) in cases {
         assert_eq!(format!("{:?}", errno(error)), format!("{expected:?}"));
@@ -64,14 +62,14 @@ pub(crate) fn fuse_errno_maps_projection_errors_to_linux_errno() {
 
 #[test]
 pub(crate) fn fuse_open_error_enforces_linux_type_and_readonly_semantics() {
-    let regular = FuseV1Attr::new("tool/fs.read".to_owned(), FuseV1FileType::Regular, 0, 0o755);
-    let control = FuseV1Attr::new(
+    let regular = FuseAttr::new("tool/fs.read".to_owned(), FuseFileType::Regular, 0, 0o755);
+    let control = FuseAttr::new(
         "agent/coder.d/cwd".to_owned(),
-        FuseV1FileType::Regular,
+        FuseFileType::Regular,
         0,
         0o644,
     );
-    let directory = FuseV1Attr::new("agent".to_owned(), FuseV1FileType::Directory, 0, 0o755);
+    let directory = FuseAttr::new("agent".to_owned(), FuseFileType::Directory, 0, 0o755);
 
     assert!(fuse_open_error(&regular, OpenFlags(nix::libc::O_RDONLY)).is_none());
     assert!(fuse_open_error(&control, OpenFlags(nix::libc::O_WRONLY)).is_none());
@@ -103,7 +101,7 @@ pub(crate) fn fuse_open_error_enforces_linux_type_and_readonly_semantics() {
 
 #[test]
 pub(crate) fn fuse_lseek_offset_uses_proc_like_data_and_hole_semantics() {
-    let attr = FuseV1Attr::new("status".to_owned(), FuseV1FileType::Regular, 12, 0o444);
+    let attr = FuseAttr::new("status".to_owned(), FuseFileType::Regular, 12, 0o444);
 
     assert_eq!(
         fuse_lseek_offset(&attr, 4, nix::libc::SEEK_SET).ok(),
@@ -137,7 +135,7 @@ pub(crate) fn fuse_lseek_offset_uses_proc_like_data_and_hole_semantics() {
 
 #[test]
 pub(crate) fn fuse_lseek_offset_rejects_invalid_offsets_and_whence() {
-    let attr = FuseV1Attr::new("status".to_owned(), FuseV1FileType::Regular, 12, 0o444);
+    let attr = FuseAttr::new("status".to_owned(), FuseFileType::Regular, 12, 0o444);
 
     let einval = format!("{:?}", Err::<i64, _>(Errno::EINVAL));
     assert_eq!(
@@ -164,25 +162,25 @@ pub(crate) fn fuse_lseek_offset_rejects_invalid_offsets_and_whence() {
 
 #[test]
 pub(crate) fn access_error_uses_linux_mode_bits_and_readonly_semantics() {
-    let regular = FuseV1Attr::with_owner(
+    let regular = FuseAttr::with_owner(
         "tool/fs.read".to_owned(),
-        FuseV1FileType::Regular,
+        FuseFileType::Regular,
         0,
         0o750,
         1000,
         100,
     );
-    let control = FuseV1Attr::with_owner(
+    let control = FuseAttr::with_owner(
         "agent/coder.d/cwd".to_owned(),
-        FuseV1FileType::Regular,
+        FuseFileType::Regular,
         0,
         0o640,
         1000,
         100,
     );
-    let no_exec = FuseV1Attr::with_owner(
+    let no_exec = FuseAttr::with_owner(
         "tool/fs.write".to_owned(),
-        FuseV1FileType::Regular,
+        FuseFileType::Regular,
         0,
         0o644,
         1000,
@@ -236,13 +234,13 @@ pub(crate) fn readonly_mutation_errno_uses_linux_readonly_filesystem_error() {
 #[test]
 pub(crate) fn parent_inode_uses_known_parent_or_root() {
     let paths = Mutex::new(HashMap::from([
-        (FUSE_V1_ROOT_INODE, String::new()),
+        (FUSE_ROOT_INODE, String::new()),
         (42, "agent/coder.d".to_owned()),
     ]));
 
     assert_eq!(parent_inode("agent/coder.d/status", &paths), Ok(42));
-    assert_eq!(parent_inode("agent", &paths), Ok(FUSE_V1_ROOT_INODE));
-    assert_eq!(parent_inode("", &paths), Ok(FUSE_V1_ROOT_INODE));
+    assert_eq!(parent_inode("agent", &paths), Ok(FUSE_ROOT_INODE));
+    assert_eq!(parent_inode("", &paths), Ok(FUSE_ROOT_INODE));
 }
 
 #[test]
@@ -288,7 +286,7 @@ pub(crate) fn socket_overlay_preserves_request_owner_for_sticky_agent_directory(
     ));
     assert_eq!(
         fs.remove_socket_overlay("agent/scratch.sock", 4321),
-        Err(FuseV1Error::PermissionDenied)
+        Err(FuseError::PermissionDenied)
     );
     assert!(matches!(
         fs.projected_getattr("agent/scratch.sock"),
@@ -315,7 +313,7 @@ pub(crate) fn backing_node_precedes_overlay_for_getattr_and_lookup() {
     assert!(matches!(
         (&direct, &lookup),
         (Ok(left), Ok(right))
-            if left == right && left.attr().file_type() == FuseV1FileType::Regular
+            if left == right && left.attr().file_type() == FuseFileType::Regular
     ));
     assert_eq!(
         fs.projected_getattr("agent/backed.sock"),
@@ -326,7 +324,7 @@ pub(crate) fn backing_node_precedes_overlay_for_getattr_and_lookup() {
 #[test]
 pub(crate) fn lifecycle_wrapper_rename_preserves_owner_for_mount_chmod() {
     let root = unique_mount_test_dir("lifecycle-wrapper-owner");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let fs = CortexFuse::new(root.to_path_buf());
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };
@@ -397,7 +395,7 @@ pub(crate) fn lifecycle_wrapper_rename_preserves_owner_for_mount_chmod() {
 #[test]
 pub(crate) fn owner_rename_supports_generated_socket_claim_and_restore() {
     let root = unique_mount_test_dir("socket-claim-rename");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let fs = CortexFuse::new(root.to_path_buf());
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };
@@ -462,7 +460,7 @@ pub(crate) fn owner_rename_supports_generated_socket_claim_and_restore() {
 #[test]
 pub(crate) fn owner_rename_noreplace_creates_missing_session_target_and_rejects_conflicts() {
     let root = unique_mount_test_dir("session-noreplace-rename");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let fs = CortexFuse::new(root.to_path_buf());
     assert!(fs.is_ok());
     let Ok(fs) = fs else { return };
@@ -488,11 +486,11 @@ pub(crate) fn owner_rename_noreplace_creates_missing_session_target_and_rejects_
     );
     assert_eq!(
         fs.rename_owner_path(&second, &target, uid, RenameFlags::RENAME_NOREPLACE),
-        Err(FuseV1Error::AlreadyExists)
+        Err(FuseError::AlreadyExists)
     );
     assert_eq!(
         fs.rename_owner_path(&third, &target, uid, RenameFlags::RENAME_EXCHANGE),
-        Err(FuseV1Error::InvalidPath)
+        Err(FuseError::InvalidPath)
     );
     assert!(root.join(second).is_file());
     assert!(root.join(third).is_file());
@@ -554,13 +552,13 @@ pub(crate) fn remove_backing_socket_entry_rejects_symlink_parent_without_removin
 pub(crate) fn unlink_model_path_rejects_symlink_model_parent_without_removing_target() {
     let root = unique_mount_test_dir("model-unlink-symlink-parent");
     let outside = unique_mount_test_dir("model-unlink-symlink-parent-outside");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     assert!(fs::remove_dir_all(root.join("model")).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(fs::write(outside.join("temp"), "keep\n").is_ok());
     assert!(symlink(&outside, root.join("model")).is_ok());
     let fs = CortexFuse {
-        projection: cortexfs::FuseV1Projection::new(root.to_path_buf()),
+        projection: cortexfs::FuseProjection::new(root.to_path_buf()),
         paths: Mutex::new(HashMap::from([(42, "model".to_owned())])),
         lookup_counts: Mutex::new(HashMap::new()),
         socket_overlays: Mutex::new(HashMap::new()),
@@ -568,7 +566,7 @@ pub(crate) fn unlink_model_path_rejects_symlink_model_parent_without_removing_ta
 
     assert_eq!(
         fs.unlink_model_path(INodeNo(42), std::ffi::OsStr::new("temp")),
-        Err(FuseV1Error::Io)
+        Err(FuseError::Io)
     );
     assert_eq!(
         fs::read_to_string(outside.join("temp")).unwrap_or_default(),
@@ -622,7 +620,7 @@ pub(crate) fn statfs_sanitizes_available_blocks_to_free_blocks() {
 #[test]
 pub(crate) fn statfs_reports_backing_source_capacity() {
     let root = unique_mount_test_dir("statfs");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let stats = mount_statfs_for_source(&root);
 

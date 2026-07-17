@@ -506,4 +506,55 @@ pub(super) fn test_provider_config_with_formats(
         formats: formats.iter().map(|format| (*format).to_owned()).collect(),
     }
 }
+
+#[test]
+fn provider_targets_share_effective_v1_base_normalization() {
+    for (base, expected) in [
+        ("http://localhost", "http://localhost/v1/responses"),
+        ("http://localhost/v1", "http://localhost/v1/responses"),
+        (
+            "http://localhost/custom",
+            "http://localhost/custom/v1/responses",
+        ),
+        (
+            "http://localhost/custom/v1",
+            "http://localhost/custom/v1/responses",
+        ),
+    ] {
+        assert_eq!(
+            provider_target(
+                &ResolvedTransport::Direct {
+                    base_url: base.into()
+                },
+                "responses",
+            )
+            .url,
+            expected
+        );
+    }
+}
+
+#[test]
+fn responses_function_call_becomes_canonical_tool_call() {
+    let output = serde_json::json!({"output":[{"type":"function_call","call_id":"call_123","name":"tsh","arguments":"{\"args\":[\"tools\"]}"}]}).to_string();
+    let value: serde_json::Value =
+        serde_json::from_str(&parse_openai_response_content(output.as_bytes()).unwrap_or_default())
+            .unwrap_or_default();
+    assert_eq!(
+        value.pointer("/arguments/args/0"),
+        Some(&serde_json::json!("tools"))
+    );
+}
+
+#[test]
+fn provider_tool_call_parser_rejects_undeclarable_function_names() {
+    let chat = serde_json::json!({"choices":[{"message":{"tool_calls":[{"id":"call_1","function":{"name":"shell.exec","arguments":"{\"args\":[\"date\"]}"}}]}}]}).to_string();
+    let responses = serde_json::json!({"output":[{"type":"function_call","call_id":"call_1","name":"shell.exec","arguments":"{\"args\":[\"date\"]}"}]}).to_string();
+    for result in [
+        parse_openai_chat_content(chat.as_bytes()),
+        parse_openai_response_content(responses.as_bytes()),
+    ] {
+        assert_eq!(result, Err("provider response missing content".to_owned()));
+    }
+}
 use super::*;

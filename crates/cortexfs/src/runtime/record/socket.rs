@@ -56,7 +56,7 @@ fn record_socket_request(
 ///
 /// This is a filesystem helper for socket runtimes. It does not create
 /// sessions, start models, or interpret provider state. The selected session
-/// must already exist and have the v1 durable files.
+/// must already exist and have the stable durable files.
 pub fn record_indexed_socket_send_to_session(
     session_root: &Path,
     request: &SocketRequest,

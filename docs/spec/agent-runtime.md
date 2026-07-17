@@ -1,10 +1,10 @@
 # Agent Runtime
 
-This document defines the v1 end-to-end agent runtime shape. It ties together
+This document defines the stable end-to-end agent runtime shape. It ties together
 the agent object ABI, the human CLI, socket sessions, the persistent terminal,
 the `tsh` tool shell, prompt construction, and sandbox execution.
 
-It does not add a root namespace. Everything here is derived from existing v1
+It does not add a root namespace. Everything here is derived from existing stable
 objects and files.
 
 ## Runtime Surfaces
@@ -86,7 +86,7 @@ Assistant text is derived from stable event frames and recorded back to the
 durable session. Raw messages and events remain ordinary files; context packs
 are rebuildable views.
 
-Executable agents use the required `agent/<name>.d/abi` control. Its only v1
+Executable agents use the required `agent/<name>.d/abi` control. Its accepted
 value is `sdk-envelope-v1`: the host writes a bounded typed invocation envelope
 to stdin and may restart the executable with the authoritative result of a
 yielded tool call.

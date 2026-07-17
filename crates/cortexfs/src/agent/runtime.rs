@@ -61,7 +61,7 @@ pub enum AgentRuntimeViewError {
     MissingControlFile(String),
     /// A control file could not be read.
     CannotReadControl(String),
-    /// A control file has malformed v1 content.
+    /// A control file has malformed content.
     InvalidControlFile(String),
 }
 
@@ -166,7 +166,7 @@ impl AgentRuntimeView {
         self.parent.as_deref()
     }
 
-    /// Returns the v1 lifecycle value.
+    /// Returns the stable lifecycle value.
     #[must_use]
     pub const fn lifecycle(&self) -> ChildLifecycle {
         self.lifecycle

@@ -1309,7 +1309,7 @@ mod d_tests {
         let Ok(source) = source else {
             return (None, None);
         };
-        let ensured = crate::ensure_v1_reference_tree(source.path());
+        let ensured = crate::ensure_reference_tree(source.path());
         assert!(ensured.is_ok(), "{ensured:?}");
         let control = source.path().join("agent/coder.d");
         assert!(fs::write(control.join("path"), format!("{parent_path}\n")).is_ok());
@@ -1362,7 +1362,7 @@ allow coder_t agent:worker start\n",
         let Ok(source) = source else {
             return (None, None);
         };
-        assert!(crate::ensure_v1_reference_tree(source.path()).is_ok());
+        assert!(crate::ensure_reference_tree(source.path()).is_ok());
         let control = source.path().join("agent/coder.d");
         assert!(fs::write(control.join("model"), "debug/echo\n").is_ok());
         assert!(fs::write(control.join("window"), parent_window).is_ok());
@@ -1455,7 +1455,7 @@ allow coder_t agent:window-child start\n",
         let source = tempfile::tempdir();
         assert!(source.is_ok(), "tempdir: {source:?}");
         let Ok(source) = source else { return };
-        assert!(crate::ensure_v1_reference_tree(source.path()).is_ok());
+        assert!(crate::ensure_reference_tree(source.path()).is_ok());
         assert!(fs::write(source.path().join("agent/coder.d/model"), "debug/echo\n").is_ok());
         let model_control = source.path().join("model/debug/echo.d");
         assert!(fs::create_dir_all(&model_control).is_ok());

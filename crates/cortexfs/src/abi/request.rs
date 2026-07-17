@@ -116,7 +116,7 @@ impl SocketRequestError {
     }
 }
 
-/// Parses one v1 JSONL socket request frame.
+/// Parses one JSONL socket request frame.
 ///
 /// Unknown fields are ignored by design. Only the stable fields that affect
 /// `CortexFS` session semantics are consumed.

@@ -1,7 +1,7 @@
 use crate::*;
 use cortexfs_runtime_client::agent::{AGENT_LAUNCH_ABI, is_agent_launch_abi};
 
-/// Installs a v1 executable object wrapper plus required `.d` control files.
+/// Installs an executable object wrapper plus required `.d` control files.
 ///
 /// The wrapper is a small POSIX shell `exec` shim to an existing runtime,
 /// script, or tool command. This helper does not start sockets, providers, or

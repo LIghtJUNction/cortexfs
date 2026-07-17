@@ -5,15 +5,15 @@ mod model_alias_tests {
     use std::os::unix::fs::symlink;
     use std::sync::Mutex;
 
-    use cortexfs::{FuseV1Error, FuseV1Projection, ensure_v1_reference_tree};
+    use cortexfs::{FuseError, FuseProjection, ensure_reference_tree};
     use fuser::{Filesystem, INodeNo};
 
-    use super::super::{CortexFuse, FUSE_V1_ROOT_INODE, SocketOverlay};
+    use super::super::{CortexFuse, FUSE_ROOT_INODE, SocketOverlay};
 
     #[test]
     fn unlink_model_path_ignores_non_symlink_provider_entries() {
         let root = super::super::unique_mount_test_dir("model-alias-provider-dir");
-        assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
         let provider = root.join("model").join("fixture");
         assert!(fs::create_dir_all(&provider).is_ok());
         let fs = mount_with_model_inode(&root);
@@ -28,7 +28,7 @@ mod model_alias_tests {
     #[test]
     fn unlink_model_path_removes_model_alias_symlinks() {
         let root = super::super::unique_mount_test_dir("model-alias-symlink");
-        assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
         let alias = root.join("model").join("scratch");
         assert!(symlink("/ctx/model/debug/echo", &alias).is_ok());
         let fs = mount_with_model_inode(&root);
@@ -41,9 +41,9 @@ mod model_alias_tests {
     }
 
     #[test]
-    fn forget_inode_drops_path_after_last_lookup_reference() -> Result<(), FuseV1Error> {
+    fn forget_inode_drops_path_after_last_lookup_reference() -> Result<(), FuseError> {
         let root = super::super::unique_mount_test_dir("forget-inode-lookup-count");
-        assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
         let fs = mount_with_model_inode(&root);
         let node = fs.projection.node_for_path("status")?;
         let inode = INodeNo(node.inode());
@@ -54,14 +54,14 @@ mod model_alias_tests {
         assert_eq!(fs.forget_inode(inode, 1), Ok(()));
         assert_eq!(fs.path_for_inode(inode), Ok("status".to_owned()));
         assert_eq!(fs.forget_inode(inode, 1), Ok(()));
-        assert_eq!(fs.path_for_inode(inode), Err(FuseV1Error::NotFound));
+        assert_eq!(fs.path_for_inode(inode), Err(FuseError::NotFound));
         Ok(())
     }
 
     #[test]
-    fn forget_inode_preserves_path_without_lookup_reference() -> Result<(), FuseV1Error> {
+    fn forget_inode_preserves_path_without_lookup_reference() -> Result<(), FuseError> {
         let root = super::super::unique_mount_test_dir("forget-inode-without-lookup-count");
-        assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
         let fs = mount_with_model_inode(&root);
         let node = fs.projection.node_for_path("status")?;
         let inode = INodeNo(node.inode());
@@ -73,9 +73,9 @@ mod model_alias_tests {
     }
 
     #[test]
-    fn destroy_drops_fuse_lifecycle_caches() -> Result<(), FuseV1Error> {
+    fn destroy_drops_fuse_lifecycle_caches() -> Result<(), FuseError> {
         let root = super::super::unique_mount_test_dir("destroy-fuse-caches");
-        assert!(ensure_v1_reference_tree(&root).is_ok());
+        assert!(ensure_reference_tree(&root).is_ok());
         let mut fs = mount_with_model_inode(&root);
         let node = fs.projection.node_for_path("status")?;
         let inode = INodeNo(node.inode());
@@ -96,10 +96,10 @@ mod model_alias_tests {
         }));
         fs.destroy();
 
-        assert_eq!(fs.path_for_inode(inode), Err(FuseV1Error::NotFound));
+        assert_eq!(fs.path_for_inode(inode), Err(FuseError::NotFound));
         assert_eq!(
-            fs.path_for_inode(INodeNo(FUSE_V1_ROOT_INODE)),
-            Err(FuseV1Error::NotFound)
+            fs.path_for_inode(INodeNo(FUSE_ROOT_INODE)),
+            Err(FuseError::NotFound)
         );
         assert!(
             fs.lookup_counts
@@ -116,9 +116,9 @@ mod model_alias_tests {
 
     fn mount_with_model_inode(root: &std::path::Path) -> CortexFuse {
         CortexFuse {
-            projection: FuseV1Projection::new(root.to_path_buf()),
+            projection: FuseProjection::new(root.to_path_buf()),
             paths: Mutex::new(HashMap::from([
-                (FUSE_V1_ROOT_INODE, String::new()),
+                (FUSE_ROOT_INODE, String::new()),
                 (42, "model".to_owned()),
             ])),
             lookup_counts: Mutex::new(HashMap::new()),
