@@ -28,8 +28,7 @@ use std::process::ExitCode;
 use cortexfs::{
     AgentExecutableSocketExecution, AgentExecutableSocketRuntime, AgentStopHandler, MountTable,
     PolicyObjectClass, PolicyPermission, PreparedAgentStop, SocketPeerPolicy, SocketRuntimeError,
-    derive_agent_runtime_view, read_provider_system_secret_for_model,
-    serve_agent_executable_socket_listener_once_with_stop,
+    derive_agent_runtime_view, serve_agent_executable_socket_listener_once_with_stop,
 };
 use listenfd::ListenFd;
 use nix::sys::stat::{Mode, fchmod};
@@ -104,24 +103,7 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
     if runtime_model != view.model() {
         runtime_env.push(("CTX_AGENT_MODEL_OVERRIDE".to_owned(), runtime_model.clone()));
     }
-    let provider_secret =
-        read_provider_system_secret_for_model(&config.source, &runtime_model).unwrap_or(None);
-    if let Some(secret) = provider_secret.as_ref() {
-        runtime_env.extend([
-            (
-                "CTX_PROVIDER_SECRET_VALUE".to_owned(),
-                secret.secret().to_owned(),
-            ),
-            (
-                "CTX_PROVIDER_SECRET_PROVIDER".to_owned(),
-                secret.provider().to_owned(),
-            ),
-            (
-                "CTX_PROVIDER_SECRET_SLOT".to_owned(),
-                secret.account().to_owned(),
-            ),
-        ]);
-    }
+    runtime_env.extend(provider_runtime_env(&config.source, &runtime_model)?);
     let agent_executable = config.source.join("agent").join(&config.agent);
     let control_dir = Path::new(RUN_CONTROL_DIR);
     #[expect(
@@ -222,6 +204,50 @@ pub(crate) fn runtime_agent_execution<'a>(
 
 pub(crate) fn runtime_model(_source: &Path, requested_model: &str) -> String {
     requested_model.to_owned()
+}
+
+fn provider_runtime_env(source: &Path, model: &str) -> Result<Vec<(String, String)>, String> {
+    if cortexfs::selected_model_provider(source, model).as_deref() == Some("codex") {
+        let credential = cortexfs::resolve_codex_system()
+            .map_err(|_error| "codex system credential refresh failed".to_owned())?
+            .ok_or_else(|| {
+                "missing codex system credential; run sudo ctx provider oauth login codex"
+                    .to_owned()
+            })?;
+        return Ok(secret_runtime_env(
+            credential.0,
+            "codex".to_owned(),
+            "default".to_owned(),
+            credential.1,
+        ));
+    }
+    let Some(secret) = cortexfs::read_provider_system_secret_for_model(source, model)
+        .map_err(|_error| "system provider credential unavailable".to_owned())?
+    else {
+        return Ok(Vec::new());
+    };
+    Ok(secret_runtime_env(
+        secret.secret().to_owned(),
+        secret.provider().to_owned(),
+        secret.account().to_owned(),
+        String::new(),
+    ))
+}
+
+fn secret_runtime_env(
+    token: String,
+    provider: String,
+    slot: String,
+    account: String,
+) -> Vec<(String, String)> {
+    [
+        ("CTX_PROVIDER_SECRET_VALUE", token),
+        ("CTX_PROVIDER_SECRET_PROVIDER", provider),
+        ("CTX_PROVIDER_SECRET_SLOT", slot),
+        ("CTX_PROVIDER_SECRET_ACCOUNT_ID", account),
+    ]
+    .map(|(name, value)| (name.to_owned(), value))
+    .to_vec()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

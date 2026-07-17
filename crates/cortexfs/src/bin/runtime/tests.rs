@@ -164,3 +164,15 @@ pub(crate) fn runtime_model_keeps_requested_model_without_primary_secret()
     let _ignored = fs::remove_dir_all(root);
     Ok(())
 }
+
+#[test]
+fn codex_runtime_environment_contains_no_refresh_token() {
+    let env = super::secret_runtime_env(
+        "access".to_owned(),
+        "codex".to_owned(),
+        "default".to_owned(),
+        "account".to_owned(),
+    );
+    assert_eq!(env.last().map(|value| value.1.as_str()), Some("account"));
+    assert!(!format!("{env:?}").contains("refresh"));
+}

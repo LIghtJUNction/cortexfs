@@ -1,9 +1,16 @@
+use base64::Engine;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::env;
-use std::fmt::Write as FmtWrite;
 
-/// OAuth 2.0 provider configuration used outside the stable `/ctx` ABI.
+pub const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+pub const CODEX_DEVICE_USER_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/usercode";
+pub const CODEX_DEVICE_TOKEN_URL: &str = "https://auth.openai.com/api/accounts/deviceauth/token";
+pub const CODEX_DEVICE_VERIFY_URL: &str = "https://auth.openai.com/codex/device";
+pub const CODEX_DEVICE_REDIRECT_URI: &str = "https://auth.openai.com/deviceauth/callback";
+const CODEX_SYSTEM_SLOTS: [&str; 4] =
+    ["default", "oauth-refresh", "oauth-account", "oauth-expires"];
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct OAuthProviderConfig {
     pub client_id: String,
@@ -16,38 +23,59 @@ pub struct OAuthProviderConfig {
     pub refresh_token_account: Option<String>,
 }
 
-/// PKCE verifier/challenge pair.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OAuthPkce {
     verifier: String,
     challenge: String,
 }
 
-/// Parsed OAuth bearer token response.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct OAuthTokenResponse {
     pub access_token: String,
-    #[serde(default)]
     pub token_type: Option<String>,
-    #[serde(default)]
     pub expires_in: Option<u64>,
-    #[serde(default)]
     pub refresh_token: Option<String>,
-    #[serde(default)]
     pub scope: Option<String>,
+    pub id_token: Option<String>,
 }
 
-/// Error while building or resolving OAuth data.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OAuthTokenState {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub account_id: String,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq)]
+pub struct DeviceCode {
+    #[serde(rename = "device_auth_id")]
+    pub id: String,
+    #[serde(rename = "user_code")]
+    pub code: String,
+    pub interval: String,
+}
+
+#[derive(Deserialize)]
+struct DeviceGrant {
+    authorization_code: String,
+    code_verifier: String,
+    code_challenge: Option<String>,
+}
+
+pub type OAuthCredential = (String, String);
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OAuthError {
     InvalidConfig,
     InvalidVerifier,
     InvalidToken,
     KeychainUnavailable,
+    SystemStoreUnavailable,
+    Transport,
 }
 
 impl OAuthProviderConfig {
-    /// Returns the system secret-store account used for OAuth access tokens.
     #[must_use]
     pub fn access_account(&self) -> &str {
         self.access_token_account
@@ -55,133 +83,468 @@ impl OAuthProviderConfig {
             .unwrap_or("oauth:access")
     }
 
-    /// Returns the system secret-store account used for OAuth refresh tokens.
     #[must_use]
     pub fn refresh_account(&self) -> &str {
         self.refresh_token_account
             .as_deref()
             .unwrap_or("oauth:refresh")
     }
+
+    #[must_use]
+    pub fn is_codex(&self) -> bool {
+        self.client_id == CODEX_CLIENT_ID
+    }
+}
+
+#[must_use]
+pub fn codex_oauth_config() -> OAuthProviderConfig {
+    OAuthProviderConfig {
+        client_id: CODEX_CLIENT_ID.to_owned(),
+        auth_url: "https://auth.openai.com/oauth/authorize".to_owned(),
+        token_url: "https://auth.openai.com/oauth/token".to_owned(),
+        redirect_uri: "http://localhost:1455/auth/callback".to_owned(),
+        scopes: vec![
+            "openid profile email offline_access api.connectors.read api.connectors.invoke"
+                .to_owned(),
+        ],
+        access_token_account: None,
+        refresh_token_account: None,
+    }
 }
 
 impl OAuthPkce {
-    /// Builds a PKCE pair from an already-generated verifier.
     pub fn from_verifier(verifier: &str) -> Result<Self, OAuthError> {
-        if !is_valid_pkce_verifier(verifier) {
+        if !(43..=128).contains(&verifier.len())
+            || !verifier.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
+            })
+        {
             return Err(OAuthError::InvalidVerifier);
         }
-        let digest = Sha256::digest(verifier.as_bytes());
+        let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(Sha256::digest(verifier.as_bytes()));
         Ok(Self {
             verifier: verifier.to_owned(),
-            challenge: base64_url_no_pad(&digest),
+            challenge,
         })
     }
 
-    /// Builds a deterministic PKCE pair from entropy bytes.
-    ///
-    /// Callers that need fresh entropy should pass at least 32 bytes from the
-    /// OS random source. This function is deterministic to keep the core
-    /// testable and independent from a concrete RNG.
     pub fn from_entropy(entropy: &[u8]) -> Result<Self, OAuthError> {
         if entropy.len() < 32 {
             return Err(OAuthError::InvalidVerifier);
         }
-        let verifier = base64_url_no_pad(entropy);
-        Self::from_verifier(&verifier)
+        Self::from_verifier(&base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(entropy))
     }
 
     #[must_use]
     pub fn verifier(&self) -> &str {
         &self.verifier
     }
-
     #[must_use]
     pub fn challenge(&self) -> &str {
         &self.challenge
     }
-
-    #[must_use]
-    pub const fn method() -> &'static str {
-        "S256"
-    }
 }
 
-/// Builds an OAuth authorization URL using Authorization Code + PKCE.
 pub fn oauth_authorization_url(
     config: &OAuthProviderConfig,
     state: &str,
     pkce: &OAuthPkce,
 ) -> Result<String, OAuthError> {
-    if !is_valid_oauth_config(config) || state.is_empty() || has_ascii_control(state) {
+    if !valid_config(config) || state.is_empty() || controls(state) {
         return Err(OAuthError::InvalidConfig);
     }
-    let mut query = vec![
-        ("response_type", "code".to_owned()),
-        ("client_id", config.client_id.clone()),
-        ("redirect_uri", config.redirect_uri.clone()),
-        ("state", state.to_owned()),
-        ("code_challenge", pkce.challenge().to_owned()),
-        ("code_challenge_method", OAuthPkce::method().to_owned()),
-    ];
-    if !config.scopes.is_empty() {
-        query.push(("scope", config.scopes.join(" ")));
+    let mut url =
+        reqwest::Url::parse(&config.auth_url).map_err(|_error| OAuthError::InvalidConfig)?;
+    {
+        let mut query = url.query_pairs_mut();
+        query.extend_pairs([
+            ("response_type", "code"),
+            ("client_id", &config.client_id),
+            ("redirect_uri", &config.redirect_uri),
+            ("state", state),
+            ("code_challenge", &pkce.challenge),
+            ("code_challenge_method", "S256"),
+        ]);
+        if !config.scopes.is_empty() {
+            query.append_pair("scope", &config.scopes.join(" "));
+        }
+        if config.is_codex() {
+            query.extend_pairs([
+                ("id_token_add_organizations", "true"),
+                ("codex_cli_simplified_flow", "true"),
+                ("originator", "ctx"),
+            ]);
+        }
     }
-    Ok(append_query(&config.auth_url, &query))
+    Ok(String::from(url).replace('+', "%20"))
 }
 
-/// Builds the form body for exchanging an authorization code for tokens.
 pub fn oauth_authorization_code_form(
     config: &OAuthProviderConfig,
     code: &str,
     pkce: &OAuthPkce,
 ) -> Result<String, OAuthError> {
-    if !is_valid_oauth_config(config) || code.is_empty() || has_ascii_control(code) {
+    if !valid_config(config) || code.is_empty() || controls(code) {
         return Err(OAuthError::InvalidConfig);
     }
-    Ok(form_urlencoded(&[
+    Ok(form(&[
         ("grant_type", "authorization_code"),
         ("client_id", &config.client_id),
         ("code", code),
         ("redirect_uri", &config.redirect_uri),
-        ("code_verifier", pkce.verifier()),
+        ("code_verifier", &pkce.verifier),
     ]))
 }
 
-/// Builds the form body for refreshing an OAuth access token.
 pub fn oauth_refresh_token_form(
     config: &OAuthProviderConfig,
-    refresh_token: &str,
+    refresh: &str,
 ) -> Result<String, OAuthError> {
-    if !is_valid_oauth_config(config)
-        || refresh_token.trim().is_empty()
-        || has_ascii_control(refresh_token)
-    {
+    if !valid_config(config) || refresh.trim().is_empty() || controls(refresh) {
         return Err(OAuthError::InvalidConfig);
     }
-    Ok(form_urlencoded(&[
+    Ok(form(&[
         ("grant_type", "refresh_token"),
         ("client_id", &config.client_id),
-        ("refresh_token", refresh_token),
+        ("refresh_token", refresh),
     ]))
 }
 
-/// Parses a token endpoint JSON response and validates bearer semantics.
 pub fn parse_oauth_token_response(body: &[u8]) -> Result<OAuthTokenResponse, OAuthError> {
-    let response = serde_json::from_slice::<OAuthTokenResponse>(body)
-        .map_err(|_error| OAuthError::InvalidToken)?;
-    if response.access_token.trim().is_empty() {
-        return Err(OAuthError::InvalidToken);
-    }
-    if let Some(token_type) = response.token_type.as_deref()
-        && !token_type.eq_ignore_ascii_case("bearer")
+    let token: OAuthTokenResponse =
+        serde_json::from_slice(body).map_err(|_error| OAuthError::InvalidToken)?;
+    if token.access_token.trim().is_empty()
+        || token
+            .token_type
+            .as_deref()
+            .is_some_and(|kind| !kind.eq_ignore_ascii_case("bearer"))
     {
         return Err(OAuthError::InvalidToken);
     }
-    Ok(response)
+    Ok(token)
 }
 
-/// Resolves an OAuth access token from provider env candidates first,
-/// then the system secret store.
+pub fn oauth_post(
+    url: &str,
+    content_type: &str,
+    body: &str,
+    timeout_secs: u64,
+) -> Result<(u16, Vec<u8>), OAuthError> {
+    if url.is_empty() || controls(url) || controls(content_type) {
+        return Err(OAuthError::InvalidConfig);
+    }
+    let response = reqwest::blocking::Client::new()
+        .post(url)
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .header(reqwest::header::CONTENT_TYPE, content_type)
+        .body(body.to_owned())
+        .send()
+        .map_err(|_error| OAuthError::Transport)?;
+    let status = response.status().as_u16();
+    let output = crate::support::process::read_limited_bytes(response, 1024 * 1024 + 1);
+    if output.len() > 1024 * 1024 {
+        Err(OAuthError::Transport)
+    } else {
+        Ok((status, output))
+    }
+}
+
+pub fn exchange_oauth_token(
+    config: &OAuthProviderConfig,
+    body: &str,
+) -> Result<OAuthTokenResponse, OAuthError> {
+    exchange_oauth_token_with(config, body, |url, body| {
+        oauth_post(url, "application/x-www-form-urlencoded", body, 30)
+    })
+}
+
+pub fn exchange_oauth_token_with(
+    config: &OAuthProviderConfig,
+    body: &str,
+    post: impl FnOnce(&str, &str) -> Result<(u16, Vec<u8>), OAuthError>,
+) -> Result<OAuthTokenResponse, OAuthError> {
+    let (status, body) = post(&config.token_url, body)?;
+    if (200..300).contains(&status) {
+        parse_oauth_token_response(&body)
+    } else {
+        Err(OAuthError::Transport)
+    }
+}
+
+pub fn request_device_code_with(
+    mut post: impl FnMut(&str, &str) -> Result<(u16, Vec<u8>), OAuthError>,
+) -> Result<DeviceCode, OAuthError> {
+    let (status, body) = post(
+        CODEX_DEVICE_USER_URL,
+        &serde_json::json!({"client_id": CODEX_CLIENT_ID}).to_string(),
+    )?;
+    if !(200..300).contains(&status) {
+        return Err(OAuthError::Transport);
+    }
+    let device: DeviceCode =
+        serde_json::from_slice(&body).map_err(|_error| OAuthError::InvalidToken)?;
+    if [&device.id, &device.code]
+        .into_iter()
+        .any(|value| value.is_empty() || controls(value))
+    {
+        Err(OAuthError::InvalidToken)
+    } else {
+        Ok(device)
+    }
+}
+
+pub fn poll_device_code_with(
+    device: &DeviceCode,
+    timeout: u64,
+    mut post: impl FnMut(&str, &str) -> Result<(u16, Vec<u8>), OAuthError>,
+    exchange: impl FnOnce(&str, &str) -> Result<(u16, Vec<u8>), OAuthError>,
+    mut pause: impl FnMut(u64),
+) -> Result<OAuthTokenResponse, OAuthError> {
+    let mut interval = device
+        .interval
+        .parse::<u64>()
+        .map_err(|_error| OAuthError::InvalidToken)?
+        .clamp(1, 60);
+    let mut remaining = timeout;
+    loop {
+        let request =
+            serde_json::json!({"device_auth_id": device.id, "user_code": device.code}).to_string();
+        let (status, body) = post(CODEX_DEVICE_TOKEN_URL, &request)?;
+        if (200..300).contains(&status) {
+            let grant: DeviceGrant =
+                serde_json::from_slice(&body).map_err(|_error| OAuthError::InvalidToken)?;
+            let pkce = OAuthPkce::from_verifier(&grant.code_verifier)?;
+            if grant
+                .code_challenge
+                .is_some_and(|value| value != pkce.challenge())
+            {
+                return Err(OAuthError::InvalidToken);
+            }
+            let mut config = codex_oauth_config();
+            CODEX_DEVICE_REDIRECT_URI.clone_into(&mut config.redirect_uri);
+            let form = oauth_authorization_code_form(&config, &grant.authorization_code, &pkce)?;
+            return exchange_oauth_token_with(&config, &form, exchange);
+        }
+        let error = serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| value.get("error")?.as_str().map(str::to_owned));
+        if status == 429 || error.as_deref() == Some("slow_down") {
+            interval = (interval + 5).min(60);
+        } else if !matches!(status, 403 | 404) && error.as_deref() != Some("authorization_pending")
+        {
+            return Err(OAuthError::Transport);
+        }
+        if interval > remaining {
+            return Err(OAuthError::Transport);
+        }
+        pause(interval);
+        remaining -= interval;
+    }
+}
+
+pub fn oauth_token_state(
+    token: &OAuthTokenResponse,
+    retained: Option<&OAuthTokenState>,
+    now: u64,
+) -> Result<OAuthTokenState, OAuthError> {
+    let access = token.access_token.trim();
+    if access.is_empty() {
+        return Err(OAuthError::InvalidToken);
+    }
+    let refresh = token
+        .refresh_token
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| retained.map(|value| value.refresh_token.as_str()))
+        .ok_or(OAuthError::InvalidToken)?;
+    let account = token
+        .id_token
+        .as_deref()
+        .and_then(oauth_account_id)
+        .or_else(|| oauth_account_id(&token.access_token))
+        .or_else(|| retained.map(|value| value.account_id.clone()))
+        .ok_or(OAuthError::InvalidToken)?;
+    let expires = token
+        .expires_in
+        .and_then(|value| now.checked_add(value))
+        .or_else(|| jwt(&token.access_token)?.get("exp")?.as_u64())
+        .or_else(|| retained.map(|value| value.expires_at))
+        .ok_or(OAuthError::InvalidToken)?;
+    Ok(OAuthTokenState {
+        access_token: access.to_owned(),
+        refresh_token: refresh.to_owned(),
+        account_id: account,
+        expires_at: expires,
+    })
+}
+
+fn user_slots(config: &OAuthProviderConfig) -> [&str; 4] {
+    [
+        config.access_account(),
+        config.refresh_account(),
+        "oauth:account",
+        "oauth:expires-at",
+    ]
+}
+
+fn write_state(
+    slots: [&str; 4],
+    state: &OAuthTokenState,
+    mut write: impl FnMut(&str, &str) -> Result<(), OAuthError>,
+) -> Result<(), OAuthError> {
+    write(slots[0], &state.access_token)?;
+    write(slots[1], &state.refresh_token)?;
+    write(slots[2], &state.account_id)?;
+    write(slots[3], &state.expires_at.to_string())
+}
+
+pub fn store_codex_with(
+    state: &OAuthTokenState,
+    host: impl FnMut(&str, &str) -> Result<(), OAuthError>,
+) -> Result<(), OAuthError> {
+    write_state(CODEX_SYSTEM_SLOTS, state, host)
+}
+
+pub fn store_codex_system(state: &OAuthTokenState) -> Result<(), OAuthError> {
+    store_codex_with(state, |slot, value| {
+        crate::provider::name::store_provider_system_secret("codex", slot, value)
+            .map_err(|_error| OAuthError::SystemStoreUnavailable)
+    })
+}
+
+fn read_state(
+    slots: [&str; 4],
+    mut read: impl FnMut(&str) -> Result<Option<String>, OAuthError>,
+) -> Result<Option<OAuthTokenState>, OAuthError> {
+    let Some(access_token) = read(slots[0])? else {
+        return Ok(None);
+    };
+    let refresh_token = read(slots[1])?.ok_or(OAuthError::InvalidToken)?;
+    let account_id = read(slots[2])?.ok_or(OAuthError::InvalidToken)?;
+    let expires = read(slots[3])?.ok_or(OAuthError::InvalidToken)?;
+    Ok(Some(OAuthTokenState {
+        access_token,
+        refresh_token,
+        account_id,
+        expires_at: expires.parse().map_err(|_error| OAuthError::InvalidToken)?,
+    }))
+}
+
+pub fn read_codex_system() -> Result<Option<OAuthTokenState>, OAuthError> {
+    read_state(CODEX_SYSTEM_SLOTS, |slot| {
+        crate::provider::name::read_provider_system_secret("codex", slot)
+            .map_err(|_error| OAuthError::SystemStoreUnavailable)
+    })
+}
+
+pub fn store_oauth_tokens(
+    provider: &str,
+    config: &OAuthProviderConfig,
+    token: &OAuthTokenResponse,
+    now: u64,
+) -> Result<(), OAuthError> {
+    let service = crate::provider::name::provider_keychain_service(provider);
+    if config.is_codex() {
+        let retained = read_state(user_slots(config), |slot| {
+            oauth_keychain_secret(&service, slot)
+        })?;
+        return write_state(
+            user_slots(config),
+            &oauth_token_state(token, retained.as_ref(), now)?,
+            |slot, value| oauth_keychain_set(&service, slot, value),
+        );
+    }
+    oauth_keychain_set(&service, config.access_account(), &token.access_token)?;
+    if let Some(refresh) = token
+        .refresh_token
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        oauth_keychain_set(&service, config.refresh_account(), refresh)?;
+    }
+    Ok(())
+}
+
+pub fn resolve_codex_with(
+    config: &OAuthProviderConfig,
+    stored: &mut Option<OAuthTokenState>,
+    now: u64,
+    exchange: impl FnOnce(&str) -> Result<OAuthTokenResponse, OAuthError>,
+) -> Result<Option<OAuthCredential>, OAuthError> {
+    if !config.is_codex() || !valid_config(config) {
+        return Err(OAuthError::InvalidConfig);
+    }
+    let Some(state) = stored.as_mut() else {
+        return Ok(None);
+    };
+    if state.access_token.trim().is_empty() || state.account_id.trim().is_empty() {
+        return Err(OAuthError::InvalidToken);
+    }
+    if oauth_needs_refresh(state.expires_at, now) {
+        if state.refresh_token.trim().is_empty() {
+            return Err(OAuthError::InvalidToken);
+        }
+        *state = oauth_token_state(
+            &exchange(&oauth_refresh_token_form(config, &state.refresh_token)?)?,
+            Some(state),
+            now,
+        )?;
+    }
+    Ok(Some((state.access_token.clone(), state.account_id.clone())))
+}
+
+pub fn resolve_codex_system() -> Result<Option<OAuthCredential>, OAuthError> {
+    let config = codex_oauth_config();
+    resolve_stored_codex(&config, read_codex_system()?, store_codex_system)
+}
+
+pub fn resolve_oauth_credential(
+    provider: &str,
+    config: &OAuthProviderConfig,
+) -> Result<Option<OAuthCredential>, OAuthError> {
+    let service = crate::provider::name::provider_keychain_service(provider);
+    let slots = user_slots(config);
+    let stored = read_state(slots, |slot| oauth_keychain_secret(&service, slot))?;
+    resolve_stored_codex(config, stored, |state| {
+        write_state(slots, state, |slot, value| {
+            oauth_keychain_set(&service, slot, value)
+        })
+    })
+}
+
+fn resolve_stored_codex(
+    config: &OAuthProviderConfig,
+    mut stored: Option<OAuthTokenState>,
+    store: impl FnOnce(&OAuthTokenState) -> Result<(), OAuthError>,
+) -> Result<Option<OAuthCredential>, OAuthError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_error| OAuthError::Transport)?
+        .as_secs();
+    let credential = resolve_codex_with(config, &mut stored, now, |form| {
+        exchange_oauth_token(config, form)
+    })?;
+    if let Some(state) = stored {
+        store(&state)?;
+    }
+    Ok(credential)
+}
+
+#[must_use]
+pub fn oauth_needs_refresh(expires_at: u64, now: u64) -> bool {
+    expires_at <= now.saturating_add(300)
+}
+
+pub fn oauth_account_id(token: &str) -> Option<String> {
+    let value = jwt(token)?;
+    value
+        .get("chatgpt_account_id")
+        .or_else(|| value.pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
 pub fn resolve_oauth_access_token(
     provider: &str,
     config: &OAuthProviderConfig,
@@ -194,148 +557,75 @@ pub fn resolve_oauth_access_token(
     )
 }
 
-/// Testable OAuth token resolution core.
-pub fn resolve_oauth_access_token_with<E, K>(
+pub fn resolve_oauth_access_token_with(
     provider: &str,
     config: &OAuthProviderConfig,
-    env_lookup: E,
-    keychain_lookup: K,
-) -> Result<Option<String>, OAuthError>
-where
-    E: Fn(&str) -> Result<String, env::VarError>,
-    K: FnOnce(&str, &str) -> Result<Option<String>, OAuthError>,
-{
-    if provider.is_empty() || has_ascii_control(provider) || !is_valid_oauth_config(config) {
+    env_lookup: impl Fn(&str) -> Result<String, env::VarError>,
+    keychain_lookup: impl FnOnce(&str, &str) -> Result<Option<String>, OAuthError>,
+) -> Result<Option<String>, OAuthError> {
+    if provider.is_empty() || controls(provider) || !valid_config(config) {
         return Err(OAuthError::InvalidConfig);
     }
     let name = crate::provider_oauth_access_token_env_name(provider);
-    if !is_valid_env_key(&name) {
-        return Err(OAuthError::InvalidConfig);
-    }
     match env_lookup(&name) {
-        Ok(value) if !value.trim().is_empty() => return Ok(Some(value)),
-        Ok(_value) => {}
-        Err(env::VarError::NotPresent) => {}
-        Err(env::VarError::NotUnicode(_value)) => return Err(OAuthError::InvalidConfig),
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+        Ok(_) | Err(env::VarError::NotPresent) => keychain_lookup(
+            &crate::provider::name::provider_keychain_service(provider),
+            config.access_account(),
+        ),
+        Err(env::VarError::NotUnicode(_)) => Err(OAuthError::InvalidConfig),
     }
-    keychain_lookup(&oauth_keychain_service(provider), config.access_account())
 }
 
-#[must_use]
-pub(crate) fn oauth_keychain_service(provider: &str) -> String {
-    format!("cortexfs:{provider}")
-}
-
-pub(crate) fn oauth_keychain_secret(
-    service: &str,
-    account: &str,
-) -> Result<Option<String>, OAuthError> {
+pub fn oauth_keychain_secret(service: &str, account: &str) -> Result<Option<String>, OAuthError> {
     let entry = match keyring::Entry::new(service, account) {
         Ok(entry) => entry,
         Err(keyring::Error::NoDefaultStore) => return Ok(None),
-        Err(_error) => return Err(OAuthError::KeychainUnavailable),
+        Err(_) => return Err(OAuthError::KeychainUnavailable),
     };
-    let secret = match entry.get_password() {
-        Ok(secret) => secret,
-        Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(_error) => return Err(OAuthError::KeychainUnavailable),
-    };
-    if secret.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(secret))
+    match entry.get_password() {
+        Ok(secret) if !secret.is_empty() => Ok(Some(secret)),
+        Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => Err(OAuthError::KeychainUnavailable),
     }
 }
 
-pub(crate) fn is_valid_oauth_config(config: &OAuthProviderConfig) -> bool {
-    !config.client_id.is_empty()
-        && !config.auth_url.is_empty()
-        && !config.token_url.is_empty()
-        && !config.redirect_uri.is_empty()
+fn oauth_keychain_set(service: &str, account: &str, secret: &str) -> Result<(), OAuthError> {
+    keyring::Entry::new(service, account)
+        .and_then(|entry| entry.set_password(secret))
+        .map_err(|_error| OAuthError::KeychainUnavailable)
+}
+
+fn valid_config(config: &OAuthProviderConfig) -> bool {
+    [
+        &config.client_id,
+        &config.auth_url,
+        &config.token_url,
+        &config.redirect_uri,
+    ]
+    .into_iter()
+    .all(|value| !value.is_empty() && !controls(value))
         && !config
             .scopes
             .iter()
-            .any(|scope| scope.trim().is_empty() || has_ascii_control(scope))
+            .any(|scope| scope.trim().is_empty() || controls(scope))
 }
 
-pub(crate) fn has_ascii_control(value: &str) -> bool {
+fn controls(value: &str) -> bool {
     value.bytes().any(|byte| byte.is_ascii_control())
 }
 
-pub(crate) fn is_valid_pkce_verifier(verifier: &str) -> bool {
-    (43..=128).contains(&verifier.len())
-        && verifier
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~'))
+fn jwt(token: &str) -> Option<serde_json::Value> {
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(token.split('.').nth(1)?)
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
-pub(crate) fn is_valid_env_key(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
+fn form(pairs: &[(&str, &str)]) -> String {
+    let Ok(mut url) = reqwest::Url::parse("http://localhost") else {
+        return String::new();
     };
-    (first == b'_' || first.is_ascii_alphabetic())
-        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
-}
-
-pub(crate) fn append_query(base: &str, pairs: &[(&str, String)]) -> String {
-    let separator = if base.contains('?') { '&' } else { '?' };
-    format!("{base}{separator}{}", form_urlencoded_owned(pairs))
-}
-
-pub(crate) fn form_urlencoded(pairs: &[(&str, &str)]) -> String {
-    pairs
-        .iter()
-        .map(|&(key, value)| format!("{}={}", url_encode(key), url_encode(value)))
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
-pub(crate) fn form_urlencoded_owned(pairs: &[(&str, String)]) -> String {
-    pairs
-        .iter()
-        .map(|pair| format!("{}={}", url_encode(pair.0), url_encode(&pair.1)))
-        .collect::<Vec<_>>()
-        .join("&")
-}
-
-pub(crate) fn url_encode(value: &str) -> String {
-    let mut output = String::new();
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            output.push(char::from(byte));
-        } else {
-            let _ignored = write!(output, "%{byte:02X}");
-        }
-    }
-    output
-}
-
-pub(crate) fn base64_url_no_pad(bytes: &[u8]) -> String {
-    let mut output = String::new();
-    for chunk in bytes.chunks(3) {
-        let Some(&b0) = chunk.first() else {
-            continue;
-        };
-        let b1 = chunk.get(1).copied().unwrap_or(0);
-        let b2 = chunk.get(2).copied().unwrap_or(0);
-        output.push(base64_url_char(usize::from(b0 >> 2)));
-        output.push(base64_url_char(usize::from(
-            ((b0 & 0b0000_0011) << 4) | (b1 >> 4),
-        )));
-        if chunk.len() > 1 {
-            output.push(base64_url_char(usize::from(
-                ((b1 & 0b0000_1111) << 2) | (b2 >> 6),
-            )));
-        }
-        if chunk.len() > 2 {
-            output.push(base64_url_char(usize::from(b2 & 0b0011_1111)));
-        }
-    }
-    output
-}
-
-pub(crate) fn base64_url_char(index: usize) -> char {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    char::from(TABLE.get(index).copied().unwrap_or(b'A'))
+    url.query_pairs_mut().extend_pairs(pairs.iter().copied());
+    url.query().unwrap_or_default().replace('+', "%20")
 }
