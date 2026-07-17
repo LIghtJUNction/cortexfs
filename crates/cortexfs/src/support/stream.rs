@@ -25,7 +25,7 @@ pub enum EventStreamIssue {
     EventNotObject(usize),
     /// Event does not have a `type` string.
     MissingType(usize),
-    /// Event `type` is not in the stable v1 event set.
+    /// Event `type` is not in the stable event set.
     UnknownType { line: usize, event_type: String },
     /// Event type requires a string `run` field.
     MissingRun(usize),

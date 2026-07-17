@@ -1,467 +1,451 @@
 ---
-/id/: /using/-/cortexfs/
-/title/: 日常使用
-/sidebar_label/: 日常使用
+id: using-cortexfs
+title: Daily Usage
+sidebar_label: Daily Usage
 ---
 
-# 日常使用
+# Daily Usage
 
-/CortexFS/ 的日常体验应该像 /Unix/：先发现对象，再读取状态，需要执行时就执行文件或连
-/socket/。
+The everyday CortexFS experience should feel like Unix: discover objects, read
+state, then execute files or connect to sockets when you need work done.
 
-## 找到可用对象
+## Find Available Objects
 
-```/bash/
-/ctx/ /ls/ /model/
-/ctx/ /ls/ /agent/
-/ctx/ /ls/ /tool/
+```bash
+ctx ls model
+ctx ls agent
+ctx ls tool
 ```
 
-常见对象形状：
+Common object shapes:
 
-```/text/
-//ctx///model///main/
-//ctx///model///debug///echo/
-//ctx///agent///coder/
-//ctx///agent///coder/./sock/
-//ctx///tool///fs/./read/
+```text
+/ctx/model/main
+/ctx/model/debug/echo
+/ctx/agent/coder
+/ctx/agent/coder.sock
+/ctx/tool/fs.read
 ```
 
-同名文件负责执行，同名 `./sock/` 负责有状态 /JSONL/ 交互，同名 `./d//` 目录保存小型控制
-文件。
+The named file executes work, the matching `.sock` handles stateful JSONL
+interaction, and the matching `.d/` directory stores small control files.
 
-部分部署中，`//ctx///agent//</name/>./sock/` 是到运行时目录的 /owner/-/authorized/ /symlink/；也有部署保留系统侧直接的 /socket/ 节点。两种形态都可用于 `/agent/./sh/`/`/nc/ -/U/` 探测，但要按实际运行态观察结果判断。
+On some deployments, `/ctx/agent/<name>.sock` is an owner-authorized symlink
+to a user runtime socket; on some system deployments it may also be a direct
+socket node. Treat both as valid implementation forms and probe with `nc -U` or
+`readlink` according to what the mount currently exposes.
 
-## 直接调用模型
+## Call A Model Directly
 
-调试时可以先用 /echo/ 模型：
+Start with the echo model while debugging:
 
-```/bash/
-//ctx///model///debug///echo/ "/hello/ /cortex/"
-/echo/ "/summarize/ /this/ /file/" | //ctx///model///main/
+```bash
+/ctx/model/debug/echo "hello cortex"
+echo "summarize this file" | /ctx/model/main
 ```
 
-切换默认模型时改 `//ctx///model///main/` /alias/，而不是在根目录新增 /provider/ 专用入口。
-初始 /canonical/ /aliases/ 是 `/main/`、兼容用 `/helper/`，以及 `/fast/`、`/reason/`、`/code/`、
-`/vision/`；能力 /alias/ 无匹配模型时安全回落到当前 `/main/` /target/。
-默认参考树提供 `/architect/`、`/coder/`、`/reviewer/` 三个 /agent/：`/architect/` 负责规划和协调，
-`/coder/` 是可修改 `//workspace/` 源码的实现 /agent/，`/reviewer/` 负责独立审查。
+Change the `/ctx/model/main` alias when you want a different default model.
+Do that by changing the alias instead of adding provider-specific root entries.
+The reference tree provides `architect`, `coder`, `reviewer`, and `worker`.
+`architect` is the root planning and coordination agent; `coder`, `reviewer`,
+and `worker` use `agent:architect` as their parent.
 
-启动默认编程 `/coder/`：
+Bootstrap and inspect the reference source with:
 
-```/bash/
-/ctx/ /bootstrap/
-/ctx/ /bootstrap/ --/check/
-/ctx/ /bootstrap/ --/dry/-/run/
-/ctx/ /agent/ /start/ /coder/ --/session/ /default/
-/ctx/ /agent/ /chat/ /coder/
+```bash
+ctx bootstrap
+ctx bootstrap --check
+ctx bootstrap --dry-run
 ```
 
-`/ctx/ /bootstrap/` 会物化 /reference/ /source/，并按需写入
-`/bin///cortexfs/./bootstrap/./json/`。已退役的 `/base/` / `/worker/` / `/executor/`
-缺少可证明整个控制树归属和未漂移的旧 /manifest/，因此 /bootstrap/ 只报告并保留给人工处理，
-不会自动删除。`--/check/` / `--/dry/-/run/` 不写盘；成功 /bootstrap/ 后再次 `--/check/`
-应为 /clean/。
+`ctx bootstrap` writes `bin/cortexfs.bootstrap.json` only when the schema,
+tree version, managed-agent list, or required migrations need refresh. Retired
+`base` and `executor` objects are reported but retained for
+manual review because old installations have no manifest proving ownership and
+full control-tree integrity. A successful bootstrap makes the next `--check`
+clean.
 
-改源码前可以先审计它看到的状态、工具和 /prompt/：
+The default `coder.d/system.md` treats `coder` as the parent integrator:
+independent implementation work should be a delegated `react` node in
+`context/plan.json`, delegated nodes that omit `agent` use `worker`, and
+delegated nodes that omit `session` use the current parent session name.
+Advance one schedule step with:
 
-```/bash/
-/ctx/ /agent/ /status/ /coder/
-/ctx/ /agent/ /tools/ /coder/
-/ctx/ /agent/ /prompt/ /coder/
+```bash
+ctx schedule status home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule advance home/1000/agent/coder/session/default/context/plan.json --done plan
+ctx schedule claim home/1000/agent/coder/session/default/context/plan.json work-123
+ctx schedule result home/1000/agent/coder/session/default/context/plan.json work-123 done "implemented"
+ctx agent wait coder work-123 --session default
 ```
 
-`/ctx/ /agent/ /chat/` 是人类聊天界面；`/tsh/` 是 /agent/ /terminal/ 里的工具 /shell/，不是同一个界面。
-默认 `/coder/./d///system/./md/` 要求它先确认适用的项目规则和当前工作区状态，用
-`/fs/./replace/` 做小范围源码修改、运行可用的 /format///static/-/check///lint///test/ 命令、检查 /diff/，
-最后汇报改动文件和真实验证命令。完整路径可以用 `/npm/ /run/ /bootstrap/-/coder/:/smoke/` 复测。
+`status` reads the plan, child table, and delegated worker
+`agent/<name>`, `agent/<name>.d/model`, and `life`; it does not invent
+`main`/`owned` defaults when the delegated backing agent is missing, then prints
+`node<TAB>kind<TAB>agent<TAB>child<TAB>session<TAB>model<TAB>life<TAB>state`. `advance`
+materializes ready child handoffs, `claim` moves a materialized child from
+`pending` to `active`, and `result` writes the terminal child result under
+`context/child/<child>/`. Command output includes the parent ref plus the child
+`agent`, `session`, `model`, `life`, `handoff.md`, `result.md`, and
+`refs.jsonl` ABI paths so neither parent nor worker has to guess coordination
+state. `agent wait` is a non-blocking waitpid-shaped reader: while the child is
+`pending` or `active` it fails, and once the child is `done`, `error`, or
+`cancelled` it prints
+`child<TAB>status<TAB>agent<TAB>session<TAB>model<TAB>life` followed by
+`result.md`. These commands do not start background listeners, polling loops,
+or a second submission entrance.
+Provider secrets are not written into model files or `.d/` control
+directories; provider adapters resolve API keys from provider environment
+candidates first (if set), then the CortexFS system secret store
+(`/var/lib/cortexfs/secrets/provider/<provider>/<slot>`). If a required
+credential is absent, the model is considered `unconfigured`.
 
-父 /agent/ 的 `/context///plan/./json/` 可以把独立工作拆给 /child/ /agent/；/delegated/ 节点省略
-`/agent/` 时默认使用 `/worker/`，省略 `/session/` 时默认使用当前父 /session/ 名。单步推进计划使用：
+Install file-based presets for common providers first:
 
-```/bash/
-/ctx/ /schedule/ /status/ /home///1000///agent///coder///session///default///context///plan/./json/ --/done/ /plan/
-/ctx/ /schedule/ /advance/ /home///1000///agent///coder///session///default///context///plan/./json/ --/done/ /plan/
-/ctx/ /schedule/ /claim/ /home///1000///agent///coder///session///default///context///plan/./json/ /work/-/123/
-/ctx/ /schedule/ /result/ /home///1000///agent///coder///session///default///context///plan/./json/ /work/-/123/ /done/ "实现完成"
-/ctx/ /agent/ /wait/ /coder/ /work/-/123/ --/session/ /default/
+```bash
+ctx provider preset list
+ctx provider preset show google
+ctx provider preset install codex
+ctx provider preset install openai
+ctx provider preset install anthropic
+ctx provider preset install google
 ```
 
-`/status/` 只读取 /plan/、/child/ 状态表和 /delegated/ /worker/ 的 `/agent//</name/>`、`/agent//</name/>./d///model/`、`/life/`、`/parent/`，
-/delegated/ /backing/ /agent/ 缺失时不会伪造 `/main/`/`/owned/` 默认值；
-并输出 `/node/</TAB/>/kind/</TAB/>/agent/</TAB/>/child/</TAB/>/session/</TAB/>/model/</TAB/>/life/</TAB/>/role/</TAB/>/child_parent/</TAB/>/state/`；`/advance/` 只物化 /ready/ /child/ /handoff/，`/claim/` 只把已物化的 /child/ 从 `/pending/`
-标记为 `/active/`，`/result/` 只把 /child/ 的终态结果写回父 /session/ 的
-`/context///child//</child/>/`。命令输出会带上 /parent/ /ref/，以及 /child/ 的
-`/agent/`、`/session/`、`/model/`、`/life/`、`/role/`、`/child_parent/`、`/handoff/./md/`、`/result/./md/`、`/refs/./jsonl/` /ABI/ 路径，父 /agent/ 和 /worker/ 不需要猜测交接文件位置、模型、角色或生命周期。
-`/agent/ /wait/` 是非阻塞的父进程式结果读取：/child/ 还在 `/pending/`/`/active/` 时失败，进入
-`/done/`/`/error/`/`/cancelled/` 后输出 `/child/</TAB/>/status/</TAB/>/agent/</TAB/>/session/</TAB/>/model/</TAB/>/life/</TAB/>/role/`
-和 `/result/./md/`，并分别以 /0/、/1/、/130/ 作为进程退出码。
-它们都不启动后台监听、轮询或第二套提交入口。
-供应商密钥不写进 /model/ 文件、`./d//` 控制目录或进程环境变量。/provider/ /adapter/ 优先读取
-约定的 /provider/ 环境变量候选（若设置），再从 /root/-/owned/ /CortexFS/ /system/ /secret/ /store/
-读取 /API/ /key/；用户不需要在 /provider/ /JSON/ 里手写环境变量名。长期凭据写入：
-`//var///lib///cortexfs///secrets///provider//</provider/>/</slot/>`，通过 /CLI/ 管理：
+Canonical provider names are `openai`, `anthropic`, and `google`. `codex` is
+an alias for the `openai` preset; `gemini` is an alias for the `google` preset.
+After installing `codex`, models are still projected under the canonical
+`/ctx/model/openai/<model>` path. CortexFS does not add a
+`/ctx/model/codex` namespace.
 
-```/bash/
-/printf/ '%/s/\/n/' '/your/-/secret/' | /sudo/ /ctx/ /provider/ /secret/ /set/ /local/
-/ctx/ /provider/ /secret/ /status/ /local/
+Model proxying is not an agent and is not written into provider JSON. The
+single global route table is:
+
+```text
+/ctx/model/route
 ```
 
-常见 /provider/ 可以先安装文件化 /preset/：
+This file decides both transport and key slot. Multiple providers, multiple
+models, and multiple keys for one provider all route through this table:
 
-```/bash/
-/ctx/ /provider/ /preset/ /list/
-/ctx/ /provider/ /preset/ /show/ /google/
-/ctx/ /provider/ /preset/ /install/ /codex/
-/ctx/ /provider/ /preset/ /install/ /openai/
-/ctx/ /provider/ /preset/ /install/ /anthropic/
-/ctx/ /provider/ /preset/ /install/ /google/
+```text
+group(proxy) -> http(http://127.0.0.1:8080/v1), key(office)
+group(local-socket) -> unix(/run/user/1000/cortexfs/proxy/openai.sock), key(local)
+
+dip(198.51.100.45) -> direct
+# dip(203.0.113.43) -> JP
+domain(bestproxy.com) -> proxy
+pname(NetworkManager, systemd-resolved, dnsmasq) -> must_direct
+dip(geoip:private) -> direct
+dip(geoip:cn) -> direct
+domain(geosite:cn) -> direct
+model(embedding-*) -> local-socket
+fallback: proxy
 ```
 
-规范名称是 `/openai/`、`/anthropic/`、`/google/`。`/codex/` 是 `/openai/` /preset/ 的别名；
-`/gemini/` 是 `/google/` /preset/ 的别名。安装 `/codex/` 后模型仍投影在规范路径
-`//ctx///model///openai//</model/>` 下，不新增 `//ctx///model///codex/` 命名空间。
+`key(office)` means another credential slot for the same provider and
+selects `/var/lib/cortexfs/secrets/provider/<provider>/office`.
+Without `key(...)`, CortexFS uses the `default` slot.
 
-模型代理不做成 /agent/，也不写进 /provider/ /JSON/。全局唯一路由表是：
+## Manage Agents
 
-```/text/
-//ctx///model///route/
+`ctx agent` is the thin client for the current ABI. Creating, starting, and
+stopping agents still goes through ordinary tools or file ABI; it does not add
+a workflow entrance:
+
+```bash
+ctx agent new reviewer --model openai/gpt-5.6 --tool fs.read
+ctx agent new reviewer --label reviewer_t --shared project-a:read --mount /work /work ro
+ctx agent new --from .cortexfs/agents/reviewer/agent.yaml
+ctx agent apply reviewer --from reviewer
+ctx agent start reviewer --session default
+ctx agent status reviewer
+ctx agent ps
+ctx agent stop reviewer
 ```
 
-这个文件同时决定 /transport/ 和 /key/ /slot/。多个 /provider/、多个模型、同一个 /provider/ 的
-多个 /key/，都通过这一张表分配：
+Host-side `agent.yaml` files (also `agent.yml` and `agent.json`) are
+authoring inputs. `ctx agent new --from` and `ctx agent apply --from`
+validate and materialize them into `agent/<name>.d/*`; runtime authority
+continues to come only from the discrete control files. A short `--from NAME`
+searches `.cortexfs/agents` and `~/.config/cortexfs/agents`.
 
-```/text/
-/group/(/proxy/) -> /http/(/http/:///127/./0/./0/./1/:/8080///v1/), /key/(/office/)
-/group/(/local/-/socket/) -> /unix/(//run///user///1000///cortexfs///proxy///openai/./sock/), /key/(/local/)
-
-/dip/(/198/./51/./100/./45/) -> /direct/
-# /dip/(/203/./0/./113/./43/) -> /JP/
-/domain/(/bestproxy/./com/) -> /proxy/
-/pname/(/NetworkManager/, /systemd/-/resolved/, /dnsmasq/) -> /must_direct/
-/dip/(/geoip/:/private/) -> /direct/
-/dip/(/geoip/:/cn/) -> /direct/
-/domain/(/geosite/:/cn/) -> /direct/
-/model/(/embedding/-*) -> /local/-/socket/
-/fallback/: /proxy/
+```yaml
+schema: cortexfs.agent.profile/v1
+name: reviewer
+description: code review agent
+instructions: Review diffs carefully.
+model: openai/gpt-5.6
+tools: [fs.read]
+parent: agent:architect
 ```
 
-`/key/(/office/)` 表示同一个 /provider/ 的另一个凭据槽，对应 /system/ /secret/ /store/ 的
-`//var///lib///cortexfs///secrets///provider//</provider/>//office/`。不写 `/key/(...)` 就用
-`/default/` 槽。
+`ctx agent new` prefers `/ctx/tool/agent.create`; if that tool is absent, host
+`ctx` creates the standard `agent/<name>.d/*` control files and
+`home/<uid>/agent/<name>/` skeleton. `ctx agent start` starts the explicit
+runtime; once the terminal socket is reachable it writes
+`agent/<name>.d/status=ready` and appends an `agent.start` event to
+`agent/<name>.d/log`. `ctx agent stop` prefers `/ctx/tool/agent.stop`; if that
+tool is absent it writes `agent/<name>.d/status=dead`, clears `pid`, and
+appends an `agent.stop` event. `ctx agent status` and `ctx agent ps` only read
+ordinary `agent/<name>.d/*` control files. `agent status` keeps the first line
+as the status value, then prints `model=...`, `life=...`, `parent=...`,
+`children=...`, `pid=...`, `uid=...`, `gid=...`, `groups=...`, `root=...`, and
+`cwd=...`. `children=...` counts direct children whose effective state is not
+`dead`; `ready` or `busy` children with stale numeric pids are excluded the
+same way as `ctx agent ps`.
+Non-default models and non-`owned` lifecycles are visible in `ctx agent ps`.
+`ctx agent env NAME` prints the sandbox environment derived by
+`ctx agent start`, and `ctx agent children NAME` shows parent-side child state
+plus the backing worker `parent_session`, `model`, `life`, `status`, and `pid`.
 
-本地聚合 /API/ 或 /IP/ 地址 /endpoint/ 必须显式配置稳定 /provider/ 名，不要让地址字面量成为
-`//ctx///model//</provider/>` 路径：
+## Submit Images And Other Files
 
-```/json/
-{
-  "/name/": "/local/",
-  "/base_url/": "/http/:///127/./0/./0/./1/:/8317///v1/",
-  "/default_model/": "/gpt/-/5/./6/",
-  "/enabled/": /true/,
-  "/formats/": ["/openai/./chat/", "/openai/./responses/"]
-}
+For images, PDFs, audio, archives, or other binary material, submit a path
+reference instead of putting bytes into the prompt. CortexFS keeps the file
+itself in workspace or shared space visible to the agent; the conversation only
+describes the task and the path.
+
+When you start an agent from the current directory, that directory is mounted as
+`/workspace` by default:
+
+```bash
+ctx agent start coder --session default
+ctx send coder "Analyze /workspace/assets/screenshot.png and summarize UI issues"
 ```
 
-对应模型路径是 `//ctx///model///local///gpt/-/5/./6/`。密钥写入
-`/service/=/cortexfs/:/local/ /account/=/default/`；不需要在 /provider/ /JSON/ 里写明文密钥。
+Use explicit mounts when you need tighter visibility:
 
-## 管理 /agent/
+```bash
+ctx agent start coder --session image-review \
+  --no-default-workspace \
+  --mount "$PWD/assets" /input ro \
+  --mount "$PWD/docs" /docs ro \
+  --cwd /docs
 
-`/ctx/ /agent/` 是当前 /ABI/ 的薄客户端。创建、启动和停止 /agent/ 仍然走普通 /tool/ 或文件
-/ABI/，不引入新的 /workflow/ 入口：
-
-```/bash/
-/ctx/ /agent/ /new/ /reviewer/ --/model/ /openai///gpt/-/5/./6/ --/tool/ /fs/./read/
-/ctx/ /agent/ /new/ /reviewer/ --/label/ /reviewer_t/ --/shared/ /project/-/a/:/read/ --/mount/ //work/ //work/ /ro/
-/ctx/ /agent/ /new/ --/from/ ./cortexfs///agents///reviewer///agent/./yaml/
-/ctx/ /agent/ /new/ --/from/ ./cortexfs///agents///reviewer/
-/ctx/ /agent/ /new/ --/from/ /reviewer/
-/ctx/ /agent/ /apply/ /reviewer/ --/from/ /reviewer/
-/ctx/ /agent/ /start/ /reviewer/ --/session/ /default/
-/ctx/ /agent/ /status/ /reviewer/
-/ctx/ /agent/ /ps/
-/ctx/ /agent/ /stop/ /reviewer/
+ctx send coder --session image-review "Inspect /input/screenshot.png and use /docs/DESIGN.md"
 ```
 
-/Host/ 侧用 **`/agent/./yaml/`**（也接受 `/agent/./yml/` / `/agent/./json/`）声明 /agent/ 行为，再通过
-`/ctx/ /agent/ /new/ --/from/` / `/ctx/ /agent/ /apply/ --/from/` **物化**为 `/agent//</name/>./d//*`。
-运行时只读 `./d//*`；`/agent/./yaml/` 不是 /live/ 控制面。
+Use shared space when multiple agents or sessions need the same material:
 
-约定布局：
-
-```/text/
-./cortexfs///agents//</name/>//agent/./yaml/
-~/./config///cortexfs///agents//</name/>//agent/./yaml/
-# 兼容：./cortexfs///agents//</name/>./yaml/
+```bash
+mkdir -p "$(ctx path shared project-a)/input"
+cp screenshot.png "$(ctx path shared project-a)/input/"
+ctx agent new reviewer --shared project-a:read
+ctx send reviewer "Inspect /ctx/shared/project-a/input/screenshot.png"
 ```
 
-`--/from/` 解析：
+This keeps large files out of message history. Context records paths,
+summaries, and refs; reading image bytes, extracting text, rendering thumbnails,
+or calling a vision model happens lazily through a visible tool.
 
-```/text/
---/from/ /path///to///agent/./yaml/     直接读该文件
---/from/ /path///to///dir/            读 /dir///agent/./yaml/
---/from/ </name/>                 在 ./cortexfs///agents/ 与 ~/./config///cortexfs///agents/ 下查找
+## Watch And Attach Terminals
+
+`ctx agent start` mounts the caller's current directory at `/workspace` inside
+the sandbox by default, then starts `ctxterm -> tsh` from `/workspace`. If the
+caller directory contains `.git`, `.git` is additionally over-mounted read-only
+at `/workspace/.git`. The agent's `HOME` is the sandbox's own `/home/agent`, so
+shell configuration and caches are not written into the project directory:
+
+```bash
+ctx agent start coder --session default
+ctx agent watch coder --session default
+ctx agent attach coder --session default
 ```
 
-支持 `/schema/: /cortexfs/./agent/./profile///v1/`，以及微软 /AgentSchema/ 子集
-（`/name/` / `/description/` / `/instructions/` / `/model/`；`/kind/: /hosted/` 容器类会拒绝）。
-/CLI/ 参数覆盖 /profile/ 字段。
+The terminal socket lives at:
 
-示例 `./cortexfs///agents///reviewer///agent/./yaml/`：
-
-```/yaml/
-/schema/: /cortexfs/./agent/./profile///v1/
-/name/: /reviewer/
-/description/: /code/ /review/ /agent/
-/instructions/: |
-  /Review/ /diffs/ /carefully/.
-/model/: /openai///gpt/-/5/./6/
-/tools/:
-  - /fs/./read/
-/parent/: /agent/:/architect/
+```text
+/ctx/home/<uid>/agent/<agent>/session/<session>/terminal/main.sock
 ```
 
-`/ctx/ /agent/ /new/` 优先调用 `//ctx///tool///agent/./create/`；如果该 /tool/ 不存在，/host/ 侧
-`/ctx/` 会创建标准 `/agent//</name/>./d//*` 控制文件和 `/home//</uid/>//agent//</name/>/`
-/skeleton/。`/ctx/ /agent/ /start/` 直接启动显式 /runtime/；/terminal/ /socket/ 可达后会把
-`/agent//</name/>./d///status/` 写为 `/ready/`，并向 `/agent//</name/>./d///log/` 追加
-`/agent/./start/` 事件，启动输出会显示 `/model/`、`/life/` 和 `/role/`。`/ctx/ /agent/ /stop/` 优先调用 `//ctx///tool///agent/./stop/`，如果该 /tool/
-不存在则把 `/agent//</name/>./d///status/` 写为 `/dead/`、清空 `/pid/`，并追加 `/agent/./stop/`
-事件。`/ctx/ /agent/ /status/` 和 `/ctx/ /agent/ /ps/` 只读取普通 `/agent//</name/>./d//*` 控制文件；
-`/agent/ /status/` 第一行仍是状态值，后续显示 `/model/=...`、`/life/=...`、`/role/=...`、`/parent/=...`、
-`/children/=...`、`/pid/=...` 和 `/ppid/=...`，并继续显示 `/uid/=...`、`/gid/=...`、`/groups/=...`、`/root/=...`、`/cwd/=...`
-这些 /Linux/ 身份和路径字段；`/parent/=...` 使用和 `/agent/ /ps/` 相同的规范化 /parent/ /ref/，包含可选
-`/session/`/`/run/`；`/children/=...` 只统计 /effective/ 状态不是 `/dead/` 的直接 /child/，
-记录了 /stale/ 数字 /pid/ 的 `/ready/`/`/busy/` /child/ 会和 `/ctx/ /agent/ /ps/` 一样被排除；非默认模型会在进程树里显示为 `/model/=...`，非 `/owned/`
-生命周期会显示为 `/life/=...`，/worker/-/role/ /agent/ 会显示为 `/role/=/worker/`。`/ctx/ /agent/ /env/ /NAME/` 打印 `/ctx/ /agent/ /start/` 派生出的沙箱环境，便于检查 /worker/ 实际获得的
-`/CTX_AGENT/`、`/CTX_AGENT_ROLE/`、`/CTX_AGENT_MODEL/`、`/CTX_AGENT_LIFE/`、`/CTX_AGENT_ROOT_PATH///CWD/`、`/CTX_AGENT_UID///GID///GROUPS/`、`/CTX_PATH/`、`/HOME/` 等变量。`/ctx/ /agent/ /children/ /NAME/` 从父 /session/ 的
-/child/ 表读取任务状态，并同时显示 /backing/ /worker/ 的 `/parent_session/`、`/parent_run/`、`/model/`、
-`/life/`、`/role/`、`/status/`、`/ppid/` 和 `/pid/`，方便按父进程视角检查 /worker/。
+The FUSE-visible path may be a symlink to
+`/run/user/<uid>/cortexfs/terminal/.../main.sock`; older installs may also
+point to `/run/cortexfs/terminal/.../main.sock`. `watch` is read-only; `attach`
+connects your stdin to the terminal.
 
-## 提交图片和其他文件
+Control the sandbox explicitly when needed:
 
-给 /agent/ 图片、/PDF/、音频、压缩包或其他二进制材料时，推荐提交“路径引用”，不要把文件内容
-塞进 /prompt/。/CortexFS/ 的思路是：文件本体留在 /agent/ 可见的 /workspace/ 或 /shared/ /space/，
-对话里只描述任务和路径。
-
-当前目录启动 /agent/ 时会默认挂载为 `//workspace/`：
-
-```/bash/
-/ctx/ /agent/ /start/ /coder/ --/session/ /default/
-/ctx/ /send/ /coder/ "请分析 //workspace///assets///screenshot/./png/，总结界面问题"
+```bash
+ctx agent start coder --session review \
+  --no-default-workspace \
+  --mount "$PWD" /workspace rw \
+  --mount "$PWD/docs" /docs ro \
+  --cwd /workspace
 ```
 
-需要显式控制可见目录时：
+## Use The Tool Shell
 
-```/bash/
-/ctx/ /agent/ /start/ /coder/ --/session/ /image/-/review/ \
-  --/no/-/default/-/workspace/ \
-  --/mount/ "$/PWD///assets/" //input/ /ro/ \
-  --/mount/ "$/PWD///docs/" //docs/ /ro/ \
-  --/cwd/ //docs/
+`tsh` is the CortexFS tool shell, not a host shell. Standalone human `tsh`
+resolves commands in this order:
 
-/ctx/ /send/ /coder/ --/session/ /image/-/review/ "请查看 //input///screenshot/./png/，并参考 //docs///DESIGN/./md/"
+```text
+1. CTX_HOME/.tshrc line CTX_PATH=...
+2. process CTX_PATH
+3. default /ctx/tool:/ctx/home/<uid>/tool
 ```
 
-需要让多个 /agent/ 或多次会话共享同一批材料时，放到 /shared/ /space/：
+Inside an agent terminal, `tsh` uses the process `CTX_PATH` that the agent
+runtime derives from policy, mounts, and uid/gid. User `.tshrc` does not
+override that authorization path.
 
-```/bash/
-/mkdir/ -/p/ "$(/ctx/ /path/ /shared/ /project/-/a/)//input/"
-/cp/ /screenshot/./png/ "$(/ctx/ /path/ /shared/ /project/-/a/)//input//"
-/ctx/ /agent/ /new/ /reviewer/ --/shared/ /project/-/a/:/read/
-/ctx/ /send/ /reviewer/ "请检查 //ctx///shared///project/-/a///input///screenshot/./png/"
+`.tshrc` is a data file, not shell syntax:
+
+```text
+CTX_PATH=/ctx/tool:/ctx/home/1000/tool
 ```
 
-这样做的好处是：大文件不进入消息历史；上下文里只记录路径、摘要和引用；真正读取图片、
-抽取文本、生成缩略图或调用视觉模型，由可见 /tool/ 在需要时完成。
+Useful checks:
 
-## 观察和接入 /agent/ 终端
-
-`/ctx/ /agent/ /start/` 默认把调用者当前目录挂载到 /sandbox/ 内的 `//workspace/`，并从
-`//workspace/` 启动 `/ctxterm/ -> /tsh/`。如果调用者当前目录包含 `./git/`，`./git/` 会被
-额外覆盖挂载到 `//workspace//./git/` 只读。/agent/ 的 `/HOME/` 是沙箱自己的
-`//home///agent/`，不会把 /shell/ 配置和缓存写进项目目录：
-
-```/bash/
-/ctx/ /agent/ /start/ /coder/ --/session/ /default/
-/ctx/ /agent/ /watch/ /coder/ --/session/ /default/
-/ctx/ /agent/ /attach/ /coder/ --/session/ /default/
+```bash
+tsh --list
+tsh which fs.read
+tsh help fs.read
 ```
 
-底层终端 /socket/ 位于：
+When invoking tools directly, prefer doing it from the agent terminal through
+`tsh`, so CortexFS can apply agent policy, mounts, uid/gid, and `CTX_PATH`
+together.
 
-```/text/
-//ctx///home//</uid/>//agent//</agent/>//session//</session/>//terminal///main/./sock/
+## Use agent.sh
+
+The repository still includes `agent.sh` as a shell frontend:
+
+```bash
+install -m 0755 agent.sh/agent.sh ~/.local/bin/agent.sh
+agent.sh --help
+agent.sh coder
+agent.sh coder "summarize this repository"
+agent.sh --chat coder
+agent.sh --attach coder
+agent.sh --watch coder
+agent.sh --session default coder "inspect the failing test"
+agent.sh --resume coder
 ```
 
-/FUSE/ 路径可以是指向 `//run///user//</uid/>//cortexfs///terminal//...//main/./sock/` 的 /symlink/；旧安装
-也可能指向 `//run///cortexfs///terminal//...//main/./sock/`。`/watch/` 只读；`/attach/` 会把你的
-/stdin/ 接入终端。
+`agent.sh coder` opens the chat UI through
+`ctx agent chat coder --session default`. With prompt arguments, it forwards one
+message to `ctx agent send coder --session default`. Use
+`agent.sh --watch coder` to observe the agent terminal, and `agent.sh --attach
+coder` only when you want to enter `ctxterm -> tsh`. `agent.sh` does not keep a
+private chat database.
 
-需要精确控制 /sandbox/ 时：
+## Installed Multi-Turn Smoke
 
-```/bash/
-/ctx/ /agent/ /start/ /coder/ --/session/ /review/ \
-  --/no/-/default/-/workspace/ \
-  --/mount/ "$/PWD/" //workspace/ /rw/ \
-  --/mount/ "$/PWD///docs/" //docs/ /ro/ \
-  --/cwd/ //workspace/
+After installation, the minimal multi-turn smoke should use the existing
+session ABI instead of adding a test entrance:
+
+```bash
+ctx bootstrap
+ctx agent start coder --session default --cwd /workspace
+ctx agent send coder --session default "round one: read the current task"
+ctx agent send coder --session default "round two: continue from the previous turn"
+ctx agent history coder --session default
+ctx agent output coder --session default
 ```
 
-## 使用 /tool/ /shell/
+This path checks `agent/<agent>.sock`, `messages.jsonl`, `latest.md`, current
+session selection, and prompt-history injection. Durable conversation facts
+stay in `/ctx/home/<uid>/agent/<agent>/session/<session>/messages.jsonl`;
+`ctx agent prompt` is only for inspecting the prompt that would be sent to the
+model, not a substitute for a live socket conversation.
 
-`/tsh/` 是 /CortexFS/ /tool/ /shell/，不是 /host/ /shell/。/standalone/ /human/ `/tsh/` 解析命令的顺序是：
+When handing independent implementation work to the spark worker, the parent
+first materializes the handoff with `ctx schedule advance`, then gives the
+worker the emitted `model=`, `life=`, `plan=`, `handoff=`, `result=`, and
+`refs=` fields. The worker writes back through the same
+`ctx schedule claim/result` path; do not add a queue, poller, or second
+coordination file.
 
-```/text/
-/1/. /CTX_HOME//./tshrc/ 里的 /CTX_PATH/=...
-/2/. 进程环境 /CTX_PATH/
-/3/. 默认 //ctx///tool/://ctx///home//</uid/>//tool/
+## Customize Agents
+
+User-editable system prompts live at:
+
+```text
+/ctx/agent/<agent>.d/system.md
+/ctx/agent/<agent>.d/prompt.template.md
 ```
 
-/agent/ /terminal/ 里的 `/tsh/` 使用 /agent/ /runtime/ 按 /policy/、/mount/、/uid///gid/ 生成的进程
-`/CTX_PATH/`，不会让用户 `./tshrc/` 覆盖这条授权路径。
+For example:
 
-`./tshrc/` 是数据文件，不执行 /shell/ 语法：
-
-```/text/
-/CTX_PATH/=//ctx///tool/://ctx///home///1000///tool/
+```bash
+ctx cat agent/coder.d/system.md
+ctx set agent/coder.d/system.md "You are a careful Rust coding agent."
+ctx cat agent/coder.d/prompt.template.md
+ctx agent prompt coder
 ```
 
-常用检查：
+`system.md` only defines persona and working style. `prompt.template.md`
+defines how that content is combined with rules, skill metadata, tool
+injection, history context, and the runtime contract into the first system
+message visible to the model. Template variables include `{{agent}}`,
+`{{current_time_unix}}`, `{{agent_instructions}}`, `{{rules}}`, `{{skills}}`,
+`{{tool_injection}}`, `{{history_messages}}`, and `{{runtime_contract}}`.
 
-```/bash/
-/tsh/ --/list/
-/tsh/ /which/ /fs/./read/
-/tsh/ /help/ /fs/./read/
+`ctx agent prompt <agent>` prints the runtime system prompt that CortexFS can
+currently render. Use it to inspect the template, agent instructions,
+discoverable AGENTS.md rules, bounded skill metadata, and runtime contract. At
+real model-call time, tool injection and history context are still filled by
+the runtime according to the context window.
+
+The skill list only injects `name`, `description`, and the `SKILL.md` path.
+Full `SKILL.md` content is read only after a skill is selected. Skill metadata
+may use at most 2% of the context window; when the window size is unknown, the
+hard cap is 8,000 characters. Over budget, descriptions are shortened first;
+if still over budget, some skills are omitted and the prompt includes a
+warning.
+
+When an agent run builds its prompt, CortexFS writes a best-effort load
+snapshot into that agent's private session directory (same text as
+`{{rules}}` / `{{skills}}`; snapshot write never blocks the run):
+
+```bash
+cat /ctx/home/$(id -u)/agent/coder/session/default/AGENTS.md
+cat /ctx/home/$(id -u)/agent/coder/session/default/SKILLS.md
 ```
 
-直接执行 /tool/ 时，推荐从 /agent/ /terminal/ 里使用 `/tsh/`，这样 /CortexFS/ 可以同时应用
-/agent/ /policy/、挂载、/uid///gid/ 和 `/CTX_PATH/`。
+- `AGENTS.md`: effective merged rules (global + project layers)
+- `SKILLS.md`: skill metadata only (`name` / `description` / `path`), not full
+  `SKILL.md` bodies
 
-## 使用 /agent/./sh/
+These prompt files do not grant authority. The default native tool remains
+`tsh`; other tools must be discovered, loaded, pinned, and called through
+`tsh`. Effective authority is still decided by `agent/<agent>.d/policy`,
+`path`, `mount`, Linux uid/gid, and mode bits.
 
-仓库仍然包含 `/agent/./sh/` 作为 /shell/ 前端：
+## Use Shared Space
 
-```/bash/
-/install/ -/m/ /0755/ /agent/./sh///agent/./sh/ ~/./local///bin///agent/./sh/
-/agent/./sh/ --/help/
-/agent/./sh/ /coder/
-/agent/./sh/ /coder/ "/summarize/ /this/ /repository/"
-/agent/./sh/ --/chat/ /coder/
-/agent/./sh/ --/attach/ /coder/
-/agent/./sh/ --/watch/ /coder/
-/agent/./sh/ --/session/ /default/ /coder/ "/inspect/ /the/ /failing/ /test/"
-/agent/./sh/ --/resume/ /coder/
+Shared space is an ordinary file directory. Use it for project material, task
+input, and results exchanged between agents:
+
+```bash
+ctx path shared project-a
+cd "$(ctx path shared project-a)"
 ```
 
-`/agent/./sh/ /coder/` 会通过 `/ctx/ /agent/ /chat/ /coder/ --/session/ /default/` 进入 /agent/ 聊天界面。带 /prompt/
-参数时由脚本转发到 `/ctx/ /agent/ /send/ /coder/ --/session/ /default/ ...` 发送一条消息。需要旁观 /agent/ /terminal/ 时使用 `/agent/./sh/ --/watch/ /coder/`；需要进入
-/terminal/、看到 `/ctxterm/ -> /tsh/` 时，才使用 `/agent/./sh/ --/attach/ /coder/`。
-`/agent/./sh/` 不保存私有聊天数据库。
+Whether an agent can read or write a shared directory is decided by its view,
+mounts, policy, Linux uid/gid, and mode bits.
 
-## 安装后多轮 /smoke/
+## Inspect History
 
-安装后的最小验证应该走现有 /session/ /ABI/，而不是另建测试入口：
-
-```/bash/
-/ctx/ /bootstrap/
-/ctx/ /agent/ /start/ /coder/ --/session/ /default/ --/cwd/ //workspace/
-/ctx/ /agent/ /send/ /coder/ --/session/ /default/ "第一轮：读取当前任务"
-/ctx/ /agent/ /send/ /coder/ --/session/ /default/ "第二轮：基于上一轮继续"
-/ctx/ /agent/ /history/ /coder/ --/session/ /default/
-/ctx/ /agent/ /output/ /coder/ --/session/ /default/
+```bash
+ctx agent history coder
+ctx agent output coder
+ctx agent trajectory coder
 ```
 
-这条路径同时验证了 `/agent//</agent/>./sock/`、`/messages/./jsonl/`、`/latest/./md/`、当前
-/session/ 选择和 /prompt/ /history/ 注入。多轮对话的持久事实仍在
-`//ctx///home//</uid/>//agent//</agent/>//session//</session/>//messages/./jsonl/`；`/ctx/ /agent/ /prompt/`
-只用于检查将要发送给模型的渲染结果，不替代真实 /socket/ 对话。
+Without `--session`, these commands use `session/index/current` first and fall
+back to `default`. That means inspecting the current/latest session does not
+need a separate `latest` subcommand.
 
-需要把独立实现任务交给 /spark/ /worker/ 时，父 /agent/ 先用 `/ctx/ /schedule/ /advance/` 物化
-/handoff/，然后把输出里的 `/model/=`、`/life/=`、`/role/=`、`/parent/=`、`/child_parent/=`、`/plan/=`、`/handoff/=`、`/result/=`、`/refs/=`
-交给 /worker/。/worker/ 只用同一套 `/ctx/ /schedule/ /claim///result/` 写回结果；不要新增队列、轮询器或第二套
-/coordination/ 文件。
+The underlying history lives at:
 
-## 自定义 /agent/
-
-/agent/ 的用户可编辑系统提示词在：
-
-```/text/
-//ctx///agent//</agent/>./d///system/./md/
-//ctx///agent//</agent/>./d///prompt/./template/./md/
+```text
+/ctx/home/<uid>/agent/<agent>/session/
 ```
 
-例如：
-
-```/bash/
-/ctx/ /cat/ /agent///coder/./d///system/./md/
-/ctx/ /set/ /agent///coder/./d///system/./md/ "/You/ /are/ /a/ /careful/ /Rust/ /coding/ /agent/."
-/ctx/ /cat/ /agent///coder/./d///prompt/./template/./md/
-/ctx/ /agent/ /prompt/ /coder/
-```
-
-`/system/./md/` 只定义 /persona/ 和工作风格；`/prompt/./template/./md/` 决定它和规则、/skill/
-元数据、工具注入内容、历史消息上下文、/runtime/ /contract/ 如何组成模型看到的第一条
-/system/ /message/。模板变量包括 `{{/agent/}}`、`{{/current_time_unix/}}`、
-`{{/agent_instructions/}}`、`{{/rules/}}`、`{{/skills/}}`、`{{/tool_injection/}}`、
-`{{/history_messages/}}`、`{{/runtime_contract/}}`。
-
-`/ctx/ /agent/ /prompt/ </agent/>` 会打印 /CortexFS/ 当前可渲染出的 /runtime/ /system/ /prompt/。
-它用于检查模板、/agent/ /instruction/、当前可发现的 /AGENTS/./md/ 规则、/bounded/ /skill/ 元数据
-和 /runtime/ /contract/ 是否按预期组合；真实模型调用时，工具注入和历史上下文仍由运行时按
-上下文窗口动态补齐。
-
-/Skill/ 列表只注入 `/name/`、`/description/`、`/SKILL/./md/` 路径；完整 `/SKILL/./md/` 只在选中
-/skill/ 后读取。/Skill/ 元数据最多占上下文窗口 /2/%；上下文大小未知时硬上限为 /8/,/000/
-字符。超限时先缩短 /description/，仍超限则省略部分 /skill/ 并在 /prompt/ 中给出警告。
-
-/agent/ 实际跑起来组 /prompt/ 时，会把当次加载快照写到该 /agent/ 的 /private/ /session/ 目录
-（与 `{{/rules/}}` / `{{/skills/}}` 同源，/best/-/effort/，不阻塞运行）：
-
-```/bash/
-/cat/ //ctx///home//$(/id/ -/u/)//agent///coder///session///default///AGENTS/./md/
-/cat/ //ctx///home//$(/id/ -/u/)//agent///coder///session///default///SKILLS/./md/
-```
-
-- `/AGENTS/./md/`：全局 + 项目等叠加后的 /effective/ 规则正文
-- `/SKILLS/./md/`：仅技能元数据（/name/ / /description/ / /path/），不含完整 `/SKILL/./md/`
-
-这些 /prompt/ 文件不授予权限。/agent/ 默认 /native/ /tool/ 仍只有 `/tsh/`；其他工具必须通过
-`/tsh/` 发现、加载、/pin/ 和调用。实际权限仍由 `/agent//</agent/>./d///policy/`、`/path/`、
-`/mount/`、/Linux/ /uid///gid/ 和 /mode/ /bits/ 决定。
-
-## 使用共享空间
-
-共享空间是普通文件目录，适合放项目材料、任务输入和 /agent/ 之间要交换的结果：
-
-```/bash/
-/ctx/ /path/ /shared/ /project/-/a/
-/cd/ "$(/ctx/ /path/ /shared/ /project/-/a/)"
-```
-
-/agent/ 是否能读写某个共享目录，由它的 /view/、/mount/、/policy/、/Linux/ /uid///gid/ 和 /mode/
-/bits/ 决定。
-
-## 查看历史
-
-```/bash/
-/ctx/ /agent/ /history/ /coder/
-/ctx/ /agent/ /output/ /coder/
-/ctx/ /agent/ /trajectory/ /coder/
-```
-
-不传 `--/session/` 时，`/ctx/ /agent/ /history/` 和 `/ctx/ /agent/ /output/` 会先使用
-`/session///index///current/`，不存在时退回 `/default/`。因此查看当前//latest/ /session/ 不需要
-单独的 `/latest/` 子命令。
-
-底层历史在：
-
-```/text/
-//ctx///home//</uid/>//agent//</agent/>//session//
-```
-
-原始 /history/ 是持久事实；/context/ 是可重建工作集。压缩上下文不能销毁原始消息。
-`/ctx/ /agent/ /trajectory/` 把当前 /session/ 的 `/messages/./jsonl/` + `/events/./jsonl/`
-投影成经过校验的 /ATIF/ /JSON/ 并输出到 /stdout/；/tool/ /call/、/observation/ 和 /usage/ 按 /run///id/
-关联，不创建第二套 /history/。
+Raw history is durable fact; context is a rebuildable working set. Compacting
+context must not destroy raw messages.
+`ctx agent trajectory` validates and prints an ATIF JSON projection of the
+selected session's `messages.jsonl` and `events.jsonl`. Tool calls,
+observations, and usage remain associated by run and call id; the command does
+not create a second history store.

@@ -63,7 +63,7 @@ pub fn default_agent_model_for_name(agent_name: &str) -> &'static str {
     }
 }
 
-/// Returns whether an agent name uses the v1 worker/executor role convention.
+/// Returns whether an agent name uses the stable worker/executor role convention.
 #[must_use]
 pub fn is_worker_agent_name(agent_name: &str) -> bool {
     matches!(agent_name, "executor" | "worker") || is_dedicated_worker_agent_name(agent_name)
@@ -79,7 +79,7 @@ pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto
 pub(crate) const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
 pub(crate) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";
 
-/// Stable semantic model capability words in the v1 ABI.
+/// Stable semantic model capability words in the ABI.
 pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
     "chat",
     "stream",
@@ -94,7 +94,7 @@ pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
     "rerank",
 ];
 
-/// Provider/API-format-private capability words forbidden in the v1 ABI.
+/// Provider/API-format-private capability words forbidden in the ABI.
 pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
     "openai_responses",
     "anthropic_messages",
@@ -131,7 +131,7 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "meta.json",
 ];
 
-/// Optional agent control files recognized by v1.
+/// Optional agent control files recognized by the stable ABI.
 ///
 /// Entries may overlap [`AGENT_CONTROL_FILES`] to preserve canonical bootstrap materialization.
 pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &[
@@ -184,7 +184,7 @@ pub const TOOL_CONTROL_FILES: &[&str] = &[
     "log",
 ];
 
-/// Required durable files in a v1 agent session directory.
+/// Required durable files in an agent session directory.
 pub const SESSION_REQUIRED_FILES: &[&str] = &[
     "messages.jsonl",
     "events.jsonl",
@@ -228,14 +228,14 @@ pub const CHILD_RESULT_REQUIRED_DIRS: &[&str] = &["artifact"];
 pub const SHARED_QUEUE_REQUIRED_DIRS: &[&str] =
     &["inbox", "pending", "lease", "claimed", "done", "failed"];
 
-/// Maximum v1 JSONL socket request frame size.
+/// Maximum JSONL socket request frame size.
 pub const MAX_SOCKET_FRAME_BYTES: usize = 1024 * 1024;
 
-/// Maximum payload accepted by the v1 local FUSE projection for one small write.
-pub const MAX_FUSE_V1_SMALL_WRITE_BYTES: usize = 64 * 1024;
+/// Maximum payload accepted by the local FUSE projection for one small write.
+pub const MAX_FUSE_SMALL_WRITE_BYTES: usize = 64 * 1024;
 
-/// Maximum payload returned by the v1 local FUSE projection for one small read.
-pub const MAX_FUSE_V1_SMALL_READ_BYTES: u64 = 1024 * 1024;
+/// Maximum payload returned by the local FUSE projection for one small read.
+pub const MAX_FUSE_SMALL_READ_BYTES: u64 = 1024 * 1024;
 
-/// Stable inode id for the v1 `/ctx` root in a FUSE adapter.
-pub const FUSE_V1_ROOT_INODE: u64 = 1;
+/// Stable inode id for the `/ctx` root in a FUSE adapter.
+pub const FUSE_ROOT_INODE: u64 = 1;

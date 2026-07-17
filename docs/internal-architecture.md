@@ -177,9 +177,12 @@ L8  bin/*                process entrypoints; may use L0–L7, not the reverse
 **Size policy (clippy-aligned):**
 
 - New functions: ≤ 120 lines unless an `#[expect]` cites an issue.
-- 新增非测试文件上限为 120 行（源代码治理硬约束）；生产文件超 120 行的债务需在后续提交中持续减少。
-- `scripts/source-budget.sh` 是 all-Rust 与 production Rust 基线、目标和 ratchet 的唯一可执行权威；不要在文档中复制快照数字。
-- Ratchet 禁止把生产代码移入 tests、压成单行、使用源码路径/include tricks 或新增薄片文件规避预算。
+- New non-test files are hard-capped at 120 lines; any debt over 120 lines in production
+  files must be reduced in follow-up commits.
+- `scripts/source-budget.sh` is the single executable authority for all-Rust and production
+  Rust baselines, targets, and ratchets; do not copy snapshot numbers into docs.
+- Ratchet forbids moving production code into `tests`, one-lining, source-path/include
+  tricks, or adding thin wrapper files to evade the budget.
 - Do not add `too_many_lines` expects on greenfield code.
 
 ### 4.3 Import policy

@@ -25,7 +25,7 @@ fn reference_tree_bootstrap_repairs_control_file_modes() {
     assert!(fs::write(&status, "idle\n").is_ok());
     assert!(fs::set_permissions(&status, fs::Permissions::from_mode(0o600)).is_ok());
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let mode = fs::metadata(status).map(|metadata| metadata.permissions().mode() & 0o777);
     assert!(matches!(mode, Ok(0o644)));
@@ -44,7 +44,7 @@ fn reference_tree_bootstrap_replaces_tshrc_symlink_without_chmodding_target() {
     assert!(fs::create_dir_all(ctx_home(&root)).is_ok());
     assert!(symlink(&victim_target, &tshrc).is_ok());
 
-    let bootstrapped = ensure_v1_reference_tree(&root);
+    let bootstrapped = ensure_reference_tree(&root);
     assert!(bootstrapped.is_ok());
 
     let target_mode =
@@ -65,7 +65,7 @@ fn reference_tree_bootstrap_rejects_symlinked_home_directory_without_writing_tar
     assert!(symlink(&outside, root.join("home").join("1000")).is_ok());
 
     assert_eq!(
-        ensure_v1_reference_tree(&root),
+        ensure_reference_tree(&root),
         Err(ReferenceTreeError::CannotCreate)
     );
     assert!(!outside.join(".tshrc").exists());
@@ -82,7 +82,7 @@ fn reference_tree_bootstrap_rejects_symlinked_home_parent_without_writing_target
     assert!(symlink(&outside, root.join("home")).is_ok());
 
     assert_eq!(
-        ensure_v1_reference_tree(&root),
+        ensure_reference_tree(&root),
         Err(ReferenceTreeError::CannotCreate)
     );
     assert!(!outside.join("1000").exists());
@@ -113,7 +113,7 @@ fn reference_tree_bootstrap_does_not_chown_descendants_through_symlink() {
     assert!(fs::create_dir_all(ctx_home(&root)).is_ok());
     assert!(symlink(&victim, &attacker_link).is_ok());
 
-    let bootstrapped = ensure_v1_reference_tree(&root);
+    let bootstrapped = ensure_reference_tree(&root);
     assert!(bootstrapped.is_ok());
 
     let metadata = ok!(fs::symlink_metadata(&victim_target));
@@ -125,7 +125,7 @@ fn reference_tree_bootstrap_does_not_chown_descendants_through_symlink() {
 fn reference_tree_model_exec_is_readonly_metadata() {
     let root = reference_tree("reference-tree-model-metadata");
     let projection =
-        FuseV1Projection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
 
     let metadata = projection.read_to_string("model/debug/echo");
     let metadata = ok!(metadata);
@@ -157,7 +157,7 @@ fn reference_tree_model_exec_is_readonly_metadata() {
 fn reference_tree_bootstrap_materializes_current_layout() {
     let root = clean_test_dir("reference-tree-current-layout");
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     assert_file_text(&root.join("agent").join("coder.d").join("model"), "main\n");
     let coder_system = ok!(fs::read_to_string(

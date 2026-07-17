@@ -1,5 +1,5 @@
 mod permission_tests {
-    use cortexfs::{FuseV1Attr, FuseV1FileType};
+    use cortexfs::{FuseAttr, FuseFileType};
     use fuser::{AccessFlags, Errno, OpenFlags};
 
     use super::super::{
@@ -19,9 +19,9 @@ mod permission_tests {
 
     #[test]
     fn access_error_checks_socket_write_access_with_mode_bits() {
-        let attr = FuseV1Attr::new(
+        let attr = FuseAttr::new(
             "agent/coder.sock".to_owned(),
-            FuseV1FileType::Socket,
+            FuseFileType::Socket,
             0,
             0o666,
         );
@@ -31,9 +31,9 @@ mod permission_tests {
 
     #[test]
     fn access_error_accepts_supplementary_group_bits() {
-        let attr = FuseV1Attr::with_owner(
+        let attr = FuseAttr::with_owner(
             "shared".to_owned(),
-            FuseV1FileType::Directory,
+            FuseFileType::Directory,
             0,
             0o750,
             0,
@@ -45,9 +45,9 @@ mod permission_tests {
 
     #[test]
     fn access_error_allows_model_route_write_access_to_projection() {
-        let attr = FuseV1Attr::with_owner(
+        let attr = FuseAttr::with_owner(
             "model/route".to_owned(),
-            FuseV1FileType::Regular,
+            FuseFileType::Regular,
             0,
             0o644,
             1000,
@@ -59,7 +59,7 @@ mod permission_tests {
 
     #[test]
     fn fuse_open_error_maps_readonly_truncate_on_directory_to_is_directory() {
-        let attr = FuseV1Attr::new("agent".to_owned(), FuseV1FileType::Directory, 0, 0o755);
+        let attr = FuseAttr::new("agent".to_owned(), FuseFileType::Directory, 0, 0o755);
         let flags = OpenFlags(nix::libc::O_RDONLY | nix::libc::O_TRUNC);
 
         assert_eq!(
@@ -70,9 +70,9 @@ mod permission_tests {
 
     #[test]
     fn fuse_open_error_maps_socket_open_to_no_device_or_address() {
-        let attr = FuseV1Attr::new(
+        let attr = FuseAttr::new(
             "agent/coder.sock".to_owned(),
-            FuseV1FileType::Socket,
+            FuseFileType::Socket,
             0,
             0o666,
         );
@@ -88,14 +88,14 @@ mod permission_tests {
 
     #[test]
     fn fuse_open_error_allows_model_route_write_open_to_projection() {
-        let attr = FuseV1Attr::new("model/route".to_owned(), FuseV1FileType::Regular, 0, 0o644);
+        let attr = FuseAttr::new("model/route".to_owned(), FuseFileType::Regular, 0, 0o644);
 
         assert!(fuse_open_error(&attr, OpenFlags(nix::libc::O_WRONLY)).is_none());
     }
 
     #[test]
     fn fuse_write_error_maps_directory_writes_to_is_directory() {
-        let attr = FuseV1Attr::new("agent".to_owned(), FuseV1FileType::Directory, 0, 0o755);
+        let attr = FuseAttr::new("agent".to_owned(), FuseFileType::Directory, 0, 0o755);
 
         assert_eq!(
             format!("{:?}", fuse_write_error(&attr)),
@@ -105,16 +105,16 @@ mod permission_tests {
 
     #[test]
     fn fuse_write_error_maps_non_control_writes_to_readonly_filesystem() {
-        let attr = FuseV1Attr::new("status".to_owned(), FuseV1FileType::Regular, 0, 0o444);
+        let attr = FuseAttr::new("status".to_owned(), FuseFileType::Regular, 0, 0o444);
 
         assert_readonly(fuse_write_error(&attr));
     }
 
     #[test]
     fn fuse_write_error_allows_writable_control_files_to_projection() {
-        let attr = FuseV1Attr::new(
+        let attr = FuseAttr::new(
             "agent/worker.d/model".to_owned(),
-            FuseV1FileType::Regular,
+            FuseFileType::Regular,
             0,
             0o644,
         );
@@ -124,9 +124,9 @@ mod permission_tests {
 
     #[test]
     fn fuse_open_and_write_reject_model_limit_mutation() {
-        let attr = FuseV1Attr::new(
+        let attr = FuseAttr::new(
             "model/local/custom.d/limit".to_owned(),
-            FuseV1FileType::Regular,
+            FuseFileType::Regular,
             0,
             0o444,
         );
@@ -137,9 +137,9 @@ mod permission_tests {
 
     #[test]
     fn fuse_open_and_write_allow_profile_control_files_to_projection() {
-        let attr = FuseV1Attr::new(
+        let attr = FuseAttr::new(
             "agent/worker.d/system.md".to_owned(),
-            FuseV1FileType::Regular,
+            FuseFileType::Regular,
             0,
             0o600,
         );
@@ -150,7 +150,7 @@ mod permission_tests {
 
     #[test]
     fn fuse_write_error_allows_model_route_control_file_to_projection() {
-        let attr = FuseV1Attr::new("model/route".to_owned(), FuseV1FileType::Regular, 0, 0o644);
+        let attr = FuseAttr::new("model/route".to_owned(), FuseFileType::Regular, 0, 0o644);
 
         assert!(fuse_write_error(&attr).is_none());
     }

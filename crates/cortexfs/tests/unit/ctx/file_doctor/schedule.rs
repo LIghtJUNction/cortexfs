@@ -134,7 +134,7 @@ fn file_check_validates_agent_schedule_plan_files() {
 #[test]
 fn schedule_advance_materializes_implicit_worker_handoff() {
     let root = clean_test_dir("ctx-schedule-advance-coder-worker");
-    let ensured = ensure_v1_reference_tree(&root);
+    let ensured = ensure_reference_tree(&root);
     assert!(ensured.is_ok());
     enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
@@ -583,7 +583,7 @@ fn schedule_result_rejects_invalid_backing_parent_without_recording() {
 #[test]
 fn schedule_status_reaps_active_child_when_worker_pid_is_stale() {
     let root = clean_test_dir("ctx-schedule-status-reaps-stale-worker");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
@@ -620,7 +620,7 @@ fn schedule_status_reaps_active_child_when_worker_pid_is_stale() {
 #[test]
 fn schedule_handoff_agent_model_rejects_invalid_model_reference() {
     let root = clean_test_dir("ctx-schedule-invalid-worker-model");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/model"), "../bad\n");
 
@@ -635,7 +635,7 @@ fn schedule_handoff_agent_model_rejects_invalid_model_reference() {
 #[test]
 fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
     let root = clean_test_dir("ctx-schedule-missing-worker-model");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
     assert!(fs::remove_file(root.join("agent/worker.d/model")).is_ok());
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
@@ -653,7 +653,7 @@ fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
 #[test]
 fn schedule_handoff_agent_rejects_invalid_lifecycle() {
     let root = clean_test_dir("ctx-schedule-handoff-invalid-life");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/life"), "detached\n");
 
@@ -668,7 +668,7 @@ fn schedule_handoff_agent_rejects_invalid_lifecycle() {
 #[test]
 fn schedule_handoff_agent_rejects_invalid_parent_ref() {
     let root = clean_test_dir("ctx-schedule-handoff-invalid-parent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
     write_text_file(&root.join("agent/worker.d/parent"), "session:default\n");
 
@@ -695,7 +695,7 @@ fn schedule_handoff_agent_model_requires_backing_agent_object() {
 #[test]
 fn schedule_status_uses_dash_model_for_local_nodes() {
     let root = clean_test_dir("ctx-schedule-status-local-model");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let session = fixture_path(
         &root,
         &["home", "1000", "agent", "coder", "session", "default"],

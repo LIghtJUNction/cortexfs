@@ -1,6 +1,6 @@
 # Root ABI
 
-Root ABI is frozen for v1.
+The root ABI is stable across rolling reference-tree updates.
 
 Stable root:
 
@@ -61,9 +61,9 @@ FUSE projection derived from its controls, policy, mounts, and Linux identity;
 it is not materialized by copying or symlinking tools into the durable user
 tree.
 
-## v1 Reference Tree
+## Stable Reference Tree
 
-This is the normative v1 shape. Concrete object names such as `debug/echo`,
+This is the normative stable shape. Concrete object names such as `debug/echo`,
 `openai/gpt-5.6`, `base`, `coder`, `reviewer`, `executor`, `worker`, `1000`, and
 `project-a` are examples of valid entries.
 
@@ -344,7 +344,7 @@ This is the normative v1 shape. Concrete object names such as `debug/echo`,
 `tool/<name>.d/origin` is an optional diagnostic file, not stable ABI. Strict
 clients must not depend on it.
 
-No other v1 root entries are stable ABI. These are explicitly not root
+No other root entries are stable ABI. These are explicitly not root
 directories:
 
 ```text

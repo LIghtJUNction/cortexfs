@@ -93,7 +93,7 @@ pub(super) fn assert_abi_class(path: &str, expected: &str) {
 
 pub(super) fn reference_tree(name: &str) -> TestDir {
     let root = clean_test_dir(name);
-    let result = ensure_v1_reference_tree(&root);
+    let result = ensure_reference_tree(&root);
     assert!(result.is_ok(), "{result:?}");
     root
 }
