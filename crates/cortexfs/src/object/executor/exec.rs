@@ -530,7 +530,7 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
         OsString::from("--unshare-pid"),
     ];
     args.extend(BWRAP_PROCESS_SETUP_ARGS.map(OsString::from));
-    args.extend(BWRAP_SYSTEM_LAYOUT_ARGS.map(OsString::from));
+    args.extend(bwrap_system_layout_args().into_iter().map(OsString::from));
     if !request.network_allowed {
         args.push(OsString::from("--unshare-net"));
     }
@@ -810,29 +810,17 @@ pub(crate) fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<OsString> {
 }
 
 pub(crate) fn bwrap_dir_args_for_parent(path: &str) -> Vec<OsString> {
-    let Some((parent, _name)) = path.rsplit_once('/') else {
-        return Vec::new();
-    };
-    if parent.is_empty() {
-        Vec::new()
-    } else {
-        bwrap_dir_args_for_chdir(parent)
-    }
+    crate::support::bwrap::dir_args_for_parent(path)
+        .into_iter()
+        .map(OsString::from)
+        .collect()
 }
 
 pub(crate) fn bwrap_dir_args_for_chdir(cwd: &str) -> Vec<OsString> {
-    let mut args = Vec::new();
-    if !cwd.starts_with('/') {
-        return args;
-    }
-    let mut path = String::new();
-    for component in cwd.split('/').filter(|component| !component.is_empty()) {
-        path.push('/');
-        path.push_str(component);
-        args.push(OsString::from("--dir"));
-        args.push(OsString::from(path.clone()));
-    }
-    args
+    crate::support::bwrap::dir_args_for_chdir(cwd)
+        .into_iter()
+        .map(OsString::from)
+        .collect()
 }
 
 pub(crate) fn run_agent_tool_process(
@@ -872,128 +860,29 @@ fn run_agent_tool_process_with_timeout_and_cancel(
         .process_group(0);
     let mut child =
         spawn_with_etxtbsy_retry(command).map_err(|error| ExecError::new(error.to_string()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| ExecError::new("cannot read tool stdout"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| ExecError::new("cannot read tool stderr"))?;
-    let stdout_reader =
-        thread::spawn(move || read_limited_bytes(stdout, MAX_AGENT_TOOL_OUTPUT_BYTES + 1));
-    let stderr_reader =
-        thread::spawn(move || read_limited_bytes(stderr, MAX_AGENT_TOOL_OUTPUT_BYTES + 1));
-    let mut stdout_reader = Some(stdout_reader);
-    let mut stderr_reader = Some(stderr_reader);
-    let mut stdout = None;
-    let mut stderr = None;
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if stdout.is_none()
-            && stdout_reader
-                .as_ref()
-                .is_some_and(thread::JoinHandle::is_finished)
-        {
-            let output = stdout_reader
-                .take()
-                .and_then(|reader| reader.join().ok())
-                .unwrap_or_default();
-            if output.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
-                terminate_process_group(&mut child);
-                let _ignored = child.wait();
-                if let Some(reader) = stderr_reader.take() {
-                    let _ignored = reader.join();
-                }
-                return Err(ExecError::new(format!(
-                    "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
-                )));
-            }
-            stdout = Some(output);
-        }
-        if stderr.is_none()
-            && stderr_reader
-                .as_ref()
-                .is_some_and(thread::JoinHandle::is_finished)
-        {
-            let output = stderr_reader
-                .take()
-                .and_then(|reader| reader.join().ok())
-                .unwrap_or_default();
-            if output.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
-                terminate_process_group(&mut child);
-                let _ignored = child.wait();
-                if let Some(reader) = stdout_reader.take() {
-                    let _ignored = reader.join();
-                }
-                return Err(ExecError::new(format!(
-                    "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
-                )));
-            }
-            stderr = Some(output);
-        }
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| ExecError::new(error.to_string()))?
-        {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            terminate_process_group(&mut child);
-            let _ignored = child.wait();
-            return Err(ExecError::new(format!(
-                "tool timed out after {}s",
-                timeout.as_secs()
-            )));
-        }
-        if cancelled() {
-            terminate_process_group(&mut child);
-            let _ignored = child.wait();
-            return Err(ExecError::new("tool cancelled"));
-        }
-        thread::sleep(Duration::from_millis(50));
-    };
-    terminate_process_group(&mut child);
-    let stdout = match stdout {
-        Some(output) => output,
-        None => {
-            collect_agent_tool_output_reader(stdout_reader.take(), AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT)?
-        }
-    };
-    let stderr = match stderr {
-        Some(output) => output,
-        None => {
-            collect_agent_tool_output_reader(stderr_reader.take(), AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT)?
-        }
-    };
-    if stdout.len() > MAX_AGENT_TOOL_OUTPUT_BYTES || stderr.len() > MAX_AGENT_TOOL_OUTPUT_BYTES {
-        return Err(ExecError::new(format!(
+    wait_capped_child_output(
+        &mut child,
+        CappedOutputWait {
+            max_output_bytes: MAX_AGENT_TOOL_OUTPUT_BYTES,
+            timeout,
+            capture_stderr: true,
+            drain_timeout: Some(AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT),
+            terminate_group_after_exit: true,
+        },
+        cancelled,
+    )
+    .map_err(|error| match error {
+        CappedOutputError::ExceededLimit => ExecError::new(format!(
             "tool output exceeds {MAX_AGENT_TOOL_OUTPUT_BYTES} bytes"
-        )));
-    }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
-    })
-}
-
-pub(crate) fn collect_agent_tool_output_reader(
-    reader: Option<thread::JoinHandle<Vec<u8>>>,
-    timeout: Duration,
-) -> Result<Vec<u8>, ExecError> {
-    let Some(reader) = reader else {
-        return Ok(Vec::new());
-    };
-    let deadline = Instant::now() + timeout;
-    while !reader.is_finished() {
-        if Instant::now() >= deadline {
-            return Err(ExecError::new(format!(
-                "tool output did not close within {}s",
-                timeout.as_secs()
-            )));
+        )),
+        CappedOutputError::TimedOut => {
+            ExecError::new(format!("tool timed out after {}s", timeout.as_secs()))
         }
-        thread::sleep(Duration::from_millis(10));
-    }
-    Ok(reader.join().unwrap_or_default())
+        CappedOutputError::Cancelled => ExecError::new("tool cancelled"),
+        CappedOutputError::DrainTimedOut => ExecError::new(format!(
+            "tool output did not close within {}s",
+            AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT.as_secs()
+        )),
+        CappedOutputError::Wait(error) => ExecError::new(error.to_string()),
+    })
 }

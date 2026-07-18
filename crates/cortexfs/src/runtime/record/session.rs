@@ -17,6 +17,7 @@ struct SessionPermissionReceipt {
     dev: u64,
     ino: u64,
     directory: bool,
+    file: fs::File,
 }
 
 #[derive(Debug)]
@@ -103,6 +104,7 @@ fn repair_agent_private_home_permissions(
             dev: metadata.dev(),
             ino: metadata.ino(),
             directory: true,
+            file,
         },
         uid,
         gid,
@@ -163,6 +165,7 @@ fn plan_session_permissions(
         dev: metadata.dev(),
         ino: metadata.ino(),
         directory: true,
+        file: root,
     });
     Ok(receipts)
 }
@@ -245,6 +248,7 @@ fn preflight_session(
             dev: metadata.dev(),
             ino: metadata.ino(),
             directory: directory_kind,
+            file,
         });
     }
     Ok(())
@@ -255,30 +259,44 @@ fn execute_permission_receipt(
     uid: u32,
     gid: u32,
 ) -> Result<(), String> {
-    let file = open_repair_path(&receipt.path, receipt.directory)?;
-    let metadata = file.metadata().map_err(|error| {
+    let held = receipt.file.metadata().map_err(|error| {
         format!(
             "cannot inspect session path {}: {error}",
             receipt.path.display()
         )
     })?;
-    if (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino)
-        || metadata.is_dir() != receipt.directory
-        || metadata.is_file() == receipt.directory
+    let visible = open_repair_path(&receipt.path, receipt.directory)?;
+    let visible_metadata = visible.metadata().map_err(|error| {
+        format!(
+            "cannot inspect session path {}: {error}",
+            receipt.path.display()
+        )
+    })?;
+    if (held.dev(), held.ino()) != (receipt.dev, receipt.ino)
+        || held.is_dir() != receipt.directory
+        || held.is_file() == receipt.directory
+        || (visible_metadata.dev(), visible_metadata.ino()) != (receipt.dev, receipt.ino)
+        || visible_metadata.is_dir() != receipt.directory
+        || visible_metadata.is_file() == receipt.directory
     {
         return Err(format!(
             "session path replacement conflict {}",
             receipt.path.display()
         ));
     }
-    fchown(&file, Some(Uid::from_raw(uid)), Some(Gid::from_raw(gid))).map_err(|error| {
+    fchown(
+        &receipt.file,
+        Some(Uid::from_raw(uid)),
+        Some(Gid::from_raw(gid)),
+    )
+    .map_err(|error| {
         format!(
             "cannot chown session path {}: {error}",
             receipt.path.display()
         )
     })?;
     fchmod(
-        &file,
+        &receipt.file,
         Mode::from_bits_truncate(if receipt.directory { 0o700 } else { 0o600 }),
     )
     .map_err(|error| {
@@ -287,7 +305,7 @@ fn execute_permission_receipt(
             receipt.path.display()
         )
     })?;
-    file.sync_all().map_err(|error| {
+    receipt.file.sync_all().map_err(|error| {
         format!(
             "cannot sync session path {}: {error}",
             receipt.path.display()

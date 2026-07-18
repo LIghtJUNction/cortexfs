@@ -148,29 +148,9 @@ fn agent_schedule_completion_rejects_unknown_local_completion_and_symlink_child_
 
 #[test]
 fn agent_schedule_completion_rejects_local_completion_for_delegated_node() {
-    let root = clean_test_dir("agent-schedule-completed-local-delegated");
-    let session = root.join("default");
-    create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:reviewer create\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let (_root, session, policy, schedule) = ok!(review_only_schedule_fixture(
+        "agent-schedule-completed-local-delegated"
+    ));
 
     let result = completed_agent_schedule_nodes_from_parent_context(
         &session,
@@ -197,29 +177,9 @@ fn agent_schedule_completion_rejects_local_completion_for_delegated_node() {
 
 #[test]
 fn agent_schedule_completion_rejects_done_status_from_conflicting_child_channel() {
-    let root = clean_test_dir("agent-schedule-completed-conflicting-child");
-    let session = root.join("default");
-    create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:reviewer create\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let (_root, session, policy, schedule) = ok!(review_only_schedule_fixture(
+        "agent-schedule-completed-conflicting-child"
+    ));
 
     assert_eq!(
         record_child_handoff_to_parent_context(
@@ -262,29 +222,9 @@ fn agent_schedule_completion_rejects_done_status_from_conflicting_child_channel(
 
 #[test]
 fn agent_schedule_completion_rejects_invalid_child_refs() {
-    let root = clean_test_dir("agent-schedule-completed-invalid-refs");
-    let session = root.join("default");
-    create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:reviewer create\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let (_root, session, policy, schedule) = ok!(review_only_schedule_fixture(
+        "agent-schedule-completed-invalid-refs"
+    ));
 
     assert_eq!(
         record_child_handoff_to_parent_context(

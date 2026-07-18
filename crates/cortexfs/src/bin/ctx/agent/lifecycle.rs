@@ -1,119 +1,21 @@
 use crate::*;
-use cortexfs::agent::stop::{TempCleanupEntry, TempCleanupPlan};
+use cortexfs::agent::stop::{TempCleanupPlan, execute_temp_cleanup, plan_temp_cleanup_paths};
 
 fn plan_temp_cleanup(root: &Path, name: &str) -> Result<TempCleanupPlan, CliError> {
-    let agent_root = root.join("agent");
-    preflight_cleanup_directory(&agent_root)?;
-
-    let mut entries = Vec::new();
-    for path in [
-        agent_object_path(root, name),
-        agent_socket_path(root, name)?,
-    ] {
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_dir() => {
-                return Err(CliError::unavailable(format!(
-                    "temp agent path is not a file or socket: {}",
-                    path.display()
-                )));
-            }
-            Ok(metadata) => entries.push(TempCleanupEntry {
-                path,
-                directory: false,
-                dev: metadata.dev(),
-                ino: metadata.ino(),
-                kind: metadata.mode() & libc::S_IFMT,
-            }),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(CliError::unavailable(format!(
-                    "cannot stat {}: {error}",
-                    path.display()
-                )));
-            }
-        }
-    }
-    plan_temp_cleanup_tree(&agent_control_dir(root, name), &mut entries)?;
-    Ok(TempCleanupPlan { entries })
-}
-
-fn plan_temp_cleanup_tree(
-    directory: &Path,
-    entries: &mut Vec<TempCleanupEntry>,
-) -> Result<(), CliError> {
-    preflight_cleanup_directory(directory)?;
-    for name in read_dir_names(directory)? {
-        let path = directory.join(name);
-        let metadata = fs::symlink_metadata(&path).map_err(|error| {
-            CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
-        })?;
-        if metadata.file_type().is_dir() {
-            plan_temp_cleanup_tree(&path, entries)?;
-        } else {
-            entries.push(TempCleanupEntry {
-                path,
-                directory: false,
-                dev: metadata.dev(),
-                ino: metadata.ino(),
-                kind: metadata.mode() & libc::S_IFMT,
-            });
-        }
-    }
-    let metadata = fs::symlink_metadata(directory).map_err(|error| {
-        CliError::unavailable(format!("cannot stat {}: {error}", directory.display()))
-    })?;
-    entries.push(TempCleanupEntry {
-        path: directory.to_path_buf(),
-        directory: true,
-        dev: metadata.dev(),
-        ino: metadata.ino(),
-        kind: metadata.mode() & libc::S_IFMT,
-    });
-    Ok(())
-}
-
-fn preflight_cleanup_directory(path: &Path) -> Result<(), CliError> {
-    let directory = open_plain_directory(path).map_err(|error| {
-        CliError::unavailable(format!("cannot open {}: {error}", path.display()))
-    })?;
-    let metadata = directory.metadata().map_err(|error| {
-        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
-    })?;
-    let fuse = cortexfs::support::plain::is_fuse(&directory).map_err(|error| {
-        CliError::unavailable(format!(
-            "cannot inspect filesystem for {}: {error}",
-            path.display()
-        ))
-    })?;
-    let uid = nix::unistd::Uid::effective().as_raw();
-    if uid != 0
-        && !fuse
-        && (metadata.uid() != uid || metadata.permissions().mode() & 0o300 != 0o300)
-    {
-        return Err(CliError::unavailable(format!(
-            "temp cleanup directory is not owner-writable: {}",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-fn execute_temp_cleanup(plan: TempCleanupPlan) -> Result<(), CliError> {
-    for entry in plan.entries {
-        let result = if entry.directory {
-            fs::remove_dir(&entry.path)
-        } else {
-            fs::remove_file(&entry.path)
-        };
-        result.map_err(|error| {
-            CliError::unavailable(format!("cannot remove {}: {error}", entry.path.display()))
-        })?;
-    }
-    Ok(())
+    let owner_uid = nix::unistd::Uid::effective().as_raw();
+    plan_temp_cleanup_paths(
+        owner_uid,
+        &root.join("agent"),
+        &agent_object_path(root, name),
+        &agent_socket_path(root, name)?,
+        &agent_control_dir(root, name),
+    )
+    .map_err(|error| CliError::unavailable(error.to_string()))
 }
 
 pub(crate) fn remove_temp_agent_object(root: &Path, child: &str) -> Result<(), CliError> {
     execute_temp_cleanup(plan_temp_cleanup(root, child)?)
+        .map_err(|error| CliError::unavailable(error.to_string()))
 }
 
 pub(crate) fn write_agent_control_plain(path: &Path, content: &str) -> Result<(), CliError> {

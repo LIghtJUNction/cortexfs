@@ -53,6 +53,8 @@ fn empty_dir_cleanup_refuses_replacement() -> TestResult {
     let (_root, receipt) = dir_fixture()?;
     fs::remove_dir(receipt.path())?;
     fs::create_dir_all(receipt.path())?;
+    let replacement = fs::symlink_metadata(receipt.path())?;
+    assert_ne!((replacement.dev(), replacement.ino()), receipt.child);
     assert_eq!(receipt.cleanup(), Err(ReceiptError::CleanupConflict));
     assert!(receipt.path().is_dir());
     Ok(())
@@ -125,6 +127,8 @@ fn cleanup_refuses_replacement_socket() -> TestResult {
     drop(listener);
     fs::remove_file(receipt.path())?;
     let _replacement = UnixListener::bind(receipt.path())?;
+    let replacement = fs::symlink_metadata(receipt.path())?;
+    assert_ne!((replacement.dev(), replacement.ino()), receipt.identity());
     assert_eq!(receipt.cleanup(), Err(SocketReceiptError::Cleanup));
     assert!(receipt.path().exists());
     Ok(())

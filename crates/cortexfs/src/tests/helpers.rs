@@ -1,8 +1,26 @@
 pub(super) fn unique_test_dir(name: &str) -> PathBuf {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
-    std::env::temp_dir().join(format!("cortexfs-{name}-{}-{nanos}", std::process::id()))
+    let mut hasher = DefaultHasher::new();
+    name.hash(&mut hasher);
+    std::env::temp_dir().join(format!(
+        "cortexfs-{:016x}-{:x}-{nanos:x}",
+        hasher.finish(),
+        std::process::id()
+    ))
+}
+
+#[test]
+fn test_directory_name_keeps_ci_socket_paths_short() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = unique_test_dir(&"long-test-name-".repeat(32));
+    let name = directory.file_name().unwrap_or_default();
+    let socket = Path::new("/tmp").join(name).join("agent/architect.sock");
+    assert!(socket.as_os_str().as_bytes().len() < 108);
 }
 
 pub(super) struct TestDir(PathBuf);

@@ -1,5 +1,4 @@
 use super::*;
-
 #[cfg(test)]
 static PROVIDER_REQUEST_ATTEMPTS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -50,6 +49,7 @@ pub(crate) fn start_curl_json_with_headers(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .map_err(|error| format!("cannot start curl: {error}"))?;
     let Some(mut stdin) = child.stdin.take() else {
@@ -194,7 +194,7 @@ pub(crate) fn provider_max_time_seconds() -> u64 {
         .unwrap_or(60)
 }
 pub(crate) fn cleanup_curl_child(child: &mut Child) {
-    let _ignored = child.kill();
+    crate::support::process::terminate_process_group(child);
     let _ignored = child.wait();
 }
 pub(crate) fn curl_config_quote(value: &str) -> Result<String, String> {
