@@ -393,13 +393,9 @@ pub fn child_handoff_receipt(path: &Path) -> Result<ChildHandoffReceipt, ChildCo
     })
 }
 
-/// Reads a terminal child status only from the exact receipt-bound channel.
-pub fn read_child_terminal_status(
+fn open_child_channel(
     receipt: &ChildHandoffReceipt,
-    expected_agent: &str,
-    expected_session: &str,
-) -> Result<ChildContextStatus, ChildContextRecordError> {
-    validate_child_context_names("terminal", expected_agent, expected_session)?;
+) -> Result<(fs::File, String, fs::File), ChildContextRecordError> {
     let parent_path = receipt
         .path
         .parent()
@@ -410,10 +406,11 @@ pub fn read_child_terminal_status(
         .path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or(ChildContextRecordError::CannotRecord)?;
+        .ok_or(ChildContextRecordError::CannotRecord)?
+        .to_owned();
     let child = nix::fcntl::openat(
         &parent,
-        name,
+        name.as_str(),
         nix::fcntl::OFlag::O_RDONLY
             | nix::fcntl::OFlag::O_DIRECTORY
             | nix::fcntl::OFlag::O_NOFOLLOW
@@ -428,6 +425,17 @@ pub fn read_child_terminal_status(
     if (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino) {
         return Err(ChildContextRecordError::CannotRecord);
     }
+    Ok((parent, name, child))
+}
+
+/// Reads a terminal child status only from the exact receipt-bound channel.
+pub fn read_child_terminal_status(
+    receipt: &ChildHandoffReceipt,
+    expected_agent: &str,
+    expected_session: &str,
+) -> Result<ChildContextStatus, ChildContextRecordError> {
+    validate_child_context_names("terminal", expected_agent, expected_session)?;
+    let (parent, name, child) = open_child_channel(receipt)?;
     for (file, expected) in [("agent", expected_agent), ("session", expected_session)] {
         let before =
             nix::sys::stat::fstatat(&child, file, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
@@ -459,8 +467,12 @@ pub fn read_child_terminal_status(
     .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     let after = nix::sys::stat::fstatat(&child, "status", nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let channel = nix::sys::stat::fstatat(&parent, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let channel = nix::sys::stat::fstatat(
+        &parent,
+        name.as_str(),
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
         || (channel.st_dev, channel.st_ino) != (receipt.dev, receipt.ino)
     {
@@ -735,34 +747,7 @@ fn finish_child_result_with_mode_hook(
     if !inspect_context_jsonl(ContextJsonlKind::Refs, refs_jsonl).is_ok() {
         return Err(ChildContextRecordError::InvalidRefs);
     }
-    let parent_path = receipt
-        .path
-        .parent()
-        .ok_or(ChildContextRecordError::CannotRecord)?;
-    let parent = open_plain_directory(parent_path)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let name = receipt
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ChildContextRecordError::CannotRecord)?;
-    let opened = nix::fcntl::openat(
-        &parent,
-        name,
-        nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map(fs::File::from)
-    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let metadata = opened
-        .metadata()
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    if (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino) {
-        return Err(ChildContextRecordError::CannotRecord);
-    }
+    let (parent, name, opened) = open_child_channel(receipt)?;
     let child_fd = match locked {
         Some(lease) => lease.child,
         None => nix::fcntl::Flock::lock(opened, nix::fcntl::FlockArg::LockExclusive)
@@ -770,7 +755,7 @@ fn finish_child_result_with_mode_hook(
     };
     let child_dir = &*child_fd;
     let mut lease = exclusive
-        .then(|| ChildPrivilegeLease::acquire(child_dir, &parent, name, receipt))
+        .then(|| ChildPrivilegeLease::acquire(child_dir, &parent, name.as_str(), receipt))
         .transpose()?;
     let operation = (|| {
         let field_receipts =
@@ -851,7 +836,7 @@ fn finish_child_result_with_mode_hook(
                 }
                 let channel = nix::sys::stat::fstatat(
                     &parent,
-                    name,
+                    name.as_str(),
                     nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
                 )
                 .map_err(|_error| ChildContextRecordError::CannotRecord)?;

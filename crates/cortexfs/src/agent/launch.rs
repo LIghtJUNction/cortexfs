@@ -852,20 +852,25 @@ pub fn cleanup_system_agent_alias(source: &Path, agent: &str) -> io::Result<bool
     )
 }
 
+fn open_alias_entry(path: &Path) -> io::Result<(fs::File, &str)> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let parent_dir = open_owned_alias_parent(parent)?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    Ok((parent_dir, name))
+}
+
 fn cleanup_exact_socket_alias(
     visible_socket: &Path,
     runtime_socket: &Path,
     owner: (u32, u32),
     mode: u32,
 ) -> io::Result<bool> {
-    let parent = visible_socket
-        .parent()
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let parent_dir = open_owned_alias_parent(parent)?;
-    let name = visible_socket
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let (parent_dir, name) = open_alias_entry(visible_socket)?;
     let (temporary, placeholder, _listener) =
         prepare_socket_sibling(&parent_dir, name, owner, mode)?;
     let alias = match exact_alias_receipt(&parent_dir, name, runtime_socket) {
@@ -1079,14 +1084,7 @@ pub fn prepare_exact_socket_alias(
     owner: (u32, u32),
     mode: u32,
 ) -> io::Result<bool> {
-    let parent = visible_socket
-        .parent()
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let parent_dir = open_owned_alias_parent(parent)?;
-    let name = visible_socket
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let (parent_dir, name) = open_alias_entry(visible_socket)?;
     match nix::fcntl::readlinkat(&parent_dir, name) {
         Ok(target) if Path::new(&target) == runtime_socket => return Ok(false),
         Ok(_) => {
@@ -1158,14 +1156,7 @@ pub fn prepare_exact_socket_alias(
 
 /// Claims and removes only an exact socket alias.
 pub fn remove_exact_socket_alias(visible_socket: &Path, runtime_socket: &Path) -> io::Result<bool> {
-    let parent = visible_socket
-        .parent()
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let parent_dir = open_owned_alias_parent(parent)?;
-    let name = visible_socket
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let (parent_dir, name) = open_alias_entry(visible_socket)?;
     let Some(claim) = claim_socket_entry(&parent_dir, name)? else {
         return Ok(false);
     };
