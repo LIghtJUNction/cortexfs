@@ -37,7 +37,7 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_COLS: u16 = 80;
-const DEFAULT_SHELL: &str = "/usr/bin/tsh";
+const DEFAULT_SHELL: &str = cortexfs::support::command::TSH;
 const CLIENT_MODE_LIMIT: usize = 16;
 const CLIENT_MODE_TIMEOUT: Duration = Duration::from_secs(1);
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(1);

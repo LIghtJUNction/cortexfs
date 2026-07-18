@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+use crate::support::command::ID;
+use crate::support::command::SETPRIV;
 use crate::support::plain::{open_plain_directory, read_small_text_file};
 
 pub(crate) fn command_for_agent_identity(
@@ -9,7 +12,7 @@ pub(crate) fn command_for_agent_identity(
     if !nix::unistd::geteuid().is_root() {
         return Command::new(program);
     }
-    let mut command = Command::new("/usr/bin/setpriv");
+    let mut command = Command::new(SETPRIV);
     command.args(["--reuid", &identity.uid().to_string()]);
     command.args(["--regid", &identity.gid().to_string()]);
     if identity.groups().is_empty() {
@@ -43,19 +46,19 @@ mod identity_tests {
             return Ok(());
         }
         let identity = AgentUnixIdentity::new(65_534, 65_534, [1]);
-        let mut command = command_for_agent_identity("/usr/bin/id", &identity);
+        let mut command = command_for_agent_identity(ID, &identity);
         command.arg("-u");
         let uid = command.output()?;
         assert!(uid.status.success());
         assert_eq!(String::from_utf8(uid.stdout)?.trim(), "65534");
 
-        let mut command = command_for_agent_identity("/usr/bin/id", &identity);
+        let mut command = command_for_agent_identity(ID, &identity);
         command.arg("-g");
         let gid = command.output()?;
         assert!(gid.status.success());
         assert_eq!(String::from_utf8(gid.stdout)?.trim(), "65534");
 
-        let mut command = command_for_agent_identity("/usr/bin/id", &identity);
+        let mut command = command_for_agent_identity(ID, &identity);
         command.arg("-G");
         let groups = command.output()?;
         assert!(groups.status.success());
@@ -72,7 +75,7 @@ mod identity_tests {
             return Ok(());
         }
         let mut command =
-            command_for_agent_identity("/usr/bin/id", &AgentUnixIdentity::new(65_534, 65_534, [1]));
+            command_for_agent_identity(ID, &AgentUnixIdentity::new(65_534, 65_534, [1]));
         command.arg("-u");
         let output = command.output()?;
         assert!(output.status.success());

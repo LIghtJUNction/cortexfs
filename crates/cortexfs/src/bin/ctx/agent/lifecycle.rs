@@ -107,7 +107,7 @@ pub(crate) fn agent_lifecycle_tool_command(root: &Path, path: &Path) -> ProcessC
     let mut command = ProcessCommand::new(path);
     command
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", cortexfs::support::command::TRUSTED_PATH)
         .env("CTX_ROOT", root);
     command
 }

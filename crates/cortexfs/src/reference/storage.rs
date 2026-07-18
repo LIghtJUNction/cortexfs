@@ -104,7 +104,7 @@ fn stage_generation(
     name: &str,
 ) -> Result<PathBuf, StorageUpdateError> {
     if let Some(source) = current {
-        let status = Command::new("/usr/bin/cp")
+        let status = Command::new(crate::support::command::CP)
             .args(["--archive", "--reflink=auto", "--"])
             .arg(source.join("."))
             .arg(stage)
