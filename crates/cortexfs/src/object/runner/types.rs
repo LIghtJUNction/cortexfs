@@ -1,11 +1,11 @@
 use serde::Deserialize;
 
-pub(crate) const RUNNER_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+pub(crate) const RUNNER_PROVIDER_CONFIG_DIR: &str = cortexfs::SYSTEM_PROVIDER_CONFIG_DIR;
 pub(crate) const MAX_RUNNER_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_RUNTIME_PROVIDER_SECRET_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_PROVIDER_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MAX_PROVIDER_STREAM_LINE_BYTES: usize = 256 * 1024;
-pub(crate) const PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
+pub(crate) const PROVIDER_CURL_BIN: &str = cortexfs::support::command::CURL;
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct RunnerProviderConfig {
     #[serde(default)]

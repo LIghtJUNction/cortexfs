@@ -76,7 +76,8 @@ pub fn is_dedicated_worker_agent_name(agent_name: &str) -> bool {
 }
 pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.6";
 pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto-review";
-pub(crate) const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+/// Host directory containing system-wide provider configuration files.
+pub const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
 pub(crate) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";
 
 /// Stable semantic model capability words in the ABI.

@@ -85,7 +85,7 @@ pub(crate) fn pty_command_with_env(
 ) -> Result<CommandBuilder, CtxtermError> {
     let mut command = CommandBuilder::new(&config.program);
     command.env_clear();
-    command.env("PATH", "/usr/bin:/bin");
+    command.env("PATH", cortexfs::support::command::TRUSTED_PATH);
     command.env("TERM", "xterm-256color");
     for (key, value) in envs {
         if preserved_pty_env_key(&key) {

@@ -273,11 +273,14 @@ pub(crate) fn system_agent_runtime_socket(agent: &str) -> PathBuf {
 #[cfg(test)]
 pub(crate) fn system_agent_socket_command(action: &str, agent: &str) -> ProcessCommand {
     let mut command = ProcessCommand::new(SYSTEMCTL_PROGRAM);
-    command.env_clear().env("PATH", "/usr/bin:/bin").args([
-        "--no-ask-password",
-        action,
-        &system_agent_socket_unit(agent),
-    ]);
+    command
+        .env_clear()
+        .env("PATH", cortexfs::support::command::TRUSTED_PATH)
+        .args([
+            "--no-ask-password",
+            action,
+            &system_agent_socket_unit(agent),
+        ]);
     command
 }
 
@@ -608,7 +611,7 @@ pub(crate) fn agent_unit_main_pid(identity: &AgentUnixIdentity, unit: &str) -> O
     unit_main_pid_for(identity, unit).map(|pid| pid.to_string())
 }
 
-const SYSTEMCTL_PROGRAM: &str = "/usr/bin/systemctl";
+const SYSTEMCTL_PROGRAM: &str = cortexfs::support::command::SYSTEMCTL;
 
 pub(crate) fn get_systemctl_program() -> &'static str {
     SYSTEMCTL_PROGRAM

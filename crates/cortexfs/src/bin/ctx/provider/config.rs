@@ -1,6 +1,6 @@
 use crate::*;
 
-pub(crate) const PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+pub(crate) const PROVIDER_CONFIG_DIR: &str = cortexfs::SYSTEM_PROVIDER_CONFIG_DIR;
 const MAX_CTX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]

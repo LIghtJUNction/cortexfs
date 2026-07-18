@@ -229,7 +229,7 @@ fn run_curl(
     if inject_monitor_error {
         MONITOR_ERROR_FD.store(monitor.as_raw_fd(), Ordering::Release);
     }
-    let mut child = Command::new("/usr/bin/curl");
+    let mut child = Command::new(crate::support::command::CURL);
     child
         .args(["-q", "--config", "-"])
         .env_clear()

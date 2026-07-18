@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const SHELL_EXEC_SHELL: &str = "/bin/sh";
+const SHELL_EXEC_SHELL: &str = crate::support::command::SH;
 const MAX_FS_READ_BYTES: u64 = 1024 * 1024;
 const MAX_TSH_CONFIG_BYTES: u64 = 64 * 1024;
 const MAX_TSH_TOOL_COUNT: usize = 1024;

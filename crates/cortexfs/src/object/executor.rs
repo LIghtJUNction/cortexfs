@@ -61,7 +61,7 @@ const MAX_AGENT_TOOL_TIMEOUT_SECONDS: u64 = 120;
 const AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const AGENT_MODEL_TIMEOUT_SECONDS: u64 = 120;
 const MAX_AGENT_MODEL_TIMEOUT_SECONDS: u64 = 600;
-const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
+const BWRAP_PROGRAM: &str = crate::support::command::BWRAP;
 
 pub(crate) use crate::support::process;
 pub(crate) use crate::support::process::read_limited_bytes;
