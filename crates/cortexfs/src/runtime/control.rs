@@ -628,6 +628,14 @@ mod tests {
         thread::spawn(move || capability.serve_ping(&listener, || Some(run.to_owned())))
     }
 
+    fn join_server(
+        server: thread::JoinHandle<Result<(), RunCapabilityError>>,
+    ) -> std::io::Result<Result<(), RunCapabilityError>> {
+        server
+            .join()
+            .map_err(|_error| std::io::Error::other("server panicked"))
+    }
+
     fn send_raw(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let mut stream = UnixStream::connect(path)?;
         stream.write_all(bytes)?;
@@ -708,12 +716,7 @@ mod tests {
         let mut bytes = serde_json::to_vec(&frame)?;
         bytes.push(b'\n');
         send_raw(capability.socket(), &bytes)?;
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Err(RunCapabilityError::TokenDenied)
-        );
+        assert_eq!(join_server(server)?, Err(RunCapabilityError::TokenDenied));
 
         let (_root, capability, listener) = fixture()?;
         assert_eq!(
@@ -728,23 +731,13 @@ mod tests {
         let (_root, capability, listener) = fixture()?;
         let server = serve(Arc::clone(&capability), listener, "run-1");
         send_raw(capability.socket(), br#"{"op":"ping"}"#)?;
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Err(RunCapabilityError::InvalidFrame)
-        );
+        assert_eq!(join_server(server)?, Err(RunCapabilityError::InvalidFrame));
 
         let (_root, capability, listener) = fixture()?;
         let server = serve(Arc::clone(&capability), listener, "run-1");
         let oversized = vec![b'x'; usize::try_from(MAX_FRAME_BYTES)? + 1];
         send_raw(capability.socket(), &oversized)?;
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Err(RunCapabilityError::InvalidFrame)
-        );
+        assert_eq!(join_server(server)?, Err(RunCapabilityError::InvalidFrame));
         Ok(())
     }
 
@@ -758,12 +751,7 @@ mod tests {
             br#"{"op":"ping","request_id":"request-1","agent":"parent","session":"session-1","run":"run-1"}
 "#,
         )?;
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Err(RunCapabilityError::InvalidFrame)
-        );
+        assert_eq!(join_server(server)?, Err(RunCapabilityError::InvalidFrame));
 
         let (_root, capability, listener) = fixture()?;
         let server = serve(Arc::clone(&capability), listener, "run-1");
@@ -777,12 +765,7 @@ mod tests {
         let mut bytes = serde_json::to_vec(&frame)?;
         bytes.push(b'\n');
         send_raw(capability.socket(), &bytes)?;
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Err(RunCapabilityError::InvalidFrame)
-        );
+        assert_eq!(join_server(server)?, Err(RunCapabilityError::InvalidFrame));
 
         let (_root, capability, listener) = fixture()?;
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -804,12 +787,7 @@ mod tests {
         let mut bytes = serde_json::to_vec(&frame)?;
         bytes.push(b'\n');
         send_raw(capability.socket(), &bytes)?;
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Err(RunCapabilityError::RunChanged)
-        );
+        assert_eq!(join_server(server)?, Err(RunCapabilityError::RunChanged));
         Ok(())
     }
 
@@ -827,12 +805,7 @@ mod tests {
         let (_root, capability, listener) = fixture()?;
         let server = serve(Arc::clone(&capability), listener, "run-1");
         let _idle = UnixStream::connect(capability.socket())?;
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Err(RunCapabilityError::CannotRead)
-        );
+        assert_eq!(join_server(server)?, Err(RunCapabilityError::CannotRead));
         Ok(())
     }
 
@@ -866,12 +839,7 @@ mod tests {
             Err(RunCapabilityError::RequestSetFull)
         );
         shutdown.store(true, Ordering::Release);
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Ok(())
-        );
+        assert_eq!(join_server(server)?, Ok(()));
         capability.cleanup()?;
         assert!(!capability.socket().exists());
         Ok(())
@@ -927,12 +895,7 @@ mod tests {
         )?;
         assert_eq!(capability.ping("request-after-invalid"), Ok(()));
         shutdown.store(true, Ordering::Release);
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Ok(())
-        );
+        assert_eq!(join_server(server)?, Ok(()));
         capability.cleanup()?;
         Ok(())
     }
@@ -1074,12 +1037,7 @@ mod tests {
             [None, None, Some(2048)]
         );
         shutdown.store(true, Ordering::Release);
-        assert_eq!(
-            server
-                .join()
-                .map_err(|_error| std::io::Error::other("server panicked"))?,
-            Ok(())
-        );
+        assert_eq!(join_server(server)?, Ok(()));
         capability.cleanup()?;
         Ok(())
     }

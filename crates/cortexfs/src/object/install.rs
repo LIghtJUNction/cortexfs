@@ -1366,57 +1366,41 @@ mod tests {
     }
 
     #[test]
-    fn publish_failure_rolls_back_without_visible_executable()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let (root, executable, digest) = fixture()?;
-        let manifest = root.path().join("tool.json");
-        fs::write(&manifest, tool_manifest(&executable, &digest))?;
-        INSTALL_FAULT.with(|fault| fault.set(4));
-        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
-        assert!(!root.path().join("tool/example.echo").exists());
-        assert!(!root.path().join("tool/example.echo.d").exists());
-        Ok(())
-    }
-
-    #[test]
-    fn rollback_conflict_preserves_replacement_and_never_publishes_exec()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let (root, executable, digest) = fixture()?;
-        let manifest = root.path().join("tool.json");
-        fs::write(&manifest, tool_manifest(&executable, &digest))?;
-        INSTALL_FAULT.with(|fault| fault.set(2));
-        let Err(error) = install_object(root.path(), &manifest, InstallTier::System) else {
-            return Err(io::Error::other("expected install rejection").into());
-        };
-        assert!(error.message().contains("rollback conflict"));
-        assert!(root.path().join("tool/example.echo.d").is_dir());
-        assert!(!root.path().join("tool/example.echo").exists());
-        Ok(())
-    }
-
-    #[test]
-    fn publish_postcheck_replacement_is_preserved_without_exec()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let (root, executable, digest) = fixture()?;
-        let manifest = root.path().join("tool.json");
-        fs::write(&manifest, tool_manifest(&executable, &digest))?;
-        INSTALL_FAULT.with(|fault| fault.set(1));
-        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
-        assert!(root.path().join("tool/example.echo.d").is_dir());
-        assert!(!root.path().join("tool/example.echo").exists());
-        Ok(())
-    }
-
-    #[test]
-    fn control_replacement_around_executable_publish_cannot_succeed()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let (root, executable, digest) = fixture()?;
-        let manifest = root.path().join("tool.json");
-        fs::write(&manifest, tool_manifest(&executable, &digest))?;
-        INSTALL_FAULT.with(|fault| fault.set(5));
-        assert!(install_object(root.path(), &manifest, InstallTier::System).is_err());
-        assert!(root.path().join("tool/example.echo.d").is_dir());
-        assert!(!root.path().join("tool/example.echo").exists());
+    fn publish_failures_preserve_expected_visible_state() -> Result<(), Box<dyn std::error::Error>>
+    {
+        for (fault, rollback_conflict, control_dir_exists) in [
+            (4, false, false),
+            (2, true, true),
+            (1, false, true),
+            (5, true, true),
+            (3, true, true),
+        ] {
+            let (root, executable, digest) = fixture()?;
+            let manifest = root.path().join("tool.json");
+            fs::write(&manifest, tool_manifest(&executable, &digest))?;
+            INSTALL_FAULT.with(|value| value.set(fault));
+            let Err(error) = install_object(root.path(), &manifest, InstallTier::System) else {
+                return Err(
+                    io::Error::other(format!("fault {fault}: expected install rejection")).into(),
+                );
+            };
+            assert_eq!(
+                error.message().contains("rollback conflict"),
+                rollback_conflict,
+                "fault {fault}: unexpected error: {}",
+                error.message()
+            );
+            let class = root.path().join("tool");
+            assert_eq!(
+                class.join("example.echo.d").is_dir(),
+                control_dir_exists,
+                "fault {fault}: unexpected control directory state"
+            );
+            assert!(
+                !class.join("example.echo").exists(),
+                "fault {fault}: executable became visible"
+            );
+        }
         Ok(())
     }
 
@@ -1449,22 +1433,6 @@ mod tests {
                 assert!(stage.join("recreated-executable").is_file());
             }
         }
-        Ok(())
-    }
-
-    #[test]
-    fn parked_postcheck_replacement_is_restored_and_preserved()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let (root, executable, digest) = fixture()?;
-        let manifest = root.path().join("tool.json");
-        fs::write(&manifest, tool_manifest(&executable, &digest))?;
-        INSTALL_FAULT.with(|fault| fault.set(3));
-        let Err(error) = install_object(root.path(), &manifest, InstallTier::System) else {
-            return Err(io::Error::other("expected install rejection").into());
-        };
-        assert!(error.message().contains("rollback conflict"));
-        assert!(root.path().join("tool/example.echo.d").is_dir());
-        assert!(!root.path().join("tool/example.echo").exists());
         Ok(())
     }
 
