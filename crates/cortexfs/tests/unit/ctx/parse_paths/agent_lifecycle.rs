@@ -281,16 +281,16 @@ fn agent_new_host_fallback_creates_spark_worker_when_lifecycle_tool_is_absent() 
         .collect::<Vec<_>>();
     expected_groups.sort_unstable();
     expected_groups.dedup();
+    let mut expected_groups_text = expected_groups
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let suffix = if expected_groups_text.is_empty() { "" } else { "\n" };
+    expected_groups_text.push_str(suffix);
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/groups")).unwrap_or_default(),
-        format!(
-            "{}\n",
-            expected_groups
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join("\n")
-        )
+        expected_groups_text
     );
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/parent")).unwrap_or_default(),

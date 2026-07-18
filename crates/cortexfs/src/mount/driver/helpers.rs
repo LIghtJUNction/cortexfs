@@ -162,8 +162,40 @@ mod session_append_create_receipt_tests {
 }
 
 impl CortexFuse {
+    /// On success: forget path and `reply.ok()`. On `NotControlFile`: return reply for next try.
+    /// Other errors: reply and consume. Returns `None` when the caller should return.
+    pub(crate) fn try_remove_control_then_ok(
+        &self,
+        layout_path: &str,
+        remove: impl FnOnce(&str) -> Result<(), FuseError>,
+        reply: ReplyEmpty,
+    ) -> Option<ReplyEmpty> {
+        match remove(layout_path) {
+            Ok(()) => {
+                if let Err(error) = self.forget_path(layout_path) {
+                    reply.error(errno(error));
+                    return None;
+                }
+                reply.ok();
+                None
+            }
+            Err(FuseError::NotControlFile) => Some(reply),
+            Err(error) => {
+                reply.error(errno(error));
+                None
+            }
+        }
+    }
+
     pub(crate) fn projected_getattr(&self, path: &str) -> Result<FuseAttr, FuseError> {
         self.projected_node_for_path(path).map(|node| node.attr)
+    }
+
+    pub(crate) fn reply_projected_attr(&self, ino: INodeNo, path: &str, reply: ReplyAttr) {
+        match self.projected_getattr(path) {
+            Ok(attr) => reply.attr(&TTL, &file_attr(ino.0, &attr)),
+            Err(error) => reply.error(errno(error)),
+        }
     }
 
     pub(crate) fn projected_node_for_path(&self, path: &str) -> Result<FuseNode, FuseError> {

@@ -271,19 +271,9 @@ fn open_dir_at(
     name: &OsStr,
     expected: Receipt,
 ) -> Result<fs::File, ResidueError> {
-    let fd = nix::fcntl::openat(
-        parent,
-        name,
-        nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map_err(|error| {
+    let directory = crate::support::plain::open_directory_at(parent, name).map_err(|error| {
         ResidueError::unavailable(format!("cannot open residue directory: {error}"))
     })?;
-    let directory = fs::File::from(fd);
     let metadata = directory.metadata().map_err(|error| {
         ResidueError::unavailable(format!("cannot inspect residue directory: {error}"))
     })?;

@@ -282,9 +282,9 @@ const en: Copy = {
 function BrandLockup(): ReactElement {
   const logoSrc = useBaseUrl('/img/cortexfs-logo.svg');
   return (
-    <div className="cortexBrandLockup" aria-label="CortexFS">
+    <div className="cortexBrandLockup" aria-label="/ ctx">
       <img src={logoSrc} alt="" />
-      <span>Cor<i>TeX</i>fs</span>
+      <span>/ <i>ctx</i></span>
     </div>
   );
 }

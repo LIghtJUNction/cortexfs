@@ -123,29 +123,8 @@ fn agent_schedule_advance_defaults_child_session_to_parent_session() {
 
 #[test]
 fn agent_schedule_advance_does_not_rewrite_already_materialized_handoff() {
-    let root = clean_test_dir("agent-schedule-advance-once");
-    let session = root.join("default");
-    create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:reviewer create\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let (_root, session, policy, schedule) =
+        ok!(review_only_schedule_fixture("agent-schedule-advance-once"));
 
     let first = ok!(advance_agent_schedule_from_parent_context(
         &session,
@@ -174,29 +153,9 @@ fn agent_schedule_advance_does_not_rewrite_already_materialized_handoff() {
 
 #[test]
 fn agent_schedule_advance_rejects_conflicting_materialized_handoff() {
-    let root = clean_test_dir("agent-schedule-advance-conflict");
-    let session = root.join("default");
-    create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:reviewer create\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let (_root, session, policy, schedule) = ok!(review_only_schedule_fixture(
+        "agent-schedule-advance-conflict"
+    ));
 
     assert_eq!(
         record_child_handoff_to_parent_context(
@@ -225,29 +184,9 @@ fn agent_schedule_advance_rejects_conflicting_materialized_handoff() {
 
 #[test]
 fn agent_schedule_advance_rejects_malformed_materialized_status() {
-    let root = clean_test_dir("agent-schedule-advance-bad-status");
-    let session = root.join("default");
-    create_complete_session_layout(&session);
-    let policy = ok!(PolicyV0::parse("allow planner_t agent:reviewer create\n"));
-    let schedule = r#"
-{
-  "version": 1,
-  "mode": "dag-react",
-  "nodes": [
-    {
-      "id": "review",
-      "kind": "react",
-      "agent": "reviewer",
-      "child": "rev-123",
-      "handoff": "Task: review the plan\n",
-      "max_steps": 8,
-      "requires": [
-        {"class": "agent", "name": "reviewer", "permission": "create"}
-      ]
-    }
-  ]
-}
-"#;
+    let (_root, session, policy, schedule) = ok!(review_only_schedule_fixture(
+        "agent-schedule-advance-bad-status"
+    ));
 
     assert_eq!(
         record_child_handoff_to_parent_context(

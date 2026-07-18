@@ -193,22 +193,12 @@ fn call_provider_driver(
                 credential: credential.as_ref(),
                 effort,
             };
-            match call_openai_chat_streaming(&route.transport, &request, run, stdout) {
-                Ok(()) => Ok(()),
-                Err(error) if error.can_fallback => {
-                    let completion = call_openai_chat(&route.transport, &request, run)
-                        .map_err(ProviderCompletionError::fallback)?;
-                    write_text_completion(stdout, run, &completion).map_err(|error| {
-                        ProviderCompletionError::no_fallback(format!(
-                            "cannot write output: {error}"
-                        ))
-                    })
-                }
-                Err(error) => Err(ProviderCompletionError {
-                    message: error.message,
-                    can_fallback: error.can_fallback,
-                }),
-            }
+            stream_or_complete(
+                call_openai_chat_streaming(&route.transport, &request, run, stdout),
+                || call_openai_chat(&route.transport, &request, run),
+                run,
+                stdout,
+            )
         }
         ProviderRuntimeDriver::OpenAiResponses => {
             let _key = openai_api_key(provider, allow_unauthenticated, credential.as_ref())
@@ -219,22 +209,12 @@ fn call_provider_driver(
                 credential: credential.as_ref(),
                 effort,
             };
-            match call_openai_responses_streaming(&route.transport, &request, run, stdout) {
-                Ok(()) => Ok(()),
-                Err(error) if error.can_fallback => {
-                    let completion = call_openai_responses(&route.transport, &request, run)
-                        .map_err(ProviderCompletionError::fallback)?;
-                    write_text_completion(stdout, run, &completion).map_err(|error| {
-                        ProviderCompletionError::no_fallback(format!(
-                            "cannot write output: {error}"
-                        ))
-                    })
-                }
-                Err(error) => Err(ProviderCompletionError {
-                    message: error.message,
-                    can_fallback: error.can_fallback,
-                }),
-            }
+            stream_or_complete(
+                call_openai_responses_streaming(&route.transport, &request, run, stdout),
+                || call_openai_responses(&route.transport, &request, run),
+                run,
+                stdout,
+            )
         }
         ProviderRuntimeDriver::AnthropicMessages => {
             let credential = credential.ok_or_else(|| {
@@ -248,6 +228,27 @@ fn call_provider_driver(
                 ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
             })
         }
+    }
+}
+
+fn stream_or_complete(
+    stream_result: Result<(), StreamFailure>,
+    complete: impl FnOnce() -> Result<ProviderTextCompletion, String>,
+    run: &str,
+    stdout: &mut impl Write,
+) -> Result<(), ProviderCompletionError> {
+    match stream_result {
+        Ok(()) => Ok(()),
+        Err(error) if error.can_fallback => {
+            let completion = complete().map_err(ProviderCompletionError::fallback)?;
+            write_text_completion(stdout, run, &completion).map_err(|error| {
+                ProviderCompletionError::no_fallback(format!("cannot write output: {error}"))
+            })
+        }
+        Err(error) => Err(ProviderCompletionError {
+            message: error.message,
+            can_fallback: error.can_fallback,
+        }),
     }
 }
 pub(crate) fn openai_api_key<'a>(

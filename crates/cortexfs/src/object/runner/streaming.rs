@@ -8,6 +8,26 @@ pub(crate) struct StreamFailure {
     pub(crate) message: String,
     pub(crate) can_fallback: bool,
 }
+
+fn push_stream_text(
+    text_emitter: &mut OpenAiStreamTextEmitter<'_>,
+    stdout: &mut impl Write,
+    text: &str,
+    child: &mut std::process::Child,
+) -> Result<(), StreamFailure> {
+    if let Err(error) = text_emitter
+        .push(stdout, text)
+        .and_then(|()| stdout.flush())
+    {
+        cleanup_curl_child(child);
+        return Err(StreamFailure {
+            message: format!("cannot write output: {error}"),
+            can_fallback: false,
+        });
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OpenAiStreamApi {
     Chat,
@@ -96,30 +116,12 @@ pub(crate) fn call_openai_sse_streaming(
         let terminal = frame.terminal && (!frame.chat_terminal || api == OpenAiStreamApi::Chat);
         match frame.event {
             OpenAiStreamEvent::Delta(text) if !text.is_empty() => {
-                if let Err(error) = text_emitter
-                    .push(stdout, &text)
-                    .and_then(|()| stdout.flush())
-                {
-                    cleanup_curl_child(&mut child);
-                    return Err(StreamFailure {
-                        message: format!("cannot write output: {error}"),
-                        can_fallback: false,
-                    });
-                }
+                push_stream_text(&mut text_emitter, stdout, &text, &mut child)?;
                 emitted = true;
             }
             OpenAiStreamEvent::Delta(_empty) => {}
             OpenAiStreamEvent::FinalText(text) if !emitted && !text.is_empty() => {
-                if let Err(error) = text_emitter
-                    .push(stdout, &text)
-                    .and_then(|()| stdout.flush())
-                {
-                    cleanup_curl_child(&mut child);
-                    return Err(StreamFailure {
-                        message: format!("cannot write output: {error}"),
-                        can_fallback: false,
-                    });
-                }
+                push_stream_text(&mut text_emitter, stdout, &text, &mut child)?;
                 emitted = true;
             }
             OpenAiStreamEvent::FinalText(_text) => {}

@@ -165,7 +165,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.agent_executable_fd.to_string(),
         SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
     ]);
-    bwrap.extend(support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
+    bwrap.extend(support::process::bwrap_system_layout_args());
     if !request.runtime.network_allowed {
         bwrap.push("--unshare-net".to_owned());
     }
@@ -218,7 +218,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.agent_home_sandbox_fd.to_string(),
         "/home/agent".to_owned(),
     ]);
-    bwrap.extend(bwrap_dir_args_for_chdir(request.cwd));
+    bwrap.extend(support::bwrap::dir_args_for_chdir(request.cwd));
     bwrap.extend([
         "--chdir".to_owned(),
         request.cwd.to_owned(),
@@ -246,35 +246,9 @@ pub(crate) fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
     if !source_root.starts_with('/') || source_root == "/" {
         return Vec::new();
     }
-    let mut args = bwrap_dir_args_for_parent(source_root);
+    let mut args = support::bwrap::dir_args_for_parent(source_root);
     args.push("--ro-bind".to_owned());
     args.push(source_root.to_owned());
     args.push(source_root.to_owned());
-    args
-}
-
-pub(crate) fn bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
-    let Some((parent, _name)) = path.rsplit_once('/') else {
-        return Vec::new();
-    };
-    if parent.is_empty() {
-        Vec::new()
-    } else {
-        bwrap_dir_args_for_chdir(parent)
-    }
-}
-
-pub(crate) fn bwrap_dir_args_for_chdir(cwd: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    if !cwd.starts_with('/') {
-        return args;
-    }
-    let mut path = String::new();
-    for component in cwd.split('/').filter(|component| !component.is_empty()) {
-        path.push('/');
-        path.push_str(component);
-        args.push("--dir".to_owned());
-        args.push(path.clone());
-    }
     args
 }

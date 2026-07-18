@@ -1,9 +1,9 @@
 # Deterministic Linux quality gate for pull requests and main.
 # Required check names (after green on main): "CI / rust", "CI / docs"
-# Local contract matches .pre-commit-config.yaml and README Development.
+# Same cargo commands as .pre-commit-config.yaml / README Development.
 #
 # CI toolchain: latest stable (documented). Workspace MSRV remains 1.91 in
-# Cargo.toml for crates.io; this gate optimizes for a reliable full test run.
+# Cargo.toml for crates.io.
 name: CI
 
 on:
@@ -22,8 +22,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  # Faster test linking on GHA; does not change runtime assertions.
-  RUSTFLAGS: "-C debuginfo=line-tables-only"
 
 jobs:
   rust:
@@ -66,26 +64,22 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-      - name: cargo test (compile)
-        run: cargo test --locked --workspace --all-targets --all-features --no-run
-
-      # Package-scoped runs keep the same cargo flags as the local contract while
-      # bounding hang risk: a stuck package fails at 180s instead of burning the
-      # whole job. Matches: cargo test --locked --workspace --all-targets --all-features
-      - name: cargo test (run)
+      # Same flags as pre-commit. Serialize timing and approval protocol fixtures.
+      # TMPDIR only for tests: fixture #!/bin/sh agents must live on an exec mount.
+      - name: cargo test
         timeout-minutes: 25
+        env:
+          TMPDIR: /tmp
+          CARGO_HOME: /tmp/cortexfs-test-cargo
+          CARGO_TARGET_DIR: /tmp/cortexfs-test-target
         run: |
-          set -euo pipefail
-          mapfile -t packages < <(cargo metadata --format-version=1 --no-deps \
-            | python3 -c 'import json,sys; m=json.load(sys.stdin); print("\n".join(p["name"] for p in m["packages"] if p["id"].startswith("path+")))')
-          for package in "${packages[@]}"; do
-            echo "::group::cargo test -p ${package}"
-            # 180s wall clock per package; local full suite is ~30s.
-            timeout --signal=TERM --kill-after=30s 180s \
-              cargo test --locked -p "${package}" --all-targets --all-features \
-              -- --test-threads=2
-            echo "::endgroup::"
-          done
+          sudo chmod o+x "$HOME" "$HOME/.cargo" "$HOME/.cargo/bin"
+          sudo chmod -R o+rX "$HOME/.rustup"
+          sudo install -d -o 1000 -g 1000 "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          sudo setpriv --reuid=1000 --regid=1000 --clear-groups env \
+            PATH="$PATH" HOME="$HOME" CARGO_HOME="$CARGO_HOME" \
+            CARGO_TARGET_DIR="$CARGO_TARGET_DIR" TMPDIR="$TMPDIR" \
+            cargo test --locked --workspace --all-targets --all-features -- --test-threads=1
 
   docs:
     name: docs

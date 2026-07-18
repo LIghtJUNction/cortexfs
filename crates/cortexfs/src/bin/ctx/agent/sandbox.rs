@@ -203,7 +203,7 @@ pub(crate) fn agent_bwrap_args(
         "--unshare-net".to_owned(),
     ]);
     bwrap.extend(cortexfs::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
-    bwrap.extend(cortexfs::support::process::BWRAP_SYSTEM_LAYOUT_ARGS.map(str::to_owned));
+    bwrap.extend(cortexfs::support::process::bwrap_system_layout_args());
     if let Some(runtime_dir) = socket_runtime_dir(socket) {
         bwrap.extend([
             "--bind".to_owned(),
@@ -231,7 +231,7 @@ pub(crate) fn agent_bwrap_args(
     let git_mask = agent_git_mask(args, cli_mounts, view);
     let mut git_masked = false;
     for mount in cli_mounts {
-        bwrap.extend(agent_bwrap_dir_args_for_parent(&mount.target));
+        bwrap.extend(cortexfs::support::bwrap::dir_args_for_parent(&mount.target));
         bwrap.push(match mount.mode.as_str() {
             "ro" => "--ro-bind".to_owned(),
             _ => "--bind".to_owned(),
@@ -415,32 +415,6 @@ pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
         }
     }
     Some(normalized)
-}
-
-pub(crate) fn agent_bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
-    let Some((parent, _name)) = path.rsplit_once('/') else {
-        return Vec::new();
-    };
-    if parent.is_empty() {
-        Vec::new()
-    } else {
-        agent_bwrap_dir_args_for_path(parent)
-    }
-}
-
-pub(crate) fn agent_bwrap_dir_args_for_path(path: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    if !path.starts_with('/') {
-        return args;
-    }
-    let mut current = String::new();
-    for component in path.split('/').filter(|component| !component.is_empty()) {
-        current.push('/');
-        current.push_str(component);
-        args.push("--dir".to_owned());
-        args.push(current.clone());
-    }
-    args
 }
 
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
