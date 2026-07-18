@@ -192,7 +192,6 @@ pub(super) struct StagedObject {
     pub(super) name: String,
     pub(super) directory: fs::File,
     _control: fs::File,
-    _executable: fs::File,
     pub(super) directory_receipt: EntryReceipt,
     pub(super) control_receipt: EntryReceipt,
     pub(super) executable_receipt: EntryReceipt,
@@ -657,6 +656,7 @@ pub(super) fn prepare_stage(
     let control_receipt = receipt_for(&control, EntryKind::Directory)?;
     let executable = copy_executable(source, &directory, &manifest.executable.sha256)?;
     let executable_receipt = receipt_for(&executable, EntryKind::Executable)?;
+    drop(executable);
     write_install_receipt(
         &control,
         &InstallReceiptData {
@@ -684,7 +684,6 @@ pub(super) fn prepare_stage(
         name,
         directory,
         _control: control,
-        _executable: executable,
         directory_receipt,
         control_receipt,
         executable_receipt,

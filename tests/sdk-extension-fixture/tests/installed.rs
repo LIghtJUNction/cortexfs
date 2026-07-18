@@ -351,13 +351,22 @@ mod tests {
 
     impl FixtureRoot {
         fn new() -> Result<Self, std::io::Error> {
-            let id = FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "cortexfs-sdk-extension-fixture-{}-{id}",
-                std::process::id()
-            ));
-            fs::create_dir_all(&path)?;
-            Ok(Self(path))
+            for _attempt in 0..32 {
+                let id = FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
+                let path = std::env::temp_dir().join(format!(
+                    "cortexfs-sdk-extension-fixture-{}-{id}",
+                    std::process::id()
+                ));
+                match fs::DirBuilder::new().create(&path) {
+                    Ok(()) => return Ok(Self(path)),
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "cannot allocate unique SDK fixture root",
+            ))
         }
 
         fn path(&self) -> &Path {
