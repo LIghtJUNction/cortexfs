@@ -1,23 +1,44 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-social-card.png" alt="CortexFS: agent runtime as a Unix ABI" width="900">
+  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: a FUSE filesystem interface for agent runtimes" width="900">
 </p>
 
-**CortexFS makes AI runtimes feel like Unix.**
+<p align="center">
+  <a href="https://github.com/LIghtJUNction/cortexfs/actions/workflows/pages.yml"><img alt="Pages deployment" src="https://img.shields.io/github/actions/workflow/status/LIghtJUNction/cortexfs/pages.yml?branch=main&amp;label=pages"></a>
+  <a href="https://lightjunction.github.io/cortexfs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-live-2A8F73"></a>
+  <a href="https://crates.io/crates/cortexfs"><img alt="crates.io" src="https://img.shields.io/crates/v/cortexfs"></a>
+  <a href="https://www.rust-lang.org/"><img alt="Rust 1.91 or newer" src="https://img.shields.io/badge/rust-1.91%2B-000000?logo=rust"></a>
+  <a href="https://doc.rust-lang.org/edition-guide/rust-2024/"><img alt="Rust edition 2024" src="https://img.shields.io/badge/edition-2024-000000?logo=rust"></a>
+  <a href="https://www.kernel.org/doc/html/latest/filesystems/fuse.html"><img alt="Linux FUSE" src="https://img.shields.io/badge/platform-Linux%20%7C%20FUSE-FCC624?logo=linux&amp;logoColor=black"></a>
+  <a href="https://github.com/LIghtJUNction/cortexfs/blob/main/Cargo.toml"><img alt="MIT license metadata" src="https://img.shields.io/badge/license-MIT-2A8F73"></a>
+</p>
 
-It mounts a small, scriptable FUSE filesystem at `/ctx`. Models are files you
-can talk to. Agents are files you can inspect, resume, and attach to. Tools are
-files that an agent can load into context, keep resident in memory, or call like
-CLI commands.
+**Your agent runtime shouldn’t hide inside a database.**
 
-CortexFS is built for the moment when you want to look inside an agent runtime
-while it is running: which model it is using, which files it can see, which tools
-are loaded, what its terminal is doing, and what state will survive the session.
-Agents wake through systemd socket activation, so idle agents do not need a
-polling loop just to be reachable.
+CortexFS is a FUSE filesystem for agent runtimes. It mounts models, agents,
+tools, and durable sessions at `/ctx` — a small Unix filesystem interface you
+can `ls`, `cat`, execute, secure, and audit.
 
-The v1 shape is intentionally small:
+CortexFS exposes exactly three executable object classes: `model` is pure
+inference, `agent` is a policy-bound orchestrator, and `tool` is an executable
+capability endpoint. Sessions are ordinary files, not a fourth executable
+object class. Raw `messages.jsonl` and `events.jsonl` history is durable; prompt
+context is disposable and rebuildable.
+
+Within one session, retrying the same client ID with the same payload replays the
+recorded run instead of executing it again; conflicting payloads are rejected.
+Session GC archives by default, and permanent deletion requires
+`--delete --yes`.
+
+The runtime stays directly inspectable while it works: see which model it is
+using, which files it can access, which tools it can execute, what its terminal
+is doing, and which state survives the session. Agents wake through systemd
+socket activation, so idle agents remain reachable without a polling loop.
+
+[Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [specification](docs/spec/README.md)
+
+The stable shape is intentionally small:
 
 ```text
 /ctx/status
@@ -29,7 +50,58 @@ The v1 shape is intentionally small:
 /ctx/shared
 ```
 
-For the normative ABI, start with [docs/DESIGN.md](docs/DESIGN.md).
+For the normative ABI, start with the [specification](docs/spec/README.md)
+and [architecture guide](docs/architecture.md). [docs/DESIGN.md](docs/DESIGN.md)
+defines the visual system for CortexFS documentation and demos, not the ABI.
+
+## An Agent Runtime You Can Open
+
+CortexFS is an agent runtime project with a built-in execution engine and a
+FUSE interface. A file manager, shell, or agent can inspect the same live work
+view: runtime status, durable `messages.jsonl` and `events.jsonl`, rebuildable
+context, and session state are ordinary paths rather than records hidden behind
+one client.
+
+That means an agent can retrieve history with ordinary file reads, while a
+human can inspect the same session tree without entering the chat UI.
+Conventional chat and CLI views, including Codex CLI, do not expose CortexFS's
+durable state as a mounted shared filesystem. This is a filesystem
+inspectability and composability distinction, not a claim that Codex lacks
+other surfaces or persistence, nor a claim about model quality or CLI speed.
+
+Model selection stays equally plain: `agent/<name>.d/model` is a text control
+containing an alias such as `main`. The visible `/ctx/model/main` alias is
+projected from the writable per-user backing symlink at
+`/ctx/home/$(id -u)/model/main`; users retarget that backing path to select the
+model behind the alias. The agent control file itself is not a symlink.
+
+## Measured Runtime
+
+The embedded chart includes a timestamped local service snapshot from the real
+`/ctx` `cortexfs` FUSE mount with `default_permissions` and `allow_other`.
+Snapshot values are local observations, not stable requirements or cross-tool
+benchmarks.
+
+The agent benchmark ran the five-item dataset once across `architect`, `coder`,
+`reviewer`, and `worker` (20 requests total), with every role selecting model
+route `main`:
+
+- Runtime success: **100% (20/20)**; every benchmark session was archived.
+- Exact-match accuracy: **20% (4/20)**. The current route completed every run,
+  but often returned useful prose instead of the dataset's required exact short
+  answer, so exact-match quality remains the clear weakness.
+- End-to-end latency: **p50 6,737.81 ms**, **p95 11,432.03 ms** (20 samples;
+  lower is better).
+- Time to first token: **p50 5,573.45 ms**, **p95 10,315.34 ms** (20 samples;
+  lower is better).
+- Token reporting was available for only **1/20** requests, so token throughput
+  is not representative and is intentionally not promoted here.
+
+See the [sanitized benchmark provenance](docs/benchmarks/20260714-agent-summary.json)
+and [Inspect benchmark guide](inspect_benchmark/README.md) for the recorded
+inputs, preflight, lifecycle, and reproduction workflow.
+
+![CortexFS measured runtime and benchmark](docs/assets/cortexfs-performance.svg)
 
 ## What It Feels Like
 
@@ -40,6 +112,9 @@ workspace:
 ctx
 /ctx/agent/coder
 live chat
+
+$ ctx agent start coder
+agent coder ready
 
 $ ctx agent chat coder
 coder/default ❯ review /workspace/docs/DESIGN.md
@@ -57,7 +132,7 @@ invoked through the same filesystem view.
 
 <p align="center">
   <a href="docs/assets/cortexfs-demo.mp4">
-    <img src="docs/assets/cortexfs-demo-poster.jpg" alt="Watch the CortexFS agent REPL demo" width="720">
+    <img src="docs/assets/cortexfs-demo-poster.jpg" alt="Watch the CortexFS agent chat demo" width="720">
   </a>
 </p>
 
@@ -93,7 +168,7 @@ The root stays small, the model tree stays provider-neutral, and agent context i
 ordinary visible state instead of hidden SDK state. CortexFS is a way to peer
 through the filesystem boundary and see what is happening inside agent software.
 
-![CortexFS v1 ABI map](docs/assets/cortexfs-abi-map.svg)
+![CortexFS ABI map](docs/assets/cortexfs-abi-map.svg)
 
 ## Quick Start
 
@@ -126,12 +201,21 @@ cargo run -p cortexfs --bin ctx -- doctor
 
 ## Bootstrap A Programming Coder
 
-`ctx bootstrap` creates the default `architect`, `coder`, and `reviewer`
-agents. Start `coder` from the project checkout, then open the chat UI:
+`ctx bootstrap` creates four default agents with separate responsibilities:
+
+```text
+architect  plans and coordinates work
+coder      implements the primary change
+worker     handles bounded tasks with the Spark worker path
+reviewer   independently verifies results and constraints
+```
+
+Start `coder` from the project checkout, wait for `ready`, then open the chat UI:
 
 ```bash
 ctx bootstrap
 ctx agent start coder --session default
+ctx agent status coder
 ctx agent chat coder
 ```
 
@@ -143,9 +227,9 @@ ctx agent tools coder
 ctx agent prompt coder
 ```
 
-Inside chat, `/workspace` shows the host checkout mounted for the agent and
-`/tools` lists visible CortexFS tools. `ctx agent chat` is the human chat
-surface; `tsh` remains the agent-facing tool shell inside `ctxterm`.
+`ctxchat` is the replaceable file/socket-ABI chat UI; `ctx agent chat` delegates
+to it for compatibility. `tsh` remains the agent-facing tool shell inside
+`ctxterm`.
 
 Ask clear coding tasks directly:
 
@@ -202,8 +286,8 @@ name.d/     small control files
 Examples:
 
 ```text
-/ctx/model/openai/gpt-5.4-mini
-/ctx/model/openai/gpt-5.4-mini.d/driver
+/ctx/model/openai/gpt-5.6
+/ctx/model/openai/gpt-5.6.d/driver
 /ctx/agent/coder
 /ctx/agent/coder.sock
 /ctx/agent/coder.d/policy
@@ -217,7 +301,7 @@ Models live under `/ctx/model/<provider>/<model>`:
 
 ```text
 /ctx/model/debug/echo
-/ctx/model/openai/gpt-5.4-mini
+/ctx/model/openai/gpt-5.6
 /ctx/model/anthropic/claude-sonnet-4
 /ctx/model/google/gemini-2.5-pro
 ```
@@ -226,16 +310,16 @@ They are executable files. You can call a model path directly for one-shot
 inference:
 
 ```bash
-/ctx/model/openai/gpt-5.4-mini "explain this error"
-echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.4-mini
-ctx exec model/openai/gpt-5.4-mini "summarize README.md"
+/ctx/model/openai/gpt-5.6 "explain this error"
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.6
+ctx exec model/openai/gpt-5.6 "summarize README.md"
 ```
 
 `/ctx/model/main` is the conventional default model alias. It is only a symlink,
 not a privileged registry entry. Change the symlink to change the default model:
 
 ```bash
-ln -sfn /ctx/model/openai/gpt-5.4-mini /ctx/home/$(id -u)/model/main
+ln -sfn /ctx/model/openai/gpt-5.6 /ctx/home/$(id -u)/model/main
 ```
 
 Provider API differences are handled below the filesystem ABI. CortexFS keeps
@@ -398,11 +482,33 @@ tsh> pin bash
 tsh> loads
 ```
 
-Native dynamic tool artifacts are loaded on demand. The SDK keeps resident
-dynamic tools under a W-TinyLFU cache, so hot tools can stay in memory while cold
-unpinned tools are admitted or evicted by use. `tsh.config` controls the visible
-tool context size with `max_loaded_tools`; pinned tools are protected from
-automatic context eviction.
+New executable tool plugins should use a hash-bound `cortexfs.object/v2`
+manifest with an object SemVer `version` and a Cargo-style
+`compatibility.cortexfs` requirement. `cortexfs.object/v1` is legacy and omits
+both fields. Installation remains new-object-only. Existing receipt-managed v1
+or v2 objects accept a v2 replacement candidate through explicit lifecycle
+commands. Plugins run through the normal `CTX_PATH` and policy path, and every
+mutation requires the durable backing tree explicitly:
+
+```bash
+ctx object install --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object replace --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object upgrade --source "$CTX_SOURCE" tool.manifest.json --tier user
+ctx object rollback --source "$CTX_SOURCE" old-tool.manifest.json --tier user
+```
+
+`replace`, `upgrade`, and `rollback` default to dry-run and require `--yes` to
+apply. Replace has no version ordering and can migrate a v1 receipt; upgrade
+requires a higher v2 version, while rollback requires a lower v2 manifest and
+artifact supplied by the caller. CortexFS keeps no version history. Applied
+replacement uses a same-filesystem stage, hides the old executable first, and
+publishes the new executable last. It does not claim pair atomicity, stop or
+start a runtime, grant policy, or create sockets; receipt conflicts preserve
+foreign inodes and may leave auditable safety residue.
+
+`/ctx`, `CTX_ROOT`, and `--root` describe the ABI projection, not a writable
+installation target. `tsh.config` controls the visible tool metadata context size; pinned
+entries are protected from automatic context eviction.
 
 Tool metadata printed to a terminal is escaped so untrusted descriptions and
 schemas cannot inject terminal control sequences.
@@ -453,11 +559,19 @@ Durable agent sessions live in the owning user's CortexFS home:
   index/
 ```
 
+`messages.jsonl` and `events.jsonl` are the durable raw history. `context/` is
+a rebuildable prompt working set, not a replacement history store.
+
 Socket requests are JSONL frames:
 
 ```jsonl
 {"op":"send","id":"client-msg-id","session":"default","scope":"private","cwd":"/work","input":"hello"}
 ```
+
+Within one session, retrying the same client `id` with the same input, scope,
+and effective `cwd` replays the original `start` or final `done` without
+running the agent again. Reusing that `id` with a conflicting payload is
+rejected.
 
 Scopes:
 
@@ -470,6 +584,39 @@ temp     temporary, no durable resume requirement
 Clients should read `session/index/current`, `session/index/list`, and
 `session/index/by-cwd/*` instead of maintaining a second hidden history store.
 
+Session garbage collection is dry-run by default. `--yes` archives matching
+live sessions outside the live session tree under
+`$CTX_HOME/archived_sessions/<agent>/<session>/`; permanent deletion requires
+the explicit `--delete --yes` combination. Use `--archive-dir /absolute/path`
+to choose another non-overlapping archive root, or archive one session
+immediately with `ctx agent session archive AGENT SESSION`.
+`default`, the current session, every session whose plain bounded `state` is
+`active`, and every explicit `--keep` name are always protected:
+
+```bash
+ctx agent session gc coder --dry-run
+ctx agent session archive coder release-investigation
+ctx agent session archive coder old-run --archive-dir /srv/cortexfs-archive
+ctx agent session gc coder --dry-run --match '*' --keep release-investigation
+ctx agent session gc coder --yes --match '*smoke*' --older-than-days 7 --keep release-investigation
+ctx agent session gc coder --yes --archive-dir /srv/cortexfs-archive --match 'e2e-*'
+ctx agent session gc coder --delete --dry-run --match '*'
+ctx agent session gc coder --delete --yes --match '*smoke*' --older-than-days 30
+```
+
+Review the complete mode-specific dry-run list before adding `--yes`. Without
+`--match`, GC uses conservative test-session patterns rather than treating
+every session as disposable. `archived_sessions/` is outside the live session
+tree and is not a new `/ctx` root ABI namespace. Archived directories preserve
+the complete original session tree and raw JSONL files unchanged. There is no
+restore command.
+
+Provider failures are durable session facts. When a run terminates with an
+error, CortexFS records the original provider `error` frame followed by
+`done(status=error)` in `events.jsonl` and sets `state` to `error`. This terminal
+history remains available to `ctx agent resume` even when no assistant message
+was produced.
+
 ## Policy Model
 
 Policy v0 is a minimal allowlist:
@@ -477,7 +624,7 @@ Policy v0 is a minimal allowlist:
 ```text
 allow coder_t tool:tsh execute
 allow coder_t tool:fs.read execute
-allow coder_t model:openai/gpt-5.4-mini use
+allow coder_t model:openai/gpt-5.6 use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
 ```
@@ -524,14 +671,31 @@ ctx agent output coder
 
 ## Development
 
-Build and test:
+Build and test (same contract as `.pre-commit-config.yaml` and the Linux CI gate):
 
 ```bash
-cargo fmt --check
+cargo fmt --all -- --check
 cargo check --locked --workspace --all-targets --all-features
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 ```
+
+Docs production build (independent of GitHub Pages deployment):
+
+```bash
+cd docs-site && bun install --frozen-lockfile && bun run build
+```
+
+### CI quality gate
+
+Workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (name **CI**).
+
+| Required check name | Job | What it runs |
+| --- | --- | --- |
+| `CI / rust` | `rust` | Ubuntu, **latest stable** Rust: the four Cargo commands above (`--locked` / `--workspace` / `--all-targets` / `--all-features`) |
+| `CI / docs` | `docs` | `docs-site` Bun install + Docusaurus production build |
+
+After these checks are green on `main`, enable them as required branch-protection checks. Privileged FUSE mounts, live providers, and systemd smoke tests stay out of this gate.
 
 Run the deterministic agent tool-loop smoke without a live model:
 
@@ -539,13 +703,13 @@ Run the deterministic agent tool-loop smoke without a live model:
 npm run agent-tool-loop:smoke
 ```
 
-Regenerate README images and the local benchmark chart:
+Regenerate README images and the local runtime chart. Pass an Inspect summary
+to include agent benchmark results:
 
 ```bash
-scripts/update-readme-svg.sh
+BENCHMARK_SUMMARY=docs/benchmarks/20260714-agent-summary.json \
+  scripts/update-readme-svg.sh
 ```
-
-![CortexFS local benchmark](docs/assets/cortexfs-performance.svg)
 
 Verus proof sources live under `proofs/verus/`. They are opt-in and do not
 change the runtime Cargo workspace. Install the upstream `verus` binary from
@@ -555,5 +719,47 @@ change the runtime Cargo workspace. Install the upstream `verus` binary from
 scripts/verify-verus.sh
 ```
 
-Current proofs cover the v1 object-name ABI predicate; see
+Current proofs cover the stable object-name ABI predicate; see
 [docs/proofs/verus.md](docs/proofs/verus.md).
+
+## External references
+
+### Projects
+- [tursodatabase/agentfs](https://github.com/tursodatabase/agentfs)
+- [modelcontextprotocol/filesystem server](https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem)
+- [j0hanz/filesystem-mcp](https://github.com/j0hanz/filesystem-mcp)
+- [rust-mcp-stack/rust-mcp-filesystem](https://github.com/rust-mcp-stack/rust-mcp-filesystem)
+- [mark3labs/mcp-filesystem-server](https://github.com/mark3labs/mcp-filesystem-server)
+- [cyanheads/filesystem-mcp-server](https://github.com/cyanheads/filesystem-mcp-server)
+- [TexasFortress-AI/rs_filesystem](https://github.com/TexasFortress-AI/rs_filesystem)
+- [colinrozzi/fs-mcp-server](https://github.com/colinrozzi/fs-mcp-server)
+- [corporatepiyush/mcp-filesystem-rust](https://github.com/corporatepiyush/mcp-filesystem-rust)
+- [rawr-ai/mcp-filesystem](https://github.com/rawr-ai/mcp-filesystem)
+- [safurrier/mcp-filesystem](https://github.com/safurrier/mcp-filesystem)
+- [SylphxAI/filesystem-mcp](https://github.com/SylphxAI/filesystem-mcp)
+- [QuantGeekDev/mcp-filesystem](https://github.com/QuantGeekDev/mcp-filesystem)
+- [efforthye/fast-filesystem-mcp](https://github.com/efforthye/fast-filesystem-mcp)
+- [lileeei/sand-mcp-fs](https://github.com/lileeei/sand-mcp-fs)
+- [proofmath-owner/ai-filesystem-mcp](https://github.com/proofmath-owner/ai-filesystem-mcp)
+- [github/github-mcp-server](https://github.com/github/github-mcp-server)
+- [conikeec/mcpr](https://github.com/conikeec/mcpr)
+- [strawgate/filesystem-operations-mcp](https://github.com/strawgate/filesystem-operations-mcp)
+- [webconsulting/mcp-server-wsl-filesystem](https://github.com/webconsulting/mcp-server-wsl-filesystem)
+- [avelino/mcp](https://github.com/avelino/mcp)
+- [wonker007/surgicalfs-mcpserver](https://github.com/wonker007/surgicalfs-mcpserver)
+
+### CortexFS MCP
+
+- CortexFS PR:
+  - [#89](https://github.com/LIghtJUNction/cortexfs/pull/89)
+  - [#88](https://github.com/LIghtJUNction/cortexfs/pull/88)
+  - [#87](https://github.com/LIghtJUNction/cortexfs/pull/87)
+- MCP PR/Issue references moved to source comments:
+  - `crates/cortexfs-tool-sdk/src/lib.rs`
+
+### Spec references
+- [Model Context Protocol (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [Model Context Protocol (2025-03-26)](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
+- [Linux FUSE documentation](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
+- [mount.fuse page](https://manpages.ubuntu.com/manpages/jammy/man8/mount.fuse.8.html)
+- [MCP security and authorization](https://modelcontextprotocol.io/docs/tutorials/security/authorization)

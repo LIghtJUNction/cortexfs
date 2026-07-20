@@ -36,7 +36,7 @@ fn abi_path_resolution_rejects_escape() {
 #[test]
 fn ls_lists_abi_paths_and_keeps_object_filtering() {
     let root = clean_test_dir("ctx-ls-paths");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let home = list_names(&root, &LsTarget::Path("home".to_owned()));
     assert_eq!(home, Ok(vec!["1000".to_owned()]));
@@ -64,7 +64,7 @@ fn ls_lists_abi_paths_and_keeps_object_filtering() {
 fn ls_rejects_symlink_directories_without_listing_targets() {
     let root = clean_test_dir("ctx-ls-symlink-directory");
     let outside = clean_test_dir("ctx-ls-symlink-directory-outside");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     assert!(fs::remove_dir_all(root.join("home")).is_ok());
     assert!(fs::create_dir_all(outside.join("1000")).is_ok());
     assert!(std::os::unix::fs::symlink(&outside, root.join("home")).is_ok());
@@ -242,7 +242,13 @@ fn detects_executable_object_paths() {
         ("tool/fs.read.d/schema", None),
         ("home/1000", None),
     ] {
-        assert_path_kind!(path, executable_object_path, expected);
+        assert_eq!(
+            parse_abi_path(path)
+                .executable_object()
+                .map(|(class, name)| (class, name.into_owned())),
+            expected,
+            "{path}"
+        );
     }
 }
 
@@ -276,6 +282,7 @@ fn detects_model_driver_paths() {
 
 #[test]
 fn detects_tool_schema_paths() {
+    // Regression coverage for MCP placeholder schema path parsing semantics.
     assert_path_matches(
         &["tool/fs.read.d/schema", "tool/mcp.github.search_issues.d/schema"],
         is_tool_schema_path,
@@ -291,6 +298,7 @@ fn detects_tool_schema_paths() {
 #[test]
 fn detects_shared_tool_schema_paths() {
     assert_path_matches(
+        // Shared legacy placeholder schema path remains valid by parser grammar.
         &[
             "shared/project-a/tool/project.test.d/schema",
             "shared/project-a/tool/mcp.github.search_issues.d/schema",

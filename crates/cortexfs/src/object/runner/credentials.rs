@@ -3,56 +3,69 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-macro_rules! runtime_secret_env_matches {
-    ($provider:expr, $account:expr, $get_env:expr) => {
-        $get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() == Ok($provider)
-            && $get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() == Ok($account)
-    };
-}
 pub(crate) fn provider_credential(
     provider: &str,
     config: &RunnerProviderConfig,
     key_slot: Option<&str>,
     driver: ProviderRuntimeDriver,
 ) -> Result<Option<ProviderCredential>, String> {
-    macro_rules! credential_from_secret {
-        ($api_key:expr) => {
-            match driver {
-                ProviderRuntimeDriver::AnthropicMessages => {
-                    ProviderCredential::AnthropicApiKey($api_key)
-                }
-                ProviderRuntimeDriver::OpenAiChat | ProviderRuntimeDriver::OpenAiResponses => {
-                    ProviderCredential::Bearer($api_key)
-                }
-            }
+    let oauth = config.oauth.as_ref();
+    let codex = oauth.is_some_and(cortexfs::OAuthProviderConfig::is_codex);
+    let account = key_slot.unwrap_or("default");
+    let runtime =
+        provider_secret_from_runtime_value_with_env(provider, account, |name| env::var(name));
+    if codex {
+        if driver != ProviderRuntimeDriver::OpenAiResponses {
+            return Err("Codex OAuth only supports openai.responses".to_owned());
+        }
+        if let Some(token) = runtime {
+            return env::var("CTX_PROVIDER_SECRET_ACCOUNT_ID")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(|account_id| Some(ProviderCredential::Codex { token, account_id }))
+                .ok_or_else(|| "runtime Codex account id unavailable".to_owned());
+        }
+        let Some(oauth) = oauth else { return Ok(None) };
+        return if key_slot.is_none() {
+            cortexfs::resolve_oauth_credential(provider, oauth)
+                .map(|value| value.map(codex_credential))
+                .map_err(|_error| format!("oauth credential unavailable: {provider}"))
+        } else {
+            Ok(None)
         };
     }
-    let account = key_slot.unwrap_or("default");
-    if let Some(api_key) =
-        provider_secret_from_runtime_value_with_env(provider, account, |name| env::var(name))
-    {
-        return Ok(Some(credential_from_secret!(api_key)));
+    let credential = |token| {
+        if driver == ProviderRuntimeDriver::AnthropicMessages {
+            ProviderCredential::AnthropicApiKey(token)
+        } else {
+            ProviderCredential::Bearer(token)
+        }
+    };
+    if let Some(token) = runtime {
+        return Ok(Some(credential(token)));
     }
-    if let Some(api_key) =
+    let runtime =
         provider_secret_from_runtime_file_with_env(provider, account, |name| env::var(name))
-            .map_err(|_error| format!("runtime provider secret unavailable: {provider}"))?
-    {
-        return Ok(Some(credential_from_secret!(api_key)));
-    }
-    if let Some(api_key) =
-        provider_secret_from_inherited_fd_with_env(provider, account, |name| env::var(name))
-            .map_err(|_error| format!("inherited provider secret unavailable: {provider}"))?
-    {
-        return Ok(Some(credential_from_secret!(api_key)));
+            .and_then(|value| {
+                value.map_or_else(
+                    || {
+                        provider_secret_from_inherited_fd_with_env(provider, account, |name| {
+                            env::var(name)
+                        })
+                    },
+                    |value| Ok(Some(value)),
+                )
+            })
+            .map_err(|_error| format!("runtime provider secret unavailable: {provider}"))?;
+    if let Some(token) = runtime {
+        return Ok(Some(credential(token)));
     }
     match cortexfs::read_provider_system_secret(provider, account) {
-        Ok(Some(api_key)) => {
-            return Ok(Some(credential_from_secret!(api_key)));
-        }
+        Ok(Some(token)) => return Ok(Some(credential(token))),
         Ok(None) | Err(cortexfs::ProviderSystemSecretError::CannotRead) => {}
         Err(_error) => return Err(format!("system provider secret unavailable: {provider}")),
     }
-    let Some(oauth) = config.oauth.as_ref() else {
+    let Some(oauth) = oauth else {
         return Ok(None);
     };
     if key_slot.is_none() {
@@ -62,12 +75,23 @@ pub(crate) fn provider_credential(
     }
     Ok(None)
 }
+fn codex_credential((token, account_id): cortexfs::OAuthCredential) -> ProviderCredential {
+    ProviderCredential::Codex { token, account_id }
+}
+fn runtime_secret_env_matches(
+    provider: &str,
+    account: &str,
+    get_env: &impl Fn(&str) -> Result<String, env::VarError>,
+) -> bool {
+    get_env("CTX_PROVIDER_SECRET_PROVIDER").as_deref() == Ok(provider)
+        && get_env("CTX_PROVIDER_SECRET_SLOT").as_deref() == Ok(account)
+}
 pub(crate) fn provider_secret_from_runtime_value_with_env(
     provider: &str,
     account: &str,
     get_env: impl Fn(&str) -> Result<String, env::VarError>,
 ) -> Option<String> {
-    if !runtime_secret_env_matches!(provider, account, get_env) {
+    if !runtime_secret_env_matches(provider, account, &get_env) {
         return None;
     }
     let secret = get_env("CTX_PROVIDER_SECRET_VALUE").ok()?;
@@ -83,7 +107,7 @@ pub(crate) fn provider_secret_from_runtime_file_with_env(
     account: &str,
     get_env: impl Fn(&str) -> Result<String, env::VarError>,
 ) -> Result<Option<String>, io::Error> {
-    if !runtime_secret_env_matches!(provider, account, get_env) {
+    if !runtime_secret_env_matches(provider, account, &get_env) {
         return Ok(None);
     }
     let Ok(path) = get_env("CTX_PROVIDER_SECRET_PATH") else {
@@ -96,22 +120,18 @@ pub(crate) fn provider_secret_from_runtime_file_with_env(
     if !path.is_absolute() {
         return Ok(None);
     }
-    let secret = read_runtime_provider_secret_file(path)?;
-    let secret = secret.trim_end_matches(['\r', '\n']);
-    if secret.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(secret.to_owned()))
-    }
+    Ok(nonempty_secret(&read_runtime_provider_secret_file(path)?))
 }
 pub(crate) fn read_runtime_provider_secret_file(path: &Path) -> Result<String, io::Error> {
-    let mut file = open_regular_file_no_follow(path, nix::fcntl::OFlag::O_CLOEXEC)?;
+    read_runtime_secret(
+        open_regular_file_no_follow(path, nix::fcntl::OFlag::O_CLOEXEC)?,
+        "runtime provider secret file is invalid",
+    )
+}
+fn read_runtime_secret(mut file: fs::File, invalid: &str) -> Result<String, io::Error> {
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > MAX_RUNTIME_PROVIDER_SECRET_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "runtime provider secret file is invalid",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, invalid));
     }
     let len = usize::try_from(metadata.len())
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
@@ -122,7 +142,7 @@ pub(crate) fn provider_secret_from_inherited_fd_with_env(
     account: &str,
     get_env: impl Fn(&str) -> Result<String, env::VarError>,
 ) -> Result<Option<String>, io::Error> {
-    if !runtime_secret_env_matches!(provider, account, get_env) {
+    if !runtime_secret_env_matches(provider, account, &get_env) {
         return Ok(None);
     }
     let Ok(fd) = get_env("CTX_PROVIDER_SECRET_FD") else {
@@ -137,23 +157,14 @@ pub(crate) fn provider_secret_from_inherited_fd_with_env(
     if fd <= libc::STDERR_FILENO {
         return Ok(None);
     }
-    let mut file = fs::File::open(format!("/proc/self/fd/{fd}"))?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() || metadata.len() > MAX_RUNTIME_PROVIDER_SECRET_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "inherited provider secret fd is invalid",
-        ));
-    }
-    let len = usize::try_from(metadata.len())
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
-    let secret = read_utf8_exact_len(&mut file, len)?;
+    Ok(nonempty_secret(&read_runtime_secret(
+        fs::File::open(format!("/proc/self/fd/{fd}"))?,
+        "inherited provider secret fd is invalid",
+    )?))
+}
+fn nonempty_secret(secret: &str) -> Option<String> {
     let secret = secret.trim_end_matches(['\r', '\n']);
-    if secret.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(secret.to_owned()))
-    }
+    (!secret.is_empty()).then(|| secret.to_owned())
 }
 pub(crate) fn read_utf8_exact_len(file: &mut fs::File, len: usize) -> Result<String, io::Error> {
     let mut content = vec![0; len];

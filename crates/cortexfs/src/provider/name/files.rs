@@ -3,10 +3,7 @@ use crate::*;
 use nix::fcntl::{FcntlArg, FdFlag, fcntl};
 use std::fs::File;
 
-use crate::support::plain::{
-    open_plain_directory as open_plain_directory_no_follow,
-    plain_file_name as provider_secret_plain_file_name,
-};
+use crate::support::plain::{open_plain_directory, plain_file_name};
 
 pub(crate) fn read_provider_secret_file(path: &Path) -> std::io::Result<String> {
     let mut file = open_provider_secret_file(path)?;
@@ -26,7 +23,7 @@ pub(crate) fn open_provider_secret_file(path: &Path) -> std::io::Result<File> {
             "provider secret has no parent",
         )
     })?;
-    let parent_dir = open_plain_directory_no_follow(parent)?;
+    let parent_dir = open_plain_directory(parent)?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -54,7 +51,7 @@ pub(crate) fn open_provider_secret_file(path: &Path) -> std::io::Result<File> {
 }
 
 pub(crate) fn set_private_dir_permissions(path: &Path) -> Result<(), ProviderSystemSecretError> {
-    let dir = match open_plain_directory_no_follow(path) {
+    let dir = match open_plain_directory(path) {
         Ok(dir) => dir,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(_error) => return Err(ProviderSystemSecretError::CannotWrite),
@@ -102,11 +99,11 @@ pub(crate) fn create_private_provider_secret_dir(
         .last()
         .and_then(|path| path.parent())
         .ok_or(ProviderSystemSecretError::CannotWrite)?;
-    let mut parent_dir = open_plain_directory_no_follow(parent)
-        .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+    let mut parent_dir =
+        open_plain_directory(parent).map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
     for directory in missing.iter().rev() {
-        let name = provider_secret_plain_file_name(directory)
-            .map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
+        let name =
+            plain_file_name(directory).map_err(|_error| ProviderSystemSecretError::CannotWrite)?;
         nix::sys::stat::mkdirat(
             &parent_dir,
             name,

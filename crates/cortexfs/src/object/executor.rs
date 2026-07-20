@@ -19,10 +19,9 @@
 #![expect(clippy::module_inception, reason = "allow submodule self name")]
 
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
@@ -30,26 +29,27 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
-    DEFAULT_AGENT_PROMPT_TEMPLATE, PolicyObjectClass, PolicyPermission, PolicyV0,
-    ToolExecutionAuthority, ToolExecutionDenial, authorize_tool_execution, collect_agent_rules,
-    collect_skill_metadata, current_time_unix, derive_agent_runtime_view,
-    inspect_event_stream_jsonl, is_model_name, is_object_name, parse_model_fallback, run_core_tool,
-    run_core_tool_cli, run_echo_model, skill_metadata_budget_from_env, write_run_snapshot,
+    AgentPromptContext, AgentWindowBudget, AgentWindowSetting, DEFAULT_AGENT_PROMPT_TEMPLATE,
+    MAX_SKILL_METADATA_CHARS, ModelContextLimit, PolicyObjectClass, PolicyPermission, PolicyV0,
+    ToolExecutionAuthority, ToolExecutionDenial, agent_provider_messages, authorize_tool_execution,
+    collect_agent_rules, collect_skill_metadata, current_time_unix, derive_agent_runtime_view,
+    inspect_event_stream_jsonl, is_model_alias, is_model_name, is_object_name,
+    parse_model_fallback, run_core_tool, run_core_tool_cli, run_echo_model,
+    skill_metadata_budget_from_env, write_run_snapshot,
 };
 use cortexfs_tool_sdk::ToolInvocation;
 use nix::libc;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/v1-root";
+const DEFAULT_SOURCE: &str = "/var/lib/cortexfs/storage/current";
 pub(crate) const DEFAULT_CTX_ROOT: &str = "/ctx";
-const MAX_AGENT_TOOL_ITERATIONS: usize = 8;
 const MAX_MODEL_FALLBACK_CANDIDATES: usize = 16;
 const MAX_TOOL_RESULT_CHARS: usize = 16 * 1024;
 pub(crate) const MAX_CHILD_STDERR_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_STREAM_TOOL_CALL_BUFFER_BYTES: usize = 64 * 1024;
 const MAX_AGENT_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
-const MAX_AGENT_TOOL_CONTEXT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_AGENT_TOOL_CONTEXT_BYTES: usize = 64 * 1024;
 const MAX_AGENT_TOOL_ARGC: usize = 64;
 const MAX_AGENT_TOOL_ARG_BYTES: usize = 8 * 1024;
 const MAX_AGENT_MODEL_FRAME_BYTES: usize = 256 * 1024;
@@ -61,7 +61,7 @@ const MAX_AGENT_TOOL_TIMEOUT_SECONDS: u64 = 120;
 const AGENT_TOOL_OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 const AGENT_MODEL_TIMEOUT_SECONDS: u64 = 120;
 const MAX_AGENT_MODEL_TIMEOUT_SECONDS: u64 = 600;
-const BWRAP_PROGRAM: &str = "/usr/bin/bwrap";
+const BWRAP_PROGRAM: &str = crate::support::command::BWRAP;
 
 pub(crate) use crate::support::process;
 pub(crate) use crate::support::process::read_limited_bytes;
@@ -87,6 +87,7 @@ pub(crate) mod access;
 pub(crate) use crate::cli::stderr;
 pub(crate) use crate::cli::text;
 pub(crate) mod args;
+pub(crate) mod error;
 pub(crate) mod exec;
 pub(crate) mod timeout;
 pub(crate) mod tool;
@@ -95,7 +96,7 @@ pub(crate) use agent::*;
 pub(crate) use alias::*;
 pub(crate) use args::*;
 pub(crate) use call::*;
-pub(crate) use exec::*;
+pub(crate) use error::*;
 pub(crate) use frames::*;
 pub(crate) use inference::*;
 pub(crate) use input::*;
@@ -122,7 +123,7 @@ pub(crate) use std::fmt::Write as _;
 #[must_use]
 pub(crate) fn main() -> ExitCode {
     match run(env::args_os().skip(1).collect()) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(error) => {
             let _ignored = write_error(&format!("cortexfs-object-runner: {error}"));
             ExitCode::from(2)
@@ -130,16 +131,16 @@ pub(crate) fn main() -> ExitCode {
     }
 }
 
-pub(crate) fn run(args: Vec<OsString>) -> Result<(), String> {
+pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, ExecError> {
     let (object_path, input) = split_object_args(args)?;
     let object = ObjectPath::parse(&object_path)?;
     match (object.class.as_str(), object.name.as_str()) {
-        ("model", name) => run_model(name, &input),
-        ("agent", name) => run_agent(name, &input),
+        ("model", name) => run_model(name, &input).map(|()| ExitCode::SUCCESS),
+        ("agent", name) => run_agent(name, &input).map(|()| ExitCode::SUCCESS),
         ("tool", name) => run_tool(name, &input),
-        (class, _name) => Err(format!(
+        (class, _name) => Err(ExecError::new(format!(
             "object class {class} is not handled by this runner"
-        )),
+        ))),
     }
 }
 

@@ -5,6 +5,7 @@ use super::{
     run_shell_exec_command_with_timeout, shell_exec_command, tsh_tool_count,
     write_tsh_runtime_config,
 };
+use crate::agent::createop::create_error;
 use cortexfs_tool_sdk::{ToolInvocation, run_tool};
 use std::ffi::OsString;
 use std::io::Cursor;

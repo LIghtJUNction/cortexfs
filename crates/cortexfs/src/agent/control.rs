@@ -1,10 +1,16 @@
+use std::collections::BTreeSet;
+
 use crate::{
     ChildLifecycle, ControlLineIssue,
+    abi::path::is_object_name,
     authority::parent_ref_agent_name,
-    support::control::{inspect_control_line, inspect_control_lines},
+    support::control::{
+        inspect_control_line, inspect_control_lines, parse_canonical_control_value,
+        parse_canonical_positive_u32,
+    },
 };
 
-/// Stable agent control file kind with fixed v1 value syntax.
+/// Stable agent control file kind with fixed value syntax.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentControlKind {
     /// `agent/<name>.d/owner`: owning Linux uid.
@@ -25,10 +31,14 @@ pub enum AgentControlKind {
     Status,
     /// `agent/<name>.d/pid`: runtime process id, when running.
     Pid,
+    /// `agent/<name>.d/approval`: hosted direct-native approval mode.
+    Approval,
+    /// `agent/<name>.d/window`: context-window setting in tokens.
+    Window,
 }
 
 impl AgentControlKind {
-    /// Parses an agent control file name with fixed v1 syntax.
+    /// Parses an agent control file name with fixed syntax.
     #[must_use]
     pub fn parse(file_name: &str) -> Option<Self> {
         match file_name {
@@ -41,6 +51,8 @@ impl AgentControlKind {
             "life" => Some(Self::Life),
             "status" => Some(Self::Status),
             "pid" => Some(Self::Pid),
+            "approval" => Some(Self::Approval),
+            "window" => Some(Self::Window),
             _ => None,
         }
     }
@@ -57,20 +69,64 @@ pub struct AgentControlReport {
 
 impl_issue_report!(AgentControlReport, ControlLineIssue);
 
-/// Inspects a fixed-format v1 agent control file body.
+/// Inspects a fixed-format agent control file body.
 #[must_use]
 pub fn inspect_agent_control(kind: AgentControlKind, content: &str) -> AgentControlReport {
     match kind {
         AgentControlKind::Groups => inspect_agent_groups_control(content),
         AgentControlKind::Parent => inspect_optional_agent_parent_control(content),
         AgentControlKind::Pid => inspect_optional_agent_number_control(content),
+        AgentControlKind::Window => inspect_agent_window_control(content),
         AgentControlKind::Owner | AgentControlKind::Uid | AgentControlKind::Gid => {
             inspect_required_agent_number_control(content)
         }
-        AgentControlKind::Iso | AgentControlKind::Life | AgentControlKind::Status => {
-            inspect_agent_vocab_control(kind, content)
-        }
+        AgentControlKind::Iso
+        | AgentControlKind::Life
+        | AgentControlKind::Status
+        | AgentControlKind::Approval => inspect_agent_vocab_control(kind, content),
     }
+}
+
+pub(crate) fn inspect_agent_window_control(content: &str) -> AgentControlReport {
+    let mut issues = inspect_control_line(content, true, |line, value, issues| {
+        if value != "auto" && parse_canonical_positive_u32(value).is_none() {
+            issues.push(ControlLineIssue::InvalidNumber {
+                line,
+                value: value.to_owned(),
+            });
+        }
+    });
+    if parse_canonical_control_value(content).is_none() && issues.is_empty() {
+        issues.push(ControlLineIssue::InvalidValue {
+            line: 1,
+            value: content.to_owned(),
+        });
+    }
+    AgentControlReport::new(issues)
+}
+
+/// Inspects the optional direct-native tool declaration control.
+#[must_use]
+pub fn inspect_agent_tools_control(content: &str) -> AgentControlReport {
+    if content.is_empty() || content == "\n" {
+        return AgentControlReport::default();
+    }
+    let mut seen = BTreeSet::new();
+    let mut issues = inspect_control_lines(content, |line, value, issues| {
+        if value == "tsh" || !is_object_name(value) || !seen.insert(value.to_owned()) {
+            issues.push(ControlLineIssue::InvalidValue {
+                line,
+                value: value.to_owned(),
+            });
+        }
+    });
+    if !content.is_empty() && !content.ends_with('\n') {
+        issues.push(ControlLineIssue::InvalidValue {
+            line: content.lines().count().max(1),
+            value: content.lines().last().unwrap_or_default().to_owned(),
+        });
+    }
+    AgentControlReport::new(issues)
 }
 
 pub(crate) fn inspect_required_agent_number_control(content: &str) -> AgentControlReport {
@@ -157,11 +213,13 @@ pub(crate) fn agent_vocab_allows(kind: AgentControlKind, value: &str) -> bool {
                 "start" | "ready" | "busy" | "idle" | "stopping" | "dead"
             )
         }
+        AgentControlKind::Approval => matches!(value, "auto" | "ask"),
         AgentControlKind::Owner
         | AgentControlKind::Uid
         | AgentControlKind::Gid
         | AgentControlKind::Groups
         | AgentControlKind::Parent
-        | AgentControlKind::Pid => false,
+        | AgentControlKind::Pid
+        | AgentControlKind::Window => false,
     }
 }

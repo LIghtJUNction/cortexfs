@@ -1,0 +1,25 @@
+[package]
+name = "cortexfs-sdk-extension-fixture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "cortexfs-sdk-fixture-agent"
+path = "src/agent.rs"
+
+[[bin]]
+name = "cortexfs-sdk-fixture-tool"
+path = "src/tool.rs"
+
+[dependencies]
+cortexfs = { version = "0.1.7", path = "../../crates/cortexfs" }
+cortexfs-agent-sdk = { version = "0.1.7", path = "../../crates/cortexfs-agent-sdk" }
+cortexfs-tool-sdk = { version = "0.1.7", path = "../../crates/cortexfs-tool-sdk" }
+serde_json = "1.0.150"
+sha2 = "0.11.0"

@@ -1,6 +1,8 @@
 use super::*;
 use crate::*;
 
+use crate::support::plain::read_small_text_file;
+
 impl Tool for TshConfigTool {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -100,7 +102,7 @@ pub(crate) fn requested_tsh_config_path(
 }
 
 pub(crate) fn read_tsh_runtime_config(path: &Path) -> ToolResult<TshRuntimeConfig> {
-    let content = match read_regular_utf8_file(path, MAX_TSH_CONFIG_BYTES) {
+    let content = match read_small_text_file(path, MAX_TSH_CONFIG_BYTES) {
         Ok(content) => content,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(TshRuntimeConfig::default());

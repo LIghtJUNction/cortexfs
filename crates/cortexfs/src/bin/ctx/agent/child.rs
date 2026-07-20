@@ -35,10 +35,9 @@ pub(crate) fn agent_wait(
     require_cli_name("child name", child)?;
     let parent_session_dir = agent_session_dir(root, name, session)?;
     let child_dir = parent_session_dir.join("context").join("child").join(child);
-    let status = reconcile_active_child_wait(root, name, &parent_session_dir, child, &child_dir)?
-        .ok_or_else(|| CliError::unavailable(format!("missing child status: {child}")))?;
-    let status = ChildContextStatus::parse(&status)
-        .ok_or_else(|| CliError::usage(format!("invalid child status for {child}: {status}")))?;
+    let status = resolve_child_wait_status(child, || {
+        reconcile_active_child_wait(root, name, &parent_session_dir, child, &child_dir)
+    })?;
     if matches!(
         status,
         ChildContextStatus::Pending | ChildContextStatus::Active
@@ -74,6 +73,16 @@ pub(crate) fn agent_wait(
     ))?;
     print_terminal_text(&result)?;
     Ok(child_wait_exit_code(status))
+}
+
+pub(crate) fn resolve_child_wait_status(
+    child: &str,
+    mut read: impl FnMut() -> Result<Option<String>, CliError>,
+) -> Result<ChildContextStatus, CliError> {
+    let status =
+        read()?.ok_or_else(|| CliError::unavailable(format!("missing child status: {child}")))?;
+    ChildContextStatus::parse(&status)
+        .ok_or_else(|| CliError::usage(format!("invalid child status for {child}: {status}")))
 }
 
 pub(crate) fn reconcile_active_child_wait(

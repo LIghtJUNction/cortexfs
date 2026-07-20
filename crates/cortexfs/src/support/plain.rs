@@ -5,7 +5,8 @@
 
 use std::fs;
 
-use std::io::{Read, Result};
+use std::ffi::OsStr;
+use std::io::{Read, Result, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixListener;
@@ -22,7 +23,8 @@ pub(crate) fn read_symlink_target(path: &Path) -> Result<PathBuf> {
         .map_err(std::io::Error::from)
 }
 
-pub(crate) fn read_small_text_file(path: &Path, max_bytes: u64) -> Result<String> {
+#[doc(hidden)]
+pub fn read_small_text_file(path: &Path, max_bytes: u64) -> Result<String> {
     let file = open_plain_file(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
@@ -50,7 +52,10 @@ pub fn read_small_text_file_at(
     let file_fd = nix::fcntl::openat(
         directory,
         name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(std::io::Error::from)?;
@@ -79,18 +84,11 @@ pub(crate) fn path_metadata_no_follow(path: &Path) -> Result<fs::Metadata> {
     fs::File::from(file_fd).metadata()
 }
 
-pub(crate) fn open_plain_file(path: &Path) -> Result<fs::File> {
+pub fn open_plain_file(path: &Path) -> Result<fs::File> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let parent_dir = open_plain_directory(parent)?;
     let file_name = plain_file_name(path)?;
-    let file_fd = nix::fcntl::openat(
-        &parent_dir,
-        file_name,
-        nix::fcntl::OFlag::O_RDONLY | nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map_err(std::io::Error::from)?;
-    Ok(fs::File::from(file_fd))
+    open_file_at(&parent_dir, file_name)
 }
 
 pub(crate) fn plain_file_name(path: &Path) -> Result<&str> {
@@ -140,36 +138,101 @@ pub fn create_plain_dir_exclusive(path: &Path, mode: u32) -> Result<fs::File> {
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     let parent_dir = open_plain_directory(parent)?;
     let name = plain_file_name(path)?;
+    create_plain_dir_at(&parent_dir, name, mode)
+}
+
+pub(crate) fn create_plain_dir_at(parent: &fs::File, name: &str, mode: u32) -> Result<fs::File> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
     nix::sys::stat::mkdirat(
-        &parent_dir,
+        parent,
         name,
         nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
     )
     .map_err(std::io::Error::from)?;
-    let created = nix::fcntl::openat(
-        &parent_dir,
-        name,
-        nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    )
-    .map(fs::File::from)
-    .map_err(std::io::Error::from);
-    let created = match created {
+    let created = match open_directory_at(parent, OsStr::new(name)) {
         Ok(created) => created,
         Err(error) => {
-            let _ignored = remove_plain_dir_at(&parent_dir, name);
+            let _ignored = remove_plain_dir_at(parent, name);
             return Err(error);
         }
     };
-    if let Err(error) = created.sync_all().and_then(|()| parent_dir.sync_all()) {
+    if let Err(error) = created.sync_all().and_then(|()| parent.sync_all()) {
         drop(created);
-        let _ignored = remove_plain_dir_at(&parent_dir, name);
+        let _ignored = remove_plain_dir_at(parent, name);
         return Err(error);
     }
     Ok(created)
+}
+
+pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u32) -> Result<()> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    let fd = nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_EXCL
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut file = fs::File::from(fd);
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    parent.sync_all()
+}
+
+/// Atomically publishes one new plain file relative to a held directory fd.
+#[doc(hidden)]
+pub fn write_file_atomic_at(
+    parent: &fs::File,
+    name: &str,
+    content: &[u8],
+    mode: u32,
+) -> Result<()> {
+    if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    let temp = format!(".{name}.tmp-{}", std::process::id());
+    let fd = nix::fcntl::openat(
+        parent,
+        temp.as_str(),
+        nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_CREAT
+            | nix::fcntl::OFlag::O_EXCL
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+    )
+    .map_err(std::io::Error::from)?;
+    let mut file = fs::File::from(fd);
+    let publish = file
+        .write_all(content)
+        .and_then(|()| file.sync_all())
+        .and_then(|()| {
+            nix::fcntl::renameat2(
+                parent,
+                temp.as_str(),
+                parent,
+                name,
+                nix::fcntl::RenameFlags::RENAME_NOREPLACE,
+            )
+            .map_err(std::io::Error::from)
+        });
+    if let Err(error) = publish {
+        let _ignored = nix::unistd::unlinkat(
+            parent,
+            temp.as_str(),
+            nix::unistd::UnlinkatFlags::NoRemoveDir,
+        );
+        return Err(error);
+    }
+    parent.sync_all()
 }
 
 pub(crate) fn remove_plain_dir(path: &Path) -> Result<()> {
@@ -328,6 +391,38 @@ pub(crate) fn sync_plain_dir(path: &Path) -> Result<()> {
     open_plain_directory(path)?.sync_all()
 }
 
+/// Opens a plain directory relative to a held parent directory fd (no-follow).
+#[doc(hidden)]
+pub fn open_directory_at(parent: &fs::File, name: &OsStr) -> Result<fs::File> {
+    nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_DIRECTORY
+            | nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(std::io::Error::from)
+}
+
+/// Opens a plain regular file relative to a held parent directory fd (no-follow).
+#[doc(hidden)]
+pub fn open_file_at(parent: &fs::File, name: &str) -> Result<fs::File> {
+    nix::fcntl::openat(
+        parent,
+        name,
+        nix::fcntl::OFlag::O_RDONLY
+            | nix::fcntl::OFlag::O_NOFOLLOW
+            | nix::fcntl::OFlag::O_NONBLOCK
+            | nix::fcntl::OFlag::O_CLOEXEC,
+        nix::sys::stat::Mode::empty(),
+    )
+    .map(fs::File::from)
+    .map_err(std::io::Error::from)
+}
+
 #[doc(hidden)]
 pub fn open_plain_directory(path: &Path) -> Result<fs::File> {
     let mut directory = if path.is_absolute() {
@@ -339,20 +434,7 @@ pub fn open_plain_directory(path: &Path) -> Result<fs::File> {
         match component {
             std::path::Component::RootDir | std::path::Component::CurDir => {}
             std::path::Component::Normal(name) => {
-                let name = name.to_str().ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidInput, "invalid directory name")
-                })?;
-                let next = nix::fcntl::openat(
-                    &directory,
-                    name,
-                    nix::fcntl::OFlag::O_DIRECTORY
-                        | nix::fcntl::OFlag::O_RDONLY
-                        | nix::fcntl::OFlag::O_NOFOLLOW
-                        | nix::fcntl::OFlag::O_CLOEXEC,
-                    nix::sys::stat::Mode::empty(),
-                )
-                .map_err(std::io::Error::from)?;
-                directory = fs::File::from(next);
+                directory = open_directory_at(&directory, name)?;
             }
             std::path::Component::ParentDir | std::path::Component::Prefix(_) => {
                 return Err(std::io::Error::new(

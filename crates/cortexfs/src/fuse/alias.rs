@@ -1,37 +1,36 @@
 use crate::*;
 
-impl FuseV1Projection {
+impl FuseProjection {
     /// Persists a temporary model symlink used by atomic alias replacement.
     pub fn set_model_alias_symlink(
         &self,
         abi_path: &str,
         target: &Path,
-    ) -> Result<FuseV1Node, FuseV1Error> {
+    ) -> Result<FuseNode, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if !is_model_alias_symlink_path(&normalized) {
-            return Err(FuseV1Error::InvalidPath);
+            return Err(FuseError::InvalidPath);
         }
-        let target = normalize_model_alias_target(target).ok_or(FuseV1Error::InvalidPath)?;
+        let target = normalize_model_alias_target(target).ok_or(FuseError::InvalidPath)?;
         let path = self.resolve(&normalized)?;
-        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?;
         ensure_model_alias_parent(parent)?;
         let parent_dir = open_model_alias_parent(parent)?;
         let file_name = model_alias_path_file_name(&path)?;
-        nix::unistd::symlinkat(&target, &parent_dir, file_name)
-            .map_err(|_error| FuseV1Error::Io)?;
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)?;
+        nix::unistd::symlinkat(&target, &parent_dir, file_name).map_err(|_error| FuseError::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)?;
         model_alias_symlink_node(normalized, &target)
     }
 
     /// Persists a model alias symlink such as `model/main`.
-    pub fn set_model_alias(&self, abi_path: &str, target: &Path) -> Result<(), FuseV1Error> {
+    pub fn set_model_alias(&self, abi_path: &str, target: &Path) -> Result<(), FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         let Some(alias) = model_alias_name(&normalized) else {
-            return Err(FuseV1Error::NotControlFile);
+            return Err(FuseError::NotControlFile);
         };
-        let target = normalize_model_alias_target(target).ok_or(FuseV1Error::InvalidPath)?;
+        let target = normalize_model_alias_target(target).ok_or(FuseError::InvalidPath)?;
         let path = self.resolve(&format!("model/{alias}"))?;
-        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?;
         ensure_model_alias_parent(parent)?;
         let parent_dir = open_model_alias_parent(parent)?;
         let temporary = create_unique_model_alias_symlink(&parent_dir, alias, &target)?;
@@ -43,19 +42,19 @@ impl FuseV1Projection {
                 temporary.as_str(),
                 nix::unistd::UnlinkatFlags::NoRemoveDir,
             );
-            return Err(FuseV1Error::Io);
+            return Err(FuseError::Io);
         }
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)
     }
 
     /// Removes a persisted model alias override, restoring the built-in target.
-    pub fn remove_model_alias(&self, abi_path: &str) -> Result<(), FuseV1Error> {
+    pub fn remove_model_alias(&self, abi_path: &str) -> Result<(), FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
         if model_alias_name(&normalized).is_none() {
-            return Err(FuseV1Error::NotControlFile);
+            return Err(FuseError::NotControlFile);
         }
         let path = self.resolve(&normalized)?;
-        let parent = path.parent().ok_or(FuseV1Error::InvalidPath)?.to_path_buf();
+        let parent = path.parent().ok_or(FuseError::InvalidPath)?.to_path_buf();
         ensure_model_alias_parent(&parent)?;
         let parent_dir = open_model_alias_parent(&parent)?;
         let file_name = model_alias_path_file_name(&path)?;
@@ -64,21 +63,21 @@ impl FuseV1Projection {
             file_name,
             nix::unistd::UnlinkatFlags::NoRemoveDir,
         ) {
-            Ok(()) => parent_dir.sync_all().map_err(|_error| FuseV1Error::Io),
+            Ok(()) => parent_dir.sync_all().map_err(|_error| FuseError::Io),
             Err(nix::errno::Errno::ENOENT) => Ok(()),
-            Err(_error) => Err(FuseV1Error::Io),
+            Err(_error) => Err(FuseError::Io),
         }
     }
 
-    /// Renames a temporary model symlink onto `model/main` or `model/helper`.
-    pub fn rename_model_alias_symlink(&self, from: &str, to: &str) -> Result<(), FuseV1Error> {
+    /// Renames a temporary model symlink onto a canonical model alias.
+    pub fn rename_model_alias_symlink(&self, from: &str, to: &str) -> Result<(), FuseError> {
         let from = normalize_fuse_abi_path(from)?;
         let to = normalize_fuse_abi_path(to)?;
         if !is_model_alias_symlink_path(&from) || model_alias_name(&to).is_none() {
-            return Err(FuseV1Error::InvalidPath);
+            return Err(FuseError::InvalidPath);
         }
         let source = self.resolve(&from)?;
-        let source_parent = source.parent().ok_or(FuseV1Error::InvalidPath)?;
+        let source_parent = source.parent().ok_or(FuseError::InvalidPath)?;
         ensure_model_alias_parent(source_parent)?;
         let source_parent_dir = open_model_alias_parent(source_parent)?;
         let source_name = model_alias_path_file_name(&source)?;
@@ -93,19 +92,19 @@ impl FuseV1Projection {
                 nix::unistd::UnlinkatFlags::NoRemoveDir,
             ) {
                 Ok(()) | Err(nix::errno::Errno::ENOENT) => {}
-                Err(_error) => return Err(FuseV1Error::Io),
+                Err(_error) => return Err(FuseError::Io),
             }
         }
         Ok(())
     }
 }
 
-pub(crate) fn ensure_model_alias_parent(parent: &Path) -> Result<(), FuseV1Error> {
+pub(crate) fn ensure_model_alias_parent(parent: &Path) -> Result<(), FuseError> {
     if let Ok(metadata) = fs::symlink_metadata(parent) {
         return if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
             sync_model_alias_parent(parent)
         } else {
-            Err(FuseV1Error::Io)
+            Err(FuseError::Io)
         };
     }
 
@@ -114,14 +113,14 @@ pub(crate) fn ensure_model_alias_parent(parent: &Path) -> Result<(), FuseV1Error
     while let Some(current) = cursor {
         match fs::symlink_metadata(current) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
-                return Err(FuseV1Error::Io);
+                return Err(FuseError::Io);
             }
             Ok(_metadata) => break,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 missing.push(current.to_path_buf());
                 cursor = current.parent();
             }
-            Err(_error) => return Err(FuseV1Error::Io),
+            Err(_error) => return Err(FuseError::Io),
         }
     }
 
@@ -139,8 +138,8 @@ pub(crate) fn ensure_model_alias_parent(parent: &Path) -> Result<(), FuseV1Error
             name,
             nix::sys::stat::Mode::from_bits_truncate(0o755),
         )
-        .map_err(|_error| FuseV1Error::Io)?;
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)?;
         let child = nix::fcntl::openat(
             &parent_dir,
             name,
@@ -150,31 +149,31 @@ pub(crate) fn ensure_model_alias_parent(parent: &Path) -> Result<(), FuseV1Error
                 | nix::fcntl::OFlag::O_CLOEXEC,
             nix::sys::stat::Mode::empty(),
         )
-        .map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
         parent_dir = fs::File::from(child);
-        parent_dir.sync_all().map_err(|_error| FuseV1Error::Io)?;
+        parent_dir.sync_all().map_err(|_error| FuseError::Io)?;
     }
     Ok(())
 }
 
-pub(crate) fn sync_model_alias_parent(parent: &Path) -> Result<(), FuseV1Error> {
+pub(crate) fn sync_model_alias_parent(parent: &Path) -> Result<(), FuseError> {
     open_model_alias_parent(parent)?
         .sync_all()
-        .map_err(|_error| FuseV1Error::Io)
+        .map_err(|_error| FuseError::Io)
 }
 
-pub(crate) fn open_model_alias_parent(parent: &Path) -> Result<fs::File, FuseV1Error> {
+pub(crate) fn open_model_alias_parent(parent: &Path) -> Result<fs::File, FuseError> {
     let directory = fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
         .open(parent)
-        .map_err(|_error| FuseV1Error::Io)?;
+        .map_err(|_error| FuseError::Io)?;
     if !directory
         .metadata()
-        .map_err(|_error| FuseV1Error::Io)?
+        .map_err(|_error| FuseError::Io)?
         .is_dir()
     {
-        return Err(FuseV1Error::Io);
+        return Err(FuseError::Io);
     }
     Ok(directory)
 }
@@ -183,7 +182,7 @@ pub(crate) fn create_unique_model_alias_symlink(
     parent_dir: &fs::File,
     alias: &str,
     target: &Path,
-) -> Result<String, FuseV1Error> {
+) -> Result<String, FuseError> {
     for attempt in 0..32_u32 {
         let temporary = format!(
             ".{alias}.tmp-{}-{}-{attempt}",
@@ -193,16 +192,16 @@ pub(crate) fn create_unique_model_alias_symlink(
         match nix::unistd::symlinkat(target, parent_dir, temporary.as_str()) {
             Ok(()) => return Ok(temporary),
             Err(nix::errno::Errno::EEXIST) => {}
-            Err(_error) => return Err(FuseV1Error::Io),
+            Err(_error) => return Err(FuseError::Io),
         }
     }
-    Err(FuseV1Error::Io)
+    Err(FuseError::Io)
 }
 
-pub(crate) fn model_alias_path_file_name(path: &Path) -> Result<&str, FuseV1Error> {
+pub(crate) fn model_alias_path_file_name(path: &Path) -> Result<&str, FuseError> {
     path.file_name()
         .and_then(|name| name.to_str())
-        .ok_or(FuseV1Error::InvalidPath)
+        .ok_or(FuseError::InvalidPath)
 }
 
 pub(crate) fn monotonic_alias_nonce() -> u128 {
@@ -227,11 +226,11 @@ pub(crate) fn is_model_alias_symlink_path(abi_path: &str) -> bool {
 pub(crate) fn model_alias_symlink_node(
     abi_path: String,
     target: &Path,
-) -> Result<FuseV1Node, FuseV1Error> {
-    let size = u64::try_from(target.as_os_str().len()).map_err(|_error| FuseV1Error::Io)?;
-    Ok(FuseV1Node::new(
-        fuse_v1_inode_for_path(&abi_path),
+) -> Result<FuseNode, FuseError> {
+    let size = u64::try_from(target.as_os_str().len()).map_err(|_error| FuseError::Io)?;
+    Ok(FuseNode::new(
+        fuse_inode_for_path(&abi_path),
         abi_path.clone(),
-        FuseV1Attr::with_owner(abi_path, FuseV1FileType::Symlink, size, 0o777, 0, 0),
+        FuseAttr::with_owner(abi_path, FuseFileType::Symlink, size, 0o777, 0, 0),
     ))
 }

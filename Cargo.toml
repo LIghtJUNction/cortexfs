@@ -1,7 +1,10 @@
 [workspace]
 members = [
     "crates/cortexfs",
+    "crates/cortexfs-agent-sdk", "crates/cortexfs-mcp",
+    "crates/cortexfs-runtime-client",
     "crates/cortexfs-tool-sdk",
+    "tests/sdk-extension-fixture",
 ]
 resolver = "3"
 
@@ -87,5 +90,3 @@ multiple_crate_versions = { level = "allow", priority = 1 }
 module_name_repetitions = { level = "allow", priority = 1 }
 missing_errors_doc = { level = "allow", priority = 1 }
 missing_panics_doc = { level = "allow", priority = 1 }
-
-[workspace.dependencies]

@@ -1,0 +1,22 @@
+[package]
+name = "cortexfs-agent-sdk"
+description = "Rust SDK for CortexFS executable agents."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+cortexfs-runtime-client = { version = "0.1.7", path = "../cortexfs-runtime-client" }
+serde_json = "1.0.150"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+cortexfs = { path = "../cortexfs" }
+tempfile = "3.27.0"

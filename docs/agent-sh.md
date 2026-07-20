@@ -24,8 +24,8 @@ agent.sh --help
 
 ## Boundary
 
-`agent.sh` is a small defaults wrapper, not an ABI reader. It resolves `ctx` and
-then execs `ctx agent ...` with common defaults such as `--session default`.
+`agent.sh` is a small defaults wrapper, not an ABI reader. It resolves `ctx`
+and then execs `ctx agent ...` with common defaults such as `--session default`.
 The stable paths below are the CortexFS state that `ctx` reads and writes:
 
 ```text
@@ -37,13 +37,16 @@ The stable paths below are the CortexFS state that `ctx` reads and writes:
 /ctx/shared
 ```
 
+In some deployments, `/ctx/agent/<agent>.sock` is an owner-authorized symlink to
+a user runtime socket, and in some deployments it may be a direct socket node.
+Probe the live mount before assuming one implementation form.
+
 `/ctx/tool` is the system tool tier. `/ctx/home/<uid>/tool` is the user's own
 tool tier, not a place for default symlink copies of system tools. An actual
 agent runtime may see a filtered in-memory FUSE projection of these tiers.
 
 It does not use root namespaces such as `provider`, `format`, `cluster`,
 `control`, `thread`, `workflow`, `mcp`, or `skill`.
-
 ## Environment
 
 ```bash
@@ -85,12 +88,9 @@ Use `agent.sh --watch AGENT` to observe the agent terminal read-only. Use
 
 ## Chat And Terminal
 
-`ctx agent chat` owns line editing, interrupt handling, socket requests, and
-assistant response rendering. Interactive chat responses are buffered before
-printing so model output does not corrupt the user's current input buffer.
-`Ctrl+C` exits an idle chat. While a run is active it asks CortexFS to cancel
-that run and returns to the prompt.
-`ctx agent repl` remains a compatibility alias for the same chat UI.
+`ctxchat` owns line editing, references, clipboard adapters, socket requests,
+and response rendering through the documented file/socket ABI. `ctx agent
+chat` execs `ctxchat`.
 
 Inside the chat shell, `/workspace` prints the host checkout mounted at
 `/workspace`; `/status` prints agent model, lifecycle, role, and workspace;
@@ -107,6 +107,7 @@ The socket request shape used by `ctx` is newline-delimited JSON:
 
 ```json
 {"op":"send","id":"ctx-...","session":"default","scope":"private","cwd":"/workspace","input":"fix tests"}
+{"op":"tsh","id":"tool-...","session":"default","args":["load","bash"]}
 {"op":"resume","session":"default"}
 {"op":"cancel","id":"run-1"}
 ```
@@ -116,7 +117,7 @@ to print raw JSONL events.
 
 ## Sessions
 
-`agent.sh` never stores private history. It reads the v1 session tree:
+`agent.sh` never stores private history. It reads the stable session tree:
 
 ```text
 $CTX_HOME/agent/<agent>/session/index/current

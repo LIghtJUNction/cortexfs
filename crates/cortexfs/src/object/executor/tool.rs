@@ -1,19 +1,20 @@
 use super::*;
 
-pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
+pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<ExitCode, ExecError> {
     if is_passthrough_tool(name) {
-        return run_passthrough_tool(name, args);
+        return run_passthrough_tool(name, args).map(|()| ExitCode::SUCCESS);
     }
     if env::var("CTX_TOOL_MODE").as_deref() == Ok("cli") {
         return run_cli_tool(name, args);
     }
-    let input = collect_input(args).map_err(|error| format!("cannot read input: {error}"))?;
+    let input =
+        collect_input(args).map_err(|error| ExecError::with_io("cannot read input", &error))?;
     let run = env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let invocation = ToolInvocation::new(run.clone(), input);
     match run_core_tool(name, &invocation, &mut stdout) {
-        Ok(true) => Ok(()),
+        Ok(true) => Ok(ExitCode::SUCCESS),
         Ok(false) => write_tool_start(&mut stdout, &run, name)
             .and_then(|()| {
                 write_tool_error(
@@ -23,28 +24,30 @@ pub(crate) fn run_tool(name: &str, args: &[OsString]) -> Result<(), String> {
                     "tool is not implemented by cortexfs-object-runner",
                 )
             })
-            .map_err(|error| format!("cannot write output: {error}")),
-        Err(error) => Err(format!("cannot write output: {error}")),
+            .map(|()| ExitCode::SUCCESS)
+            .map_err(|error| ExecError::with_io("cannot write output", &error)),
+        Err(error) => Err(ExecError::with_io("cannot write output", &error)),
     }
 }
 
-pub(crate) fn run_cli_tool(name: &str, args: &[OsString]) -> Result<(), String> {
+pub(crate) fn run_cli_tool(name: &str, args: &[OsString]) -> Result<ExitCode, ExecError> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     match run_core_tool_cli(name, args, &mut stdout) {
-        Ok(Some(code)) if code == ExitCode::SUCCESS => Ok(()),
-        Ok(Some(code)) => Err(format!("{name} tool exited with {code:?}")),
-        Ok(None) => Err("tool is not implemented by cortexfs-object-runner".to_owned()),
-        Err(error) => Err(format!("cannot run tool: {error}")),
+        Ok(Some(code)) => Ok(code),
+        Ok(None) => Err(ExecError::new(
+            "tool is not implemented by cortexfs-object-runner",
+        )),
+        Err(error) => Err(ExecError::with_io("cannot run tool", &error)),
     }
 }
 
 pub(crate) fn passthrough_tool_program(name: &str) -> Option<&'static str> {
     match name {
-        "bash" => Some("/usr/bin/bash"),
-        "tmux" => Some("/usr/bin/tmux"),
-        "zellij" => Some("/usr/bin/zellij"),
-        "tsh" => Some("/usr/bin/tsh"),
+        "bash" => Some(crate::support::command::BASH),
+        "tmux" => Some(crate::support::command::TMUX),
+        "zellij" => Some(crate::support::command::ZELLIJ),
+        "tsh" => Some(crate::support::command::TSH),
         _ => None,
     }
 }
@@ -53,29 +56,54 @@ pub(crate) fn is_passthrough_tool(name: &str) -> bool {
     passthrough_tool_program(name).is_some()
 }
 
-pub(crate) fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), String> {
-    let program = passthrough_tool_program(name)
-        .ok_or_else(|| format!("tool is not implemented by cortexfs-object-runner: {name}"))?;
+pub(crate) fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), ExecError> {
+    let program = passthrough_tool_program(name).ok_or_else(|| {
+        ExecError::new(format!(
+            "tool is not implemented by cortexfs-object-runner: {name}"
+        ))
+    })?;
     let mut command = Command::new(program);
-    command.args(args).env_clear().env("PATH", "/usr/bin:/bin");
+    command
+        .args(args)
+        .env_clear()
+        .env("PATH", crate::support::command::TRUSTED_PATH);
     for key in passthrough_tool_runtime_env_keys() {
         if let Some(value) = env::var_os(key) {
             command.env(key, value);
         }
     }
+    if name == "tsh" {
+        for key in tsh_passthrough_capability_env_keys() {
+            if let Some(value) = env::var_os(key) {
+                command.env(key, value);
+            }
+        }
+    }
     let status = command
         .status()
-        .map_err(|error| format!("cannot run {name} tool: {error}"))?;
+        .map_err(|error| ExecError::with_io(&format!("cannot run {name} tool"), &error))?;
     if status.success() {
         Ok(())
     } else {
-        Err(format!("{name} tool exited with {status}"))
+        Err(ExecError::new(format!("{name} tool exited with {status}")))
     }
+}
+
+pub(crate) fn tsh_passthrough_capability_env_keys() -> &'static [&'static str] {
+    &[
+        "CTX_CONTROL_SOCKET",
+        "CTX_CONTROL_TOKEN",
+        "CTX_HOME",
+        "CTX_PATH",
+        "HOME",
+    ]
 }
 
 pub(crate) fn passthrough_tool_runtime_env_keys() -> &'static [&'static str] {
     &[
         "CTX_AGENT",
+        "CTX_SESSION",
+        "CTX_RUN_ID",
         "CTX_ROOT",
         "CTX_SOURCE",
         "CTX_TOOL_MODE",

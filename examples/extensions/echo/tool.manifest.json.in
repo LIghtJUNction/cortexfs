@@ -1,0 +1,19 @@
+{
+  "schema": "cortexfs.object/v2",
+  "version": "0.1.0",
+  "compatibility": {
+    "cortexfs": ">=0.1.7, <0.2.0"
+  },
+  "class": "tool",
+  "name": "example.echo",
+  "executable": {
+    "path": "@TOOL_PATH@",
+    "sha256": "@TOOL_SHA256@"
+  },
+  "controls": {
+    "description": "Echo text through the CortexFS Tool SDK.",
+    "schema": "{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}},\"required\":[\"text\"]}",
+    "cap": "text",
+    "policy": ""
+  }
+}

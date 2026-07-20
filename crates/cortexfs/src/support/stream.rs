@@ -19,11 +19,13 @@ use crate::{
 pub enum EventStreamIssue {
     /// Line is not valid JSON.
     InvalidJson(usize),
+    /// Stream does not end with a newline-terminated event.
+    MissingFinalNewline(usize),
     /// Event line is not a JSON object.
     EventNotObject(usize),
     /// Event does not have a `type` string.
     MissingType(usize),
-    /// Event `type` is not in the stable v1 event set.
+    /// Event `type` is not in the stable event set.
     UnknownType { line: usize, event_type: String },
     /// Event type requires a string `run` field.
     MissingRun(usize),
@@ -37,6 +39,8 @@ pub enum EventStreamIssue {
     InvalidUsage(usize),
     /// Tool call event lacks stable tool-call syntax.
     InvalidToolCall(usize),
+    /// Host approval event lacks stable approval syntax.
+    InvalidApproval(usize),
     /// Agent lifecycle event lacks stable child-agent syntax.
     InvalidAgentLifecycle(usize),
 }
@@ -56,6 +60,11 @@ pub fn inspect_event_stream_jsonl(content: &str) -> EventStreamReport {
     for_each_jsonl_line(content, |line_number, line| {
         inspect_event_stream_line(line_number, line, &mut issues);
     });
+    if !content.is_empty() && !content.ends_with('\n') {
+        issues.push(EventStreamIssue::MissingFinalNewline(
+            content.lines().count(),
+        ));
+    }
     EventStreamReport::new(issues)
 }
 
@@ -103,6 +112,9 @@ pub(crate) fn inspect_event_stream_line(
         "done" => inspect_done_event(line_number, &event, issues),
         "usage" => inspect_usage_event(line_number, &event, issues),
         "tool_call" => inspect_tool_call_event(line_number, &event, issues),
+        "approval_request" | "approval_result" => {
+            inspect_approval_event(line_number, event_type, &event, issues);
+        }
         "agent.child.cancel" => inspect_agent_child_cancel_event(line_number, &event, issues),
         "agent.stop" => inspect_agent_stop_event(line_number, &event, issues),
         _ => {}
@@ -120,6 +132,8 @@ pub(crate) struct EventLineJson {
     output_tokens: Option<JsonU64Field>,
     id: Option<JsonStringField>,
     name: Option<JsonStringField>,
+    args: Option<Value>,
+    decision: Option<JsonStringField>,
     parent: Option<JsonStringField>,
     child: Option<JsonStringField>,
     reason: Option<JsonStringField>,
@@ -138,6 +152,8 @@ pub(crate) fn is_canonical_event_type(value: &str) -> bool {
             | "usage"
             | "error"
             | "done"
+            | "approval_request"
+            | "approval_result"
             | "agent.child.cancel"
             | "agent.stop"
     )
@@ -202,6 +218,41 @@ pub(crate) fn inspect_tool_call_event(
     event: &EventLineJson,
     issues: &mut Vec<EventStreamIssue>,
 ) {
+    if !has_valid_id_name(event) {
+        issues.push(EventStreamIssue::InvalidToolCall(line_number));
+    }
+}
+
+pub(crate) fn inspect_approval_event(
+    line_number: usize,
+    event_type: &str,
+    event: &EventLineJson,
+    issues: &mut Vec<EventStreamIssue>,
+) {
+    let valid_body = match event_type {
+        "approval_request" => event
+            .args
+            .as_ref()
+            .and_then(Value::as_array)
+            .is_some_and(|args| args.iter().all(Value::is_string)),
+        "approval_result" => {
+            matches!(
+                event.decision.as_ref().and_then(JsonStringField::as_str),
+                Some("allow_once" | "deny")
+            ) && event
+                .reason
+                .as_ref()
+                .and_then(JsonStringField::as_str)
+                .is_some_and(|reason| !reason.is_empty())
+        }
+        _ => true,
+    };
+    if !has_valid_id_name(event) || !valid_body {
+        issues.push(EventStreamIssue::InvalidApproval(line_number));
+    }
+}
+
+pub(crate) fn has_valid_id_name(event: &EventLineJson) -> bool {
     let valid_id = event
         .id
         .as_ref()
@@ -212,9 +263,7 @@ pub(crate) fn inspect_tool_call_event(
         .as_ref()
         .and_then(JsonStringField::as_str)
         .is_some_and(is_object_name);
-    if !valid_id || !valid_name {
-        issues.push(EventStreamIssue::InvalidToolCall(line_number));
-    }
+    valid_id && valid_name
 }
 
 pub(crate) fn inspect_agent_child_cancel_event(

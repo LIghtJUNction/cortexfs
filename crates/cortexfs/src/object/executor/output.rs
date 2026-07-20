@@ -1,55 +1,30 @@
 use super::*;
 
-pub(crate) fn write_agent_frames(
+pub(crate) fn write_hosted_agent_frames(
     stdout: &mut impl Write,
     run: &str,
     frames: &[String],
-) -> Result<(), String> {
+    streamed: bool,
+) -> Result<(), ExecError> {
     for frame in frames {
-        if event_type(frame).is_some() {
-            writeln!(stdout, "{frame}")
-                .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))?;
-        } else {
-            write_model_text_or_tool_call(stdout, run, frame)
-                .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))?;
+        let kind = event_type(frame);
+        if matches!(kind.as_deref(), Some("start" | "error" | "done"))
+            || streamed && matches!(kind.as_deref(), Some("delta" | "reasoning_delta" | "usage"))
+        {
+            continue;
         }
+        let write = match kind.as_deref() {
+            Some("message" | "tool_call" | "delta" | "reasoning_delta" | "usage") => {
+                writeln!(stdout, "{frame}")
+            }
+            None => write_model_text_or_tool_call(stdout, run, frame),
+            Some(_) => continue,
+        };
+        write
+            .and_then(|()| stdout.flush())
+            .map_err(|error| ExecError::new(format!("cannot write output: {error}")))?;
     }
     Ok(())
-}
-
-pub(crate) fn write_done_frames(stdout: &mut impl Write, frames: &[String]) -> Result<(), String> {
-    for frame in frames {
-        if event_type(frame).as_deref() == Some("done") {
-            writeln!(stdout, "{frame}")
-                .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn write_success_done_if_missing(
-    stdout: &mut impl Write,
-    run: &str,
-    frames: &[String],
-) -> Result<(), String> {
-    if frames
-        .iter()
-        .any(|frame| event_type(frame).as_deref() == Some("done"))
-    {
-        return Ok(());
-    }
-    let done = serde_json::json!({
-        "type": "done",
-        "run": run,
-        "status": "ok"
-    })
-    .to_string();
-    writeln!(stdout, "{done}")
-        .and_then(|()| stdout.flush())
-        .map_err(|error| format!("cannot write output: {error}"))
 }
 
 pub(crate) fn write_agent_frames_for_tool_iteration(
@@ -57,7 +32,7 @@ pub(crate) fn write_agent_frames_for_tool_iteration(
     run: &str,
     frames: &[String],
     tool_call: &AgentToolCall,
-) -> Result<(), String> {
+) -> Result<(), ExecError> {
     let mut wrote_tool_call = false;
     for frame in frames {
         if matches!(event_type(frame).as_deref(), Some("start" | "done")) {
@@ -66,14 +41,14 @@ pub(crate) fn write_agent_frames_for_tool_iteration(
         if tool_call_from_event_frame(frame)?.is_some() {
             writeln!(stdout, "{frame}")
                 .and_then(|()| stdout.flush())
-                .map_err(|error| format!("cannot write output: {error}"))?;
+                .map_err(|error| ExecError::new(format!("cannot write output: {error}")))?;
             wrote_tool_call = true;
         }
     }
     if !wrote_tool_call {
         write_tool_call_event(stdout, run, tool_call)
             .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
+            .map_err(|error| ExecError::new(format!("cannot write output: {error}")))?;
     }
     Ok(())
 }
@@ -83,7 +58,7 @@ pub(crate) fn write_tool_result_event(
     run: &str,
     tool_call: &AgentToolCall,
     result: &str,
-) -> Result<(), String> {
+) -> Result<(), ExecError> {
     let args = tool_call_args_strings(tool_call);
     let event = serde_json::json!({
         "type": "message",
@@ -100,81 +75,11 @@ pub(crate) fn write_tool_result_event(
         }]
     })
     .to_string();
-    if !inspect_event_stream_jsonl(&event).is_ok() {
-        return Err("generated invalid tool result event".to_owned());
+    if !inspect_event_stream_jsonl(&format!("{event}\n")).is_ok() {
+        return Err(ExecError::new("generated invalid tool result event"));
     }
-    writeln!(stdout, "{event}").map_err(|error| format!("cannot write output: {error}"))
-}
-
-pub(crate) fn write_tool_result_fallback_response(
-    stdout: &mut impl Write,
-    run: &str,
-    tool_call: &AgentToolCall,
-    result: &str,
-) -> Result<(), String> {
-    let text = format!(
-        "工具 `{}` 已执行，参数：{}\n\n输出：\n\n{}",
-        tool_call.name,
-        tool_call_args_json(tool_call),
-        result
-    );
-    let message = serde_json::json!({
-        "type": "message",
-        "run": run,
-        "role": "assistant",
-        "content": [{
-            "type": "text",
-            "text": text
-        }]
-    })
-    .to_string();
-    let done = serde_json::json!({
-        "type": "done",
-        "run": run,
-        "status": "ok"
-    })
-    .to_string();
-    writeln!(stdout, "{message}")
-        .and_then(|()| writeln!(stdout, "{done}"))
-        .and_then(|()| stdout.flush())
-        .map_err(|error| format!("cannot write output: {error}"))
-}
-
-pub(crate) fn write_tool_loop_handoff_response(
-    stdout: &mut impl Write,
-    run: &str,
-    reason: &str,
-    tool_call: Option<&AgentToolCall>,
-) -> Result<(), String> {
-    let mut text = format!(
-        "当前工具循环已停止：{reason}\n\n没有自动继续当前上下文。请交给一个上下文干净的 agent 审查是否需要继续；默认由人工决定。"
-    );
-    if let Some(tool_call) = tool_call {
-        text.push_str("\n\n最后一次工具调用：");
-        text.push_str(&tool_call.name);
-        text.push(' ');
-        text.push_str(&tool_call_args_json(tool_call));
-    }
-    let message = serde_json::json!({
-        "type": "message",
-        "run": run,
-        "role": "assistant",
-        "content": [{
-            "type": "text",
-            "text": text
-        }]
-    })
-    .to_string();
-    let done = serde_json::json!({
-        "type": "done",
-        "run": run,
-        "status": "ok"
-    })
-    .to_string();
-    writeln!(stdout, "{message}")
-        .and_then(|()| writeln!(stdout, "{done}"))
-        .and_then(|()| stdout.flush())
-        .map_err(|error| format!("cannot write output: {error}"))
+    writeln!(stdout, "{event}")
+        .map_err(|error| ExecError::new(format!("cannot write output: {error}")))
 }
 
 pub(crate) fn missing_model_message(ctx_root: &Path, model: &str, model_path: &Path) -> String {

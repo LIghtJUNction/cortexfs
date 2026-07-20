@@ -7,6 +7,7 @@ pub(crate) fn is_tsh_builtin(name: &str) -> bool {
             | "quit"
             | "help"
             | "tools"
+            | "find"
             | "which"
             | "type"
             | "command"

@@ -1,6 +1,15 @@
+fail_fast: true
+
 repos:
   - repo: local
     hooks:
+      - id: source-budget
+        name: source budget
+        entry: scripts/source-budget.sh HEAD
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all -- --check

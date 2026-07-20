@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use crate::*;
 
-/// File kind exposed by the v1 FUSE projection layer.
+/// File kind exposed by the FUSE projection layer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FuseV1FileType {
+pub enum FuseFileType {
     /// Directory entry.
     Directory,
     /// Regular file.
@@ -15,35 +17,35 @@ pub enum FuseV1FileType {
     Other,
 }
 
-/// Minimal attributes needed by a FUSE adapter for v1 ABI paths.
+/// Minimal attributes needed by a FUSE adapter for ABI paths.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FuseV1Attr {
+pub struct FuseAttr {
     pub abi_path: String,
-    pub file_type: FuseV1FileType,
+    pub file_type: FuseFileType,
     pub size: u64,
     pub mode: u32,
     pub uid: u32,
     pub gid: u32,
 }
 
-/// Directory entry returned by the v1 FUSE projection.
+/// Directory entry returned by the FUSE projection.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FuseV1DirEntry {
+pub struct FuseDirEntry {
     pub name: String,
-    pub file_type: FuseV1FileType,
+    pub file_type: FuseFileType,
 }
 
 /// Path/inode pair used by a FUSE adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FuseV1Node {
+pub struct FuseNode {
     pub inode: u64,
     pub abi_path: String,
-    pub attr: FuseV1Attr,
+    pub attr: FuseAttr,
 }
 
-/// Error returned by the local v1 FUSE projection helpers.
+/// Error returned by the local FUSE projection helpers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FuseV1Error {
+pub enum FuseError {
     /// ABI path escaped the `/ctx` root or used invalid syntax.
     InvalidPath,
     /// Path does not exist.
@@ -64,7 +66,7 @@ pub enum FuseV1Error {
     InvalidOffset,
     /// Control-file payload was not valid UTF-8 text.
     InvalidContent,
-    /// Write exceeds the v1 small-control-file limit.
+    /// Write exceeds the small-control-file limit.
     TooLarge,
     /// Underlying filesystem denied access.
     PermissionDenied,
@@ -72,19 +74,18 @@ pub enum FuseV1Error {
     Io,
 }
 
-/// Local v1 FUSE projection backend over an existing `/ctx`-shaped tree.
+/// Local FUSE projection backend over an existing `/ctx`-shaped tree.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FuseV1Projection {
+pub struct FuseProjection {
     pub root: PathBuf,
     pub provider_config_dir: PathBuf,
     pub provider_model_cache_dir: PathBuf,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct VirtualExecObject {
-    pub(crate) class: ObjectClass,
-    pub(crate) name: String,
-    pub(crate) control_dir: PathBuf,
+pub(crate) struct ProjectedFile {
+    pub(crate) attr: FuseAttr,
+    pub(crate) content: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -94,6 +95,8 @@ pub(crate) struct ProviderConfig {
     pub(crate) default_model: Option<String>,
     #[serde(default)]
     pub(crate) models: Vec<String>,
+    #[serde(default)]
+    pub(crate) model_limits: HashMap<String, u32>,
     #[serde(default = "default_provider_enabled")]
     pub(crate) enabled: bool,
     #[serde(default)]
@@ -116,12 +119,13 @@ pub(crate) struct ProjectedProviderModel {
     pub(crate) cap: String,
     pub(crate) effort: String,
     pub(crate) fallback: String,
+    pub(crate) limit: ModelContextLimit,
 }
 
-impl FuseV1Attr {
+impl FuseAttr {
     /// Creates a projected file attribute record.
     #[must_use]
-    pub const fn new(abi_path: String, file_type: FuseV1FileType, size: u64, mode: u32) -> Self {
+    pub const fn new(abi_path: String, file_type: FuseFileType, size: u64, mode: u32) -> Self {
         Self::with_owner(abi_path, file_type, size, mode, 0, 0)
     }
 
@@ -129,7 +133,7 @@ impl FuseV1Attr {
     #[must_use]
     pub const fn with_owner(
         abi_path: String,
-        file_type: FuseV1FileType,
+        file_type: FuseFileType,
         size: u64,
         mode: u32,
         uid: u32,
@@ -153,7 +157,7 @@ impl FuseV1Attr {
 
     /// Returns the projected file kind.
     #[must_use]
-    pub const fn file_type(&self) -> FuseV1FileType {
+    pub const fn file_type(&self) -> FuseFileType {
         self.file_type
     }
 
@@ -182,10 +186,10 @@ impl FuseV1Attr {
     }
 }
 
-impl FuseV1DirEntry {
+impl FuseDirEntry {
     /// Creates a projected directory entry.
     #[must_use]
-    pub const fn new(name: String, file_type: FuseV1FileType) -> Self {
+    pub const fn new(name: String, file_type: FuseFileType) -> Self {
         Self { name, file_type }
     }
 
@@ -197,15 +201,15 @@ impl FuseV1DirEntry {
 
     /// Returns the entry file kind.
     #[must_use]
-    pub const fn file_type(&self) -> FuseV1FileType {
+    pub const fn file_type(&self) -> FuseFileType {
         self.file_type
     }
 }
 
-impl FuseV1Node {
+impl FuseNode {
     /// Creates a projected node record.
     #[must_use]
-    pub const fn new(inode: u64, abi_path: String, attr: FuseV1Attr) -> Self {
+    pub const fn new(inode: u64, abi_path: String, attr: FuseAttr) -> Self {
         Self {
             inode,
             abi_path,
@@ -227,12 +231,12 @@ impl FuseV1Node {
 
     /// Returns projected attributes for this node.
     #[must_use]
-    pub const fn attr(&self) -> &FuseV1Attr {
+    pub const fn attr(&self) -> &FuseAttr {
         &self.attr
     }
 }
 
-impl FuseV1Error {
+impl FuseError {
     /// Returns the stable errno name for this projection error.
     #[must_use]
     pub const fn errno(self) -> &'static str {

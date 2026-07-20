@@ -1,35 +1,47 @@
 use crate::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_authority_plain_directory,
-    path_metadata_no_follow as authority_path_metadata_no_follow,
-    plain_file_name as authority_plain_file_name,
-};
+use crate::support::plain::{open_plain_directory, path_metadata_no_follow, plain_file_name};
+#[cfg(test)]
+use std::os::unix::fs::FileExt;
 
-pub(crate) fn append_jsonl_event(path: &Path, event: &str) -> std::io::Result<()> {
-    append_jsonl_line(path, event)
-}
-
+#[cfg(test)]
 pub(crate) fn append_jsonl_line(path: &Path, line: &str) -> std::io::Result<()> {
+    if line.bytes().any(|byte| matches!(byte, b'\n' | b'\r')) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "jsonl line contains a line break",
+        ));
+    }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_authority_plain_directory(parent)?;
-    let file_name = authority_plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
     let file_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
         nix::fcntl::OFlag::O_APPEND
-            | nix::fcntl::OFlag::O_WRONLY
+            | nix::fcntl::OFlag::O_RDWR
             | nix::fcntl::OFlag::O_NOFOLLOW
             | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::empty(),
     )
     .map_err(nix_errno_to_io)?;
     let mut file = fs::File::from(file_fd);
-    if !file.metadata()?.is_file() {
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
         return Err(std::io::Error::other("jsonl target is not a regular file"));
     }
-    file.write_all(line.as_bytes())?;
-    file.write_all(b"\n")?;
+    if metadata.len() != 0 {
+        let mut last = [0_u8; 1];
+        if file.read_at(&mut last, metadata.len() - 1)? != 1 || last[0] != b'\n' {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "jsonl target has an incomplete final line",
+            ));
+        }
+    }
+    let mut frame = line.as_bytes().to_vec();
+    frame.push(b'\n');
+    file.write_all(&frame)?;
     file.flush()?;
     file.sync_all()
 }
@@ -38,26 +50,59 @@ pub(crate) fn atomic_replace_text(path: &Path, content: &str) -> std::io::Result
     atomic_replace_text_with_mode(path, content, 0o600)
 }
 
+pub(crate) fn atomic_replace_text_outcome(
+    path: &Path,
+    content: &str,
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
+    atomic_replace_text_inner(path, content, AtomicReplaceMetadata::mode(0o600), None)
+}
+
 pub fn atomic_replace_text_with_mode(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
     atomic_replace_text_inner(path, content, AtomicReplaceMetadata::mode(mode), None)
+        .and_then(AtomicReplaceOutcome::into_result)
 }
 
 pub fn atomic_create_text_with_mode(path: &Path, content: &str, mode: u32) -> std::io::Result<()> {
     atomic_replace_text_inner(path, content, AtomicReplaceMetadata::create(mode), None)
+        .and_then(AtomicReplaceOutcome::into_result)
+}
+
+pub(crate) fn atomic_create_text_with_mode_and_owner(
+    path: &Path,
+    content: &str,
+    mode: u32,
+    owner: (u32, u32),
+) -> std::io::Result<()> {
+    atomic_replace_text_inner(
+        path,
+        content,
+        AtomicReplaceMetadata::create_owned(mode, owner),
+        None,
+    )
+    .and_then(AtomicReplaceOutcome::into_result)
 }
 
 pub fn atomic_replace_text_preserving_metadata(path: &Path, content: &str) -> std::io::Result<()> {
-    atomic_replace_text_preserving_metadata_inner(path, content, None)
+    atomic_replace_text_preserving_metadata_inner(path, content, None, None)
+}
+
+pub fn atomic_replace_text_preserving_metadata_if_matches(
+    path: &Path,
+    content: &str,
+    expected: (u64, u64),
+) -> std::io::Result<()> {
+    atomic_replace_text_preserving_metadata_inner(path, content, Some(expected), None)
 }
 
 fn atomic_replace_text_preserving_metadata_inner(
     path: &Path,
     content: &str,
+    expected: Option<(u64, u64)>,
     before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
 ) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_authority_plain_directory(parent)?;
-    let file_name = authority_plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
     let existing_fd = nix::fcntl::openat(
         &parent_dir,
         file_name,
@@ -75,14 +120,19 @@ fn atomic_replace_text_preserving_metadata_inner(
             "atomic replace target is not a regular file",
         ));
     }
+    let identity = (metadata.dev(), metadata.ino());
+    if expected.is_some_and(|expected| expected != identity) {
+        return Err(std::io::Error::other("atomic replace target changed"));
+    }
     let replacement = AtomicReplaceMetadata {
         mode: metadata.permissions().mode() & 0o7777,
         owner: Some((metadata.uid(), metadata.gid())),
-        identity: Some((metadata.dev(), metadata.ino())),
+        identity: Some(expected.unwrap_or(identity)),
         commit: AtomicCommit::Replace,
     };
     drop(existing);
     atomic_replace_text_in_parent(&parent_dir, file_name, content, replacement, before_commit)
+        .and_then(AtomicReplaceOutcome::into_result)
 }
 
 #[cfg(test)]
@@ -91,7 +141,7 @@ pub(crate) fn atomic_replace_text_preserving_metadata_with_hook(
     content: &str,
     before_commit: &mut dyn FnMut() -> std::io::Result<()>,
 ) -> std::io::Result<()> {
-    atomic_replace_text_preserving_metadata_inner(path, content, Some(before_commit))
+    atomic_replace_text_preserving_metadata_inner(path, content, None, Some(before_commit))
 }
 
 #[derive(Clone, Copy)]
@@ -106,6 +156,42 @@ struct AtomicReplaceMetadata {
 enum AtomicCommit {
     Replace,
     NoReplace,
+}
+
+#[derive(Debug)]
+pub(crate) enum AtomicReplaceOutcome {
+    Synced,
+    PublishedUnsynced(std::io::Error),
+}
+
+impl AtomicReplaceOutcome {
+    fn into_result(self) -> std::io::Result<()> {
+        match self {
+            Self::Synced => Ok(()),
+            Self::PublishedUnsynced(error) => Err(error),
+        }
+    }
+}
+
+fn publish_outcome(result: std::io::Result<()>) -> AtomicReplaceOutcome {
+    match result {
+        Ok(()) => AtomicReplaceOutcome::Synced,
+        Err(error) => AtomicReplaceOutcome::PublishedUnsynced(error),
+    }
+}
+
+#[cfg(test)]
+mod atomic_publish_tests {
+    use super::{AtomicReplaceOutcome, publish_outcome};
+
+    #[test]
+    fn sync_failure_is_reported_as_published() {
+        let outcome = publish_outcome(Err(std::io::Error::other("sync failed")));
+        assert!(matches!(
+            outcome,
+            AtomicReplaceOutcome::PublishedUnsynced(_)
+        ));
+    }
 }
 
 impl AtomicReplaceMetadata {
@@ -126,6 +212,15 @@ impl AtomicReplaceMetadata {
             commit: AtomicCommit::NoReplace,
         }
     }
+
+    const fn create_owned(mode: u32, owner: (u32, u32)) -> Self {
+        Self {
+            mode,
+            owner: Some(owner),
+            identity: None,
+            commit: AtomicCommit::NoReplace,
+        }
+    }
 }
 
 fn atomic_replace_text_inner(
@@ -133,10 +228,10 @@ fn atomic_replace_text_inner(
     content: &str,
     metadata: AtomicReplaceMetadata,
     before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
-) -> std::io::Result<()> {
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let parent_dir = open_authority_plain_directory(parent)?;
-    let file_name = authority_plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
     atomic_replace_text_in_parent(&parent_dir, file_name, content, metadata, before_commit)
 }
 
@@ -146,7 +241,7 @@ fn atomic_replace_text_in_parent(
     content: &str,
     metadata: AtomicReplaceMetadata,
     mut before_commit: Option<&mut dyn FnMut() -> std::io::Result<()>>,
-) -> std::io::Result<()> {
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
     for attempt in 0..16 {
         let temp_name = generated_sibling_name(file_name, "tmp", attempt);
         let file_fd = match nix::fcntl::openat(
@@ -231,7 +326,7 @@ fn atomic_replace_text_in_parent(
             remove_atomic_temp(parent_dir, &temp_name);
             return Err(nix_errno_to_io(error));
         }
-        return parent_dir.sync_all();
+        return Ok(publish_outcome(parent_dir.sync_all()));
     }
     Err(std::io::Error::new(
         std::io::ErrorKind::AlreadyExists,
@@ -248,6 +343,7 @@ pub fn generated_sibling_name(target: &str, kind: &str, attempt: u8) -> String {
 }
 
 #[must_use]
+/// Parses a generated sibling target marker and returns the base target name.
 pub fn generated_sibling_target<'a>(name: &'a str, kind: &str) -> Option<&'a str> {
     let rest = name.strip_prefix('.')?;
     let marker = format!(".{kind}-");
@@ -268,7 +364,7 @@ fn commit_preserving_atomic_temp(
     file_name: &str,
     expected: (u64, u64),
     replacement: (u64, u64),
-) -> std::io::Result<()> {
+) -> Result<AtomicReplaceOutcome, std::io::Error> {
     if support::plain::is_fuse(parent_dir)? {
         // CortexFS synthetic inodes are path-derived, so a cross-path exchange
         // cannot compare the temporary inode with the target inode. The mount
@@ -281,7 +377,7 @@ fn commit_preserving_atomic_temp(
             remove_atomic_temp(parent_dir, temp_name);
             return Err(nix_errno_to_io(error));
         }
-        return parent_dir.sync_all();
+        return Ok(publish_outcome(parent_dir.sync_all()));
     }
 
     nix::fcntl::renameat2(
@@ -294,7 +390,7 @@ fn commit_preserving_atomic_temp(
     .map_err(nix_errno_to_io)?;
     if atomic_target_matches(parent_dir, temp_name, expected) {
         remove_atomic_temp(parent_dir, temp_name);
-        return parent_dir.sync_all();
+        return Ok(publish_outcome(parent_dir.sync_all()));
     }
     if !atomic_target_matches(parent_dir, file_name, replacement) {
         return Err(std::io::Error::other(
@@ -354,7 +450,7 @@ pub(crate) fn tool_path_denial(error: ToolPathError) -> ToolExecutionDenial {
 }
 
 pub(crate) fn symlink_safe_metadata(path: &Path) -> std::io::Result<fs::Metadata> {
-    let metadata = authority_path_metadata_no_follow(path)?;
+    let metadata = path_metadata_no_follow(path)?;
     if metadata.file_type().is_symlink() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

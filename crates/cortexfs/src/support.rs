@@ -1,3 +1,6 @@
+pub mod bwrap;
+pub mod columnar;
+pub mod command;
 pub mod control;
 pub mod index;
 pub mod jsonl;
@@ -8,9 +11,11 @@ pub mod path;
 pub mod plain;
 pub mod process;
 pub mod queue;
+pub mod receipt;
 pub mod schema;
 pub mod session;
 pub mod stream;
+pub mod terminal;
 pub mod toolpath;
 pub mod trajectory;
 

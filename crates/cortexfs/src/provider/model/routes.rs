@@ -110,9 +110,8 @@ impl ModelDriverRoutingTable {
 
 /// Parses `model/<provider>/<model>.d/driver`.
 ///
-/// A legacy single-line value such as `debug` is treated as `default=debug`.
-/// Route-table form supports `default`, `exec`, `socket`, and `agent` keys with
-/// comma-separated drivers in priority order.
+/// Supports `default`, `exec`, `socket`, and `agent` keys with comma-separated
+/// drivers in priority order.
 pub fn parse_model_driver_routes(
     content: &str,
 ) -> Result<ModelDriverRoutingTable, ModelDriverRouteError> {
@@ -127,19 +126,6 @@ pub fn parse_model_driver_routes(
 
     if significant.is_empty() {
         return Err(ModelDriverRouteError::Empty);
-    }
-
-    if significant.len() == 1 {
-        let Some((line, driver)) = significant.first().copied() else {
-            return Err(ModelDriverRouteError::Empty);
-        };
-        if !driver.contains('=') {
-            return parse_driver_list(line, driver).map(|drivers| {
-                let mut table = ModelDriverRoutingTable::new();
-                table.insert(ModelDriverUseCase::Default, drivers);
-                table
-            });
-        }
     }
 
     let mut table = ModelDriverRoutingTable::new();

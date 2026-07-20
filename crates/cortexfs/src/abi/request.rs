@@ -57,6 +57,12 @@ pub enum SocketRequest {
         /// User input text.
         input: String,
     },
+    /// Execute one tsh command through the authoritative agent runtime.
+    Tsh {
+        id: String,
+        session: String,
+        args: Vec<String>,
+    },
     /// Resume a session stream, optionally after an event id.
     Resume {
         /// `CortexFS` session name. Defaults to `default` when omitted.
@@ -68,6 +74,11 @@ pub enum SocketRequest {
     Cancel {
         /// Run id to cancel.
         id: String,
+    },
+    /// Stop an agent and its owned descendants through its authoritative runtime.
+    Stop {
+        /// Agent name; must match the socket runtime identity.
+        agent: String,
     },
     /// Health check.
     Ping,
@@ -105,7 +116,7 @@ impl SocketRequestError {
     }
 }
 
-/// Parses one v1 JSONL socket request frame.
+/// Parses one JSONL socket request frame.
 ///
 /// Unknown fields are ignored by design. Only the stable fields that affect
 /// `CortexFS` session semantics are consumed.
@@ -151,6 +162,13 @@ enum SocketRequestFrame {
         workspace: Option<String>,
         input: String,
     },
+    #[serde(rename = "tsh")]
+    Tsh {
+        id: String,
+        #[serde(default = "default_socket_session")]
+        session: String,
+        args: Vec<String>,
+    },
     #[serde(rename = "resume")]
     Resume {
         #[serde(default = "default_socket_session")]
@@ -159,6 +177,8 @@ enum SocketRequestFrame {
     },
     #[serde(rename = "cancel")]
     Cancel { id: String },
+    #[serde(rename = "stop")]
+    Stop { agent: String },
     #[serde(rename = "ping")]
     Ping,
 }
@@ -195,10 +215,36 @@ impl TryFrom<SocketRequestFrame> for SocketRequest {
                 workspace,
                 input,
             } => parse_socket_send_request(id, session, scope.into(), cwd, workspace, input),
+            SocketRequestFrame::Tsh { id, session, args } => {
+                validate_socket_object_field("id", &id)?;
+                validate_socket_object_field("session", &session)?;
+                if args.is_empty()
+                    || args.len() > 64
+                    || args
+                        .iter()
+                        .any(|arg| arg.contains('\0') || arg.len() > 4096)
+                {
+                    return Err(SocketRequestError::InvalidField {
+                        field: "args",
+                        value: args.join(" "),
+                    });
+                }
+                Ok(Self::Tsh { id, session, args })
+            }
             SocketRequestFrame::Resume { session, after } => {
                 parse_socket_resume_request(session, after)
             }
             SocketRequestFrame::Cancel { id } => parse_socket_cancel_request(id),
+            SocketRequestFrame::Stop { agent } => {
+                if is_object_name(&agent) {
+                    Ok(Self::Stop { agent })
+                } else {
+                    Err(SocketRequestError::InvalidField {
+                        field: "agent",
+                        value: agent,
+                    })
+                }
+            }
             SocketRequestFrame::Ping => Ok(Self::Ping),
         }
     }

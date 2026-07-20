@@ -1,12 +1,6 @@
 use super::*;
 use std::path::Path;
 
-pub(crate) fn provider_name_from_config(
-    base_url: &str,
-    name: Option<&str>,
-) -> Result<String, cortexfs::ProviderNameError> {
-    cortexfs::provider_name_from_config(base_url, name)
-}
 pub(crate) fn model_effort(ctx_root: &Path, provider: &str, model: &str) -> cortexfs::ModelEffort {
     let path = ctx_root
         .join("model")

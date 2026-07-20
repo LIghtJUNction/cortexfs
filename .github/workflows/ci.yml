@@ -1,0 +1,109 @@
+# Deterministic Linux quality gate for pull requests and main.
+# Required check names (after green on main): "CI / rust", "CI / docs"
+# Same cargo commands as .pre-commit-config.yaml / README Development.
+#
+# CI toolchain: latest stable (documented). Workspace MSRV remains 1.91 in
+# Cargo.toml for crates.io.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Sandbox tests drive bwrap --overlay, which needs bubblewrap >= 0.10;
+      # ubuntu-latest ships 0.9.0, so build a pinned release from source.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends meson ninja-build libcap-dev
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          curl -sSfL https://github.com/containers/bubblewrap/releases/download/v0.11.0/bubblewrap-0.11.0.tar.xz | sudo tar -xJ -C /tmp
+          meson setup /tmp/bwrap-build /tmp/bubblewrap-0.11.0 -Dprefix=/usr
+          sudo ninja -C /tmp/bwrap-build install
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-rust-stable
+          cache-on-failure: true
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo check
+        run: cargo check --locked --workspace --all-targets --all-features
+
+      - name: cargo clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      # Same flags as pre-commit. Serialize timing and approval protocol fixtures.
+      # TMPDIR only for tests: fixture #!/bin/sh agents must live on an exec mount.
+      - name: cargo test
+        timeout-minutes: 25
+        env:
+          TMPDIR: /tmp
+          CARGO_HOME: /tmp/cortexfs-test-cargo
+          CARGO_TARGET_DIR: /tmp/cortexfs-test-target
+        run: |
+          sudo chmod o+x "$HOME" "$HOME/.cargo" "$HOME/.cargo/bin"
+          sudo chmod -R o+rX "$HOME/.rustup"
+          sudo install -d -o 1000 -g 1000 "$CARGO_HOME" "$CARGO_TARGET_DIR"
+          sudo setpriv --reuid=1000 --regid=1000 --clear-groups env \
+            PATH="$PATH" HOME="$HOME" CARGO_HOME="$CARGO_HOME" \
+            CARGO_TARGET_DIR="$CARGO_TARGET_DIR" TMPDIR="$TMPDIR" \
+            cargo test --locked --workspace --all-targets --all-features -- --test-threads=1
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install docs-site dependencies
+        working-directory: docs-site
+        run: bun install --frozen-lockfile
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Audit docs/i18n sync
+        run: ./scripts/sync-docs-audit.sh
+
+      - name: Build Docusaurus
+        working-directory: docs-site
+        run: bun run build

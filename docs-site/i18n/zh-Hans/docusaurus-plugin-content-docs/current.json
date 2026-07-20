@@ -1,0 +1,50 @@
+{
+  "version.label": {
+    "message": "Next",
+    "description": "The label for version current"
+  },
+  "sidebar.docs.category.Further Reading": {
+    "message": "拓展阅读",
+    "description": "The label for category 'Further Reading' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Specification": {
+    "message": "规范",
+    "description": "The label for category 'Specification' in sidebar 'docs'"
+  },
+  "sidebar.docs.doc.Visual Design": {
+    "message": "设计说明",
+    "description": "The label for the doc item 'Visual Design' in sidebar 'docs', linking to the doc DESIGN"
+  },
+  "sidebar.docs.doc.System Architecture": {
+    "message": "系统架构",
+    "description": "The label for the doc item 'System Architecture' in sidebar 'docs', linking to the doc architecture"
+  },
+  "sidebar.docs.doc.Internal Architecture": {
+    "message": "内部工程架构",
+    "description": "The label for the doc item 'Internal Architecture' in sidebar 'docs', linking to the doc internal-architecture"
+  },
+  "sidebar.docs.doc.Naming Guide": {
+    "message": "命名约定",
+    "description": "The label for the doc item 'Naming Guide' in sidebar 'docs', linking to the doc naming-guide"
+  },
+  "sidebar.docs.doc.ctx Coreutils Design": {
+    "message": "ctx Coreutils 设计",
+    "description": "The label for the doc item 'ctx Coreutils Design' in sidebar 'docs', linking to the doc CTX"
+  },
+  "sidebar.docs.doc.agent.sh": {
+    "message": "agent.sh",
+    "description": "The label for the doc item 'agent.sh' in sidebar 'docs', linking to the doc agent-sh"
+  },
+  "sidebar.docs.doc.Chat UI ABI": {
+    "message": "Chat UI ABI",
+    "description": "The label for the doc item 'Chat UI ABI' in sidebar 'docs', linking to the doc chatui"
+  },
+  "sidebar.docs.doc.AIMock Testing": {
+    "message": "AIMock 测试",
+    "description": "The label for the doc item 'AIMock Testing' in sidebar 'docs', linking to the doc aimock-testing"
+  },
+  "sidebar.docs.doc.Verus Proofs": {
+    "message": "Verus 证明",
+    "description": "The label for the doc item 'Verus Proofs' in sidebar 'docs', linking to the doc proofs/verus"
+  }
+}

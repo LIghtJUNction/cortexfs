@@ -1,11 +1,11 @@
 use serde::Deserialize;
 
-pub(crate) const RUNNER_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+pub(crate) const RUNNER_PROVIDER_CONFIG_DIR: &str = cortexfs::SYSTEM_PROVIDER_CONFIG_DIR;
 pub(crate) const MAX_RUNNER_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_RUNTIME_PROVIDER_SECRET_BYTES: u64 = 64 * 1024;
 pub(crate) const MAX_PROVIDER_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MAX_PROVIDER_STREAM_LINE_BYTES: usize = 256 * 1024;
-pub(crate) const PROVIDER_CURL_BIN: &str = "/usr/bin/curl";
+pub(crate) const PROVIDER_CURL_BIN: &str = cortexfs::support::command::CURL;
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct RunnerProviderConfig {
     #[serde(default)]
@@ -42,12 +42,20 @@ pub(crate) enum ProviderRuntimeDriver {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderCredential {
     Bearer(String),
+    Codex { token: String, account_id: String },
     AnthropicApiKey(String),
 }
 impl ProviderCredential {
     pub(crate) fn secret(&self) -> &str {
-        match self {
-            &Self::Bearer(ref secret) | &Self::AnthropicApiKey(ref secret) => secret,
+        match *self {
+            Self::Bearer(ref secret) | Self::AnthropicApiKey(ref secret) => secret,
+            Self::Codex { ref token, .. } => token,
+        }
+    }
+    pub(crate) fn codex_account(&self) -> Option<&str> {
+        match *self {
+            Self::Codex { ref account_id, .. } => Some(account_id),
+            Self::Bearer(_) | Self::AnthropicApiKey(_) => None,
         }
     }
 }

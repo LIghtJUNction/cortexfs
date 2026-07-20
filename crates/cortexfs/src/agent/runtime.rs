@@ -1,4 +1,5 @@
 use crate::*;
+use std::collections::BTreeSet;
 
 /// Runtime Unix identity used for Linux permission checks.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,7 +33,21 @@ pub struct AgentRuntimeView {
     pub(crate) tool_path: ToolPath,
     pub(crate) mount_table: MountTable,
     pub(crate) model: String,
+    pub(crate) model_limit: ModelContextLimit,
+    pub(crate) window_setting: AgentWindowSetting,
+    pub(crate) effective_window: AgentEffectiveWindow,
     pub(crate) policy: PolicyV0,
+    pub(crate) declared_tools: BTreeSet<String>,
+    pub(crate) approval: AgentApprovalMode,
+}
+
+/// Hosted direct-native tool approval mode.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentApprovalMode {
+    /// Execute fully authorized calls without an interactive approval exchange.
+    Auto,
+    /// Require one same-socket approval for each fully authorized call.
+    Ask,
 }
 
 /// Error while deriving an agent runtime view from `agent/<name>.d/*`.
@@ -46,7 +61,7 @@ pub enum AgentRuntimeViewError {
     MissingControlFile(String),
     /// A control file could not be read.
     CannotReadControl(String),
-    /// A control file has malformed v1 content.
+    /// A control file has malformed content.
     InvalidControlFile(String),
 }
 
@@ -151,7 +166,7 @@ impl AgentRuntimeView {
         self.parent.as_deref()
     }
 
-    /// Returns the v1 lifecycle value.
+    /// Returns the stable lifecycle value.
     #[must_use]
     pub const fn lifecycle(&self) -> ChildLifecycle {
         self.lifecycle
@@ -193,10 +208,41 @@ impl AgentRuntimeView {
         &self.model
     }
 
+    /// Returns the trusted hard limit for the selected model independently of
+    /// the Agent's durable and effective window selections.
+    #[must_use]
+    pub const fn model_limit(&self) -> ModelContextLimit {
+        self.model_limit
+    }
+
+    /// Returns the durable Agent window setting.
+    #[must_use]
+    pub const fn window_setting(&self) -> AgentWindowSetting {
+        self.window_setting
+    }
+
+    /// Returns the effective token window after model-limit resolution.
+    #[must_use]
+    pub const fn effective_window(&self) -> AgentEffectiveWindow {
+        self.effective_window
+    }
+
     /// Returns the parsed v0 policy.
     #[must_use]
     pub const fn policy(&self) -> &PolicyV0 {
         &self.policy
+    }
+
+    /// Returns the statically declared direct-native tools.
+    #[must_use]
+    pub const fn declared_tools(&self) -> &BTreeSet<String> {
+        &self.declared_tools
+    }
+
+    /// Returns the hosted direct-native approval mode.
+    #[must_use]
+    pub const fn approval(&self) -> AgentApprovalMode {
+        self.approval
     }
 }
 

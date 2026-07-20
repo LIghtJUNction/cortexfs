@@ -1,41 +1,79 @@
 use super::*;
+use cortexfs_runtime_client::agent::{AGENT_ENVELOPE_ARG, AGENT_LAUNCH_ABI};
 use nix::fcntl::{FcntlArg, fcntl};
 use std::os::fd::RawFd;
 
 const SOCKET_AGENT_EXECUTABLE_PATH: &str = "/run/cortexfs/agent-executable";
+/// Fixed sandbox path for the receipt-bound per-run control socket.
+pub const SOCKET_RUN_CONTROL_PATH: &str = "/run/cortexfs/control.sock";
+pub(crate) type RunControlCommand<'a> = (&'a Path, &'a [(String, String)]);
 
 pub(crate) fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
     agent_executable: &fs::File,
     request: AgentExecutableRunRequest<'_>,
-) -> Result<(Command, Option<InheritedFd>), SocketRuntimeError> {
+    step: u8,
+    control: Option<RunControlCommand<'_>>,
+    provider_egress: Option<&Path>,
+) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
-            let mut command = Command::new(support::plain::proc_fd_path(agent_executable));
-            apply_agent_executable_socket_env(&mut command, runtime, request);
-            command.arg(request.input);
+            let mut command = command_for_agent_identity(
+                support::plain::proc_fd_path(agent_executable),
+                runtime.identity,
+            );
+            apply_agent_executable_socket_env(&mut command, runtime, request, step);
+            if let Some((_socket, environment)) = control {
+                command.envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
+            }
+            command.arg(AGENT_ENVELOPE_ARG).stdin(Stdio::piped());
             command.stdout(Stdio::piped()).process_group(0);
             Ok((command, None))
         }
         AgentExecutableSocketExecution::Bwrap {
             program,
             mount_table,
+            ..
         } => {
             let agent_executable_fd = InheritedFd::duplicate(agent_executable)?;
-            let mut command = Command::new(program);
+            let agent_home = runtime
+                .session_root
+                .parent()
+                .ok_or(SocketRuntimeError::CannotRunAgent)?;
+            let agent_home_dir = open_plain_directory(agent_home)
+                .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+            let agent_home_source_fd = InheritedFd::duplicate(&agent_home_dir)?;
+            let agent_home_sandbox_fd = InheritedFd::duplicate(&agent_home_dir)?;
+            let mut command = command_for_agent_identity(program, runtime.identity);
             command.args(agent_executable_socket_bwrap_args(
                 &BwrapAgentExecutableArgs {
                     runtime,
                     mount_table,
                     cwd: request.cwd.unwrap_or(runtime.default_cwd),
                     debug: request.debug,
-                    input: request.input,
+                    input: AGENT_ENVELOPE_ARG,
                     agent_executable_fd: agent_executable_fd.raw(),
+                    agent_home_source_fd: agent_home_source_fd.raw(),
+                    agent_home_sandbox_fd: agent_home_sandbox_fd.raw(),
+                    agent_home,
+                    control_socket: control.map(|(socket, _environment)| socket),
+                    provider_egress,
                 },
             ));
-            apply_agent_executable_socket_env(&mut command, runtime, request);
+            apply_agent_executable_socket_env(&mut command, runtime, request, step);
+            if let Some((_socket, environment)) = control {
+                command.envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
+            }
             command.stdout(Stdio::piped()).process_group(0);
-            Ok((command, Some(agent_executable_fd)))
+            command.stdin(Stdio::piped());
+            Ok((
+                command,
+                Some(vec![
+                    agent_executable_fd,
+                    agent_home_source_fd,
+                    agent_home_sandbox_fd,
+                ]),
+            ))
         }
     }
 }
@@ -48,6 +86,11 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub debug: Option<SocketDebugTiming>,
     pub input: &'a str,
     pub agent_executable_fd: RawFd,
+    pub agent_home_source_fd: RawFd,
+    pub agent_home_sandbox_fd: RawFd,
+    pub agent_home: &'a Path,
+    pub control_socket: Option<&'a Path>,
+    pub provider_egress: Option<&'a Path>,
 }
 
 pub(crate) struct InheritedFd(RawFd);
@@ -74,6 +117,7 @@ pub(crate) fn apply_agent_executable_socket_env(
     command: &mut Command,
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
+    step: u8,
 ) {
     command
         .env_clear()
@@ -89,8 +133,8 @@ pub(crate) fn apply_agent_executable_socket_env(
         .env("CTX_SOURCE", runtime.source_root)
         .env("CTX_RUN_ID", request.run_id)
         .env("CTX_SESSION", request.session)
-        .env("CTX_AGENT_HISTORY_MESSAGES", request.history_messages)
-        .env("CTX_AGENT_TOOL_CONTEXT", request.tool_context);
+        .env("CTX_AGENT_LAUNCH", AGENT_LAUNCH_ABI)
+        .env("CTX_AGENT_STEP", step.to_string());
 }
 
 pub(crate) fn agent_executable_socket_bwrap_args(
@@ -108,14 +152,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
             .to_string(),
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
-        "--proc".to_owned(),
-        "/proc".to_owned(),
-        "--dev".to_owned(),
-        "/dev".to_owned(),
-        "--tmpfs".to_owned(),
-        "/tmp".to_owned(),
-        "--dir".to_owned(),
-        "/run".to_owned(),
+    ];
+    bwrap.extend(support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    bwrap.extend([
         "--dir".to_owned(),
         "/run/cortexfs".to_owned(),
         "--perms".to_owned(),
@@ -123,28 +162,31 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         "--ro-bind-data".to_owned(),
         request.agent_executable_fd.to_string(),
         SOCKET_AGENT_EXECUTABLE_PATH.to_owned(),
-        "--dir".to_owned(),
-        "/home".to_owned(),
-        "--ro-bind".to_owned(),
-        "/usr".to_owned(),
-        "/usr".to_owned(),
-        "--ro-bind".to_owned(),
-        "/etc".to_owned(),
-        "/etc".to_owned(),
-        "--tmpfs".to_owned(),
-        "/etc/profile.d".to_owned(),
-        "--symlink".to_owned(),
-        "usr/bin".to_owned(),
-        "/bin".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib64".to_owned(),
-    ];
-    bwrap.push("--unshare-net".to_owned());
+    ]);
+    bwrap.extend(support::process::bwrap_system_layout_args());
+    if !request.runtime.network_allowed {
+        bwrap.push("--unshare-net".to_owned());
+    }
+    if let Some(host_dir) = request.provider_egress {
+        bwrap.extend([
+            "--dir".to_owned(),
+            runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
+            "--ro-bind".to_owned(),
+            host_dir.display().to_string(),
+            runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
+            "--setenv".to_owned(),
+            runtime::egress::PROVIDER_EGRESS_DIR_ENV.to_owned(),
+            runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
+        ]);
+    }
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
+    if let Some(socket) = request.control_socket {
+        bwrap.extend([
+            "--bind".to_owned(),
+            socket.display().to_string(),
+            SOCKET_RUN_CONTROL_PATH.to_owned(),
+        ]);
+    }
     if let Some(timing) = request.debug {
         bwrap.extend([
             "--setenv".to_owned(),
@@ -166,7 +208,15 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         ));
         bwrap.push(mount.target().to_owned());
     }
-    bwrap.extend(bwrap_dir_args_for_chdir(request.cwd));
+    bwrap.extend([
+        "--bind-fd".to_owned(),
+        request.agent_home_source_fd.to_string(),
+        request.agent_home.display().to_string(),
+        "--bind-fd".to_owned(),
+        request.agent_home_sandbox_fd.to_string(),
+        "/home/agent".to_owned(),
+    ]);
+    bwrap.extend(support::bwrap::dir_args_for_chdir(request.cwd));
     bwrap.extend([
         "--chdir".to_owned(),
         request.cwd.to_owned(),
@@ -194,35 +244,9 @@ pub(crate) fn bwrap_source_root_bind_args(source_root: &Path) -> Vec<String> {
     if !source_root.starts_with('/') || source_root == "/" {
         return Vec::new();
     }
-    let mut args = bwrap_dir_args_for_parent(source_root);
+    let mut args = support::bwrap::dir_args_for_parent(source_root);
     args.push("--ro-bind".to_owned());
     args.push(source_root.to_owned());
     args.push(source_root.to_owned());
-    args
-}
-
-pub(crate) fn bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
-    let Some((parent, _name)) = path.rsplit_once('/') else {
-        return Vec::new();
-    };
-    if parent.is_empty() {
-        Vec::new()
-    } else {
-        bwrap_dir_args_for_chdir(parent)
-    }
-}
-
-pub(crate) fn bwrap_dir_args_for_chdir(cwd: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    if !cwd.starts_with('/') {
-        return args;
-    }
-    let mut path = String::new();
-    for component in cwd.split('/').filter(|component| !component.is_empty()) {
-        path.push('/');
-        path.push_str(component);
-        args.push("--dir".to_owned());
-        args.push(path.clone());
-    }
     args
 }

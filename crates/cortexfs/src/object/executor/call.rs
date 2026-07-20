@@ -7,7 +7,7 @@ pub(crate) struct AgentToolCall {
     pub(crate) args: Vec<OsString>,
 }
 
-pub(crate) fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>, String> {
+pub(crate) fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>, ExecError> {
     for frame in frames {
         if let Some(call) = tool_call_from_event_frame(frame)? {
             return Ok(Some(call));
@@ -21,11 +21,6 @@ pub(crate) fn first_tool_call(frames: &[String]) -> Result<Option<AgentToolCall>
     Ok(None)
 }
 
-pub(crate) fn tool_call_signature(tool_call: &AgentToolCall) -> String {
-    let args = tool_call_args_strings(tool_call).join("\u{1f}");
-    format!("{}\u{1e}{args}", tool_call.name)
-}
-
 pub(crate) fn tool_call_args_strings(tool_call: &AgentToolCall) -> Vec<String> {
     tool_call
         .args
@@ -34,12 +29,7 @@ pub(crate) fn tool_call_args_strings(tool_call: &AgentToolCall) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn tool_call_args_json(tool_call: &AgentToolCall) -> String {
-    serde_json::to_string(&tool_call_args_strings(tool_call))
-        .unwrap_or_else(|_error| "[]".to_owned())
-}
-
-pub(crate) fn tool_call_from_event_frame(frame: &str) -> Result<Option<AgentToolCall>, String> {
+pub(crate) fn tool_call_from_event_frame(frame: &str) -> Result<Option<AgentToolCall>, ExecError> {
     let Ok(value) = serde_json::from_str::<Value>(frame) else {
         return Ok(None);
     };
@@ -57,7 +47,7 @@ pub(crate) fn event_text(frame: &str) -> Option<String> {
     value.get("text").and_then(Value::as_str).map(str::to_owned)
 }
 
-pub(crate) fn tool_call_from_text(text: &str) -> Result<Option<AgentToolCall>, String> {
+pub(crate) fn tool_call_from_text(text: &str) -> Result<Option<AgentToolCall>, ExecError> {
     let trimmed = text.trim();
     if !trimmed.starts_with('{') {
         return Ok(None);
@@ -72,20 +62,22 @@ pub(crate) fn tool_call_from_text(text: &str) -> Result<Option<AgentToolCall>, S
     agent_tool_call_from_value(&value)
 }
 
-pub(crate) fn agent_tool_call_from_value(value: &Value) -> Result<Option<AgentToolCall>, String> {
+pub(crate) fn agent_tool_call_from_value(
+    value: &Value,
+) -> Result<Option<AgentToolCall>, ExecError> {
     let id = value
         .get("id")
         .and_then(Value::as_str)
-        .ok_or_else(|| "tool_call missing id".to_owned())?;
+        .ok_or_else(|| ExecError::new("tool_call missing id"))?;
     let name = value
         .get("name")
         .and_then(Value::as_str)
-        .ok_or_else(|| "tool_call missing name".to_owned())?;
+        .ok_or_else(|| ExecError::new("tool_call missing name"))?;
     if !is_object_name(id) {
-        return Err(format!("invalid tool_call id: {id}"));
+        return Err(ExecError::new(format!("invalid tool_call id: {id}")));
     }
     if !is_object_name(name) {
-        return Err(format!("invalid tool_call name: {name}"));
+        return Err(ExecError::new(format!("invalid tool_call name: {name}")));
     }
     let args = tool_call_args(value.get("arguments"))?;
     Ok(Some(AgentToolCall {
@@ -95,7 +87,7 @@ pub(crate) fn agent_tool_call_from_value(value: &Value) -> Result<Option<AgentTo
     }))
 }
 
-pub(crate) fn tool_call_args(arguments: Option<&Value>) -> Result<Vec<OsString>, String> {
+pub(crate) fn tool_call_args(arguments: Option<&Value>) -> Result<Vec<OsString>, ExecError> {
     let args = match arguments {
         None => Vec::new(),
         Some(arguments) => {
@@ -108,9 +100,9 @@ pub(crate) fn tool_call_args(arguments: Option<&Value>) -> Result<Vec<OsString>,
             } else if let Some(value) = arguments.as_str() {
                 shell_words(value)?
             } else {
-                return Err(
-                    "tool_call arguments must contain args, argv, command, or input".to_owned(),
-                );
+                return Err(ExecError::new(
+                    "tool_call arguments must contain args, argv, command, or input",
+                ));
             }
         }
     };
@@ -118,9 +110,9 @@ pub(crate) fn tool_call_args(arguments: Option<&Value>) -> Result<Vec<OsString>,
     Ok(args.into_iter().map(OsString::from).collect())
 }
 
-pub(crate) fn json_string_array(value: &Value) -> Result<Vec<String>, String> {
+pub(crate) fn json_string_array(value: &Value) -> Result<Vec<String>, ExecError> {
     let Some(values) = value.as_array() else {
-        return Err("tool_call args must be an array".to_owned());
+        return Err(ExecError::new("tool_call args must be an array"));
     };
     values
         .iter()
@@ -128,7 +120,7 @@ pub(crate) fn json_string_array(value: &Value) -> Result<Vec<String>, String> {
             value
                 .as_str()
                 .map(str::to_owned)
-                .ok_or_else(|| "tool_call args must be strings".to_owned())
+                .ok_or_else(|| ExecError::new("tool_call args must be strings"))
         })
         .collect()
 }

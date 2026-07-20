@@ -38,18 +38,6 @@ fn cli_error_line_escapes_terminal_controls() {
 }
 
 #[test]
-fn agent_repl_unknown_command_line_escapes_terminal_controls() {
-    let rendered = agent_repl_unknown_command_line("/bad\u{1b}]52;c;payload\u{7}");
-
-    assert_eq!(
-        rendered,
-        "ctx: unknown repl command: /bad\\u{1b}]52;c;payload\\u{7}"
-    );
-    assert!(!rendered.as_bytes().contains(&0x1b));
-    assert!(!rendered.as_bytes().contains(&0x07));
-}
-
-#[test]
 fn temp_file_name_changes_with_retry_attempt() {
     assert_ne!(temp_file_name(0), temp_file_name(1));
 }
@@ -83,11 +71,13 @@ fn ctx_executable_open_refuses_symlink_targets() {
 fn provider_config_reader_lists_plain_config_dir() {
     let root = clean_test_dir("ctx-provider-config-reader-dir");
     assert!(fs::create_dir_all(&root).is_ok());
-    assert!(fs::write(
-        root.join("local.json"),
-        "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
-    )
-    .is_ok());
+    assert!(
+        fs::write(
+            root.join("local.json"),
+            "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
+        )
+        .is_ok()
+    );
 
     assert!(read_provider_config_from_dir("local", &root).is_ok());
 }
@@ -98,11 +88,13 @@ fn provider_config_reader_rejects_symlink_config_dir() {
     let outside = clean_test_dir("ctx-provider-config-reader-dir-symlink-outside");
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
-    assert!(fs::write(
-        outside.join("local.json"),
-        "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
-    )
-    .is_ok());
+    assert!(
+        fs::write(
+            outside.join("local.json"),
+            "{\"name\":\"local\",\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
+        )
+        .is_ok()
+    );
     assert!(std::os::unix::fs::symlink(&outside, root.join("providers.d")).is_ok());
 
     assert!(read_provider_config_from_dir("local", &root.join("providers.d")).is_err());
@@ -117,7 +109,10 @@ fn provider_secret_stdin_reader_accepts_input_at_limit() {
         MAX_PROVIDER_SECRET_STDIN_BYTES,
     );
 
-    assert_eq!(read.unwrap_or_default().len(), MAX_PROVIDER_SECRET_STDIN_BYTES);
+    assert_eq!(
+        read.unwrap_or_default().len(),
+        MAX_PROVIDER_SECRET_STDIN_BYTES
+    );
 }
 
 #[test]
@@ -133,42 +128,18 @@ fn provider_secret_stdin_reader_rejects_input_over_limit() {
 }
 
 #[test]
-fn agent_repl_stdin_reader_accepts_input_at_limit() {
-    let input = "x".repeat(MAX_AGENT_REPL_STDIN_BYTES);
-
-    let read = read_limited_input_text(
-        std::io::Cursor::new(input.as_bytes()),
-        MAX_AGENT_REPL_STDIN_BYTES,
-        "agent stdin exceeds input limit",
-    );
-
-    assert_eq!(read.unwrap_or_default().len(), MAX_AGENT_REPL_STDIN_BYTES);
-}
-
-#[test]
-fn agent_repl_stdin_reader_rejects_input_over_limit() {
-    let input = "x".repeat(MAX_AGENT_REPL_STDIN_BYTES + 1);
-
-    let read = read_limited_input_text(
-        std::io::Cursor::new(input.as_bytes()),
-        MAX_AGENT_REPL_STDIN_BYTES,
-        "agent stdin exceeds input limit",
-    );
-
-    assert!(matches!(read, Err(ref error) if error.kind() == std::io::ErrorKind::InvalidData));
-}
-
-#[test]
 fn provider_config_file_reader_refuses_symlink_intermediate_directory() {
     let root = clean_test_dir("ctx-provider-config-reader-intermediate-symlink");
     let outside = clean_test_dir("ctx-provider-config-reader-intermediate-outside");
     assert!(fs::create_dir_all(&root).is_ok());
     assert!(fs::create_dir_all(outside.join("providers.d")).is_ok());
-    assert!(fs::write(
-        outside.join("providers.d/local.json"),
-        "{\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
-    )
-    .is_ok());
+    assert!(
+        fs::write(
+            outside.join("providers.d/local.json"),
+            "{\"base_url\":\"http://127.0.0.1:8317/v1\"}\n",
+        )
+        .is_ok()
+    );
     assert!(std::os::unix::fs::symlink(&outside, root.join("etc")).is_ok());
 
     assert!(read_provider_config_file(&root.join("etc/providers.d/local.json")).is_err());
@@ -212,12 +183,9 @@ fn provider_config_atomic_write_rejects_symlink_parent_directory() {
     assert!(atomic_write_provider_config(&path, "{\"base_url\":\"http://new/v1\"}\n").is_err());
     assert!(!outside.join("local.json").exists());
     assert!(!fs::read_dir(&outside).map_or(true, |entries| {
-        entries.filter_map(Result::ok).any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".tmp")
-        })
+        entries
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().starts_with(".tmp"))
     }));
 }
 
@@ -233,14 +201,13 @@ fn provider_config_atomic_write_rejects_symlink_intermediate_directory() {
 
     assert!(atomic_write_provider_config(&path, "{\"base_url\":\"http://new/v1\"}\n").is_err());
     assert!(!outside.join("providers.d/local.json").exists());
-    assert!(!fs::read_dir(outside.join("providers.d")).map_or(true, |entries| {
-        entries.filter_map(Result::ok).any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".tmp")
+    assert!(
+        !fs::read_dir(outside.join("providers.d")).map_or(true, |entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|entry| entry.file_name().to_string_lossy().starts_with(".tmp"))
         })
-    }));
+    );
 }
 
 #[test]
@@ -252,7 +219,7 @@ fn ctx_file_helpers_refuse_symlink_reads_and_appends() {
     assert!(fs::write(&target, "outside\n").is_ok());
     assert!(std::os::unix::fs::symlink(&target, &link).is_ok());
 
-    assert!(cat_path(&link).is_err());
+    assert!(cat_path(&link, None).is_err());
     assert!(read_file_to_string(&link).is_err());
     assert!(file_append(&root, "link.txt", "changed").is_err());
     assert_eq!(fs::read_to_string(&target).unwrap_or_default(), "outside\n");
@@ -268,7 +235,7 @@ fn ctx_file_helpers_refuse_symlink_intermediate_reads() {
     assert!(std::os::unix::fs::symlink(&outside, root.join("link")).is_ok());
     let path = root.join("link/session/state");
 
-    assert!(cat_path(&path).is_err());
+    assert!(cat_path(&path, None).is_err());
     assert!(read_file_to_string(&path).is_err());
 }
 
@@ -318,6 +285,95 @@ fn ctx_file_writes_reject_symlink_intermediate_parent_without_writing_target() {
     assert_eq!(
         fs::read_to_string(outside_session.join("events.jsonl")).unwrap_or_default(),
         "outside\n"
+    );
+}
+
+#[test]
+fn ctx_file_set_and_append_refuse_session_history_without_side_effects() {
+    let root = clean_test_dir("ctx-file-session-history-read-only");
+    let paths = [
+        "home/1000/agent/coder/session/default/messages.jsonl",
+        "home/1000/model/openai/gpt-4o.d/session/default/events.jsonl",
+        "shared/team/agent/coder/session/default/events.jsonl",
+        "shared/team/model/openai/gpt-4o.d/session/default/messages.jsonl",
+    ];
+
+    for (index, path) in paths.into_iter().enumerate() {
+        let marker = root.join(path);
+        let session = marker.parent().unwrap_or(&marker);
+        let store = session.join(".store");
+        let claim = store.join("claim");
+        let cursor = claim.join(".cursor.json");
+        let claim_file = claim.join("claim-1");
+        assert!(fs::create_dir_all(&claim).is_ok());
+        assert!(fs::write(&marker, format!("marker-{index}\n")).is_ok());
+        assert!(fs::write(&cursor, b"cursor-marker\n").is_ok());
+        assert!(fs::write(&claim_file, b"claim-marker\n").is_ok());
+
+        let snapshot = || {
+            let mut store_entries = fs::read_dir(&store)
+                .map(|entries| {
+                    entries
+                        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            store_entries.sort();
+            let mut claim_entries = fs::read_dir(&claim)
+                .map(|entries| {
+                    entries
+                        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            claim_entries.sort();
+            (
+                fs::read(&marker).ok(),
+                fs::metadata(&marker).map(|metadata| metadata.ino()).ok(),
+                fs::metadata(&store).map(|metadata| metadata.ino()).ok(),
+                fs::metadata(&claim).map(|metadata| metadata.ino()).ok(),
+                store_entries,
+                claim_entries,
+                fs::read(&cursor).ok(),
+                fs::read(&claim_file).ok(),
+            )
+        };
+        let before = snapshot();
+
+        for operation in ["set", "append"] {
+            let result = if operation == "set" {
+                file_set(&root, path, "replacement")
+            } else {
+                file_append(&root, path, "replacement")
+            };
+            assert!(result.is_err(), "session history mutation must be refused");
+            let Err(error) = result else {
+                return;
+            };
+            assert_eq!(
+                (error.code, error.message),
+                (
+                    2,
+                    format!(
+                        "session history is read-only; maintained by the runtime or an authorized FUSE writer: {path}"
+                    )
+                ),
+                "unexpected {operation} error for {path}"
+            );
+            assert_eq!(snapshot(), before, "{operation} changed {path}");
+        }
+    }
+}
+
+#[test]
+fn ctx_file_set_and_append_preserve_ordinary_file_semantics() {
+    let root = clean_test_dir("ctx-file-ordinary-write");
+    assert!(fs::create_dir_all(root.join("shared/project")).is_ok());
+    assert!(file_set(&root, "shared/project/note", "first").is_ok());
+    assert!(file_append(&root, "shared/project/note", "second").is_ok());
+    assert_eq!(
+        fs::read_to_string(root.join("shared/project/note")).ok(),
+        Some("first\nsecond\n".to_owned())
     );
 }
 

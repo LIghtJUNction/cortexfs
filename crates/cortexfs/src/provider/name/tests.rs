@@ -5,8 +5,8 @@ mod provider_secret_file_tests {
     use super::super::files::set_private_dir_permissions;
     use super::super::{
         create_private_provider_secret_dir, is_secret_account_name, open_provider_secret_file,
-        provider_host_from_base_url, provider_secret_file_exists, read_provider_secret_file,
-        selected_model_provider,
+        provider_host_from_base_url, provider_name_from_config, provider_secret_file_exists,
+        read_provider_secret_file, selected_model_provider,
     };
     use std::fs;
     use std::os::unix::fs::{PermissionsExt, symlink};
@@ -38,6 +38,14 @@ mod provider_secret_file_tests {
         assert_eq!(
             provider_host_from_base_url("https://api.openai.com\noutput=/tmp/leak"),
             None
+        );
+        assert_eq!(
+            provider_host_from_base_url(r"https://api.openai.com\@evil.example/v1"),
+            None
+        );
+        assert_eq!(
+            provider_name_from_config(r"https://api.openai.com\@evil.example/v1", Some("trusted")),
+            Err(super::ProviderNameError::MissingHost)
         );
     }
 

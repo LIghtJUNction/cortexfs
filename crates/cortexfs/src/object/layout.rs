@@ -1,4 +1,6 @@
-use crate::support::layout::{LayoutPathRole, PathLayoutIssue, require_plain};
+use crate::support::layout::{
+    LayoutPathRole, PathLayoutIssue, PlainPathKindCheck, check_plain_file, require_plain,
+};
 use crate::*;
 
 /// Inspects a model, agent, or tool object triple under a `CortexFS` root.
@@ -34,6 +36,9 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
         &mut issues,
     );
     for file in control_files_for(class) {
+        if class == ObjectClass::Agent && AGENT_OPTIONAL_CONTROL_FILES.contains(file) {
+            continue;
+        }
         let label = format!("{control_label}/{file}");
         require_plain(
             &control_dir.join(file),
@@ -41,6 +46,17 @@ pub fn inspect_object_layout(root: &Path, class: ObjectClass, name: &str) -> Obj
             LayoutPathRole::ControlFile,
             &mut issues,
         );
+    }
+    if class == ObjectClass::Agent {
+        for file in AGENT_OPTIONAL_CONTROL_FILES {
+            let label = format!("{control_label}/{file}");
+            if check_plain_file(&control_dir.join(file)) == PlainPathKindCheck::WrongKind {
+                issues.push(PathLayoutIssue::wrong_kind(
+                    label,
+                    LayoutPathRole::ControlFile,
+                ));
+            }
+        }
     }
     if class != ObjectClass::Model {
         require_object_hook_dirs(&control_dir, &control_label, &mut issues);
@@ -74,7 +90,9 @@ pub(crate) fn inspect_object_socket(
     let socket_label = format!("{}/{name}.sock", class.as_str());
     let socket_path = root.join(class.as_str()).join(format!("{name}.sock"));
     match class {
-        ObjectClass::Agent => require_unix_socket(&socket_path, &socket_label, true, issues),
+        ObjectClass::Agent | ObjectClass::Tool => {
+            require_unix_socket(&socket_path, &socket_label, false, issues);
+        }
         ObjectClass::Model => {
             let session_label = format!("{}/{name}.d/session", class.as_str());
             inspect_model_socket(
@@ -85,7 +103,6 @@ pub(crate) fn inspect_object_socket(
                 issues,
             );
         }
-        ObjectClass::Tool => require_unix_socket(&socket_path, &socket_label, false, issues),
     }
 }
 
@@ -291,26 +308,24 @@ pub(crate) fn inspect_agent_control_files(
         return;
     }
 
-    for file in AGENT_CONTROL_FILES {
-        let Some(kind) = AgentControlKind::parse(file) else {
+    for file in AGENT_CONTROL_FILES.iter().copied().chain(
+        AGENT_OPTIONAL_CONTROL_FILES
+            .iter()
+            .copied()
+            .filter(|file| !AGENT_CONTROL_FILES.contains(file)),
+    ) {
+        let control_path = control_dir.join(file);
+        if check_plain_file(&control_path) != PlainPathKindCheck::Ok {
+            continue;
+        }
+        let path = format!("agent/{name}.d/{file}");
+        let Ok(content) = read_object_layout_control_file(&control_path) else {
+            issues.push(PathLayoutIssue::invalid_value(path, "invalid content"));
             continue;
         };
-        with_object_control_file(
-            class,
-            ObjectClass::Agent,
-            control_dir,
-            file,
-            issues,
-            |content, issues| {
-                let path = format!("agent/{name}.d/{file}");
-                let report = inspect_agent_control(kind, content);
-                let values = report
-                    .issues()
-                    .iter()
-                    .map(|issue| issue.value().unwrap_or("").to_owned());
-                push_control_invalid_values(&path, values, issues);
-            },
-        );
+        if validate_agent_bootstrap_control_content(file, &content).is_err() {
+            issues.push(PathLayoutIssue::invalid_value(path, "invalid content"));
+        }
     }
 }
 
@@ -347,10 +362,18 @@ pub(crate) fn require_unix_socket(
     match object_layout_socket_metadata(path) {
         Ok(metadata) if metadata.file_type().is_socket() => {}
         Ok(_metadata) => issues.push(PathLayoutIssue::wrong_kind(label, LayoutPathRole::Socket)),
-        Err(_error) if required => {
+        Err(error) if required || error.kind() != std::io::ErrorKind::NotFound => {
             issues.push(PathLayoutIssue::missing(label, LayoutPathRole::Socket));
         }
-        Err(_error) => {}
+        Err(_error) => match path.symlink_metadata() {
+            Ok(_metadata) => {
+                issues.push(PathLayoutIssue::wrong_kind(label, LayoutPathRole::Socket));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_error) => {
+                issues.push(PathLayoutIssue::missing(label, LayoutPathRole::Socket));
+            }
+        },
     }
 }
 

@@ -1,5 +1,4 @@
 use super::names::PROVIDER_SYSTEM_SECRET_ROOT;
-use crate::support::plain::open_plain_directory as open_plain_directory_no_follow;
 use crate::*;
 use std::net::IpAddr;
 
@@ -46,14 +45,15 @@ pub fn read_provider_system_secret_for_model(
     }))
 }
 
-pub(crate) fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
+#[must_use]
+pub fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<String> {
     let model = model.trim();
     if model.contains('/') {
         return model.split_once('/').and_then(|(provider, model)| {
             (!provider.is_empty() && !model.is_empty()).then_some(provider.to_owned())
         });
     }
-    if !matches!(model, "main" | "helper") {
+    if !is_model_alias(model) {
         return None;
     }
     let target = read_model_alias_target(ctx_root, model).ok()?;
@@ -67,7 +67,7 @@ pub(crate) fn selected_model_provider(ctx_root: &Path, model: &str) -> Option<St
 }
 
 pub(crate) fn read_model_alias_target(ctx_root: &Path, alias: &str) -> std::io::Result<String> {
-    let model_dir = open_plain_directory_no_follow(&ctx_root.join("model"))?;
+    let model_dir = open_plain_directory(&ctx_root.join("model"))?;
     let target = nix::fcntl::readlinkat(&model_dir, alias).map_err(std::io::Error::from)?;
     Ok(target.to_string_lossy().into_owned())
 }

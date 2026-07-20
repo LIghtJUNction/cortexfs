@@ -4,7 +4,7 @@ pub(crate) fn run_agent_model_once(
     config: &AgentModelRunConfig,
     input: &str,
     stdout: &mut impl Write,
-) -> Result<AgentModelRunOutcome, String> {
+) -> Result<AgentModelRunOutcome, ExecError> {
     run_agent_model_once_with_timeout(
         config,
         input,
@@ -18,35 +18,27 @@ pub(crate) fn run_agent_model_once_with_timeout(
     input: &str,
     stdout: &mut impl Write,
     timeout: Duration,
-) -> Result<AgentModelRunOutcome, String> {
+) -> Result<AgentModelRunOutcome, ExecError> {
+    if !admit_agent_prompt(config, input)? {
+        return agent_model_error_outcome(
+            stdout,
+            &config.run,
+            "E2BIG",
+            "agent prompt exceeds the effective context window",
+            config.suppress_model_error_events,
+        );
+    }
     write_agent_debug_timing(stdout, config, "model_spawn_start")?;
     let model_executable = open_executable_no_follow(&config.model_path)
-        .map_err(|error| format!("cannot run agent model: {error}"))?;
-    let mut command = Command::new(proc_fd_path(&model_executable));
-    command
-        .arg(input)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("CTX_ROOT", &config.ctx_root)
-        .env("CTX_SOURCE", &config.source)
-        .env("CTX_RUN_ID", &config.run)
-        .env("CTX_AGENT", &config.agent)
-        .env("CTX_AGENT_SYSTEM", &config.system_prompt)
-        .env("CTX_AGENT_PROMPT_TEMPLATE", &config.prompt_template)
-        .env("CTX_AGENT_RULES", &config.rules)
-        .env("CTX_AGENT_SKILLS", &config.skills)
-        .env("CTX_AGENT_CURRENT_TIME_UNIX", &config.current_time_unix)
-        .env("CTX_AGENT_TOOL_CONTEXT", &config.tool_context)
-        .env("CTX_AGENT_HISTORY_MESSAGES", &config.history_messages);
-    command.process_group(0);
-    pass_runtime_provider_secret_env(&mut command);
+        .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
+    let mut command = agent_model_command(config, input, &model_executable);
     let mut child = spawn_with_etxtbsy_retry(command.stdout(Stdio::piped()).stderr(Stdio::piped()))
-        .map_err(|error| format!("cannot run agent model: {error}"))?;
+        .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
     write_agent_debug_timing(stdout, config, "model_spawned")?;
     let child_stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "cannot read agent model output".to_owned())?;
+        .ok_or_else(|| ExecError::new("cannot read agent model output"))?;
     let stderr_reader = child.stderr.take().map(spawn_child_stderr_reader);
     let stdout_reader = spawn_agent_model_stdout_reader(child_stdout);
     let mut frames = Vec::new();
@@ -84,7 +76,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
                         .map_err(|error| {
                             terminate_process_group(&mut child);
                             let _ignored = child.wait();
-                            format!("cannot write output: {error}")
+                            ExecError::with_io("cannot write output", &error)
                         })?;
                     streamed = true;
                 }
@@ -98,7 +90,7 @@ pub(crate) fn run_agent_model_once_with_timeout(
                 return overflow_agent_model_outcome(
                     stdout,
                     &config.run,
-                    &error,
+                    error.message(),
                     config.suppress_model_error_events,
                 );
             }
@@ -118,14 +110,16 @@ pub(crate) fn run_agent_model_once_with_timeout(
                         config.suppress_model_error_events,
                     );
                 }
-                let _ignored = child.try_wait().map_err(|error| error.to_string())?;
+                let _ignored = child
+                    .try_wait()
+                    .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
             }
         }
     }
     let _ignored = stdout_reader.handle.join();
     let status = child
         .wait()
-        .map_err(|error| format!("cannot run agent model: {error}"))?;
+        .map_err(|error| ExecError::with_io("cannot run agent model", &error))?;
     let stderr = collect_child_stderr(stderr_reader);
     append_model_exit_error(stdout, config, status, &stderr, &mut frames)?;
     Ok(AgentModelRunOutcome {
@@ -135,13 +129,59 @@ pub(crate) fn run_agent_model_once_with_timeout(
     })
 }
 
+pub(crate) fn agent_model_command(
+    config: &AgentModelRunConfig,
+    input: &str,
+    model_executable: &fs::File,
+) -> Command {
+    let mut command = Command::new(proc_fd_path(model_executable));
+    command
+        .arg(input)
+        .env_clear()
+        .env("PATH", crate::support::command::TRUSTED_PATH)
+        .env("CTX_ROOT", &config.ctx_root)
+        .env("CTX_SOURCE", &config.source)
+        .env("CTX_RUN_ID", &config.run)
+        .env("CTX_AGENT", &config.agent)
+        .env("CTX_AGENT_SYSTEM", &config.system_prompt)
+        .env("CTX_AGENT_PROMPT_TEMPLATE", &config.prompt_template)
+        .env("CTX_AGENT_RULES", &config.rules)
+        .env("CTX_AGENT_SKILLS", &config.skills)
+        .env("CTX_AGENT_CURRENT_TIME_UNIX", &config.current_time_unix)
+        .env("CTX_AGENT_TOOL_CONTEXT", &config.tool_context)
+        .env("CTX_AGENT_HISTORY_MESSAGES", &config.history_messages);
+    if let Some(budget) = config.context_budget {
+        command.env("CTX_CONTEXT_WINDOW_TOKENS", budget.tokens().to_string());
+        command.env("CTX_CONTEXT_WINDOW_CHARS", budget.total_chars().to_string());
+    }
+    command.env("CTX_AGENT_WINDOW_SETTING", config.window_setting.value());
+    command.process_group(0);
+    pass_runtime_provider_secret_env(&mut command);
+    pass_provider_egress_env(&mut command);
+    command
+}
+
+fn pass_provider_egress_env(command: &mut Command) {
+    let value = env::var_os(cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV);
+    if value.as_deref()
+        == Some(OsStr::new(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        ))
+    {
+        command.env(
+            cortexfs::runtime::egress::PROVIDER_EGRESS_DIR_ENV,
+            cortexfs::runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH,
+        );
+    }
+}
+
 pub(crate) fn append_model_exit_error(
     stdout: &mut impl Write,
     config: &AgentModelRunConfig,
     status: std::process::ExitStatus,
     stderr: &str,
     frames: &mut Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), ExecError> {
     if status.success() || frames_have_error(frames) {
         return Ok(());
     }
@@ -153,7 +193,7 @@ pub(crate) fn append_model_exit_error(
     if !config.suppress_model_error_events {
         write_error_event(stdout, &config.run, "EIO", &message)
             .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
+            .map_err(|error| ExecError::with_io("cannot write output", &error))?;
     }
     frames.push(
         serde_json::json!({
@@ -172,7 +212,7 @@ pub(crate) fn overflow_agent_model_outcome(
     run: &str,
     message: &str,
     suppress_output: bool,
-) -> Result<AgentModelRunOutcome, String> {
+) -> Result<AgentModelRunOutcome, ExecError> {
     agent_model_error_outcome(stdout, run, "EOVERFLOW", message, suppress_output)
 }
 
@@ -182,11 +222,11 @@ pub(crate) fn agent_model_error_outcome(
     code: &str,
     message: &str,
     suppress_output: bool,
-) -> Result<AgentModelRunOutcome, String> {
+) -> Result<AgentModelRunOutcome, ExecError> {
     if !suppress_output {
         write_error_event(stdout, run, code, message)
             .and_then(|()| stdout.flush())
-            .map_err(|error| format!("cannot write output: {error}"))?;
+            .map_err(|error| ExecError::with_io("cannot write output", &error))?;
     }
     Ok(AgentModelRunOutcome {
         frames: vec![

@@ -1,13 +1,15 @@
 use super::*;
 
-/// Materializes the documented v1 reference tree under `root`.
+/// Materializes the documented reference tree under `root`.
 ///
 /// This is a filesystem bootstrap helper for tests, local inspection, and
 /// simple demos. It creates ABI-visible files, control directories, symlinks,
 /// session skeletons, shared queue directories, and Unix socket path entries.
 /// It does not start agents, models, MCP servers, providers, or a supervisor.
-pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
+pub fn ensure_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, ReferenceTreeError> {
     let plan = plan_reference_tree_upgrade(root);
+    reject_unsupported_version(&plan)?;
+    let agent_groups = reference_agent_groups(1000, 1000);
     create_reference_root(root)?;
     ensure_reference_bin(root)?;
     for agent in REFERENCE_AGENTS {
@@ -19,13 +21,11 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
         }) {
             continue;
         }
-        ensure_reference_agent(root, agent.name, agent.parent)?;
+        ensure_reference_agent(root, agent.name, agent.parent, &agent_groups)?;
     }
-    remove_deprecated_reference_placeholder_tools(root)?;
     ensure_reference_global_tools(root)?;
     ensure_reference_docs(root)?;
     ensure_reference_home(root)?;
-    remove_deprecated_reference_home_tool_aliases(root)?;
     migrate_reference_legacy_session_meta_models(root)?;
     apply_precomputed_reference_tree_upgrade(root, plan)?;
     Ok(ReferenceTreeBootstrap::new(root.to_path_buf()))
@@ -38,7 +38,7 @@ pub fn ensure_v1_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, R
 /// sandboxes bind the backing source tree at `/ctx`. This helper keeps the
 /// backing source tree aligned for runtime execution without making the pure
 /// reference-tree bootstrap depend on host provider state.
-pub fn ensure_v1_runtime_models(root: &Path) -> Result<(), ReferenceTreeError> {
+pub fn ensure_runtime_models(root: &Path) -> Result<(), ReferenceTreeError> {
     ensure_reference_models(root)
 }
 
@@ -62,7 +62,7 @@ pub(crate) const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
     ReferenceAgentSpec {
         name: "reviewer",
         parent: Some("agent:architect"),
-        model: HELPER_MODEL_ALIAS,
+        model: DEFAULT_MODEL_ALIAS,
     },
     ReferenceAgentSpec {
         name: "worker",
@@ -93,6 +93,7 @@ pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceT
             ("driver", "default=debug\nexec=debug\nagent=debug"),
             ("cap", "chat\nstream"),
             ("effort", "auto"),
+            ("limit", "unknown"),
             ("default", ""),
             ("fallback", ""),
             ("session", "none"),
@@ -154,14 +155,41 @@ pub(crate) fn ensure_reference_model_aliases(
         models,
         Some("codex-auto-review"),
     );
-    ensure_reference_model_alias(
-        &root.join("model").join(DEFAULT_MODEL_ALIAS),
-        Path::new(&main),
-    )?;
-    ensure_reference_model_alias(
-        &root.join("model").join(HELPER_MODEL_ALIAS),
-        Path::new(&helper),
-    )
+    for (alias, target) in MODEL_ALIASES.iter().copied().map(|alias| {
+        let target = match alias {
+            DEFAULT_MODEL_ALIAS => main.clone(),
+            HELPER_MODEL_ALIAS => helper.clone(),
+            alias => capability_model_alias_target(alias, models).unwrap_or_else(|| main.clone()),
+        };
+        (alias, target)
+    }) {
+        ensure_reference_model_alias(&root.join("model").join(alias), Path::new(&target))?;
+    }
+    Ok(())
+}
+
+fn capability_model_alias_target(alias: &str, models: &[ProjectedProviderModel]) -> Option<String> {
+    models
+        .iter()
+        .find(|model| match alias {
+            "fast" => model_name_has_word(&model.model, "fast"),
+            "reason" => model.cap.lines().any(|cap| cap.trim() == "reasoning"),
+            "code" => ["code", "coder", "coding"]
+                .iter()
+                .any(|word| model_name_has_word(&model.model, word)),
+            "vision" => model
+                .cap
+                .lines()
+                .any(|cap| matches!(cap.trim(), "vision" | "image_input")),
+            _ => false,
+        })
+        .map(|model| format!("/ctx/model/{}/{}", model.provider, model.model))
+}
+
+fn model_name_has_word(model: &str, expected: &str) -> bool {
+    model
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|word| word.eq_ignore_ascii_case(expected))
 }
 
 pub(crate) fn reference_model_alias_target(
@@ -230,19 +258,6 @@ pub(crate) fn ensure_reference_bin(root: &Path) -> Result<(), ReferenceTreeError
         )?;
         set_reference_executable(&path)?;
     }
-    remove_deprecated_reference_bin_te(root)?;
-    Ok(())
-}
-
-pub(crate) fn remove_deprecated_reference_bin_te(root: &Path) -> Result<(), ReferenceTreeError> {
-    let path = root.join("bin").join("te");
-    let Ok(content) = support::plain::read_small_text_file(&path, MAX_REFERENCE_SESSION_META_BYTES)
-    else {
-        return Ok(());
-    };
-    if content.contains("# CortexFS reference-tree te placeholder.") {
-        remove_reference_entry(&path).map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    }
     Ok(())
 }
 
@@ -250,8 +265,9 @@ pub(crate) fn ensure_reference_agent(
     root: &Path,
     name: &str,
     parent: Option<&str>,
+    groups: &str,
 ) -> Result<(), ReferenceTreeError> {
-    install_executable_object_wrapper(root, ObjectClass::Agent, name, "/bin/false", &[])
+    install_executable_object_wrapper(root, ObjectClass::Agent, name, support::command::FALSE, &[])
         .map_err(ReferenceTreeError::Object)?;
     let control = root.join("agent").join(format!("{name}.d"));
     let label = format!("user_u:agent_r:{name}_t:s0\n");
@@ -265,7 +281,7 @@ pub(crate) fn ensure_reference_agent(
         ("owner", "1000\n".to_owned()),
         ("uid", "1000\n".to_owned()),
         ("gid", "1000\n".to_owned()),
-        ("groups", "1000\n".to_owned()),
+        ("groups", groups.to_owned()),
         ("label", label),
         ("iso", "shared\n".to_owned()),
         (
@@ -279,6 +295,7 @@ pub(crate) fn ensure_reference_agent(
         ("path", "/ctx/tool:/ctx/home/1000/tool\n".to_owned()),
         ("mount", mount),
         ("model", format!("{}\n", reference_agent_model(name))),
+        ("window", "auto\n".to_owned()),
         ("system.md", reference_agent_system_prompt(name)),
         (
             "prompt.template.md",
@@ -302,6 +319,83 @@ pub(crate) fn ensure_reference_agent(
     let gid = read_reference_owner_id(&control.join("gid"))?;
     ensure_reference_socket(&root.join("agent").join(format!("{name}.sock")), uid, gid)?;
     ensure_reference_agent_control_ownership(&control)
+}
+
+fn reference_agent_groups(uid: u32, primary_gid: u32) -> String {
+    let primary = nix::unistd::Gid::from_raw(primary_gid);
+    let groups = active_user_manager_groups(uid, primary_gid)
+        .or_else(|| {
+            nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid))
+                .ok()
+                .flatten()
+                .and_then(|user| std::ffi::CString::new(user.name).ok())
+                .and_then(|name| nix::unistd::getgrouplist(&name, primary).ok())
+                .map(|groups| groups.into_iter().map(nix::unistd::Gid::as_raw).collect())
+        })
+        .unwrap_or_else(|| vec![primary_gid]);
+    format_reference_agent_groups(groups)
+}
+
+fn active_user_manager_groups(uid: u32, gid: u32) -> Option<Vec<u32>> {
+    let unit = format!("user@{uid}.service");
+    let output = Command::new("systemctl")
+        .args(["show", "--property=MainPID", "--value", unit.as_str()])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let pid = std::str::from_utf8(&output.stdout)
+        .ok()?
+        .trim()
+        .parse::<u32>()
+        .ok()?;
+    if pid == 0 {
+        return None;
+    }
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    parse_user_manager_groups(&status, uid, gid)
+}
+
+fn parse_user_manager_groups(status: &str, uid: u32, gid: u32) -> Option<Vec<u32>> {
+    let parse_ids = |label: &str| {
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(label))?
+            .split_whitespace()
+            .map(str::parse::<u32>)
+            .collect::<Result<Vec<_>, _>>()
+            .ok()
+    };
+    let uids = parse_ids("Uid:")?;
+    let gids = parse_ids("Gid:")?;
+    if uids.len() != 4
+        || gids.len() != 4
+        || uids.iter().any(|value| *value != uid)
+        || gids.iter().any(|value| *value != gid)
+    {
+        return None;
+    }
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("Groups:"))?
+        .split_whitespace()
+        .map(str::parse::<u32>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()
+}
+
+fn format_reference_agent_groups(groups: impl IntoIterator<Item = u32>) -> String {
+    let mut groups = groups.into_iter().collect::<Vec<_>>();
+    groups.sort_unstable();
+    groups.dedup();
+    let mut content = groups
+        .into_iter()
+        .map(|group| group.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    content.push('\n');
+    content
 }
 
 pub(crate) fn reference_agent_wrapper_script(name: &str) -> String {
@@ -329,13 +423,17 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
             format_args!(
                 "allow {policy_subject} tool:fs.write execute\n\
                  allow {policy_subject} tool:fs.replace execute\n\
-                 allow {policy_subject} tool:shell.exec execute\n"
+                 allow {policy_subject} tool:shell.exec execute\n\
+                 allow {policy_subject} tool:bash execute\n"
             ),
         );
     } else if name == "executor" {
         let _ignored = std::fmt::Write::write_fmt(
             &mut policy,
-            format_args!("allow {policy_subject} tool:shell.exec execute\n"),
+            format_args!(
+                "allow {policy_subject} tool:shell.exec execute\n\
+                 allow {policy_subject} tool:bash execute\n"
+            ),
         );
     }
     for child in reference_agent_children(name) {
@@ -382,7 +480,7 @@ Your human role name is Architect.
 Act as the parent planner and architecture coordinator for the default agent tree.
 Keep task decomposition explicit in session files; delegate implementation to `coder` as the primary implementer, simple bounded execution to `worker`, and independent verification to `reviewer`.
 Minimize coordination cost: merge small work, split only when implementation and review responsibilities are genuinely distinct.
-Preserve the CortexFS v1 ABI shape; do not add root namespaces, background schedulers, polling loops, watchers, or hot reload paths.
+Preserve the stable CortexFS ABI shape; do not add root namespaces, background schedulers, polling loops, watchers, or hot reload paths.
 Prefer concrete files, command evidence, and current repository state over speculative architecture.
 "
         .to_owned(),
@@ -436,70 +534,6 @@ Report commands, outputs, status, and failures without expanding scope.
     }
 }
 
-#[expect(
-    dead_code,
-    reason = "legacy reference stub retained while object-runner wrapper rollout settles"
-)]
-pub(crate) fn reference_agent_stub_script(name: &str) -> String {
-    format!(
-        r#"#!/bin/sh
-# CortexFS reference-tree agent stub. The selected model is a file ABI choice.
-source_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-ctx_root="${{CTX_ROOT:-/ctx}}"
-run="${{CTX_RUN_ID:-r1}}"
-input="$*"
-if [ -z "$input" ]; then
-  input="$(/usr/bin/cat)"
-fi
-model="$(/usr/bin/tr -d '\n' < "$source_root/agent/{name}.d/model" 2>/dev/null || true)"
-if [ -z "$model" ]; then
-  model="main"
-fi
-case "$model" in
-  */*/*|/*|../*|*/../*|*/..|*//*) model="" ;;
-  */*) ;;
-  main|helper)
-    target="$(/usr/bin/readlink "$ctx_root/model/$model" 2>/dev/null || true)"
-    case "$target" in
-      /ctx/model/*/*) model="${{target#/ctx/model/}}" ;;
-      *) model="" ;;
-    esac
-    ;;
-  *) model="" ;;
-esac
-case "$model" in
-  */*/*|/*|../*|*/../*|*/..|*//*) model="" ;;
-  ?*/*?) ;;
-  *) model="" ;;
-esac
-if [ -z "$model" ] || [ ! -x "$ctx_root/model/$model" ]; then
-  printf '{{"type":"error","run":"%s","code":"ENOENT","message":"missing model"}}\n' "$run"
-  printf '{{"type":"done","run":"%s","status":"error"}}\n' "$run"
-  exit 1
-fi
-history="${{CTX_AGENT_HISTORY_MESSAGES:-}}"
-if [ -z "$history" ] || [ "$history" = "(no historical messages injected)" ]; then
-  session="${{CTX_SESSION:-default}}"
-  case "$session" in
-    */*|.*|*..*) session="" ;;
-  esac
-  history_file="$source_root/home/1000/agent/{name}/session/$session/messages.jsonl"
-  if [ -n "$session" ] && [ -r "$history_file" ]; then
-    history="$(/usr/bin/tail -n 40 "$history_file" 2>/dev/null || true)"
-  fi
-fi
-if [ -n "$history" ] && [ "$history" != "(no historical messages injected)" ]; then
-  input="$(/usr/bin/printf '%s\n%s\n\n%s\n%s\n' "Conversation history:" "$history" "Current user input:" "$input")"
-fi
-CTX_AGENT="{name}" \
-CTX_AGENT_SYSTEM="$(/usr/bin/cat "$source_root/agent/{name}.d/system.md" 2>/dev/null || true)" \
-CTX_AGENT_PROMPT_TEMPLATE="$(/usr/bin/cat "$source_root/agent/{name}.d/prompt.template.md" 2>/dev/null || true)" \
-CTX_RUN_ID="$run" \
-exec "$ctx_root/model/$model" "$input"
-"#
-    )
-}
-
 pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), ReferenceTreeError> {
     for tool in REFERENCE_GLOBAL_TOOLS {
         install_executable_object_wrapper(
@@ -532,195 +566,29 @@ pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), Reference
     Ok(())
 }
 
-pub(crate) fn remove_deprecated_reference_placeholder_tools(
-    root: &Path,
-) -> Result<(), ReferenceTreeError> {
-    for tool in DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS {
-        remove_deprecated_reference_placeholder_tool(root, tool)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn remove_deprecated_reference_placeholder_tool(
-    root: &Path,
-    name: &str,
-) -> Result<(), ReferenceTreeError> {
-    let executable = root.join("tool").join(name);
-    let control_dir = root.join("tool").join(format!("{name}.d"));
-    if fs::symlink_metadata(&executable).is_err() && fs::symlink_metadata(&control_dir).is_err() {
-        return Ok(());
-    }
-    if !is_deprecated_reference_placeholder_tool(&executable, &control_dir) {
-        return Ok(());
-    }
-    remove_reference_entry(&executable).map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    remove_deprecated_reference_placeholder_control_dir(&control_dir)?;
-    Ok(())
-}
-
-pub(crate) fn remove_deprecated_reference_placeholder_control_dir(
-    control_dir: &Path,
-) -> Result<(), ReferenceTreeError> {
-    let control_dir_file =
-        open_reference_dir(control_dir).map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    for file in TOOL_CONTROL_FILES {
-        nix::unistd::unlinkat(
-            &control_dir_file,
-            *file,
-            nix::unistd::UnlinkatFlags::NoRemoveDir,
-        )
-        .map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    }
-    remove_deprecated_reference_placeholder_hook_dir(&control_dir_file)?;
-    let Some(parent) = control_dir.parent() else {
-        return Err(ReferenceTreeError::CannotRemove);
-    };
-    let parent_dir =
-        open_reference_dir(parent).map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    let name = control_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or(ReferenceTreeError::CannotRemove)?;
-    nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::RemoveDir)
-        .map_err(|_error| ReferenceTreeError::CannotRemove)
-}
-
-pub(crate) fn remove_deprecated_reference_placeholder_hook_dir(
-    control_dir_file: &fs::File,
-) -> Result<(), ReferenceTreeError> {
-    let Ok(hook_dir_fd) = nix::fcntl::openat(
-        control_dir_file,
-        OBJECT_HOOK_DIR,
-        nix::fcntl::OFlag::O_DIRECTORY
-            | nix::fcntl::OFlag::O_RDONLY
-            | nix::fcntl::OFlag::O_NOFOLLOW
-            | nix::fcntl::OFlag::O_CLOEXEC,
-        nix::sys::stat::Mode::empty(),
-    ) else {
-        return Ok(());
-    };
-    let hook_dir = fs::File::from(hook_dir_fd);
-    for phase in OBJECT_HOOK_PHASE_DIRS {
-        nix::unistd::unlinkat(&hook_dir, *phase, nix::unistd::UnlinkatFlags::RemoveDir)
-            .map_err(|_error| ReferenceTreeError::CannotRemove)?;
-    }
-    nix::unistd::unlinkat(
-        control_dir_file,
-        OBJECT_HOOK_DIR,
-        nix::unistd::UnlinkatFlags::RemoveDir,
-    )
-    .map_err(|_error| ReferenceTreeError::CannotRemove)
-}
-
-pub(crate) fn is_deprecated_reference_placeholder_tool(
-    executable: &Path,
-    control_dir: &Path,
-) -> bool {
-    if !control_dir
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.is_dir())
-    {
-        return false;
-    }
-    let Ok(wrapper) =
-        support::plain::read_small_text_file(executable, MAX_REFERENCE_SESSION_META_BYTES)
-    else {
-        return false;
-    };
-    let Ok(description) = support::plain::read_small_text_file(
-        &control_dir.join("description"),
-        MAX_REFERENCE_SESSION_META_BYTES,
-    ) else {
-        return false;
-    };
-    ((wrapper.contains("# CortexFS generated object wrapper.\n")
-        && wrapper.contains("exec '/bin/false' \"$0\" \"$@\"\n"))
-        || wrapper
-            == "#!/bin/sh\n# CortexFS generated object wrapper.\nexec '/bin/false' \"$0\" \"$@\"\n")
-        && description.trim_end_matches('\n') == "CortexFS reference-tree tool"
-        && deprecated_placeholder_tool_control_dir_is_exact(control_dir)
-}
-
-pub(crate) fn deprecated_placeholder_tool_control_dir_is_exact(control_dir: &Path) -> bool {
-    let Ok(control_dir_file) = open_reference_dir(control_dir) else {
-        return false;
-    };
-    let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&control_dir_file)) else {
-        return false;
-    };
-    let mut seen = Vec::new();
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let Some(file_name) = file_name.to_str() else {
-            return false;
-        };
-        if !TOOL_CONTROL_FILES.contains(&file_name) {
-            if file_name == OBJECT_HOOK_DIR && deprecated_placeholder_hook_dir_is_exact(control_dir)
-            {
-                continue;
-            }
-            return false;
-        }
-        let Ok(stat) = nix::sys::stat::fstatat(
-            &control_dir_file,
-            file_name,
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        ) else {
-            return false;
-        };
-        if stat.st_mode & libc::S_IFMT != libc::S_IFREG {
-            return false;
-        }
-        seen.push(file_name.to_owned());
-    }
-    TOOL_CONTROL_FILES
-        .iter()
-        .all(|required| seen.iter().any(|file| file == required))
-}
-
-pub(crate) fn deprecated_placeholder_hook_dir_is_exact(control_dir: &Path) -> bool {
-    let hook_dir = control_dir.join(OBJECT_HOOK_DIR);
-    if !hook_dir
-        .symlink_metadata()
-        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
-    {
-        return false;
-    }
-    let Ok(hook_dir_file) = open_reference_dir(&hook_dir) else {
-        return false;
-    };
-    let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&hook_dir_file)) else {
-        return false;
-    };
-    let mut seen = Vec::new();
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let Some(file_name) = file_name.to_str() else {
-            return false;
-        };
-        if !OBJECT_HOOK_PHASE_DIRS.contains(&file_name) {
-            return false;
-        }
-        let Ok(stat) = nix::sys::stat::fstatat(
-            &hook_dir_file,
-            file_name,
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        ) else {
-            return false;
-        };
-        if stat.st_mode & libc::S_IFMT != libc::S_IFDIR {
-            return false;
-        }
-        seen.push(file_name.to_owned());
-    }
-    OBJECT_HOOK_PHASE_DIRS
-        .iter()
-        .all(|required| seen.iter().any(|file| file == required))
-}
-
 #[cfg(test)]
 mod reference_model_tests {
     use super::*;
+
+    #[test]
+    fn user_manager_status_groups_require_matching_identity() {
+        let status = "Name:\tsystemd\nUid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\nGroups:\t1000 985 998\n";
+
+        assert_eq!(
+            parse_user_manager_groups(status, 1000, 1000),
+            Some(vec![1000, 985, 998])
+        );
+        assert_eq!(parse_user_manager_groups(status, 1001, 1000), None);
+        assert_eq!(parse_user_manager_groups(status, 1000, 1001), None);
+    }
+
+    #[test]
+    fn reference_agent_groups_are_sorted_deduplicated_and_terminated() {
+        assert_eq!(
+            format_reference_agent_groups([1002, 1000, 1001, 1002]),
+            "1000\n1001\n1002\n"
+        );
+    }
 
     #[test]
     fn provider_models_are_materialized_into_reference_tree()
@@ -780,19 +648,61 @@ mod reference_model_tests {
                 provider: "api.test".to_owned(),
                 model: "gpt-main".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
             },
             ProjectedProviderModel {
                 provider: "api.test".to_owned(),
                 model: "codex-auto-review".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
-                driver: "openai.chat".to_owned(),
+                driver: "default=openai-chat".to_owned(),
                 cap: "chat\nstream".to_owned(),
                 effort: "auto".to_owned(),
                 fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "turbo-fast".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "default=openai-chat".to_owned(),
+                cap: "chat\nstream".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "deep".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "default=openai-chat".to_owned(),
+                cap: "chat\nreasoning".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "code-pro".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "default=openai-chat".to_owned(),
+                cap: "chat\nstream".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
+            },
+            ProjectedProviderModel {
+                provider: "api.test".to_owned(),
+                model: "multimodal".to_owned(),
+                base_url: "https://api.test/v1".to_owned(),
+                driver: "default=openai-chat".to_owned(),
+                cap: "chat\nvision".to_owned(),
+                effort: "auto".to_owned(),
+                fallback: String::new(),
+                limit: ModelContextLimit::Unknown,
             },
         ];
         for model in &models {
@@ -810,6 +720,17 @@ mod reference_model_tests {
             fs::read_link(root.path().join("model/helper"))?,
             PathBuf::from("/ctx/model/api.test/codex-auto-review")
         );
+        for (alias, target) in [
+            ("fast", "turbo-fast"),
+            ("reason", "deep"),
+            ("code", "code-pro"),
+            ("vision", "multimodal"),
+        ] {
+            assert_eq!(
+                fs::read_link(root.path().join("model").join(alias))?,
+                PathBuf::from(format!("/ctx/model/api.test/{target}"))
+            );
+        }
         Ok(())
     }
 
@@ -834,6 +755,12 @@ mod reference_model_tests {
             fs::read_link(root.path().join("model/helper"))?,
             PathBuf::from("/ctx/model/debug/echo")
         );
+        for alias in MODEL_ALIASES {
+            assert_eq!(
+                fs::read_link(root.path().join("model").join(alias))?,
+                PathBuf::from("/ctx/model/debug/echo")
+            );
+        }
         Ok(())
     }
 }

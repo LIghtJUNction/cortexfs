@@ -27,6 +27,7 @@ pub fn provider_name_from_config(
     base_url: &str,
     name: Option<&str>,
 ) -> Result<String, ProviderNameError> {
+    let host = provider_host_from_base_url(base_url).ok_or(ProviderNameError::MissingHost)?;
     if let Some(name) = name.map(str::trim).filter(|value| !value.is_empty()) {
         return if is_object_name(name) {
             Ok(name.to_owned())
@@ -35,7 +36,6 @@ pub fn provider_name_from_config(
         };
     }
 
-    let host = provider_host_from_base_url(base_url).ok_or(ProviderNameError::MissingHost)?;
     if provider_host_requires_name(&host) {
         return Err(ProviderNameError::MissingNameForAddress);
     }
@@ -56,30 +56,24 @@ pub fn provider_name_from_base_url(base_url: &str) -> Option<String> {
 /// Returns the lowercase host from a provider base URL.
 #[must_use]
 pub fn provider_host_from_base_url(base_url: &str) -> Option<String> {
-    let mut rest = base_url.trim();
-    if rest.bytes().any(|byte| byte.is_ascii_control()) {
+    let base_url = base_url.trim();
+    // Reject control bytes before parsing so injection payloads never reach the URL parser.
+    if base_url
+        .bytes()
+        .any(|byte| byte.is_ascii_control() || byte == b'\\')
+    {
         return None;
     }
-    if let Some(value) = rest.strip_prefix("https://") {
-        rest = value;
-    } else if let Some(value) = rest.strip_prefix("http://") {
-        rest = value;
-    } else {
+    // Require a non-empty authority (reject WHATWG oddities like `https:///v1`).
+    let (_scheme, rest) = base_url.split_once("://")?;
+    if rest.is_empty() || rest.starts_with('/') {
         return None;
     }
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default()
-        .rsplit('@')
-        .next()
-        .unwrap_or_default();
-    let host = authority
-        .split(':')
-        .next()
-        .unwrap_or_default()
-        .trim_end_matches('.')
-        .to_ascii_lowercase();
+    let url = url::Url::parse(base_url).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = url.host_str()?.trim_end_matches('.').to_ascii_lowercase();
     (!host.is_empty()).then_some(host)
 }
 
@@ -95,7 +89,7 @@ pub fn provider_oauth_refresh_token_env_name(provider: &str) -> String {
     format!("CTX_{}_OAUTH_REFRESH_TOKEN", provider_env_label(provider))
 }
 
-/// Returns the system keychain service name for a provider.
+/// Returns the system secret-store service name for a provider.
 #[must_use]
 pub fn provider_keychain_service(provider: &str) -> String {
     format!("cortexfs:{provider}")

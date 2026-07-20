@@ -6,7 +6,8 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::agent::prompt::message_content_text;
-use crate::support::plain::read_small_text_file;
+use crate::support::columnar::{HistoryGuard, Stream};
+use crate::support::plain::{path_metadata_no_follow, read_small_text_file};
 use crate::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
 
 use super::types::{
@@ -34,13 +35,28 @@ pub enum TrajectoryMapError {
 /// Reads `messages.jsonl`, `events.jsonl`, and optional `meta.json`. Does not
 /// write files and does not mutate session history.
 pub fn trajectory_from_session_dir(session_dir: &Path) -> Result<Trajectory, TrajectoryMapError> {
+    for (file, missing) in [
+        ("messages.jsonl", TrajectoryMapError::MissingMessages),
+        ("events.jsonl", TrajectoryMapError::MissingEvents),
+    ] {
+        match path_metadata_no_follow(&session_dir.join(file)) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => return Err(missing),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Err(missing),
+            Err(_error) => return Err(TrajectoryMapError::CannotRead(file)),
+        }
+    }
+    let history = HistoryGuard::shared(session_dir)
+        .map_err(|_error| TrajectoryMapError::CannotRead("messages.jsonl"))?;
     let messages = read_session_text(
-        session_dir,
+        &history,
+        Stream::Messages,
         "messages.jsonl",
         TrajectoryMapError::MissingMessages,
     )?;
     let events = read_session_text(
-        session_dir,
+        &history,
+        Stream::Events,
         "events.jsonl",
         TrajectoryMapError::MissingEvents,
     )?;
@@ -67,7 +83,7 @@ pub fn trajectory_from_session_jsonl(
 ) -> Trajectory {
     let meta = parse_meta(meta_json);
     let indexed = index_events(events_jsonl);
-    let (mut steps, remaining_tool_calls, legacy_unmatched_tool_results) =
+    let (mut steps, remaining_tool_calls) =
         map_messages_to_steps(messages_jsonl, indexed.tool_calls);
     attach_orphan_tool_calls(&mut steps, &remaining_tool_calls);
     attach_run_metrics(&mut steps, &indexed.usages);
@@ -76,14 +92,6 @@ pub fn trajectory_from_session_jsonl(
     let mut agent_extra = Map::new();
     if let Some(scope) = meta.scope {
         agent_extra.insert("scope".to_owned(), Value::String(scope));
-    }
-
-    let mut trajectory_extra = Map::new();
-    if legacy_unmatched_tool_results > 0 {
-        trajectory_extra.insert(
-            "legacy_unmatched_tool_results".to_owned(),
-            Value::from(legacy_unmatched_tool_results),
-        );
     }
 
     Trajectory {
@@ -104,7 +112,7 @@ pub fn trajectory_from_session_jsonl(
         steps,
         final_metrics,
         notes: Some("projected from CortexFS session messages.jsonl + events.jsonl".to_owned()),
-        extra: (!trajectory_extra.is_empty()).then_some(trajectory_extra),
+        extra: None,
     }
 }
 
@@ -126,12 +134,12 @@ struct RunToolCall {
 }
 
 fn read_session_text(
-    session_dir: &Path,
+    history: &HistoryGuard<'_>,
+    stream: Stream,
     file: &'static str,
     missing: TrajectoryMapError,
 ) -> Result<String, TrajectoryMapError> {
-    let path = session_dir.join(file);
-    match read_small_text_file(&path, MAX_TRAJECTORY_SESSION_FILE_BYTES) {
+    match history.read_text(stream, MAX_TRAJECTORY_SESSION_FILE_BYTES) {
         Ok(content) => Ok(content),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(missing),
         Err(_error) => Err(TrajectoryMapError::CannotRead(file)),
@@ -239,10 +247,9 @@ fn tool_call_from_event(value: &Value) -> Option<TrajectoryToolCall> {
 fn map_messages_to_steps(
     messages_jsonl: &str,
     mut pending_tool_calls: VecDeque<RunToolCall>,
-) -> (Vec<TrajectoryStep>, VecDeque<RunToolCall>, u64) {
+) -> (Vec<TrajectoryStep>, VecDeque<RunToolCall>) {
     let mut steps = Vec::new();
     let mut step_id = 1_u64;
-    let mut legacy_unmatched_tool_results = 0_u64;
 
     for_each_jsonl_line(messages_jsonl, |_line_number, line| {
         let JsonlLineShape::Value(value) = parse_jsonl_line(line) else {
@@ -279,39 +286,30 @@ fn map_messages_to_steps(
                 step_id = step_id.saturating_add(1);
             }
             "tool" => {
-                let message_run = event_run(&value);
+                let Some(message_run) = event_run(&value) else {
+                    return;
+                };
                 let mut results = tool_observation_results(&value);
                 let call_ids: Vec<String> = results
                     .iter()
                     .filter_map(|result| result.source_call_id.clone())
                     .collect();
-                let matched_calls = take_matching_tool_calls(
-                    &mut pending_tool_calls,
-                    &call_ids,
-                    message_run.as_deref(),
-                );
-                results.retain_mut(|result| {
-                    let Some(source_call_id) = result.source_call_id.as_deref() else {
-                        return true;
-                    };
-                    if matched_calls
-                        .iter()
-                        .any(|call| call.call.tool_call_id == source_call_id)
-                    {
-                        return true;
-                    }
-                    legacy_unmatched_tool_results = legacy_unmatched_tool_results.saturating_add(1);
-                    result.source_call_id = None;
+                let matched_calls =
+                    take_matching_tool_calls(&mut pending_tool_calls, &call_ids, &message_run);
+                results.retain(|result| {
                     result
-                        .content
-                        .as_ref()
-                        .is_some_and(|content| !content.is_empty())
+                        .source_call_id
+                        .as_deref()
+                        .is_some_and(|source_call_id| {
+                            matched_calls
+                                .iter()
+                                .any(|call| call.call.tool_call_id == source_call_id)
+                        })
                 });
                 if results.is_empty() && matched_calls.is_empty() {
                     return;
                 }
-                let run = message_run.or_else(|| unique_call_run(&matched_calls));
-                if let Some(index) = agent_step_for_run(&steps, run.as_deref()) {
+                if let Some(index) = agent_step_for_run(&steps, Some(&message_run)) {
                     let Some(last) = steps.get_mut(index) else {
                         return;
                     };
@@ -330,7 +328,7 @@ fn map_messages_to_steps(
                         tool_calls: None,
                         observation: None,
                         metrics: None,
-                        extra: run.as_deref().map(run_extra),
+                        extra: Some(run_extra(&message_run)),
                     };
                     if !matched_calls.is_empty() {
                         merge_tool_calls(&mut step, calls_without_runs(matched_calls));
@@ -344,50 +342,33 @@ fn map_messages_to_steps(
         }
     });
 
-    (steps, pending_tool_calls, legacy_unmatched_tool_results)
+    (steps, pending_tool_calls)
 }
 
 fn tool_observation_results(message: &Value) -> Vec<TrajectoryObservationResult> {
-    let Some(content) = message.get("content") else {
+    let Some(parts) = message.get("content").and_then(Value::as_array) else {
         return Vec::new();
     };
-    if let Some(parts) = content.as_array() {
-        let mut results = Vec::new();
-        for part in parts {
-            let part_type = part.get("type").and_then(Value::as_str);
-            if part_type == Some("tool_result") || part.get("tool_call_id").is_some() {
-                results.push(TrajectoryObservationResult {
-                    source_call_id: part
-                        .get("tool_call_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                    content: part
-                        .get("content")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                        .or_else(|| part.get("text").and_then(Value::as_str).map(str::to_owned)),
-                });
-            }
-        }
-        if !results.is_empty() {
-            return results;
-        }
-    }
-    let text = message_content_text(Some(content));
-    if text.is_empty() {
-        Vec::new()
-    } else {
-        vec![TrajectoryObservationResult {
-            source_call_id: None,
-            content: Some(text),
-        }]
-    }
+    parts
+        .iter()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("tool_result"))
+        .map(|part| TrajectoryObservationResult {
+            source_call_id: part
+                .get("tool_call_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            content: part
+                .get("content")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+        .collect()
 }
 
 fn take_matching_tool_calls(
     pending: &mut VecDeque<RunToolCall>,
     call_ids: &[String],
-    run: Option<&str>,
+    run: &str,
 ) -> Vec<RunToolCall> {
     if call_ids.is_empty() {
         return Vec::new();
@@ -395,8 +376,7 @@ fn take_matching_tool_calls(
     let mut matched = Vec::with_capacity(call_ids.len());
     for call_id in call_ids {
         let position = pending.iter().position(|call| {
-            call.call.tool_call_id == *call_id
-                && run.is_none_or(|run| call.run.as_deref() == Some(run))
+            call.call.tool_call_id == *call_id && call.run.as_deref() == Some(run)
         });
         if let Some(position) = position
             && let Some(call) = pending.remove(position)
@@ -530,14 +510,6 @@ fn agent_step_for_run(steps: &[TrajectoryStep], run: Option<&str>) -> Option<usi
         .filter_map(|(index, step)| (step.source == "agent").then_some(index));
     let only = agents.next()?;
     agents.next().is_none().then_some(only)
-}
-
-fn unique_call_run(calls: &[RunToolCall]) -> Option<String> {
-    let first = calls.first()?.run.as_deref()?;
-    calls
-        .iter()
-        .all(|call| call.run.as_deref() == Some(first))
-        .then(|| first.to_owned())
 }
 
 fn calls_without_runs(calls: Vec<RunToolCall>) -> Vec<TrajectoryToolCall> {

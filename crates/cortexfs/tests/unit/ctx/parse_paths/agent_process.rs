@@ -402,6 +402,9 @@ fn parses_agent_env_command() {
 fn agent_env_reports_derived_sandbox_environment() {
     let root = clean_test_dir("ctx-agent-env-worker");
     create_complete_agent_control(&root, "worker");
+    ensure_runtime_model_fixture(&root);
+    let view = derive_agent_runtime_view(&root, "worker");
+    assert!(view.is_ok(), "worker fixture view: {view:?}");
 
     assert_eq!(
         agent_env_lines(&root, "worker"),

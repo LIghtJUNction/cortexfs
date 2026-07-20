@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU32};
 
 use crate::abi::constants::{FORBIDDEN_MODEL_CAPABILITIES, STABLE_MODEL_CAPABILITIES};
 use crate::abi::path::is_model_name;
+use crate::support::control::{parse_canonical_control_value, parse_canonical_positive_u32};
 
 /// Model capability control-file validation issue.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,7 +14,7 @@ pub enum ModelCapabilityIssue {
         /// Capability word from the file.
         capability: String,
     },
-    /// Capability word is not in the stable v1 semantic capability set.
+    /// Capability word is not in the stable semantic capability set.
     Unknown {
         /// One-based line number in `cap`.
         line: usize,
@@ -81,6 +82,54 @@ pub enum ModelRegistryError {
     CannotRead,
     /// Registry cache could not be written.
     CannotWrite,
+}
+
+/// Trusted hard context limit projected for one model.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModelContextLimit {
+    /// No trusted maximum is available.
+    Unknown,
+    /// Known positive hard limit in tokens.
+    Known(NonZeroU32),
+}
+
+impl ModelContextLimit {
+    /// Constructs a known limit from a positive token count.
+    #[must_use]
+    pub const fn known(tokens: u32) -> Option<Self> {
+        match NonZeroU32::new(tokens) {
+            Some(tokens) => Some(Self::Known(tokens)),
+            None => None,
+        }
+    }
+
+    /// Parses an exact `model/<provider>/<model>.d/limit` file body.
+    #[must_use]
+    pub fn parse_control(content: &str) -> Option<Self> {
+        let value = parse_canonical_control_value(content)?;
+        if value == "unknown" {
+            return Some(Self::Unknown);
+        }
+        NonZeroU32::new(parse_canonical_positive_u32(value)?).map(Self::Known)
+    }
+
+    /// Returns the known token maximum, if the catalog or host supplied one.
+    #[must_use]
+    pub const fn tokens(self) -> Option<u32> {
+        match self {
+            Self::Unknown => None,
+            Self::Known(tokens) => Some(tokens.get()),
+        }
+    }
+}
+
+impl std::fmt::Display for ModelContextLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            Self::Unknown => f.write_str("unknown"),
+            Self::Known(tokens) => tokens.fmt(f),
+        }
+    }
 }
 
 /// Supported provider-neutral model reasoning effort levels for control files.
@@ -299,7 +348,7 @@ impl ModelCapabilityRegistry {
     }
 }
 
-/// Inspects a `model/<provider>/<model>.d/cap` file body for stable v1 capability words.
+/// Inspects a `model/<provider>/<model>.d/cap` file body for stable capability words.
 #[must_use]
 pub fn inspect_model_capabilities(content: &str) -> ModelCapabilityReport {
     let mut issues = Vec::new();
@@ -327,6 +376,41 @@ pub fn inspect_model_capabilities(content: &str) -> ModelCapabilityReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_context_limit_accepts_unknown_or_a_positive_canonical_token_count() {
+        assert_eq!(
+            ModelContextLimit::parse_control("unknown\n"),
+            Some(ModelContextLimit::Unknown)
+        );
+        assert_eq!(
+            ModelContextLimit::parse_control("272000\n").and_then(ModelContextLimit::tokens),
+            Some(272_000)
+        );
+    }
+
+    #[test]
+    fn model_context_limit_rejects_noncanonical_or_out_of_range_values() {
+        for invalid in [
+            "",
+            "0\n",
+            "-1\n",
+            "+1\n",
+            "01\n",
+            " 1\n",
+            "1 \n",
+            "1.0\n",
+            "4294967296\n",
+            "unknown",
+            "unknown\nextra\n",
+        ] {
+            assert_eq!(
+                ModelContextLimit::parse_control(invalid),
+                None,
+                "accepted {invalid:?}"
+            );
+        }
+    }
 
     #[test]
     fn model_effort_accepts_known_values() {

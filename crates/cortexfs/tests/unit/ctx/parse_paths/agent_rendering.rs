@@ -13,96 +13,6 @@ fn debug_timing_diagnostic_is_readable() {
 }
 
 #[test]
-fn debug_tool_names_report_native_agent_tools_only() {
-    let root = clean_test_dir("ctx-agent-debug-native-tools");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    assert!(
-        fs::write(
-            root.join("agent").join("coder.d").join("path"),
-            format!("{}\n", root.join("tool").display()),
-        )
-        .is_ok()
-    );
-    assert!(
-        fs::write(
-            root.join("agent").join("coder.d").join("mount"),
-            format!("{}\t{}\tro\trbind,nosuid,nodev\n", root.display(), root.display()),
-        )
-        .is_ok()
-    );
-
-    let tools = agent_native_tool_names(&root, "coder");
-
-    assert_eq!(tools, Ok(vec!["tsh".to_owned()]));
-}
-
-#[test]
-fn debug_tool_names_include_loaded_agent_tools() {
-    let root = clean_test_dir("ctx-agent-debug-loaded-tools");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let tool = root.join("tool").join("bash");
-    let tool_control = root.join("tool").join("bash.d");
-    assert!(
-        fs::write(
-            root.join("agent").join("coder.d").join("path"),
-            format!("{}\n", root.join("tool").display()),
-        )
-        .is_ok()
-    );
-    assert!(
-        fs::write(
-            root.join("agent").join("coder.d").join("mount"),
-            format!("{}\t{}\tro\trbind,nosuid,nodev\n", root.display(), root.display()),
-        )
-        .is_ok()
-    );
-    let tsh = root.join("tool").join("tsh");
-    let tsh_control = root.join("tool").join("tsh.d");
-    assert!(fs::create_dir_all(&tsh_control).is_ok());
-    assert!(fs::write(&tsh, "#!/bin/sh\nexit 0\n").is_ok());
-    let tsh_metadata = fs::metadata(&tsh);
-    assert!(tsh_metadata.is_ok());
-    let Ok(tsh_metadata) = tsh_metadata else { return };
-    let mut tsh_permissions = tsh_metadata.permissions();
-    tsh_permissions.set_mode(0o755);
-    assert!(fs::set_permissions(&tsh, tsh_permissions).is_ok());
-    assert!(fs::write(tsh_control.join("policy"), "allow coder_t tool:tsh execute\n").is_ok());
-    assert!(fs::create_dir_all(&tool_control).is_ok());
-    assert!(fs::write(&tool, "#!/bin/sh\nexit 0\n").is_ok());
-    let tool_metadata = fs::metadata(&tool);
-    assert!(tool_metadata.is_ok());
-    let Ok(tool_metadata) = tool_metadata else { return };
-    let mut permissions = tool_metadata.permissions();
-    permissions.set_mode(0o755);
-    assert!(fs::set_permissions(&tool, permissions).is_ok());
-    assert!(fs::write(tool_control.join("policy"), "allow coder_t tool:bash execute\n").is_ok());
-    let agent_policy = root.join("agent").join("coder.d").join("policy");
-    let mut policy = fs::read_to_string(&agent_policy).unwrap_or_default();
-    policy.push_str("\nallow coder_t tool:bash execute\n");
-    assert!(fs::write(&agent_policy, policy).is_ok());
-
-    let view = derive_agent_runtime_view(&root, "coder");
-    assert!(view.is_ok());
-    let Ok(view) = view else { return };
-    let state_path = cortexfs::tsh_context_state_path(view.home());
-    let mut state = cortexfs::TshContextState::default();
-    state.tools = vec![cortexfs::TshLoadedToolState {
-        name: "bash".to_owned(),
-        path: tool,
-        description: "shell".to_owned(),
-        schema: None,
-        dynamic_resident: true,
-        pinned: true,
-        last_used: 1,
-    }];
-    assert!(cortexfs::write_tsh_context_state(&state_path, &state).is_ok());
-
-    let tools = agent_native_tool_names(&root, "coder");
-
-    assert_eq!(tools, Ok(vec!["bash".to_owned(), "tsh".to_owned()]));
-}
-
-#[test]
 fn buffered_agent_renderer_shows_tool_args_result_preview_and_usage() {
     let input = concat!(
         r#"{"type":"tool_call","run":"r1","id":"call-1","name":"tsh","arguments":{"args":["shell.exec","cargo test -p cortexfs"]}}"#,
@@ -198,7 +108,7 @@ fn buffered_agent_renderer_rejects_too_many_diagnostics() {
 }
 
 #[test]
-fn interruptible_agent_renderer_preserves_partial_frame_across_timeout() {
+fn agent_renderer_preserves_partial_frame_across_timeout() {
     let pair = std::os::unix::net::UnixStream::pair();
     assert!(pair.is_ok());
     let Ok((reader, mut writer)) = pair else {
@@ -219,10 +129,7 @@ fn interruptible_agent_renderer_preserves_partial_frame_across_timeout() {
         );
         assert!(std::io::Write::write_all(&mut writer, b"\n").is_ok());
     });
-    let interrupted = std::sync::atomic::AtomicBool::new(false);
-
-    let rendered =
-        collect_agent_events_buffered_interruptible(std::io::BufReader::new(reader), &interrupted);
+    let rendered = collect_agent_events_buffered(std::io::BufReader::new(reader));
 
     assert!(writer_thread.join().is_ok());
     assert!(matches!(
@@ -231,104 +138,5 @@ fn interruptible_agent_renderer_preserves_partial_frame_across_timeout() {
             if rendered.output.is_empty()
                 && rendered.diagnostics == vec!["error EFAIL: slow split frame".to_owned()]
                 && rendered.exit_code == 1
-                && !rendered.interrupted
     ));
-}
-
-#[test]
-fn interruptible_agent_renderer_returns_on_interrupt_flag() {
-    let pair = std::os::unix::net::UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((reader, _writer)) = pair else {
-        return;
-    };
-    assert!(reader
-        .set_read_timeout(Some(std::time::Duration::from_millis(1)))
-        .is_ok());
-    let interrupted = std::sync::atomic::AtomicBool::new(true);
-
-    let rendered =
-        collect_agent_events_buffered_interruptible(std::io::BufReader::new(reader), &interrupted);
-
-    assert!(matches!(
-        rendered,
-        Ok(ref rendered)
-            if rendered.output.is_empty()
-                && rendered.diagnostics.is_empty()
-                && rendered.exit_code == 0
-                && rendered.interrupted
-    ));
-}
-
-#[test]
-fn interruptible_raw_socket_copy_returns_on_interrupt_flag() {
-    let pair = std::os::unix::net::UnixStream::pair();
-    assert!(pair.is_ok());
-    let Ok((reader, _writer)) = pair else {
-        return;
-    };
-    assert!(reader
-        .set_read_timeout(Some(std::time::Duration::from_millis(1)))
-        .is_ok());
-    let interrupted = std::sync::atomic::AtomicBool::new(true);
-
-    let copied = copy_socket_response_interruptible(reader, &interrupted);
-
-    assert!(matches!(copied, Ok(true)));
-}
-
-#[test]
-fn interruptible_buffered_agent_request_sends_cancel_for_active_run() {
-    let root = clean_test_dir("ctx-agent-repl-interrupt-cancel");
-    assert!(fs::create_dir_all(&root).is_ok());
-    let socket = root.join("agent.sock");
-    let listener = std::os::unix::net::UnixListener::bind(&socket);
-    assert!(listener.is_ok());
-    let Ok(listener) = listener else {
-        return;
-    };
-
-    let server = std::thread::spawn(move || {
-        let first = listener.accept();
-        assert!(first.is_ok());
-        let Ok((mut first_stream, _addr)) = first else {
-            return String::new();
-        };
-        let mut first_request = String::new();
-        assert!(std::io::Read::read_to_string(&mut first_stream, &mut first_request).is_ok());
-
-        let second = listener.accept();
-        assert!(second.is_ok());
-        let Ok((mut second_stream, _addr)) = second else {
-            return first_request;
-        };
-        let mut second_request = String::new();
-        assert!(std::io::Read::read_to_string(&mut second_stream, &mut second_request).is_ok());
-
-        format!("{first_request}{second_request}")
-    });
-
-    let guard = AgentInterruptGuard::new();
-    assert!(guard.is_ok());
-    let Ok(guard) = guard else {
-        return;
-    };
-    guard.interrupted_flag().store(true, std::sync::atomic::Ordering::SeqCst);
-
-    let result = stream_agent_socket_request_streaming_interruptible(
-        &socket,
-        "{\"op\":\"send\",\"id\":\"run-1\"}\n",
-        false,
-        Some((&guard, "{\"op\":\"cancel\",\"id\":\"run-1\"}\n", "run-1")),
-    );
-
-    assert!(matches!(result, Ok(code) if code == ExitCode::SUCCESS));
-    let requests = server.join();
-    assert!(requests.is_ok());
-    let Ok(requests) = requests else {
-        return;
-    };
-    assert!(requests.contains("\"op\":\"send\""));
-    assert!(requests.contains("\"op\":\"cancel\""));
-    assert!(requests.contains("\"id\":\"run-1\""));
 }

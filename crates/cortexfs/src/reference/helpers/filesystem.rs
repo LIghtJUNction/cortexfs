@@ -5,7 +5,7 @@ pub(crate) fn create_reference_dir(path: &Path) -> Result<(), ReferenceTreeError
 }
 
 pub(crate) fn open_reference_dir(path: &Path) -> Result<fs::File, ReferenceTreeError> {
-    support::plain::open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
+    open_plain_directory(path).map_err(|_error| ReferenceTreeError::CannotCreate)
 }
 
 pub(crate) fn ensure_reference_home_entry_ownership(path: &Path) -> Result<(), ReferenceTreeError> {
@@ -202,11 +202,7 @@ pub(crate) fn ensure_reference_model_alias(
         if existing == target || is_valid_ctx_model_symlink(&existing) {
             return Ok(());
         }
-        if is_legacy_ctx_model_symlink(&existing) {
-            remove_reference_entry(path).map_err(|_error| ReferenceTreeError::CannotLink)?;
-        } else {
-            return Err(ReferenceTreeError::CannotLink);
-        }
+        return Err(ReferenceTreeError::CannotLink);
     } else if path.symlink_metadata().is_ok() {
         return Err(ReferenceTreeError::CannotLink);
     }
@@ -234,14 +230,4 @@ pub(crate) fn is_valid_ctx_model_symlink(target: &Path) -> bool {
         return false;
     };
     abi::path::is_model_reference(model)
-}
-
-pub(crate) fn is_legacy_ctx_model_symlink(target: &Path) -> bool {
-    let Some(target) = target.to_str() else {
-        return false;
-    };
-    let Some(model) = target.strip_prefix("/ctx/model/") else {
-        return false;
-    };
-    is_object_name(model)
 }

@@ -53,19 +53,36 @@ macro_rules! impl_issue_report {
     };
 }
 
+// Module layers (docs/internal-architecture.md §4): depend only downward.
+// L0 abi/policy → L1 support → L2 authority/context → L3 provider/tool →
+// L4 reference/mount → L5 agent/runtime → L6 object → L7 fuse → L8 bin/*.
+
+/// L0 — pure ABI grammar and request types.
 pub mod abi;
+/// L5 — agent lifecycle, launch, child, schedule (not FUSE projection).
 pub mod agent;
+/// L2 — identity and authority helpers.
 pub mod authority;
+/// L2 — context packs and working-set construction.
 pub mod context;
+/// L4 — mount table types and parsing.
 pub mod mount;
+/// L0 — SELinux-like allowlist policy types.
 pub mod policy;
+/// L3 — provider/model registry (not root ABI).
 pub mod provider;
+/// L3 — tool schema and execution authority helpers.
 pub mod tool;
 
+/// L7 — FUSE projection only; must not call `object::executor`.
 pub mod fuse;
+/// L6 — object install/swap and one-shot executor/runner.
 pub mod object;
+/// L4 — storage generations and bootstrap tree.
 pub mod reference;
+/// L5 — sockets, durable session record, egress.
 pub mod runtime;
+/// L1 — plain files, jsonl, layout, process helpers (no FUSE/HTTP).
 pub mod support;
 
 pub use abi::authority::*;
@@ -78,8 +95,9 @@ pub use support::{
     ATIF_SCHEMA_VERSION, MAX_TRAJECTORY_SESSION_FILE_BYTES, TRAJECTORY_DEFAULT_AGENT_NAME,
     Trajectory, TrajectoryAgent, TrajectoryFinalMetrics, TrajectoryIssue, TrajectoryMapError,
     TrajectoryMetrics, TrajectoryObservation, TrajectoryObservationResult, TrajectoryReport,
-    TrajectoryStep, TrajectoryToolCall, manuals, stream, trajectory, trajectory_from_session_dir,
-    trajectory_from_session_jsonl, validate_trajectory, write_trajectory_json,
+    TrajectoryStep, TrajectoryToolCall, columnar, manuals, stream, trajectory,
+    trajectory_from_session_dir, trajectory_from_session_jsonl, validate_trajectory,
+    write_trajectory_json,
 };
 pub use tool::core::runtime::*;
 
@@ -103,6 +121,10 @@ pub use reference::bootstrap::*;
 pub use reference::helpers::*;
 
 pub use agent::child::*;
+pub use agent::launch::{
+    AgentLaunchCommand, AgentLaunchRequest, chat_socket_command, invocation_id, launch_process_for,
+    parse_main_pid, reset_unit_for, set_user_systemd_client_env, unit_main_pid_for,
+};
 pub use agent::runtime::*;
 pub use agent::view::*;
 
@@ -115,13 +137,10 @@ pub use policy::subject::*;
 use abi::constants::{
     DEBUG_ECHO_MODEL, DEBUG_ECHO_NAME, DEBUG_ECHO_PROVIDER, DEFAULT_MODEL_ALIAS,
     DEFAULT_MODEL_ALIAS_TARGET, DEFAULT_MODEL_ROUTE, HELPER_MODEL_ALIAS, HELPER_MODEL_ALIAS_TARGET,
-    MODEL_ROUTE_FILE, SYSTEM_PROVIDER_CONFIG_DIR, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
+    MODEL_ROUTE_FILE, SYSTEM_PROVIDER_MODEL_CACHE_DIR,
 };
 use abi::path::is_object_name_for_class;
-use support::plain::{
-    open_plain_directory as open_session_layout_plain_directory,
-    plain_file_name as session_layout_plain_file_name,
-};
+use support::plain::{open_plain_directory, plain_file_name};
 
 pub mod exports;
 pub use exports::*;
@@ -192,7 +211,7 @@ pub fn peer_credentials(stream: &UnixStream) -> Result<PeerCredentials, PeerCred
         .map_err(|_error| PeerCredentialError::CannotRead)
 }
 
-/// Ensures `session_root/<session>/` has the durable v1 session layout.
+/// Ensures `session_root/<session>/` has the durable session layout.
 ///
 /// This creates only documented session files, context directories, and the
 /// reserved `session/index` files. Existing files are preserved; the helper
@@ -203,7 +222,7 @@ pub fn ensure_durable_session_layout(
     cwd: &str,
     model: Option<&str>,
     scope: SocketSessionScope,
-) -> Result<(), DurableSessionLayoutError> {
+) -> Result<SessionLayoutReceipts, DurableSessionLayoutError> {
     if !is_object_name(session_name) {
         return Err(DurableSessionLayoutError::InvalidSessionName);
     }
@@ -219,63 +238,137 @@ pub fn ensure_durable_session_layout(
         return Err(DurableSessionLayoutError::TempSessionNotDurable);
     }
 
-    let session_dir = session_root.join(session_name);
-    let context = session_dir.join("context");
-    create_dir(session_root)?;
-    create_dir(&session_dir)?;
-    create_dir(&context)?;
-    for dir in CONTEXT_REQUIRED_DIRS {
-        create_dir(&context.join(dir))?;
+    let mut receipts = SessionLayoutReceipts::default();
+    let result = (|| {
+        let session_dir = session_root.join(session_name);
+        let context = session_dir.join("context");
+        create_dir(session_root, &mut receipts)?;
+        create_dir(&session_dir, &mut receipts)?;
+        create_dir(&context, &mut receipts)?;
+        for dir in CONTEXT_REQUIRED_DIRS {
+            create_dir(&context.join(dir), &mut receipts)?;
+        }
+        create_dir(&context.join("swap").join("chunk"), &mut receipts)?;
+        create_dir(&context.join("dedup").join("blob"), &mut receipts)?;
+        let index = session_root.join("index");
+        create_dir(&index, &mut receipts)?;
+        create_dir(&index.join("by-cwd"), &mut receipts)?;
+        create_dir(&index.join("by-hash"), &mut receipts)?;
+        create_dir(&index.join("by-uuid"), &mut receipts)?;
+
+        let now = unix_timestamp_text();
+        record_text(&session_dir.join("messages.jsonl"), "", &mut receipts)?;
+        record_text(&session_dir.join("events.jsonl"), "", &mut receipts)?;
+        record_text(&session_dir.join("latest.md"), "", &mut receipts)?;
+        record_text(&session_dir.join("state"), "idle\n", &mut receipts)?;
+        record_text(&session_dir.join("cwd"), &format!("{cwd}\n"), &mut receipts)?;
+        record_text(&session_dir.join("created_at"), &now, &mut receipts)?;
+        record_text(&session_dir.join("updated_at"), &now, &mut receipts)?;
+        let meta_json = session_dir.join("meta.json");
+        record_text(
+            &meta_json,
+            &durable_session_meta_json(model, scope),
+            &mut receipts,
+        )?;
+
+        record_text(&context.join("budget"), "0\n", &mut receipts)?;
+        record_text(
+            &context.join("pack.json"),
+            &format!(
+                "{}\n",
+                serde_json::json!({
+                    "session": session_name,
+                    "items": []
+                })
+            ),
+            &mut receipts,
+        )?;
+        for path in [
+            context.join("pack.md"),
+            context.join("summary.md"),
+            context.join("facts.jsonl"),
+            context.join("decisions.jsonl"),
+            context.join("todo.md"),
+            context.join("refs.jsonl"),
+            context.join("swap/index.jsonl"),
+            context.join("dedup/index.jsonl"),
+        ] {
+            record_text(&path, "", &mut receipts)?;
+        }
+
+        record_text(
+            &session_root.join("index").join("list"),
+            &format!("{session_name}\n"),
+            &mut receipts,
+        )?;
+        record_text(
+            &session_root.join("index").join("current"),
+            &format!("{session_name}\n"),
+            &mut receipts,
+        )?;
+
+        Ok::<(), DurableSessionLayoutError>(())
+    })();
+    if let Err(error) = result {
+        let _rollback = agent::create::rollback_session_layout(receipts);
+        return Err(error);
     }
-    create_dir(&context.join("swap").join("chunk"))?;
-    create_dir(&context.join("dedup").join("blob"))?;
-    let index = session_root.join("index");
-    create_dir(&index)?;
-    create_dir(&index.join("by-cwd"))?;
-    create_dir(&index.join("by-hash"))?;
-    create_dir(&index.join("by-uuid"))?;
+    Ok(receipts)
+}
 
-    let now = unix_timestamp_text();
-    write_text_file_if_missing(&session_dir.join("messages.jsonl"), "")?;
-    write_text_file_if_missing(&session_dir.join("events.jsonl"), "")?;
-    write_text_file_if_missing(&session_dir.join("latest.md"), "")?;
-    write_text_file_if_missing(&session_dir.join("state"), "idle\n")?;
-    write_text_file_if_missing(&session_dir.join("cwd"), &format!("{cwd}\n"))?;
-    write_text_file_if_missing(&session_dir.join("created_at"), &now)?;
-    write_text_file_if_missing(&session_dir.join("updated_at"), &now)?;
-    let meta_json = session_dir.join("meta.json");
-    write_text_file_if_missing(&meta_json, &durable_session_meta_json(model, scope))?;
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct SessionLayoutReceipt {
+    pub(crate) path: PathBuf,
+    pub(crate) dev: u64,
+    pub(crate) ino: u64,
+    pub(crate) directory: bool,
+}
 
-    write_text_file_if_missing(&context.join("budget"), "0\n")?;
-    write_text_file_if_missing(
-        &context.join("pack.json"),
-        &format!(
-            "{}\n",
-            serde_json::json!({
-                "session": session_name,
-                "items": []
-            })
-        ),
-    )?;
-    write_text_file_if_missing(&context.join("pack.md"), "")?;
-    write_text_file_if_missing(&context.join("summary.md"), "")?;
-    write_text_file_if_missing(&context.join("facts.jsonl"), "")?;
-    write_text_file_if_missing(&context.join("decisions.jsonl"), "")?;
-    write_text_file_if_missing(&context.join("todo.md"), "")?;
-    write_text_file_if_missing(&context.join("refs.jsonl"), "")?;
-    write_text_file_if_missing(&context.join("swap").join("index.jsonl"), "")?;
-    write_text_file_if_missing(&context.join("dedup").join("index.jsonl"), "")?;
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct SessionLayoutReceipts {
+    entries: Vec<SessionLayoutReceipt>,
+}
 
-    write_text_file_if_missing(
-        &session_root.join("index").join("list"),
-        &format!("{session_name}\n"),
-    )?;
-    write_text_file_if_missing(
-        &session_root.join("index").join("current"),
-        &format!("{session_name}\n"),
-    )?;
+impl SessionLayoutReceipts {
+    pub(crate) fn into_entries(self) -> Vec<SessionLayoutReceipt> {
+        self.entries
+    }
+}
 
-    Ok(())
+#[cfg(test)]
+type SessionLayoutHook = Box<dyn FnOnce(&Path)>;
+
+#[cfg(test)]
+thread_local! {
+    static SESSION_LAYOUT_FILE_RACE: std::cell::RefCell<Option<SessionLayoutHook>> =
+        const { std::cell::RefCell::new(None) };
+    static SESSION_LAYOUT_DIR_FAULT: std::cell::RefCell<Option<SessionLayoutHook>> =
+        const { std::cell::RefCell::new(None) };
+    static SESSION_LAYOUT_FILE_FAULT: std::cell::RefCell<Option<SessionLayoutHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_session_layout_file_race(hook: impl FnOnce(&Path) + 'static) {
+    SESSION_LAYOUT_FILE_RACE.with(|slot| slot.replace(Some(Box::new(hook))));
+}
+
+#[cfg(test)]
+pub(crate) fn set_session_layout_dir_fault(hook: impl FnOnce(&Path) + 'static) {
+    SESSION_LAYOUT_DIR_FAULT.with(|slot| slot.replace(Some(Box::new(hook))));
+}
+
+#[cfg(test)]
+pub(crate) fn set_session_layout_file_fault(hook: impl FnOnce(&Path) + 'static) {
+    SESSION_LAYOUT_FILE_FAULT.with(|slot| slot.replace(Some(Box::new(hook))));
+}
+
+fn record_text(
+    path: &Path,
+    content: &str,
+    receipts: &mut SessionLayoutReceipts,
+) -> Result<(), DurableSessionLayoutError> {
+    write_text_file_if_missing(path, content, receipts)
 }
 
 pub(crate) fn durable_session_meta_json(model: Option<&str>, scope: SocketSessionScope) -> String {
@@ -291,7 +384,10 @@ pub(crate) fn durable_session_meta_json(model: Option<&str>, scope: SocketSessio
     format!("{value}\n")
 }
 
-pub(crate) fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
+pub(crate) fn create_dir(
+    path: &Path,
+    receipts: &mut SessionLayoutReceipts,
+) -> Result<(), DurableSessionLayoutError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(DurableSessionLayoutError::CannotCreate);
@@ -317,20 +413,20 @@ pub(crate) fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
         .last()
         .and_then(|path| path.parent())
         .ok_or(DurableSessionLayoutError::CannotCreate)?;
-    let mut parent_dir = open_session_layout_plain_directory(parent)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let mut parent_dir =
+        open_plain_directory(parent).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     for dir in missing.iter().rev() {
-        let name = session_layout_plain_file_name(dir)
-            .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-        nix::sys::stat::mkdirat(
+        let name =
+            plain_file_name(dir).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+        let created = match nix::sys::stat::mkdirat(
             &parent_dir,
             name,
             nix::sys::stat::Mode::from_bits_truncate(0o700),
-        )
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-        parent_dir
-            .sync_all()
-            .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+        ) {
+            Ok(()) => true,
+            Err(nix::errno::Errno::EEXIST) => false,
+            Err(_error) => return Err(DurableSessionLayoutError::CannotCreate),
+        };
         let child = nix::fcntl::openat(
             &parent_dir,
             name,
@@ -340,12 +436,58 @@ pub(crate) fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
                 | nix::fcntl::OFlag::O_CLOEXEC,
             nix::sys::stat::Mode::empty(),
         )
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-        parent_dir = fs::File::from(child);
-        parent_dir
+        .map_err(|_error| {
+            if created {
+                DurableSessionLayoutError::RetainedResidue
+            } else {
+                DurableSessionLayoutError::CannotCreate
+            }
+        })?;
+        let child = fs::File::from(child);
+        let metadata = child.metadata().map_err(|_error| {
+            if created {
+                DurableSessionLayoutError::RetainedResidue
+            } else {
+                DurableSessionLayoutError::CannotCreate
+            }
+        })?;
+        let rebound =
+            nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
+                .map_err(|_error| {
+                    if created {
+                        DurableSessionLayoutError::RetainedResidue
+                    } else {
+                        DurableSessionLayoutError::CannotCreate
+                    }
+                })?;
+        if !metadata.is_dir()
+            || (metadata.dev(), metadata.ino()) != (rebound.st_dev, rebound.st_ino)
+        {
+            return Err(if created {
+                DurableSessionLayoutError::RetainedResidue
+            } else {
+                DurableSessionLayoutError::CannotCreate
+            });
+        }
+        if created {
+            receipts.entries.push(SessionLayoutReceipt {
+                path: dir.clone(),
+                dev: metadata.dev(),
+                ino: metadata.ino(),
+                directory: true,
+            });
+            #[cfg(test)]
+            if let Some(hook) = SESSION_LAYOUT_DIR_FAULT.with(|slot| slot.borrow_mut().take()) {
+                hook(dir);
+                return Err(DurableSessionLayoutError::CannotCreate);
+            }
+        }
+        child
             .set_permissions(fs::Permissions::from_mode(0o700))
+            .and_then(|()| child.sync_all())
             .and_then(|()| parent_dir.sync_all())
             .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+        parent_dir = child;
     }
     Ok(())
 }
@@ -353,6 +495,7 @@ pub(crate) fn create_dir(path: &Path) -> Result<(), DurableSessionLayoutError> {
 pub(crate) fn write_text_file_if_missing(
     path: &Path,
     content: &str,
+    receipts: &mut SessionLayoutReceipts,
 ) -> Result<(), DurableSessionLayoutError> {
     if let Ok(metadata) = fs::symlink_metadata(path) {
         return if metadata.is_file() {
@@ -362,9 +505,9 @@ pub(crate) fn write_text_file_if_missing(
         };
     }
     if let Some(parent) = path.parent() {
-        create_dir(parent)?;
+        create_dir(parent, receipts)?;
     }
-    write_private_text_file(path, content)
+    write_private_text_file(path, content, receipts)
 }
 
 pub(crate) fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
@@ -386,8 +529,8 @@ pub(crate) fn set_text_file_permissions(path: &Path) -> Result<(), DurableSessio
 }
 
 pub(crate) fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSessionLayoutError> {
-    let dir = open_session_layout_plain_directory(path)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let dir =
+        open_plain_directory(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     dir.set_permissions(fs::Permissions::from_mode(0o700))
         .and_then(|()| dir.sync_all())
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)
@@ -396,23 +539,66 @@ pub(crate) fn set_private_dir_permissions(path: &Path) -> Result<(), DurableSess
 pub(crate) fn write_private_text_file(
     path: &Path,
     content: &str,
+    receipts: &mut SessionLayoutReceipts,
 ) -> Result<(), DurableSessionLayoutError> {
-    let (parent_dir, mut file) = open_session_layout_file_at(
+    #[cfg(test)]
+    if let Some(hook) = SESSION_LAYOUT_FILE_RACE.with(|slot| slot.borrow_mut().take()) {
+        hook(path);
+    }
+    let (parent_dir, mut file) = match open_session_layout_file_at(
         path,
         nix::fcntl::OFlag::O_CREAT
-            | nix::fcntl::OFlag::O_TRUNC
+            | nix::fcntl::OFlag::O_EXCL
             | nix::fcntl::OFlag::O_WRONLY
             | nix::fcntl::OFlag::O_NOFOLLOW
             | nix::fcntl::OFlag::O_CLOEXEC,
         nix::sys::stat::Mode::from_bits_truncate(0o600),
-    )?;
+    ) {
+        Ok(files) => files,
+        Err(DurableSessionLayoutError::CannotCreate)
+            if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) =>
+        {
+            set_text_file_permissions(path)?;
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    };
+    let metadata = file
+        .metadata()
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    if !metadata.is_file() {
+        return Err(DurableSessionLayoutError::CannotCreate);
+    }
+    let file_name =
+        plain_file_name(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let rebound = nix::sys::stat::fstatat(
+        &parent_dir,
+        file_name,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| DurableSessionLayoutError::RetainedResidue)?;
+    if (metadata.dev(), metadata.ino()) != (rebound.st_dev, rebound.st_ino) {
+        return Err(DurableSessionLayoutError::RetainedResidue);
+    }
+    receipts.entries.push(SessionLayoutReceipt {
+        path: path.to_owned(),
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+        directory: false,
+    });
+    #[cfg(test)]
+    if let Some(hook) = SESSION_LAYOUT_FILE_FAULT.with(|slot| slot.borrow_mut().take()) {
+        hook(path);
+        return Err(DurableSessionLayoutError::CannotCreate);
+    }
     file.write_all(content.as_bytes())
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     file.set_permissions(fs::Permissions::from_mode(0o600))
         .and_then(|()| file.flush())
         .and_then(|()| file.sync_all())
         .and_then(|()| parent_dir.sync_all())
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)
+        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    Ok(())
 }
 
 pub(crate) fn open_session_layout_file_at(
@@ -423,10 +609,10 @@ pub(crate) fn open_session_layout_file_at(
     let parent = path
         .parent()
         .ok_or(DurableSessionLayoutError::CannotCreate)?;
-    let file_name = session_layout_plain_file_name(path)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
-    let parent_dir = open_session_layout_plain_directory(parent)
-        .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let file_name =
+        plain_file_name(path).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
+    let parent_dir =
+        open_plain_directory(parent).map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     let file_fd = nix::fcntl::openat(&parent_dir, file_name, flags, mode)
         .map_err(|_error| DurableSessionLayoutError::CannotCreate)?;
     Ok((parent_dir, fs::File::from(file_fd)))

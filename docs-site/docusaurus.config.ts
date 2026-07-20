@@ -6,30 +6,30 @@ const baseUrl = process.env.DOCUSAURUS_BASE_URL ?? '/cortexfs/';
 
 const config: Config = {
   title: 'CortexFS',
-  tagline: 'A small Linux filesystem ABI for agent runtimes',
+  tagline: 'Models, agents, tools, and durable sessions under /ctx',
   url: 'https://lightjunction.github.io',
   baseUrl,
-  favicon: 'img/cortexfs-logo.jpg',
+  favicon: 'img/cortexfs-logo.svg',
   organizationName: 'LIghtJUNction',
   projectName: 'cortexfs',
   onBrokenLinks: 'throw',
   markdown: {
     hooks: {
-      onBrokenMarkdownLinks: 'warn',
+      onBrokenMarkdownLinks: 'throw',
     },
   },
 
   i18n: {
-    defaultLocale: 'zh-Hans',
-    locales: ['zh-Hans', 'en'],
+    defaultLocale: 'en',
+    locales: ['en', 'zh-Hans'],
     localeConfigs: {
-      'zh-Hans': {
-        label: '简体中文',
-        htmlLang: 'zh-CN',
-      },
       en: {
         label: 'English',
         htmlLang: 'en-US',
+      },
+      'zh-Hans': {
+        label: '简体中文',
+        htmlLang: 'zh-CN',
       },
     },
   },
@@ -42,6 +42,7 @@ const config: Config = {
           path: '../docs',
           routeBasePath: 'docs',
           sidebarPath: './sidebars.ts',
+          editUrl: 'https://github.com/LIghtJUNction/cortexfs/edit/main/docs/',
         },
         blog: false,
         theme: {
@@ -53,6 +54,13 @@ const config: Config = {
 
   themeConfig: {
     image: 'img/cortexfs-social-card.png',
+    metadata: [
+      {
+        name: 'description',
+        content:
+          'CortexFS mounts models, agents, tools, and durable sessions at /ctx — a small Unix ABI you can ls, cat, execute, secure, and audit.',
+      },
+    ],
     colorMode: {
       respectPrefersColorScheme: true,
     },
@@ -60,23 +68,23 @@ const config: Config = {
       title: 'CortexFS',
       logo: {
         alt: 'CortexFS',
-        src: 'img/cortexfs-logo.jpg',
+        src: 'img/cortexfs-logo.svg',
       },
       items: [
         {
           type: 'docSidebar',
           sidebarId: 'docs',
           position: 'left',
-          label: '文档',
+          label: 'Docs',
         },
         {
           to: '/docs/getting-started',
-          label: '安装',
+          label: 'Install',
           position: 'left',
         },
         {
           to: '/docs/using-cortexfs',
-          label: '使用',
+          label: 'Usage',
           position: 'left',
         },
         {
@@ -99,12 +107,12 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: '核心',
+          title: 'Core',
           items: [
-            {label: '安装', to: '/docs/getting-started'},
-            {label: '使用 CortexFS', to: '/docs/using-cortexfs'},
-            {label: '二次开发', to: '/docs/developing-cortexfs'},
-            {label: '设计', to: '/docs/DESIGN'},
+            {label: 'Install', to: '/docs/getting-started'},
+            {label: 'Use CortexFS', to: '/docs/using-cortexfs'},
+            {label: 'Develop', to: '/docs/developing-cortexfs'},
+            {label: 'Design', to: '/docs/DESIGN'},
             {label: 'Root ABI', to: '/docs/spec/root-abi'},
             {label: 'Object ABI', to: '/docs/spec/object-abi'},
           ],
@@ -114,11 +122,12 @@ const config: Config = {
           items: [
             {label: 'ctx coreutils', to: '/docs/CTX'},
             {label: 'agent.sh', to: '/docs/agent-sh'},
+            {label: 'Chat UI ABI', to: '/docs/chatui'},
             {label: 'Session ABI', to: '/docs/spec/session-abi'},
           ],
         },
         {
-          title: '项目',
+          title: 'Project',
           items: [
             {label: 'GitHub', href: 'https://github.com/LIghtJUNction/cortexfs'},
           ],
@@ -129,6 +138,7 @@ const config: Config = {
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
+      additionalLanguages: ['bash', 'toml', 'diff', 'ini', 'json'],
     },
   } satisfies Preset.ThemeConfig,
 };

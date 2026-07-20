@@ -1,0 +1,4 @@
+interface:
+  display_name: "CTX Agent Benchmark"
+  short_description: "Measure CortexFS agent quality and performance"
+  default_prompt: "Use $ctx-agent-benchmark to run the full CortexFS agent benchmark and summarize regressions."
