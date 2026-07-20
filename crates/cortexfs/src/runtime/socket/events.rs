@@ -1,13 +1,89 @@
 use super::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_socket_runtime_plain_directory,
-    read_small_text_file as socket_runtime_read_plain_text_file,
-};
+#[cfg(test)]
+use crate::support::command::ID;
+use crate::support::command::SETPRIV;
+use crate::support::plain::{open_plain_directory, read_small_text_file};
 
-pub(crate) fn apply_agent_identity_to_command(command: &mut Command, identity: &AgentUnixIdentity) {
-    if nix::unistd::geteuid().is_root() {
-        command.gid(identity.gid()).uid(identity.uid());
+pub(crate) fn command_for_agent_identity(
+    program: impl AsRef<std::ffi::OsStr>,
+    identity: &AgentUnixIdentity,
+) -> Command {
+    if !nix::unistd::geteuid().is_root() {
+        return Command::new(program);
+    }
+    let mut command = Command::new(SETPRIV);
+    command.args(["--reuid", &identity.uid().to_string()]);
+    command.args(["--regid", &identity.gid().to_string()]);
+    if identity.groups().is_empty() {
+        command.arg("--clear-groups");
+    } else {
+        command.arg("--groups").arg(
+            identity
+                .groups()
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+    }
+    command.arg("--").arg(program);
+    command
+}
+
+#[cfg(test)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "identity tests stay beside the command constructor"
+)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn root_caller_applies_uid_gid_and_supplementary_groups()
+    -> Result<(), Box<dyn std::error::Error>> {
+        if !nix::unistd::geteuid().is_root() {
+            return Ok(());
+        }
+        let identity = AgentUnixIdentity::new(65_534, 65_534, [1]);
+        let mut command = command_for_agent_identity(ID, &identity);
+        command.arg("-u");
+        let uid = command.output()?;
+        assert!(uid.status.success());
+        assert_eq!(String::from_utf8(uid.stdout)?.trim(), "65534");
+
+        let mut command = command_for_agent_identity(ID, &identity);
+        command.arg("-g");
+        let gid = command.output()?;
+        assert!(gid.status.success());
+        assert_eq!(String::from_utf8(gid.stdout)?.trim(), "65534");
+
+        let mut command = command_for_agent_identity(ID, &identity);
+        command.arg("-G");
+        let groups = command.output()?;
+        assert!(groups.status.success());
+        let groups = String::from_utf8(groups.stdout)?;
+        let groups = groups.split_whitespace().collect::<Vec<_>>();
+        assert!(groups.contains(&"65534"));
+        assert!(groups.contains(&"1"));
+        Ok(())
+    }
+
+    #[test]
+    fn non_root_caller_keeps_existing_identity() -> Result<(), Box<dyn std::error::Error>> {
+        if nix::unistd::geteuid().is_root() {
+            return Ok(());
+        }
+        let mut command =
+            command_for_agent_identity(ID, &AgentUnixIdentity::new(65_534, 65_534, [1]));
+        command.arg("-u");
+        let output = command.output()?;
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout)?.trim(),
+            nix::unistd::geteuid().as_raw().to_string()
+        );
+        Ok(())
     }
 }
 
@@ -18,7 +94,7 @@ pub(crate) fn open_agent_executable_no_follow(path: &Path) -> Result<fs::File, S
     let parent = path
         .parent()
         .ok_or(SocketRuntimeError::InvalidAgentExecutable)?;
-    let parent_dir = open_socket_runtime_plain_directory(parent)
+    let parent_dir = open_plain_directory(parent)
         .map_err(|_error| SocketRuntimeError::InvalidAgentExecutable)?;
     let file_name = path
         .file_name()
@@ -67,7 +143,7 @@ pub(crate) fn event_type(line: &str) -> Option<String> {
 }
 
 pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
-    let Ok(state) = socket_runtime_read_plain_text_file(
+    let Ok(state) = read_small_text_file(
         &session_dir.join("state"),
         MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES,
     ) else {
@@ -76,8 +152,9 @@ pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
     if state.trim() != "cancelled" {
         return false;
     }
-    let Ok(events) = socket_runtime_read_plain_text_file(
-        &session_dir.join("events.jsonl"),
+    let Ok(events) = columnar::read_text(
+        session_dir,
+        columnar::Stream::Events,
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     ) else {
         return false;
@@ -91,165 +168,217 @@ pub(crate) fn agent_run_cancelled(session_dir: &Path, run_id: &str) -> bool {
     })
 }
 
-pub(crate) fn assistant_text_from_event_frames(frames: &[String]) -> Option<String> {
-    let mut output = String::new();
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        let event_type = value.get("type").and_then(Value::as_str);
-        if matches!(event_type, Some("delta" | "reasoning_delta"))
-            && let Some(text) = value.get("text").and_then(Value::as_str)
-        {
-            output.push_str(text);
-            continue;
-        }
-        if matches!(event_type, Some("message" | "reasoning_message"))
-            && value.get("role").and_then(Value::as_str) == Some("assistant")
-            && let Some(text) = message_event_text(&value)
-        {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&text);
-        }
-    }
-    (!output.is_empty()).then_some(output)
+enum AgentTerminal<'a> {
+    Success {
+        assistant: Option<String>,
+        done: &'a str,
+    },
+    Error {
+        error: &'a str,
+        done: &'a str,
+    },
 }
 
-pub(crate) fn record_agent_error_from_event_frames(
-    session_dir: &Path,
-    run_id: &str,
-    frames: &[String],
-) -> Result<bool, SocketSessionRecordError> {
-    let mut error = None;
-    let mut terminal = None;
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        if value.get("run").and_then(Value::as_str) != Some(run_id) {
-            continue;
-        }
-        match value.get("type").and_then(Value::as_str) {
-            Some("error") => error = Some(frame.as_str()),
-            Some("done") => {
-                terminal = None;
-                if value.get("status").and_then(Value::as_str) == Some("error")
-                    && let Some(error) = error
+struct AgentToolResult {
+    call: String,
+    name: Option<String>,
+    content: String,
+}
+
+pub(crate) struct AgentFrameBatch<'a> {
+    approvals: Vec<&'a str>,
+    tools: Vec<AgentToolResult>,
+    terminal: Option<AgentTerminal<'a>>,
+}
+
+impl<'a> AgentFrameBatch<'a> {
+    pub(crate) fn parse(run_id: &str, frames: &'a [String]) -> Self {
+        let mut approvals = Vec::new();
+        let mut calls = Vec::new();
+        let mut tools = Vec::new();
+        let mut assistant = String::new();
+        let mut error = None;
+        let mut done = None;
+
+        for frame in frames {
+            let Ok(value) = serde_json::from_str::<Value>(frame) else {
+                continue;
+            };
+            let event = value.get("type").and_then(Value::as_str);
+            if value.get("run").and_then(Value::as_str) != Some(run_id) {
+                continue;
+            }
+            if event == Some("tool_call")
+                && let (Some(id), Some(name)) = (
+                    value.get("id").and_then(Value::as_str),
+                    value.get("name").and_then(Value::as_str),
+                )
+            {
+                calls.push((id.to_owned(), name.to_owned()));
+            }
+            push_tool_results(&mut tools, &value);
+            match event {
+                Some("approval_request" | "approval_result") => approvals.push(frame.as_str()),
+                Some("error")
+                    if value.get("recoverable").and_then(Value::as_bool) != Some(true) =>
                 {
-                    terminal = Some([error, frame.as_str()]);
+                    error = Some(frame.as_str());
                 }
+                Some("done") => match value.get("status").and_then(Value::as_str) {
+                    Some("ok") => done = Some((frame.as_str(), true)),
+                    Some("error") => done = Some((frame.as_str(), false)),
+                    _ => {}
+                },
+                _ => push_assistant_text(&mut assistant, &value),
             }
-            _ => {}
         }
-    }
-    let Some(terminal) = terminal else {
-        return Ok(false);
-    };
-
-    require_socket_session_files(session_dir)?;
-    let events = socket_runtime_read_plain_text_file(
-        &session_dir.join("events.jsonl"),
-        MAX_SOCKET_RUNTIME_EVENTS_BYTES,
-    )
-    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
-    let mut already_done = false;
-    for_each_jsonl_line(&events, |_line_number, line| {
-        already_done |= serde_json::from_str::<Value>(line).is_ok_and(|value| {
-            value.get("type").and_then(Value::as_str) == Some("done")
-                && value.get("run").and_then(Value::as_str) == Some(run_id)
+        for tool in &mut tools {
+            if tool.name.is_none() {
+                tool.name = calls
+                    .iter()
+                    .find(|call| call.0 == tool.call)
+                    .map(|call| call.1.clone());
+            }
+        }
+        let terminal = done.and_then(|(done, success)| {
+            if success {
+                Some(AgentTerminal::Success {
+                    assistant: (!assistant.is_empty()).then_some(assistant),
+                    done,
+                })
+            } else {
+                error.map(|error| AgentTerminal::Error { error, done })
+            }
         });
-    });
-    if already_done {
-        return Ok(true);
+        Self {
+            approvals,
+            tools,
+            terminal,
+        }
     }
 
-    append_session_lines(session_dir, "events.jsonl", &terminal)?;
-    set_session_state(session_dir, "error")?;
-    Ok(true)
-}
-
-pub(crate) fn record_tool_results_from_event_frames(
-    session_dir: &Path,
-    run_id: &str,
-    frames: &[String],
-) -> Result<(), SocketSessionRecordError> {
-    let mut calls = Vec::new();
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        if value.get("type").and_then(Value::as_str) != Some("tool_call") {
-            continue;
+    pub(crate) fn record(
+        &self,
+        session_dir: &Path,
+        run_id: &str,
+    ) -> Result<(), SocketSessionRecordError> {
+        if !self.approvals.is_empty() {
+            require_socket_session_files(session_dir)?;
+            append_session_lines(session_dir, "events.jsonl", &self.approvals)?;
         }
-        let Some(id) = value.get("id").and_then(Value::as_str) else {
-            continue;
-        };
-        let Some(name) = value.get("name").and_then(Value::as_str) else {
-            continue;
-        };
-        calls.push((id.to_owned(), name.to_owned()));
-    }
-
-    for frame in frames {
-        let Ok(value) = serde_json::from_str::<Value>(frame) else {
-            continue;
-        };
-        if value.get("type").and_then(Value::as_str) != Some("message")
-            || value.get("role").and_then(Value::as_str) != Some("tool")
-        {
-            continue;
-        }
-        let event_tool_name = value.get("name").and_then(Value::as_str);
-        let Some(parts) = value.get("content").and_then(Value::as_array) else {
-            continue;
-        };
-        for part in parts {
-            if part.get("type").and_then(Value::as_str) != Some("tool_result") {
-                continue;
-            }
-            let Some(tool_call_id) = part.get("tool_call_id").and_then(Value::as_str) else {
+        for tool in &self.tools {
+            let Some(name) = tool.name.as_deref() else {
                 continue;
             };
-            let Some(tool_name) = event_tool_name
-                .or_else(|| tool_name_for_call(&calls, tool_call_id).map(String::as_str))
-            else {
-                continue;
-            };
-            let content = tool_result_content_text(part.get("content"));
             record_tool_execution_result_to_session(
                 session_dir,
                 run_id,
-                tool_call_id,
-                tool_name,
-                &content,
+                &tool.call,
+                name,
+                &tool.content,
             )?;
         }
+        Ok(())
     }
-    Ok(())
+
+    pub(crate) fn settle(
+        self,
+        session_dir: &Path,
+        run_id: &str,
+    ) -> Result<bool, SocketSessionRecordError> {
+        let Some(terminal) = self.terminal else {
+            return Ok(false);
+        };
+        require_socket_session_files(session_dir)?;
+        let history = columnar::HistoryGuard::exclusive(session_dir)
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        if !active_session_run_matches_locked(&history, session_dir, run_id)? {
+            return Ok(false);
+        }
+        history
+            .refresh_claims()
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        let state = match terminal {
+            AgentTerminal::Success {
+                assistant: Some(assistant),
+                done,
+            } => {
+                record_assistant_response_locked(&history, session_dir, run_id, &assistant, done)?;
+                "done"
+            }
+            AgentTerminal::Success {
+                assistant: None,
+                done,
+            } => {
+                history
+                    .append(columnar::Stream::Events, &[done])
+                    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+                "done"
+            }
+            AgentTerminal::Error { error, done } => {
+                history
+                    .append(columnar::Stream::Events, &[error, done])
+                    .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+                "error"
+            }
+        };
+        history
+            .refresh_claims()
+            .map_err(|_error| SocketSessionRecordError::CannotRecord)?;
+        transition_active_session_run_locked(&history, session_dir, run_id, state)
+    }
 }
 
-pub(crate) fn tool_name_for_call<'a>(
-    calls: &'a [(String, String)],
-    tool_call_id: &str,
-) -> Option<&'a String> {
-    calls
-        .iter()
-        .find_map(|call| (call.0 == tool_call_id).then_some(&call.1))
+fn push_tool_results(tools: &mut Vec<AgentToolResult>, value: &Value) {
+    if value.get("type").and_then(Value::as_str) != Some("message")
+        || value.get("role").and_then(Value::as_str) != Some("tool")
+    {
+        return;
+    }
+    let name = value.get("name").and_then(Value::as_str).map(str::to_owned);
+    let Some(parts) = value.get("content").and_then(Value::as_array) else {
+        return;
+    };
+    for part in parts {
+        if part.get("type").and_then(Value::as_str) == Some("tool_result")
+            && let Some(call) = part.get("tool_call_id").and_then(Value::as_str)
+        {
+            let content = part.get("content").map_or_else(String::new, |content| {
+                content
+                    .as_str()
+                    .map_or_else(|| content.to_string(), str::to_owned)
+            });
+            tools.push(AgentToolResult {
+                call: call.to_owned(),
+                name: name.clone(),
+                content,
+            });
+        }
+    }
 }
 
-pub(crate) fn tool_result_content_text(content: Option<&Value>) -> String {
-    if let Some(value) = content.and_then(Value::as_str) {
-        return value.to_owned();
+fn push_assistant_text(output: &mut String, value: &Value) {
+    let event = value.get("type").and_then(Value::as_str);
+    if matches!(event, Some("delta" | "reasoning_delta"))
+        && let Some(text) = value.get("text").and_then(Value::as_str)
+    {
+        output.push_str(text);
+        return;
     }
-    content.map_or_else(String::new, Value::to_string)
+    if matches!(event, Some("message" | "reasoning_message"))
+        && value.get("role").and_then(Value::as_str) == Some("assistant")
+        && let Some(text) = message_event_text(value)
+    {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&text);
+    }
 }
 
 pub(crate) fn message_event_text(value: &Value) -> Option<String> {
-    let parts = value.get("content")?.as_array()?;
     let mut text = String::new();
-    for part in parts {
+    for part in value.get("content")?.as_array()? {
         if part.get("type").and_then(Value::as_str) == Some("text")
             && let Some(value) = part.get("text").and_then(Value::as_str)
         {

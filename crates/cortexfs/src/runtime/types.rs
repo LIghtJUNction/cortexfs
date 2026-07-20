@@ -20,6 +20,10 @@ pub enum SocketSessionRecordError {
     MissingSessionFile(&'static str),
     /// A supplied stable field is malformed.
     InvalidField(&'static str),
+    /// The client id is already bound to a different durable send payload.
+    RequestConflict,
+    /// Durable history cannot prove one complete send claim.
+    CorruptHistory,
     /// Session files could not be updated.
     CannotRecord,
 }
@@ -55,6 +59,8 @@ pub enum SocketRuntimeError {
     CannotRunAgent,
     /// Agent executable returned invalid canonical event JSONL.
     InvalidAgentOutput,
+    /// Stop was accepted and flushed, but synchronous execution failed.
+    PostAcceptStop,
 }
 
 /// JSONL lines durably recorded for one socket request.
@@ -68,6 +74,15 @@ pub struct SocketSessionRecord {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SocketRuntimeResponse {
     frames: Vec<String>,
+}
+
+/// Whether a durable socket send was newly recorded or replayed from history.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SocketSendOutcome<T> {
+    /// The send claimed its client id and appended durable facts.
+    Recorded(T),
+    /// The client id was already durably claimed with the same payload.
+    Replayed(T),
 }
 
 /// Error while recording a socket send and updating the session index.
@@ -92,6 +107,7 @@ pub struct PeerCredentials {
 pub struct SocketPeerPolicy {
     uid: Option<u32>,
     gid: Option<u32>,
+    allow_root: bool,
 }
 
 /// Runtime inputs for dispatching socket `send` frames to an agent executable.
@@ -133,6 +149,8 @@ pub enum AgentExecutableSocketExecution<'a> {
         program: &'a Path,
         /// Agent mount table derived from `agent/<name>.d/mount`.
         mount_table: &'a MountTable,
+        /// Root-owned private directory for per-run control sockets.
+        control_dir: Option<&'a Path>,
     },
 }
 
@@ -153,10 +171,27 @@ impl SocketRuntimeError {
             | Self::CannotWriteResponse
             | Self::CannotAcceptConnection
             | Self::CannotRunAgent
-            | Self::InvalidAgentOutput => "EIO",
+            | Self::InvalidAgentOutput
+            | Self::PostAcceptStop => "EIO",
             Self::InvalidAgentExecutable => "ENOENT",
         }
     }
+}
+
+/// A stop transaction whose complete receipt preflight already succeeded.
+pub trait PreparedAgentStop {
+    /// Executes the prepared stop synchronously.
+    fn execute(self: Box<Self>) -> Result<(), SocketRuntimeError>;
+}
+
+/// Privileged stop planner injected by the authoritative root runtime.
+pub trait AgentStopHandler {
+    /// Validates the exact runtime agent and preflights all stop receipts.
+    fn preflight(
+        &self,
+        agent: &str,
+        peer_uid: u32,
+    ) -> Result<Box<dyn PreparedAgentStop>, SocketRuntimeError>;
 }
 
 impl SocketSessionRecordError {
@@ -164,9 +199,12 @@ impl SocketSessionRecordError {
     #[must_use]
     pub const fn errno(self) -> &'static str {
         match self {
-            Self::UnsupportedRequest | Self::SessionMismatch | Self::InvalidField(_) => "EINVAL",
+            Self::UnsupportedRequest
+            | Self::SessionMismatch
+            | Self::InvalidField(_)
+            | Self::RequestConflict => "EINVAL",
             Self::TempSessionNotDurable | Self::MissingSessionFile(_) => "ENOENT",
-            Self::CannotRecord => "EIO",
+            Self::CorruptHistory | Self::CannotRecord => "EIO",
         }
     }
 }
@@ -259,6 +297,17 @@ impl SocketPeerPolicy {
         Self {
             uid: Some(uid),
             gid: None,
+            allow_root: false,
+        }
+    }
+
+    /// Requires a specific peer uid or the root-authoritative system runtime.
+    #[must_use]
+    pub const fn uid_or_root(uid: u32) -> Self {
+        Self {
+            uid: Some(uid),
+            gid: None,
+            allow_root: true,
         }
     }
 
@@ -268,6 +317,7 @@ impl SocketPeerPolicy {
         Self {
             uid: None,
             gid: Some(gid),
+            allow_root: false,
         }
     }
 
@@ -277,12 +327,15 @@ impl SocketPeerPolicy {
         Self {
             uid: Some(uid),
             gid: Some(gid),
+            allow_root: false,
         }
     }
 
     /// Returns whether the peer credentials satisfy this policy.
     #[must_use]
     pub fn allows(self, peer: PeerCredentials) -> bool {
-        self.uid.is_none_or(|uid| peer.uid() == uid) && self.gid.is_none_or(|gid| peer.gid() == gid)
+        self.allow_root && peer.uid() == 0
+            || self.uid.is_none_or(|uid| peer.uid() == uid)
+                && self.gid.is_none_or(|gid| peer.gid() == gid)
     }
 }

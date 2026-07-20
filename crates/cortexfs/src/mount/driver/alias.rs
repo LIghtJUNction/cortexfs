@@ -12,6 +12,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
         ) {
             let file_type = mode & S_IFMT;
             if file_type == S_IFREG || file_type == 0 {
+                let permissions = (mode & 0o7777) & !umask;
                 let path = create_session_layout_child_or_reply!(
                     self,
                     req,
@@ -19,9 +20,9 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     name,
                     reply,
                     create_layout_file,
-                    (mode & 0o7777) & !umask
+                    permissions
                 );
-                match self.projected_node_for_path(&path) {
+                match self.created_layout_node(&path, permissions, req.uid(), req.gid()) {
                     Ok(node) => self.reply_entry(&node, reply),
                     Err(error) => reply.error(errno(error)),
                 }
@@ -42,13 +43,13 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     return;
                 }
             };
-            if FuseV1Projection::is_socket_alias_path(&path)
+            if FuseProjection::is_socket_alias_path(&path)
                 && let Err(error) = self.projection.authorize_socket_alias(&path, req.uid())
             {
                 reply.error(errno(error));
                 return;
             }
-            if FuseV1Projection::is_socket_alias_path(&path) {
+            if FuseProjection::is_socket_alias_path(&path) {
                 match self.projection.create_socket_placeholder(
                     &path,
                     req.uid(),
@@ -65,7 +66,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     reply.error(Errno::EEXIST);
                     return;
                 }
-                Err(FuseV1Error::NotFound) => {}
+                Err(FuseError::NotFound) => {}
                 Err(error) => {
                     reply.error(errno(error));
                     return;
@@ -106,39 +107,20 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                 reply.error(Errno::EINVAL);
                 return;
             };
-            match self.projection.remove_layout_file(&layout_path, req.uid()) {
-                Ok(()) => {
-                    if let Err(error) = self.forget_path(&layout_path) {
-                        reply.error(errno(error));
-                        return;
-                    }
-                    reply.ok();
-                    return;
-                }
-                Err(FuseV1Error::NotControlFile) => {}
-                Err(error) => {
-                    reply.error(errno(error));
-                    return;
-                }
-            }
-            match self
-                .projection
-                .remove_socket_alias_claim(&layout_path, req.uid())
-            {
-                Ok(()) => {
-                    if let Err(error) = self.forget_path(&layout_path) {
-                        reply.error(errno(error));
-                        return;
-                    }
-                    reply.ok();
-                    return;
-                }
-                Err(FuseV1Error::NotControlFile) => {}
-                Err(error) => {
-                    reply.error(errno(error));
-                    return;
-                }
-            }
+            let Some(reply) = self.try_remove_control_then_ok(
+                &layout_path,
+                |path| self.projection.remove_layout_file(path, req.uid()),
+                reply,
+            ) else {
+                return;
+            };
+            let Some(reply) = self.try_remove_control_then_ok(
+                &layout_path,
+                |path| self.projection.remove_socket_alias_claim(path, req.uid()),
+                reply,
+            ) else {
+                return;
+            };
             let path = match self.socket_alias_child_path(parent, name) {
                 Ok(path) => path,
                 Err(_error) => match self.socket_child_path(parent, name) {
@@ -149,7 +131,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                     }
                 },
             };
-            let socket_alias = FuseV1Projection::is_socket_alias_path(&path);
+            let socket_alias = FuseProjection::is_socket_alias_path(&path);
             if socket_alias
                 && let Err(error) = self.projection.authorize_socket_alias(&path, req.uid())
             {
@@ -185,7 +167,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
                 return;
             }
             match self.projection.getattr(&path) {
-                Ok(attr) if attr.file_type() == FuseV1FileType::Socket => {
+                Ok(attr) if attr.file_type() == FuseFileType::Socket => {
                     if remove_backing_socket_entry(self.projection.root(), &path).is_err() {
                         reply.error(Errno::EIO);
                         return;
@@ -274,7 +256,7 @@ macro_rules! cortexfs_mount_socket_alias_methods {
             };
             match self.rename_owner_path(&from, &to, req.uid(), flags) {
                 Ok(()) => reply.ok(),
-                Err(FuseV1Error::NotControlFile) if flags.is_empty() => {
+                Err(FuseError::NotControlFile) if flags.is_empty() => {
                     reply.error(readonly_mutation_errno());
                 }
                 Err(error) => reply.error(errno(error)),

@@ -5,20 +5,20 @@ pub(crate) fn authorize_agent_model_use(
     requested_model: &str,
     primary_model: &str,
     selected_model: &str,
-) -> Result<(), String> {
+) -> Result<(), ExecError> {
     let label =
         read_small_plain_text_file(&agent_dir.join("label"), MAX_RUNNER_CONTROL_BYTES, "runner")
-            .map_err(|error| format!("cannot read agent label: {error}"))?;
-    let subject =
-        policy_subject_from_label(label.trim()).ok_or_else(|| "invalid agent label".to_owned())?;
+            .map_err(|error| ExecError::with_io("cannot read agent label", &error))?;
+    let subject = policy_subject_from_label(label.trim())
+        .ok_or_else(|| ExecError::new("invalid agent label"))?;
     let policy_text = read_small_plain_text_file(
         &agent_dir.join("policy"),
         MAX_RUNNER_CONTROL_BYTES,
         "runner",
     )
-    .map_err(|error| format!("cannot read agent policy: {error}"))?;
+    .map_err(|error| ExecError::with_io("cannot read agent policy", &error))?;
     let policy =
-        PolicyV0::parse(&policy_text).map_err(|_error| "invalid agent policy".to_owned())?;
+        PolicyV0::parse(&policy_text).map_err(|_error| ExecError::new("invalid agent policy"))?;
     if policy.allows(
         subject,
         PolicyObjectClass::Model,
@@ -36,11 +36,13 @@ pub(crate) fn authorize_agent_model_use(
         ) {
             return Ok(());
         }
-        return Err(format!(
+        return Err(ExecError::new(format!(
             "agent policy denies requested model:{requested_model} use via selected primary:{selected_model}"
-        ));
+        )));
     }
-    Err(format!("agent policy denies model:{selected_model} use"))
+    Err(ExecError::new(format!(
+        "agent policy denies model:{selected_model} use"
+    )))
 }
 
 pub(crate) fn agent_debug_timing_start_unix_ms() -> Option<u128> {
@@ -62,7 +64,7 @@ pub(crate) fn write_agent_debug_timing(
     stdout: &mut impl Write,
     config: &AgentModelRunConfig,
     stage: &str,
-) -> Result<(), String> {
+) -> Result<(), ExecError> {
     let Some(start_unix_ms) = config.debug_timing_start_unix_ms else {
         return Ok(());
     };
@@ -74,7 +76,7 @@ pub(crate) fn write_agent_debug_timing(
     });
     writeln!(stdout, "{frame}")
         .and_then(|()| stdout.flush())
-        .map_err(|error| format!("cannot write output: {error}"))
+        .map_err(|error| ExecError::new(format!("cannot write output: {error}")))
 }
 
 pub(crate) struct AgentModelRunOutcome {

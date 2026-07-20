@@ -1,6 +1,6 @@
 [package]
 name = "cortexfs"
-description = "CortexFS Agent OS ABI design core."
+description = "FUSE filesystem interface for agent runtimes."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,21 +11,32 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+arrow-array = "59.1.0"
+arrow-schema = "59.1.0"
+base64 = "0.22.1"
+cortexfs-runtime-client = { version = "0.1.7", path = "../cortexfs-runtime-client" }
 cortexfs-tool-sdk = { version = "0.1.0", path = "../cortexfs-tool-sdk" }
 fuser = "0.17.0"
-jsonschema = { version = "0.46.5", default-features = false }
-keyring = "4.1.2"
+jsonschema = { version = "0.47.0", default-features = false }
+keyring = "4.1.4"
 listenfd = "1.0.2"
+models-dev = { version = "0.1.1", default-features = false, features = ["rustls-tls"] }
 nix = { version = "0.31.3", features = ["fs", "signal", "socket", "term", "user"] }
+parquet = { version = "59.1.0", default-features = false, features = ["arrow"] }
 portable-pty = "0.9.0"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 rustyline = "18.0.1"
+semver = "1.0.28"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 serde_path_to_error = "0.1.20"
 serde_yaml = "0.9"
 sha2 = "0.11.0"
-signal-hook = "0.3.18"
+signal-hook = "0.4.4"
 tempfile = "3.27.0"
+thiserror = "2.0.18"
+tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+url = "2.5.8"
 xattr = "1.6.1"
 
 [lints]
@@ -38,6 +49,10 @@ path = "src/bin/ctx/main.rs"
 [[bin]]
 name = "ctxterm"
 path = "src/bin/ctxterm/main.rs"
+
+[[bin]]
+name = "ctxchat"
+path = "src/bin/ctxchat/main.rs"
 
 [[bin]]
 name = "tsh"

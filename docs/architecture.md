@@ -8,7 +8,7 @@ not become root ABI.
 ## One-page model
 
 ```text
-/ctx is a FUSE Agent OS ABI view.
+/ctx is a FUSE filesystem interface for agent runtimes.
 model is a pure inference file.
 agent is the policy-bound orchestrator.
 tool is a capability endpoint.
@@ -53,6 +53,22 @@ Policy, path, mount, uid/gid, and mode bits grant authority.
 ```
 
 ## Where things live
+
+The packaged host keeps versioned durable trees under
+`/var/lib/cortexfs/storage/generations/<generation>` and exposes the selected
+tree through the atomic `/var/lib/cortexfs/storage/current` symlink. On a
+systemd restart, `ctx storage update` clones the current generation, applies
+and validates the next `bin/cortexfs.bootstrap.json` `tree_version`, then
+switches `current`. A failed stage leaves `current` unchanged. This is a
+restart boundary, not a watcher, poller, or hot reload;
+the `/ctx` ABI shape remains unchanged. The package generates root files
+locally; generations are not distributed artifacts. The systemd restart path,
+after stopping consumers, explicitly uses `--prune` to remove non-current
+generations. There is no background generation GC.
+The mount and agent runtime resolve `current` once at process startup and keep
+that concrete generation for their full lifetime, including mount cache
+refresh. Short-lived object-runner invocations may resolve the then-current
+generation each time.
 
 | Place | Path shape | Role |
 | --- | --- | --- |
@@ -106,25 +122,36 @@ ordinary files for history and snapshots
 Module naming: [naming-guide.md](naming-guide.md). Prefer single-token stems
 (`snapshot.rs`); no new `-` / `_` in module file stems.
 
+## Internal code architecture
+
+Product rules above freeze **what** `/ctx` is. How the Rust tree is layered
+(process roles, crate/feature splits, module dependency direction, error
+tiers, migration phases) lives in
+[internal-architecture.md](internal-architecture.md).
+
+Read that document before large refactors (crate splits, executor error
+migrations, FUSE vs object boundary changes). Do not “improve structure” by
+adding root ABI classes, workflow engines, or background watchers.
+
 ## Read the specs in order
 
 ```text
 spec/README.md
 spec/root-abi.md
-spec/fuse-v1.md
+spec/fuse.md
 spec/object-abi.md
 spec/model-abi.md
 spec/session-abi.md
-spec/16-context.md
+spec/context-abi.md
 spec/agent-tool-security.md
 spec/agent-runtime.md
 spec/tool-policy-abi.md
-spec/17-child-agents.md
+spec/child-agents.md
 spec/ctx-coreutils.md
-spec/phase-1.md
+spec/rolling-upgrades.md
 ```
 
-## v1 red line
+## Stable ABI red line
 
 ```text
 Do not let /ctx become a directory mirror of an AI platform database.

@@ -146,41 +146,11 @@ pub(crate) fn parse_home_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
 }
 
 pub(crate) fn parse_home_agent_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((agent, rest)) = parts.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    if !is_object_name(agent) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    match *first {
-        "session" => parse_session_path(rest),
-        _ => AbiPathKind::HomeDir,
-    }
+    parse_agent_session_tail(parts, AbiPathKind::HomeDir, AbiPathKind::HomeDir)
 }
 
 pub(crate) fn parse_home_model_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
-    let Some((provider, rest)) = parts.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    let Some((model_dir, rest)) = rest.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    let Some(model) = model_dir.strip_suffix(".d") else {
-        return AbiPathKind::HomeDir;
-    };
-    if !is_model_name(&format!("{provider}/{model}")) {
-        return AbiPathKind::Unknown;
-    }
-    let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::HomeDir;
-    };
-    match *first {
-        "session" => parse_session_path(rest),
-        _ => AbiPathKind::HomeDir,
-    }
+    parse_model_session_tail(parts, AbiPathKind::HomeDir, AbiPathKind::HomeDir)
 }
 
 pub(crate) fn parse_shared_path<'a>(parts: &[&'a str]) -> AbiPathKind<'a> {
@@ -242,40 +212,64 @@ pub(crate) fn parse_shared_tool_path<'a>(space: &'a str, parts: &[&'a str]) -> A
 }
 
 pub(crate) fn parse_shared_agent_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
+    parse_agent_session_tail(
+        parts,
+        AbiPathKind::SharedDir { space },
+        AbiPathKind::SharedDir { space },
+    )
+}
+
+pub(crate) fn parse_shared_model_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
+    parse_model_session_tail(
+        parts,
+        AbiPathKind::SharedDir { space },
+        AbiPathKind::SharedDir { space },
+    )
+}
+
+fn parse_agent_session_tail<'a>(
+    parts: &[&'a str],
+    empty: AbiPathKind<'a>,
+    other: AbiPathKind<'a>,
+) -> AbiPathKind<'a> {
     let Some((agent, rest)) = parts.split_first() else {
-        return AbiPathKind::SharedDir { space };
+        return empty;
     };
     if !is_object_name(agent) {
         return AbiPathKind::Unknown;
     }
     let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::SharedDir { space };
+        return empty;
     };
     match *first {
         "session" => parse_session_path(rest),
-        _ => AbiPathKind::SharedDir { space },
+        _ => other,
     }
 }
 
-pub(crate) fn parse_shared_model_path<'a>(space: &'a str, parts: &[&'a str]) -> AbiPathKind<'a> {
+fn parse_model_session_tail<'a>(
+    parts: &[&'a str],
+    empty: AbiPathKind<'a>,
+    other: AbiPathKind<'a>,
+) -> AbiPathKind<'a> {
     let Some((provider, rest)) = parts.split_first() else {
-        return AbiPathKind::SharedDir { space };
+        return empty;
     };
     let Some((model_dir, rest)) = rest.split_first() else {
-        return AbiPathKind::SharedDir { space };
+        return empty;
     };
     let Some(model) = model_dir.strip_suffix(".d") else {
-        return AbiPathKind::SharedDir { space };
+        return empty;
     };
     if !is_model_name(&format!("{provider}/{model}")) {
         return AbiPathKind::Unknown;
     }
     let Some((first, rest)) = rest.split_first() else {
-        return AbiPathKind::SharedDir { space };
+        return empty;
     };
     match *first {
         "session" => parse_session_path(rest),
-        _ => AbiPathKind::SharedDir { space },
+        _ => other,
     }
 }
 

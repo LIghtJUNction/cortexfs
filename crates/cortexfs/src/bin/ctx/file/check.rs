@@ -174,34 +174,52 @@ pub(crate) fn file_check_jsonl_content(
     parsed: AbiPathKind<'_>,
     resolved: &Path,
 ) -> Result<bool, CliError> {
-    if matches!(
-        parsed,
+    let stream = match parsed {
         AbiPathKind::SessionFile {
             file: "messages.jsonl",
             ..
-        }
-    ) {
-        let content = read_file_to_string(resolved)?;
-        let report = inspect_message_stream_jsonl(&content);
-        return check_report("message stream", report.is_ok(), || {
-            format_message_stream_issues(report.issues())
-        })
-        .map(|()| true);
-    }
-
-    if matches!(
-        parsed,
+        } => Some(columnar::Stream::Messages),
         AbiPathKind::SessionFile {
             file: "events.jsonl",
             ..
+        } => Some(columnar::Stream::Events),
+        _ => None,
+    };
+    if let Some(stream) = stream {
+        let session = resolved
+            .parent()
+            .ok_or_else(|| CliError::usage("session history path must have a parent directory"))?;
+        let max_bytes = usize::try_from(MAX_CTX_FILE_CHECK_BYTES).map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", resolved.display()))
+        })?;
+        let bytes = columnar::read_at(session, stream, 0, max_bytes.saturating_add(1)).map_err(
+            |error| CliError::unavailable(format!("cannot read {}: {error}", resolved.display())),
+        )?;
+        if bytes.len() > max_bytes {
+            return Err(CliError::unavailable(format!(
+                "cannot read {}: not a small regular file",
+                resolved.display()
+            )));
         }
-    ) {
-        let content = read_file_to_string(resolved)?;
-        let report = inspect_event_stream_jsonl(&content);
-        return check_report("event stream", report.is_ok(), || {
-            format_event_stream_issues(report.issues())
-        })
-        .map(|()| true);
+        let content = String::from_utf8(bytes).map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", resolved.display()))
+        })?;
+        return match stream {
+            columnar::Stream::Messages => {
+                let report = inspect_message_stream_jsonl(&content);
+                check_report("message stream", report.is_ok(), || {
+                    format_message_stream_issues(report.issues())
+                })
+                .map(|()| true)
+            }
+            columnar::Stream::Events => {
+                let report = inspect_event_stream_jsonl(&content);
+                check_report("event stream", report.is_ok(), || {
+                    format_event_stream_issues(report.issues())
+                })
+                .map(|()| true)
+            }
+        };
     }
 
     if let Some(kind) = parsed.context_jsonl_kind() {

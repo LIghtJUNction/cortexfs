@@ -19,65 +19,6 @@ pub(crate) struct AgentVisibleTool {
     pub(crate) status: String,
 }
 
-pub(crate) fn agent_native_tool_names(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
-    require_cli_name("agent name", name)?;
-    let view = derive_agent_runtime_view(root, name)
-        .map_err(|error| CliError::unavailable(format!("agent view {}: {name}", error.errno())))?;
-    if !agent_tool_is_authorized(&view, "tsh")? {
-        return Ok(Vec::new());
-    }
-    let mut tools = vec!["tsh".to_owned()];
-    let state_path = cortexfs::tsh_context_state_path(view.home());
-    let state = cortexfs::read_tsh_context_state(&state_path).map_err(|error| {
-        CliError::unavailable(format!("cannot read {}: {error}", state_path.display()))
-    })?;
-    for tool in state.tools {
-        if tool.name == "tsh" || tools.contains(&tool.name) {
-            continue;
-        }
-        if agent_tool_is_authorized(&view, &tool.name)? {
-            tools.push(tool.name);
-        }
-    }
-    tools.sort();
-    tools.dedup();
-    Ok(tools)
-}
-
-pub(crate) fn agent_tool_is_authorized(
-    view: &AgentRuntimeView,
-    tool: &str,
-) -> Result<bool, CliError> {
-    let Some(hit) = view
-        .tool_path()
-        .find(tool)
-        .map_err(|error| CliError::unavailable(format!("cannot inspect CTX_PATH: {error:?}")))?
-    else {
-        return Ok(false);
-    };
-    let policy = read_file_to_string(&hit.control_dir().join("policy")).map_err(|error| {
-        CliError::unavailable(format!(
-            "cannot read {}: {}",
-            hit.control_dir().join("policy").display(),
-            error.message
-        ))
-    })?;
-    let tool_policy = PolicyV0::parse(&policy)
-        .map_err(|_error| CliError::unavailable(format!("invalid policy for tool:{tool}")))?;
-    Ok(authorize_tool_execution(
-        view.tool_path(),
-        tool,
-        ToolExecutionAuthority::new(
-            view.identity(),
-            view.mount_table(),
-            view.policy_subject(),
-            view.policy(),
-            &tool_policy,
-        ),
-    )
-    .is_ok())
-}
-
 pub(crate) fn agent_visible_tool_entries(
     root: &Path,
     name: &str,
@@ -141,7 +82,16 @@ pub(crate) fn latest_run_id(root: &Path, name: &str, session: &str) -> Result<St
         return Ok(run);
     }
     let events = session_dir.join("events.jsonl");
-    let content = read_file_to_string(&events)?;
+    let max_bytes = usize::try_from(MAX_CTX_FILE_CHECK_BYTES).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", events.display()))
+    })?;
+    let bytes =
+        columnar::tail(&session_dir, columnar::Stream::Events, max_bytes).map_err(|error| {
+            CliError::unavailable(format!("cannot read {}: {error}", events.display()))
+        })?;
+    let content = String::from_utf8(bytes).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", events.display()))
+    })?;
     let mut latest = None;
     for line in content.lines() {
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {

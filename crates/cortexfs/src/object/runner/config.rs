@@ -1,4 +1,3 @@
-use super::context::provider_name_from_config;
 use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,16 +29,6 @@ pub(crate) fn provider_config_from_model_control(
         base_url,
         oauth: None,
         formats: model_driver_formats(&driver),
-    })
-}
-pub(crate) fn model_default_base_url(content: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let line = line
-            .split_once('#')
-            .map_or(line, |(value, _comment)| value)
-            .trim();
-        let value = line.strip_prefix("base_url=")?.trim();
-        (!value.is_empty()).then_some(value.to_owned())
     })
 }
 pub(crate) fn model_driver_formats(content: &str) -> Vec<String> {
@@ -78,7 +67,7 @@ pub(crate) fn provider_config_from_dir(
         )
         .ok()?;
         let config = serde_json::from_str::<RunnerProviderConfig>(&content).ok()?;
-        if provider_name_from_config(&config.base_url, config.name.as_deref()).as_deref()
+        if cortexfs::provider_name_from_config(&config.base_url, config.name.as_deref()).as_deref()
             != Ok(provider)
         {
             continue;

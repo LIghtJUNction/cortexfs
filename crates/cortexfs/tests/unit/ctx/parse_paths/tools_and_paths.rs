@@ -10,14 +10,13 @@ fn bootstrap_output_lists_all_reference_agents() {
 fn reference_bootstrap_gives_coder_source_editing_tools() {
     let root = clean_test_dir("ctx-reference-coder-source-tools");
 
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     for tool in ["fs.read", "fs.write", "fs.replace", "shell.exec"] {
         let path = root.join("tool").join(tool);
         assert!(path.exists(), "{tool} executable missing");
         assert!(
-            fs::metadata(&path)
-                .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0),
+            fs::metadata(&path).is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0),
             "{tool} is not executable"
         );
     }
@@ -46,17 +45,26 @@ fn reference_bootstrap_gives_coder_source_editing_tools() {
     assert!(coder_prompt.contains("current workspace state"));
     assert!(!coder_prompt.contains("git status --short"));
     assert!(!coder_prompt.contains("find /workspace -name AGENTS.md -print"));
-    assert!(coder_prompt.contains("never overwrite, revert, delete, or reformat unrelated user changes"));
+    assert!(
+        coder_prompt
+            .contains("never overwrite, revert, delete, or reformat unrelated user changes")
+    );
     assert!(coder_prompt.contains("Never run destructive git commands"));
 }
 
 #[test]
 fn agent_prompt_renders_runtime_system_prompt_from_control_files() {
     let root = clean_test_dir("ctx-agent-prompt-render");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     let control = root.join("agent").join("coder.d");
-    assert!(fs::write(control.join("system.md"), "Be precise.
-").is_ok());
+    assert!(
+        fs::write(
+            control.join("system.md"),
+            "Be precise.
+"
+        )
+        .is_ok()
+    );
     assert!(
         fs::write(
             control.join("prompt.template.md"),
@@ -75,7 +83,10 @@ inst={{agent_instructions}}
         Ok(ref prompt) if prompt.contains("agent=coder")
             && prompt.contains("time=123")
             && prompt.contains("inst=Be precise.")
-            && prompt.contains("native callable tool exposed by this runtime is `tsh`")
+            && prompt.contains("The CortexFS tool shell `tsh` is always native")
+            && prompt.contains(
+                "Tools statically declared by the agent `tools` control may also be exposed as direct-native calls."
+            )
             && prompt.contains("When tool execution is useful")
             && prompt.contains("Tool results include the original `arguments.args`")
             && prompt.contains("If no concrete file path is provided")
@@ -97,7 +108,9 @@ fn shell_quote_arg_escapes_single_quotes() {
 
 #[test]
 fn cli_names_accept_abi_valid_uppercase_names() {
-    for name in ["NAME", "SESSION", "AGENT", "SOURCE", "TARGET", "PATH", "INPUT", "RUN"] {
+    for name in [
+        "NAME", "SESSION", "AGENT", "SOURCE", "TARGET", "PATH", "INPUT", "RUN",
+    ] {
         assert!(require_cli_name("agent name", name).is_ok(), "{name}");
         assert!(require_session_name(name).is_ok(), "{name}");
     }
@@ -111,16 +124,18 @@ fn session_names_reject_control_characters() {
 }
 
 fn contains_arg_pair(args: &[String], first: &str, second: &str) -> bool {
-    args.windows(2)
-        .any(|window| window.first().map(String::as_str) == Some(first)
-            && window.get(1).map(String::as_str) == Some(second))
+    args.windows(2).any(|window| {
+        window.first().map(String::as_str) == Some(first)
+            && window.get(1).map(String::as_str) == Some(second)
+    })
 }
 
 fn contains_arg_triplet(args: &[String], first: &str, second: &str, third: &str) -> bool {
-    args.windows(3)
-        .any(|window| window.first().map(String::as_str) == Some(first)
+    args.windows(3).any(|window| {
+        window.first().map(String::as_str) == Some(first)
             && window.get(1).map(String::as_str) == Some(second)
-            && window.get(2).map(String::as_str) == Some(third))
+            && window.get(2).map(String::as_str) == Some(third)
+    })
 }
 
 fn contains_ro_bind_stub(args: &[String], target: &str) -> bool {
@@ -165,11 +180,7 @@ fn parses_bootstrap_and_mount_commands() {
     let update = cmd!("update");
     assert!(matches!(
         update,
-        Ok(Command::Bootstrap {
-            source: None,
-            dry_run: false,
-            check: false
-        })
+        Err(ref error) if error.code == 2 && error.message == "unknown command: update"
     ));
 
     let bootstrap_source = cmd!("bootstrap", "/tmp/cortexfs-source");
@@ -182,17 +193,7 @@ fn parses_bootstrap_and_mount_commands() {
         }) if source == Path::new("/tmp/cortexfs-source")
     ));
 
-    let update_source = cmd!("update", "/tmp/cortexfs-source");
-    assert!(matches!(
-        update_source,
-        Ok(Command::Bootstrap {
-            source: Some(ref source),
-            dry_run: false,
-            check: false
-        }) if source == Path::new("/tmp/cortexfs-source")
-    ));
-
-    let dry_run = cmd!("update", "--dry-run", "/tmp/cortexfs-source");
+    let dry_run = cmd!("bootstrap", "--dry-run", "/tmp/cortexfs-source");
     assert!(matches!(
         dry_run,
         Ok(Command::Bootstrap {
@@ -213,9 +214,28 @@ fn parses_bootstrap_and_mount_commands() {
     ));
 
     assert!(matches!(
-        cmd!("update", "--check", "--dry-run"),
+        cmd!("bootstrap", "--check", "--dry-run"),
         Err(ref error) if error.code == 2
     ));
+
+    assert!(matches!(
+        cmd!("storage", "update", "/var/lib/cortexfs/storage"),
+        Ok(Command::StorageUpdate { storage: Some(ref path), prune: false })
+            if path == Path::new("/var/lib/cortexfs/storage")
+    ));
+    assert!(matches!(
+        cmd!("storage", "update"),
+        Ok(Command::StorageUpdate {
+            storage: None,
+            prune: false
+        })
+    ));
+    assert!(matches!(
+        cmd!("storage", "update", "--prune", "/var/lib/cortexfs/storage"),
+        Ok(Command::StorageUpdate { storage: Some(ref path), prune: true })
+            if path == Path::new("/var/lib/cortexfs/storage")
+    ));
+    assert!(cmd!("storage", "delete").is_err());
 
     let mount = cmd!(
         "mount",
@@ -259,14 +279,23 @@ fn parses_tool_command_with_arguments() {
 
 #[test]
 fn parses_provider_oauth_commands() {
-    let login = cmd!("provider", "oauth", "login", "api.openai.com", "--timeout", "30");
+    let login = cmd!(
+        "provider",
+        "oauth",
+        "login",
+        "api.openai.com",
+        "--timeout",
+        "30"
+    );
     assert!(matches!(
         login,
-        Ok(Command::Provider(ProviderArgs::Login {
-            ref provider,
-            timeout
-        })) if provider == "api.openai.com" && timeout == 30
+        Ok(Command::Provider(ProviderArgs::Login(ref provider, 30, false)))
+            if provider == "api.openai.com"
     ));
+    assert!(
+        matches!(cmd!("provider", "oauth", "login", "codex", "--device"),
+        Ok(Command::Provider(ProviderArgs::Login(ref provider, 120, true))) if provider == "codex")
+    );
 
     let status = cmd!("provider", "oauth", "status", "api.openai.com");
     assert!(matches!(
@@ -318,6 +347,18 @@ fn parses_provider_preset_commands() {
 }
 
 #[test]
+fn codex_preset_is_separate_and_responses_only() {
+    let codex = provider_preset("codex").map(|preset| preset.config);
+    let openai = provider_preset("openai").map(|preset| preset.config);
+    assert!(
+        matches!(codex, Ok(config) if config.contains("chatgpt.com/backend-api/codex") && config.contains(r#""formats": ["openai.responses"]"#))
+    );
+    assert!(
+        matches!(openai, Ok(config) if config.contains("api.openai.com/v1") && !config.contains("oauth"))
+    );
+}
+
+#[test]
 fn parses_provider_secret_commands() {
     assert!(matches!(
         cmd!("provider", "secret", "set", "local"),
@@ -338,7 +379,7 @@ fn parses_provider_secret_commands() {
 #[test]
 fn tool_command_runs_core_tool_cli_at_selected_root() {
     let root = clean_test_dir("ctx-tool-command-core");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
 
     let mut output = Vec::new();
     let result = run_visible_tool_with_writer(
@@ -360,7 +401,7 @@ fn tool_command_runs_core_tool_cli_at_selected_root() {
 #[test]
 fn tool_command_requires_core_tool_to_be_visible() {
     let root = clean_test_dir("ctx-tool-command-core-hidden");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     assert!(fs::remove_file(root.join("tool").join("tsh.config")).is_ok());
 
     let result = run_visible_tool_with_writer(

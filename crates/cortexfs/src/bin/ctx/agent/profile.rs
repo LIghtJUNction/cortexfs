@@ -1,5 +1,6 @@
 use crate::*;
 use serde::Deserialize;
+use std::cell::Cell;
 
 /// Host-side authoring schema for agent profiles (import-only; runtime uses `.d/*`).
 pub(crate) const AGENT_PROFILE_SCHEMA_V1: &str = "cortexfs.agent.profile/v1";
@@ -7,6 +8,15 @@ pub(crate) const AGENT_PROFILE_SCHEMA_V1: &str = "cortexfs.agent.profile/v1";
 /// Conventional profile file names (Microsoft-style `agent.yaml` first).
 pub(crate) const AGENT_PROFILE_FILE_NAMES: &[&str] = &["agent.yaml", "agent.yml", "agent.json"];
 const MAX_AGENT_PROFILE_CONTROL_BYTES: u64 = 64 * 1024;
+
+thread_local! {
+    static PROFILE_TOOLS_POLICY_FAULT: Cell<u8> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_profile_tools_policy_fault(fault: u8) {
+    PROFILE_TOOLS_POLICY_FAULT.set(fault);
+}
 
 /// Parsed host-side agent profile ready to materialize into `agent/<name>.d/*`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -16,6 +26,7 @@ pub(crate) struct AgentProfile {
     pub(crate) instructions: Option<String>,
     pub(crate) models: Vec<String>,
     pub(crate) tools: Vec<String>,
+    pub(crate) tools_declared: bool,
     pub(crate) label: Option<String>,
     pub(crate) parent: Option<String>,
     pub(crate) temporary: bool,
@@ -224,6 +235,10 @@ pub(crate) fn parse_agent_profile_text(text: &str) -> Result<AgentProfile, CliEr
     profile_document_to_profile(doc)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "profile schema normalization keeps accepted dialect fields auditable"
+)]
 fn profile_document_to_profile(mut doc: ProfileDocument) -> Result<AgentProfile, CliError> {
     if let Some(schema) = doc.schema.as_deref()
         && schema != AGENT_PROFILE_SCHEMA_V1
@@ -312,6 +327,7 @@ fn profile_document_to_profile(mut doc: ProfileDocument) -> Result<AgentProfile,
         }
     }
 
+    let tools_declared = doc.tools.is_some();
     let tools = doc
         .tools
         .map_or_else(Vec::new, ProfileStringOrList::into_vec);
@@ -346,6 +362,7 @@ fn profile_document_to_profile(mut doc: ProfileDocument) -> Result<AgentProfile,
         instructions: nonempty_opt(doc.instructions),
         models,
         tools,
+        tools_declared,
         label: nonempty_opt(doc.label),
         parent: nonempty_opt(doc.parent),
         temporary,
@@ -437,10 +454,26 @@ pub(crate) fn agent_profile_meta_json(description: Option<&str>) -> String {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ProfileTarget {
+    Existing,
+    Missing,
+}
+
+struct ProfileWrite {
+    file: &'static str,
+    content: String,
+    target: ProfileTarget,
+}
+
 /// Applies a host-side profile onto an existing agent control directory.
 ///
 /// Runtime authority remains discrete `.d/*` files; this only rewrites selected
 /// controls that the profile declares.
+#[expect(
+    clippy::too_many_lines,
+    reason = "profile preflight keeps every staged target state ahead of writes"
+)]
 pub(crate) fn agent_apply(
     root: &Path,
     name: &str,
@@ -461,24 +494,36 @@ pub(crate) fn agent_apply(
 
     let mut writes = Vec::new();
     if let Some(instructions) = profile.instructions.as_deref() {
-        require_plain_agent_control_target(&control.join("system.md"))?;
-        writes.push(("system.md", ensure_profile_newline(instructions)));
+        writes.push(ProfileWrite {
+            file: "system.md",
+            content: ensure_profile_newline(instructions),
+            target: optional_plain_agent_control_target(&control.join("system.md"))?,
+        });
     }
     if let Some(description) = profile.description.as_deref() {
-        let meta = read_agent_profile_control(&control, "meta.json")?;
-        writes.push((
-            "meta.json",
-            ensure_profile_newline(&merge_agent_profile_meta(&meta, description)?),
-        ));
+        let target = optional_plain_agent_control_target(&control.join("meta.json"))?;
+        let meta = match target {
+            ProfileTarget::Existing => read_agent_profile_control(&control, "meta.json")?,
+            ProfileTarget::Missing => "{}".to_owned(),
+        };
+        writes.push(ProfileWrite {
+            file: "meta.json",
+            content: ensure_profile_newline(&merge_agent_profile_meta(&meta, description)?),
+            target,
+        });
     }
 
     let model = profile.models.first().cloned();
     if let Some(ref model) = model {
         require_plain_agent_control_target(&control.join("model"))?;
-        writes.push(("model", ensure_profile_newline(model)));
+        writes.push(ProfileWrite {
+            file: "model",
+            content: ensure_profile_newline(model),
+            target: ProfileTarget::Existing,
+        });
     }
 
-    if model.is_some() || !profile.tools.is_empty() {
+    if model.is_some() || profile.tools_declared {
         let label = read_agent_profile_control(&control, "label")?;
         let subject = policy_subject_from_label(label.trim()).ok_or_else(|| {
             CliError::unavailable("invalid agent label; cannot rebuild policy from profile")
@@ -491,22 +536,63 @@ pub(crate) fn agent_apply(
             )));
         }
         let existing_policy = read_agent_profile_control(&control, "policy")?;
-        let policy =
-            agent_apply_policy_text(&existing_policy, subject, &selected_model, &profile.tools);
-        writes.push(("policy", ensure_profile_newline(&policy)));
+        let policy = agent_apply_policy_text(
+            &existing_policy,
+            subject,
+            &selected_model,
+            &profile.tools,
+            profile.tools_declared,
+        );
+        writes.push(ProfileWrite {
+            file: "policy",
+            content: ensure_profile_newline(&policy),
+            target: ProfileTarget::Existing,
+        });
+    }
+    if profile.tools_declared {
+        let tools = profile.tools.join("\n");
+        writes.push(ProfileWrite {
+            file: "tools",
+            content: ensure_profile_newline(&tools),
+            target: optional_plain_agent_control_target(&control.join("tools"))?,
+        });
     }
 
     if !profile.mounts.is_empty() {
         require_plain_agent_control_target(&control.join("mount"))?;
         let uid = current_uid_text().map_err(CliError::unavailable)?;
         let mount = agent_new_mount_control(&uid, name, &profile.mounts);
-        writes.push(("mount", ensure_profile_newline(&mount)));
+        writes.push(ProfileWrite {
+            file: "mount",
+            content: ensure_profile_newline(&mount),
+            target: ProfileTarget::Existing,
+        });
     }
 
-    let updated = writes.iter().map(|entry| entry.0).collect::<Vec<_>>();
-    for (file, content) in writes {
-        let path = control.join(file);
-        atomic_replace_text_preserving_metadata(&path, &content).map_err(|error| {
+    let updated = writes.iter().map(|entry| entry.file).collect::<Vec<_>>();
+    if profile.tools_declared {
+        let policy = writes
+            .iter()
+            .find_map(|entry| (entry.file == "policy").then_some(entry.content.as_str()))
+            .ok_or_else(|| CliError::unavailable("missing staged profile policy"))?;
+        let (tools, tools_target) = writes
+            .iter()
+            .find_map(|entry| {
+                (entry.file == "tools").then_some((entry.content.as_str(), entry.target))
+            })
+            .ok_or_else(|| CliError::unavailable("missing staged profile tools"))?;
+        apply_profile_tools_policy(&control, tools, policy, tools_target)?;
+        writes.retain(|entry| !matches!(entry.file, "tools" | "policy"));
+    }
+    for write in writes {
+        let path = control.join(write.file);
+        let result = match write.target {
+            ProfileTarget::Existing => {
+                atomic_replace_text_preserving_metadata(&path, &write.content)
+            }
+            ProfileTarget::Missing => atomic_create_text_with_mode(&path, &write.content, 0o644),
+        };
+        result.map_err(|error| {
             CliError::unavailable(format!("cannot write {}: {error}", path.display()))
         })?;
     }
@@ -565,6 +651,20 @@ fn require_plain_agent_control_target(path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
+fn optional_plain_agent_control_target(path: &Path) -> Result<ProfileTarget, CliError> {
+    match fs::symlink_metadata(path) {
+        Ok(_metadata) => {
+            require_plain_agent_control_target(path)?;
+            Ok(ProfileTarget::Existing)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(ProfileTarget::Missing),
+        Err(error) => Err(CliError::unavailable(format!(
+            "cannot stat {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
 fn read_agent_profile_control(control: &Path, file: &str) -> Result<String, CliError> {
     let path = control.join(file);
     read_small_plain_text_file(
@@ -609,8 +709,9 @@ pub(crate) fn agent_apply_policy_text(
     subject: &str,
     model: &str,
     tools: &[String],
+    replace_tools: bool,
 ) -> String {
-    if !tools.is_empty() {
+    if replace_tools {
         return agent_new_policy(subject, model, tools);
     }
     let mut lines = Vec::new();
@@ -636,4 +737,57 @@ pub(crate) fn agent_apply_policy_text(
         lines.insert(0, format!("allow {subject} model:{model} use"));
     }
     lines.join("\n")
+}
+
+fn apply_profile_tools_policy(
+    control: &Path,
+    tools: &str,
+    policy: &str,
+    tools_target: ProfileTarget,
+) -> Result<(), CliError> {
+    let policy_path = control.join("policy");
+    let tools_path = control.join("tools");
+    require_plain_agent_control_target(&policy_path)?;
+    if matches!(tools_target, ProfileTarget::Existing) {
+        require_plain_agent_control_target(&tools_path)?;
+    }
+    let old_policy = read_agent_profile_control(control, "policy")?;
+    atomic_replace_text_preserving_metadata(&policy_path, policy).map_err(|error| {
+        CliError::unavailable(format!("cannot write {}: {error}", policy_path.display()))
+    })?;
+    let receipt = fs::symlink_metadata(&policy_path)
+        .map(|metadata| (metadata.dev(), metadata.ino()))
+        .map_err(|error| CliError::unavailable(format!("cannot stat policy receipt: {error}")))?;
+    let fault = PROFILE_TOOLS_POLICY_FAULT.with(|slot| slot.replace(0));
+    if fault == 2 {
+        #[cfg(test)]
+        let foreign = control.join(".policy.foreign");
+        #[cfg(test)]
+        atomic_create_text_with_mode(&foreign, "foreign policy\n", 0o644)
+            .and_then(|()| fs::rename(&foreign, &policy_path))
+            .map_err(|error| {
+                CliError::unavailable(format!("cannot inject policy race: {error}"))
+            })?;
+    }
+    let tools_result = if fault != 0 {
+        Err(io::Error::other("injected tools write failure"))
+    } else {
+        match tools_target {
+            ProfileTarget::Existing => atomic_replace_text_preserving_metadata(&tools_path, tools),
+            ProfileTarget::Missing => atomic_create_text_with_mode(&tools_path, tools, 0o644),
+        }
+    };
+    if let Err(error) = tools_result {
+        let unchanged = fs::symlink_metadata(&policy_path)
+            .is_ok_and(|metadata| (metadata.dev(), metadata.ino()) == receipt)
+            && read_agent_profile_control(control, "policy").is_ok_and(|content| content == policy);
+        if unchanged {
+            let _rollback = atomic_replace_text_preserving_metadata(&policy_path, &old_policy);
+        }
+        return Err(CliError::unavailable(format!(
+            "cannot write {}: {error}",
+            tools_path.display()
+        )));
+    }
+    Ok(())
 }

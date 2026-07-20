@@ -6,8 +6,8 @@
 use std::borrow::Cow;
 
 use crate::{
-    AgentControlKind, ContextJsonlKind, DEFAULT_MODEL_ALIAS, HELPER_MODEL_ALIAS,
-    MAX_OBJECT_NAME_LEN, ROOT_ENTRIES, SessionControlKind, SessionIndexKind,
+    AgentControlKind, ContextJsonlKind, MAX_OBJECT_NAME_LEN, ROOT_ENTRIES, SessionControlKind,
+    SessionIndexKind, is_model_alias,
 };
 
 pub use crate::abi::parse::{classify_abi_path, parse_abi_path};
@@ -113,7 +113,7 @@ pub fn is_model_name(name: &str) -> bool {
 }
 
 pub(crate) fn is_model_reference(name: &str) -> bool {
-    is_model_name(name) || matches!(name, DEFAULT_MODEL_ALIAS | HELPER_MODEL_ALIAS)
+    is_model_name(name) || is_model_alias(name)
 }
 
 pub(crate) fn is_object_name_for_class(class: ObjectClass, name: &str) -> bool {
@@ -130,7 +130,7 @@ pub(crate) fn is_object_name_for_class(class: ObjectClass, name: &str) -> bool {
 /// the filesystem ABI remains the path shape and stable type strings.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AbiPathKind<'a> {
-    /// Path does not match any stable v1 ABI shape.
+    /// Path does not match any stable ABI shape.
     Unknown,
     /// `model/<provider>`.
     ModelDir { provider: &'a str },
@@ -320,7 +320,14 @@ impl<'a> AbiPathKind<'a> {
         matches!(
             self,
             Self::ObjectControl {
-                class: ObjectClass::Model | ObjectClass::Agent | ObjectClass::Tool,
+                class: ObjectClass::Model,
+                file,
+                ..
+            } if file != "limit"
+        ) || matches!(
+            self,
+            Self::ObjectControl {
+                class: ObjectClass::Agent | ObjectClass::Tool,
                 ..
             } | Self::SharedToolControl { .. }
         )
@@ -380,6 +387,7 @@ mod tests {
     #[test]
     fn writable_control_path_classification() {
         assert!(parse_abi_path("model/debug/echo.d/cap").is_writable_control_path());
+        assert!(!parse_abi_path("model/debug/echo.d/limit").is_writable_control_path());
         assert!(parse_abi_path("agent/coder.d/cwd").is_writable_control_path());
         assert!(parse_abi_path("tool/fs.read.d/schema").is_writable_control_path());
         assert!(parse_abi_path("shared/team/tool/repo.d/schema").is_writable_control_path());

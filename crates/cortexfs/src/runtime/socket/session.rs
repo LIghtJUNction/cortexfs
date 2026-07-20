@@ -1,13 +1,12 @@
 use super::*;
 
-use crate::support::plain::read_small_text_file as socket_runtime_read_plain_text_file;
-
 pub(crate) fn handle_socket_send(
     session_root: &Path,
     default_cwd: &str,
     model: Option<&str>,
     request: &SocketRequest,
-) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
+    preparation: Option<&OwnedSessionPreparation>,
+) -> Result<SocketSendOutcome<SocketRuntimeResponse>, SocketRuntimeError> {
     let &SocketRequest::Send {
         ref id,
         ref session,
@@ -28,13 +27,14 @@ pub(crate) fn handle_socket_send(
                 DurableSessionLayoutError::InvalidCwd,
             ));
         }
-        return Ok(SocketRuntimeResponse::new(vec![socket_start_frame(
-            id, model,
-        )]));
+        return Ok(SocketSendOutcome::Recorded(SocketRuntimeResponse::new(
+            vec![socket_start_frame(id, model)],
+        )));
     }
 
-    ensure_durable_session_layout(session_root, session, effective_cwd, model, scope)
-        .map_err(SocketRuntimeError::SessionLayout)?;
+    let _receipts =
+        ensure_durable_session_layout(session_root, session, effective_cwd, model, scope)
+            .map_err(SocketRuntimeError::SessionLayout)?;
     let durable_request = SocketRequest::Send {
         id: id.to_owned(),
         session: session.to_owned(),
@@ -43,9 +43,26 @@ pub(crate) fn handle_socket_send(
         workspace: None,
         input: input.to_owned(),
     };
-    let record = record_indexed_socket_send_to_session(session_root, &durable_request)
+    let outcome = preparation
+        .map_or_else(
+            || record_indexed_socket_send_to_session(session_root, &durable_request),
+            |preparation| {
+                record_prepared_indexed_socket_send_to_session(
+                    session_root,
+                    &durable_request,
+                    preparation,
+                )
+            },
+        )
         .map_err(SocketRuntimeError::IndexedRecord)?;
-    Ok(SocketRuntimeResponse::new(record.events().to_vec()))
+    Ok(match outcome {
+        SocketSendOutcome::Recorded(record) => {
+            SocketSendOutcome::Recorded(SocketRuntimeResponse::new(record.events().to_vec()))
+        }
+        SocketSendOutcome::Replayed(record) => {
+            SocketSendOutcome::Replayed(SocketRuntimeResponse::new(record.events().to_vec()))
+        }
+    })
 }
 
 pub(crate) fn handle_socket_resume(
@@ -56,8 +73,9 @@ pub(crate) fn handle_socket_resume(
     if !is_object_name(session) {
         return Err(SocketRuntimeError::InvalidSessionName);
     }
-    let events = socket_runtime_read_plain_text_file(
-        &session_root.join(session).join("events.jsonl"),
+    let events = columnar::read_text(
+        &session_root.join(session),
+        columnar::Stream::Events,
         MAX_SOCKET_RUNTIME_EVENTS_BYTES,
     )
     .map_err(|_error| SocketRuntimeError::CannotReadEvents)?;
@@ -72,10 +90,7 @@ pub(crate) fn handle_socket_cancel(
 ) -> Result<SocketRuntimeResponse, SocketRuntimeError> {
     let session = current_or_default_session_name(session_root)?;
     let session_dir = session_root.join(session);
-    let request = SocketRequest::Cancel {
-        id: run_id.to_owned(),
-    };
-    let record = record_socket_request_to_session(&session_dir, &request)
+    let record = record_socket_cancel_to_session(&session_dir, run_id)
         .map_err(SocketRuntimeError::Record)?;
     Ok(SocketRuntimeResponse::new(record.events().to_vec()))
 }
@@ -109,7 +124,7 @@ pub(crate) fn current_or_default_session_name(
     session_root: &Path,
 ) -> Result<String, SocketRuntimeError> {
     let current_path = session_root.join("index").join("current");
-    match socket_runtime_read_plain_text_file(&current_path, MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES) {
+    match support::plain::read_small_text_file(&current_path, MAX_SOCKET_RUNTIME_SMALL_FILE_BYTES) {
         Ok(value) => {
             let session = value.trim();
             if is_object_name(session) {

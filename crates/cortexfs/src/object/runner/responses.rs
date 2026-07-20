@@ -26,27 +26,15 @@ pub(crate) fn parse_openai_chat_content(output: &[u8]) -> Result<String, String>
 }
 pub(crate) fn openai_chat_tool_call_content(value: &Value) -> Option<String> {
     let function = value.get("function")?;
-    let name = function.get("name").and_then(Value::as_str)?;
-    if !is_object_name(name) {
-        return None;
-    }
     let id = value
         .get("id")
         .and_then(Value::as_str)
         .filter(|id| is_object_name(id))
         .unwrap_or("call-1");
-    let arguments = function.get("arguments")?;
-    let args = openai_chat_tool_call_args(arguments)?;
-    Some(
-        json!({
-            "type": "tool_call",
-            "id": id,
-            "name": name,
-            "arguments": {
-                "args": args
-            }
-        })
-        .to_string(),
+    canonical_tool_call(
+        function.get("name")?.as_str()?,
+        id,
+        function.get("arguments")?,
     )
 }
 pub(crate) fn openai_chat_tool_call_args(arguments: &Value) -> Option<Vec<String>> {
@@ -77,23 +65,19 @@ pub(crate) fn parse_openai_response_content(output: &[u8]) -> Result<String, Str
     {
         return Ok(tool_call);
     }
-    let mut content = String::new();
-    if let Some(items) = value.get("output").and_then(Value::as_array) {
-        for item in items {
-            let Some(parts) = item.get("content").and_then(Value::as_array) else {
-                continue;
-            };
-            for part in parts {
-                if matches!(
-                    part.get("type").and_then(Value::as_str),
-                    Some("output_text" | "text")
-                ) && let Some(text) = part.get("text").and_then(Value::as_str)
-                {
-                    content.push_str(text);
-                }
-            }
-        }
-    }
+    let content = text_parts(
+        value
+            .get("output")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|item| {
+                item.get("content")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+            }),
+    );
     if content.is_empty() {
         Err("provider response missing content".to_owned())
     } else {
@@ -104,50 +88,47 @@ pub(crate) fn openai_response_tool_call_content(value: &Value) -> Option<String>
     if value.get("type").and_then(Value::as_str) != Some("function_call") {
         return None;
     }
-    let name = value.get("name").and_then(Value::as_str)?;
-    if !is_object_name(name) {
-        return None;
-    }
     let id = value
         .get("call_id")
         .or_else(|| value.get("id"))
         .and_then(Value::as_str)
         .filter(|id| is_object_name(id))
         .unwrap_or("call-1");
-    let arguments = value.get("arguments")?;
+    canonical_tool_call(value.get("name")?.as_str()?, id, value.get("arguments")?)
+}
+fn canonical_tool_call(name: &str, id: &str, arguments: &Value) -> Option<String> {
+    if !provider_function_name_is_compatible(name) {
+        return None;
+    }
     let args = openai_chat_tool_call_args(arguments)?;
-    Some(
-        json!({
-            "type": "tool_call",
-            "id": id,
-            "name": name,
-            "arguments": {
-                "args": args
-            }
-        })
-        .to_string(),
-    )
+    Some(json!({"type":"tool_call","id":id,"name":name,"arguments":{"args":args}}).to_string())
 }
 pub(crate) fn parse_anthropic_message_content(output: &[u8]) -> Result<String, String> {
     let value = serde_json::from_slice::<Value>(output)
         .map_err(|error| format!("invalid provider json: {error}"))?;
-    let parts = value
-        .get("content")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "provider response missing content".to_owned())?;
-    let mut output = String::new();
-    for part in parts {
-        if part.get("type").and_then(Value::as_str) == Some("text")
-            && let Some(text) = part.get("text").and_then(Value::as_str)
-        {
-            output.push_str(text);
-        }
-    }
+    let output = text_parts(
+        value
+            .get("content")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "provider response missing content".to_owned())?
+            .iter(),
+    );
     if output.is_empty() {
         Err("provider response missing text content".to_owned())
     } else {
         Ok(output)
     }
+}
+fn text_parts<'a>(parts: impl Iterator<Item = &'a Value>) -> String {
+    parts
+        .filter(|part| {
+            matches!(
+                part.get("type").and_then(Value::as_str),
+                Some("output_text" | "text")
+            )
+        })
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect()
 }
 pub(crate) fn parse_provider_usage(output: &[u8]) -> Result<Option<TokenUsage>, String> {
     let value = serde_json::from_slice::<Value>(output)
@@ -155,11 +136,6 @@ pub(crate) fn parse_provider_usage(output: &[u8]) -> Result<Option<TokenUsage>, 
     Ok(token_usage_from_value(&value))
 }
 pub(crate) fn token_usage_from_value(value: &Value) -> Option<TokenUsage> {
-    usage_value_candidates(value)
-        .into_iter()
-        .find_map(token_usage_from_usage_value)
-}
-pub(crate) fn usage_value_candidates(value: &Value) -> Vec<&Value> {
     [
         value.get("usage"),
         value.pointer("/response/usage"),
@@ -167,76 +143,94 @@ pub(crate) fn usage_value_candidates(value: &Value) -> Vec<&Value> {
     ]
     .into_iter()
     .flatten()
-    .collect()
-}
-pub(crate) fn token_usage_from_usage_value(value: &Value) -> Option<TokenUsage> {
-    let input_tokens = value
-        .get("input_tokens")
-        .or_else(|| value.get("prompt_tokens"))
-        .and_then(Value::as_u64)?;
-    let output_tokens = value
-        .get("output_tokens")
-        .or_else(|| value.get("completion_tokens"))
-        .and_then(Value::as_u64)?;
-    Some(TokenUsage {
-        input_tokens,
-        output_tokens,
+    .find_map(|value| {
+        Some(TokenUsage {
+            input_tokens: value
+                .get("input_tokens")
+                .or_else(|| value.get("prompt_tokens"))?
+                .as_u64()?,
+            output_tokens: value
+                .get("output_tokens")
+                .or_else(|| value.get("completion_tokens"))?
+                .as_u64()?,
+        })
     })
 }
-macro_rules! provider_target_fn {
-    ($name:ident, $path:literal) => {
-        pub(crate) fn $name(transport: &ResolvedTransport) -> CurlJsonTarget {
-            let (base_url, unix_socket) = match *transport {
-                ResolvedTransport::Direct { ref base_url }
-                | ResolvedTransport::Http { ref base_url } => (base_url, None),
-                ResolvedTransport::Unix {
-                    ref base_url,
-                    ref socket_path,
-                } => (base_url, Some(socket_path.clone())),
-            };
-            let base = base_url.trim().trim_end_matches('/');
-            let url = if base.rsplit('/').next() == Some("v1") {
-                format!("{base}/{}", $path)
-            } else {
-                format!("{base}/v1/{}", $path)
-            };
-            CurlJsonTarget { url, unix_socket }
+pub(crate) fn provider_target(transport: &ResolvedTransport, path: &str) -> CurlJsonTarget {
+    let (base_url, unix_socket) = match *transport {
+        ResolvedTransport::Direct { ref base_url } | ResolvedTransport::Http { ref base_url } => {
+            (base_url, None)
         }
+        ResolvedTransport::Unix {
+            ref base_url,
+            ref socket_path,
+        } => (base_url, Some(socket_path.clone())),
     };
+    let base = crate::provider::effective_base_url(base_url);
+    CurlJsonTarget {
+        url: format!("{base}/{path}"),
+        unix_socket,
+    }
 }
-provider_target_fn!(chat_completions_target, "chat/completions");
-provider_target_fn!(responses_target, "responses");
-provider_target_fn!(anthropic_messages_target, "messages");
+pub(crate) fn openai_request_target(
+    transport: &ResolvedTransport,
+    credential: Option<&ProviderCredential>,
+    responses: bool,
+    run: &str,
+) -> Result<(CurlJsonTarget, Vec<String>), String> {
+    let codex = matches!(credential, Some(ProviderCredential::Codex { .. }));
+    if codex && !responses {
+        return Err("Codex OAuth only supports openai.responses".to_owned());
+    }
+    let target = if codex {
+        let (url, unix_socket) = match *transport {
+            ResolvedTransport::Direct { .. } => (
+                "https://chatgpt.com/backend-api/codex/responses".to_owned(),
+                None,
+            ),
+            ResolvedTransport::Http { ref base_url } => (
+                format!("{}/responses", base_url.trim_end_matches('/')),
+                None,
+            ),
+            ResolvedTransport::Unix {
+                ref base_url,
+                ref socket_path,
+            } => (
+                format!("{}/responses", base_url.trim_end_matches('/')),
+                Some(socket_path.clone()),
+            ),
+        };
+        CurlJsonTarget { url, unix_socket }
+    } else if responses {
+        provider_target(transport, "responses")
+    } else {
+        provider_target(transport, "chat/completions")
+    };
+    let mut headers = credential.map_or_else(Vec::new, |credential| {
+        vec![format!("Authorization: Bearer {}", credential.secret())]
+    });
+    if let Some(account_id) = credential.and_then(ProviderCredential::codex_account) {
+        if [run, account_id]
+            .into_iter()
+            .any(|value| value.is_empty() || value.bytes().any(|byte| byte.is_ascii_control()))
+        {
+            return Err("invalid Codex metadata".to_owned());
+        }
+        headers.push(format!("ChatGPT-Account-Id: {account_id}"));
+        headers.extend([
+            "originator: ctx".to_owned(),
+            format!("User-Agent: cortexfs/{}", env!("CARGO_PKG_VERSION")),
+            format!("session-id: {run}"),
+        ]);
+    }
+    Ok((target, headers))
+}
 pub(crate) fn anthropic_headers(credential: &ProviderCredential) -> Vec<String> {
     let auth = match *credential {
-        ProviderCredential::Bearer(ref token) => format!("Authorization: Bearer {token}"),
+        ProviderCredential::Bearer(ref token) | ProviderCredential::Codex { ref token, .. } => {
+            format!("Authorization: Bearer {token}")
+        }
         ProviderCredential::AnthropicApiKey(ref key) => format!("x-api-key: {key}"),
     };
     vec![auth, "anthropic-version: 2023-06-01".to_owned()]
-}
-#[cfg(test)]
-mod responses_tests {
-    use super::*;
-    #[test]
-    fn responses_function_call_becomes_canonical_tool_call() {
-        let output = json!({
-            "output": [{
-                "type": "function_call",
-                "call_id": "call_123",
-                "name": "tsh",
-                "arguments": "{\"args\":[\"tools\"]}"
-            }]
-        })
-        .to_string();
-        let frame = parse_openai_response_content(output.as_bytes());
-        assert!(frame.is_ok());
-        let value = frame
-            .ok()
-            .and_then(|frame| serde_json::from_str::<Value>(&frame).ok())
-            .unwrap_or_default();
-        assert_eq!(value.get("type"), Some(&json!("tool_call")));
-        assert_eq!(value.get("id"), Some(&json!("call_123")));
-        assert_eq!(value.get("name"), Some(&json!("tsh")));
-        assert_eq!(value.pointer("/arguments/args/0"), Some(&json!("tools")));
-    }
 }

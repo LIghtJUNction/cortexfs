@@ -1,6 +1,6 @@
 use crate::*;
 
-/// v1 child lifecycle value.
+/// Stable child lifecycle value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChildLifecycle {
     /// Parent-owned durable child. The parent owns cancellation and history.
@@ -12,7 +12,12 @@ pub enum ChildLifecycle {
 impl ChildLifecycle {
     /// Parses `agent/<child>.d/life`.
     pub fn parse(value: &str) -> Result<Self, ChildAgentDenial> {
-        match value.trim() {
+        Self::parse_exact(value.trim())
+    }
+
+    /// Parses an exact wire or tool lifecycle literal without trimming.
+    pub(crate) fn parse_exact(value: &str) -> Result<Self, ChildAgentDenial> {
+        match value {
             "owned" => Ok(Self::Owned),
             "temp" => Ok(Self::Temp),
             _ => Err(ChildAgentDenial::UnsupportedLifecycle),
@@ -27,23 +32,27 @@ pub struct ChildAgentControls<'a> {
     pub(crate) subject: &'a str,
     pub(crate) policy: &'a PolicyV0,
     pub(crate) mounts: &'a MountTable,
+    pub(crate) tool_path: Option<&'a ToolPath>,
 }
 
 impl<'a> ChildAgentControls<'a> {
     /// Creates child control values from `uid/gid/groups`, `label`, `policy`,
-    /// and `mount`.
+    /// `mount`, and an optional explicit tool-path attenuation. `None` keeps
+    /// the parent's canonical path unchanged.
     #[must_use]
     pub const fn new(
         identity: &'a AgentUnixIdentity,
         subject: &'a str,
         policy: &'a PolicyV0,
         mounts: &'a MountTable,
+        tool_path: Option<&'a ToolPath>,
     ) -> Self {
         Self {
             identity,
             subject,
             policy,
             mounts,
+            tool_path,
         }
     }
 }
@@ -83,6 +92,7 @@ pub struct ChildAgentAuthority<'a> {
     pub(crate) subject: &'a str,
     pub(crate) effective_policy: &'a PolicyV0,
     pub(crate) visible_mounts: &'a MountTable,
+    pub(crate) tool_path: &'a ToolPath,
 }
 
 impl<'a> ChildAgentAuthority<'a> {
@@ -94,6 +104,7 @@ impl<'a> ChildAgentAuthority<'a> {
         subject: &'a str,
         effective_policy: &'a PolicyV0,
         visible_mounts: &'a MountTable,
+        tool_path: &'a ToolPath,
     ) -> Self {
         Self {
             parent_agent,
@@ -101,6 +112,7 @@ impl<'a> ChildAgentAuthority<'a> {
             subject,
             effective_policy,
             visible_mounts,
+            tool_path,
         }
     }
 }
@@ -118,7 +130,7 @@ pub enum ChildAgentDenial {
     ParentMismatch,
     /// Parent reference syntax is invalid.
     InvalidParentRef,
-    /// Child lifecycle is not a supported v1 value.
+    /// Child lifecycle is not a supported value.
     UnsupportedLifecycle,
     /// Child uid or gid differs from the parent without supervisor authority.
     IdentityExpansion,
@@ -128,14 +140,16 @@ pub enum ChildAgentDenial {
     PolicyExpansion,
     /// Child mount table exposes paths or permissions outside the parent view.
     MountExpansion,
+    /// Child tool path adds, duplicates, or reorders parent search tiers.
+    ToolPathExpansion,
 }
 
 /// Runtime-owned child cancellation failure.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OwnedChildCancellationError {
-    /// Parent agent name is not a valid v1 object name.
+    /// Parent agent name is not a valid object name.
     InvalidParentName,
-    /// Child agent name is not a valid v1 object name.
+    /// Child agent name is not a valid object name.
     InvalidChildName,
     /// The child session directory is missing durable history files.
     MissingChildHistory,
@@ -206,6 +220,22 @@ pub enum ChildContextRecordError {
     MissingParentSession,
     /// Child coordination files could not be written.
     CannotRecord,
+}
+
+/// Receipt for one exclusively published parent-side child handoff.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChildHandoffReceipt {
+    pub(crate) path: PathBuf,
+    pub(crate) dev: u64,
+    pub(crate) ino: u64,
+}
+
+impl ChildHandoffReceipt {
+    /// Returns the published child channel directory.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 impl ChildContextRecordError {

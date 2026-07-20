@@ -1,11 +1,13 @@
 [Unit]
 Description=CortexFS agent runtime for %i
 Documentation=file:/usr/share/doc/cortexfs-git/README.md
-Requires=cortexfs.service
+BindsTo=cortexfs.service
+PartOf=cortexfs.service
 After=cortexfs.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 EnvironmentFile=-/etc/cortexfs/*.env
-ExecStart=/usr/bin/cortexfs-agent-runtime --source /var/lib/cortexfs/storage/v1-root --agent %i
+ExecStart=/usr/bin/cortexfs-agent-runtime --source /var/lib/cortexfs/storage/current --agent %i
 NoNewPrivileges=yes

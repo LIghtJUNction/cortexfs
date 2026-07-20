@@ -1,6 +1,6 @@
 # Tool, Shared, Policy, and Logs ABI
 
-This file continues [agent-tool-security.md](agent-tool-security.md). It keeps
+This file continues [agent-tool-security.md](./agent-tool-security). It keeps
 the tool ABI, MCP projection rules, shared-space rules, policy v0, and log
 placement separate from agent identity and mount setup.
 
@@ -17,6 +17,9 @@ placement separate from agent identity and mount setup.
     policy
     status
     log
+    hooks/
+      pre.d/
+      post.d/
   fs.write
   fs.write.d/
     name
@@ -26,6 +29,9 @@ placement separate from agent identity and mount setup.
     policy
     status
     log
+    hooks/
+      pre.d/
+      post.d/
   shell.exec
   shell.exec.d/
     name
@@ -35,6 +41,9 @@ placement separate from agent identity and mount setup.
     policy
     status
     log
+    hooks/
+      pre.d/
+      post.d/
 ```
 
 MCP servers are tool sources, not CortexFS root objects. Do not expose:
@@ -44,15 +53,38 @@ MCP servers are tool sources, not CortexFS root objects. Do not expose:
 /ctx/mcp/figma
 ```
 
-After a real MCP adapter is configured, expose its capabilities as ordinary
-tools:
+`ctxmcp` projects an explicitly selected external stdio server as ordinary
+tools. Projection writes v2 manifest candidates only; it does not install,
+grant policy, or write `/ctx`:
+
+`ctxmcp` advertises stable MCP `2025-11-25` and accepts only the negotiated
+stable versions `2025-11-25`, `2025-06-18`, `2025-03-26`, and `2024-11-05`.
+Draft, unknown, and future versions are rejected.
 
 ```text
-/ctx/tool/mcp.github.search_issues
-/ctx/tool/mcp.github.create_issue
-/ctx/tool/mcp.figma.get_file
-/ctx/tool/mcp.chrome.open
+/ctx/tool/github.search_issues
+/ctx/tool/github.create_issue
+/ctx/tool/figma.get_file
+/ctx/tool/chrome.open
 ```
+
+The projected name is exactly `<server>.<remote_tool>` and must fit the normal
+64-byte object-name grammar. There is no implicit `mcp.` prefix or registry.
+The optional stable `mcp` control is a strict stdio locator containing
+`transport`, an absolute visible external `config` path, `server`, and `tool`.
+Projection never copies the external configuration or its secrets.
+
+```bash
+ctxmcp list --config "$HOME/.config/example/mcp.json" --server github
+ctxmcp project --config "$HOME/.config/example/mcp.json" \
+  --runtime-config /workspace/.mcp.json --server github --out ./mcp-manifests
+ctx object check ./mcp-manifests/github.search_issues.manifest.json
+ctx object install --source /var/lib/cortexfs/storage/current \
+  ./mcp-manifests/github.search_issues.manifest.json --tier system
+```
+
+Installation remains the existing explicit `ctx object install` lifecycle and
+does not authorize any agent.
 
 MCP-backed capabilities may be projected as ordinary tools, but they are not
 default built-ins. CortexFS does not define where MCP servers are configured.
@@ -62,16 +94,16 @@ visible inside the agent view.
 Projected tool control files remain the ordinary tool ABI:
 
 ```text
-/ctx/tool/mcp.github.search_issues.d/schema
-/ctx/tool/mcp.github.search_issues.d/policy
-/ctx/tool/mcp.github.search_issues.d/status
-/ctx/tool/mcp.github.search_issues.d/log
+/ctx/tool/github.search_issues.d/schema
+/ctx/tool/github.search_issues.d/policy
+/ctx/tool/github.search_issues.d/status
+/ctx/tool/github.search_issues.d/log
 ```
 
 An implementation may expose an optional diagnostic origin file:
 
 ```text
-/ctx/tool/mcp.github.search_issues.d/origin
+/ctx/tool/github.search_issues.d/origin
 ```
 
 `origin` is not stable ABI. Strict clients must not depend on it. MCP is only
@@ -103,6 +135,16 @@ requested child groups are a subset of parent groups
 requested child name is valid
 ```
 
+Authorization is explicit and child-name-specific; the reference agents do
+not receive it by default. A test or deployment policy for child `review-1`
+uses both grants:
+
+```text
+allow parent_t tool:agent.create execute
+allow parent_t agent:review-1 create
+allow parent_t agent:review-1 start
+```
+
 ## Agent Terminal Tools
 
 Agents should get one terminal capability: `tsh`. A runtime launches it inside
@@ -131,10 +173,11 @@ The terminal CLI mode should behave like a normal command line program: argv is
 preserved, stdin/stdout/stderr are inherited, and output is plain command
 output. A tool may decide that empty argv is invalid, but `tsh` must not reject
 empty argv for ordinary visible tools before the tool runs. The native agent
-mode may load the same tool into memory and call it through the SDK ABI, using
-structured JSON input and JSONL tool frames. `load` and `pin` affect the native
-context/cache; they must not force terminal CLI commands to emit structured
-frames.
+mode uses structured JSON input and JSONL tool frames. Executable plugins run
+through the same authorized object path as other tools. The Tool SDK defines a
+dynamic-library ABI, but the current core does not load it; `load` and `pin`
+currently affect metadata context/cache and must not force terminal CLI
+commands to emit structured frames.
 
 Executing a tool through `tsh` requires an agent terminal context so CortexFS
 can evaluate the agent identity, mounts, policy, and `CTX_PATH` together. A
@@ -205,7 +248,7 @@ Example request:
 {
   "name": "reviewer",
   "label": "reviewer_t",
-  "model": ["openai/gpt-4o"],
+  "model": ["openai/gpt-5.6"],
   "tools": ["fs.read"],
   "shared": {
     "project-a": ["read"]
@@ -262,10 +305,10 @@ window_percent=1
 ```
 
 `max_loaded_tools` limits unpinned tool metadata entries loaded into the `tsh`
-context. `cache_capacity` limits unpinned dynamic tool artifacts kept resident
-in memory by W-TinyLFU. `window_percent` configures the W-TinyLFU admission
-window. Pinned tools are excluded from both automatic context unload and dynamic
-cache eviction.
+context. `cache_capacity` limits unpinned tool-path cache entries tracked by
+W-TinyLFU. `window_percent` configures the W-TinyLFU admission window. Pinned
+tools are excluded from both automatic context unload and path-cache eviction.
+These settings do not imply that core loads SDK dynamic libraries.
 
 The durable configuration should normally be updated through the visible tool:
 
@@ -302,8 +345,8 @@ both constrain the final agent-visible tool set.
 MCP-originated tools use the same policy object class:
 
 ```text
-allow coder_t tool:mcp.github.search_issues execute
-allow coder_t tool:mcp.figma.get_file execute
+allow coder_t tool:github.search_issues execute
+allow coder_t tool:figma.get_file execute
 ```
 
 Tool lookup is strictly `CTX_PATH`:
@@ -338,6 +381,45 @@ policy v0
 Do not design a collaboration DSL here. Higher-level agents can create ordinary
 files under `shared/<project>`.
 
+### Shared queue file protocol
+
+A project queue is file-native state, not a daemon or workflow engine:
+
+```text
+queue/
+  inbox/
+  pending/
+  lease/
+  claimed/
+  done/
+  failed/
+```
+
+For a request name `J` ending in `*.req.json`, the durable states are:
+
+```text
+pending/J
+claimed/J/J + lease/J/worker
+done/J + done/J.result
+failed/J + failed/J.result
+```
+
+Rules:
+
+```text
+publish   write a sibling temporary file, sync it, then atomically rename it to pending/J
+claim     mkdir claimed/J is the exclusive arbitration point; the winner renames pending/J to claimed/J/J
+lease     sync the claim move before creating and syncing lease/J/worker; execution starts only after both are durable
+finish    sync a sibling temporary result, atomically rename it to J.result without replacement, then rename the request beside it
+recover   an abandoned claim may return to pending only when claim and lease evidence both exist and no pending or terminal entry conflicts
+conflict  never overwrite pending, claimed, lease, result, or terminal request evidence; incomplete pairs require explicit reconciliation
+```
+
+After each rename or directory removal, sync every changed parent directory.
+Invalid names, symlinks, and non-regular request or lease files are not queue
+jobs. No background watcher, polling service, or additional root path is part
+of this protocol.
+
 `shared/cortexfs-docs` is reserved for the system-maintained Markdown manual
 bundle:
 
@@ -353,6 +435,13 @@ bundle:
     ctx.session.md
     ctx.provider.md
 ```
+
+`/ctx/shared/cortexfs-docs/man/*.md` are documentation mirrors and should stay
+aligned with `docs/spec/*.md` so live manuals do not keep stale references.
+When an installed `/ctx/shared/cortexfs-docs` tree is stale, run
+`ctx bootstrap [SOURCE]` to rematerialize from the matching release source tree.
+If stale content remains, the installed `ctx` binary is still shipping an older
+embedded manual bundle and must be updated before rerunning bootstrap.
 
 `ctx man TOPIC` prints these files directly when present and falls back to the
 compiled-in copy when they are absent. Topic names such as `agent` and `model`
@@ -401,9 +490,10 @@ Examples:
 ```text
 allow coder_t tool:fs.read execute
 allow coder_t tool:shell.exec execute
-allow coder_t model:openai/gpt-4o use
+allow coder_t model:openai/gpt-5.6 use
 allow coder_t shared:project-a read
 allow coder_t shared:project-a write
+allow coder_t network:default connect
 allow coder_t agent:reviewer create
 allow coder_t agent:reviewer start
 ```
@@ -423,7 +513,7 @@ unknown permission returns EINVAL
 missing object returns ENOENT or EACCES
 ```
 
-Fixed v1 permission set:
+Fixed permission set:
 
 ```text
 tool:    execute
@@ -435,7 +525,7 @@ agent:   create start stop read write
 network: connect
 ```
 
-Agent policy uses concrete names in v1:
+Agent policy uses concrete names:
 
 ```text
 allow coder_t agent:reviewer create
@@ -448,13 +538,13 @@ Do not add glob, inheritance, variables, or templates:
 allow coder_t agent:* create
 ```
 
-The only v1 network object name is `default`:
+The only stable network object name is `default`:
 
 ```text
 allow coder_t network:default connect
 ```
 
-`network:default connect` is a coarse policy capability. It must not by itself remove sandbox network namespace isolation or grant unrestricted host-network egress; runtimes that need provider egress must route it through a constrained implementation.
+Without `allow coder_t network:default connect`, there is no network access.
 
 Permission check order:
 

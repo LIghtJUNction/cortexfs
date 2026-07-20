@@ -1,10 +1,29 @@
+const REPLACED_WORKER_PLAN: &str = r#"{
+  "version": 1,
+  "mode": "dag-react",
+  "nodes": [
+    {"id": "local", "kind": "dag", "agent": "coder"}
+  ]
+}
+"#;
+const WORKER_PLAN_ABI_PATH: &str = "home/1000/agent/coder/session/default/context/plan.json";
+
 fn assert_worker_claimed_active(root: &Path, child: &Path) {
     assert_eq!(schedule_claim_worker(root), Ok(()));
     assert!(matches!(
         fs::read_to_string(child.join("status")).as_deref(),
         Ok("active\n")
     ));
+    let active_inode = fs::metadata(child.join("status"))
+        .map(|metadata| metadata.ino())
+        .unwrap_or_default();
     assert_eq!(schedule_claim_worker(root), Ok(()));
+    assert_eq!(
+        fs::metadata(child.join("status"))
+            .map(|metadata| metadata.ino())
+            .unwrap_or_default(),
+        active_inode
+    );
     let active_wait = agent_wait(root, "coder", Some("default"), "work-123");
     assert!(matches!(
         active_wait,
@@ -48,7 +67,7 @@ fn schedule_claim_worker(root: &Path) -> Result<(), CliError> {
     schedule_command(
         root,
         &ScheduleArgs::Claim {
-            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+            path: WORKER_PLAN_ABI_PATH.to_owned(),
             child: "work-123".to_owned(),
         },
     )
@@ -58,10 +77,64 @@ fn schedule_status_worker(root: &Path) -> Result<(), CliError> {
     schedule_command(
         root,
         &ScheduleArgs::Status {
-            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+            path: WORKER_PLAN_ABI_PATH.to_owned(),
             done: Vec::new(),
         },
     )
+}
+
+fn schedule_result_worker(
+    root: &Path,
+    status: ChildContextStatus,
+    result: &str,
+    refs_jsonl: &str,
+) -> Result<(), CliError> {
+    schedule_command(
+        root,
+        &ScheduleArgs::Result {
+            path: WORKER_PLAN_ABI_PATH.to_owned(),
+            child: "work-123".to_owned(),
+            status,
+            result: result.to_owned(),
+            refs_jsonl: refs_jsonl.to_owned(),
+        },
+    )
+}
+
+fn worker_plan_path(child: &Path) -> PathBuf {
+    child
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(child)
+        .join("plan.json")
+}
+
+fn child_terminal_snapshot(child: &Path) -> [(String, u64); 3] {
+    ["status", "result.md", "refs.jsonl"].map(|file| {
+        let path = child.join(file);
+        (
+            fs::read_to_string(&path).unwrap_or_default(),
+            fs::metadata(path)
+                .map(|metadata| metadata.ino())
+                .unwrap_or_default(),
+        )
+    })
+}
+
+fn replace_file_for_schedule_race(path: &Path, value: &str) -> Result<(), CliError> {
+    let temporary = path.with_file_name(".plan.race.json");
+    write_text_file(&temporary, value);
+    fs::rename(&temporary, path).map_err(|error| {
+        CliError::unavailable(format!("cannot replace schedule race fixture: {error}"))
+    })
+}
+
+fn replace_handoff_for_schedule_race(path: &Path, value: &str) -> Result<(), CliError> {
+    let temporary = path.with_file_name(".handoff.race.md");
+    write_text_file(&temporary, value);
+    fs::rename(&temporary, path).map_err(|error| {
+        CliError::unavailable(format!("cannot replace handoff race fixture: {error}"))
+    })
 }
 
 fn write_worker_schedule_plan(session: &Path) {
@@ -88,15 +161,13 @@ fn write_worker_schedule_plan(session: &Path) {
 }
 
 fn create_pending_worker_handoff(root: &Path, test_name: &str) -> PathBuf {
-    let ensured = ensure_v1_reference_tree(root);
+    let ensured = ensure_reference_tree(root);
     assert!(ensured.is_ok(), "{ensured:?}");
     enable_dynamic_worker_fixture(root);
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
     let session = fixture_path(
         root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        &["home", "1000", "agent", "coder", "session", "default"],
     );
     create_complete_session_layout(&session);
     write_worker_schedule_plan(&session);
@@ -104,7 +175,7 @@ fn create_pending_worker_handoff(root: &Path, test_name: &str) -> PathBuf {
         schedule_command(
             root,
             &ScheduleArgs::Advance {
-                path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
+                path: WORKER_PLAN_ABI_PATH.to_owned(),
                 done: Vec::new(),
             },
         )
@@ -129,31 +200,8 @@ fn assert_worker_schedule_status(root: &Path, status: &str) {
 }
 
 fn assert_schedule_status_rows(root: &Path, expected: &[&str]) -> Result<(), CliError> {
-    let schedule = load_schedule_context(
-        root,
-        "home/1000/agent/coder/session/default/context/plan.json",
-        "status",
-    )?;
+    let schedule = load_schedule_context(root, WORKER_PLAN_ABI_PATH, "status")?;
     let lines = schedule_status_lines(root, &schedule, &[])?;
     assert_eq!(lines, expected);
     Ok(())
-}
-
-fn assert_worker_wait_status(root: &Path, status: ChildContextStatus, result: &str, code: u8) {
-    let recorded = schedule_command(
-        root,
-        &ScheduleArgs::Result {
-            path: "home/1000/agent/coder/session/default/context/plan.json".to_owned(),
-            child: "work-123".to_owned(),
-            status,
-            result: result.to_owned(),
-            refs_jsonl: String::new(),
-        },
-    );
-
-    assert_eq!(recorded, Ok(()));
-    assert_eq!(
-        agent_wait(root, "coder", Some("default"), "work-123"),
-        Ok(ExitCode::from(code))
-    );
 }

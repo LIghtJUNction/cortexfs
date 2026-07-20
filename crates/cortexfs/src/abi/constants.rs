@@ -9,7 +9,7 @@ pub const CTX_ROOT: &str = "/ctx";
 /// Rust object runner used by executable object metadata files.
 pub const CORTEXFS_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
 
-/// Root entries reserved by the new Agent OS ABI.
+/// Root entries reserved by the FUSE filesystem ABI.
 pub const ROOT_ENTRIES: &[&str] = &["status", "bin", "model", "agent", "tool", "home", "shared"];
 
 /// Object classes exposed as executable files.
@@ -20,7 +20,7 @@ pub const MAX_OBJECT_NAME_LEN: usize = 64;
 
 /// Required model control files.
 pub const MODEL_CONTROL_FILES: &[&str] = &[
-    "id", "driver", "cap", "effort", "default", "fallback", "session", "status", "log",
+    "id", "driver", "cap", "effort", "default", "fallback", "limit", "session", "status", "log",
 ];
 /// Required hook directory inside every executable object's `.d/` control tree.
 pub const OBJECT_HOOK_DIR: &str = "hooks";
@@ -43,7 +43,15 @@ pub(crate) const DEBUG_ECHO_PROVIDER: &str = "debug";
 pub(crate) const DEBUG_ECHO_NAME: &str = "echo";
 pub(crate) const DEFAULT_MODEL_ALIAS: &str = "main";
 pub(crate) const HELPER_MODEL_ALIAS: &str = "helper";
+/// Canonical model aliases exposed directly below `/ctx/model`.
+pub const MODEL_ALIASES: &[&str] = &["main", "helper", "fast", "reason", "code", "vision"];
 pub const DEFAULT_WORKER_MODEL: &str = "api.lmm.best/gpt-5.3-codex-spark";
+
+/// Returns whether a name is a canonical model alias.
+#[must_use]
+pub fn is_model_alias(name: &str) -> bool {
+    MODEL_ALIASES.contains(&name)
+}
 
 /// Returns the implicit model for an agent that has no explicit `model` control file.
 #[must_use]
@@ -55,7 +63,7 @@ pub fn default_agent_model_for_name(agent_name: &str) -> &'static str {
     }
 }
 
-/// Returns whether an agent name uses the v1 worker/executor role convention.
+/// Returns whether an agent name uses the stable worker/executor role convention.
 #[must_use]
 pub fn is_worker_agent_name(agent_name: &str) -> bool {
     matches!(agent_name, "executor" | "worker") || is_dedicated_worker_agent_name(agent_name)
@@ -66,12 +74,13 @@ pub fn is_worker_agent_name(agent_name: &str) -> bool {
 pub fn is_dedicated_worker_agent_name(agent_name: &str) -> bool {
     agent_name.starts_with("executor-") || agent_name.starts_with("worker-")
 }
-pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.5";
+pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.6";
 pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto-review";
-pub(crate) const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
+/// Host directory containing system-wide provider configuration files.
+pub const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
 pub(crate) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";
 
-/// Stable semantic model capability words in the v1 ABI.
+/// Stable semantic model capability words in the ABI.
 pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
     "chat",
     "stream",
@@ -86,7 +95,7 @@ pub const STABLE_MODEL_CAPABILITIES: &[&str] = &[
     "rerank",
 ];
 
-/// Provider/API-format-private capability words forbidden in the v1 ABI.
+/// Provider/API-format-private capability words forbidden in the ABI.
 pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
     "openai_responses",
     "anthropic_messages",
@@ -96,8 +105,9 @@ pub const FORBIDDEN_MODEL_CAPABILITIES: &[&str] = &[
     "native_stateless",
 ];
 
-/// Required agent control files.
+/// Canonical agent control-file set materialized by bootstrap.
 pub const AGENT_CONTROL_FILES: &[&str] = &[
+    "abi",
     "owner",
     "uid",
     "gid",
@@ -112,12 +122,24 @@ pub const AGENT_CONTROL_FILES: &[&str] = &[
     "path",
     "mount",
     "model",
+    "window",
     "system.md",
     "prompt.template.md",
     "policy",
     "status",
     "pid",
     "log",
+    "meta.json",
+];
+
+/// Optional agent control files recognized by the stable ABI.
+///
+/// Entries may overlap [`AGENT_CONTROL_FILES`] to preserve canonical bootstrap materialization.
+pub const AGENT_OPTIONAL_CONTROL_FILES: &[&str] = &[
+    "approval",
+    "tools",
+    "system.md",
+    "prompt.template.md",
     "meta.json",
 ];
 
@@ -163,7 +185,7 @@ pub const TOOL_CONTROL_FILES: &[&str] = &[
     "log",
 ];
 
-/// Required durable files in a v1 agent session directory.
+/// Required durable files in an agent session directory.
 pub const SESSION_REQUIRED_FILES: &[&str] = &[
     "messages.jsonl",
     "events.jsonl",
@@ -207,14 +229,14 @@ pub const CHILD_RESULT_REQUIRED_DIRS: &[&str] = &["artifact"];
 pub const SHARED_QUEUE_REQUIRED_DIRS: &[&str] =
     &["inbox", "pending", "lease", "claimed", "done", "failed"];
 
-/// Maximum v1 JSONL socket request frame size.
+/// Maximum JSONL socket request frame size.
 pub const MAX_SOCKET_FRAME_BYTES: usize = 1024 * 1024;
 
-/// Maximum payload accepted by the v1 local FUSE projection for one small write.
-pub const MAX_FUSE_V1_SMALL_WRITE_BYTES: usize = 64 * 1024;
+/// Maximum payload accepted by the local FUSE projection for one small write.
+pub const MAX_FUSE_SMALL_WRITE_BYTES: usize = 64 * 1024;
 
-/// Maximum payload returned by the v1 local FUSE projection for one small read.
-pub const MAX_FUSE_V1_SMALL_READ_BYTES: u64 = 1024 * 1024;
+/// Maximum payload returned by the local FUSE projection for one small read.
+pub const MAX_FUSE_SMALL_READ_BYTES: u64 = 1024 * 1024;
 
-/// Stable inode id for the v1 `/ctx` root in a FUSE adapter.
-pub const FUSE_V1_ROOT_INODE: u64 = 1;
+/// Stable inode id for the `/ctx` root in a FUSE adapter.
+pub const FUSE_ROOT_INODE: u64 = 1;

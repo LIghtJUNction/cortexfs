@@ -1,12 +1,66 @@
+use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+use nix::fcntl::{Flock, FlockArg};
+
+#[cfg(test)]
+use std::cell::Cell;
+
 use crate::{
-    ControlLineIssue, atomic_replace_text, is_object_name,
+    ControlLineIssue, atomic_replace_text_preserving_metadata,
+    authority::helpers::atomic_create_text_with_mode_and_owner,
+    is_object_name,
     support::control::{inspect_control_line, inspect_control_lines},
-    support::plain::read_small_text_file,
+    support::plain::{open_plain_directory, read_small_text_file},
 };
 
 const MAX_SESSION_INDEX_FILE_BYTES: u64 = 64 * 1024;
+
+/// Exclusive transaction guard for a durable session index.
+#[derive(Debug)]
+pub struct SessionIndexGuard {
+    _lock: Flock<fs::File>,
+    owner: (u32, u32),
+}
+
+impl SessionIndexGuard {
+    /// Locks the stable, no-follow `session/index` directory inode.
+    pub fn exclusive(session_root: &Path) -> Result<Self, SessionIndexUpdateError> {
+        let directory = open_plain_directory(&session_root.join("index"))
+            .map_err(|_error| SessionIndexUpdateError::MissingIndex)?;
+        let metadata = directory
+            .metadata()
+            .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+        let lock = Flock::lock(directory, FlockArg::LockExclusive)
+            .map_err(|(_directory, _error)| SessionIndexUpdateError::CannotRecord)?;
+        let locked_metadata = lock
+            .metadata()
+            .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+        if (
+            locked_metadata.dev(),
+            locked_metadata.ino(),
+            locked_metadata.uid(),
+            locked_metadata.gid(),
+        ) != (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.uid(),
+            metadata.gid(),
+        ) {
+            return Err(SessionIndexUpdateError::CannotRecord);
+        }
+        Ok(Self {
+            _lock: lock,
+            owner: (metadata.uid(), metadata.gid()),
+        })
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static SESSION_INDEX_UPDATE_FAILURE: Cell<bool> = const { Cell::new(false) };
+}
 
 /// Stable session index file kind.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,6 +105,8 @@ pub enum SessionIndexUpdateError {
     InvalidIndex,
     /// Index files could not be read or atomically rewritten.
     CannotRecord,
+    /// `index/current` no longer names the caller's expected session.
+    CurrentMismatch,
 }
 
 impl SessionIndexUpdateError {
@@ -65,13 +121,14 @@ impl SessionIndexUpdateError {
             | Self::InvalidIndex => "EINVAL",
             Self::MissingSession | Self::MissingIndex => "ENOENT",
             Self::CannotRecord => "EIO",
+            Self::CurrentMismatch => "EAGAIN",
         }
     }
 }
 
 impl_issue_report!(SessionIndexReport, ControlLineIssue);
 
-/// Inspects a fixed-format v1 session index file.
+/// Inspects a fixed-format session index file.
 #[must_use]
 pub fn inspect_session_index(kind: SessionIndexKind, content: &str) -> SessionIndexReport {
     match kind {
@@ -134,6 +191,25 @@ pub fn update_session_index_with_keys(
     by_hash_key: Option<&str>,
     by_uuid_key: Option<&str>,
 ) -> Result<(), SessionIndexUpdateError> {
+    let guard = SessionIndexGuard::exclusive(session_root)?;
+    update_session_index_with_keys_locked(
+        session_root,
+        session_name,
+        by_cwd_key,
+        by_hash_key,
+        by_uuid_key,
+        guard.owner,
+    )
+}
+
+fn update_session_index_with_keys_locked(
+    session_root: &Path,
+    session_name: &str,
+    by_cwd_key: Option<&str>,
+    by_hash_key: Option<&str>,
+    by_uuid_key: Option<&str>,
+    index_owner: (u32, u32),
+) -> Result<(), SessionIndexUpdateError> {
     let update = prepare_session_index_update(
         session_root,
         session_name,
@@ -141,6 +217,11 @@ pub fn update_session_index_with_keys(
         by_hash_key,
         by_uuid_key,
     )?;
+
+    #[cfg(test)]
+    if SESSION_INDEX_UPDATE_FAILURE.with(|value| value.replace(false)) {
+        return Err(SessionIndexUpdateError::CannotRecord);
+    }
 
     let mut sessions = vec![session_name.to_owned()];
     sessions.extend(
@@ -150,17 +231,73 @@ pub fn update_session_index_with_keys(
             .filter(|existing| *existing != session_name)
             .map(str::to_owned),
     );
-    atomic_replace_text(&update.list_path, &format!("{}\n", sessions.join("\n")))
-        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
-    atomic_replace_text(&update.current_path, &format!("{session_name}\n"))
+    atomic_replace_text_preserving_metadata(
+        &update.list_path,
+        &format!("{}\n", sessions.join("\n")),
+    )
+    .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    atomic_replace_text_preserving_metadata(&update.current_path, &format!("{session_name}\n"))
         .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
 
     for path in update.secondary_paths.into_iter().flatten() {
-        atomic_replace_text(&path, &format!("{session_name}\n"))
+        replace_secondary_index(&path, session_name, index_owner)
             .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
     }
 
     Ok(())
+}
+
+/// Selects a durable session only when `index/current` still matches `expected_current`.
+pub fn compare_and_update_session_index(
+    session_root: &Path,
+    session_name: &str,
+    expected_current: &str,
+) -> Result<(), SessionIndexUpdateError> {
+    if !is_object_name(expected_current) {
+        return Err(SessionIndexUpdateError::InvalidSessionName);
+    }
+    let _guard = SessionIndexGuard::exclusive(session_root)?;
+    let update = prepare_session_index_update(session_root, session_name, None, None, None)?;
+    if !update.list.lines().any(|existing| existing == session_name) {
+        return Err(SessionIndexUpdateError::MissingSession);
+    }
+    let current_metadata = update
+        .current_path
+        .metadata()
+        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    let current = read_session_index_file(&update.current_path)
+        .map_err(|_error| SessionIndexUpdateError::CannotRecord)?;
+    if current.trim() != expected_current {
+        return Err(SessionIndexUpdateError::CurrentMismatch);
+    }
+    #[cfg(test)]
+    if SESSION_INDEX_UPDATE_FAILURE.with(|value| value.replace(false)) {
+        return Err(SessionIndexUpdateError::CannotRecord);
+    }
+    crate::authority::helpers::atomic_replace_text_preserving_metadata_if_matches(
+        &update.current_path,
+        &format!("{session_name}\n"),
+        (current_metadata.dev(), current_metadata.ino()),
+    )
+    .map_err(|_error| SessionIndexUpdateError::CurrentMismatch)
+}
+
+#[cfg(test)]
+pub(crate) fn set_session_index_update_failure(fail: bool) {
+    SESSION_INDEX_UPDATE_FAILURE.with(|value| value.set(fail));
+}
+
+fn replace_secondary_index(
+    path: &Path,
+    session_name: &str,
+    index_owner: (u32, u32),
+) -> std::io::Result<()> {
+    let content = format!("{session_name}\n");
+    if is_plain_file_path(path) {
+        atomic_replace_text_preserving_metadata(path, &content)
+    } else {
+        atomic_create_text_with_mode_and_owner(path, &content, 0o600, index_owner)
+    }
 }
 
 pub fn preflight_session_index_update(

@@ -1,21 +1,66 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
-  <title id="title">CortexFS turns AI runtimes into Unix-shaped files</title>
-  <desc id="desc">A branded CortexFS hero card showing the ctx logo, the frozen /ctx root, and an agent REPL surface.</desc>
+  <title id="title">CortexFS — Agents, as files.</title>
+  <desc id="desc">A warm paper editorial hero for CortexFS, showing three executable object classes under /ctx: model, agent, and tool. Durable sessions are stored under user agent homes.</desc>
   <defs>
-    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#181b19"/><stop offset="1" stop-color="#0f1110"/></linearGradient>
-    <radialGradient id="glow" cx="76%" cy="22%" r="58%"><stop offset="0" stop-color="#64c8a9" stop-opacity=".24"/><stop offset="1" stop-color="#64c8a9" stop-opacity="0"/></radialGradient>
-    <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse"><path d="M38 0H0V38" fill="none" stroke="#d8ff66" stroke-opacity=".075"/></pattern>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="24" stdDeviation="26" flood-color="#000" flood-opacity=".3"/></filter>
-    <style>.serif{font-family:Georgia,"Times New Roman",serif}.sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.paper{fill:#fffdfa}.muted{fill:#bfb6a8}.mint{fill:#64c8a9}.lime{fill:#d8ff66}.ink{fill:#111312}.soft{fill:#fffdfa;fill-opacity:.06;stroke:#fffdfa;stroke-opacity:.1}</style>
+    <style>
+      .serif{font-family:Georgia,"Times New Roman",serif}.sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.ink{fill:#111312}.slate{fill:#66716c}.mint{fill:#2a8f73}.paper{fill:#fffdfa}.coal-muted{fill:#fffdfa;fill-opacity:.68}.line{stroke:#ded8ca}
+    </style>
   </defs>
-  <rect width="1200" height="520" fill="#111211"/><rect width="1200" height="520" fill="url(#glow)"/><rect x="578" y="36" width="548" height="404" fill="url(#grid)" opacity=".85"/>
-  <g transform="translate(72 58)">
-    <path fill="#d8ff66" d="M38 4.7c.4-.2.8-.2 1.2 0l28.2 16.2c.4.2.6.6.6 1.1v32.5c0 .5-.2.9-.6 1.1L39.2 71.8c-.4.2-.8.2-1.2 0L9.8 55.6c-.4-.2-.6-.6-.6-1.1V22c0-.5.2-.9.6-1.1L38 4.7Z"/>
-    <path fill="#111312" d="M42.7 17.3h8.6L34.4 60.4h-8.6l16.9-43.1Z"/>
-    <path fill="#111312" fill-rule="evenodd" d="M18.2 22.8h13.5c.8 0 1.5.3 2.1 1l2.4 2.9h10.3c1.5 0 2.6 1.1 2.6 2.6v9.3c0 1.5-1.1 2.6-2.6 2.6H18.2c-1.5 0-2.6-1.1-2.6-2.6V25.4c0-1.5 1.1-2.6 2.6-2.6Zm0 27.1c0-1.3 1.1-2.5 2.5-2.5h7.9c1.3 0 2.5 1.2 2.5 2.5v7.9c0 1.3-1.2 2.5-2.5 2.5h-7.9c-1.4 0-2.5-1.2-2.5-2.5v-7.9Zm34.4 2.8a5.4 5.4 0 1 1 8.6 4.5v5.2h5.6v5.1H51.1v-5.1h5.2v-5.1a5.4 5.4 0 0 1-3.7-4.6Z" clip-rule="evenodd"/>
-    <path fill="#fffdfa" d="M21.2 50.6H28v6.8h-6.8z"/>
-    <text class="serif paper" x="96" y="47" font-size="44" font-weight="700">Cor</text><text class="serif mint" x="171" y="47" font-size="44" font-weight="700" font-style="italic">TeX</text><text class="serif paper" x="244" y="47" font-size="44" font-weight="700">fs</text>
+
+  <rect width="1200" height="520" fill="#f7f5f1"/>
+  <path d="M56 48H1144M56 472H1144" class="line" stroke-width="1"/>
+
+  <g transform="translate(72 72)">
+    <g aria-label="CortexFS">
+      <rect width="52" height="52" rx="6" fill="#fff" stroke="#ded8ca"/>
+      <path class="ink" d="M12 15h15l4 5h10v11H12V15Zm0 21h11v11H12V36Zm24 2h11v5h-3v4h-5v-4h-3v-5Z"/>
+      <path class="mint" d="M31 9h6L22 43h-6L31 9Z"/>
+      <text class="serif ink" x="68" y="38" font-size="34" font-weight="700">Cor</text>
+      <text class="serif mint" x="126" y="38" font-size="34" font-weight="700" font-style="italic">TeX</text>
+      <text class="serif ink" x="184" y="38" font-size="34" font-weight="700">fs</text>
+    </g>
+
+    <text class="sans mint" y="120" font-size="12" font-weight="900" letter-spacing="2.4">FUSE FILESYSTEM INTERFACE</text>
+    <text class="serif ink" y="193" font-size="68" font-weight="600">Agents, as files.</text>
+    <text class="sans slate" y="239" font-size="17">A small Unix ABI for durable agent runtimes.</text>
+
+    <g transform="translate(0 291)">
+      <path d="M0 0H428" class="line"/>
+      <text class="mono ink" y="32" font-size="13" font-weight="800">write request</text>
+      <text class="mono mint" x="124" y="32" font-size="13" font-weight="900">→</text>
+      <text class="mono ink" x="154" y="32" font-size="13" font-weight="800">atomic rename</text>
+      <text class="mono mint" x="285" y="32" font-size="13" font-weight="900">→</text>
+      <text class="mono ink" x="315" y="32" font-size="13" font-weight="800">read result</text>
+    </g>
   </g>
-  <g transform="translate(72 168)"><text class="sans mint" x="0" y="0" font-size="17" font-weight="900" letter-spacing="3">FILESYSTEM AS AGENT OS</text><text class="serif paper" x="0" y="72" font-size="64" font-weight="650">Agent runtime</text><text class="serif paper" x="0" y="144" font-size="64" font-weight="650">as a Unix ABI</text><text class="sans muted" x="0" y="210" font-size="23">No provider tree. No workflow DSL. Just /ctx.</text><rect x="0" y="250" width="434" height="58" rx="8" fill="#fffdfa"/><text class="mono ink" x="24" y="286" font-size="18" font-weight="900">ctx agent chat coder</text></g>
-  <g transform="translate(620 86)" filter="url(#shadow)"><rect width="424" height="332" rx="8" fill="url(#panel)" stroke="#fffdfa" stroke-opacity=".12"/><rect width="424" height="48" rx="8" fill="#101210"/><rect width="54" height="48" rx="8" fill="#d8ff66"/><text class="mono ink" x="17" y="31" font-size="14" font-weight="950">ctx</text><text class="mono paper" x="74" y="31" font-size="13" font-weight="850" fill-opacity=".86">/ctx/agent/coder</text><text class="mono paper" x="348" y="31" font-size="12" font-weight="850" fill-opacity=".5">chat</text><g transform="translate(28 72)"><text class="mono lime" x="0" y="17" font-size="15" font-weight="950">$</text><text class="mono paper" x="24" y="17" font-size="15" font-weight="900">ctx agent chat coder</text><rect class="soft" x="0" y="42" width="368" height="44" rx="6"/><text class="mono mint" x="16" y="70" font-size="13" font-weight="900">USER</text><text class="mono paper" x="86" y="70" font-size="13" font-weight="850" fill-opacity=".82">review docs/DESIGN.md</text><rect class="soft" x="0" y="96" width="368" height="44" rx="6"/><text class="mono mint" x="16" y="124" font-size="13" font-weight="900">TOOL</text><text class="mono paper" x="86" y="124" font-size="13" font-weight="850" fill-opacity=".82">tsh fs.read</text><rect x="0" y="150" width="368" height="56" rx="6" fill="#d8ff66" fill-opacity=".08" stroke="#d8ff66" stroke-opacity=".18"/><text class="mono lime" x="16" y="181" font-size="13" font-weight="900">COMMIT</text><text class="mono paper" x="96" y="181" font-size="13" font-weight="850" fill-opacity=".82">*.req.json -> outbox</text></g></g>
+
+  <g transform="translate(654 64)">
+    <rect width="474" height="392" rx="8" fill="#181b19"/>
+    <path d="M0 56H474" stroke="#fffdfa" stroke-opacity=".12"/>
+    <circle cx="28" cy="28" r="4" fill="#d8ff66"/>
+    <text class="mono paper" x="46" y="33" font-size="13" font-weight="850">/ctx</text>
+    <text class="mono coal-muted" x="390" y="33" font-size="12">mounted</text>
+
+    <g class="mono" font-size="14" font-weight="800">
+      <text class="paper" x="34" y="92">/ctx</text>
+      <text class="coal-muted" x="34" y="121">├── <tspan class="paper">status</tspan></text>
+      <text class="coal-muted" x="34" y="150">├── <tspan class="paper">bin/</tspan></text>
+      <text class="coal-muted" x="34" y="179">├── <tspan class="paper">model/</tspan></text>
+      <text class="coal-muted" x="34" y="208">├── <tspan class="paper">agent/</tspan></text>
+      <text class="coal-muted" x="34" y="237">├── <tspan class="paper">tool/</tspan></text>
+      <text class="coal-muted" x="34" y="266">├── <tspan class="paper">home/</tspan></text>
+      <text class="coal-muted" x="34" y="295">└── <tspan class="paper">shared/</tspan></text>
+    </g>
+
+    <path d="M270 91V290" stroke="#fffdfa" stroke-opacity=".12"/>
+    <text class="sans coal-muted" x="304" y="109" font-size="12" font-weight="900" letter-spacing="1.6">UNIX-NATIVE</text>
+    <text class="serif paper" x="304" y="158" font-size="26" font-weight="600">Inspect.</text>
+    <text class="serif paper" x="304" y="194" font-size="26" font-weight="600">Script.</text>
+    <text class="serif paper" x="304" y="230" font-size="26" font-weight="600">Compose.</text>
+
+    <path d="M34 320H440" stroke="#fffdfa" stroke-opacity=".12"/>
+    <text class="mono coal-muted" x="34" y="355" font-size="12">$</text>
+    <text class="mono paper" x="54" y="355" font-size="12" font-weight="800">ls /ctx/agent</text>
+    <rect x="170" y="346" width="7" height="12" fill="#d8ff66"/>
+  </g>
 </svg>

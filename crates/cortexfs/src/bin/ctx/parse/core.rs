@@ -1,5 +1,8 @@
 use crate::*;
+use cortexfs::object::install::InstallTier;
+use cortexfs::object::replace::ReplaceMode;
 
+/// CLI parsing error that exits with a specific code and message.
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct CliError {
     pub(crate) code: u8,
@@ -7,6 +10,7 @@ pub(crate) struct CliError {
 }
 
 impl CliError {
+    /// Creates an argument-usage error with exit code 2.
     pub(crate) fn usage(message: impl Into<String>) -> Self {
         Self {
             code: 2,
@@ -14,6 +18,7 @@ impl CliError {
         }
     }
 
+    /// Creates an unavailable/internal error with the historical exit code 69.
     pub(crate) fn unavailable(message: impl Into<String>) -> Self {
         Self {
             code: 69,
@@ -23,12 +28,14 @@ impl CliError {
 }
 
 #[derive(Debug)]
+/// Parsed root command context for this invocation.
 pub(crate) struct Cli {
     pub(crate) root: PathBuf,
     pub(crate) command: Command,
 }
 
 #[derive(Debug)]
+/// Top-level parsed command for `ctx`.
 pub(crate) enum Command {
     Help,
     HelpTopic(String),
@@ -43,6 +50,10 @@ pub(crate) enum Command {
         source: Option<PathBuf>,
         dry_run: bool,
         check: bool,
+    },
+    StorageUpdate {
+        storage: Option<PathBuf>,
+        prune: bool,
     },
     Mount {
         source: Option<PathBuf>,
@@ -65,6 +76,44 @@ pub(crate) enum Command {
         input: String,
     },
     Agent(AgentArgs),
+    ObjectInstall {
+        source: PathBuf,
+        manifest: PathBuf,
+        tier: InstallTier,
+    },
+    ObjectInspect {
+        source: PathBuf,
+        class: ObjectClass,
+        name: String,
+        tier: InstallTier,
+    },
+    ObjectReplace {
+        source: PathBuf,
+        manifest: PathBuf,
+        tier: InstallTier,
+        mode: ReplaceMode,
+        yes: bool,
+    },
+    ObjectUninstall {
+        source: PathBuf,
+        class: ObjectClass,
+        name: String,
+        tier: InstallTier,
+        yes: bool,
+    },
+    ObjectCheck {
+        manifest: PathBuf,
+    },
+    ObjectResidueAudit {
+        source: PathBuf,
+    },
+    ObjectResidueCleanup {
+        source: PathBuf,
+        path: PathBuf,
+        dev: u64,
+        ino: u64,
+        yes: bool,
+    },
     Provider(ProviderArgs),
     Ping {
         path: String,
@@ -99,6 +148,7 @@ pub(crate) enum Command {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Supported file-related actions under `ctx file`.
 pub(crate) enum FileCommand {
     Info,
     Type,
@@ -106,18 +156,21 @@ pub(crate) enum FileCommand {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+/// Supported `ctx ls` target.
 pub(crate) enum LsTarget {
     Root,
     Path(String),
 }
 
 #[derive(Debug)]
+/// Arguments parsed from `ctx file`.
 pub(crate) struct FileArgs {
     pub(crate) command: FileCommand,
     pub(crate) path: String,
 }
 
 #[derive(Debug, Eq, PartialEq)]
+/// Parsed schedule arguments for `ctx schedule`.
 pub(crate) enum ScheduleArgs {
     Status {
         path: String,
@@ -140,6 +193,7 @@ pub(crate) enum ScheduleArgs {
     },
 }
 
+/// Runs the parsed CLI and returns an OS exit code.
 pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
     let cli = parse(args)?;
     match cli.command {
@@ -155,6 +209,9 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             dry_run,
             check,
         } => success(bootstrap_reference_tree(source.as_deref(), dry_run, check)),
+        Command::StorageUpdate { storage, prune } => {
+            success(update_storage(storage.as_deref(), prune))
+        }
         Command::Mount { source, mountpoint } => success(mount_reference_tree(
             &cli.root,
             source.as_deref(),
@@ -173,8 +230,60 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
             agent,
             session,
             input,
-        } => agent_send(&cli.root, &agent, session.as_deref(), &input, false, false),
+        } => agent_send(
+            &cli.root,
+            &agent,
+            AgentSend {
+                session: session.as_deref(),
+                input: &input,
+                raw: false,
+                debug: false,
+                approvals: &[],
+            },
+        ),
         Command::Agent(args) => agent_command(&cli.root, &args),
+        Command::ObjectInstall {
+            source,
+            manifest,
+            tier,
+        } => success(install::run_object_install(&source, &manifest, tier)),
+        Command::ObjectInspect {
+            source,
+            class,
+            name,
+            tier,
+        } => success(install::run_object_inspect(&source, class, &name, tier)),
+        Command::ObjectReplace {
+            source,
+            manifest,
+            tier,
+            mode,
+            yes,
+        } => success(install::run_object_replace(
+            &source, &manifest, tier, mode, yes,
+        )),
+        Command::ObjectUninstall {
+            source,
+            class,
+            name,
+            tier,
+            yes,
+        } => success(install::run_object_uninstall(
+            &source, class, &name, tier, yes,
+        )),
+        Command::ObjectCheck { manifest } => success(install::run_object_check(&manifest)),
+        Command::ObjectResidueAudit { source } => {
+            success(residue::run_object_residue_audit(&source))
+        }
+        Command::ObjectResidueCleanup {
+            source,
+            path,
+            dev,
+            ino,
+            yes,
+        } => success(residue::run_object_residue_cleanup(
+            &source, &path, dev, ino, yes,
+        )),
         Command::Provider(args) => provider_command(&args),
         Command::Ping { path } => ping(&cli.root, &path),
         Command::Cancel { path, run } => cancel(&cli.root, &path, &run),
@@ -190,10 +299,12 @@ pub(crate) fn run(args: Vec<OsString>) -> Result<ExitCode, CliError> {
     }
 }
 
+/// Converts a unit-successful command result into `ExitCode::SUCCESS`.
 pub(crate) fn success(result: Result<(), CliError>) -> Result<ExitCode, CliError> {
     result.map(|()| ExitCode::SUCCESS)
 }
 
+/// Parses command-line arguments into a typed root `Cli` command model.
 pub(crate) fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
     let mut root = env::var_os("CTX_ROOT").map_or_else(|| PathBuf::from(CTX_ROOT), PathBuf::from);
     let mut values = args.into_iter();
@@ -228,6 +339,7 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Cli, CliError> {
     Ok(Cli { root, command })
 }
 
+/// Converts a raw `OsString` argument into UTF-8 `String`.
 pub(crate) fn os_string(value: OsString) -> Result<String, CliError> {
     value.into_string().map_err(|value| {
         CliError::usage(format!(
@@ -237,6 +349,7 @@ pub(crate) fn os_string(value: OsString) -> Result<String, CliError> {
     })
 }
 
+/// Reads the next required CLI argument or returns a usage error.
 pub(crate) fn required_arg(
     values: &mut impl Iterator<Item = String>,
     message: &str,
@@ -244,6 +357,7 @@ pub(crate) fn required_arg(
     values.next().ok_or_else(|| CliError::usage(message))
 }
 
+/// Parses `bootstrap` command arguments and validates allowed flags.
 pub(crate) fn parse_bootstrap_command(
     values: impl Iterator<Item = String>,
 ) -> Result<Command, CliError> {
@@ -266,7 +380,7 @@ pub(crate) fn parse_bootstrap_command(
     }
     if dry_run && check {
         return Err(CliError::usage(
-            "bootstrap/update accepts only one of --check or --dry-run",
+            "bootstrap accepts only one of --check or --dry-run",
         ));
     }
     Ok(Command::Bootstrap {
@@ -276,6 +390,28 @@ pub(crate) fn parse_bootstrap_command(
     })
 }
 
+/// Parses `storage` command arguments and validates the `update` action.
+pub(crate) fn parse_storage_command(
+    mut values: impl Iterator<Item = String>,
+) -> Result<Command, CliError> {
+    if required_arg(&mut values, "storage requires update")? != "update" {
+        return Err(CliError::usage("storage supports only update"));
+    }
+    let mut storage = None;
+    let mut prune = false;
+    for value in values {
+        match value.as_str() {
+            "--prune" if !prune => prune = true,
+            _ if storage.is_none() && !value.starts_with('-') => {
+                storage = Some(PathBuf::from(value));
+            }
+            _ => return Err(CliError::usage(format!("unexpected argument: {value}"))),
+        }
+    }
+    Ok(Command::StorageUpdate { storage, prune })
+}
+
+/// Parses all top-level commands by dispatching on command name and arguments.
 #[expect(
     clippy::too_many_lines,
     reason = "flat CLI dispatch keeps subcommand parsing explicit"
@@ -317,7 +453,8 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             no_extra_args(values)?;
             Ok(Command::Status)
         }
-        "bootstrap" | "update" => parse_bootstrap_command(values),
+        "bootstrap" => parse_bootstrap_command(values),
+        "storage" => parse_storage_command(values),
         "mount" => parse_mount_command(values),
         "ls" => parse_ls_command(values),
         "which" => {
@@ -361,6 +498,7 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
             })
         }
         "agent" => parse_agent_command(values.collect()),
+        "object" => install::parse_object_command(values),
         "provider" => parse_provider_command(values.collect()),
         "ping" => {
             let path = required_arg(&mut values, "ping requires model/NAME or agent/NAME")?;
@@ -425,10 +563,12 @@ pub(crate) fn parse_command(args: Vec<String>) -> Result<Command, CliError> {
     }
 }
 
+/// Returns true when args contain only a single CLI help flag.
 pub(crate) fn is_help_args(args: &[String]) -> bool {
     matches!(args, [value] if is_help_flag(value))
 }
 
+/// Returns true when a command name supports `help <command>` usage.
 pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
     matches!(
         command,
@@ -438,7 +578,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "root"
             | "man"
             | "bootstrap"
-            | "update"
+            | "storage"
             | "mount"
             | "ls"
             | "which"
@@ -448,6 +588,7 @@ pub(crate) fn is_top_level_help_topic(command: &str) -> bool {
             | "resume"
             | "send"
             | "agent"
+            | "object"
             | "provider"
             | "ping"
             | "cancel"

@@ -1,6 +1,53 @@
 use crate::*;
 
 pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode, CliError> {
+    let started = agent_start_host(root, args)?;
+    for line in agent_start_status_lines(
+        color_enabled(),
+        &args.name,
+        &started.model,
+        &started.life,
+        &started.role,
+        &[
+            ("UID", started.uid.as_str()),
+            ("GID", started.gid.as_str()),
+            ("Groups", started.groups.as_str()),
+        ],
+        &args.session,
+        &started.unit,
+        started.invocation.as_deref(),
+        &args.cwd,
+        started.workspace.as_deref(),
+        &started.visible_socket,
+        &started.socket,
+        &started.current_uid,
+    ) {
+        print_line(&line)?;
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct AgentStartHostReceipt {
+    pub(crate) pid: String,
+    pub(crate) unit: String,
+    model: String,
+    life: String,
+    role: String,
+    uid: String,
+    gid: String,
+    groups: String,
+    invocation: Option<String>,
+    workspace: Option<String>,
+    visible_socket: PathBuf,
+    socket: PathBuf,
+    current_uid: String,
+}
+
+pub(crate) fn agent_start_host(
+    root: &Path,
+    args: &AgentStartArgs,
+) -> Result<AgentStartHostReceipt, CliError> {
     require_cli_name("agent name", &args.name)?;
     require_session_name(&args.session)?;
     require_sandbox_cwd(&args.cwd)?;
@@ -35,8 +82,10 @@ pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode
         socket,
         unit,
         output,
+        system,
+        terminal_alias_created,
     } = start_agent_runtime_services(root, args, &cli_mounts, &view)?;
-    let invocation = systemd_run_invocation_id(&output);
+    let invocation = invocation_id(&output);
     let life = agent_lifecycle_name(view.lifecycle());
     let role = agent_role_for_display(view.agent_name());
     let uid = view.identity().uid().to_string();
@@ -48,6 +97,44 @@ pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join(" ");
+    let terminal =
+        match cortexfs::agent::launch::launch_receipt(view.identity(), &unit, socket.clone()) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                cortexfs::agent::launch::stop_system_agent_socket(&system).map_err(|conflict| {
+                    CliError::unavailable(format!("agent start rollback conflict: {conflict:?}"))
+                })?;
+                let terminal_aliases = terminal_alias_created
+                    .then_some((visible_socket.as_path(), socket.as_path()))
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                rollback_agent_start_resources(
+                    view.identity(),
+                    &unit,
+                    None,
+                    &terminal_aliases,
+                    &[socket.as_path()],
+                );
+                return Err(CliError::unavailable(format!(
+                    "cannot bind agent terminal receipt: {error:?}"
+                )));
+            }
+        };
+    let source = agent_source_root(root);
+    if let Err(error) =
+        cortexfs::agent::launch::persist_agent_launch_meta(&source, &args.name, &terminal, &system)
+    {
+        rollback_receipted_agent_start(
+            &system,
+            &terminal,
+            &visible_socket,
+            &socket,
+            terminal_alias_created,
+        )?;
+        return Err(CliError::unavailable(format!(
+            "cannot persist agent launch receipt: {error:?}"
+        )));
+    }
     let start_facts = [
         ("model", view.model()),
         ("life", life),
@@ -56,32 +143,31 @@ pub(crate) fn agent_start(root: &Path, args: &AgentStartArgs) -> Result<ExitCode
         ("gid", gid.as_str()),
         ("groups", groups.as_str()),
     ];
-    let identity_lines = [
-        ("UID", uid.as_str()),
-        ("GID", gid.as_str()),
-        ("Groups", groups.as_str()),
-    ];
-    record_agent_start_state(root, args, &unit, &start_facts, invocation.as_deref())?;
-    let current_uid = current_uid_for_ctx(root)?;
-    for line in agent_start_status_lines(
-        color_enabled(),
-        &args.name,
-        view.model(),
-        life,
-        role,
-        &identity_lines,
-        &args.session,
+    record_agent_start_state(
+        root,
+        args,
+        view.identity(),
         &unit,
+        &start_facts,
         invocation.as_deref(),
-        &args.cwd,
-        session_workspace.as_deref(),
-        &visible_socket,
-        &socket,
-        &current_uid,
-    ) {
-        print_line(&line)?;
-    }
-    Ok(ExitCode::SUCCESS)
+    )?;
+    let current_uid = current_uid_for_ctx(root)?;
+    let pid = agent_unit_main_pid(view.identity(), &unit).unwrap_or_default();
+    Ok(AgentStartHostReceipt {
+        pid,
+        unit,
+        model: view.model().to_owned(),
+        life: life.to_owned(),
+        role: role.to_owned(),
+        uid,
+        gid,
+        groups,
+        invocation,
+        workspace: session_workspace,
+        visible_socket,
+        socket,
+        current_uid,
+    })
 }
 
 struct AgentStartServices {
@@ -89,6 +175,8 @@ struct AgentStartServices {
     socket: PathBuf,
     unit: String,
     output: std::process::Output,
+    system: cortexfs::agent::launch::SystemAgentSocketReceipt,
+    terminal_alias_created: bool,
 }
 
 fn start_agent_runtime_services(
@@ -99,21 +187,26 @@ fn start_agent_runtime_services(
 ) -> Result<AgentStartServices, CliError> {
     let visible_socket = agent_terminal_socket(root, &args.name, &args.session)?;
     let socket = agent_runtime_socket(root, &args.name, &args.session)?;
-    let chat_visible_socket = agent_socket_path(root, &args.name)?;
-    let chat_socket = agent_chat_runtime_socket(root, &args.name)?;
-    let chat_unit = agent_chat_unit(root, &args.name);
     let unit = agent_terminal_unit(&args.name, &args.session);
     let terminal_alias_created = ensure_agent_terminal_socket(&visible_socket, &socket)?;
     let terminal_aliases = terminal_alias_created
         .then_some((visible_socket.as_path(), socket.as_path()))
         .into_iter()
         .collect::<Vec<_>>();
-    reset_agent_terminal_unit(&unit);
+    reset_agent_terminal_unit(view.identity(), &unit);
     let command = agent_start_systemd_command(root, args, cli_mounts, view, &socket, &unit);
-    let output = match agent_start_process_command(&command).output() {
+    let output = match agent_start_process_command(view.identity(), &command)
+        .and_then(|mut process| process.output())
+    {
         Ok(output) => output,
         Err(error) => {
-            rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+            rollback_agent_start_resources(
+                view.identity(),
+                &unit,
+                None,
+                &terminal_aliases,
+                &[socket.as_path()],
+            );
             return Err(CliError::unavailable(format!(
                 "cannot start systemd-run: {error}"
             )));
@@ -125,72 +218,98 @@ fn start_agent_runtime_services(
             "agent terminal service failed to start with {}{diagnostics}",
             output.status
         ));
-        rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+        rollback_agent_start_resources(
+            view.identity(),
+            &unit,
+            None,
+            &terminal_aliases,
+            &[socket.as_path()],
+        );
         return Err(error);
     }
     if let Err(error) = wait_for_agent_terminal_socket(&socket) {
-        rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+        rollback_agent_start_resources(
+            view.identity(),
+            &unit,
+            None,
+            &terminal_aliases,
+            &[socket.as_path()],
+        );
         return Err(error);
     }
-    let chat_alias_state = match ensure_agent_chat_socket(&chat_visible_socket, &chat_socket) {
-        Ok(state) => state,
+    let system = match ensure_system_agent_socket(root, &args.name) {
+        Ok(receipt) => receipt,
         Err(error) => {
-            rollback_agent_start_resources(&unit, None, &terminal_aliases, &[socket.as_path()]);
+            rollback_agent_start_resources(
+                view.identity(),
+                &unit,
+                None,
+                &terminal_aliases,
+                &[socket.as_path()],
+            );
             return Err(error);
         }
     };
-    reset_agent_chat_unit(&chat_unit);
-    let chat_command =
-        agent_chat_socket_systemd_command(root, &args.name, &chat_socket, &chat_unit);
-    let chat_output = match agent_start_process_command(&chat_command).output() {
-        Ok(output) => output,
-        Err(error) => {
-            rollback_agent_late_chat_start(
-                (&unit, &chat_unit),
-                (
-                    &terminal_aliases,
-                    &[socket.as_path(), chat_socket.as_path()],
-                ),
-                (&chat_visible_socket, &chat_socket, &chat_alias_state),
-            );
-            return Err(CliError::unavailable(format!(
-                "cannot start agent chat socket: {error}"
-            )));
-        }
-    };
-    if !chat_output.status.success() {
-        let diagnostics = systemd_run_diagnostics(&chat_output);
-        let error = CliError::unavailable(format!(
-            "agent chat socket failed to start with {}{diagnostics}",
-            chat_output.status
-        ));
-        rollback_agent_late_chat_start(
-            (&unit, &chat_unit),
-            (
-                &terminal_aliases,
-                &[socket.as_path(), chat_socket.as_path()],
-            ),
-            (&chat_visible_socket, &chat_socket, &chat_alias_state),
-        );
-        return Err(error);
-    }
-    if let Err(error) = wait_for_agent_chat_socket(&chat_socket) {
-        rollback_agent_late_chat_start(
-            (&unit, &chat_unit),
-            (
-                &terminal_aliases,
-                &[socket.as_path(), chat_socket.as_path()],
-            ),
-            (&chat_visible_socket, &chat_socket, &chat_alias_state),
-        );
-        return Err(error);
-    }
     Ok(AgentStartServices {
         visible_socket,
         socket,
         unit,
         output,
+        system,
+        terminal_alias_created,
     })
+}
+
+#[cfg(test)]
+pub(crate) fn system_agent_socket_unit(agent: &str) -> String {
+    format!("cortexfs-agent@{agent}.socket")
+}
+
+#[cfg(test)]
+pub(crate) fn system_agent_runtime_socket(agent: &str) -> PathBuf {
+    Path::new("/run/cortexfs/agent").join(format!("{agent}.sock"))
+}
+
+#[cfg(test)]
+pub(crate) fn system_agent_socket_command(action: &str, agent: &str) -> ProcessCommand {
+    let mut command = ProcessCommand::new(SYSTEMCTL_PROGRAM);
+    command
+        .env_clear()
+        .env("PATH", cortexfs::support::command::TRUSTED_PATH)
+        .args([
+            "--no-ask-password",
+            action,
+            &system_agent_socket_unit(agent),
+        ]);
+    command
+}
+
+fn ensure_system_agent_socket(
+    root: &Path,
+    agent: &str,
+) -> Result<cortexfs::agent::launch::SystemAgentSocketReceipt, CliError> {
+    let visible = agent_socket_path(root, agent)?;
+    cortexfs::agent::launch::ensure_system_agent_socket(agent, &visible).map_err(|error| {
+        CliError::unavailable(format!("cannot start system agent socket: {error:?}"))
+    })
+}
+
+fn rollback_receipted_agent_start(
+    system: &cortexfs::agent::launch::SystemAgentSocketReceipt,
+    terminal: &cortexfs::agent::launch::AgentLaunchReceipt,
+    visible_socket: &Path,
+    socket: &Path,
+    terminal_alias_created: bool,
+) -> Result<(), CliError> {
+    let system_result = cortexfs::agent::launch::stop_system_agent_socket(system);
+    let terminal_result = cortexfs::agent::launch::stop_launch(terminal);
+    if terminal_alias_created {
+        remove_matching_socket_alias(visible_socket, socket);
+    }
+    remove_plain_runtime_socket(socket);
+    system_result
+        .and(terminal_result)
+        .map_err(|error| CliError::unavailable(format!("agent start rollback conflict: {error:?}")))
 }
 
 pub(crate) fn ensure_agent_start_session(
@@ -204,7 +323,7 @@ pub(crate) fn ensure_agent_start_session(
         .join("agent")
         .join(&args.name)
         .join("session");
-    ensure_durable_session_layout(
+    let _receipts = ensure_durable_session_layout(
         &session_root,
         &args.session,
         cwd,
@@ -229,6 +348,7 @@ pub(crate) fn ensure_agent_start_session(
 pub(crate) fn record_agent_start_state(
     root: &Path,
     args: &AgentStartArgs,
+    identity: &AgentUnixIdentity,
     unit: &str,
     facts: &[(&str, &str)],
     invocation: Option<&str>,
@@ -244,7 +364,7 @@ pub(crate) fn record_agent_start_state(
         )));
     }
     write_agent_control_plain(&control.join("status"), "ready\n")?;
-    let pid = agent_unit_main_pid(unit).unwrap_or_default();
+    let pid = agent_unit_main_pid(identity, unit).unwrap_or_default();
     write_agent_control_plain(&control.join("pid"), &format!("{pid}\n"))?;
     append_agent_log_event(
         &control.join("log"),
@@ -389,17 +509,6 @@ pub(crate) fn agent_start_status_lines(
     lines
 }
 
-pub(crate) fn systemd_run_invocation_id(output: &std::process::Output) -> Option<String> {
-    let mut text = String::new();
-    text.push_str(&String::from_utf8_lossy(&output.stdout));
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
-    text.lines().find_map(|line| {
-        line.rsplit_once("invocation ID: ")
-            .map(|(_prefix, value)| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-    })
-}
-
 pub(crate) fn systemd_run_diagnostics(output: &std::process::Output) -> String {
     let mut diagnostics = String::new();
     for bytes in [&output.stderr, &output.stdout] {
@@ -417,19 +526,12 @@ pub(crate) fn systemd_run_diagnostics(output: &std::process::Output) -> String {
     diagnostics
 }
 
-pub(crate) fn reset_agent_terminal_unit(unit: &str) {
-    let service = format!("{unit}.service");
-    let _ignored = systemctl_user_command(["stop", &service])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let _ignored = systemctl_user_command(["reset-failed", &service])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+pub(crate) fn reset_agent_terminal_unit(identity: &AgentUnixIdentity, unit: &str) {
+    reset_unit_for(identity, unit);
 }
 
 pub(crate) fn rollback_agent_start_resources(
+    identity: &AgentUnixIdentity,
     terminal_unit: &str,
     chat_unit: Option<&str>,
     aliases: &[(&Path, &Path)],
@@ -440,7 +542,7 @@ pub(crate) fn rollback_agent_start_resources(
         chat_unit,
         aliases,
         runtime_sockets,
-        reset_agent_terminal_unit,
+        |unit| reset_agent_terminal_unit(identity, unit),
         reset_agent_chat_unit,
     );
 }
@@ -465,24 +567,18 @@ pub(crate) fn rollback_agent_start_resources_with(
     }
 }
 
+#[cfg(test)]
 type AgentStartAlias<'a> = (&'a Path, &'a Path);
+#[cfg(test)]
 type AgentStartCleanup<'a> = (&'a [AgentStartAlias<'a>], &'a [&'a Path]);
-type AgentChatCleanup<'a> = (&'a Path, &'a Path, &'a AgentChatAliasState);
+#[cfg(test)]
+type AgentChatCleanup<'a> = (
+    &'a Path,
+    &'a Path,
+    &'a cortexfs::agent::launch::AgentChatAliasState,
+);
 
-fn rollback_agent_late_chat_start(
-    units: (&str, &str),
-    terminal: AgentStartCleanup<'_>,
-    chat: AgentChatCleanup<'_>,
-) {
-    rollback_agent_late_chat_start_with(
-        units,
-        terminal,
-        chat,
-        reset_agent_terminal_unit,
-        reset_agent_chat_unit,
-    );
-}
-
+#[cfg(test)]
 pub(crate) fn rollback_agent_late_chat_start_with(
     units: (&str, &str),
     terminal: AgentStartCleanup<'_>,
@@ -498,11 +594,11 @@ pub(crate) fn rollback_agent_late_chat_start_with(
         reset_terminal,
         reset_chat,
     );
-    let _ignored = rollback_agent_chat_alias(chat.0, chat.1, chat.2);
+    let _ignored = cortexfs::agent::launch::rollback_agent_chat_alias(chat.0, chat.1, chat.2);
 }
 
 fn remove_matching_socket_alias(visible: &Path, target: &Path) {
-    let _ignored = remove_exact_socket_alias(visible, target);
+    let _ignored = cortexfs::agent::launch::remove_exact_socket_alias(visible, target);
 }
 
 fn remove_plain_runtime_socket(path: &Path) {
@@ -511,27 +607,11 @@ fn remove_plain_runtime_socket(path: &Path) {
     }
 }
 
-pub(crate) fn agent_unit_main_pid(unit: &str) -> Option<String> {
-    let service = format!("{unit}.service");
-    let output = systemctl_user_command(["show", "--property", "MainPID", "--value", &service])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    parse_systemctl_main_pid(&String::from_utf8_lossy(&output.stdout))
+pub(crate) fn agent_unit_main_pid(identity: &AgentUnixIdentity, unit: &str) -> Option<String> {
+    unit_main_pid_for(identity, unit).map(|pid| pid.to_string())
 }
 
-pub(crate) fn parse_systemctl_main_pid(output: &str) -> Option<String> {
-    let pid = output.trim();
-    if pid != "0" && pid.bytes().all(|byte| byte.is_ascii_digit()) {
-        Some(pid.to_owned())
-    } else {
-        None
-    }
-}
-
-const SYSTEMCTL_PROGRAM: &str = "/usr/bin/systemctl";
+const SYSTEMCTL_PROGRAM: &str = cortexfs::support::command::SYSTEMCTL;
 
 pub(crate) fn get_systemctl_program() -> &'static str {
     SYSTEMCTL_PROGRAM

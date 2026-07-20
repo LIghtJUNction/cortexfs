@@ -72,6 +72,7 @@ fn file_check_formatters_escape_terminal_controls() {
 fn formats_event_stream_issues_for_file_check() {
     assert_eq!(
         format_event_stream_issues(&[
+            EventStreamIssue::MissingFinalNewline(1),
             EventStreamIssue::ProviderNativeField {
                 line: 1,
                 field: "response_id".to_owned(),
@@ -81,9 +82,10 @@ fn formats_event_stream_issues_for_file_check() {
                 event_type: "native_thread".to_owned(),
             },
             EventStreamIssue::InvalidUsage(3),
-            EventStreamIssue::InvalidAgentLifecycle(4),
+            EventStreamIssue::InvalidApproval(4),
+            EventStreamIssue::InvalidAgentLifecycle(5),
         ]),
-        "provider native field line 1 response_id, unknown type line 2 native_thread, invalid usage line 3, invalid agent lifecycle line 4"
+        "missing final newline line 1, provider native field line 1 response_id, unknown type line 2 native_thread, invalid usage line 3, invalid approval line 4, invalid agent lifecycle line 5"
     );
 }
 
@@ -91,6 +93,7 @@ fn formats_event_stream_issues_for_file_check() {
 fn formats_message_stream_issues_for_file_check() {
     assert_eq!(
         format_message_stream_issues(&[
+            MessageStreamIssue::MissingFinalNewline(1),
             MessageStreamIssue::ProviderNativeField {
                 line: 1,
                 field: "thread_id".to_owned(),
@@ -102,7 +105,7 @@ fn formats_message_stream_issues_for_file_check() {
             MessageStreamIssue::InvalidContent(3),
             MessageStreamIssue::MissingContent(4),
         ]),
-        "provider native field line 1 thread_id, invalid role line 2 developer, invalid content line 3, missing content line 4"
+        "missing final newline line 1, provider native field line 1 thread_id, invalid role line 2 developer, invalid content line 3, missing content line 4"
     );
 }
 
@@ -441,6 +444,7 @@ fn file_check_validates_event_stream_files() {
         &events,
         "{\"type\":\"start\",\"run\":\"r1\",\"response_id\":\"resp_1\"}\n"
     );
+    write_text_file(&events.with_file_name("messages.jsonl"), "");
 
     assert_file_check_error_contains(
         &root,
@@ -465,9 +469,117 @@ fn file_check_validates_event_stream_files() {
         &model_events,
         "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}\n"
     );
+    write_text_file(&model_events.with_file_name("messages.jsonl"), "");
     assert!(file_check(
         &root,
         "shared/project-a/model/openai/gpt-4o.d/session/default/events.jsonl"
     )
     .is_ok());
+}
+
+#[test]
+fn file_check_rejects_session_streams_without_final_newline() {
+    let root = clean_test_dir("ctx-stream-newline-check");
+    let session = fixture_path(
+        &root,
+        &["home", "1000", "agent", "coder", "session", "default"],
+    );
+    let messages = session.join("messages.jsonl");
+    let events = session.join("events.jsonl");
+
+    write_text_file(&events, "");
+    write_text_file(&messages, "{\"role\":\"user\",\"content\":\"hello\"}");
+    let message_error = file_check(
+        &root,
+        "home/1000/agent/coder/session/default/messages.jsonl",
+    );
+    assert_eq!(
+        message_error,
+        Err(CliError::usage(
+            "invalid message stream: missing final newline line 1"
+        ))
+    );
+
+    write_text_file(&events, "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}");
+    let event_error = file_check(
+        &root,
+        "home/1000/agent/coder/session/default/events.jsonl",
+    );
+    assert_eq!(
+        event_error,
+        Err(CliError::usage(
+            "invalid event stream: missing final newline line 1"
+        ))
+    );
+
+    write_text_file(
+        &messages,
+        "{\"role\":\"user\",\"content\":\"hello\"}\n",
+    );
+    write_text_file(
+        &events,
+        "{\"type\":\"done\",\"run\":\"r1\",\"status\":\"ok\"}\n",
+    );
+    assert!(
+        file_check(
+            &root,
+            "home/1000/agent/coder/session/default/messages.jsonl"
+        )
+        .is_ok()
+    );
+    assert!(
+        file_check(
+            &root,
+            "home/1000/agent/coder/session/default/events.jsonl"
+        )
+        .is_ok()
+    );
+    assert!(!session.join(".store").exists());
+}
+
+#[test]
+fn file_check_reads_projected_columnar_session_streams() {
+    let root = clean_test_dir("ctx-columnar-stream-check");
+    let session = fixture_path(
+        &root,
+        &["home", "1000", "agent", "coder", "session", "default"],
+    );
+    create_complete_session_layout(&session);
+    write_text_file(&session.join("messages.jsonl"), "");
+    write_text_file(&session.join("events.jsonl"), "");
+    assert!(
+        columnar::append(
+            &session,
+            columnar::Stream::Messages,
+            &[r#"{"role":"user"}"#],
+        )
+        .is_ok()
+    );
+    assert!(
+        columnar::append(
+            &session,
+            columnar::Stream::Events,
+            &[r#"{"type":"native_thread"}"#],
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("messages.jsonl")).unwrap_or_default(),
+        ""
+    );
+    assert_eq!(
+        fs::read_to_string(session.join("events.jsonl")).unwrap_or_default(),
+        ""
+    );
+
+    assert_file_check_error_contains(
+        &root,
+        "home/1000/agent/coder/session/default/messages.jsonl",
+        &["missing content line 1"],
+    );
+    assert_file_check_error_contains(
+        &root,
+        "home/1000/agent/coder/session/default/events.jsonl",
+        &["unknown type line 1 native_thread"],
+    );
 }

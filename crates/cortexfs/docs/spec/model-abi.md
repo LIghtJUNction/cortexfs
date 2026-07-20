@@ -6,8 +6,9 @@ There is only one model ABI:
 /ctx/model/<provider>/<model>       one-shot inference executable
 /ctx/model/<provider>/<model>.sock  optional CortexFS session socket
 /ctx/model/<provider>/<model>.d/    control files
-/ctx/model/main                     default coder model symlink
-/ctx/model/helper                   default reviewer model symlink
+/ctx/model/main                     default model symlink
+/ctx/model/{helper,fast,reason,code,vision}
+                                    canonical compatibility/capability aliases
 ```
 
 `<provider>/<model>` is represented as two path components. For native model
@@ -61,6 +62,10 @@ Example:
 /ctx/model/
   main -> /ctx/model/openai/gpt-5.5
   helper -> /ctx/model/openai/codex-auto-review
+  fast -> /ctx/model/openai/gpt-5.5
+  reason -> /ctx/model/openai/gpt-5.5
+  code -> /ctx/model/openai/gpt-5.5
+  vision -> /ctx/model/openai/gpt-5.5
   debug/
     echo
     echo.d/
@@ -70,6 +75,7 @@ Example:
       effort
       default
       fallback
+      limit
       session
       status
       log
@@ -87,6 +93,12 @@ Example:
       log
 ```
 
+`main`, `helper`, `fast`, `reason`, `code`, and `vision` are the complete
+canonical alias set. `helper` remains a compatibility alias. Bootstrap may
+select a projected model whose provider-neutral metadata matches a capability
+alias; when it cannot identify one, that alias points to the selected `main`
+target. Existing valid user-managed alias symlinks are preserved.
+
 Control files:
 
 ```text
@@ -96,10 +108,94 @@ cap      capability list, one per line
 effort   provider-neutral reasoning effort: auto, low, medium, high, or xhigh
 default  default parameters, KEY=VALUE, one per line
 fallback ordered fallback model chain, one provider/model name per line
+limit    maximum hard context size in tokens, or unknown
 session  none or socket
 status   dynamic status
 log      short call log or pointer to log location
 ```
+
+## Hard Context Limit
+
+Every model control directory contains a read-only `limit` file:
+
+```text
+/ctx/model/<provider>/<model>.d/limit
+```
+
+The file contains exactly one canonical LF-terminated line. Its value is
+either `unknown` or a positive base-10 `u32` token count. Numeric values use no
+sign, surrounding whitespace, or leading zeroes. Zero, overflow, extra lines,
+and non-canonical decimal text are invalid. The number is the provider/model's
+hard combined context limit; it is not an output-token setting and must not be
+used as one.
+
+Examples:
+
+```text
+272000
+unknown
+```
+
+`unknown` means CortexFS has no trusted maximum. It must not be rendered as
+zero or replaced with a guessed value. The executable model metadata field
+`context_length` contains the same canonical value as `limit`.
+
+`limit` is an inspectable projection, never an Agent-writable control. FUSE
+opens and writes that request mutation must fail with `EROFS`, including for
+uid 0. Updating a limit happens only when host configuration changes or during
+the existing synchronous mount-start catalog refresh; there is no watcher,
+poller, or hot-reload path.
+
+The resolver uses this precedence:
+
+```text
+1. model_limits in the selected host provider config
+2. a valid CortexFS-owned models.dev cache entry
+3. unknown
+```
+
+A provider config may declare explicit limits for locally configured models
+without changing the backward-compatible string `models` list:
+
+```json
+{
+  "name": "local",
+  "base_url": "http://127.0.0.1:8317/v1",
+  "models": ["custom-model"],
+  "model_limits": {
+    "custom-model": 32768
+  }
+}
+```
+
+Each `model_limits` key must be a model listed by `default_model` or `models`,
+and each value must be in `1..=4294967295`. Invalid local limit declarations
+make that provider config invalid; they are not silently ignored. A local
+entry overrides catalog data for the same projected model.
+
+CortexFS obtains catalog limits through the external `models-dev` library.
+Catalog provider and model map keys are matched exactly to the projected
+`<provider>/<model>` identity; transport hosts and aggregator names are not
+guessed as original providers. Only stable CortexFS provider/model names and
+positive limits enter the cache.
+
+The host cache is bounded, versioned data with this shape:
+
+```json
+{
+  "schema": "cortexfs.model-limits/v1",
+  "models": {
+    "openai/gpt-5.5": 272000
+  }
+}
+```
+
+The cache is atomically replaced only after a complete successful online
+response has been parsed and validated. A timeout, network error, invalid or
+oversized response, empty validated result, or failed durable write preserves
+the last valid cache unchanged. A missing, malformed, oversized, wrong-schema,
+or unsafe cache supplies no limit. Catalog cache content contains no provider
+credentials and is backend state, not a new `/ctx` namespace.
 
 `fallback` is a model fallback chain, not a transport route. It lives next to
 the selected model in `model/<provider>/<model>.d/fallback`; each non-comment
@@ -107,7 +203,7 @@ line is another stable provider/model reference, for example:
 
 ```text
 openai/codex-auto-review
-openai/gpt-5.3-codex-spark
+api.lmm.best/gpt-5.3-codex-spark
 ```
 
 When the selected model is unavailable or fails before producing a successful
@@ -374,7 +470,7 @@ grants no tool permission.
 
 ## Canonical Event Stream
 
-v1 model and agent streams use these event types:
+Model and agent streams use these event types:
 
 ```text
 start

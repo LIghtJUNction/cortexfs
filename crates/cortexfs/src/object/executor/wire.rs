@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) struct AgentModelStdoutReader {
-    pub(crate) receiver: std::sync::mpsc::Receiver<Result<String, String>>,
+    pub(crate) receiver: std::sync::mpsc::Receiver<Result<String, ExecError>>,
     pub(crate) handle: thread::JoinHandle<()>,
 }
 
@@ -44,19 +44,21 @@ pub(crate) fn spawn_with_etxtbsy_retry(command: &mut Command) -> io::Result<Chil
 
 pub(crate) fn read_agent_model_frame_line(
     reader: &mut impl BufRead,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, ExecError> {
     let mut bytes = Vec::new();
     let limit = u64::try_from(MAX_AGENT_MODEL_FRAME_BYTES.saturating_add(1))
-        .map_err(|_error| "agent model output frame limit is invalid".to_owned())?;
+        .map_err(|_error| ExecError::new("agent model output frame limit is invalid"))?;
     let read = reader
         .take(limit)
         .read_until(b'\n', &mut bytes)
-        .map_err(|error| format!("cannot read agent model output: {error}"))?;
+        .map_err(|error| ExecError::with_io("cannot read agent model output", &error))?;
     if read == 0 {
         return Ok(None);
     }
     if bytes.len() > MAX_AGENT_MODEL_FRAME_BYTES {
-        return Err("agent model output frame exceeds byte limit".to_owned());
+        return Err(ExecError::new(
+            "agent model output frame exceeds byte limit",
+        ));
     }
     if bytes.ends_with(b"\n") {
         bytes.pop();
@@ -66,7 +68,7 @@ pub(crate) fn read_agent_model_frame_line(
     }
     String::from_utf8(bytes)
         .map(Some)
-        .map_err(|error| format!("agent model output frame is not utf-8: {error}"))
+        .map_err(|error| ExecError::new(format!("agent model output frame is not utf-8: {error}")))
 }
 
 pub(crate) fn pass_runtime_provider_secret_env(command: &mut Command) {

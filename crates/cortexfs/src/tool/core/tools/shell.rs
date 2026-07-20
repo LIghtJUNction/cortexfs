@@ -53,108 +53,27 @@ pub(crate) fn run_shell_exec_command_with_timeout(
         .process_group(0)
         .spawn()
         .map_err(|error| format!("cannot run shell command: {error}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "cannot read shell stdout".to_owned())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "cannot read shell stderr".to_owned())?;
-    let stdout_reader = thread::spawn(move || {
-        support::process::read_limited_bytes(stdout, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
-    });
-    let stderr_reader = thread::spawn(move || {
-        support::process::read_limited_bytes(stderr, MAX_SHELL_EXEC_OUTPUT_BYTES + 1)
-    });
-    let mut stdout_reader = Some(stdout_reader);
-    let mut stderr_reader = Some(stderr_reader);
-    let mut stdout = None;
-    let mut stderr = None;
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if stdout.is_none()
-            && stdout_reader
-                .as_ref()
-                .is_some_and(thread::JoinHandle::is_finished)
-        {
-            let output = stdout_reader
-                .take()
-                .and_then(|reader| reader.join().ok())
-                .unwrap_or_default();
-            if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
-                support::process::terminate_process_group(&mut child);
-                let _ignored = child.wait();
-                if let Some(reader) = stderr_reader.take() {
-                    let _ignored = reader.join();
-                }
-                return Err(format!(
-                    "shell command output exceeds {MAX_SHELL_EXEC_OUTPUT_BYTES} bytes"
-                ));
-            }
-            stdout = Some(output);
+    support::process::wait_capped_child_output(
+        &mut child,
+        support::process::CappedOutputWait {
+            max_output_bytes: MAX_SHELL_EXEC_OUTPUT_BYTES,
+            timeout,
+            capture_stderr: true,
+            drain_timeout: None,
+            terminate_group_after_exit: false,
+        },
+        || false,
+    )
+    .map_err(|error| match error {
+        support::process::CappedOutputError::ExceededLimit => {
+            format!("shell command output exceeds {MAX_SHELL_EXEC_OUTPUT_BYTES} bytes")
         }
-        if stderr.is_none()
-            && stderr_reader
-                .as_ref()
-                .is_some_and(thread::JoinHandle::is_finished)
-        {
-            let output = stderr_reader
-                .take()
-                .and_then(|reader| reader.join().ok())
-                .unwrap_or_default();
-            if output.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
-                support::process::terminate_process_group(&mut child);
-                let _ignored = child.wait();
-                if let Some(reader) = stdout_reader.take() {
-                    let _ignored = reader.join();
-                }
-                return Err(format!(
-                    "shell command output exceeds {MAX_SHELL_EXEC_OUTPUT_BYTES} bytes"
-                ));
-            }
-            stderr = Some(output);
+        support::process::CappedOutputError::TimedOut => {
+            format!("shell command timed out after {}s", timeout.as_secs())
         }
-        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            support::process::terminate_process_group(&mut child);
-            let _ignored = child.wait();
-            if let Some(reader) = stdout_reader.take() {
-                let _ignored = reader.join();
-            }
-            if let Some(reader) = stderr_reader.take() {
-                let _ignored = reader.join();
-            }
-            return Err(format!(
-                "shell command timed out after {}s",
-                timeout.as_secs()
-            ));
-        }
-        thread::sleep(Duration::from_millis(50));
-    };
-    let stdout = stdout.unwrap_or_else(|| {
-        stdout_reader
-            .take()
-            .and_then(|reader| reader.join().ok())
-            .unwrap_or_default()
-    });
-    let stderr = stderr.unwrap_or_else(|| {
-        stderr_reader
-            .take()
-            .and_then(|reader| reader.join().ok())
-            .unwrap_or_default()
-    });
-    if stdout.len() > MAX_SHELL_EXEC_OUTPUT_BYTES || stderr.len() > MAX_SHELL_EXEC_OUTPUT_BYTES {
-        return Err(format!(
-            "shell command output exceeds {MAX_SHELL_EXEC_OUTPUT_BYTES} bytes"
-        ));
-    }
-    Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
+        support::process::CappedOutputError::Wait(error) => error.to_string(),
+        support::process::CappedOutputError::Cancelled
+        | support::process::CappedOutputError::DrainTimedOut => "shell command failed".to_owned(),
     })
 }
 
@@ -181,7 +100,7 @@ pub(crate) fn shell_exec_command() -> Command {
     let mut command = Command::new(SHELL_EXEC_SHELL);
     command
         .env_clear()
-        .env("PATH", "/usr/bin:/bin")
+        .env("PATH", support::command::TRUSTED_PATH)
         .env("GIT_OPTIONAL_LOCKS", "0");
     command
 }

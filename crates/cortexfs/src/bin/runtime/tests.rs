@@ -1,11 +1,11 @@
-use super::{BWRAP_PROGRAM, DEFAULT_SOURCE, RuntimeConfig, runtime_agent_execution, runtime_model};
+use super::{
+    BWRAP_PROGRAM, DEFAULT_SOURCE, RuntimeConfig, RuntimeMode, runtime_agent_execution,
+    runtime_model,
+};
 use cortexfs::{AgentExecutableSocketExecution, MountTable};
 use std::ffi::OsString;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::UnixListener;
 use std::path::Path;
-use std::path::PathBuf;
 
 #[test]
 pub(crate) fn runtime_config_parses_agent_and_default_source() {
@@ -15,6 +15,7 @@ pub(crate) fn runtime_config_parses_agent_and_default_source() {
         Ok(RuntimeConfig {
             source: Path::new(DEFAULT_SOURCE).to_path_buf(),
             agent: "coder".to_owned(),
+            mode: RuntimeMode::Serve,
         })
     );
 }
@@ -31,16 +32,99 @@ pub(crate) fn runtime_config_accepts_positional_agent() {
         Ok(RuntimeConfig {
             source: Path::new("/tmp/ctx").to_path_buf(),
             agent: "reviewer".to_owned(),
+            mode: RuntimeMode::Serve,
         })
     );
 }
 
 #[test]
-pub(crate) fn runtime_agent_executable_uses_ctx_abi_path() {
-    assert_eq!(
-        Path::new("/ctx").join("agent").join("coder"),
-        PathBuf::from("/ctx/agent/coder")
+pub(crate) fn runtime_config_parses_internal_socket_alias_modes() {
+    for (flag, mode) in [
+        ("--prepare-socket-alias", RuntimeMode::PrepareSocketAlias),
+        ("--cleanup-socket-alias", RuntimeMode::CleanupSocketAlias),
+    ] {
+        let parsed = RuntimeConfig::parse(vec![
+            OsString::from(flag),
+            OsString::from("--source"),
+            OsString::from("/tmp/ctx"),
+            OsString::from("--agent"),
+            OsString::from("coder"),
+        ]);
+        assert_eq!(
+            parsed,
+            Ok(RuntimeConfig {
+                source: Path::new("/tmp/ctx").to_path_buf(),
+                agent: "coder".to_owned(),
+                mode,
+            })
+        );
+    }
+}
+
+#[test]
+pub(crate) fn runtime_config_rejects_conflicting_or_positional_internal_modes() {
+    assert!(
+        RuntimeConfig::parse(vec![
+            OsString::from("--prepare-socket-alias"),
+            OsString::from("--cleanup-socket-alias"),
+            OsString::from("--agent"),
+            OsString::from("coder"),
+        ])
+        .is_err()
     );
+    assert!(
+        RuntimeConfig::parse(vec![
+            OsString::from("--prepare-socket-alias"),
+            OsString::from("coder"),
+        ])
+        .is_err()
+    );
+}
+
+#[test]
+pub(crate) fn packaged_socket_unit_uses_receipted_alias_lifecycle_and_safe_ordering()
+-> Result<(), Box<dyn std::error::Error>> {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let unit = fs::read_to_string(manifest.join("../../packaging/systemd/cortexfs-agent@.socket"))?;
+    for expected in [
+        "DefaultDependencies=no",
+        "Requires=cortexfs.service",
+        "After=cortexfs.service",
+        "Conflicts=shutdown.target",
+        "Before=shutdown.target",
+        "--prepare-socket-alias",
+        "--cleanup-socket-alias",
+    ] {
+        assert!(unit.lines().any(|line| line.contains(expected)));
+    }
+    assert!(!unit.contains("BindsTo=cortexfs.service"));
+    assert!(!unit.contains("PartOf=cortexfs.service"));
+    assert!(!unit.contains("/usr/bin/rm -f"));
+    assert!(!unit.contains("/usr/bin/ln -s"));
+
+    let service =
+        fs::read_to_string(manifest.join("../../packaging/systemd/cortexfs-agent@.service"))?;
+    for expected in [
+        "BindsTo=cortexfs.service",
+        "PartOf=cortexfs.service",
+        "After=cortexfs.service",
+    ] {
+        assert!(service.lines().any(|line| line == expected));
+    }
+    let unit_section = service
+        .strip_prefix("[Unit]\n")
+        .and_then(|contents| contents.split_once("\n[Service]\n"))
+        .ok_or("packaged agent service must contain [Unit] before [Service]")?;
+    assert_eq!(
+        unit_section
+            .0
+            .lines()
+            .filter(|line| *line == "StartLimitIntervalSec=0")
+            .count(),
+        1
+    );
+    assert!(!unit_section.1.contains("StartLimitIntervalSec"));
+    Ok(())
 }
 
 #[test]
@@ -51,7 +135,8 @@ pub(crate) fn runtime_agent_execution_uses_bwrap_sandbox() -> Result<(), Box<dyn
     let AgentExecutableSocketExecution::Bwrap {
         program,
         mount_table: selected_mount_table,
-    } = runtime_agent_execution(&mount_table)
+        ..
+    } = runtime_agent_execution(&mount_table, Path::new("/run/cortexfs/control"))
     else {
         return Err("socket-activated agents must use the bwrap sandbox".into());
     };
@@ -81,117 +166,13 @@ pub(crate) fn runtime_model_keeps_requested_model_without_primary_secret()
 }
 
 #[test]
-pub(crate) fn session_permission_repair_skips_non_file_special_entries()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!(
-        "cortexfs-session-special-repair-{}",
-        std::process::id()
-    ));
-    let _ignored = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root)?;
-    let socket = root.join("runtime.sock");
-    let _listener = UnixListener::bind(&socket)?;
-    fs::set_permissions(&socket, fs::Permissions::from_mode(0o777))?;
-    let uid = nix::unistd::Uid::current().as_raw();
-    let gid = nix::unistd::Gid::current().as_raw();
-
-    super::repair_path_permissions(&root, uid, gid)?;
-
-    assert_eq!(
-        fs::symlink_metadata(&socket)?.permissions().mode() & 0o777,
-        0o777
+fn codex_runtime_environment_contains_no_refresh_token() {
+    let env = super::secret_runtime_env(
+        "access".to_owned(),
+        "codex".to_owned(),
+        "default".to_owned(),
+        "account".to_owned(),
     );
-    let _ignored = fs::remove_file(&socket);
-    let _ignored = fs::remove_dir_all(root);
-    Ok(())
-}
-
-#[test]
-pub(crate) fn session_permission_repair_skips_dangling_symlink_root()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!(
-        "cortexfs-session-dangling-symlink-repair-{}",
-        std::process::id()
-    ));
-    let target = std::env::temp_dir().join(format!(
-        "cortexfs-session-dangling-symlink-repair-target-{}",
-        std::process::id()
-    ));
-    let _ignored = fs::remove_file(&root);
-    let _ignored = fs::remove_dir_all(&target);
-    std::os::unix::fs::symlink(&target, &root)?;
-    let uid = nix::unistd::Uid::current().as_raw();
-    let gid = nix::unistd::Gid::current().as_raw();
-
-    super::repair_agent_session_permissions(&root, uid, gid)?;
-
-    assert!(root.symlink_metadata()?.file_type().is_symlink());
-    assert!(!target.exists());
-    let _ignored = fs::remove_file(root);
-    Ok(())
-}
-
-#[test]
-pub(crate) fn session_permission_repair_rejects_symlink_intermediate_without_chmodding_target()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!(
-        "cortexfs-session-intermediate-symlink-repair-{}",
-        std::process::id()
-    ));
-    let outside = std::env::temp_dir().join(format!(
-        "cortexfs-session-intermediate-symlink-repair-outside-{}",
-        std::process::id()
-    ));
-    let _ignored = fs::remove_dir_all(&root);
-    let _ignored = fs::remove_dir_all(&outside);
-    fs::create_dir_all(&root)?;
-    fs::create_dir_all(outside.join("session"))?;
-    let target = outside.join("session").join("state");
-    fs::write(&target, "outside\n")?;
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o666))?;
-    std::os::unix::fs::symlink(&outside, root.join("link"))?;
-    let uid = nix::unistd::Uid::current().as_raw();
-    let gid = nix::unistd::Gid::current().as_raw();
-
-    assert!(super::repair_path_permissions(&root.join("link").join("session"), uid, gid).is_err());
-    assert_eq!(fs::metadata(&target)?.permissions().mode() & 0o777, 0o666);
-
-    let _ignored = fs::remove_dir_all(root);
-    let _ignored = fs::remove_dir_all(outside);
-    Ok(())
-}
-
-#[test]
-pub(crate) fn session_permission_repair_recurses_without_chmodding_symlink_targets()
--> Result<(), Box<dyn std::error::Error>> {
-    let root = std::env::temp_dir().join(format!(
-        "cortexfs-session-recursive-repair-{}",
-        std::process::id()
-    ));
-    let outside = std::env::temp_dir().join(format!(
-        "cortexfs-session-recursive-repair-outside-{}",
-        std::process::id()
-    ));
-    let _ignored = fs::remove_dir_all(&root);
-    let _ignored = fs::remove_dir_all(&outside);
-    fs::create_dir_all(root.join("default"))?;
-    fs::create_dir_all(&outside)?;
-    let child = root.join("default").join("state");
-    let target = outside.join("state");
-    fs::write(&child, "idle\n")?;
-    fs::write(&target, "outside\n")?;
-    fs::set_permissions(&child, fs::Permissions::from_mode(0o666))?;
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o666))?;
-    std::os::unix::fs::symlink(&target, root.join("default").join("link"))?;
-    let uid = nix::unistd::Uid::current().as_raw();
-    let gid = nix::unistd::Gid::current().as_raw();
-
-    super::repair_path_permissions(&root, uid, gid)?;
-
-    assert_eq!(fs::metadata(&child)?.permissions().mode() & 0o777, 0o600);
-    assert_eq!(fs::metadata(&target)?.permissions().mode() & 0o777, 0o666);
-
-    let _ignored = fs::remove_dir_all(root);
-    let _ignored = fs::remove_dir_all(outside);
-    Ok(())
+    assert_eq!(env.last().map(|value| value.1.as_str()), Some("account"));
+    assert!(!format!("{env:?}").contains("refresh"));
 }

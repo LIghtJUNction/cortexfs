@@ -1,40 +1,49 @@
+use super::agent::create::{
+    AgentCreateError, AgentCreateStage, AgentRollbackError, AgentRollbackStage, chown_home_entry,
+    create_agent_files, create_agent_files_with_hook, rollback_agent_files,
+    rollback_agent_files_with_hook,
+};
+use super::runtime::record::socket::record_unindexed_socket_request_for_test;
+use super::support::columnar;
+use super::support::index::set_session_index_update_failure;
 use super::{
     AGENT_CONTROL_FILES, ATIF_SCHEMA_VERSION, AgentControlKind, AgentExecutableRunRequest,
     AgentExecutableSocketExecution, AgentExecutableSocketRuntime, AgentRuntimeViewError,
     AgentScheduleAdvance, AgentScheduleChildHandoff, AgentScheduleIssue, AgentScheduleNodeKind,
-    AgentScheduleRecordError, AgentUnixIdentity, ApiKeyResolutionError, BOOTSTRAP_STATE_REL,
-    BootstrapAction, BwrapAgentExecutableArgs, CORTEXFS_OBJECT_RUNNER, CTX_ROOT,
-    ChildAgentAuthority, ChildAgentControls, ChildAgentDenial, ChildAgentRequest,
-    ChildContextRecordError, ChildContextStatus, ChildLifecycle, ContextJsonlIssue,
-    ContextJsonlKind, ContextPackBuildError, ContextPackIssue, ContextPackSourceError,
-    ControlLineIssue, DEFAULT_WORKER_MODEL, DurableSessionLayoutError, EXEC_OBJECTS,
-    EventStreamIssue, FUSE_V1_ROOT_INODE, FuseV1Error, FuseV1FileType, FuseV1Projection,
-    IndexedSocketSessionRecordError, LayoutPathRole, MAX_AGENT_SCHEDULE_NODES,
-    MAX_ECHO_MODEL_STDIN_BYTES, MAX_FUSE_V1_SMALL_WRITE_BYTES, MAX_OBJECT_NAME_LEN,
-    MAX_SOCKET_FRAME_BYTES, MIGRATION_RETIRED_AGENTS_V1, MODEL_CONTROL_FILES, MessageStreamIssue,
-    ModelCapabilityIssue, ModelDriverRouteError, ModelDriverUseCase, MountEntry, MountError,
-    MountMode, MountOption, MountTable, OAuthError, OAuthPkce, OAuthProviderConfig,
-    OBJECT_HOOK_DIR, OBJECT_HOOK_PHASE_DIRS, ObjectBootstrapError, ObjectClass,
-    OwnedChildCancellationError, PathLayoutIssue, PeerCredentials, PolicyError, PolicyObjectClass,
-    PolicyPermission, PolicyRule, PolicyV0, REFERENCE_TREE_VERSION, ReferenceTreeError,
+    AgentScheduleRecordError, AgentUnixIdentity, AgentWindowSetting, ApiKeyResolutionError,
+    BOOTSTRAP_STATE_REL, BootstrapAction, BootstrapState, BwrapAgentExecutableArgs,
+    CHILD_RESULT_REQUIRED_FILES, CONTEXT_REQUIRED_FILES, CORTEXFS_OBJECT_RUNNER, CTX_ROOT,
+    ChildAgentAuthority, ChildAgentControls, ChildAgentDenial, ChildAgentRequest, ChildClaimStage,
+    ChildContextRecordError, ChildContextStatus, ChildHandoffStage, ChildLifecycle,
+    ContextJsonlIssue, ContextJsonlKind, ControlLineIssue, DEFAULT_WORKER_MODEL,
+    DurableSessionLayoutError, EXEC_OBJECTS, EventStreamIssue, FUSE_ROOT_INODE, FuseDirEntry,
+    FuseError, FuseFileType, FuseProjection, IndexedSocketSessionRecordError, LayoutPathRole,
+    MAX_AGENT_SCHEDULE_NODES, MAX_ECHO_MODEL_STDIN_BYTES, MAX_FUSE_SMALL_WRITE_BYTES,
+    MAX_OBJECT_NAME_LEN, MAX_SOCKET_FRAME_BYTES, MIGRATION_RETIRED_AGENTS, MIGRATION_ROLLING_TREE,
+    MODEL_CONTROL_FILES, MessageStreamIssue, ModelCapabilityIssue, ModelContextLimit,
+    ModelDriverRouteError, ModelDriverUseCase, MountEntry, MountError, MountMode, MountOption,
+    MountTable, OAuthError, OAuthPkce, OAuthProviderConfig, OBJECT_HOOK_DIR,
+    OBJECT_HOOK_PHASE_DIRS, ObjectBootstrapError, ObjectClass, OwnedChildCancellationError,
+    PathLayoutIssue, PeerCredentials, PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule,
+    PolicyV0, REFERENCE_TREE_VERSION, ReferenceTreeError, SECRET_TOOL_PROGRAM,
     SESSION_REQUIRED_FILES, SHARED_QUEUE_REQUIRED_DIRS, SessionAccess, SessionAccessAuthority,
-    SessionAccessDenial, SessionControlKind, SessionIndexKind, SessionIndexUpdateError,
-    SharedAccess, SharedAccessAuthority, SharedAccessDenial, SharedQueueClaimError,
-    SharedQueueFinishError, SharedQueueOutcome, SharedQueueRecoverError, SkillMetadata,
-    SocketPeerPolicy, SocketRequest, SocketRequestError, SocketRuntimeError,
-    SocketSessionRecordError, SocketSessionScope, TOOL_CONTROL_FILES, ToolExecutionAuthority,
-    ToolExecutionDenial, ToolExecutionPrincipal, ToolHit, ToolPath, ToolPathError, ToolSchemaIssue,
-    TrajectoryIssue, TrajectoryMapError, TrajectoryObservation, TrajectoryObservationResult,
-    advance_agent_schedule_from_parent_context, agent_executable_socket_bwrap_args,
-    agent_executable_socket_command, append_jsonl_line, apply_reference_tree_upgrade,
-    atomic_create_text_with_mode, atomic_replace_text_preserving_metadata,
-    atomic_replace_text_preserving_metadata_with_hook, atomic_replace_text_with_mode,
-    authorize_child_agent, authorize_session_access, authorize_shared_access,
-    authorize_tool_execution, claim_next_shared_queue_job, classify_abi_path,
+    SessionAccessDenial, SessionControlKind, SessionIndexGuard, SessionIndexKind,
+    SessionIndexUpdateError, SharedAccess, SharedAccessAuthority, SharedAccessDenial,
+    SkillMetadata, SocketPeerPolicy, SocketRequest, SocketRequestError, SocketRuntimeError,
+    SocketSendOutcome, SocketSessionRecordError, SocketSessionScope, TOOL_CONTROL_FILES,
+    ToolExecutionAuthority, ToolExecutionDenial, ToolExecutionPrincipal, ToolHit, ToolPath,
+    ToolPathError, ToolSchemaIssue, TrajectoryIssue, TrajectoryMapError, TrajectoryObservation,
+    TrajectoryObservationResult, advance_agent_schedule_from_parent_context,
+    agent_executable_socket_bwrap_args, agent_executable_socket_command, append_jsonl_line,
+    apply_reference_tree_upgrade, atomic_create_text_with_mode,
+    atomic_replace_text_preserving_metadata, atomic_replace_text_preserving_metadata_with_hook,
+    atomic_replace_text_with_mode, authorize_child_agent, authorize_session_access,
+    authorize_shared_access, authorize_tool_execution, chown_reference_home_entry,
+    claim_child_handoff_active, claim_child_handoff_active_with_hook, classify_abi_path,
     collect_agent_rules_from_paths, collect_history_messages_from_session,
-    completed_agent_schedule_nodes_from_parent_context, create_private_context_dir,
-    default_agent_model_for_name, derive_agent_runtime_view, ensure_durable_session_layout,
-    ensure_v1_reference_tree, finish_shared_queue_job, format_history_messages_jsonl,
+    compare_and_update_session_index, completed_agent_schedule_nodes_from_parent_context,
+    create_private_context_dir, default_agent_model_for_name, derive_agent_runtime_view,
+    ensure_durable_session_layout, ensure_reference_tree, format_history_messages_jsonl,
     format_skill_metadata_with_budget, fuse_metadata_error, handle_socket_request_frame,
     inspect_agent_control, inspect_agent_schedule_json, inspect_context_jsonl,
     inspect_context_pack_json, inspect_event_stream_jsonl, inspect_message_stream_jsonl,
@@ -45,16 +54,17 @@ use super::{
     oauth_authorization_code_form, oauth_authorization_url, oauth_refresh_token_form,
     open_agent_executable_no_follow, owned_child_cancellation_events, parse_model_driver_routes,
     parse_oauth_token_response, parse_socket_request_frame, peer_credentials,
-    plan_reference_tree_upgrade, read_bootstrap_state, read_echo_model_stdin_limited,
-    ready_agent_schedule_child_handoffs, ready_agent_schedule_nodes, rebuild_context_pack,
-    record_agent_schedule_to_parent_context, record_assistant_response_to_session,
-    record_child_handoff_to_parent_context, record_child_result_to_parent_context,
-    record_indexed_socket_send_to_session, record_owned_child_cancellation,
-    record_ready_agent_schedule_child_handoffs_to_parent_context, record_socket_request_to_session,
+    plan_reference_tree_upgrade, publish_child_handoff, publish_child_handoff_with_hook,
+    read_bootstrap_state, read_echo_model_stdin_limited, ready_agent_schedule_child_handoffs,
+    ready_agent_schedule_nodes, record_agent_schedule_to_parent_context,
+    record_assistant_response_to_session, record_child_handoff_to_parent_context,
+    record_child_result_to_parent_context, record_indexed_socket_send_to_session,
+    record_owned_child_cancellation, record_ready_agent_schedule_child_handoffs_to_parent_context,
     record_tool_execution_denial_to_session, record_tool_execution_result_to_session,
-    recover_shared_queue_job, reference_agent_children, reference_agent_model,
-    reference_agent_policy, reference_agent_system_prompt, resolve_api_key_from_env_names_with,
-    resolve_api_key_with, resolve_fuse_abi_path, resolve_oauth_access_token_with, run_echo_model,
+    reference_agent_children, reference_agent_model, reference_agent_policy,
+    reference_agent_system_prompt, resolve_api_key_from_env_names_with, resolve_api_key_with,
+    resolve_fuse_abi_path, resolve_oauth_access_token_with, rollback_child_handoff, run_echo_model,
+    run_secret_tool_command_with_timeout, secret_tool_dbus_address,
     serve_agent_executable_socket_stream_once, serve_unix_socket_listener_once,
     serve_unix_socket_stream_once, session_index_key_for_cwd, set_private_dir_permissions,
     set_text_file_permissions, should_repair_reference_owner, snapshot_dirs,
@@ -72,24 +82,29 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-include!("../tests/unit/lib/helpers.rs");
-include!("../tests/unit/lib/agent_model_defaults.rs");
-include!("../tests/unit/lib/reference_tree_basics.rs");
-include!("../tests/unit/lib/agent_prompt.rs");
-include!("../tests/unit/lib/fuse_projection_objects.rs");
-include!("../tests/unit/lib/object_agent_layout.rs");
-include!("../tests/unit/lib/agent_runtime_socket_parse.rs");
-include!("../tests/unit/lib/socket_session_record.rs");
-include!("../tests/unit/lib/socket_runtime.rs");
-include!("../tests/unit/lib/agent_execution_policy.rs");
-include!("../tests/unit/lib/agent_schedule.rs");
-include!("../tests/unit/lib/child_context.rs");
-include!("../tests/unit/lib/session_context.rs");
-include!("../tests/unit/lib/context_queue.rs");
-include!("../tests/unit/lib/shared_queue_access.rs");
-include!("../tests/unit/lib/tool_authority.rs");
-include!("../tests/unit/lib/trajectory/map_and_validate.rs");
-include!("../tests/unit/lib/atomic_replace.rs");
+#[macro_use]
+mod helpers;
+
+mod atomic;
+mod authority;
+mod child;
+mod context;
+mod defaults;
+mod execution;
+mod layout;
+mod projection;
+mod prompt;
+mod recording;
+mod reference;
+mod runtime;
+mod schedule;
+mod session;
+mod shared;
+mod socket;
+mod store;
+mod trajectory;
+
+use helpers::*;
 
 /// Locks the mechanical src-tree naming rule from `docs/naming-guide.md`.
 ///

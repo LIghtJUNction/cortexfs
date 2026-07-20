@@ -1,11 +1,5 @@
 use crate::*;
 
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct AgentEventRender {
-    pub(crate) exit_code: u8,
-    pub(crate) interrupted: bool,
-}
-
 pub(crate) fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliError> {
     stream
         .set_read_timeout(Some(Duration::from_secs(1)))
@@ -13,23 +7,101 @@ pub(crate) fn render_agent_events(stream: UnixStream) -> Result<ExitCode, CliErr
             CliError::unavailable(format!("cannot configure socket progress: {error}"))
         })?;
     let reader = io::BufReader::new(stream);
-    Ok(ExitCode::from(
-        render_agent_event_lines(reader, None)?.exit_code,
-    ))
+    Ok(ExitCode::from(render_agent_event_lines(reader, None)?))
 }
 
-pub(crate) fn render_agent_events_interruptible(
+pub(crate) fn render_agent_events_approving(
     stream: UnixStream,
-    interrupt: &AtomicBool,
-) -> Result<AgentEventRender, CliError> {
+    writer: UnixStream,
+    approvals: &[String],
+) -> Result<ExitCode, CliError> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(1)))
+        .map_err(|error| {
+            CliError::unavailable(format!("cannot configure socket progress: {error}"))
+        })?;
     let reader = io::BufReader::new(stream);
-    render_agent_event_lines(reader, Some(interrupt))
+    let mut responder = ApprovalResponder::new(writer, approvals)?;
+    Ok(ExitCode::from(render_agent_event_lines(
+        reader,
+        Some(&mut responder),
+    )?))
 }
 
+pub(crate) struct ApprovalResponder {
+    writer: UnixStream,
+    allowed: std::collections::BTreeSet<String>,
+}
+
+impl ApprovalResponder {
+    fn new(writer: UnixStream, approvals: &[String]) -> Result<Self, CliError> {
+        let mut allowed = std::collections::BTreeSet::new();
+        for name in approvals {
+            require_cli_name("approved tool name", name)?;
+            allowed.insert(name.clone());
+        }
+        Ok(Self { writer, allowed })
+    }
+
+    fn respond(&mut self, value: &serde_json::Value) -> Result<(), CliError> {
+        let object = value
+            .as_object()
+            .filter(|object| object.len() == 5)
+            .ok_or_else(|| CliError::unavailable("invalid approval request"))?;
+        let field = |name| object.get(name).and_then(serde_json::Value::as_str);
+        let run = field("run").ok_or_else(|| CliError::unavailable("invalid approval run"))?;
+        let id = field("id").ok_or_else(|| CliError::unavailable("invalid approval id"))?;
+        let name = field("name").ok_or_else(|| CliError::unavailable("invalid approval name"))?;
+        if field("type") != Some("approval_request")
+            || value
+                .get("args")
+                .and_then(serde_json::Value::as_array)
+                .is_none()
+        {
+            return Err(CliError::unavailable("invalid approval request"));
+        }
+        let decision = approval_decision(&self.allowed, name);
+        let response = serde_json::json!({
+            "op":"approve", "run":run, "id":id, "decision":decision
+        });
+        writeln!(self.writer, "{response}")
+            .and_then(|()| self.writer.flush())
+            .map_err(|error| CliError::unavailable(format!("cannot write approval: {error}")))
+    }
+}
+
+fn approval_decision(
+    allowed: &std::collections::BTreeSet<String>,
+    requested: &str,
+) -> &'static str {
+    if allowed.contains(requested) {
+        "allow_once"
+    } else {
+        "deny"
+    }
+}
+
+#[cfg(test)]
+mod approval_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_approval_allowlist_matches_exact_tool_name() {
+        let allowed = std::collections::BTreeSet::from(["example.echo".to_owned()]);
+        assert_eq!(approval_decision(&allowed, "example.echo"), "allow_once");
+        assert_eq!(approval_decision(&allowed, "example.echo.extra"), "deny");
+        assert_eq!(approval_decision(&allowed, "Example.echo"), "deny");
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "single-pass renderer keeps ordered socket event handling auditable"
+)]
 pub(crate) fn render_agent_event_lines(
     mut reader: impl BufRead,
-    interrupt: Option<&AtomicBool>,
-) -> Result<AgentEventRender, CliError> {
+    mut approval: Option<&mut ApprovalResponder>,
+) -> Result<u8, CliError> {
     let mut saw_delta = false;
     let mut usage_totals = AgentUsageTotals::default();
     let mut exit = ExitCode::SUCCESS;
@@ -60,13 +132,6 @@ pub(crate) fn render_agent_event_lines(
                     io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                 ) =>
             {
-                if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
-                    clear_waiting_status_if_active(&mut waiting_status_active)?;
-                    return Ok(AgentEventRender {
-                        exit_code: exit_code_u8(exit),
-                        interrupted: true,
-                    });
-                }
                 update_waiting_status(
                     quiet_since.elapsed(),
                     &mut next_waiting_notice,
@@ -95,7 +160,14 @@ pub(crate) fn render_agent_event_lines(
             print_line(line)?;
             continue;
         };
-        match value.get("type").and_then(serde_json::Value::as_str) {
+        let event_type = value.get("type").and_then(serde_json::Value::as_str);
+        if event_type == Some("approval_request") {
+            if let Some(responder) = approval.as_mut() {
+                responder.respond(&value)?;
+            }
+            continue;
+        }
+        match event_type {
             Some("delta" | "reasoning_delta") => {
                 if let Some(text) = json_text_field(&value) {
                     print_terminal_text(text)?;
@@ -145,10 +217,7 @@ pub(crate) fn render_agent_event_lines(
             _ => {}
         }
     }
-    Ok(AgentEventRender {
-        exit_code: exit_code_u8(exit),
-        interrupted: false,
-    })
+    Ok(exit_code_u8(exit))
 }
 
 pub(crate) fn clear_waiting_status_if_active(active: &mut bool) -> Result<(), CliError> {
@@ -234,28 +303,11 @@ pub(crate) struct BufferedAgentEvents {
     pub(crate) output: String,
     pub(crate) diagnostics: Vec<String>,
     pub(crate) exit_code: u8,
-    pub(crate) interrupted: bool,
 }
 
 #[cfg(test)]
 pub(crate) fn collect_agent_events_buffered(
-    reader: impl BufRead,
-) -> Result<BufferedAgentEvents, CliError> {
-    collect_agent_events_buffered_with(reader, None)
-}
-
-#[cfg(test)]
-pub(crate) fn collect_agent_events_buffered_interruptible(
-    reader: impl BufRead,
-    interrupt: &AtomicBool,
-) -> Result<BufferedAgentEvents, CliError> {
-    collect_agent_events_buffered_with(reader, Some(interrupt))
-}
-
-#[cfg(test)]
-pub(crate) fn collect_agent_events_buffered_with(
     mut reader: impl BufRead,
-    interrupt: Option<&AtomicBool>,
 ) -> Result<BufferedAgentEvents, CliError> {
     let mut saw_delta = false;
     let mut usage_totals = AgentUsageTotals::default();
@@ -281,20 +333,11 @@ pub(crate) fn collect_agent_events_buffered_with(
                 }
             }
             Err(error)
-                if interrupt.is_some()
-                    && matches!(
-                        error.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
             {
-                if interrupt.is_some_and(|flag| flag.load(Ordering::SeqCst)) {
-                    return Ok(BufferedAgentEvents {
-                        output,
-                        diagnostics,
-                        exit_code,
-                        interrupted: true,
-                    });
-                }
                 continue;
             }
             Err(error) => {
@@ -365,7 +408,6 @@ pub(crate) fn collect_agent_events_buffered_with(
         output,
         diagnostics,
         exit_code,
-        interrupted: false,
     })
 }
 

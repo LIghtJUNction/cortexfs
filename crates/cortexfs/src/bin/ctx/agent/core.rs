@@ -23,11 +23,13 @@ pub(crate) enum AgentArgs {
         session: Option<String>,
         input: String,
         raw: bool,
+        approvals: Vec<String>,
     },
-    Repl {
+    Chat {
         name: String,
         session: Option<String>,
         raw: bool,
+        approvals: Vec<String>,
     },
     Resume {
         name: String,
@@ -50,7 +52,13 @@ pub(crate) enum AgentArgs {
         name: String,
         session: Option<String>,
     },
+    SessionArchive(AgentSessionArchiveArgs),
     SessionGc(AgentSessionGcArgs),
+    SessionSelect {
+        name: String,
+        target: String,
+        from: String,
+    },
     Prompt {
         name: String,
     },
@@ -82,8 +90,6 @@ pub(crate) enum AgentArgs {
     },
 }
 
-pub(crate) const MAX_AGENT_REPL_STDIN_BYTES: usize = 1024 * 1024;
-
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct AgentNewArgs {
     pub(crate) name: String,
@@ -114,9 +120,19 @@ pub(crate) struct AgentSessionGcArgs {
     pub(crate) name: String,
     pub(crate) dry_run: bool,
     pub(crate) yes: bool,
+    pub(crate) delete: bool,
+    pub(crate) archive_dir: Option<PathBuf>,
     pub(crate) keep: Vec<String>,
     pub(crate) patterns: Vec<String>,
     pub(crate) older_than_days: Option<u64>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+/// Arguments for archiving one durable agent session.
+pub(crate) struct AgentSessionArchiveArgs {
+    pub(crate) name: String,
+    pub(crate) session: String,
+    pub(crate) archive_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -160,12 +176,24 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             ref session,
             ref input,
             raw,
-        } => agent_send(root, name, session.as_deref(), input, raw, false),
-        AgentArgs::Repl {
+            ref approvals,
+        } => agent_send(
+            root,
+            name,
+            AgentSend {
+                session: session.as_deref(),
+                input,
+                raw,
+                debug: false,
+                approvals,
+            },
+        ),
+        AgentArgs::Chat {
             ref name,
             ref session,
             raw,
-        } => agent_repl(root, name, session.as_deref(), raw),
+            ref approvals,
+        } => agent_chat(root, name, session.as_deref(), raw, approvals),
         AgentArgs::Resume {
             ref name,
             ref session,
@@ -187,7 +215,13 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
             ref name,
             ref session,
         } => success(agent_trajectory(root, name, session.as_deref())),
+        AgentArgs::SessionArchive(ref args) => success(agent_session_archive(root, args)),
         AgentArgs::SessionGc(ref args) => success(agent_session_gc(root, args)),
+        AgentArgs::SessionSelect {
+            ref name,
+            ref target,
+            ref from,
+        } => success(agent_session_select(root, name, target, from)),
         AgentArgs::Prompt { ref name } => success(agent_prompt(root, name)),
         AgentArgs::Tools { ref name } => success(agent_tools(root, name)),
         AgentArgs::Children {
@@ -218,15 +252,86 @@ pub(crate) fn agent_command(root: &Path, args: &AgentArgs) -> Result<ExitCode, C
 
 pub(crate) fn agent_new(root: &Path, args: &AgentNewArgs) -> Result<ExitCode, CliError> {
     let request = agent_new_request_json(args)?;
-    if agent_lifecycle_tool_exists(root, "agent.create")? {
+    if agent_lifecycle_tool_selected(root, agent_runtime_context_matches(root))? {
         return agent_lifecycle_tool(root, "agent.create", &request);
     }
     agent_new_host_fallback(root, args)
 }
 
-pub(crate) fn agent_stop(root: &Path, name: &str) -> Result<ExitCode, CliError> {
-    if agent_lifecycle_tool_exists(root, "agent.stop")? {
-        return agent_lifecycle_tool(root, "agent.stop", &agent_name_request_json(name));
+pub(crate) fn agent_lifecycle_tool_selected(
+    root: &Path,
+    runtime_context_matches: bool,
+) -> Result<bool, CliError> {
+    Ok(runtime_context_matches && agent_lifecycle_tool_exists(root, "agent.create")?)
+}
+
+pub(crate) fn agent_runtime_context_matches(root: &Path) -> bool {
+    let Ok(agent) = env::var("CTX_AGENT") else {
+        return false;
+    };
+    let Ok(session) = env::var("CTX_SESSION") else {
+        return false;
+    };
+    let Ok(run) = env::var("CTX_RUN_ID") else {
+        return false;
+    };
+    let Some(source) = env::var_os("CTX_SOURCE").map(PathBuf::from) else {
+        return false;
+    };
+    let Some(ctx_root) = env::var_os("CTX_ROOT").map(PathBuf::from) else {
+        return false;
+    };
+    agent_runtime_context_matches_values(root, &source, &ctx_root, &agent, &session, &run)
+}
+
+pub(crate) fn agent_runtime_context_matches_values(
+    root: &Path,
+    source: &Path,
+    ctx_root: &Path,
+    agent: &str,
+    session: &str,
+    run: &str,
+) -> bool {
+    if !is_object_name(agent)
+        || !is_object_name(session)
+        || !is_object_name(run)
+        || ctx_root != root
+        || !source.is_absolute()
+    {
+        return false;
     }
-    agent_stop_host_fallback(root, name)
+    let Ok(view) = derive_agent_runtime_view(source, agent) else {
+        return false;
+    };
+    let source_control = source.join("agent").join(format!("{agent}.d"));
+    let projected_control = root.join("agent").join(format!("{agent}.d"));
+    for file in [
+        "owner", "uid", "gid", "groups", "label", "iso", "root", "cwd", "env", "path", "mount",
+        "model", "policy", "parent", "life",
+    ] {
+        let source_value = fs::read_to_string(source_control.join(file));
+        let projected_value = fs::read_to_string(projected_control.join(file));
+        if !matches!((source_value, projected_value), (Ok(left), Ok(right)) if left == right) {
+            return false;
+        }
+    }
+    let session_dir = source
+        .join("home")
+        .join(view.owner().to_string())
+        .join("agent")
+        .join(agent)
+        .join("session")
+        .join(session);
+    session_dir
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
+        && fs::read_to_string(session_dir.join("current_run"))
+            .is_ok_and(|current| current.trim() == run)
+}
+
+pub(crate) fn agent_stop(root: &Path, name: &str) -> Result<ExitCode, CliError> {
+    require_cli_name("agent name", name)?;
+    let socket = agent_socket_path(root, name)?;
+    let request = format!("{}\n", serde_json::json!({ "op": "stop", "agent": name }));
+    stream_socket_request(&socket, &request)
 }

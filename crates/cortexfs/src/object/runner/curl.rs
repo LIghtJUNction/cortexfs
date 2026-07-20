@@ -1,13 +1,18 @@
 use super::*;
+#[cfg(test)]
+static PROVIDER_REQUEST_ATTEMPTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
-pub(crate) fn run_curl_json(
-    target: &CurlJsonTarget,
-    api_key: Option<&str>,
-    body: &str,
-) -> Result<Vec<u8>, String> {
-    let headers = openai_headers(api_key);
-    run_curl_json_with_headers(target, &headers, body)
+#[cfg(test)]
+pub(crate) fn reset_provider_request_attempts() {
+    PROVIDER_REQUEST_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
 }
+
+#[cfg(test)]
+pub(crate) fn provider_request_attempts() -> usize {
+    PROVIDER_REQUEST_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 pub(crate) fn run_curl_json_with_headers(
     target: &CurlJsonTarget,
     headers: &[String],
@@ -33,28 +38,18 @@ pub(crate) fn provider_request_failure_message(output: &std::process::Output) ->
     }
     format!("provider request failed with {}", output.status)
 }
-pub(crate) fn start_curl_json(
-    target: &CurlJsonTarget,
-    api_key: Option<&str>,
-    body: &str,
-) -> Result<Child, String> {
-    let headers = openai_headers(api_key);
-    start_curl_json_with_headers(target, &headers, body)
-}
-pub(crate) fn openai_headers(api_key: Option<&str>) -> Vec<String> {
-    api_key.map_or_else(Vec::new, |api_key| {
-        vec![format!("Authorization: Bearer {api_key}")]
-    })
-}
 pub(crate) fn start_curl_json_with_headers(
     target: &CurlJsonTarget,
     headers: &[String],
     body: &str,
 ) -> Result<Child, String> {
+    #[cfg(test)]
+    PROVIDER_REQUEST_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut child = provider_curl_command()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .map_err(|error| format!("cannot start curl: {error}"))?;
     let Some(mut stdin) = child.stdin.take() else {
@@ -199,7 +194,7 @@ pub(crate) fn provider_max_time_seconds() -> u64 {
         .unwrap_or(60)
 }
 pub(crate) fn cleanup_curl_child(child: &mut Child) {
-    let _ignored = child.kill();
+    crate::support::process::terminate_process_group(child);
     let _ignored = child.wait();
 }
 pub(crate) fn curl_config_quote(value: &str) -> Result<String, String> {

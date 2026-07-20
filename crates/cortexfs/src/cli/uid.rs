@@ -1,14 +1,14 @@
-const ID_PROGRAM: &str = "/usr/bin/id";
+use crate::support::command::{ID, TRUSTED_PATH};
 
 #[must_use]
 pub fn get_id_program() -> &'static str {
-    ID_PROGRAM
+    ID
 }
 
 #[must_use]
 pub fn id_command() -> std::process::Command {
     let mut command = std::process::Command::new(get_id_program());
-    command.arg("-u").env_clear().env("PATH", "/usr/bin:/bin");
+    command.arg("-u").env_clear().env("PATH", TRUSTED_PATH);
     command
 }
 

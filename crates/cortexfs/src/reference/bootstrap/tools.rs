@@ -12,7 +12,7 @@ pub(crate) struct ReferenceToolSpec {
 pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
     ReferenceToolSpec {
         name: "tsh",
-        wrapper_target: "/bin/false",
+        wrapper_target: support::command::FALSE,
         description: "CortexFS tool shell. Resolve and run tools through CTX_PATH.",
         schema: r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -113,6 +113,14 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
         cap: "tsh.config",
         policy: "allow architect_t tool:tsh.config execute\nallow coder_t tool:tsh.config execute\nallow reviewer_t tool:tsh.config execute",
     },
+    ReferenceToolSpec {
+        name: "agent.create",
+        wrapper_target: REFERENCE_OBJECT_RUNNER,
+        description: "Create one explicitly authorized owned child agent.",
+        schema: agent::createop::AGENT_CREATE_SCHEMA,
+        cap: "agent.create",
+        policy: "allow architect_t tool:agent.create execute\nallow coder_t tool:agent.create execute\nallow reviewer_t tool:agent.create execute",
+    },
 ];
 
 pub(crate) const DEFAULT_TSH_CONFIG: &str = "\
@@ -120,13 +128,6 @@ max_loaded_tools=64
 cache_capacity=32
 window_percent=1
 ";
-
-pub(crate) const DEPRECATED_REFERENCE_PLACEHOLDER_TOOLS: &[&str] = &[
-    "mcp.github.search_issues",
-    "agent.create",
-    "agent.start",
-    "agent.stop",
-];
 
 pub(crate) fn reference_tool_stub_script(name: &str) -> Option<&'static str> {
     match name {

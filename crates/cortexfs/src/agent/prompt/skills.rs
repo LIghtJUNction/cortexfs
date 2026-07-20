@@ -17,9 +17,15 @@ pub fn collect_skill_metadata(max_chars: usize) -> String {
 
 #[must_use]
 pub fn skill_metadata_budget_from_env() -> usize {
-    env::var("CTX_CONTEXT_WINDOW_CHARS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
+    skill_metadata_budget(env::var("CTX_CONTEXT_WINDOW_CHARS").ok().as_deref())
+}
+
+pub(crate) fn skill_metadata_budget(window_chars: Option<&str>) -> usize {
+    window_chars
+        .and_then(|value| {
+            let parsed = value.parse::<usize>().ok()?;
+            (parsed > 0 && parsed.to_string() == value).then_some(parsed)
+        })
         .map_or(MAX_SKILL_METADATA_CHARS, |window| {
             window.saturating_mul(2).saturating_div(100)
         })
@@ -105,7 +111,7 @@ pub(crate) fn collect_skill_files(root: &Path, paths: &mut Vec<PathBuf>, depth: 
     if depth > 8 || paths.len() >= MAX_SKILL_FILES {
         return;
     }
-    let Ok(root_dir) = support::plain::open_plain_directory(root) else {
+    let Ok(root_dir) = open_plain_directory(root) else {
         return;
     };
     let Ok(entries) = fs::read_dir(support::plain::proc_fd_path(&root_dir)) else {
@@ -202,4 +208,28 @@ pub(crate) fn shorten_description(description: &str, max_chars: usize) -> String
         return normalized;
     }
     normalized.chars().take(max_chars).collect::<String>()
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn known_window_uses_two_percent_of_total_chars() {
+        assert_eq!(skill_metadata_budget(Some("65536")), 1_310);
+    }
+
+    #[test]
+    fn unknown_or_malformed_window_uses_legacy_limit() {
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("+1"),
+            Some("01"),
+            Some("nope"),
+        ] {
+            assert_eq!(skill_metadata_budget(value), MAX_SKILL_METADATA_CHARS);
+        }
+    }
 }

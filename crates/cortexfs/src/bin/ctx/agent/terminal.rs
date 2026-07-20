@@ -35,7 +35,6 @@ pub(crate) fn agent_terminal_connect_socket(
     for socket in [
         agent_terminal_socket(root, name, session)?,
         agent_runtime_socket(root, name, session)?,
-        agent_legacy_runtime_socket(root, name, session)?,
     ] {
         if terminal_socket_exists(&socket) {
             return Ok(socket);

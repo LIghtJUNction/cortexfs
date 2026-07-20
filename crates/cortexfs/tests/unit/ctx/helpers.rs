@@ -166,12 +166,6 @@ fn context_jsonl_path_kind(path: &str) -> Option<ContextJsonlKind> {
     parse_abi_path(path).context_jsonl_kind()
 }
 
-fn executable_object_path(path: &str) -> Option<(ObjectClass, String)> {
-    parse_abi_path(path)
-        .executable_object()
-        .map(|(class, name)| (class, name.into_owned()))
-}
-
 fn fixture_path(root: &Path, parts: &[&str]) -> PathBuf {
     let mut path = root.to_path_buf();
     path.extend(parts.iter().copied());
@@ -212,6 +206,24 @@ fn create_complete_agent_control(root: &Path, name: &str) {
             &format!("{}\n", complete_agent_control_value(file, name)),
         );
     }
+}
+
+fn ensure_runtime_model_fixture(root: &Path) {
+    let models = ensure_runtime_models(root);
+    assert!(models.is_ok(), "{models:?}");
+    let worker_model = Path::new(DEFAULT_WORKER_MODEL);
+    let worker_limit = root
+        .join("model")
+        .join(worker_model.parent().unwrap_or_else(|| Path::new("")))
+        .join(format!(
+            "{}.d",
+            worker_model
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+        ))
+        .join("limit");
+    write_text_file(&worker_limit, "unknown\n");
 }
 
 fn enable_dynamic_worker_fixture(root: &Path) {
@@ -276,6 +288,8 @@ fn complete_agent_control_value(file: &str, name: &str) -> String {
         "path" => "/ctx/tool:/ctx/home/1000/tool".to_owned(),
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
         "model" => "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+        "abi" => "sdk-envelope-v1".to_owned(),
+        "window" => "auto".to_owned(),
         "policy" => format!("allow {subject} model:api.lmm.best/gpt-5.3-codex-spark use"),
         "status" => "idle".to_owned(),
         "meta.json" => "{}".to_owned(),

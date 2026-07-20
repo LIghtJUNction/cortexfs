@@ -1,11 +1,7 @@
 use super::*;
 use crate::*;
 
-use crate::support::plain::{
-    open_plain_directory as open_tool_io_plain_directory,
-    plain_file_name as tool_io_plain_file_name,
-    read_small_text_file as read_tool_io_small_text_file,
-};
+use crate::support::plain::{open_plain_directory, plain_file_name, read_small_text_file};
 
 impl Tool for FsReadTool {
     fn spec(&self) -> ToolSpec {
@@ -27,7 +23,7 @@ impl Tool for FsReadTool {
         if path.is_empty() {
             return Err(ToolError::invalid("missing path"));
         }
-        match read_regular_utf8_file(Path::new(&path), MAX_FS_READ_BYTES) {
+        match read_small_text_file(Path::new(&path), MAX_FS_READ_BYTES) {
             Ok(content) => output
                 .message(&content)
                 .map_err(|error| ToolError::new("EIO", error.to_string())),
@@ -99,13 +95,9 @@ pub(crate) fn run_fs_read_cli(args: &[OsString], writer: &mut dyn Write) -> io::
         writeln!(io::stderr(), "fs.read: missing path")?;
         return Ok(ExitCode::from(2));
     };
-    let content = read_regular_utf8_file(&PathBuf::from(path), MAX_FS_READ_BYTES)?;
+    let content = read_small_text_file(&PathBuf::from(path), MAX_FS_READ_BYTES)?;
     writer.write_all(content.as_bytes())?;
     Ok(ExitCode::SUCCESS)
-}
-
-pub(crate) fn read_regular_utf8_file(path: &Path, max_bytes: u64) -> io::Result<String> {
-    read_tool_io_small_text_file(path, max_bytes)
 }
 
 pub(crate) fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io::Result<ExitCode> {
@@ -120,7 +112,7 @@ pub(crate) fn run_fs_write_cli(args: &[OsString], writer: &mut dyn Write) -> io:
             .collect::<Vec<_>>()
             .join(" ")
     } else {
-        read_text_from_stdin_limited(io::stdin(), MAX_FUSE_V1_SMALL_WRITE_BYTES)?
+        read_text_from_stdin_limited(io::stdin(), MAX_FUSE_SMALL_WRITE_BYTES)?
     };
     write_text_file_atomic(Path::new(path), &content)?;
     writeln!(writer, "written")?;
@@ -180,7 +172,7 @@ pub(crate) fn replace_exactly_once(path: &Path, old: &str, new: &str) -> io::Res
             "old text must not be empty",
         ));
     }
-    let content = read_regular_utf8_file(path, MAX_FS_READ_BYTES)?;
+    let content = read_small_text_file(path, MAX_FS_READ_BYTES)?;
     let mut matches = content.match_indices(old);
     let Some((_start, _matched)) = matches.next() else {
         return Err(io::Error::new(
@@ -213,8 +205,8 @@ pub(crate) fn write_text_file_atomic(path: &Path, content: &str) -> io::Result<(
             "path must have a parent directory",
         ));
     };
-    let file_name = tool_io_plain_file_name(path)?;
-    let parent_dir = open_tool_io_plain_directory(parent)?;
+    let file_name = plain_file_name(path)?;
+    let parent_dir = open_plain_directory(parent)?;
     for attempt in 0..16 {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)

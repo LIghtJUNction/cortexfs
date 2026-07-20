@@ -22,7 +22,12 @@
 /.env.*
 !/.env.example
 /tmp/
+/ctx
+/inspect_benchmark/tmp/
 *.log
 *.pid
 .codegraph
 /.tokensave/
+/.omo/
+SWAP.md
+scripts/__pycache__/

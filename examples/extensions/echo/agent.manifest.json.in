@@ -1,0 +1,34 @@
+{
+  "schema": "cortexfs.object/v2",
+  "version": "0.1.0",
+  "compatibility": {
+    "cortexfs": ">=0.1.7, <0.2.0"
+  },
+  "class": "agent",
+  "name": "example-echo",
+  "executable": {
+    "path": "@AGENT_PATH@",
+    "sha256": "@AGENT_SHA256@"
+  },
+  "controls": {
+    "owner": "@UID@",
+    "uid": "@UID@",
+    "gid": "@GID@",
+    "groups": "@GROUPS@",
+    "label": "user_u:agent_r:example_t:s0",
+    "iso": "shared",
+    "parent": "",
+    "life": "owned",
+    "root": "/",
+    "cwd": "/workspace",
+    "env": "CTX_ROOT=/ctx",
+    "path": "/ctx/tool",
+    "mount": "/ctx\t/ctx\tro\trbind,nosuid,nodev",
+    "model": "main",
+    "abi": "sdk-envelope-v1",
+    "approval": "auto",
+    "tools": "example.echo",
+    "policy": "allow example_t model:main use\nallow example_t tool:example.echo execute",
+    "system.md": "Echo the requested input without adding authority."
+  }
+}

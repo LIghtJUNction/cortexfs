@@ -14,7 +14,16 @@ pub(crate) fn schedule_command(root: &Path, args: &ScheduleArgs) -> Result<(), C
             status,
             ref result,
             ref refs_jsonl,
-        } => schedule_result(root, path, child, status, result, refs_jsonl),
+        } => schedule_result(
+            root,
+            path,
+            child,
+            ScheduleResultInput {
+                status,
+                result,
+                refs_jsonl,
+            },
+        ),
     }
 }
 
@@ -115,6 +124,82 @@ pub(crate) struct LoadedScheduleContext {
     pub(crate) parent_subject: String,
     pub(crate) parent_policy: PolicyV0,
     pub(crate) json: String,
+    plan_path: PathBuf,
+    plan_file: fs::File,
+    plan_dev: u64,
+    plan_ino: u64,
+}
+
+struct OpenedSchedulePlan {
+    file: fs::File,
+    dev: u64,
+    ino: u64,
+    json: String,
+}
+
+fn open_schedule_plan(path: &Path) -> Result<OpenedSchedulePlan, CliError> {
+    let mut file = open_plain_read_file(path)?;
+    let metadata = file.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+    })?;
+    if !metadata.is_file() || metadata.len() > MAX_CTX_FILE_CHECK_BYTES {
+        return Err(CliError::unavailable(format!(
+            "cannot read {}: not a small regular file",
+            path.display()
+        )));
+    }
+    let len = usize::try_from(metadata.len()).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+    })?;
+    let mut content = vec![0; len];
+    file.read_exact(&mut content).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+    })?;
+    let after = file.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+    })?;
+    let current = open_plain_read_file(path)?;
+    let current_metadata = current.metadata().map_err(|error| {
+        CliError::unavailable(format!("cannot stat {}: {error}", path.display()))
+    })?;
+    if (
+        after.dev(),
+        after.ino(),
+        after.len(),
+        after.mtime(),
+        after.mtime_nsec(),
+    ) != (
+        metadata.dev(),
+        metadata.ino(),
+        metadata.len(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+    ) || (
+        current_metadata.dev(),
+        current_metadata.ino(),
+        current_metadata.len(),
+        current_metadata.mtime(),
+        current_metadata.mtime_nsec(),
+    ) != (
+        metadata.dev(),
+        metadata.ino(),
+        metadata.len(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+    ) {
+        return Err(CliError::usage(
+            "invalid child context: current plan changed during read",
+        ));
+    }
+    let json = String::from_utf8(content).map_err(|error| {
+        CliError::unavailable(format!("cannot read {}: {error}", path.display()))
+    })?;
+    Ok(OpenedSchedulePlan {
+        file: current,
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+        json,
+    })
 }
 
 pub(crate) fn load_schedule_context(
@@ -134,13 +219,19 @@ pub(crate) fn load_schedule_context(
             "schedule {command} plan must belong to an agent session"
         ))
     })?;
+    let plan_path = resolve_abi_path(root, path)?;
+    let plan = open_schedule_plan(&plan_path)?;
     Ok(LoadedScheduleContext {
         context_abi_path: schedule_context_abi_path(&abi_path, command)?,
         parent_agent: parent_agent.to_owned(),
         parent_session_dir: schedule_parent_session_dir(root, path, command)?,
         parent_subject: parent_policy_subject(root, parent_agent)?,
         parent_policy: parent_agent_policy(root, parent_agent)?,
-        json: read_file_to_string(&resolve_abi_path(root, path)?)?,
+        json: plan.json,
+        plan_path,
+        plan_file: plan.file,
+        plan_dev: plan.dev,
+        plan_ino: plan.ino,
         abi_path,
     })
 }
@@ -317,11 +408,12 @@ pub(crate) fn require_schedule_handoff_agent(root: &Path, agent: &str) -> Result
 }
 
 pub(crate) struct ScheduleChildHandoffContext {
-    pub(crate) abi_path: String,
-    pub(crate) parent_session_dir: PathBuf,
+    pub(crate) schedule: LoadedScheduleContext,
+    pub(crate) child_dir: PathBuf,
     pub(crate) child_paths: ScheduleChildContextAbiPaths,
     pub(crate) agent: String,
     pub(crate) session: String,
+    pub(crate) handoff: String,
     pub(crate) model: String,
     pub(crate) life: String,
     pub(crate) parent_ref: String,
@@ -334,26 +426,33 @@ pub(crate) fn schedule_child_handoff_context(
     child: &str,
     command: &str,
 ) -> Result<ScheduleChildHandoffContext, CliError> {
-    let abi_path = classify_input_path(root, path)?;
-    let parent_agent = parent_agent_for_session_context_path(&abi_path).ok_or_else(|| {
-        CliError::usage(format!(
-            "schedule {command} plan must belong to an agent session"
-        ))
-    })?;
-    let parent_session_dir = schedule_parent_session_dir(root, path, command)?;
-    let context_abi_path = schedule_context_abi_path(&abi_path, command)?;
-    let child_paths = schedule_child_context_abi_paths(&context_abi_path, child)?;
+    let schedule = load_schedule_context(root, path, command)?;
+    let node = schedule_delegated_child_node(&schedule, child, command)?;
+    let child_paths = schedule_child_context_abi_paths(&schedule.context_abi_path, child)?;
     let child_dir = child_context_dir(root, &child_paths.status, child)?;
     let (agent, session) = schedule_child_context_agent_session(&child_dir)?;
-    let (model, life, child_parent) = schedule_handoff_agent_details(root, &agent)?;
-    let parent_ref = schedule_parent_ref_for_output(parent_agent, &parent_session_dir)?;
+    let expected_session = schedule_node_session(&schedule.parent_session_dir, &node)?;
+    let expected_handoff =
+        ensure_trailing_newline(node.handoff().ok_or_else(|| {
+            CliError::usage("invalid child context: current plan handoff mismatch")
+        })?);
+    let handoff = read_file_to_string(&child_dir.join("handoff.md"))?;
+    if agent != node.agent() || session != expected_session || handoff != expected_handoff {
+        return Err(CliError::usage(
+            "invalid child context: current plan handoff mismatch",
+        ));
+    }
+    let (model, life, child_parent) = schedule_handoff_agent_details(root, node.agent())?;
+    let parent_ref =
+        schedule_parent_ref_for_output(&schedule.parent_agent, &schedule.parent_session_dir)?;
     schedule_require_handoff_parent(&parent_ref, &agent, &child_parent)?;
     Ok(ScheduleChildHandoffContext {
-        abi_path,
-        parent_session_dir,
+        schedule,
+        child_dir,
         child_paths,
         agent,
         session,
+        handoff,
         model,
         life,
         parent_ref,
@@ -361,9 +460,142 @@ pub(crate) fn schedule_child_handoff_context(
     })
 }
 
+pub(crate) fn schedule_delegated_child_node(
+    schedule: &LoadedScheduleContext,
+    child: &str,
+    command: &str,
+) -> Result<AgentScheduleNode, CliError> {
+    schedule_delegated_child_node_from(
+        &schedule.json,
+        &schedule.parent_subject,
+        &schedule.parent_policy,
+        child,
+        command,
+    )
+}
+
+fn schedule_delegated_child_node_from(
+    json: &str,
+    parent_subject: &str,
+    parent_policy: &PolicyV0,
+    child: &str,
+    command: &str,
+) -> Result<AgentScheduleNode, CliError> {
+    let nodes = agent_schedule_nodes(json, parent_subject, parent_policy).map_err(|report| {
+        schedule_record_cli_error(command, AgentScheduleRecordError::InvalidSchedule(report))
+    })?;
+    let mut matches = nodes.into_iter().filter(|node| node.child() == Some(child));
+    let node = matches.next().ok_or_else(|| {
+        CliError::usage("invalid child context: child is not delegated by current plan")
+    })?;
+    if matches.next().is_some() {
+        return Err(CliError::usage(
+            "invalid child context: child is delegated more than once by current plan",
+        ));
+    }
+    Ok(node)
+}
+
+fn revalidate_schedule_child(
+    context: &ScheduleChildHandoffContext,
+    child: &str,
+    command: &str,
+) -> Result<OpenedSchedulePlan, CliError> {
+    let schedule = &context.schedule;
+    let held = schedule.plan_file.metadata().map_err(|error| {
+        CliError::unavailable(format!(
+            "cannot {command} child: cannot stat held plan: {error}"
+        ))
+    })?;
+    let current = open_schedule_plan(&schedule.plan_path)?;
+    if !held.is_file()
+        || (held.dev(), held.ino()) != (schedule.plan_dev, schedule.plan_ino)
+        || (current.dev, current.ino) != (schedule.plan_dev, schedule.plan_ino)
+        || current.json != schedule.json
+    {
+        return Err(CliError::usage(
+            "invalid child context: current plan changed during operation",
+        ));
+    }
+    let node = schedule_delegated_child_node_from(
+        &current.json,
+        &schedule.parent_subject,
+        &schedule.parent_policy,
+        child,
+        command,
+    )?;
+    let expected_session = schedule_node_session(&schedule.parent_session_dir, &node)?;
+    let expected_handoff =
+        ensure_trailing_newline(node.handoff().ok_or_else(|| {
+            CliError::usage("invalid child context: current plan handoff mismatch")
+        })?);
+    if node.agent() != context.agent
+        || expected_session != context.session
+        || expected_handoff != context.handoff
+    {
+        return Err(CliError::usage(
+            "invalid child context: current plan handoff mismatch",
+        ));
+    }
+    Ok(current)
+}
+
+fn prepare_schedule_child_mutation(
+    root: &Path,
+    path: &str,
+    child: &str,
+    command: &str,
+    hook: impl FnOnce() -> Result<(), CliError>,
+) -> Result<
+    (
+        ScheduleChildHandoffContext,
+        ChildHandoffReceipt,
+        ChildContextLease,
+        OpenedSchedulePlan,
+    ),
+    CliError,
+> {
+    let context = schedule_child_handoff_context(root, path, child, command)?;
+    let receipt =
+        child_handoff_receipt(&context.child_dir).map_err(schedule_child_context_cli_error)?;
+    let lease = acquire_child_context_lease(&receipt).map_err(schedule_child_context_cli_error)?;
+    hook()?;
+    validate_child_context_lease(
+        &lease,
+        &receipt,
+        &context.agent,
+        &context.session,
+        &context.handoff,
+    )
+    .map_err(schedule_child_context_cli_error)?;
+    let plan = revalidate_schedule_child(&context, child, command)?;
+    Ok((context, receipt, lease, plan))
+}
+
 pub(crate) fn schedule_claim(root: &Path, path: &str, child: &str) -> Result<(), CliError> {
-    let handoff = schedule_child_handoff_context(root, path, child, "claim")?;
-    schedule_claim_child_active(root, &handoff.child_paths.status)?;
+    schedule_claim_with_hook(root, path, child, || Ok(()))
+}
+
+pub(crate) fn schedule_claim_with_hook(
+    root: &Path,
+    path: &str,
+    child: &str,
+    hook: impl FnOnce() -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    let (handoff, receipt, lease, _plan) =
+        prepare_schedule_child_mutation(root, path, child, "claim", hook)?;
+    if child_context_lease_status(&lease).map_err(schedule_child_context_cli_error)?
+        != ChildContextStatus::Active
+    {
+        claim_child_handoff_active_with_lease(
+            &lease,
+            &receipt,
+            &handoff.agent,
+            &handoff.session,
+            Some(&handoff.handoff),
+        )
+        .map_err(schedule_child_context_cli_error)?;
+    }
     print_line(&format!(
         "claim child={child} status=active {} handoff={} result={} refs={}",
         schedule_handoff_identity_output(&handoff),
@@ -383,7 +615,7 @@ pub(crate) fn schedule_handoff_identity_output(handoff: &ScheduleChildHandoffCon
         agent_role_for_display(&handoff.agent),
         shell_quote_arg(&handoff.parent_ref),
         shell_quote_arg(&handoff.child_parent),
-        handoff.abi_path,
+        handoff.schedule.abi_path,
     )
 }
 
@@ -396,23 +628,6 @@ pub(crate) fn child_context_dir(
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| CliError::usage(format!("invalid child status path for {child}")))
-}
-
-pub(crate) fn schedule_claim_child_active(
-    root: &Path,
-    status_abi_path: &str,
-) -> Result<(), CliError> {
-    let status = read_file_to_string(&resolve_abi_path(root, status_abi_path)?)?;
-    match ChildContextStatus::parse(status.trim()) {
-        Some(ChildContextStatus::Pending) => file_set(root, status_abi_path, "active"),
-        Some(ChildContextStatus::Active) => Ok(()),
-        Some(
-            ChildContextStatus::Done | ChildContextStatus::Error | ChildContextStatus::Cancelled,
-        )
-        | None => Err(CliError::usage(
-            "invalid child context: invalid status transition",
-        )),
-    }
 }
 
 pub(crate) fn schedule_child_context_agent_session(
@@ -452,26 +667,45 @@ pub(crate) fn schedule_parent_session_for_output(
     Ok(session.to_owned())
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct ScheduleResultInput<'a> {
+    pub(crate) status: ChildContextStatus,
+    pub(crate) result: &'a str,
+    pub(crate) refs_jsonl: &'a str,
+}
+
 pub(crate) fn schedule_result(
     root: &Path,
     path: &str,
     child: &str,
-    status: ChildContextStatus,
-    result: &str,
-    refs_jsonl: &str,
+    input: ScheduleResultInput<'_>,
 ) -> Result<(), CliError> {
-    let handoff = schedule_child_handoff_context(root, path, child, "result")?;
-    record_child_result_to_parent_context(
-        &handoff.parent_session_dir,
-        child,
-        status,
-        result,
-        refs_jsonl,
+    schedule_result_with_hook(root, path, child, input, || Ok(()))
+}
+
+pub(crate) fn schedule_result_with_hook(
+    root: &Path,
+    path: &str,
+    child: &str,
+    input: ScheduleResultInput<'_>,
+    hook: impl FnOnce() -> Result<(), CliError>,
+) -> Result<(), CliError> {
+    let (handoff, receipt, lease, _plan) =
+        prepare_schedule_child_mutation(root, path, child, "result", hook)?;
+    finish_child_result_with_lease(
+        lease,
+        &receipt,
+        &handoff.agent,
+        &handoff.session,
+        Some(&handoff.handoff),
+        input.status,
+        input.result,
+        input.refs_jsonl,
     )
     .map_err(schedule_child_context_cli_error)?;
     print_line(&format!(
         "result child={child} status={} {} result={} refs={}",
-        status.as_str(),
+        input.status.as_str(),
         schedule_handoff_identity_output(&handoff),
         handoff.child_paths.result,
         handoff.child_paths.refs,

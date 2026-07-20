@@ -74,6 +74,23 @@ pub fn render_agent_system_prompt(
     prompt
 }
 
+/// Builds the canonical provider message array for an Agent call.
+#[must_use]
+pub fn agent_provider_messages(
+    input: &str,
+    agent: &str,
+    agent_system: &str,
+    prompt_context: &AgentPromptContext,
+) -> Value {
+    serde_json::json!([
+        {
+            "role": "system",
+            "content": render_agent_system_prompt(agent, agent_system, prompt_context)
+        },
+        {"role": "user", "content": input}
+    ])
+}
+
 pub(crate) fn normalized_or_empty(value: &str) -> &str {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -88,10 +105,10 @@ pub fn agent_runtime_contract(agent: &str) -> String {
     format!(
         "\
 You are CortexFS agent `{agent}`.
-The only native callable tool exposed by this runtime is `tsh`, the CortexFS tool shell.
+The CortexFS tool shell `tsh` is always native. Tools statically declared by the agent `tools` control may also be exposed as direct-native calls.
 Do not claim direct access to provider, host, or assistant-platform tools.
 Do not mention hidden platform tools such as `image_gen` as callable tools for this agent.
-Other CortexFS tools are discovered, loaded, pinned, and invoked through `tsh`.
+Other dynamically discovered, loaded, or pinned CortexFS tools are invoked through `tsh`; tsh cache state never makes a tool direct-native.
 When tool execution is useful, request the native `tsh` tool with `arguments.args` set to the exact `tsh` argv.
 Tool results include the original `arguments.args` plus stdout/stderr or an ERROR line; use exact command output to decide the next repair step.
 If no concrete file path is provided for a file read/write request, ask the user for a path; do not invent a project file path.

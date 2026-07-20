@@ -1,9 +1,11 @@
 use super::*;
 
-pub(crate) fn split_object_args(args: Vec<OsString>) -> Result<(PathBuf, Vec<OsString>), String> {
+pub(crate) fn split_object_args(
+    args: Vec<OsString>,
+) -> Result<(PathBuf, Vec<OsString>), ExecError> {
     let mut values = args.into_iter();
     let Some(path) = values.next() else {
-        return Err("missing object path".to_owned());
+        return Err(ExecError::new("missing object path"));
     };
     let path = PathBuf::from(path);
     let object_path = object_path_from_exec_metadata(&path)
@@ -16,7 +18,7 @@ pub(crate) fn split_object_args(args: Vec<OsString>) -> Result<(PathBuf, Vec<OsS
 pub(crate) fn validate_exec_metadata_object_path(
     exec_path: &Path,
     metadata_path: PathBuf,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, ExecError> {
     let Some(authorized_path) = env::var_os("CTX_AUTHORIZED_OBJECT") else {
         return Ok(metadata_path);
     };
@@ -24,12 +26,12 @@ pub(crate) fn validate_exec_metadata_object_path(
     if metadata_path == authorized_path {
         return Ok(metadata_path);
     }
-    Err(format!(
+    Err(ExecError::new(format!(
         "executable metadata object {} does not match authorized object {} for {}",
         metadata_path.display(),
         authorized_path.display(),
         exec_path.display()
-    ))
+    )))
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -39,16 +41,16 @@ pub(crate) struct ObjectPath {
 }
 
 impl ObjectPath {
-    pub(crate) fn parse(path: &Path) -> Result<Self, String> {
+    pub(crate) fn parse(path: &Path) -> Result<Self, ExecError> {
         let leaf = path
             .file_name()
             .and_then(|value| value.to_str())
-            .ok_or_else(|| "object path has no valid name".to_owned())?;
+            .ok_or_else(|| ExecError::new("object path has no valid name"))?;
         let parent = path
             .parent()
             .and_then(Path::file_name)
             .and_then(|value| value.to_str())
-            .ok_or_else(|| "object path has no valid parent".to_owned())?;
+            .ok_or_else(|| ExecError::new("object path has no valid parent"))?;
         let (class, name) = if parent == "model" || parent == "agent" || parent == "tool" {
             (parent.to_owned(), leaf.to_owned())
         } else {
@@ -57,7 +59,7 @@ impl ObjectPath {
                 .and_then(Path::parent)
                 .and_then(Path::file_name)
                 .and_then(|value| value.to_str())
-                .ok_or_else(|| "object path has no valid class".to_owned())?;
+                .ok_or_else(|| ExecError::new("object path has no valid class"))?;
             (class.to_owned(), format!("{parent}/{leaf}"))
         };
         Ok(Self { class, name })

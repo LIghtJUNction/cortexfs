@@ -1,25 +1,36 @@
-#[test]
-fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
-    let root = clean_test_dir("ctx-agent-wait-reaps-dead-worker");
-    let pid = std::process::id().to_string();
-    let ensured = ensure_v1_reference_tree(&root);
-    assert!(ensured.is_ok());
-    write_text_file(&root.join("agent/coder.d/pid"), &format!("{pid}\n"));
+fn create_child_channel(
+    root: &Path,
+    child_name: &str,
+    agent: &str,
+    child_session: &str,
+    status: &str,
+    result: &str,
+) -> PathBuf {
     let session = fixture_path(
-        &root,
+        root,
         &[
             "home", "1000", "agent", "coder", "session", "default",
         ],
     );
     create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
+    let child = session.join("context").join("child").join(child_name);
     assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "active\n");
+    write_text_file(&child.join("agent"), &format!("{agent}\n"));
+    write_text_file(&child.join("session"), &format!("{child_session}\n"));
+    write_text_file(&child.join("status"), &format!("{status}\n"));
     write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "");
+    write_text_file(&child.join("result.md"), result);
     write_text_file(&child.join("refs.jsonl"), "");
+    child
+}
+
+#[test]
+fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
+    let root = clean_test_dir("ctx-agent-wait-reaps-dead-worker");
+    let pid = std::process::id().to_string();
+    assert!(ensure_reference_tree(&root).is_ok());
+    write_text_file(&root.join("agent/coder.d/pid"), &format!("{pid}\n"));
+    let child = create_child_channel(&root, "work-123", "worker", "default", "active", "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
         "agent:coder session:default run:r1\n",
@@ -64,22 +75,8 @@ fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
 fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
     for agent in ["worker-fast", "executor-fast"] {
         let root = clean_test_dir(&format!("ctx-agent-wait-{agent}-spark"));
-        assert!(ensure_v1_reference_tree(&root).is_ok());
-        let session = fixture_path(
-            &root,
-            &[
-                "home", "1000", "agent", "coder", "session", "default",
-            ],
-        );
-        create_complete_session_layout(&session);
-        let child = session.join("context").join("child").join("work-fast");
-        assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-        write_text_file(&child.join("agent"), &format!("{agent}\n"));
-        write_text_file(&child.join("session"), "default\n");
-        write_text_file(&child.join("status"), "active\n");
-        write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-        write_text_file(&child.join("result.md"), "");
-        write_text_file(&child.join("refs.jsonl"), "");
+        assert!(ensure_reference_tree(&root).is_ok());
+        let child = create_child_channel(&root, "work-fast", agent, "default", "active", "");
         let control = root.join("agent").join(format!("{agent}.d"));
         assert!(fs::create_dir_all(&control).is_ok());
         write_text_file(&control.join("parent"), "agent:coder session:default run:r1\n");
@@ -119,27 +116,19 @@ fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
 #[test]
 fn agent_child_rows_default_missing_worker_model_to_spark() {
     let root = clean_test_dir("ctx-child-row-missing-worker-model");
-    let ensured = ensure_v1_reference_tree(&root);
-    assert!(ensured.is_ok());
+    assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
     assert!(fs::remove_file(root.join("agent/worker.d/model")).is_ok());
     write_text_file(&root.join("agent/worker.d/status"), "idle\n");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
-    let session = fixture_path(
+    let _child = create_child_channel(
         &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        "work-123",
+        "worker",
+        "default",
+        "done",
+        "Done.\n",
     );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "done\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "Done.\n");
-    write_text_file(&child.join("refs.jsonl"), "");
 
     let rows = agent_child_rows(&root, "coder", Some("default"));
     assert!(matches!(
@@ -163,22 +152,15 @@ fn agent_child_rows_default_missing_worker_model_to_spark() {
 #[test]
 fn agent_child_rows_rejects_invalid_child_agent_metadata() {
     let root = clean_test_dir("ctx-child-row-invalid-child-agent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
+    assert!(ensure_reference_tree(&root).is_ok());
+    let _child = create_child_channel(
         &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        "work-123",
+        "../worker",
+        "default",
+        "done",
+        "Done.\n",
     );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "../worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "done\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "Done.\n");
-    write_text_file(&child.join("refs.jsonl"), "");
 
     assert!(matches!(
         agent_child_rows(&root, "coder", Some("default")),
@@ -191,22 +173,15 @@ fn agent_child_rows_rejects_invalid_child_agent_metadata() {
 #[test]
 fn agent_child_rows_rejects_mismatched_backing_parent() {
     let root = clean_test_dir("ctx-child-row-bad-parent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
+    assert!(ensure_reference_tree(&root).is_ok());
+    let _child = create_child_channel(
         &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        "work-123",
+        "worker",
+        "default",
+        "done",
+        "Done.\n",
     );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "done\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "Done.\n");
-    write_text_file(&child.join("refs.jsonl"), "");
     write_text_file(&root.join("agent/worker.d/parent"), "agent:planner\n");
 
     assert!(matches!(
@@ -221,22 +196,15 @@ fn agent_child_rows_rejects_mismatched_backing_parent() {
 #[test]
 fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
     let root = clean_test_dir("ctx-agent-wait-invalid-child-session");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
+    assert!(ensure_reference_tree(&root).is_ok());
+    let _child = create_child_channel(
         &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        "work-123",
+        "worker",
+        "../default",
+        "done",
+        "Done.\n",
     );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "../default\n");
-    write_text_file(&child.join("status"), "done\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "Done.\n");
-    write_text_file(&child.join("refs.jsonl"), "");
 
     assert!(matches!(
         agent_wait(&root, "coder", Some("default"), "work-123"),
@@ -249,22 +217,15 @@ fn agent_wait_rejects_invalid_terminal_child_session_metadata() {
 #[test]
 fn agent_wait_rejects_mismatched_terminal_backing_parent() {
     let root = clean_test_dir("ctx-agent-wait-bad-parent");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
+    assert!(ensure_reference_tree(&root).is_ok());
+    let _child = create_child_channel(
         &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        "work-123",
+        "worker",
+        "default",
+        "done",
+        "Done.\n",
     );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "done\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "Done.\n");
-    write_text_file(&child.join("refs.jsonl"), "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
         "agent:coder session:other run:r1\n",
@@ -282,22 +243,15 @@ fn agent_wait_rejects_mismatched_terminal_backing_parent() {
 #[test]
 fn agent_wait_rejects_invalid_backing_lifecycle() {
     let root = clean_test_dir("ctx-agent-wait-invalid-backing-life");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
+    assert!(ensure_reference_tree(&root).is_ok());
+    let _child = create_child_channel(
         &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        "work-123",
+        "worker",
+        "default",
+        "done",
+        "Done.\n",
     );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "done\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "Done.\n");
-    write_text_file(&child.join("refs.jsonl"), "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
         "agent:coder session:default run:r1\n",
@@ -315,22 +269,15 @@ fn agent_wait_rejects_invalid_backing_lifecycle() {
 #[test]
 fn agent_wait_rejects_invalid_backing_model() {
     let root = clean_test_dir("ctx-agent-wait-invalid-backing-model");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
+    assert!(ensure_reference_tree(&root).is_ok());
+    let _child = create_child_channel(
         &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
+        "work-123",
+        "worker",
+        "default",
+        "done",
+        "Done.\n",
     );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "done\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "Done.\n");
-    write_text_file(&child.join("refs.jsonl"), "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
         "agent:coder session:default run:r1\n",
@@ -348,22 +295,8 @@ fn agent_wait_rejects_invalid_backing_model() {
 #[test]
 fn agent_wait_reaps_active_child_when_parent_session_is_omitted() {
     let root = clean_test_dir("ctx-wait-reaps-dead-no-session");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
-        &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
-    );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-123");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "active\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "");
-    write_text_file(&child.join("refs.jsonl"), "");
+    assert!(ensure_reference_tree(&root).is_ok());
+    let child = create_child_channel(&root, "work-123", "worker", "default", "active", "");
     write_text_file(&root.join("agent/worker.d/parent"), "agent:coder run:r1\n");
     write_text_file(&root.join("agent/worker.d/status"), "dead\n");
     write_text_file(&root.join("agent/worker.d/life"), "temp\n");
@@ -386,22 +319,8 @@ fn agent_wait_reaps_active_child_when_parent_session_is_omitted() {
 #[test]
 fn agent_wait_reaps_active_child_when_backing_worker_pid_is_stale() {
     let root = clean_test_dir("ctx-agent-wait-reaps-stale-worker");
-    assert!(ensure_v1_reference_tree(&root).is_ok());
-    let session = fixture_path(
-        &root,
-        &[
-            "home", "1000", "agent", "coder", "session", "default",
-        ],
-    );
-    create_complete_session_layout(&session);
-    let child = session.join("context").join("child").join("work-stale");
-    assert!(fs::create_dir_all(child.join("artifact")).is_ok());
-    write_text_file(&child.join("agent"), "worker\n");
-    write_text_file(&child.join("session"), "default\n");
-    write_text_file(&child.join("status"), "active\n");
-    write_text_file(&child.join("handoff.md"), "Task: implement.\n");
-    write_text_file(&child.join("result.md"), "");
-    write_text_file(&child.join("refs.jsonl"), "");
+    assert!(ensure_reference_tree(&root).is_ok());
+    let child = create_child_channel(&root, "work-stale", "worker", "default", "active", "");
     write_text_file(
         &root.join("agent/worker.d/parent"),
         "agent:coder session:default run:r1\n",

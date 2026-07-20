@@ -1,0 +1,29 @@
+[package]
+name = "cortexfs-mcp"
+description = "Explicit MCP stdio projection adapter for CortexFS tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "ctxmcp"
+path = "src/main.rs"
+
+[dependencies]
+cortexfs = { version = "0.1.7", path = "../cortexfs" }
+cortexfs-tool-sdk = { version = "0.1.7", path = "../cortexfs-tool-sdk" }
+nix = { version = "0.31.3", features = ["signal"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.11.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"

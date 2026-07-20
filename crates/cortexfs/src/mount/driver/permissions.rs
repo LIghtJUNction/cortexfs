@@ -13,7 +13,7 @@ pub(crate) fn fuse_ioctl_error() -> Errno {
 }
 
 pub(crate) fn access_error(
-    attr: &FuseV1Attr,
+    attr: &FuseAttr,
     uid: u32,
     gid: u32,
     groups: &[u32],
@@ -24,7 +24,7 @@ pub(crate) fn access_error(
         return Some(Errno::EINVAL);
     }
     if mask.contains(AccessFlags::W_OK)
-        && attr.file_type() != FuseV1FileType::Socket
+        && attr.file_type() != FuseFileType::Socket
         && !fuse_writable_projection_path(attr.abi_path())
     {
         return Some(Errno::EROFS);
@@ -70,16 +70,16 @@ pub(crate) fn supplementary_groups_for_pid(pid: u32) -> Vec<u32> {
         .unwrap_or_default()
 }
 
-pub(crate) fn fuse_open_error(attr: &FuseV1Attr, flags: OpenFlags) -> Option<Errno> {
+pub(crate) fn fuse_open_error(attr: &FuseAttr, flags: OpenFlags) -> Option<Errno> {
     let wants_write = matches!(
         flags.acc_mode(),
         OpenAccMode::O_WRONLY | OpenAccMode::O_RDWR
     );
     let wants_truncate = flags.0 & nix::libc::O_TRUNC != 0;
-    if attr.file_type() == FuseV1FileType::Directory {
+    if attr.file_type() == FuseFileType::Directory {
         return (wants_write || wants_truncate).then_some(Errno::EISDIR);
     }
-    if attr.file_type() == FuseV1FileType::Socket {
+    if attr.file_type() == FuseFileType::Socket {
         return Some(Errno::ENXIO);
     }
     if flags.acc_mode() == OpenAccMode::O_RDONLY && wants_truncate {
@@ -91,8 +91,8 @@ pub(crate) fn fuse_open_error(attr: &FuseV1Attr, flags: OpenFlags) -> Option<Err
     None
 }
 
-pub(crate) fn fuse_write_error(attr: &FuseV1Attr) -> Option<Errno> {
-    if attr.file_type() == FuseV1FileType::Directory {
+pub(crate) fn fuse_write_error(attr: &FuseAttr) -> Option<Errno> {
+    if attr.file_type() == FuseFileType::Directory {
         return Some(Errno::EISDIR);
     }
     (!fuse_writable_projection_path(attr.abi_path())).then_some(Errno::EROFS)
@@ -107,18 +107,18 @@ pub(crate) fn fuse_writable_projection_path(path: &str) -> bool {
 }
 
 pub(crate) fn fuse_session_writable_projection_path(path: &str) -> bool {
-    FuseV1Projection::is_session_append_path(path)
-        || FuseV1Projection::is_session_replace_path(path)
-        || FuseV1Projection::layout_atomic_temp_target(path).is_some()
-        || FuseV1Projection::is_agent_wrapper_path(path)
-        || FuseV1Projection::is_agent_control_path(path)
+    FuseProjection::is_session_append_path(path)
+        || FuseProjection::is_session_replace_path(path)
+        || FuseProjection::layout_atomic_temp_target(path).is_some()
+        || FuseProjection::is_agent_wrapper_path(path)
+        || FuseProjection::is_agent_control_path(path)
 }
 
 pub(crate) fn fuse_setattr_metadata_error(changes_metadata: bool) -> Option<Errno> {
     changes_metadata.then_some(readonly_mutation_errno())
 }
 
-pub(crate) fn fuse_lseek_offset(attr: &FuseV1Attr, offset: i64, whence: i32) -> Result<i64, Errno> {
+pub(crate) fn fuse_lseek_offset(attr: &FuseAttr, offset: i64, whence: i32) -> Result<i64, Errno> {
     let size = i64::try_from(attr.size()).map_err(|_error| Errno::EOVERFLOW)?;
     match whence {
         nix::libc::SEEK_SET | nix::libc::SEEK_CUR => nonnegative_seek(offset),

@@ -1,4 +1,3 @@
-use crate::support::plain::open_plain_directory as open_fuse_v1_plain_directory;
 use crate::*;
 
 pub(crate) fn debug_echo_model_metadata() -> String {
@@ -15,7 +14,7 @@ pub(crate) fn debug_model_metadata(id: &str, description: &str, cap: &str) -> St
         "# cortexfs.type=debug".to_owned(),
         "# cortexfs.created_at=".to_owned(),
         "# cortexfs.owned_by=cortexfs".to_owned(),
-        "# cortexfs.context_length=0".to_owned(),
+        "# cortexfs.context_length=unknown".to_owned(),
         "# cortexfs.driver=debug".to_owned(),
         "# cortexfs.driver.default=debug".to_owned(),
         "# cortexfs.driver.exec=debug".to_owned(),
@@ -35,6 +34,7 @@ pub(crate) fn debug_model_control_content(model: &str, file: &str) -> Option<Str
         "driver" => Some("default=debug\nexec=debug\nagent=debug\n".to_owned()),
         "cap" => Some("chat\nstream\n".to_owned()),
         "effort" => Some("auto\n".to_owned()),
+        "limit" => Some("unknown\n".to_owned()),
         "default" | "fallback" | "log" => Some("\n".to_owned()),
         "session" => Some("none\n".to_owned()),
         "status" => Some("idle\n".to_owned()),
@@ -51,8 +51,9 @@ const MAX_PROVIDER_CONFIG_BYTES: u64 = 64 * 1024;
 pub(crate) fn projected_provider_models(
     config_dir: &Path,
     cache_dir: &Path,
-) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Vec<ProjectedProviderModel>, FuseError> {
     let configs = read_provider_configs(config_dir)?;
+    let catalog_limits = provider::catalog::cached_model_limits(cache_dir);
     let mut projected = Vec::new();
     let mut seen = HashSet::new();
     for entry in configs {
@@ -66,6 +67,18 @@ pub(crate) fn projected_provider_models(
         for model in provider_config_models(&config, cache_dir, &provider) {
             let key = format!("{provider}/{model}");
             if seen.insert(key) {
+                let limit = config
+                    .model_limits
+                    .get(&model)
+                    .copied()
+                    .and_then(ModelContextLimit::known)
+                    .or_else(|| {
+                        catalog_limits
+                            .get(&format!("{provider}/{model}"))
+                            .copied()
+                            .and_then(ModelContextLimit::known)
+                    })
+                    .unwrap_or(ModelContextLimit::Unknown);
                 projected.push(ProjectedProviderModel {
                     provider: provider.clone(),
                     model,
@@ -77,6 +90,7 @@ pub(crate) fn projected_provider_models(
                         &provider,
                         config.default_model.as_deref(),
                     ),
+                    limit,
                 });
             }
         }
@@ -95,24 +109,24 @@ pub(crate) struct ProviderConfigEntry {
 
 pub(crate) fn read_provider_configs(
     config_dir: &Path,
-) -> Result<Vec<ProviderConfigEntry>, FuseV1Error> {
-    let directory = match open_fuse_v1_plain_directory(config_dir) {
+) -> Result<Vec<ProviderConfigEntry>, FuseError> {
+    let directory = match open_plain_directory(config_dir) {
         Ok(directory) => directory,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_error) => return Err(FuseV1Error::Io),
+        Err(_error) => return Err(FuseError::Io),
     };
     let entries = match fs::read_dir(support::plain::proc_fd_path(&directory)) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_error) => return Err(FuseV1Error::Io),
+        Err(_error) => return Err(FuseError::Io),
     };
     let mut configs = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
+        let entry = entry.map_err(|_error| FuseError::Io)?;
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_error| FuseV1Error::InvalidPath)?;
+            .map_err(|_error| FuseError::InvalidPath)?;
         let Some(extension) = Path::new(&name)
             .extension()
             .and_then(|value| value.to_str())
@@ -133,16 +147,26 @@ pub(crate) fn read_provider_configs(
         let Ok(config) = serde_json::from_str::<ProviderConfig>(&content) else {
             continue;
         };
+        if !valid_provider_model_limits(&config) {
+            continue;
+        }
         configs.push(ProviderConfigEntry { config });
     }
     Ok(configs)
+}
+
+fn valid_provider_model_limits(config: &ProviderConfig) -> bool {
+    config.model_limits.iter().all(|(model, limit)| {
+        *limit > 0
+            && (config.default_model.as_ref() == Some(model) || config.models.contains(model))
+    })
 }
 
 pub(crate) fn projected_provider_models_for_provider(
     config_dir: &Path,
     cache_dir: &Path,
     provider: &str,
-) -> Result<Vec<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Vec<ProjectedProviderModel>, FuseError> {
     Ok(projected_provider_models(config_dir, cache_dir)?
         .into_iter()
         .filter(|model| model.provider == provider)
@@ -153,7 +177,7 @@ pub(crate) fn projected_provider_models_for_provider_path(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &str,
-) -> Result<Option<Vec<ProjectedProviderModel>>, FuseV1Error> {
+) -> Result<Option<Vec<ProjectedProviderModel>>, FuseError> {
     let Some(provider) = abi_path.strip_prefix("model/") else {
         return Ok(None);
     };
@@ -172,7 +196,7 @@ pub(crate) fn projected_provider_model_for_exec(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &str,
-) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Option<ProjectedProviderModel>, FuseError> {
     let Some(model_name) = model_exec_name(abi_path) else {
         return Ok(None);
     };
@@ -185,7 +209,7 @@ pub(crate) fn projected_provider_model_control_dir(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &str,
-) -> Result<Option<ProjectedProviderModel>, FuseV1Error> {
+) -> Result<Option<ProjectedProviderModel>, FuseError> {
     let Some(model_name) = abi_path
         .strip_prefix("model/")
         .and_then(|path| path.strip_suffix(".d"))
@@ -204,7 +228,7 @@ pub(crate) fn projected_provider_model_control_file<'a>(
     config_dir: &Path,
     cache_dir: &Path,
     abi_path: &'a str,
-) -> Result<Option<(ProjectedProviderModel, &'a str)>, FuseV1Error> {
+) -> Result<Option<(ProjectedProviderModel, &'a str)>, FuseError> {
     let Some((dir, file)) = abi_path.rsplit_once('/') else {
         return Ok(None);
     };
@@ -247,9 +271,9 @@ pub(crate) fn append_provider_model_name(
     }
 }
 
-pub(crate) fn projected_provider_name(config: &ProviderConfig) -> Result<String, FuseV1Error> {
+pub(crate) fn projected_provider_name(config: &ProviderConfig) -> Result<String, FuseError> {
     provider_name_from_config(&config.base_url, config.name.as_deref())
-        .map_err(|_error| FuseV1Error::InvalidContent)
+        .map_err(|_error| FuseError::InvalidContent)
 }
 
 pub(crate) fn normalize_provider_base_url(base_url: &str) -> String {
@@ -279,7 +303,7 @@ pub(crate) fn provider_drivers(formats: &[String]) -> Vec<String> {
     for format in formats {
         let driver = match format.trim() {
             "openai.responses" => "openai-responses",
-            "openai.chat" | "openai-compatible" => "openai-chat",
+            "openai.chat" => "openai-chat",
             _ => continue,
         };
         if seen.insert(driver) {
@@ -318,7 +342,7 @@ pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String 
          # cortexfs.type=chat\n\
          # cortexfs.created_at=\n\
          # cortexfs.owned_by={}\n\
-         # cortexfs.context_length=0\n\
+         # cortexfs.context_length={}\n\
          # cortexfs.driver={driver}\n\
          # cortexfs.driver.default={}\n\
          # cortexfs.driver.exec={}\n\
@@ -328,6 +352,7 @@ pub(crate) fn provider_model_metadata(model: &ProjectedProviderModel) -> String 
          # cortexfs.status=configured\n\
          # cortexfs.cap={}\n",
         model.provider,
+        model.limit,
         routes.route_value(ModelDriverUseCase::Default),
         routes.route_value(ModelDriverUseCase::Exec),
         routes.route_value(ModelDriverUseCase::Socket),
@@ -346,6 +371,7 @@ pub(crate) fn provider_model_control_content(
         "cap" => Some(model.cap.clone()),
         "effort" => Some(format!("{}\n", model.effort)),
         "fallback" => Some(model.fallback.clone()),
+        "limit" => Some(format!("{}\n", model.limit)),
         "default" => Some(format!("base_url={}\n", model.base_url)),
         "session" => Some("none\n".to_owned()),
         "status" => Some("configured\n".to_owned()),
@@ -359,7 +385,7 @@ pub(crate) fn default_provider_model_fallback(
     default_model: Option<&str>,
 ) -> String {
     let requested = [
-        "gpt-5.5",
+        "gpt-5.6",
         "codex-auto-review",
         "gpt-5.3-codex-spark",
         "gpt-5.4",
@@ -380,17 +406,17 @@ pub(crate) fn default_provider_model_fallback(
     fallback
 }
 
-pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseV1Error> {
-    let directory = open_fuse_v1_plain_directory(model_root).map_err(|_error| FuseV1Error::Io)?;
+pub(crate) fn read_model_provider_dirs(model_root: &Path) -> Result<Vec<String>, FuseError> {
+    let directory = open_plain_directory(model_root).map_err(|_error| FuseError::Io)?;
     let entries =
-        fs::read_dir(support::plain::proc_fd_path(&directory)).map_err(|_error| FuseV1Error::Io)?;
+        fs::read_dir(support::plain::proc_fd_path(&directory)).map_err(|_error| FuseError::Io)?;
     let mut names = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|_error| FuseV1Error::Io)?;
+        let entry = entry.map_err(|_error| FuseError::Io)?;
         let name = entry
             .file_name()
             .into_string()
-            .map_err(|_error| FuseV1Error::InvalidPath)?;
+            .map_err(|_error| FuseError::InvalidPath)?;
         let stat = nix::sys::stat::fstatat(
             &directory,
             name.as_str(),

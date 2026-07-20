@@ -55,6 +55,8 @@ agent policy decides whether execution is allowed
     path
     mount
     model
+    tools
+    abi
     system.md
     prompt.template.md
     policy
@@ -80,7 +82,31 @@ parent  parent agent, session, or run that created this agent
 life    lifecycle ownership, default owned
 system.md user-editable agent instructions/persona. This is prompt text, not authority.
 prompt.template.md user-editable system prompt template. This is prompt text, not authority.
+abi     required executable-agent launch ABI: sdk-envelope-v1
+approval hosted SDK direct-native mode: auto or ask; missing means auto
 ```
+
+The `abi` control is required and accepts only `sdk-envelope-v1`; it must not be
+inferred from executable contents or other controls. `approval=ask` uses this
+host-mediated exchange.
+
+The optional `tools` control declares the agent's static direct-native tool set.
+It is empty when missing or empty and otherwise contains one canonical tool
+name per line with a final newline. Blank, whitespace-padded, duplicate,
+invalid, and reserved `tsh` entries are rejected. Declaration is not authority:
+
+```text
+direct execution = declared name AND CTX_PATH hit AND agent policy AND tool policy AND Linux/mount permission
+```
+
+Every call re-derives this intersection and opens the selected executable
+without following symlinks. `tsh` load/pin cache state is dynamic prompt
+context only and never admits a direct-native call.
+
+For hosted SDK agents in `ask` mode, approval occurs after this full authority
+intersection and nofollow open, before process spawn. It is an additional
+single-call gate, not an authority grant and not Codex-equivalent coverage for
+all operations. Clients without an approval handler fail closed.
 
 Multiple agents may share one Linux uid. The uid expresses the user boundary.
 The label expresses the agent security boundary.
@@ -184,7 +210,7 @@ stopping
 dead
 ```
 
-v1 does not introduce a global daemon. Prefer each agent process owning its own
+The stable ABI does not introduce a global daemon. Prefer each agent process owning its own
 socket, pid, log, and sessions. A future supervisor is implementation detail.
 It must not add another root directory.
 
@@ -289,7 +315,7 @@ An agent can create another agent only through normal CortexFS objects and
 policy checks. There is no root-level `spawn/`, `factory/`, or
 `agent-template/`.
 
-`architect` is the ordinary root agent for v1 lineage:
+`architect` is the ordinary root agent for lineage:
 
 ```text
 /ctx/agent/architect
@@ -303,7 +329,7 @@ home, and session state. New top-level agents should be created by
 `agent.create` with `parent=agent:architect`. Child agents created by other agents
 must still be attenuated from their direct parent.
 
-`base` is a retired reference-agent name. `ctx update` reports any remaining
+`base` is a retired reference-agent name. `ctx bootstrap` reports any remaining
 `base` object as `would_skip` and retains it for manual review; legacy trees
 have no manifest that can prove ownership and full control-tree integrity, so
 update must not delete it automatically.
@@ -334,7 +360,7 @@ The child appears as ordinary agent ABI:
   log
 ```
 
-`parent` is a small text file. v1 should keep it simple:
+`parent` is a small text file. Keep it simple:
 
 ```text
 agent:architect
@@ -347,7 +373,7 @@ or, when needed:
 agent:coder session:default run:01H...
 ```
 
-Do not turn lineage into a separate tree in v1.
+Do not turn lineage into a separate tree.
 
 Child defaults:
 
@@ -457,7 +483,7 @@ views of those paths, but not `/home/user`, `/etc`, `/var/log`, or
 `/shared/project-b` unless a supervisor authorizes them.
 
 Owned child agents are cancelled when the parent dies. Parent death cancels
-the child runtime, not the child's session history. See `17-child-agents.md`
+the child runtime, not the child's session history. See `child-agents.md`
 for handoff, result, and lifecycle rules.
 
 Names should stay short:

@@ -1,7 +1,7 @@
 use super::*;
 
-/// Monotonic reference-tree generation written to the backing source.
-pub const REFERENCE_TREE_VERSION: u32 = 2;
+/// Monotonic target version written to the backing source.
+pub const REFERENCE_TREE_VERSION: u32 = 5;
 
 /// Relative path for bootstrap state under the source root.
 pub const BOOTSTRAP_STATE_REL: &str = "bin/cortexfs.bootstrap.json";
@@ -10,11 +10,34 @@ pub const BOOTSTRAP_STATE_REL: &str = "bin/cortexfs.bootstrap.json";
 pub const RETIRED_REFERENCE_AGENTS: &[&str] = &["base", "executor"];
 
 /// Migration id recording that retired reference agents were reviewed.
-pub const MIGRATION_RETIRED_AGENTS_V1: &str = "retired-agents-v1";
+pub const MIGRATION_RETIRED_AGENTS: &str = "retired-agents";
+/// Migration id recording adoption of the rolling reference-tree model.
+pub const MIGRATION_ROLLING_TREE: &str = "rolling-tree";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReferenceTreeMigration {
+    target_version: u32,
+    id: &'static str,
+}
+
+const REFERENCE_TREE_MIGRATIONS: &[ReferenceTreeMigration] = &[
+    ReferenceTreeMigration {
+        target_version: 4,
+        id: MIGRATION_RETIRED_AGENTS,
+    },
+    ReferenceTreeMigration {
+        target_version: 5,
+        id: MIGRATION_ROLLING_TREE,
+    },
+];
 
 /// Planned upgrade / GC action for dry-run and apply reporting.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BootstrapAction {
+    /// Source state was written by a newer binary and cannot be downgraded.
+    RejectVersion { current: u32, target: u32 },
+    /// Ordered migration required to reach the target tree version.
+    ApplyMigration { version: u32, id: &'static str },
     /// Retired agent exists but ownership cannot be proven safely.
     SkipAgent { name: String, reason: String },
     /// Reference agent missing from the source tree.
@@ -42,7 +65,7 @@ pub struct BootstrapState {
     /// Schema of this state file.
     #[serde(default = "bootstrap_state_schema_default")]
     pub schema: u32,
-    /// Reference tree generation.
+    /// Applied reference-tree version.
     pub tree_version: u32,
     /// Managed reference agent names at last bootstrap.
     #[serde(default)]
@@ -72,6 +95,27 @@ pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
             .map(|value| value.applied_migrations.clone())
             .unwrap_or_default(),
     };
+
+    let current_version = plan.current_version.unwrap_or(0);
+    if current_version > REFERENCE_TREE_VERSION {
+        plan.actions.push(BootstrapAction::RejectVersion {
+            current: current_version,
+            target: REFERENCE_TREE_VERSION,
+        });
+        return plan;
+    }
+    plan.actions.extend(
+        REFERENCE_TREE_MIGRATIONS
+            .iter()
+            .filter(|migration| {
+                current_version < migration.target_version
+                    && migration.target_version <= REFERENCE_TREE_VERSION
+            })
+            .map(|migration| BootstrapAction::ApplyMigration {
+                version: migration.target_version,
+                id: migration.id,
+            }),
+    );
 
     for agent in REFERENCE_AGENTS {
         let exec = root.join("agent").join(agent.name);
@@ -112,6 +156,7 @@ pub fn plan_reference_tree_upgrade(root: &Path) -> BootstrapPlan {
 /// Applies the safe reference-tree upgrade subset and refreshes state if needed.
 pub fn apply_reference_tree_upgrade(root: &Path) -> Result<BootstrapPlan, ReferenceTreeError> {
     let plan = plan_reference_tree_upgrade(root);
+    reject_unsupported_version(&plan)?;
     if plan.actions.iter().any(|action| {
         matches!(action, BootstrapAction::EnsureAgent { name }
             if REFERENCE_AGENTS.iter().any(|agent| agent.name == name))
@@ -125,6 +170,7 @@ pub(crate) fn apply_precomputed_reference_tree_upgrade(
     root: &Path,
     plan: BootstrapPlan,
 ) -> Result<BootstrapPlan, ReferenceTreeError> {
+    reject_unsupported_version(&plan)?;
     let skips_current_agent = plan.actions.iter().any(|action| {
         matches!(action, BootstrapAction::SkipAgent { name, .. }
             if REFERENCE_AGENTS.iter().any(|agent| agent.name == name))
@@ -135,7 +181,7 @@ pub(crate) fn apply_precomputed_reference_tree_upgrade(
             .iter()
             .any(|action| matches!(action, BootstrapAction::WriteState { .. }))
     {
-        write_bootstrap_state(root, &[MIGRATION_RETIRED_AGENTS_V1])?;
+        write_bootstrap_state(root)?;
     }
     Ok(plan)
 }
@@ -161,6 +207,14 @@ pub fn format_bootstrap_plan_lines(plan: &BootstrapPlan) -> Vec<String> {
     ];
     for action in &plan.actions {
         match *action {
+            BootstrapAction::RejectVersion { current, target } => {
+                lines.push(format!(
+                    "reject tree_version={current} newer_than_target={target}"
+                ));
+            }
+            BootstrapAction::ApplyMigration { version, id } => {
+                lines.push(format!("would_apply migration v{version} {id}"));
+            }
             BootstrapAction::SkipAgent {
                 ref name,
                 ref reason,
@@ -176,6 +230,18 @@ pub fn format_bootstrap_plan_lines(plan: &BootstrapPlan) -> Vec<String> {
         }
     }
     lines
+}
+
+pub(crate) fn reject_unsupported_version(plan: &BootstrapPlan) -> Result<(), ReferenceTreeError> {
+    if plan
+        .actions
+        .iter()
+        .any(|action| matches!(action, BootstrapAction::RejectVersion { .. }))
+    {
+        Err(ReferenceTreeError::UnsupportedVersion)
+    } else {
+        Ok(())
+    }
 }
 
 fn retired_reference_agent_present(root: &Path, name: &str) -> bool {
@@ -207,17 +273,9 @@ pub fn read_bootstrap_state(root: &Path) -> Option<BootstrapState> {
 }
 
 /// Writes bootstrap state after a successful materialize / GC pass.
-pub fn write_bootstrap_state(
-    root: &Path,
-    new_migrations: &[&str],
-) -> Result<(), ReferenceTreeError> {
-    let mut applied = read_bootstrap_state(root)
-        .map(|state| state.applied_migrations)
-        .unwrap_or_default();
-    for migration in new_migrations {
-        if !applied.iter().any(|value| value == migration) {
-            applied.push((*migration).to_owned());
-        }
+pub fn write_bootstrap_state(root: &Path) -> Result<(), ReferenceTreeError> {
+    if read_bootstrap_state(root).is_some_and(|state| state.tree_version > REFERENCE_TREE_VERSION) {
+        return Err(ReferenceTreeError::UnsupportedVersion);
     }
     let state = BootstrapState {
         schema: 1,
@@ -226,7 +284,11 @@ pub fn write_bootstrap_state(
             .iter()
             .map(|agent| agent.name.to_owned())
             .collect(),
-        applied_migrations: applied,
+        applied_migrations: REFERENCE_TREE_MIGRATIONS
+            .iter()
+            .filter(|migration| migration.target_version <= REFERENCE_TREE_VERSION)
+            .map(|migration| migration.id.to_owned())
+            .collect(),
     };
     let content =
         serde_json::to_string_pretty(&state).map_err(|_error| ReferenceTreeError::CannotCreate)?;
@@ -257,8 +319,4 @@ pub fn bootstrap_state_matches_target(state: &BootstrapState) -> bool {
                 .iter()
                 .map(|agent| agent.name.to_owned())
                 .collect::<Vec<_>>()
-        && state
-            .applied_migrations
-            .iter()
-            .any(|migration| migration == MIGRATION_RETIRED_AGENTS_V1)
 }

@@ -46,28 +46,10 @@ pub(crate) fn fd_entry_is_directory(parent_dir: &File, name: &str) -> bool {
         .is_ok_and(|stat| stat.st_mode & libc::S_IFMT == libc::S_IFDIR)
 }
 
-pub(crate) fn read_history_messages_tail(path: &Path) -> std::io::Result<String> {
-    let mut file = support::plain::open_plain_file(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "history messages path is not a plain file",
-        ));
-    }
-    let len = metadata.len();
-    let read_len = len.min(MAX_HISTORY_MESSAGES_READ_BYTES);
-    let start = len.saturating_sub(read_len);
-    file.seek(SeekFrom::Start(start))?;
-
-    let read_len_usize = usize::try_from(read_len)
-        .map_err(|_error| std::io::Error::other("history tail too large"))?;
-    let mut bytes = vec![0; read_len_usize];
-    file.read_exact(&mut bytes)?;
-    if start > 0
-        && let Some(first_newline) = bytes.iter().position(|byte| *byte == b'\n')
-    {
-        bytes.drain(..=first_newline);
-    }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+pub(crate) fn read_history_messages_tail(session: &Path) -> std::io::Result<String> {
+    columnar::tail_text(
+        session,
+        columnar::Stream::Messages,
+        MAX_HISTORY_MESSAGES_READ_BYTES,
+    )
 }

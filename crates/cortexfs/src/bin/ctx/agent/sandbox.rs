@@ -1,11 +1,5 @@
 use crate::*;
 
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct AgentStartCommand {
-    pub(crate) program: String,
-    pub(crate) args: Vec<String>,
-}
-
 pub(crate) fn agent_start_systemd_command(
     root: &Path,
     args: &AgentStartArgs,
@@ -13,9 +7,9 @@ pub(crate) fn agent_start_systemd_command(
     view: &AgentRuntimeView,
     socket: &Path,
     unit: &str,
-) -> AgentStartCommand {
+) -> AgentLaunchCommand {
     let home = view.ctx_home();
-    let mut command = AgentStartCommand {
+    let mut command = AgentLaunchCommand {
         program: SYSTEMD_RUN_PROGRAM.to_owned(),
         args: vec![
             "--user".to_owned(),
@@ -25,10 +19,10 @@ pub(crate) fn agent_start_systemd_command(
             "Restart=always".to_owned(),
             "--property".to_owned(),
             "RestartSec=250ms".to_owned(),
-            "/usr/bin/env".to_owned(),
+            cortexfs::support::command::ENV.to_owned(),
             "-i".to_owned(),
-            "PATH=/usr/bin:/bin".to_owned(),
-            "/usr/bin/bwrap".to_owned(),
+            format!("PATH={}", cortexfs::support::command::TRUSTED_PATH),
+            cortexfs::support::command::BWRAP.to_owned(),
         ],
     };
     command
@@ -37,32 +31,45 @@ pub(crate) fn agent_start_systemd_command(
     command
 }
 
+#[cfg(test)]
 pub(crate) fn agent_chat_socket_systemd_command(
     root: &Path,
     name: &str,
     socket: &Path,
     unit: &str,
-) -> AgentStartCommand {
-    AgentStartCommand {
-        program: SYSTEMD_RUN_PROGRAM.to_owned(),
-        args: vec![
-            "--user".to_owned(),
-            "--unit".to_owned(),
-            unit.to_owned(),
-            "--collect".to_owned(),
-            "--socket-property".to_owned(),
-            format!("ListenStream={}", socket.display()),
-            "--socket-property".to_owned(),
-            "SocketMode=0666".to_owned(),
-            agent_runtime_program(),
-            "--source".to_owned(),
-            root.display().to_string(),
-            "--agent".to_owned(),
-            name.to_owned(),
-        ],
+) -> AgentLaunchCommand {
+    let source = agent_source_root(root);
+    cortexfs::chat_socket_command(
+        &cortexfs::AgentLaunchRequest {
+            agent: name.to_owned(),
+            session: String::new(),
+            source,
+            cwd: String::new(),
+            mounts: Vec::new(),
+            default_workspace: false,
+        },
+        socket,
+        unit,
+        Path::new(&agent_runtime_program()),
+    )
+}
+
+pub(crate) fn agent_source_root(root: &Path) -> PathBuf {
+    if read_xattr_string(root, "user.cortexfs.abi_path").as_deref() != Some("") {
+        return root.to_path_buf();
+    }
+    let Some(backing) = read_xattr_string(root, "user.cortexfs.backing_path").map(PathBuf::from)
+    else {
+        return root.to_path_buf();
+    };
+    if backing.is_absolute() && open_plain_directory(&backing).is_ok() {
+        backing
+    } else {
+        root.to_path_buf()
     }
 }
 
+#[cfg(test)]
 pub(crate) fn agent_runtime_program() -> String {
     if let Ok(current) = env::current_exe()
         && let Some(parent) = current.parent()
@@ -72,23 +79,14 @@ pub(crate) fn agent_runtime_program() -> String {
             return sibling.display().to_string();
         }
     }
-    "/usr/bin/cortexfs-agent-runtime".to_owned()
+    cortexfs::support::command::CORTEXFS_AGENT_RUNTIME.to_owned()
 }
 
-pub(crate) fn agent_start_process_command(command: &AgentStartCommand) -> ProcessCommand {
-    let mut process = ProcessCommand::new(&command.program);
-    process.args(&command.args);
-    set_user_systemd_client_env(&mut process);
-    process
-}
-
-pub(crate) fn set_user_systemd_client_env(command: &mut ProcessCommand) {
-    command.env_clear().env("PATH", "/usr/bin:/bin");
-    for key in ["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"] {
-        if let Some(value) = env::var_os(key) {
-            command.env(key, value);
-        }
-    }
+pub(crate) fn agent_start_process_command(
+    identity: &AgentUnixIdentity,
+    command: &AgentLaunchCommand,
+) -> io::Result<ProcessCommand> {
+    launch_process_for(identity, command)
 }
 
 pub(crate) fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(String, String)> {
@@ -138,7 +136,10 @@ pub(crate) fn agent_sandbox_env(_root: &Path, view: &AgentRuntimeView) -> Vec<(S
         ("HOME".to_owned(), AGENT_SANDBOX_HOME.to_owned()),
         ("USER".to_owned(), view.agent_name().to_owned()),
         ("LOGNAME".to_owned(), view.agent_name().to_owned()),
-        ("SHELL".to_owned(), "/usr/bin/bash".to_owned()),
+        (
+            "SHELL".to_owned(),
+            cortexfs::support::command::BASH.to_owned(),
+        ),
         ("TERM".to_owned(), "xterm-256color".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("GIT_OPTIONAL_LOCKS".to_owned(), "0".to_owned()),
@@ -203,34 +204,9 @@ pub(crate) fn agent_bwrap_args(
         "--die-with-parent".to_owned(),
         "--unshare-pid".to_owned(),
         "--unshare-net".to_owned(),
-        "--proc".to_owned(),
-        "/proc".to_owned(),
-        "--dev".to_owned(),
-        "/dev".to_owned(),
-        "--tmpfs".to_owned(),
-        "/tmp".to_owned(),
-        "--dir".to_owned(),
-        "/run".to_owned(),
-        "--dir".to_owned(),
-        "/home".to_owned(),
-        "--ro-bind".to_owned(),
-        "/usr".to_owned(),
-        "/usr".to_owned(),
-        "--ro-bind".to_owned(),
-        "/etc".to_owned(),
-        "/etc".to_owned(),
-        "--tmpfs".to_owned(),
-        "/etc/profile.d".to_owned(),
-        "--symlink".to_owned(),
-        "usr/bin".to_owned(),
-        "/bin".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib".to_owned(),
-        "--symlink".to_owned(),
-        "usr/lib".to_owned(),
-        "/lib64".to_owned(),
     ]);
+    bwrap.extend(cortexfs::support::process::BWRAP_PROCESS_SETUP_ARGS.map(str::to_owned));
+    bwrap.extend(cortexfs::support::process::bwrap_system_layout_args());
     if let Some(runtime_dir) = socket_runtime_dir(socket) {
         bwrap.extend([
             "--bind".to_owned(),
@@ -238,10 +214,14 @@ pub(crate) fn agent_bwrap_args(
             runtime_dir.display().to_string(),
         ]);
     }
+    let has_policy_git_mount = has_policy_git_mount(view);
     for mount in view.mount_table().entries() {
+        if args.default_workspace && mount.target() == "/workspace/.git" {
+            continue;
+        }
         bwrap.push(match mount.mode() {
-            MountMode::ReadOnly => "--ro-bind".to_owned(),
-            MountMode::ReadWrite => "--bind".to_owned(),
+            cortexfs::MountMode::ReadOnly => "--ro-bind".to_owned(),
+            cortexfs::MountMode::ReadWrite => "--bind".to_owned(),
         });
         bwrap.push(agent_host_mount_source(root, mount.source()));
         let target = if mount.target() == agent_home {
@@ -251,14 +231,36 @@ pub(crate) fn agent_bwrap_args(
         };
         bwrap.push(target);
     }
+    let git_mask = agent_git_mask(args, cli_mounts, view);
+    let mut git_masked = false;
     for mount in cli_mounts {
-        bwrap.extend(agent_bwrap_dir_args_for_parent(&mount.target));
+        bwrap.extend(cortexfs::support::bwrap::dir_args_for_parent(&mount.target));
         bwrap.push(match mount.mode.as_str() {
             "ro" => "--ro-bind".to_owned(),
             _ => "--bind".to_owned(),
         });
         bwrap.push(mount.source.clone());
         bwrap.push(mount.target.clone());
+        if !git_masked && args.default_workspace && mount.target == "/workspace" {
+            if has_policy_git_mount {
+                for mount in view
+                    .mount_table()
+                    .entries()
+                    .iter()
+                    .filter(|mount| mount.target() == "/workspace/.git")
+                {
+                    bwrap.push(match mount.mode() {
+                        cortexfs::MountMode::ReadOnly => "--ro-bind".to_owned(),
+                        cortexfs::MountMode::ReadWrite => "--bind".to_owned(),
+                    });
+                    bwrap.push(agent_host_mount_source(root, mount.source()));
+                    bwrap.push(mount.target().to_owned());
+                }
+            } else if let Some(mask) = git_mask {
+                bwrap.extend(agent_git_mask_args(mask));
+            }
+            git_masked = true;
+        }
     }
     if let Some(startup_stub) = shell_startup_stub_path(socket) {
         bwrap.extend([
@@ -274,7 +276,7 @@ pub(crate) fn agent_bwrap_args(
     bwrap.extend([
         "--chdir".to_owned(),
         sandbox_cwd,
-        "/usr/bin/ctxterm".to_owned(),
+        cortexfs::support::command::CTXTERM.to_owned(),
         "--listen".to_owned(),
         socket.display().to_string(),
         "--no-stdio".to_owned(),
@@ -324,8 +326,6 @@ pub(crate) fn agent_start_sandbox_cwd(args: &AgentStartArgs, mounts: &[AgentMoun
     args.cwd.clone()
 }
 
-const SYSTEMD_RUN_PROGRAM: &str = "/usr/bin/systemd-run";
-
 pub(crate) fn agent_start_mounts(args: &AgentStartArgs) -> Result<Vec<AgentMount>, CliError> {
     let default_source = env::current_dir().map_err(|error| {
         CliError::unavailable(format!("cannot read current directory: {error}"))
@@ -347,81 +347,59 @@ pub(crate) fn agent_start_mounts_with_default_source(
             target: "/workspace".to_owned(),
             mode: "rw".to_owned(),
         });
-        mounts.extend(agent_start_git_mounts(default_source));
     }
     mounts.extend(args.mounts.iter().cloned());
     mounts
 }
 
-pub(crate) fn agent_start_git_mounts(default_source: &Path) -> Vec<AgentMount> {
-    let git = default_source.join(".git");
-    let Ok(metadata) = fs::symlink_metadata(&git) else {
-        return Vec::new();
-    };
-    let file_type = metadata.file_type();
-    if !file_type.is_dir() && !metadata.is_file() {
-        return Vec::new();
-    }
-    let mut mounts = vec![AgentMount {
-        source: git.display().to_string(),
-        target: "/workspace/.git".to_owned(),
-        mode: "ro".to_owned(),
-    }];
-    if metadata.is_file() {
-        extend_git_file_mounts(default_source, &git, &mut mounts);
-    }
-    mounts
+const SYSTEMD_RUN_PROGRAM: &str = cortexfs::support::command::SYSTEMD_RUN;
+
+#[derive(Clone, Copy)]
+enum AgentGitMask {
+    Directory,
+    File,
 }
 
-pub(crate) fn extend_git_file_mounts(
-    default_source: &Path,
-    git_file: &Path,
-    mounts: &mut Vec<AgentMount>,
-) {
-    let Ok(content) = fs::read_to_string(git_file) else {
-        return;
-    };
-    let Some(gitdir) = parse_gitdir_file(default_source, &content) else {
-        return;
-    };
-    push_readonly_host_path_mount(mounts, &gitdir);
-    if let Some(commondir) = git_common_dir(&gitdir) {
-        push_readonly_host_path_mount(mounts, &commondir);
-    }
+fn has_policy_git_mount(view: &AgentRuntimeView) -> bool {
+    view.mount_table()
+        .entries()
+        .iter()
+        .any(|mount| mount.target() == "/workspace/.git")
 }
 
-pub(crate) fn parse_gitdir_file(default_source: &Path, content: &str) -> Option<PathBuf> {
-    let line = content
-        .lines()
-        .find_map(|line| line.strip_prefix("gitdir:"))?;
-    let path = line.trim();
-    if path.is_empty() {
+fn agent_git_mask(
+    args: &AgentStartArgs,
+    mounts: &[AgentMount],
+    view: &AgentRuntimeView,
+) -> Option<AgentGitMask> {
+    if !args.default_workspace
+        || mounts.iter().any(|mount| mount.target == "/workspace/.git")
+        || has_policy_git_mount(view)
+    {
         return None;
     }
-    let path = Path::new(path);
-    let gitdir = if path.is_absolute() {
-        path.to_path_buf()
+    let workspace = mounts
+        .iter()
+        .find(|mount| mount.target == "/workspace" && mount.mode == "rw")?;
+    let metadata = fs::symlink_metadata(Path::new(&workspace.source).join(".git")).ok()?;
+    if metadata.is_dir() {
+        Some(AgentGitMask::Directory)
+    } else if metadata.is_file() {
+        Some(AgentGitMask::File)
     } else {
-        default_source.join(path)
-    };
-    let gitdir = normalized_absolute_path(&gitdir)?;
-    plain_directory(&gitdir).then_some(gitdir)
+        None
+    }
 }
 
-pub(crate) fn git_common_dir(gitdir: &Path) -> Option<PathBuf> {
-    let content = fs::read_to_string(gitdir.join("commondir")).ok()?;
-    let path = content.lines().next()?.trim();
-    if path.is_empty() {
-        return None;
+fn agent_git_mask_args(mask: AgentGitMask) -> Vec<String> {
+    match mask {
+        AgentGitMask::Directory => vec!["--tmpfs".to_owned(), "/workspace/.git".to_owned()],
+        AgentGitMask::File => vec![
+            "--ro-bind".to_owned(),
+            "/dev/null".to_owned(),
+            "/workspace/.git".to_owned(),
+        ],
     }
-    let path = Path::new(path);
-    let common = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        gitdir.join(path)
-    };
-    let common = normalized_absolute_path(&common)?;
-    plain_directory(&common).then_some(common)
 }
 
 pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
@@ -440,52 +418,6 @@ pub(crate) fn normalized_absolute_path(path: &Path) -> Option<PathBuf> {
         }
     }
     Some(normalized)
-}
-
-pub(crate) fn plain_directory(path: &Path) -> bool {
-    fs::symlink_metadata(path)
-        .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
-}
-
-pub(crate) fn push_readonly_host_path_mount(mounts: &mut Vec<AgentMount>, path: &Path) {
-    let value = path.display().to_string();
-    if mounts
-        .iter()
-        .any(|mount| mount.source == value && mount.target == value)
-    {
-        return;
-    }
-    mounts.push(AgentMount {
-        source: value.clone(),
-        target: value,
-        mode: "ro".to_owned(),
-    });
-}
-
-pub(crate) fn agent_bwrap_dir_args_for_parent(path: &str) -> Vec<String> {
-    let Some((parent, _name)) = path.rsplit_once('/') else {
-        return Vec::new();
-    };
-    if parent.is_empty() {
-        Vec::new()
-    } else {
-        agent_bwrap_dir_args_for_path(parent)
-    }
-}
-
-pub(crate) fn agent_bwrap_dir_args_for_path(path: &str) -> Vec<String> {
-    let mut args = Vec::new();
-    if !path.starts_with('/') {
-        return args;
-    }
-    let mut current = String::new();
-    for component in path.split('/').filter(|component| !component.is_empty()) {
-        current.push('/');
-        current.push_str(component);
-        args.push("--dir".to_owned());
-        args.push(current.clone());
-    }
-    args
 }
 
 pub(crate) fn agent_start_workspace_source(mounts: &[AgentMount]) -> Option<String> {
@@ -574,6 +506,7 @@ pub(crate) fn ensure_agent_terminal_socket(
     ensure_best_effort_visible_terminal_socket(visible_socket, runtime_socket)
 }
 
+#[cfg(test)]
 pub(crate) fn agent_chat_unit(root: &Path, name: &str) -> String {
     format!("cortexfs-agent-{name}-{}-chat", stable_path_hash(root))
 }
@@ -591,202 +524,6 @@ pub(crate) fn agent_chat_runtime_socket(root: &Path, name: &str) -> Result<PathB
         .join("agent")
         .join(stable_path_hash(root))
         .join(format!("{name}.sock")))
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum AgentChatAliasState {
-    ExistingSameTarget,
-    Created,
-    ReplacedPlaceholder { mode: u32, uid: u32, gid: u32 },
-}
-
-pub(crate) fn ensure_agent_chat_socket(
-    visible_socket: &Path,
-    runtime_socket: &Path,
-) -> Result<AgentChatAliasState, CliError> {
-    if let Some(parent) = runtime_socket.parent() {
-        create_agent_terminal_runtime_dir(parent).map_err(|error| {
-            CliError::unavailable(format!("cannot create {}: {error}", parent.display()))
-        })?;
-    }
-    match remove_stale_socket(runtime_socket) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(CliError::unavailable(format!(
-                "cannot remove stale {}: {error}",
-                runtime_socket.display()
-            )));
-        }
-    }
-    let parent = visible_socket
-        .parent()
-        .ok_or_else(|| CliError::unavailable("agent socket path has no parent"))?;
-    let parent_dir = open_plain_directory(parent).map_err(|error| {
-        CliError::unavailable(format!("cannot open {}: {error}", parent.display()))
-    })?;
-    let name = visible_socket
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| CliError::unavailable("invalid agent socket link name"))?;
-    let state = match nix::sys::stat::fstatat(
-        &parent_dir,
-        name,
-        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-    ) {
-        Ok(stat)
-            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFLNK) =>
-        {
-            let target = nix::fcntl::readlinkat(&parent_dir, name).map_err(|error| {
-                CliError::unavailable(format!(
-                    "cannot inspect {}: {error}",
-                    visible_socket.display()
-                ))
-            })?;
-            if Path::new(&target) == runtime_socket {
-                return Ok(AgentChatAliasState::ExistingSameTarget);
-            }
-            return Err(CliError::unavailable(format!(
-                "{} already points at another socket",
-                visible_socket.display()
-            )));
-        }
-        Ok(stat)
-            if nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFSOCK) =>
-        {
-            let current = nix::sys::stat::fstatat(
-                &parent_dir,
-                name,
-                nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-            )
-            .map_err(|error| {
-                CliError::unavailable(format!(
-                    "cannot recheck {} before replacement: {error}",
-                    visible_socket.display()
-                ))
-            })?;
-            if !nix::sys::stat::SFlag::from_bits_truncate(current.st_mode)
-                .contains(nix::sys::stat::SFlag::S_IFSOCK)
-                || (current.st_dev, current.st_ino) != (stat.st_dev, stat.st_ino)
-            {
-                return Err(CliError::unavailable(format!(
-                    "{} changed before replacement",
-                    visible_socket.display()
-                )));
-            }
-            nix::unistd::unlinkat(&parent_dir, name, nix::unistd::UnlinkatFlags::NoRemoveDir)
-                .map_err(|error| {
-                    CliError::unavailable(format!(
-                        "cannot replace {} with runtime socket link: {error}",
-                        visible_socket.display()
-                    ))
-                })?;
-            AgentChatAliasState::ReplacedPlaceholder {
-                mode: stat.st_mode & 0o7777,
-                uid: stat.st_uid,
-                gid: stat.st_gid,
-            }
-        }
-        Ok(_stat) => {
-            return Err(CliError::unavailable(format!(
-                "cannot replace {} with runtime socket link: refusing non-socket path",
-                visible_socket.display()
-            )));
-        }
-        Err(nix::errno::Errno::ENOENT) => AgentChatAliasState::Created,
-        Err(error) => {
-            return Err(CliError::unavailable(format!(
-                "cannot inspect {}: {error}",
-                visible_socket.display()
-            )));
-        }
-    };
-    match nix::unistd::symlinkat(runtime_socket, &parent_dir, name) {
-        Ok(()) => match verify_visible_socket_alias(visible_socket, runtime_socket) {
-            Ok(()) => Ok(state),
-            Err(error) => {
-                let _ignored = rollback_agent_chat_alias(visible_socket, runtime_socket, &state);
-                Err(error)
-            }
-        },
-        Err(error) => {
-            let _ignored = rollback_agent_chat_alias(visible_socket, runtime_socket, &state);
-            Err(CliError::unavailable(format!(
-                "cannot link {} -> {}: {error}",
-                visible_socket.display(),
-                runtime_socket.display()
-            )))
-        }
-    }
-}
-
-pub(crate) fn rollback_agent_chat_alias(
-    visible_socket: &Path,
-    runtime_socket: &Path,
-    state: &AgentChatAliasState,
-) -> io::Result<()> {
-    match *state {
-        AgentChatAliasState::ExistingSameTarget => Ok(()),
-        AgentChatAliasState::Created => {
-            remove_exact_socket_alias(visible_socket, runtime_socket).map(|_removed| ())
-        }
-        AgentChatAliasState::ReplacedPlaceholder { mode, uid, gid } => {
-            remove_exact_socket_alias(visible_socket, runtime_socket)?;
-            restore_agent_chat_placeholder(visible_socket, mode, uid, gid)
-        }
-    }
-}
-
-fn restore_agent_chat_placeholder(path: &Path, mode: u32, uid: u32, gid: u32) -> io::Result<()> {
-    cortexfs::support::plain::ensure_socket_placeholder(path, mode)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let parent_dir = open_plain_directory(parent)?;
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let stat = nix::sys::stat::fstatat(&parent_dir, name, nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW)
-        .map_err(io::Error::from)?;
-    if !nix::sys::stat::SFlag::from_bits_truncate(stat.st_mode)
-        .contains(nix::sys::stat::SFlag::S_IFSOCK)
-    {
-        return Err(io::Error::other("restored agent socket is not plain"));
-    }
-    if stat.st_uid != uid || stat.st_gid != gid {
-        nix::unistd::fchownat(
-            &parent_dir,
-            name,
-            Some(nix::unistd::Uid::from_raw(uid)),
-            Some(nix::unistd::Gid::from_raw(gid)),
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        )
-        .map_err(io::Error::from)?;
-    }
-    nix::sys::stat::fchmodat(
-        &parent_dir,
-        name,
-        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
-        nix::sys::stat::FchmodatFlags::NoFollowSymlink,
-    )
-    .map_err(io::Error::from)?;
-    parent_dir.sync_all()
-}
-
-pub(crate) fn wait_for_agent_chat_socket(socket: &Path) -> Result<(), CliError> {
-    for _ in 0..50 {
-        if terminal_socket_exists(socket) {
-            return Ok(());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Err(CliError::unavailable(format!(
-        "agent chat socket service started, but socket did not appear: {}",
-        socket.display()
-    )))
 }
 
 pub(crate) fn reset_agent_chat_unit(unit: &str) {
