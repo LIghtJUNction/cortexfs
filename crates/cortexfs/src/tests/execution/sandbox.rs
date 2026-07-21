@@ -148,7 +148,8 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         provider_egress: Some(Path::new("/run/cortexfs/egress-run-1")),
     });
 
-    assert!(!args.contains(&"--clearenv".to_owned()));
+    assert_eq!(args.first().map(String::as_str), Some("--clearenv"));
+    assert!(args.contains(&"--unshare-net".to_owned()));
     assert!(args.contains(&"--unshare-pid".to_owned()));
     assert!(contains_arg_pair(&args, "--tmpfs", "/tmp"));
     assert!(contains_arg_pair(&args, "--ro-bind", "/usr"));
@@ -219,6 +220,33 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         Some(&"/run/cortexfs/agent-executable".to_owned())
     );
     assert_eq!(args.last().map(String::as_str), Some("hi"));
+
+    let opened = ok!(open_agent_executable_no_follow(&agent_executable));
+    let request = AgentExecutableRunRequest {
+        run_id: "run-1",
+        session: "default",
+        cwd: Some("/workspace"),
+        input: "hi",
+        history_messages: "",
+        tool_context: "",
+        debug: None,
+    };
+    let (command, agent_executable_fd) = ok!(agent_executable_socket_command(
+        runtime, &opened, request
+    ));
+    drop(agent_executable_fd);
+    let command_env: Vec<_> = command
+        .get_envs()
+        .filter_map(|(name, _value)| name.to_str())
+        .collect();
+    for secret_name in [
+        "CTX_PROVIDER_SECRET_FD",
+        "CTX_PROVIDER_SECRET_PATH",
+        "CTX_PROVIDER_SECRET_PROVIDER",
+        "CTX_PROVIDER_SECRET_SLOT",
+    ] {
+        assert!(!command_env.contains(&secret_name));
+    }
 }
 
 #[test]
@@ -276,7 +304,7 @@ fn agent_executable_socket_bwrap_executes_opened_inode_after_path_replacement()
 }
 
 #[test]
-fn agent_executable_socket_bwrap_preserves_provider_secret_env()
+fn agent_executable_socket_bwrap_does_not_inherit_provider_secret_env()
 -> Result<(), Box<dyn std::error::Error>> {
     let root = reference_tree("agent-bwrap-provider-secret-env");
     let session_root = agent_session_root(&root, "coder");
@@ -285,7 +313,7 @@ fn agent_executable_socket_bwrap_preserves_provider_secret_env()
     let agent_executable = root.join("agent").join("coder");
     write_text_file(
         &agent_executable,
-        "#!/bin/sh\nprintf %s \"$CTX_PROVIDER_SECRET_VALUE\"\n",
+        "#!/bin/sh\nprintf %s \"${CTX_PROVIDER_SECRET_VALUE:-secret-not-inherited}\"\n",
     );
     set_file_mode(&agent_executable, 0o755);
     let opened = open_agent_executable_no_follow(&agent_executable)
@@ -329,7 +357,7 @@ fn agent_executable_socket_bwrap_preserves_provider_secret_env()
     let output = command.output()?;
     drop(agent_executable_fd);
     assert!(output.status.success(), "bwrap failed: {output:?}");
-    assert_eq!(output.stdout, b"provider-secret");
+    assert_eq!(output.stdout, b"secret-not-inherited");
     Ok(())
 }
 
