@@ -8,6 +8,18 @@
 
 CortexFS 是一个通过受限 `/ctx` 文件系统 ABI 暴露 agent 的 FUSE 运行时。
 
+## 项目介绍
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=3BhCiHWbrUQ">
+    <img src="https://img.youtube.com/vi/3BhCiHWbrUQ/maxresdefault.jpg" alt="观看 CortexFS 项目介绍视频" width="720">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=3BhCiHWbrUQ">在 YouTube 观看 CortexFS 介绍视频</a>
+</p>
+
 ## 范围与原则
 
 - 保持稳定的 root ABI 足够小。

@@ -38,6 +38,18 @@ socket activation, so idle agents remain reachable without a polling loop.
 
 [Live docs](https://lightjunction.github.io/cortexfs/) · [20-second demo](docs/assets/cortexfs-demo.mp4) · [specification](docs/spec/README.md)
 
+## Project Introduction
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=3BhCiHWbrUQ">
+    <img src="https://img.youtube.com/vi/3BhCiHWbrUQ/maxresdefault.jpg" alt="Watch the CortexFS project introduction" width="720">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=3BhCiHWbrUQ">Watch the CortexFS trailer on YouTube</a>
+</p>
+
 The stable shape is intentionally small:
 
 ```text
