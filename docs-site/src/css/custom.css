@@ -565,6 +565,7 @@ video:focus-visible {
   font-weight: 900;
 }
 
+.cortexIntroduction,
 .cortexFilm,
 .cortexSpecimens,
 .cortexBoundaries,
@@ -574,8 +575,36 @@ video:focus-visible {
   scroll-margin-top: 88px;
 }
 
+.cortexIntroduction,
 .cortexFilm {
   background: var(--cortex-paper-strong);
+}
+
+.cortexIntroductionFrame {
+  background: #0f1110;
+  border: 1px solid rgba(255, 253, 250, 0.14);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(30, 24, 14, 0.16);
+  margin: 0;
+  overflow: hidden;
+}
+
+.cortexIntroductionFrame iframe {
+  aspect-ratio: 16 / 9;
+  background: #0f1110;
+  border: 0;
+  display: block;
+  width: 100%;
+}
+
+.cortexIntroductionFrame figcaption {
+  background: #181b19;
+  border-top: 1px solid rgba(255, 253, 250, 0.12);
+  color: rgba(255, 253, 250, 0.78);
+  font-size: 12px;
+  line-height: 1.5;
+  min-height: 50px;
+  padding: 16px;
 }
 
 .cortexFilmHeader {
@@ -1125,6 +1154,7 @@ video:focus-visible {
     gap: 4px;
   }
 
+  .cortexIntroduction,
   .cortexFilm,
   .cortexSpecimens,
   .cortexBoundaries,

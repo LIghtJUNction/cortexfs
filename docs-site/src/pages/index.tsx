@@ -34,6 +34,10 @@ type Copy = {
   rootLabel: string;
   rootAria: string;
   curtain: CortexCurtainCopy;
+  introductionLabel: string;
+  introductionTitle: string;
+  introductionCaption: string;
+  introductionAria: string;
   demoLabel: string;
   demoTitle: string;
   demoCaption: string;
@@ -77,7 +81,7 @@ const zh: Copy = {
   title: 'Agent runtime 不该藏在数据库里。',
   lead:
     'CortexFS 在 /ctx 挂载模型、agent、tool 和持久 session——一个可用 ls、cat、执行、安全控制和审计的小型 Unix ABI。',
-  watchDemo: '观看真实 Demo',
+  watchDemo: '观看项目介绍',
   install: '开始安装',
   github: 'GitHub',
   proofLabel: 'CortexFS 运行时证据',
@@ -96,6 +100,10 @@ const zh: Copy = {
       session: 'session 是普通文件：原始 JSONL 持久，prompt context 可重建。',
     },
   },
+  introductionLabel: '项目介绍',
+  introductionTitle: '快速了解 CortexFS。',
+  introductionCaption: '从 /ctx 的稳定 ABI，到 model、agent、tool 与持久 session 的整体设计。',
+  introductionAria: 'CortexFS 项目介绍视频',
   demoLabel: '真实运行，而非概念图',
   demoTitle: '看 runtime 真正在工作。',
   demoCaption:
@@ -180,7 +188,7 @@ const en: Copy = {
   title: 'Your agent runtime shouldn’t hide inside a database.',
   lead:
     'CortexFS mounts models, agents, tools, and durable sessions at /ctx — a small Unix ABI you can ls, cat, execute, secure, and audit.',
-  watchDemo: 'Watch the real demo',
+  watchDemo: 'Watch the introduction',
   install: 'Install CortexFS',
   github: 'GitHub',
   proofLabel: 'CortexFS runtime proof',
@@ -199,6 +207,11 @@ const en: Copy = {
       session: 'A session is ordinary files: raw JSONL stays durable; prompt context rebuilds.',
     },
   },
+  introductionLabel: 'Project introduction',
+  introductionTitle: 'Meet CortexFS.',
+  introductionCaption:
+    'An overview of the stable /ctx ABI, its model, agent, and tool objects, and durable sessions.',
+  introductionAria: 'CortexFS project introduction video',
   demoLabel: 'Running product, not a diagram',
   demoTitle: 'Watch the runtime while it works.',
   demoCaption:
@@ -317,6 +330,23 @@ function ProductVideo({copy}: {copy: Copy}): ReactElement {
   );
 }
 
+function IntroductionVideo({copy}: {copy: Copy}): ReactElement {
+  return (
+    <figure className="cortexIntroductionFrame">
+      <iframe
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        aria-label={copy.introductionAria}
+        loading="lazy"
+        referrerPolicy="strict-origin-when-cross-origin"
+        src="https://www.youtube-nocookie.com/embed/3BhCiHWbrUQ?rel=0"
+        title={copy.introductionAria}
+      />
+      <figcaption>{copy.introductionCaption}</figcaption>
+    </figure>
+  );
+}
+
 function Hero({copy}: {copy: Copy}): ReactElement {
   return (
     <section className="cortexHero" aria-labelledby="cortex-hero-title">
@@ -327,7 +357,7 @@ function Hero({copy}: {copy: Copy}): ReactElement {
           <h1 id="cortex-hero-title">{copy.title}</h1>
           <p className="cortexLead">{copy.lead}</p>
           <div className="cortexActions">
-            <a className="cortexButton cortexButtonPrimary" href="#demo">{copy.watchDemo}</a>
+            <a className="cortexButton cortexButtonPrimary" href="#introduction">{copy.watchDemo}</a>
             <Link className="cortexButton" to="/docs/getting-started">{copy.install}</Link>
             <a
               className="cortexTextLink cortexExternal"
@@ -350,6 +380,24 @@ function Hero({copy}: {copy: Copy}): ReactElement {
           </div>
         </div>
         <CortexCurtain copy={copy.curtain} />
+      </div>
+    </section>
+  );
+}
+
+function Introduction({copy}: {copy: Copy}): ReactElement {
+  return (
+    <section
+      className="cortexIntroduction"
+      id="introduction"
+      aria-labelledby="cortex-introduction-title"
+    >
+      <div className="container">
+        <header className="cortexFilmHeader">
+          <p className="cortexSectionLabel">{copy.introductionLabel}</p>
+          <h2 id="cortex-introduction-title">{copy.introductionTitle}</h2>
+        </header>
+        <IntroductionVideo copy={copy} />
       </div>
     </section>
   );
@@ -506,6 +554,7 @@ export default function Home(): ReactElement {
     <Layout title={copy.eyebrow} description={copy.description}>
       <main className="cortexHome">
         <Hero copy={copy} />
+        <Introduction copy={copy} />
         <DemoFilm copy={copy} />
         <Specimens copy={copy} />
         <Boundaries copy={copy} />
