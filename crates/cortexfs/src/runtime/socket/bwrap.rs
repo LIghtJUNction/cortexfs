@@ -125,10 +125,7 @@ pub(crate) fn apply_agent_executable_socket_env(
             runtime
                 .env
                 .iter()
-                .filter(|env| {
-                    !matches!(runtime.execution, AgentExecutableSocketExecution::Direct)
-                        || !env.0.starts_with("CTX_PROVIDER_SECRET_")
-                })
+                .filter(|env| !env.0.starts_with("CTX_PROVIDER_SECRET_"))
                 .map(|env| (env.0.as_str(), env.1.as_str())),
         )
         .env("CTX_AGENT", runtime.agent_name)
@@ -144,6 +141,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
     request: &BwrapAgentExecutableArgs<'_>,
 ) -> Vec<String> {
     let mut bwrap = vec![
+        "--clearenv".to_owned(),
         "--setenv".to_owned(),
         "CTX_PROVIDER_CONFIG_DIR".to_owned(),
         request
