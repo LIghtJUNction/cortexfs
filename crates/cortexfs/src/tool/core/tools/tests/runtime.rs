@@ -124,6 +124,45 @@ pub(crate) fn agent_create_is_consistent_across_public_dispatch() {
     assert!(!output.is_empty());
 }
 
+/// agent.update 必须在 spec 列表、tool dispatch 与 CLI dispatch 三条公共路径上一致，
+/// 且缺失 run capability 环境时以错误帧 fail closed 而不是静默成功。
+#[test]
+pub(crate) fn agent_update_is_consistent_across_public_dispatch() {
+    let spec = core_tool_specs()
+        .into_iter()
+        .find(|spec| spec.name == "agent.update");
+    assert!(spec.is_some());
+    let Some(spec) = spec else { return };
+    assert_eq!(
+        spec.input_schema,
+        crate::agent::updateop::AGENT_UPDATE_SCHEMA
+    );
+
+    let invocation = ToolInvocation::new("r1", r#"{"control":"system.md","content":"updated"}"#);
+    let mut output = Vec::new();
+    assert!(matches!(
+        run_core_tool("agent.update", &invocation, &mut output),
+        Ok(true)
+    ));
+    assert!(!output.is_empty());
+
+    let rejected = ToolInvocation::new("r1", r#"{"control":"policy","content":"allow"}"#);
+    output.clear();
+    assert!(matches!(
+        run_core_tool("agent.update", &rejected, &mut output),
+        Ok(true)
+    ));
+    let frames = String::from_utf8_lossy(&output).into_owned();
+    assert!(frames.contains("\"type\":\"error\""), "{frames}");
+
+    output.clear();
+    assert!(matches!(
+        run_core_tool_cli_with_root(Path::new("/ctx"), "agent.update", &[], &mut output),
+        Ok(Some(_))
+    ));
+    assert!(!output.is_empty());
+}
+
 #[test]
 #[ignore = "subprocess entrypoint for agent.create lifecycle test"]
 pub(crate) fn agent_create_lifecycle_subprocess() {
@@ -202,6 +241,7 @@ pub(crate) fn agent_create_passes_lifecycle_and_tool_path_to_runtime()
                     pid: 42,
                 })
             },
+            |_request| Err(crate::runtime::control::RunCapabilityError::Unsupported),
         )
     });
     for (mode, request_id) in [

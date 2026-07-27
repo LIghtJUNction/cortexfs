@@ -8,5 +8,6 @@ pub mod runtime;
 pub mod schedule;
 pub mod secret;
 pub mod stop;
+pub(crate) mod updateop;
 pub mod view;
 pub mod window;

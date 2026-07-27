@@ -135,6 +135,51 @@ fn fuse_projection_validates_agent_model_window_pair_atomically() {
     );
 }
 
+/// 全新 agent 目录逐个物化控制文件时（ctx agent new 的宿主回退路径），
+/// 首次写 model/window 不存在成对文件；缺失的 peer 取创建默认值而不是拒绝，
+/// 但显式 window 在 model 未知时仍必须 fail closed。
+#[test]
+fn fuse_projection_allows_model_window_writes_during_fresh_agent_creation() {
+    let root = reference_tree("fuse-agent-window-fresh-create");
+    let uid = 1000;
+    let gid = 1000;
+    let providers = root.join("providers.d");
+    write_text_file(
+        &providers.join("local.json"),
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["large"],"model_limits":{"large":64}}"#,
+    );
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
+    assert!(
+        projection
+            .create_layout_dir("agent/fresh.d", uid, gid, 0o755)
+            .is_ok()
+    );
+    write_text_file(&root.join("agent/fresh.d/owner"), "1000\n");
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/fresh.d/model", 0, b"local/large\n", uid, gid)
+            .is_ok(),
+        "first model write must not require an existing window control"
+    );
+    fs::remove_file(root.join("agent/fresh.d/model")).ok();
+    assert_eq!(
+        projection.write_fuse_file_at_for_owner("agent/fresh.d/window", 0, b"32\n", uid, gid),
+        Err(FuseError::InvalidContent),
+        "explicit window without any model stays rejected"
+    );
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/fresh.d/window", 0, b"auto\n", uid, gid)
+            .is_ok(),
+        "auto window must be writable before the model control exists"
+    );
+    assert!(
+        projection
+            .write_fuse_file_at_for_owner("agent/fresh.d/model", 0, b"local/large\n", uid, gid)
+            .is_ok()
+    );
+}
+
 #[test]
 fn fuse_projection_serializes_concurrent_model_and_window_commits() -> Result<(), String> {
     let root = reference_tree("fuse-agent-window-concurrent");

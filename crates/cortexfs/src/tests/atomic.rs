@@ -41,6 +41,32 @@ fn atomic_replace_text_with_mode_ignores_restrictive_umask() -> std::io::Result<
 }
 
 #[test]
+fn write_text_file_at_ignores_restrictive_umask() -> std::io::Result<()> {
+    const CHILD_ENV: &str = "CORTEXFS_TEST_WRITE_TEXT_FILE_AT_UMASK_CHILD";
+    if std::env::var_os(CHILD_ENV).is_some() {
+        let temp = tempfile::tempdir()?;
+        let parent = crate::support::plain::open_plain_directory(temp.path())?;
+        crate::support::plain::write_text_file_at(&parent, "state.txt", "new\n", 0o644)?;
+
+        let path = temp.path().join("state.txt");
+        assert_eq!(fs::read_to_string(&path)?, "new\n");
+        assert_eq!(fs::metadata(path)?.permissions().mode() & 0o7777, 0o644);
+        return Ok(());
+    }
+
+    let test_binary = std::env::current_exe()?;
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("umask 077; exec \"$1\" tests::atomic::write_text_file_at_ignores_restrictive_umask --exact")
+        .arg("sh")
+        .arg(test_binary)
+        .env(CHILD_ENV, "1")
+        .output()?;
+    assert_child_test_ran(&output);
+    Ok(())
+}
+
+#[test]
 fn atomic_replace_text_preserves_regular_file_metadata() -> std::io::Result<()> {
     let temp = tempfile::tempdir()?;
     for mode in [0o600, 0o644] {

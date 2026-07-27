@@ -99,8 +99,20 @@ pub struct CreateChildRequest {
     pub life: String,
 }
 
+/// Strict authority-free payload for one self prompt-control update request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UpdatePromptRequest {
+    pub agent: String,
+    pub session: String,
+    pub run: String,
+    pub control: String,
+    pub content: String,
+}
+
 /// Stable successful child creation response.
-pub use cortexfs_runtime_client::{CreateChildEnvironmentRequest, CreateChildResult};
+pub use cortexfs_runtime_client::{
+    CreateChildEnvironmentRequest, CreateChildResult, UpdatePromptEnvironmentRequest,
+};
 
 impl RunCapability {
     #[expect(
@@ -198,11 +210,20 @@ impl RunCapability {
         startup: &SyncSender<Result<(), RunCapabilityError>>,
         current_run: impl FnMut() -> Option<String>,
     ) -> Result<(), RunCapabilityError> {
-        self.serve_run_with_handler(listener, shutdown, startup, current_run, |_request| {
-            Err(RunCapabilityError::Unsupported)
-        })
+        self.serve_run_with_handler(
+            listener,
+            shutdown,
+            startup,
+            current_run,
+            |_request| Err(RunCapabilityError::Unsupported),
+            |_request| Err(RunCapabilityError::Unsupported),
+        )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "run server keeps its per-operation handlers explicit"
+    )]
     pub fn serve_run_with_handler(
         &self,
         listener: &UnixListener,
@@ -212,6 +233,7 @@ impl RunCapability {
         mut create_child: impl FnMut(
             CreateChildRequest,
         ) -> Result<CreateChildResult, RunCapabilityError>,
+        mut update_prompt: impl FnMut(UpdatePromptRequest) -> Result<(), RunCapabilityError>,
     ) -> Result<(), RunCapabilityError> {
         listener
             .set_nonblocking(true)
@@ -227,6 +249,7 @@ impl RunCapability {
                         &mut seen,
                         &mut current_run,
                         &mut create_child,
+                        &mut update_prompt,
                     );
                     if !startup_sent && result.as_deref() == Ok(startup_id.as_str()) {
                         let _ignored = startup.send(Ok(()));
@@ -271,9 +294,13 @@ impl RunCapability {
             }
         };
         let mut seen = HashSet::new();
-        self.handle_connection(&mut stream, &mut seen, &mut current_run, &mut |_request| {
-            Err(RunCapabilityError::Unsupported)
-        })?;
+        self.handle_connection(
+            &mut stream,
+            &mut seen,
+            &mut current_run,
+            &mut |_request| Err(RunCapabilityError::Unsupported),
+            &mut |_request| Err(RunCapabilityError::Unsupported),
+        )?;
         self.consumed.store(true, Ordering::Release);
         Ok(())
     }
@@ -286,6 +313,7 @@ impl RunCapability {
         create_child: &mut impl FnMut(
             CreateChildRequest,
         ) -> Result<CreateChildResult, RunCapabilityError>,
+        update_prompt: &mut impl FnMut(UpdatePromptRequest) -> Result<(), RunCapabilityError>,
     ) -> Result<String, RunCapabilityError> {
         if current_run().as_deref() != Some(self.run.as_str()) {
             return Err(RunCapabilityError::RunChanged);
@@ -366,6 +394,34 @@ impl RunCapability {
                     }
                 };
             }
+            RequestFrame::UpdatePrompt {
+                token,
+                request_id,
+                agent,
+                session,
+                run,
+                control,
+                content,
+            } => {
+                self.authorize_request(stream, seen, &token, &request_id, &mut *current_run)?;
+                if agent != self.agent
+                    || session != self.session
+                    || run != self.run
+                    || !cortexfs_runtime_client::is_agent_prompt_control(&control)
+                    || content.len() > cortexfs_runtime_client::MAX_SELF_UPDATE_CONTENT_BYTES
+                {
+                    let _ignored = write_error_frame(stream, request_id, "EINVAL");
+                    return Err(RunCapabilityError::InvalidFrame);
+                }
+                let request = UpdatePromptRequest {
+                    agent,
+                    session,
+                    run,
+                    control,
+                    content,
+                };
+                return respond_update_prompt(stream, request_id, update_prompt(request));
+            }
         };
         self.authorize_request(stream, seen, &token, &request_id, &mut *current_run)?;
         write_frame(
@@ -442,6 +498,25 @@ impl RunCapability {
         .map_err(client_error)
     }
 
+    pub fn update_prompt(
+        &self,
+        request_id: &str,
+        control: &str,
+        content: &str,
+    ) -> Result<(), RunCapabilityError> {
+        cortexfs_runtime_client::update_prompt(
+            self.socket_receipt.path(),
+            &self.token,
+            request_id,
+            &self.agent,
+            &self.session,
+            &self.run,
+            control,
+            content,
+        )
+        .map_err(client_error)
+    }
+
     pub fn cleanup(&self) -> Result<(), RunCapabilityError> {
         self.socket_receipt
             .cleanup()
@@ -465,6 +540,12 @@ pub fn create_child_from_environment(
     request: CreateChildEnvironmentRequest<'_>,
 ) -> Result<CreateChildResult, RunCapabilityError> {
     cortexfs_runtime_client::create_child_from_environment(request).map_err(client_error)
+}
+
+pub fn update_prompt_from_environment(
+    request: UpdatePromptEnvironmentRequest<'_>,
+) -> Result<(), RunCapabilityError> {
+    cortexfs_runtime_client::update_prompt_from_environment(request).map_err(client_error)
 }
 
 /// Performs the optional one-shot runner handshake from reserved environment.
@@ -518,6 +599,28 @@ fn legal_request_id(request_id: &str) -> bool {
         && request_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn respond_update_prompt(
+    stream: &mut UnixStream,
+    request_id: String,
+    result: Result<(), RunCapabilityError>,
+) -> Result<String, RunCapabilityError> {
+    match result {
+        Ok(()) => {
+            write_frame(
+                stream,
+                &ResponseFrame::PromptUpdated {
+                    request_id: request_id.clone(),
+                },
+            )?;
+            Ok(request_id)
+        }
+        Err(error) => {
+            let _ignored = write_error_frame(stream, request_id, error.errno());
+            Err(error)
+        }
+    }
 }
 
 fn write_error_frame(
@@ -957,6 +1060,7 @@ mod tests {
                         pid: 42,
                     })
                 },
+                |_request| Err(RunCapabilityError::Unsupported),
             )
         });
         capability.ping("startup-run-1")?;
@@ -1035,6 +1139,86 @@ mod tests {
                 .lock()
                 .map_err(|_error| std::io::Error::other("window capture poisoned"))?,
             [None, None, Some(2048)]
+        );
+        shutdown.store(true, Ordering::Release);
+        assert_eq!(join_server(server)?, Ok(()));
+        capability.cleanup()?;
+        Ok(())
+    }
+
+    /// 校验 agent.update 客户端输入筛选和服务端身份绑定都 fail closed，
+    /// 合法的本 agent prompt 请求恰好调用 handler 一次。
+    #[test]
+    fn update_handler_applies_only_self_prompt_controls() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let (_root, capability, listener) = fixture()?;
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = Arc::clone(&shutdown);
+        let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let server_updates = Arc::clone(&updates);
+        let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
+        let server_capability = Arc::clone(&capability);
+        let server = thread::spawn(move || {
+            server_capability.serve_run_with_handler(
+                &listener,
+                &server_shutdown,
+                &startup_sender,
+                || Some("run-1".to_owned()),
+                |_request| Err(RunCapabilityError::Unsupported),
+                move |request| {
+                    server_updates
+                        .lock()
+                        .map_err(|_error| RunCapabilityError::CannotWrite)?
+                        .push((request.control, request.content));
+                    Ok(())
+                },
+            )
+        });
+        capability.ping("startup-run-1")?;
+        assert_eq!(startup_receiver.recv()?, Ok(()));
+        assert_eq!(
+            capability.update_prompt("update-denied", "policy", "allow coder_t tool:tsh execute"),
+            Err(RunCapabilityError::InvalidFrame)
+        );
+        let oversized =
+            "x".repeat(cortexfs_runtime_client::MAX_SELF_UPDATE_CONTENT_BYTES.saturating_add(1));
+        assert_eq!(
+            capability.update_prompt("update-oversized", "system.md", &oversized),
+            Err(RunCapabilityError::InvalidFrame)
+        );
+        let mut raw_stream = UnixStream::connect(capability.socket())?;
+        write_frame(
+            &mut raw_stream,
+            &RequestFrame::UpdatePrompt {
+                token: capability.token.clone(),
+                request_id: "update-raw-agent".to_owned(),
+                agent: "sibling".to_owned(),
+                session: "session-1".to_owned(),
+                run: "run-1".to_owned(),
+                control: "system.md".to_owned(),
+                content: "different\n".to_owned(),
+            },
+        )?;
+        assert!(matches!(
+            read_json_line::<ResponseFrame>(&mut raw_stream)?,
+            ResponseFrame::Error { errno, .. } if errno == "EINVAL"
+        ));
+        assert!(
+            updates
+                .lock()
+                .map_err(|_error| std::io::Error::other("update capture poisoned"))?
+                .is_empty()
+        );
+        capability.update_prompt("update-1", "system.md", "You improve yourself.\n")?;
+        assert_eq!(
+            capability.update_prompt("update-1", "system.md", "You improve yourself.\n"),
+            Err(RunCapabilityError::Replayed)
+        );
+        assert_eq!(
+            *updates
+                .lock()
+                .map_err(|_error| std::io::Error::other("update capture poisoned"))?,
+            [("system.md".to_owned(), "You improve yourself.\n".to_owned())]
         );
         shutdown.store(true, Ordering::Release);
         assert_eq!(join_server(server)?, Ok(()));

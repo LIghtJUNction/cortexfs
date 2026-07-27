@@ -16,14 +16,19 @@ pub(crate) fn agent_executable_socket_command(
     control: Option<RunControlCommand<'_>>,
     provider_egress: Option<&Path>,
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
+    let environment = agent_executable_socket_env(runtime, request, step);
+    let (control_socket, control_environment) = match control {
+        Some((socket, environment)) => (Some(socket), Some(environment)),
+        None => (None, None),
+    };
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
             let mut command = command_for_agent_identity(
                 support::plain::proc_fd_path(agent_executable),
                 runtime.identity,
             );
-            apply_agent_executable_socket_env(&mut command, runtime, request, step);
-            if let Some((_socket, environment)) = control {
+            apply_agent_executable_socket_env(&mut command, &environment);
+            if let Some(environment) = control_environment {
                 command.envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
             }
             command.arg(AGENT_ENVELOPE_ARG).stdin(Stdio::piped());
@@ -56,12 +61,14 @@ pub(crate) fn agent_executable_socket_command(
                     agent_home_source_fd: agent_home_source_fd.raw(),
                     agent_home_sandbox_fd: agent_home_sandbox_fd.raw(),
                     agent_home,
-                    control_socket: control.map(|(socket, _environment)| socket),
+                    environment: &environment,
+                    control_socket,
+                    control_environment,
                     provider_egress,
                 },
             ));
-            apply_agent_executable_socket_env(&mut command, runtime, request, step);
-            if let Some((_socket, environment)) = control {
+            apply_agent_executable_socket_env(&mut command, &environment);
+            if let Some(environment) = control_environment {
                 command.envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
             }
             command.stdout(Stdio::piped()).process_group(0);
@@ -89,7 +96,9 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub agent_home_source_fd: RawFd,
     pub agent_home_sandbox_fd: RawFd,
     pub agent_home: &'a Path,
+    pub environment: &'a [(String, String)],
     pub control_socket: Option<&'a Path>,
+    pub control_environment: Option<&'a [(String, String)]>,
     pub provider_egress: Option<&'a Path>,
 }
 
@@ -113,28 +122,42 @@ impl Drop for InheritedFd {
     }
 }
 
-pub(crate) fn apply_agent_executable_socket_env(
-    command: &mut Command,
+fn agent_executable_socket_env(
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
     step: u8,
+) -> Vec<(String, String)> {
+    let mut environment = runtime
+        .env
+        .iter()
+        .filter(|env| !env.0.starts_with("CTX_PROVIDER_SECRET_"))
+        .cloned()
+        .collect::<Vec<_>>();
+    environment.extend([
+        ("CTX_AGENT".to_owned(), runtime.agent_name.to_owned()),
+        (
+            "CTX_ROOT".to_owned(),
+            runtime.ctx_root.display().to_string(),
+        ),
+        (
+            "CTX_SOURCE".to_owned(),
+            runtime.source_root.display().to_string(),
+        ),
+        ("CTX_RUN_ID".to_owned(), request.run_id.to_owned()),
+        ("CTX_SESSION".to_owned(), request.session.to_owned()),
+        ("CTX_AGENT_LAUNCH".to_owned(), AGENT_LAUNCH_ABI.to_owned()),
+        ("CTX_AGENT_STEP".to_owned(), step.to_string()),
+    ]);
+    environment
+}
+
+pub(crate) fn apply_agent_executable_socket_env(
+    command: &mut Command,
+    environment: &[(String, String)],
 ) {
     command
         .env_clear()
-        .envs(
-            runtime
-                .env
-                .iter()
-                .filter(|env| !env.0.starts_with("CTX_PROVIDER_SECRET_"))
-                .map(|env| (env.0.as_str(), env.1.as_str())),
-        )
-        .env("CTX_AGENT", runtime.agent_name)
-        .env("CTX_ROOT", runtime.ctx_root)
-        .env("CTX_SOURCE", runtime.source_root)
-        .env("CTX_RUN_ID", request.run_id)
-        .env("CTX_SESSION", request.session)
-        .env("CTX_AGENT_LAUNCH", AGENT_LAUNCH_ABI)
-        .env("CTX_AGENT_STEP", step.to_string());
+        .envs(environment.iter().map(|entry| (&entry.0, &entry.1)));
 }
 
 pub(crate) fn agent_executable_socket_bwrap_args(
@@ -179,6 +202,7 @@ pub(crate) fn agent_executable_socket_bwrap_args(
             runtime::egress::PROVIDER_EGRESS_SANDBOX_PATH.to_owned(),
         ]);
     }
+    append_bwrap_agent_environment(&mut bwrap, request.environment, request.control_environment);
     bwrap.extend(bwrap_source_root_bind_args(request.runtime.source_root));
     if let Some(socket) = request.control_socket {
         bwrap.extend([
@@ -224,6 +248,29 @@ pub(crate) fn agent_executable_socket_bwrap_args(
         request.input.to_owned(),
     ]);
     bwrap
+}
+
+fn append_bwrap_agent_environment(
+    bwrap: &mut Vec<String>,
+    environment: &[(String, String)],
+    control_environment: Option<&[(String, String)]>,
+) {
+    for entry in environment {
+        let (name, value) = (&entry.0, &entry.1);
+        if matches!(
+            name.as_str(),
+            "CTX_PROVIDER_CONFIG_DIR" | runtime::egress::PROVIDER_EGRESS_DIR_ENV
+        ) {
+            continue;
+        }
+        bwrap.extend(["--setenv".to_owned(), name.clone(), value.clone()]);
+    }
+    for entry in control_environment.unwrap_or_default() {
+        let (name, value) = (&entry.0, &entry.1);
+        if matches!(name.as_str(), "CTX_CONTROL_SOCKET" | "CTX_CONTROL_TOKEN") {
+            bwrap.extend(["--setenv".to_owned(), name.clone(), value.clone()]);
+        }
+    }
 }
 
 pub(crate) fn socket_runtime_host_mount_source(source_root: &Path, source: &str) -> String {

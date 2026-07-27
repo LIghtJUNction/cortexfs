@@ -216,6 +216,7 @@ fn reference_tree_bootstrap_materializes_documented_shape() {
         "shell.exec",
         "tsh.config",
         "agent.create",
+        "agent.update",
     ] {
         assert!(root.join("tool").join(tool).is_file());
         assert!(root.join("tool").join(format!("{tool}.d")).is_dir());

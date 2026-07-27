@@ -121,6 +121,14 @@ pub(crate) const REFERENCE_GLOBAL_TOOLS: &[ReferenceToolSpec] = &[
         cap: "agent.create",
         policy: "allow architect_t tool:agent.create execute\nallow coder_t tool:agent.create execute\nallow reviewer_t tool:agent.create execute",
     },
+    ReferenceToolSpec {
+        name: "agent.update",
+        wrapper_target: REFERENCE_OBJECT_RUNNER,
+        description: "Replace one prompt control of the calling agent itself.",
+        schema: agent::updateop::AGENT_UPDATE_SCHEMA,
+        cap: "agent.update",
+        policy: "allow architect_t tool:agent.update execute\nallow coder_t tool:agent.update execute\nallow reviewer_t tool:agent.update execute\nallow worker_t tool:agent.update execute",
+    },
 ];
 
 pub(crate) const DEFAULT_TSH_CONFIG: &str = "\

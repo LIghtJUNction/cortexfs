@@ -379,6 +379,30 @@ Interactive host-like behavior is provided by ordinary tool objects named
 `bash`, `tmux`, or `zellij` when visible and allowed. `tsh` itself must not
 fallback to arbitrary host commands.
 
+## Self Iteration
+
+An agent iterates itself through the `agent.update` tool. The tool sends one
+`agent.update` frame over the receipt-bound run capability socket:
+
+```json
+{"op":"agent.update","token":"...","request_id":"tool-1","agent":"coder","session":"default","run":"run-1","control":"system.md","content":"..."}
+```
+
+The frame's `agent`, `session`, and `run` must equal the capability's own
+identity, so the operation is self-only by construction. `control` accepts
+exactly `system.md` or `prompt.template.md`; `content` is bounded UTF-8 text
+of at most 8 KiB without NUL bytes. The host revalidates both and atomically
+replaces (or creates, for an optional control not yet materialized)
+`agent/<self>.d/<control>` in the backing source. The tool generates a fresh
+request id per invocation; replaying an already-seen request id returns
+`EALREADY` without writing twice. A request id is consumed by any authorized
+attempt, successful or not — a failed attempt must retry under a new id.
+
+The update takes effect at the next run: prompt construction reads `system.md`
+and `prompt.template.md` fresh from the control directory for every run, and
+prompt text grants no authority. Authority controls cannot travel through this
+operation.
+
 ## Prompt Runtime Contract
 
 The first model system message is rendered from:
