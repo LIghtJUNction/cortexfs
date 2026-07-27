@@ -630,6 +630,7 @@ mod tests {
                         pid: 42,
                     })
                 },
+                |_request| Err(cortexfs::runtime::control::RunCapabilityError::Unsupported),
             )
         });
         let output = std::process::Command::new(env::current_exe()?)

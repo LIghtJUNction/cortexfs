@@ -1,7 +1,7 @@
 use super::*;
 
 /// Monotonic target version written to the backing source.
-pub const REFERENCE_TREE_VERSION: u32 = 5;
+pub const REFERENCE_TREE_VERSION: u32 = 6;
 
 /// Relative path for bootstrap state under the source root.
 pub const BOOTSTRAP_STATE_REL: &str = "bin/cortexfs.bootstrap.json";
@@ -13,6 +13,8 @@ pub const RETIRED_REFERENCE_AGENTS: &[&str] = &["base", "executor"];
 pub const MIGRATION_RETIRED_AGENTS: &str = "retired-agents";
 /// Migration id recording adoption of the rolling reference-tree model.
 pub const MIGRATION_ROLLING_TREE: &str = "rolling-tree";
+/// Migration id recording installation of the self-update reference tool.
+pub const MIGRATION_AGENT_UPDATE: &str = "agent-update";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ReferenceTreeMigration {
@@ -28,6 +30,10 @@ const REFERENCE_TREE_MIGRATIONS: &[ReferenceTreeMigration] = &[
     ReferenceTreeMigration {
         target_version: 5,
         id: MIGRATION_ROLLING_TREE,
+    },
+    ReferenceTreeMigration {
+        target_version: 6,
+        id: MIGRATION_AGENT_UPDATE,
     },
 ];
 

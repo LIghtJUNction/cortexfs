@@ -71,6 +71,28 @@ pub enum RequestFrame {
         input: String,
         life: String,
     },
+    #[serde(rename = "agent.update")]
+    UpdatePrompt {
+        token: String,
+        request_id: String,
+        agent: String,
+        session: String,
+        run: String,
+        control: String,
+        content: String,
+    },
+}
+
+/// Maximum accepted `agent.update` prompt-control payload in bytes.
+pub const MAX_SELF_UPDATE_CONTENT_BYTES: usize = 8 * 1024;
+
+/// Returns whether a control file may be self-updated through `agent.update`.
+///
+/// Only authority-free prompt controls are eligible; every other agent
+/// control stays host-owned.
+#[must_use]
+pub fn is_agent_prompt_control(name: &str) -> bool {
+    matches!(name, "system.md" | "prompt.template.md")
 }
 
 fn deserialize_present_u32<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
@@ -129,15 +151,17 @@ pub enum ResponseFrame {
         request_id: String,
         result: CreateChildResult,
     },
+    #[serde(rename = "agent.updated")]
+    PromptUpdated { request_id: String },
 }
 
 impl RequestFrame {
     #[must_use]
     pub fn request_id(&self) -> &str {
         match *self {
-            Self::Ping { ref request_id, .. } | Self::CreateChild { ref request_id, .. } => {
-                request_id
-            }
+            Self::Ping { ref request_id, .. }
+            | Self::CreateChild { ref request_id, .. }
+            | Self::UpdatePrompt { ref request_id, .. } => request_id,
         }
     }
 }
@@ -172,7 +196,8 @@ pub fn request(socket: &Path, frame: &RequestFrame) -> Result<ResponseFrame, Run
     let response_id = match response {
         ResponseFrame::Pong { ref request_id, .. }
         | ResponseFrame::Error { ref request_id, .. }
-        | ResponseFrame::ChildCreated { ref request_id, .. } => request_id,
+        | ResponseFrame::ChildCreated { ref request_id, .. }
+        | ResponseFrame::PromptUpdated { ref request_id } => request_id,
     };
     if response_id != frame.request_id()
         || !matches!(
@@ -183,6 +208,9 @@ pub fn request(socket: &Path, frame: &RequestFrame) -> Result<ResponseFrame, Run
             ) | (
                 RequestFrame::CreateChild { .. },
                 ResponseFrame::ChildCreated { .. } | ResponseFrame::Error { .. }
+            ) | (
+                RequestFrame::UpdatePrompt { .. },
+                ResponseFrame::PromptUpdated { .. } | ResponseFrame::Error { .. }
             )
         )
     {
@@ -211,7 +239,9 @@ pub fn ping(
     )? {
         ResponseFrame::Pong { receipt, .. } => Ok(receipt),
         ResponseFrame::Error { errno, .. } => Err(RuntimeClientError::Rejected(errno)),
-        ResponseFrame::ChildCreated { .. } => Err(RuntimeClientError::InvalidFrame),
+        ResponseFrame::ChildCreated { .. } | ResponseFrame::PromptUpdated { .. } => {
+            Err(RuntimeClientError::InvalidFrame)
+        }
     }
 }
 
@@ -254,8 +284,77 @@ pub fn create_child(
     )? {
         ResponseFrame::ChildCreated { result, .. } => Ok(result),
         ResponseFrame::Error { errno, .. } => Err(RuntimeClientError::Rejected(errno)),
-        ResponseFrame::Pong { .. } => Err(RuntimeClientError::InvalidFrame),
+        ResponseFrame::Pong { .. } | ResponseFrame::PromptUpdated { .. } => {
+            Err(RuntimeClientError::InvalidFrame)
+        }
     }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "wire helper keeps capability and self-update fields explicit"
+)]
+pub fn update_prompt(
+    socket: &Path,
+    token: &str,
+    request_id: &str,
+    agent: &str,
+    session: &str,
+    run: &str,
+    control: &str,
+    content: &str,
+) -> Result<(), RuntimeClientError> {
+    if !is_agent_prompt_control(control) || content.len() > MAX_SELF_UPDATE_CONTENT_BYTES {
+        return Err(RuntimeClientError::InvalidEnvironment);
+    }
+    match request(
+        socket,
+        &RequestFrame::UpdatePrompt {
+            token: token.to_owned(),
+            request_id: request_id.to_owned(),
+            agent: agent.to_owned(),
+            session: session.to_owned(),
+            run: run.to_owned(),
+            control: control.to_owned(),
+            content: content.to_owned(),
+        },
+    )? {
+        ResponseFrame::PromptUpdated { .. } => Ok(()),
+        ResponseFrame::Error { errno, .. } => Err(RuntimeClientError::Rejected(errno)),
+        ResponseFrame::Pong { .. } | ResponseFrame::ChildCreated { .. } => {
+            Err(RuntimeClientError::InvalidFrame)
+        }
+    }
+}
+
+/// Environment-derived request for one self prompt-control update.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UpdatePromptEnvironmentRequest<'a> {
+    pub request_id: &'a str,
+    pub control: &'a str,
+    pub content: &'a str,
+}
+
+pub fn update_prompt_from_environment(
+    request: UpdatePromptEnvironmentRequest<'_>,
+) -> Result<(), RuntimeClientError> {
+    let socket = env::var_os("CTX_CONTROL_SOCKET").ok_or(RuntimeClientError::InvalidEnvironment)?;
+    let token =
+        env::var("CTX_CONTROL_TOKEN").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
+    let agent = env::var("CTX_AGENT").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
+    let session =
+        env::var("CTX_SESSION").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
+    let run = env::var("CTX_RUN_ID").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
+    update_prompt(
+        &PathBuf::from(socket),
+        &token,
+        request.request_id,
+        &agent,
+        &session,
+        &run,
+        request.control,
+        request.content,
+    )
 }
 
 pub fn create_child_from_environment(
@@ -519,6 +618,69 @@ mod tests {
             assert!(serde_json::from_value::<RequestFrame>(invalid).is_err());
         }
         Ok(())
+    }
+
+    /// 校验 `update_prompt` 的请求-响应一一对应，尤其 control/content 关键字段映射。
+    #[test]
+    fn update_prompt_response_has_exact_parity() {
+        let root = tempfile::tempdir().ok();
+        assert!(root.is_some());
+        let Some(root) = root else { return };
+        let socket = root.path().join("control.sock");
+        let listener = UnixListener::bind(&socket).ok();
+        assert!(listener.is_some());
+        let Some(listener) = listener else { return };
+        let server = thread::spawn(move || {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let mut bytes = Vec::new();
+            let _ignored = BufReader::new(&mut stream).read_until(b'\n', &mut bytes);
+            let frame = serde_json::from_slice::<RequestFrame>(&bytes);
+            assert!(matches!(
+                frame,
+                Ok(RequestFrame::UpdatePrompt { control, content, .. })
+                    if control == "system.md" && content == "iterate\n"
+            ));
+            let _ignored =
+                stream.write_all(b"{\"type\":\"agent.updated\",\"request_id\":\"request-1\"}\n");
+        });
+        let result = update_prompt(
+            &socket,
+            "token",
+            "request-1",
+            "agent",
+            "session",
+            "run",
+            "system.md",
+            "iterate\n",
+        );
+        assert!(server.join().is_ok());
+        assert_eq!(result, Ok(()));
+    }
+
+    /// 非 prompt 控制名与超界内容都必须在连接任何 socket 之前 fail closed。
+    #[test]
+    fn illegal_update_prompt_fails_before_connect() {
+        for (control, content) in [
+            ("policy", "allow".to_owned()),
+            ("window", "auto\n".to_owned()),
+            ("system.md", "x".repeat(MAX_SELF_UPDATE_CONTENT_BYTES + 1)),
+        ] {
+            assert_eq!(
+                update_prompt(
+                    Path::new("/definitely/missing.sock"),
+                    "token",
+                    "request-1",
+                    "agent",
+                    "session",
+                    "run",
+                    control,
+                    &content,
+                ),
+                Err(RuntimeClientError::InvalidEnvironment)
+            );
+        }
     }
 
     /// 以零窗口作为非法输入，验证在连接前快速失败，避免下游 socket 错误泄漏语义。

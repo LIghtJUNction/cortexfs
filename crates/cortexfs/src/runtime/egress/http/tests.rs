@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::super::ProviderEgressCredential;
 use super::*;
 
 fn target(base: &str) -> ProviderTarget {
@@ -18,7 +19,46 @@ fn provider_target(provider: &str, base: &str) -> ProviderTarget {
         base_url: format!("http://example.test{base}"),
         authority: "http://example.test".to_owned(),
         base_path: base.to_owned(),
+        credential: None,
     }
+}
+
+#[test]
+fn host_credential_replaces_agent_authentication() {
+    let mut target = provider_target("fixture", "/v1");
+    target.credential = Some(ProviderEgressCredential {
+        token: "host-token".to_owned(),
+        codex_account_id: None,
+        run: "run-1".to_owned(),
+    });
+    let request = inject_provider_credential(
+        Request {
+            endpoint: "chat/completions",
+            headers: vec![
+                ("authorization".to_owned(), "Bearer agent-token".to_owned()),
+                ("x-api-key".to_owned(), "agent-key".to_owned()),
+                ("content-type".to_owned(), "application/json".to_owned()),
+            ],
+            body: Vec::new(),
+        },
+        &target,
+    );
+    assert!(
+        request
+            .headers
+            .contains(&("authorization".to_owned(), "Bearer host-token".to_owned()))
+    );
+    assert!(
+        request
+            .headers
+            .contains(&("content-type".to_owned(), "application/json".to_owned()))
+    );
+    assert!(
+        !request
+            .headers
+            .iter()
+            .any(|header| header.1.contains("agent-token") || header.1.contains("agent-key"))
+    );
 }
 
 #[test]
@@ -130,6 +170,7 @@ fn monitor_error_reaps_curl_group_and_closes_upstream_within_one_second()
         base_url: format!("http://{address}/v1"),
         authority: format!("http://{address}"),
         base_path: "/v1".to_owned(),
+        credential: None,
     };
     let (_client, server) = UnixStream::pair()?;
     let monitor_fd = server.as_raw_fd();
@@ -217,6 +258,7 @@ fn silent_upstream_is_killed_when_client_disconnects() -> Result<(), Box<dyn std
         base_url: format!("http://{address}/v1"),
         authority: format!("http://{address}"),
         base_path: "/v1".to_owned(),
+        credential: None,
     };
     let (client, server) = UnixStream::pair()?;
     let request = Request {
@@ -272,6 +314,7 @@ fn curl_raw_response_preserves_chunked_sse_and_non_success_status()
             base_url: format!("http://{address}/v1"),
             authority: format!("http://{address}"),
             base_path: "/v1".to_owned(),
+            credential: None,
         };
         let (mut client, server) = UnixStream::pair()?;
         let request = Request {

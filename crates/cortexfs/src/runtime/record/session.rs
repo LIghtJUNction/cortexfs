@@ -918,10 +918,12 @@ mod permission_tests {
     fn root_runtime_repairs_private_agent_home_traversal_boundary()
     -> Result<(), Box<dyn std::error::Error>> {
         let base = root("agent-home-owner");
-        let agent_home = base.join("home/1000/agent/example-echo");
+        let shared_parent = base.join("home/1000/agent");
+        let agent_home = shared_parent.join("example-echo");
         let session_root = agent_home.join("session");
         let _ignored = fs::remove_dir_all(&base);
         assert!(fs::create_dir_all(&agent_home).is_ok());
+        assert!(fs::set_permissions(&shared_parent, fs::Permissions::from_mode(0o755)).is_ok());
         assert!(fs::set_permissions(&agent_home, fs::Permissions::from_mode(0o700)).is_ok());
         let uid = nix::unistd::geteuid().as_raw();
         let gid = nix::unistd::getegid().as_raw();
@@ -943,9 +945,9 @@ mod permission_tests {
             assert_eq!((metadata.uid(), metadata.gid()), (uid, gid));
             assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
         }
-        let shared_parent = base.join("home/1000/agent");
         let metadata = fs::metadata(shared_parent)?;
-        assert_ne!(metadata.permissions().mode() & 0o777, 0o700);
+        assert_eq!((metadata.uid(), metadata.gid()), (uid, gid));
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o755);
         let _ignored = fs::remove_dir_all(base);
         Ok(())
     }

@@ -45,6 +45,14 @@ pub(crate) fn bootstrap_reference_tree_default(
 }
 
 fn bootstrap_reference_tree_at(source: &Path, dry_run: bool, check: bool) -> Result<(), CliError> {
+    // An explicit SOURCE may be the documented `storage/current` generation
+    // symlink; bootstrap operates on the resolved plain directory behind it.
+    let resolved = source
+        .symlink_metadata()
+        .ok()
+        .filter(|metadata| metadata.file_type().is_symlink())
+        .and_then(|_metadata| source.canonicalize().ok());
+    let source = resolved.as_deref().unwrap_or(source);
     if check {
         return print_bootstrap_check(source);
     }

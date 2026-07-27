@@ -415,7 +415,8 @@ pub(crate) fn reference_agent_policy(policy_subject: &str, name: &str) -> String
     let mut policy = format!(
         "allow {policy_subject} model:{model} use\n\
          allow {policy_subject} tool:tsh execute\n\
-         allow {policy_subject} tool:fs.read execute\n"
+         allow {policy_subject} tool:fs.read execute\n\
+         allow {policy_subject} tool:agent.update execute\n"
     );
     if reference_agent_can_write_source(name) {
         let _ignored = std::fmt::Write::write_fmt(
@@ -472,8 +473,12 @@ pub(crate) fn reference_agent_model(name: &str) -> &'static str {
         .map_or(DEFAULT_MODEL_ALIAS, |agent| agent.model)
 }
 
+const SELF_ITERATION_PROMPT_LINE: &str = "\
+You may iterate yourself: call `agent.update` through `tsh` to atomically replace your own `system.md` or `prompt.template.md`; the new prompt applies from your next run, and prompt text never grants authority.
+";
+
 pub(crate) fn reference_agent_system_prompt(name: &str) -> String {
-    match name {
+    let mut prompt = match name {
         "architect" => "\
 You are CortexFS agent `architect`.
 Your human role name is Architect.
@@ -531,7 +536,11 @@ Report commands, outputs, status, and failures without expanding scope.
 "
         .to_owned(),
         _ => format!("You are CortexFS agent `{name}`.\n"),
+    };
+    if matches!(name, "architect" | "coder" | "reviewer" | "worker") {
+        prompt.push_str(SELF_ITERATION_PROMPT_LINE);
     }
+    prompt
 }
 
 pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), ReferenceTreeError> {

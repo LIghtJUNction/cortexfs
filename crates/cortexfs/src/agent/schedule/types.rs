@@ -237,7 +237,7 @@ impl AgentScheduleAdvance {
 pub enum AgentScheduleRecordError {
     /// Schedule text contains a raw NUL byte.
     InvalidText,
-    /// Schedule JSON did not pass [`inspect_agent_schedule_json`].
+    /// Schedule JSON did not pass [`crate::agent::schedule::inspect_agent_schedule_json`].
     InvalidSchedule(AgentScheduleReport),
     /// Parent session or its `context/` directory is missing or unsafe.
     MissingParentSession,

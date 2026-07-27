@@ -145,6 +145,38 @@ allow parent_t agent:review-1 create
 allow parent_t agent:review-1 start
 ```
 
+## Agent Self Iteration
+
+`/ctx/tool/agent.update` is the self-iteration endpoint. It lets a running
+agent replace exactly one of its own authority-free prompt controls:
+
+```text
+agent/<self>.d/system.md
+agent/<self>.d/prompt.template.md
+```
+
+The tool submits the update through the receipt-bound run capability socket.
+The host binds the request to the calling agent, session, and run, so an agent
+cannot name another agent. The host revalidates the control name and content,
+rejects payloads larger than 8 KiB, and applies the replacement atomically in
+the agent's own control directory. Every other agent control, including
+`policy`, `mount`, `model`, `window`, and the identity files, stays host-owned
+and is rejected with `EINVAL`.
+
+Prompt text does not grant authority. A self update changes behavior only when
+the next run renders its prompt; it cannot expand mounts, policy, tools, or
+Linux identity. Like every tool call, the update is recorded as ordinary
+`tool_call`/`tool_result` facts in the durable session, so self iterations are
+auditable from session history alone.
+
+Execution requires both layers, like any tool:
+
+```text
+allow <agent>_t tool:agent.update execute
+```
+
+in the agent policy and in the tool policy.
+
 ## Agent Terminal Tools
 
 Agents should get one terminal capability: `tsh`. A runtime launches it inside

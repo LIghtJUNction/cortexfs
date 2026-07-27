@@ -841,25 +841,39 @@ impl FuseProjection {
         let candidate =
             std::str::from_utf8(candidate).map_err(|_error| FuseError::InvalidContent)?;
         let control_dir = self.root.join("agent").join(format!("{agent}.d"));
-        let read_peer = |file: &str| {
-            support::plain::read_small_text_file(&control_dir.join(file), MAX_FUSE_SMALL_READ_BYTES)
-                .map_err(|_error| FuseError::InvalidContent)
+        // During initial agent materialization the peer control does not exist
+        // yet; a missing peer takes its creation default instead of failing.
+        let read_peer = |file: &str| match support::plain::read_small_text_file(
+            &control_dir.join(file),
+            MAX_FUSE_SMALL_READ_BYTES,
+        ) {
+            Ok(content) => Ok(Some(content)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(_error) => Err(FuseError::InvalidContent),
         };
         let model_content = if candidate_control == "model" {
-            candidate.to_owned()
+            Some(candidate.to_owned())
         } else {
             read_peer("model")?
         };
         let window_content = if candidate_control == "window" {
             candidate.to_owned()
         } else {
-            read_peer("window")?
+            read_peer("window")?.unwrap_or_else(|| "auto\n".to_owned())
+        };
+        let setting =
+            AgentWindowSetting::parse_control(&window_content).ok_or(FuseError::InvalidContent)?;
+        let Some(model_content) = model_content else {
+            // No model recorded yet: `auto` stays valid for any later model,
+            // while an explicit window cannot be validated against a limit.
+            return match setting {
+                AgentWindowSetting::Auto => Ok(()),
+                AgentWindowSetting::Explicit(_) => Err(FuseError::InvalidContent),
+            };
         };
         let model = support::control::parse_canonical_control_value(&model_content)
             .filter(|model| abi::path::is_model_reference(model))
             .ok_or(FuseError::InvalidContent)?;
-        let setting =
-            AgentWindowSetting::parse_control(&window_content).ok_or(FuseError::InvalidContent)?;
         let model_name = if is_model_alias(model) {
             let target = self.default_model_alias_target(model)?;
             target

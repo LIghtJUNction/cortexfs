@@ -14,6 +14,68 @@ fn assert_provider_egress_args(args: &[String], host_dir: &str) {
     ));
 }
 
+fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) {
+    let agent_home = session_root.parent().unwrap_or(session_root);
+    assert_eq!(args.first().map(String::as_str), Some("--clearenv"));
+    assert!(args.contains(&"--unshare-net".to_owned()));
+    assert!(args.contains(&"--unshare-pid".to_owned()));
+    assert!(contains_arg_pair(args, "--tmpfs", "/tmp"));
+    assert!(contains_arg_pair(args, "--ro-bind", "/usr"));
+    assert!(contains_arg_pair(args, "--dir", "/workspace"));
+    assert!(contains_arg_pair(args, "--perms", "0755"));
+    assert!(contains_arg_triplet(
+        args,
+        "--ro-bind-data",
+        "9",
+        "/run/cortexfs/agent-executable"
+    ));
+    assert!(contains_arg_triplet(
+        args,
+        "--bind-fd",
+        "10",
+        &agent_home.display().to_string()
+    ));
+    assert!(contains_arg_triplet(args, "--bind-fd", "11", "/home/agent"));
+    assert!(!args.iter().any(|arg| arg == "- user: hi"));
+    assert!(!args.iter().any(|arg| arg == "workspace context"));
+    assert!(contains_arg_triplet(
+        args,
+        "--setenv",
+        "CTX_PROVIDER_CONFIG_DIR",
+        &root.join("shared/providers.d").display().to_string()
+    ));
+    assert_provider_egress_args(args, "/run/cortexfs/egress-run-1");
+    assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
+    for secret in [
+        "CTX_PROVIDER_SECRET_FD",
+        "CTX_PROVIDER_SECRET_PATH",
+        "CTX_PROVIDER_SECRET_PROVIDER",
+        "CTX_PROVIDER_SECRET_SLOT",
+        "/run/user/1000/cortexfs/credentials/coder-default",
+    ] {
+        assert!(!args.iter().any(|arg| arg == secret));
+    }
+    assert!(contains_arg_pair(args, "--chdir", "/workspace"));
+    assert!(!contains_arg_triplet(args, "--bind", "/repo", "/workspace"));
+    assert!(contains_arg_triplet(
+        args,
+        "--ro-bind",
+        root.to_str().unwrap_or_default(),
+        "/ctx"
+    ));
+    assert!(contains_arg_triplet(
+        args,
+        "--ro-bind",
+        root.to_str().unwrap_or_default(),
+        root.to_str().unwrap_or_default()
+    ));
+    assert_eq!(
+        args.get(args.len().saturating_sub(2)),
+        Some(&"/run/cortexfs/agent-executable".to_owned())
+    );
+    assert_eq!(args.last().map(String::as_str), Some("hi"));
+}
+
 #[test]
 fn agent_executable_socket_direct_does_not_inherit_provider_secrets() {
     let root = reference_tree("agent-direct-secrets");
@@ -116,6 +178,8 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "openai".to_owned(),
     ));
     env.push(("CTX_PROVIDER_SECRET_SLOT".to_owned(), "default".to_owned()));
+    let secret_value = "provider-secret".to_owned();
+    env.push(("CTX_PROVIDER_SECRET_VALUE".to_owned(), secret_value));
     let runtime = AgentExecutableSocketRuntime {
         ctx_root: &root,
         source_root: &root,
@@ -133,7 +197,14 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
             control_dir: None,
         },
     };
-
+    let environment = [("CTX_AGENT".to_owned(), "coder".to_owned())];
+    let control_environment = [
+        (
+            "CTX_CONTROL_SOCKET".to_owned(),
+            "/run/cortexfs/control.sock".to_owned(),
+        ),
+        ("CTX_CONTROL_TOKEN".to_owned(), "control-token".to_owned()),
+    ];
     let args = agent_executable_socket_bwrap_args(&BwrapAgentExecutableArgs {
         runtime,
         mount_table: view.mount_table(),
@@ -144,86 +215,36 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         agent_home_source_fd: 10,
         agent_home_sandbox_fd: 11,
         agent_home: session_root.parent().unwrap_or(&session_root),
+        environment: &environment,
         control_socket: Some(Path::new("/run/cortexfs/control/source.sock")),
+        control_environment: Some(&control_environment),
         provider_egress: Some(Path::new("/run/cortexfs/egress-run-1")),
     });
 
-    assert_eq!(args.first().map(String::as_str), Some("--clearenv"));
-    assert!(args.contains(&"--unshare-net".to_owned()));
-    assert!(args.contains(&"--unshare-pid".to_owned()));
-    assert!(contains_arg_pair(&args, "--tmpfs", "/tmp"));
-    assert!(contains_arg_pair(&args, "--ro-bind", "/usr"));
-    assert!(contains_arg_pair(&args, "--dir", "/workspace"));
-    assert!(contains_arg_pair(&args, "--perms", "0755"));
-    assert!(contains_arg_triplet(
-        &args,
-        "--ro-bind-data",
-        "9",
-        "/run/cortexfs/agent-executable"
-    ));
-    assert!(contains_arg_triplet(
-        &args,
-        "--bind-fd",
-        "10",
-        &session_root
-            .parent()
-            .unwrap_or(&session_root)
-            .display()
-            .to_string()
-    ));
-    assert!(contains_arg_triplet(
-        &args,
-        "--bind-fd",
-        "11",
-        "/home/agent"
-    ));
-    assert!(!args.iter().any(|arg| arg == "- user: hi"));
-    assert!(!args.iter().any(|arg| arg == "workspace context"));
+    assert_agent_sandbox_args(&args, &root, &session_root);
     assert!(contains_arg_triplet(
         &args,
         "--setenv",
-        "CTX_PROVIDER_CONFIG_DIR",
-        &root.join("shared/providers.d").display().to_string()
-    ));
-    assert_provider_egress_args(&args, "/run/cortexfs/egress-run-1");
-    assert!(!args.iter().any(|arg| arg == "/host/providers.d"));
-    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_FD"));
-    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PATH"));
-    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_PROVIDER"));
-    assert!(!args.iter().any(|arg| arg == "CTX_PROVIDER_SECRET_SLOT"));
-    assert!(
-        !args
-            .iter()
-            .any(|arg| arg == "/run/user/1000/cortexfs/credentials/coder-default")
-    );
-    assert!(contains_arg_pair(&args, "--chdir", "/workspace"));
-    assert!(!contains_arg_triplet(
-        &args,
-        "--bind",
-        "/repo",
-        "/workspace"
+        "CTX_AGENT",
+        "coder"
     ));
     assert!(contains_arg_triplet(
         &args,
-        "--ro-bind",
-        root.to_str().unwrap_or_default(),
-        "/ctx"
+        "--setenv",
+        "CTX_CONTROL_SOCKET",
+        "/run/cortexfs/control.sock"
     ));
     assert!(contains_arg_triplet(
         &args,
-        "--ro-bind",
-        root.to_str().unwrap_or_default(),
-        root.to_str().unwrap_or_default()
+        "--setenv",
+        "CTX_CONTROL_TOKEN",
+        "control-token"
     ));
-    assert_eq!(
-        args.get(args.len().saturating_sub(2)),
-        Some(&"/run/cortexfs/agent-executable".to_owned())
-    );
-    assert_eq!(args.last().map(String::as_str), Some("hi"));
 
     let opened = ok!(open_agent_executable_no_follow(&agent_executable));
     let request = AgentExecutableRunRequest {
         run_id: "run-1",
+        cancellation_id: "cancel-1",
         session: "default",
         cwd: Some("/workspace"),
         input: "hi",
@@ -232,7 +253,12 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         debug: None,
     };
     let (command, agent_executable_fd) = ok!(agent_executable_socket_command(
-        runtime, &opened, request
+        runtime,
+        &opened,
+        request,
+        0,
+        None,
+        Some(Path::new("/run/cortexfs/egress-run-1")),
     ));
     drop(agent_executable_fd);
     let command_env: Vec<_> = command
@@ -244,9 +270,16 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "CTX_PROVIDER_SECRET_PATH",
         "CTX_PROVIDER_SECRET_PROVIDER",
         "CTX_PROVIDER_SECRET_SLOT",
+        "CTX_PROVIDER_SECRET_VALUE",
     ] {
         assert!(!command_env.contains(&secret_name));
     }
+    assert!(
+        !command
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .any(|arg| arg == "provider-secret")
+    );
 }
 
 #[test]
@@ -563,7 +596,9 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         agent_home_source_fd: 10,
         agent_home_sandbox_fd: 11,
         agent_home: session_root.parent().unwrap_or(&session_root),
+        environment: &[],
         control_socket: None,
+        control_environment: None,
         provider_egress: None,
     });
 
@@ -615,7 +650,9 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         agent_home_source_fd: 10,
         agent_home_sandbox_fd: 11,
         agent_home: session_root.parent().unwrap_or(&session_root),
+        environment: &[],
         control_socket: None,
+        control_environment: None,
         provider_egress: None,
     });
 

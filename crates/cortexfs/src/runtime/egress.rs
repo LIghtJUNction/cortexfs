@@ -46,12 +46,20 @@ pub enum ProviderEgressError {
     CannotCreate,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
+struct ProviderEgressCredential {
+    token: String,
+    codex_account_id: Option<String>,
+    run: String,
+}
+
+#[derive(Eq, PartialEq)]
 struct ProviderTarget {
     provider: String,
     base_url: String,
     authority: String,
     base_path: String,
+    credential: Option<ProviderEgressCredential>,
 }
 
 /// Run-scoped Unix sockets that relay only to pre-resolved provider authorities.
@@ -80,6 +88,7 @@ impl ProviderEgress {
         control_dir: &Path,
         ctx_root: &Path,
         model: &str,
+        runtime_env: &[(String, String)],
         uid: u32,
         gid: u32,
         run: &str,
@@ -87,7 +96,10 @@ impl ProviderEgress {
         if !is_object_name(run) {
             return Err(ProviderEgressError::InvalidRun);
         }
-        let targets = plan_targets(ctx_root, model)?;
+        let mut targets = plan_targets(ctx_root, model)?;
+        for target in &mut targets {
+            target.credential = provider_egress_credential(runtime_env, &target.provider, run)?;
+        }
         let runtime_owner = (
             nix::unistd::geteuid().as_raw(),
             nix::unistd::getegid().as_raw(),
@@ -220,12 +232,53 @@ fn plan_targets(ctx_root: &Path, model: &str) -> Result<Vec<ProviderTarget>, Pro
                         base_url: canonical.to_string().trim_end_matches('/').to_owned(),
                         authority,
                         base_path,
+                        credential: None,
                     },
                 );
             }
         }
     }
     Ok(targets.into_values().collect())
+}
+
+fn provider_egress_credential(
+    environment: &[(String, String)],
+    provider: &str,
+    run: &str,
+) -> Result<Option<ProviderEgressCredential>, ProviderEgressError> {
+    if runtime_env_value(environment, "CTX_PROVIDER_SECRET_PROVIDER") != Some(provider) {
+        return Ok(None);
+    }
+    let Some(token) = runtime_env_value(environment, "CTX_PROVIDER_SECRET_VALUE")
+        .map(|value| value.trim_end_matches(['\r', '\n']))
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let codex_account_id = runtime_env_value(environment, "CTX_PROVIDER_SECRET_ACCOUNT_ID")
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned);
+    if token.chars().any(char::is_control)
+        || codex_account_id
+            .as_deref()
+            .is_some_and(|value| value.chars().any(char::is_control))
+        || (provider == "codex" && codex_account_id.is_none())
+    {
+        return Err(ProviderEgressError::CannotCreate);
+    }
+    Ok(Some(ProviderEgressCredential {
+        token: token.to_owned(),
+        codex_account_id,
+        run: run.to_owned(),
+    }))
+}
+
+fn runtime_env_value<'a>(environment: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    environment
+        .iter()
+        .rev()
+        .find(|entry| entry.0 == name)
+        .map(|entry| entry.1.as_str())
 }
 
 #[expect(

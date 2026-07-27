@@ -66,7 +66,7 @@ pub(crate) fn read_limited_bytes(mut reader: impl Read, limit: usize) -> Vec<u8>
 
 /// Lossy UTF-8 decode of a limited byte read.
 ///
-/// Prefer this when the caller only needs text; use [`read_limited_bytes`] for
+/// Prefer this when the caller only needs text; use `read_limited_bytes` for
 /// binary length checks before decoding.
 #[must_use]
 pub fn read_limited_text(reader: impl Read, limit: usize) -> String {

@@ -309,36 +309,59 @@ mod tests {
     }
 
     #[test]
-    fn version_four_current_stages_version_five_once() -> Result<(), Box<dyn std::error::Error>> {
+    fn version_five_current_stages_version_six_once() -> Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let storage = directory.path().join("storage");
-        let version_four = update_storage_generation(&storage)?;
+        let version_five = update_storage_generation(&storage)?;
         let state = crate::BootstrapState {
             schema: 1,
-            tree_version: 4,
+            tree_version: 5,
             managed_agents: REFERENCE_AGENTS
                 .iter()
                 .map(|agent| agent.name.to_owned())
                 .collect(),
-            applied_migrations: vec![crate::MIGRATION_RETIRED_AGENTS.to_owned()],
+            applied_migrations: vec![
+                crate::MIGRATION_RETIRED_AGENTS.to_owned(),
+                crate::MIGRATION_ROLLING_TREE.to_owned(),
+            ],
         };
         fs::write(
-            version_four.join(crate::BOOTSTRAP_STATE_REL),
+            version_five.join(crate::BOOTSTRAP_STATE_REL),
             format!("{}\n", serde_json::to_string_pretty(&state)?),
         )?;
 
-        let version_five = update_storage_generation(&storage)?;
-        assert_ne!(version_five, version_four);
+        let version_six = update_storage_generation(&storage)?;
+        assert_ne!(version_six, version_five);
+        assert_eq!(
+            fs::read_link(storage.join("current"))?,
+            version_six.strip_prefix(&storage)?
+        );
         assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 2);
         assert!(matches!(
-            read_bootstrap_state(&version_five),
+            read_bootstrap_state(&version_six),
             Some(state)
-                if state.tree_version == 5
+                if state.tree_version == 6
                     && state.applied_migrations
-                        == [crate::MIGRATION_RETIRED_AGENTS, crate::MIGRATION_ROLLING_TREE]
+                        == [
+                            crate::MIGRATION_RETIRED_AGENTS,
+                            crate::MIGRATION_ROLLING_TREE,
+                            crate::reference::bootstrap::MIGRATION_AGENT_UPDATE
+                        ]
         ));
+        for path in [
+            "tool/agent.update",
+            "tool/agent.update.d/schema",
+            "tool/agent.update.d/cap",
+            "tool/agent.update.d/policy",
+        ] {
+            assert!(version_six.join(path).is_file(), "{path}");
+        }
+        assert_eq!(
+            fs::read_to_string(version_six.join("tool/agent.update.d/cap"))?,
+            "agent.update\n"
+        );
 
-        assert_eq!(update_storage_generation(&storage)?, version_five);
+        assert_eq!(update_storage_generation(&storage)?, version_six);
         assert_eq!(fs::read_dir(storage.join("generations"))?.count(), 2);
         Ok(())
     }

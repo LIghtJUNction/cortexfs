@@ -183,6 +183,11 @@ pub fn write_text_file_at(parent: &fs::File, name: &str, content: &str, mode: u3
     .map_err(std::io::Error::from)?;
     let mut file = fs::File::from(fd);
     file.write_all(content.as_bytes())?;
+    nix::sys::stat::fchmod(
+        &file,
+        nix::sys::stat::Mode::from_bits_truncate(mode & 0o7777),
+    )
+    .map_err(std::io::Error::from)?;
     file.sync_all()?;
     parent.sync_all()
 }

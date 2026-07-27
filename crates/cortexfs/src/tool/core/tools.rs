@@ -1,5 +1,6 @@
 use crate::CTX_ROOT;
 use crate::agent::createop::AgentCreateTool;
+use crate::agent::updateop::AgentUpdateTool;
 use cortexfs_tool_sdk::{
     Tool, ToolEmitter, ToolError, ToolInvocation, ToolResult, ToolSpec, run_tool,
 };
@@ -50,6 +51,7 @@ pub fn core_tool_specs() -> Vec<ToolSpec> {
         ShellExecTool.spec(),
         TshConfigTool.spec(),
         AgentCreateTool.spec(),
+        AgentUpdateTool.spec(),
     ]
 }
 
@@ -65,6 +67,7 @@ pub fn run_core_tool(
         "shell.exec" => run_tool(&ShellExecTool, invocation, writer).map(|_code| true),
         "tsh.config" => run_tool(&TshConfigTool, invocation, writer).map(|_code| true),
         "agent.create" => run_tool(&AgentCreateTool, invocation, writer).map(|_code| true),
+        "agent.update" => run_tool(&AgentUpdateTool, invocation, writer).map(|_code| true),
         _ => Ok(false),
     }
 }
@@ -90,17 +93,25 @@ pub fn run_core_tool_cli_with_root(
         "shell.exec" => run_shell_exec_cli(args, writer).map(Some),
         "tsh.config" => run_tsh_config_cli(root, args, writer).map(Some),
         "agent.create" => {
-            let input = args
-                .iter()
-                .map(|value| value.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let run = std::env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
-            let invocation = ToolInvocation::new(run, input);
+            let invocation = cli_invocation(args);
             run_tool(&AgentCreateTool, &invocation, writer).map(Some)
+        }
+        "agent.update" => {
+            let invocation = cli_invocation(args);
+            run_tool(&AgentUpdateTool, &invocation, writer).map(Some)
         }
         _ => Ok(None),
     }
+}
+
+fn cli_invocation(args: &[OsString]) -> ToolInvocation {
+    let input = args
+        .iter()
+        .map(|value| value.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let run = std::env::var("CTX_RUN_ID").unwrap_or_else(|_error| "r1".to_owned());
+    ToolInvocation::new(run, input)
 }
 
 pub(crate) fn ctx_root_from_env() -> PathBuf {

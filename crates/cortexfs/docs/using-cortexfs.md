@@ -306,6 +306,12 @@ When invoking tools directly, prefer doing it from the agent terminal through
 `tsh`, so CortexFS can apply agent policy, mounts, uid/gid, and `CTX_PATH`
 together.
 
+Agents with the `agent.update` grant can iterate themselves: the tool
+atomically replaces the calling agent's own `system.md` or
+`prompt.template.md` through the host-validated run capability socket, and the
+new prompt applies from the next run. Other agent controls stay host-owned;
+see `docs/spec/tool-policy-abi.md` for the exact contract.
+
 ## Use agent.sh
 
 The repository still includes `agent.sh` as a shell frontend:

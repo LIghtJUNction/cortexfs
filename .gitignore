@@ -31,3 +31,6 @@
 /.omo/
 SWAP.md
 scripts/__pycache__/
+
+# Local video production assets (135 MB+, not part of the source tree)
+/video/

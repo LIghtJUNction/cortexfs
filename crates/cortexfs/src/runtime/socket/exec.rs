@@ -90,6 +90,7 @@ fn start_run_control(
             &startup_sender,
             || Some(request_run.clone()),
             |request| create_socket_child(&source_root, &ctx_root, request),
+            |request| update_socket_prompt(&source_root, &request),
         );
         if let Err(ref error) = result {
             let _ignored = error_sender.try_send(Err(error.clone()));
@@ -165,6 +166,33 @@ fn create_socket_child(
         "EINVAL" => runtime::control::RunCapabilityError::InvalidFrame,
         _ => runtime::control::RunCapabilityError::CannotCreate,
     })
+}
+
+/// Applies one authorized self prompt-control update to the backing source.
+///
+/// The capability socket already binds the request to the running agent, so
+/// this only revalidates the authority-free control name and content before
+/// atomically replacing `agent/<name>.d/<control>`.
+fn update_socket_prompt(
+    source_root: &Path,
+    request: &runtime::control::UpdatePromptRequest,
+) -> Result<(), runtime::control::RunCapabilityError> {
+    if !is_object_name(&request.agent)
+        || !cortexfs_runtime_client::is_agent_prompt_control(&request.control)
+    {
+        return Err(runtime::control::RunCapabilityError::InvalidFrame);
+    }
+    validate_agent_bootstrap_control_content(&request.control, &request.content)
+        .map_err(|_error| runtime::control::RunCapabilityError::InvalidFrame)?;
+    let control_dir = source_root
+        .join("agent")
+        .join(format!("{}.d", request.agent));
+    open_plain_directory(&control_dir)
+        .map_err(|_error| runtime::control::RunCapabilityError::CannotWrite)?;
+    // 0o644 matches bootstrap-created prompt controls, so a self-updated
+    // control keeps the same mode as its peers instead of drifting to 0o600.
+    atomic_replace_text_with_mode(&control_dir.join(&request.control), &request.content, 0o644)
+        .map_err(|_error| runtime::control::RunCapabilityError::CannotWrite)
 }
 
 pub(crate) fn handle_agent_executable_socket_request_frame_streaming(
@@ -1076,6 +1104,7 @@ pub(crate) fn run_agent_executable_streaming(
                     control_dir,
                     runtime.ctx_root,
                     runtime.model.ok_or(SocketRuntimeError::CannotRunAgent)?,
+                    runtime.env,
                     runtime.identity.uid(),
                     runtime.identity.gid(),
                     request.run_id,
@@ -1128,9 +1157,15 @@ pub(crate) fn run_agent_executable_streaming(
         .stdin
         .take()
         .ok_or(SocketRuntimeError::CannotRunAgent)?;
-    stdin
-        .write_all(envelope.as_bytes())
-        .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    // A fast-exiting executable can close stdin before the envelope arrives;
+    // its emitted frames and exit status stay the authoritative outcome.
+    if let Err(error) = stdin.write_all(envelope.as_bytes())
+        && error.kind() != std::io::ErrorKind::BrokenPipe
+    {
+        terminate_agent_process_group(&mut child);
+        let _ignored = child.wait();
+        return Err(SocketRuntimeError::CannotRunAgent);
+    }
     drop(stdin);
     drop(agent_executable_fd);
     if let Some(server) = control_server.as_ref()
@@ -1933,5 +1968,57 @@ mod completion_tests {
             CAPTURE_SOCKET_CHILD_WINDOW.with(|capture| capture.borrow().clone()),
             [Some(2048), None]
         );
+    }
+
+    /// 校验 `update_socket_prompt` 只原子替换合法 prompt 控制文件：
+    /// 非 prompt 控制、NUL 内容与缺失 agent 目录都 fail closed 且不落盘。
+    #[test]
+    fn socket_prompt_update_replaces_only_prompt_controls() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let root = tempfile::tempdir()?;
+        let control_dir = root.path().join("agent/self.d");
+        fs::create_dir_all(&control_dir)?;
+        fs::write(control_dir.join("system.md"), "old prompt\n")?;
+        let request = |control: &str, content: &str| runtime::control::UpdatePromptRequest {
+            agent: "self".to_owned(),
+            session: "session-1".to_owned(),
+            run: "run-1".to_owned(),
+            control: control.to_owned(),
+            content: content.to_owned(),
+        };
+        assert_eq!(
+            update_socket_prompt(root.path(), &request("window", "auto\n")),
+            Err(runtime::control::RunCapabilityError::InvalidFrame)
+        );
+        assert_eq!(
+            update_socket_prompt(root.path(), &request("system.md", "bad\0content")),
+            Err(runtime::control::RunCapabilityError::InvalidFrame)
+        );
+        assert_eq!(
+            fs::read_to_string(control_dir.join("system.md"))?,
+            "old prompt\n"
+        );
+        let mut missing = request("system.md", "new prompt\n");
+        missing.agent = "absent".to_owned();
+        assert_eq!(
+            update_socket_prompt(root.path(), &missing),
+            Err(runtime::control::RunCapabilityError::CannotWrite)
+        );
+        update_socket_prompt(
+            root.path(),
+            &request("system.md", "You iterate yourself.\n"),
+        )
+        .map_err(|error| io::Error::other(format!("cannot update prompt: {error:?}")))?;
+        assert_eq!(
+            fs::read_to_string(control_dir.join("system.md"))?,
+            "You iterate yourself.\n"
+        );
+        update_socket_prompt(root.path(), &request("prompt.template.md", "{{input}}\n"))
+            .map_err(|error| io::Error::other(format!("cannot create template: {error:?}")))?;
+        assert_eq!(
+            fs::read_to_string(control_dir.join("prompt.template.md"))?,
+            "{{input}}\n"
+        );
+        Ok(())
     }
 }

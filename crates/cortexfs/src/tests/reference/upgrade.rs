@@ -23,18 +23,19 @@ fn reference_tree_bootstrap_writes_bootstrap_state() {
         state.applied_migrations,
         vec![
             MIGRATION_RETIRED_AGENTS.to_owned(),
-            MIGRATION_ROLLING_TREE.to_owned()
+            MIGRATION_ROLLING_TREE.to_owned(),
+            crate::reference::bootstrap::MIGRATION_AGENT_UPDATE.to_owned()
         ]
     );
     assert!(root.join(BOOTSTRAP_STATE_REL).is_file());
 }
 
 #[test]
-fn version_four_plan_selects_only_version_five_migration() {
-    let root = reference_tree("reference-tree-plan-v4-v5");
+fn version_five_plan_selects_and_records_only_version_six_migration() {
+    let root = reference_tree("reference-tree-plan-v5-v6");
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
-        r#"{"schema":1,"tree_version":4,"managed_agents":["architect","coder","reviewer","worker"],"applied_migrations":["retired-agents"]}"#,
+        r#"{"schema":1,"tree_version":5,"managed_agents":["architect","coder","reviewer","worker"],"applied_migrations":["retired-agents","rolling-tree"]}"#,
     );
 
     let plan = plan_reference_tree_upgrade(&root);
@@ -46,14 +47,29 @@ fn version_four_plan_selects_only_version_five_migration() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(migrations, vec![(5, MIGRATION_ROLLING_TREE)]);
-    assert_eq!(plan.current_version, Some(4));
-    assert_eq!(plan.target_version, 5);
+    assert_eq!(
+        migrations,
+        vec![(6, crate::reference::bootstrap::MIGRATION_AGENT_UPDATE)]
+    );
+    assert_eq!(plan.current_version, Some(5));
+    assert_eq!(plan.target_version, 6);
+    assert!(ensure_reference_tree(&root).is_ok());
+    assert!(matches!(
+        read_bootstrap_state(&root),
+        Some(state)
+            if state.tree_version == 6
+                && state.applied_migrations
+                    == [
+                        MIGRATION_RETIRED_AGENTS,
+                        MIGRATION_ROLLING_TREE,
+                        crate::reference::bootstrap::MIGRATION_AGENT_UPDATE
+                    ]
+    ));
 }
 
 #[test]
-fn skipped_version_plan_orders_version_four_before_version_five() {
-    let root = reference_tree("reference-tree-plan-v3-v5");
+fn skipped_version_plan_orders_migrations_through_version_six() {
+    let root = reference_tree("reference-tree-plan-v3-v6");
     write_text_file(
         &root.join(BOOTSTRAP_STATE_REL),
         r#"{"schema":1,"tree_version":3,"managed_agents":["architect","coder","reviewer","worker"],"applied_migrations":[]}"#,
@@ -69,7 +85,11 @@ fn skipped_version_plan_orders_version_four_before_version_five() {
         .collect::<Vec<_>>();
     assert_eq!(
         migrations,
-        vec![(4, MIGRATION_RETIRED_AGENTS), (5, MIGRATION_ROLLING_TREE)]
+        vec![
+            (4, MIGRATION_RETIRED_AGENTS),
+            (5, MIGRATION_ROLLING_TREE),
+            (6, crate::reference::bootstrap::MIGRATION_AGENT_UPDATE)
+        ]
     );
 }
 
@@ -89,14 +109,18 @@ fn bootstrap_retry_rebuilds_unique_deterministic_migration_audit() {
     assert!(matches!(
         second,
         Some(BootstrapState { applied_migrations, .. })
-            if applied_migrations == [MIGRATION_RETIRED_AGENTS, MIGRATION_ROLLING_TREE]
+            if applied_migrations == [
+                MIGRATION_RETIRED_AGENTS,
+                MIGRATION_ROLLING_TREE,
+                crate::reference::bootstrap::MIGRATION_AGENT_UPDATE
+            ]
     ));
 }
 
 #[test]
 fn future_version_rejects_before_mutating_tree() {
     let root = clean_test_dir("reference-tree-future-version");
-    let state = r#"{"schema":1,"tree_version":6,"managed_agents":["future"],"applied_migrations":["future"]}"#;
+    let state = r#"{"schema":1,"tree_version":7,"managed_agents":["future"],"applied_migrations":["future"]}"#;
     write_text_file(&root.join(BOOTSTRAP_STATE_REL), state);
     write_text_file(&root.join("sentinel"), "keep\n");
 
@@ -104,7 +128,7 @@ fn future_version_rejects_before_mutating_tree() {
     assert_eq!(
         plan.actions,
         vec![BootstrapAction::RejectVersion {
-            current: 6,
+            current: 7,
             target: REFERENCE_TREE_VERSION
         }]
     );

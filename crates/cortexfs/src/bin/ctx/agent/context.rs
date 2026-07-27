@@ -10,6 +10,15 @@ pub(crate) fn agent_status(root: &Path, name: &str) -> Result<(), CliError> {
 pub(crate) fn agent_status_lines(root: &Path, name: &str) -> Result<Vec<String>, CliError> {
     require_cli_name("agent name", name)?;
     let control = agent_control_dir(root, name);
+    if !control
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
+    {
+        return Err(CliError::unavailable(format!(
+            "unknown agent: {}",
+            terminal_safe_text(name)
+        )));
+    }
     let (status, live_pid) = live_agent_status_and_pid(&control)?;
     let (model, life) = read_agent_model_life_for_context(&control, "agent")?;
     let parent = read_agent_parent_ref(&control)?;
