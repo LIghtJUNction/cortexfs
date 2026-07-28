@@ -84,14 +84,14 @@ mod runner_provider_config_tests {
     fn provider_config_can_fall_back_to_model_control_files()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
-        let control = root.path().join("model/api.test/gpt-5.4-mini.d");
+        let control = root.path().join("model/api.test/gpt-5.6-terra.d");
         fs::create_dir_all(&control)?;
         fs::write(control.join("default"), "base_url=https://api.test/v1\n")?;
         fs::write(
             control.join("driver"),
             "default=openai-chat\nagent=openai-responses,openai-chat\n",
         )?;
-        let config = provider_config_from_model_control(root.path(), "api.test", "gpt-5.4-mini")
+        let config = provider_config_from_model_control(root.path(), "api.test", "gpt-5.6-terra")
             .ok_or_else(|| io::Error::other("missing fallback provider config"))?;
         assert_eq!(config.name.as_deref(), Some("api.test"));
         assert_eq!(config.base_url, "https://api.test/v1");

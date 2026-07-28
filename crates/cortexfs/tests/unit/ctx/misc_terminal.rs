@@ -293,9 +293,9 @@ fn ctx_file_set_and_append_refuse_session_history_without_side_effects() {
     let root = clean_test_dir("ctx-file-session-history-read-only");
     let paths = [
         "home/1000/agent/coder/session/default/messages.jsonl",
-        "home/1000/model/openai/gpt-4o.d/session/default/events.jsonl",
+        "home/1000/model/openai/gpt-5.6.d/session/default/events.jsonl",
         "shared/team/agent/coder/session/default/events.jsonl",
-        "shared/team/model/openai/gpt-4o.d/session/default/messages.jsonl",
+        "shared/team/model/openai/gpt-5.6.d/session/default/messages.jsonl",
     ];
 
     for (index, path) in paths.into_iter().enumerate() {

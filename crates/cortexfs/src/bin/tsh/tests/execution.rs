@@ -37,7 +37,6 @@ pub(crate) fn tsh_terminal_without_run_capability_uses_ephemeral_context()
         .env_remove("CTX_RUN_ID")
         .env_remove("CTX_SOURCE")
         .env_remove("CTX_CONTROL_SOCKET")
-        .env_remove("CTX_CONTROL_TOKEN")
         .output()?;
     assert!(output.status.success(), "{output:?}");
     Ok(())
@@ -53,25 +52,22 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
         let projection =
             PathBuf::from(std::env::var_os("CORTEXFS_TSH_RECEIPT_ROOT").unwrap_or_default());
         let socket = std::env::var_os("CTX_CONTROL_SOCKET").unwrap_or_default();
-        let token = std::env::var_os("CTX_CONTROL_TOKEN").unwrap_or_default();
-        let path = persistent_context_path_with_capability(&projection, "coder", &socket, &token)
+        let path = persistent_context_path_with_capability(&projection, "coder", &socket)
             .map_err(|error| io::Error::other(error.message))?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "agent cache path missing"))?;
         assert!(fs::create_dir_all(path.parent().unwrap_or(&path)).is_ok());
         assert!(cortexfs::write_tsh_context_state(&path, &ToolContext::new(4).to_state()).is_ok());
-        let load_path =
-            persistent_context_path_with_capability(&projection, "coder", &socket, &token)
-                .map_err(|error| io::Error::other(error.message))?
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "loaded agent cache path missing")
-                })?;
+        let load_path = persistent_context_path_with_capability(&projection, "coder", &socket)
+            .map_err(|error| io::Error::other(error.message))?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "loaded agent cache path missing")
+            })?;
         assert!(cortexfs::read_tsh_context_state(&load_path).is_ok());
-        let second_path =
-            persistent_context_path_with_capability(&projection, "coder", &socket, &token)
-                .map_err(|error| io::Error::other(error.message))?
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "second agent cache path missing")
-                })?;
+        let second_path = persistent_context_path_with_capability(&projection, "coder", &socket)
+            .map_err(|error| io::Error::other(error.message))?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "second agent cache path missing")
+            })?;
         assert!(
             cortexfs::write_tsh_context_state(&second_path, &ToolContext::new(4).to_state())
                 .is_ok()
@@ -126,7 +122,8 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
         identity.uid(),
         identity.gid(),
     )?;
-    let environment = capability.environment(capability.socket());
+    capability.register_launch_root(std::process::id())?;
+    let environment = cortexfs::runtime::control::RunCapability::environment(capability.socket());
     let shutdown = Arc::new(AtomicBool::new(false));
     let server_shutdown = Arc::clone(&shutdown);
     let (startup_tx, _startup_rx) = mpsc::sync_channel(1);
@@ -146,7 +143,6 @@ fn tsh_cache_write_uses_real_authoritative_capability() -> Result<(), Box<dyn st
         .env("CTX_RUN_ID", "run-1")
         .env("CTX_SOURCE", &source)
         .env("CTX_CONTROL_SOCKET", &environment[0].1)
-        .env("CTX_CONTROL_TOKEN", &environment[1].1)
         .output()?;
     assert!(output.status.success(), "{output:?}");
     shutdown.store(true, Ordering::Release);
@@ -298,10 +294,6 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
             .env("CTX_RUN_ID", "run-1")
             .env("CTX_SOURCE", &root)
             .env("CTX_CONTROL_SOCKET", "/run/cortexfs/control.sock")
-            .env(
-                "CTX_CONTROL_TOKEN",
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            )
             .output();
         assert!(matches!(output, Ok(ref output) if output.status.success()));
         return;
@@ -382,7 +374,7 @@ pub(crate) fn tsh_tool_execution_gets_clean_agent_environment() {
 [ "$CTX_RUN_ID" = run-1 ] || exit 17
 [ "$CTX_SOURCE" = "$CTX_ROOT" ] || exit 18
 [ "$CTX_CONTROL_SOCKET" = /run/cortexfs/control.sock ] || exit 19
-[ "$CTX_CONTROL_TOKEN" = 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef ] || exit 20
+[ "$(env | grep -c '^CTX_CONTROL_')" = 1 ] || exit 20
 [ "$CTX_AUTHORIZED_OBJECT" = /ctx/tool/probe ] || exit 15
 [ "$PATH" = /usr/bin:/bin ] || exit 13
 [ -n "$CTX_ROOT" ] || exit 14
@@ -415,34 +407,13 @@ exit 0
         Err(ref error) if error.message.contains("missing CTX_RUN_ID")
     ));
     assert!(matches!(
-        validate_tsh_control_environment(
-            Some(OsString::from("/run/cortexfs/control.sock")),
-            None,
-        ),
-        Err(ref error) if error.message.contains("incomplete CTX_CONTROL_SOCKET")
+        validate_tsh_control_environment(Some(OsString::from("/run/cortexfs/control.sock"))),
+        Ok(Some(socket)) if socket == "/run/cortexfs/control.sock"
     ));
-    for (socket, token, message) in [
-        (
-            Some(OsString::from("")),
-            Some(OsString::from("0".repeat(64))),
-            "fixed runtime control path",
-        ),
-        (
-            Some(OsString::from("/run/cortexfs/control.sock")),
-            Some(OsString::from("")),
-            "32-byte hex token",
-        ),
-        (
-            Some(OsString::from("/run/cortexfs/control.sock")),
-            Some(OsString::from("z".repeat(64))),
-            "32-byte hex token",
-        ),
-    ] {
-        assert!(matches!(
-            validate_tsh_control_environment(socket, token),
-            Err(ref error) if error.message.contains(message)
-        ));
-    }
+    assert!(matches!(
+        validate_tsh_control_environment(Some(OsString::from(""))),
+        Err(ref error) if error.message.contains("fixed runtime control path")
+    ));
 
     let backing = root.join("backing");
     let backing_control = backing.join("agent/coder.d");

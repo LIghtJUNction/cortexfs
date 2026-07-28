@@ -32,7 +32,7 @@ done
 response=$(curl -fsS "${BASE_URL}/v1/chat/completions" \
   -H 'Authorization: Bearer mock' \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"stream":false}')
+  -d '{"model":"gpt-5.6","messages":[{"role":"user","content":"hi"}],"stream":false}')
 
 case "$response" in
   *"cortexfs aimock ok"*) ;;
@@ -46,7 +46,7 @@ esac
 stream=$(curl -fsS "${BASE_URL}/v1/chat/completions" \
   -H 'Authorization: Bearer mock' \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"stream":true}')
+  -d '{"model":"gpt-5.6","messages":[{"role":"user","content":"hi"}],"stream":true}')
 
 case "$stream" in
   *"data:"*"cortexfs aimock ok"*"[DONE]"*) ;;

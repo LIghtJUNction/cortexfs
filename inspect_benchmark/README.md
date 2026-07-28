@@ -78,7 +78,7 @@ Inspect 使用 `mockllm/model` 作为框架占位模型；实际推理仍由被�
 直接模型 baseline：
 
 ```bash
-./inspect_benchmark/run_benchmark.sh model --model openai/gpt-4o-mini
+./inspect_benchmark/run_benchmark.sh model --model openai/gpt-5.6
 ```
 
 通用 CLI bridge：
@@ -86,13 +86,13 @@ Inspect 使用 `mockllm/model` 作为框架占位模型；实际推理仍由被�
 ```bash
 ./inspect_benchmark/run_benchmark.sh agent \
   -S command=agent_benchmark/examples/openai_cli_agent.py \
-  --model openai/gpt-4o-mini
+  --model openai/gpt-5.6
 ```
 
 In-process OpenAI bridge：
 
 ```bash
-./inspect_benchmark/run_benchmark.sh process --model openai/gpt-4o-mini
+./inspect_benchmark/run_benchmark.sh process --model openai/gpt-5.6
 ```
 
 ## 真实调用说明

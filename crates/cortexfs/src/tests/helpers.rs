@@ -312,7 +312,7 @@ pub(super) fn create_complete_object_layout(
         let model_control = root.join("model/debug/echo.d");
         assert!(fs::create_dir_all(&model_control).is_ok());
         write_text_file(&model_control.join("limit"), "unknown\n");
-        let worker_control = root.join("model/api.lmm.best/gpt-5.3-codex-spark.d");
+        let worker_control = root.join("model/api.test/gpt-5.6.d");
         assert!(fs::create_dir_all(&worker_control).is_ok());
         write_text_file(&worker_control.join("limit"), "unknown\n");
         assert!(fs::create_dir_all(root.join("model")).is_ok());

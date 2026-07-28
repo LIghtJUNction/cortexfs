@@ -1,5 +1,5 @@
 #[test]
-fn worker_role_names_default_to_spark_model() {
+fn worker_role_names_default_to_default_worker_model() {
     for name in ["worker", "worker-fast", "executor", "executor-fast"] {
         assert!(is_worker_agent_name(name), "{name}");
         assert_eq!(default_agent_model_for_name(name), DEFAULT_WORKER_MODEL);

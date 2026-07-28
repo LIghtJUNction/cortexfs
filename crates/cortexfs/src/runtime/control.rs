@@ -10,21 +10,24 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
+use std::fs;
 use std::io::{BufRead, BufReader, Read, Write as _};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{os::unix::net::UnixListener, os::unix::net::UnixStream};
 
-const TOKEN_BYTES: usize = 32;
+const SOCKET_NONCE_BYTES: usize = 16;
 const MAX_FRAME_BYTES: u64 = 16 * 1024;
 const MAX_REQUEST_IDS: usize = 64;
 const MAX_REQUEST_ID_BYTES: usize = 128;
+const MAX_ANCESTRY_DEPTH: usize = 64;
 
 pub struct RunCapability {
-    token: String,
     agent: String,
     session: String,
     run: String,
@@ -32,8 +35,49 @@ pub struct RunCapability {
     gid: u32,
     socket_receipt: SocketReceipt,
     source_receipt: Option<cortexfs_runtime_client::RuntimeSourceReceipt>,
+    roots: Mutex<Vec<LaunchRoot>>,
     #[cfg(test)]
     consumed: AtomicBool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct LaunchRoot {
+    pid: u32,
+    start_time: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProcessStat {
+    parent: u32,
+    start_time: u64,
+}
+
+/// A one-use bwrap startup gate paired with its host-owned capability.
+///
+/// The read side is inherited only by bwrap through `--block-fd`. The host
+/// registers the spawned bwrap PID before dropping the write side, so no
+/// sandbox process can connect during the spawn-to-registration interval.
+pub(crate) struct LaunchGate {
+    read: Option<OwnedFd>,
+    release: Option<OwnedFd>,
+    capability: Arc<RunCapability>,
+}
+
+impl LaunchGate {
+    pub(crate) fn block_fd(&self) -> RawFd {
+        self.read.as_ref().map_or(-1, AsRawFd::as_raw_fd)
+    }
+
+    /// Authorizes the just-spawned bwrap host PID before unblocking it.
+    pub(crate) fn register_and_release(&mut self, pid: u32) -> Result<(), RunCapabilityError> {
+        if self.read.is_none() || self.release.is_none() {
+            return Err(RunCapabilityError::CannotCreate);
+        }
+        self.capability.register_launch_root(pid)?;
+        self.read.take();
+        self.release.take();
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
@@ -50,8 +94,6 @@ pub enum RunCapabilityError {
     InvalidFrame,
     #[error("run capability peer denied")]
     PeerDenied,
-    #[error("run capability token denied")]
-    TokenDenied,
     #[error("run capability active run changed")]
     RunChanged,
     #[error("run capability already consumed")]
@@ -71,7 +113,7 @@ impl RunCapabilityError {
             Self::Replayed => "EALREADY",
             Self::RequestSetFull => "ENOSPC",
             Self::Unsupported => "ENOSYS",
-            Self::PeerDenied | Self::TokenDenied => "EACCES",
+            Self::PeerDenied => "EACCES",
             Self::InvalidFrame => "EINVAL",
             Self::RunChanged => "ECANCELED",
             Self::CannotCreate
@@ -151,11 +193,11 @@ impl RunCapability {
         uid: u32,
         gid: u32,
     ) -> Result<(Self, UnixListener), RunCapabilityError> {
-        let token =
-            random_hex::<TOKEN_BYTES>().map_err(|_error| RunCapabilityError::CannotCreate)?;
+        let nonce = random_hex::<SOCKET_NONCE_BYTES>()
+            .map_err(|_error| RunCapabilityError::CannotCreate)?;
         let socket = directory.join(format!(
             "control-{}.sock",
-            token.get(..24).unwrap_or(&token)
+            nonce.get(..24).unwrap_or(&nonce)
         ));
         let name = socket
             .file_name()
@@ -172,7 +214,6 @@ impl RunCapability {
             })?;
         Ok((
             Self {
-                token,
                 agent: agent.to_owned(),
                 session: session.to_owned(),
                 run: run.to_owned(),
@@ -180,6 +221,7 @@ impl RunCapability {
                 gid,
                 socket_receipt,
                 source_receipt: None,
+                roots: Mutex::new(Vec::new()),
                 #[cfg(test)]
                 consumed: AtomicBool::new(false),
             },
@@ -193,14 +235,43 @@ impl RunCapability {
     }
 
     #[must_use]
-    pub fn environment(&self, sandbox_socket: &Path) -> [(String, String); 2] {
-        [
-            (
-                "CTX_CONTROL_SOCKET".to_owned(),
-                sandbox_socket.display().to_string(),
-            ),
-            ("CTX_CONTROL_TOKEN".to_owned(), self.token.clone()),
-        ]
+    pub fn environment(sandbox_socket: &Path) -> [(String, String); 1] {
+        [(
+            "CTX_CONTROL_SOCKET".to_owned(),
+            sandbox_socket.display().to_string(),
+        )]
+    }
+
+    pub(crate) fn launch_gate(self: &Arc<Self>) -> Result<LaunchGate, RunCapabilityError> {
+        let (read, release) =
+            nix::unistd::pipe().map_err(|_error| RunCapabilityError::CannotCreate)?;
+        let flags = nix::fcntl::fcntl(&release, nix::fcntl::FcntlArg::F_GETFD)
+            .map_err(|_error| RunCapabilityError::CannotCreate)?;
+        let flags = nix::fcntl::FdFlag::from_bits_truncate(flags) | nix::fcntl::FdFlag::FD_CLOEXEC;
+        nix::fcntl::fcntl(&release, nix::fcntl::FcntlArg::F_SETFD(flags))
+            .map_err(|_error| RunCapabilityError::CannotCreate)?;
+        Ok(LaunchGate {
+            read: Some(read),
+            release: Some(release),
+            capability: Arc::clone(self),
+        })
+    }
+
+    /// Registers the host PID that owns a deliberately launched sandbox tree.
+    pub fn register_launch_root(&self, pid: u32) -> Result<(), RunCapabilityError> {
+        let stat = read_process_stat(pid).ok_or(RunCapabilityError::CannotCreate)?;
+        {
+            let mut roots = self
+                .roots
+                .lock()
+                .map_err(|_error| RunCapabilityError::CannotCreate)?;
+            roots.retain(|root| root.pid != pid);
+            roots.push(LaunchRoot {
+                pid,
+                start_time: stat.start_time,
+            });
+        }
+        Ok(())
     }
 
     pub fn serve_run(
@@ -323,25 +394,24 @@ impl RunCapability {
             .and_then(|()| stream.set_write_timeout(Some(control_timeout())))
             .map_err(|_error| RunCapabilityError::CannotRead)?;
         let peer = peer_credentials(stream).map_err(|_error| RunCapabilityError::PeerDenied)?;
-        if !peer_allowed(peer, self.uid) {
+        if !peer_allowed(peer, self.uid, &self.roots) {
             return Err(RunCapabilityError::PeerDenied);
         }
         let frame: RequestFrame = read_json_line(stream)?;
-        let (token, request_id) = match frame {
+        let request_id = match frame {
             RequestFrame::Ping {
-                token,
                 request_id,
                 agent,
                 session,
                 run,
+                ..
             } => {
                 if agent != self.agent || session != self.session || run != self.run {
                     return Err(RunCapabilityError::InvalidFrame);
                 }
-                (token, request_id)
+                request_id
             }
             RequestFrame::CreateChild {
-                token,
                 request_id,
                 agent,
                 session,
@@ -352,8 +422,9 @@ impl RunCapability {
                 window,
                 input,
                 life,
+                ..
             } => {
-                self.authorize_request(stream, seen, &token, &request_id, &mut *current_run)?;
+                self.authorize_request(stream, seen, &request_id, &mut *current_run)?;
                 if agent != self.agent || session != self.session || run != self.run {
                     let _ignored = write_error_frame(stream, request_id, "EINVAL");
                     return Err(RunCapabilityError::InvalidFrame);
@@ -395,15 +466,15 @@ impl RunCapability {
                 };
             }
             RequestFrame::UpdatePrompt {
-                token,
                 request_id,
                 agent,
                 session,
                 run,
                 control,
                 content,
+                ..
             } => {
-                self.authorize_request(stream, seen, &token, &request_id, &mut *current_run)?;
+                self.authorize_request(stream, seen, &request_id, &mut *current_run)?;
                 if agent != self.agent
                     || session != self.session
                     || run != self.run
@@ -423,7 +494,7 @@ impl RunCapability {
                 return respond_update_prompt(stream, request_id, update_prompt(request));
             }
         };
-        self.authorize_request(stream, seen, &token, &request_id, &mut *current_run)?;
+        self.authorize_request(stream, seen, &request_id, &mut *current_run)?;
         write_frame(
             stream,
             &ResponseFrame::Pong {
@@ -438,13 +509,9 @@ impl RunCapability {
         &self,
         stream: &mut UnixStream,
         seen: &mut HashSet<String>,
-        token: &str,
         request_id: &str,
         current_run: &mut dyn FnMut() -> Option<String>,
     ) -> Result<(), RunCapabilityError> {
-        if !constant_time_eq(token.as_bytes(), self.token.as_bytes()) {
-            return Err(RunCapabilityError::TokenDenied);
-        }
         if !legal_request_id(request_id) {
             return Err(RunCapabilityError::InvalidFrame);
         }
@@ -457,7 +524,7 @@ impl RunCapability {
     pub fn ping(&self, request_id: &str) -> Result<(), RunCapabilityError> {
         cortexfs_runtime_client::ping(
             self.socket_receipt.path(),
-            &self.token,
+            "",
             request_id,
             &self.agent,
             &self.session,
@@ -483,7 +550,7 @@ impl RunCapability {
     ) -> Result<CreateChildResult, RunCapabilityError> {
         cortexfs_runtime_client::create_child(
             self.socket_receipt.path(),
-            &self.token,
+            "",
             request_id,
             &self.agent,
             &self.session,
@@ -506,7 +573,7 @@ impl RunCapability {
     ) -> Result<(), RunCapabilityError> {
         cortexfs_runtime_client::update_prompt(
             self.socket_receipt.path(),
-            &self.token,
+            "",
             request_id,
             &self.agent,
             &self.session,
@@ -571,8 +638,76 @@ fn client_error(error: cortexfs_runtime_client::RuntimeClientError) -> RunCapabi
     }
 }
 
-fn peer_allowed(peer: PeerCredentials, uid: u32) -> bool {
-    peer.uid() == uid
+fn peer_allowed(peer: PeerCredentials, uid: u32, roots: &Mutex<Vec<LaunchRoot>>) -> bool {
+    let Ok(roots) = roots.lock() else {
+        return false;
+    };
+    peer_allowed_with(peer, uid, &roots, read_process_stat)
+}
+
+fn peer_allowed_with(
+    peer: PeerCredentials,
+    uid: u32,
+    roots: &[LaunchRoot],
+    mut read_stat: impl FnMut(u32) -> Option<ProcessStat>,
+) -> bool {
+    if peer.uid() != uid {
+        return false;
+    }
+    let Some(pid) = peer.pid().and_then(|value| u32::try_from(value).ok()) else {
+        return false;
+    };
+    roots
+        .iter()
+        .copied()
+        .any(|root| process_descends_from(pid, root, &mut read_stat))
+}
+
+fn process_descends_from(
+    pid: u32,
+    root: LaunchRoot,
+    mut read_stat: impl FnMut(u32) -> Option<ProcessStat>,
+) -> bool {
+    let mut current = pid;
+    let mut seen = HashSet::new();
+    for _ in 0..MAX_ANCESTRY_DEPTH {
+        if !seen.insert(current) {
+            return false;
+        }
+        let Some(stat) = read_stat(current) else {
+            return false;
+        };
+        if current == root.pid {
+            return stat.start_time == root.start_time && !seen.contains(&stat.parent);
+        }
+        if stat.parent == 0 || stat.parent == current {
+            return false;
+        }
+        current = stat.parent;
+    }
+    false
+}
+
+fn read_process_stat(pid: u32) -> Option<ProcessStat> {
+    if pid == 0 {
+        return None;
+    }
+    parse_process_stat(&fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+fn parse_process_stat(stat: &str) -> Option<ProcessStat> {
+    let closing = stat.rfind(')')?;
+    let fields = stat
+        .get(closing.checked_add(1)?..)?
+        .split_ascii_whitespace();
+    let fields = fields.collect::<Vec<_>>();
+    let state = *fields.first()?;
+    if matches!(state, "Z" | "X") {
+        return None;
+    }
+    let parent = fields.get(1)?.parse().ok()?;
+    let start_time = fields.get(19)?.parse().ok()?;
+    Some(ProcessStat { parent, start_time })
 }
 
 fn control_timeout() -> Duration {
@@ -581,16 +716,6 @@ fn control_timeout() -> Duration {
     } else {
         Duration::from_secs(5)
     }
-}
-
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    let mut difference = left.len() ^ right.len();
-    for index in 0..left.len().max(right.len()) {
-        difference |= usize::from(
-            left.get(index).copied().unwrap_or(0) ^ right.get(index).copied().unwrap_or(0),
-        );
-    }
-    difference == 0
 }
 
 fn legal_request_id(request_id: &str) -> bool {
@@ -684,7 +809,6 @@ impl fmt::Debug for RunCapability {
         let mut debug = f.debug_struct("RunCapability");
         debug
             .field("socket", &self.socket_receipt.path())
-            .field("token", &"[REDACTED]")
             .field("agent", &self.agent)
             .field("session", &self.session)
             .field("run", &self.run)
@@ -693,6 +817,9 @@ impl fmt::Debug for RunCapability {
             .field("dev", &self.socket_receipt.identity().0)
             .field("ino", &self.socket_receipt.identity().1)
             .field("source_receipt", &self.source_receipt);
+        if let Ok(roots) = self.roots.lock() {
+            debug.field("launch_roots", &roots.len());
+        }
         #[cfg(test)]
         debug.field("consumed", &self.consumed.load(Ordering::Acquire));
         debug.finish()
@@ -720,7 +847,11 @@ mod tests {
             nix::unistd::getuid().as_raw(),
             nix::unistd::getgid().as_raw(),
         )?;
-        Ok((root, Arc::new(capability), listener))
+        let capability = Arc::new(capability);
+        // These unit tests exercise the in-process protocol only. The Bwrap
+        // execution proof registers a spawned host root through a gate.
+        capability.register_launch_root(std::process::id())?;
+        Ok((root, capability, listener))
     }
 
     fn serve(
@@ -785,13 +916,6 @@ mod tests {
     }
 
     #[test]
-    fn token_and_run_validation_are_strict() {
-        assert!(constant_time_eq(b"same", b"same"));
-        assert!(!constant_time_eq(b"same", b"diff"));
-        assert!(!constant_time_eq(b"short", b"longer"));
-    }
-
-    #[test]
     fn cleanup_refuses_replacement() -> Result<(), Box<dyn std::error::Error>> {
         let (_root, capability, listener) = fixture()?;
         drop(listener);
@@ -806,11 +930,12 @@ mod tests {
     }
 
     #[test]
-    fn wrong_token_and_wrong_run_are_rejected() -> Result<(), Box<dyn std::error::Error>> {
+    fn legacy_token_is_ignored_and_wrong_run_is_rejected() -> Result<(), Box<dyn std::error::Error>>
+    {
         let (_root, capability, listener) = fixture()?;
         let server = serve(Arc::clone(&capability), listener, "run-1");
         let frame = RequestFrame::Ping {
-            token: "00".repeat(TOKEN_BYTES),
+            token: "legacy-token".to_owned(),
             request_id: "request-1".to_owned(),
             agent: "parent".to_owned(),
             session: "session-1".to_owned(),
@@ -818,8 +943,13 @@ mod tests {
         };
         let mut bytes = serde_json::to_vec(&frame)?;
         bytes.push(b'\n');
-        send_raw(capability.socket(), &bytes)?;
-        assert_eq!(join_server(server)?, Err(RunCapabilityError::TokenDenied));
+        let mut stream = UnixStream::connect(capability.socket())?;
+        stream.write_all(&bytes)?;
+        assert!(matches!(
+            read_json_line::<ResponseFrame>(&mut stream)?,
+            ResponseFrame::Pong { request_id, .. } if request_id == "request-1"
+        ));
+        assert_eq!(join_server(server)?, Ok(()));
 
         let (_root, capability, listener) = fixture()?;
         assert_eq!(
@@ -845,21 +975,24 @@ mod tests {
     }
 
     #[test]
-    fn missing_token_frame_run_and_changed_run_are_rejected()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn tokenless_frame_and_changed_run_are_checked() -> Result<(), Box<dyn std::error::Error>> {
         let (_root, capability, listener) = fixture()?;
         let server = serve(Arc::clone(&capability), listener, "run-1");
-        send_raw(
-            capability.socket(),
+        let mut stream = UnixStream::connect(capability.socket())?;
+        stream.write_all(
             br#"{"op":"ping","request_id":"request-1","agent":"parent","session":"session-1","run":"run-1"}
 "#,
         )?;
-        assert_eq!(join_server(server)?, Err(RunCapabilityError::InvalidFrame));
+        assert!(matches!(
+            read_json_line::<ResponseFrame>(&mut stream)?,
+            ResponseFrame::Pong { request_id, .. } if request_id == "request-1"
+        ));
+        assert_eq!(join_server(server)?, Ok(()));
 
         let (_root, capability, listener) = fixture()?;
         let server = serve(Arc::clone(&capability), listener, "run-1");
         let frame = RequestFrame::Ping {
-            token: capability.token.clone(),
+            token: String::new(),
             request_id: "request-2".to_owned(),
             agent: "parent".to_owned(),
             session: "session-1".to_owned(),
@@ -881,7 +1014,7 @@ mod tests {
             })
         });
         let frame = RequestFrame::Ping {
-            token: capability.token.clone(),
+            token: String::new(),
             request_id: "request-2".to_owned(),
             agent: "parent".to_owned(),
             session: "session-1".to_owned(),
@@ -896,9 +1029,45 @@ mod tests {
 
     #[test]
     fn peer_and_timeouts_are_bounded() -> Result<(), Box<dyn std::error::Error>> {
-        assert!(!peer_allowed(PeerCredentials::new(None, 1001, 1002), 1000));
-        assert!(!peer_allowed(PeerCredentials::new(None, 0, 0), 1000));
-        assert!(peer_allowed(PeerCredentials::new(None, 1000, 1002), 1000));
+        let root = LaunchRoot {
+            pid: 10,
+            start_time: 100,
+        };
+        let stat = |pid| match pid {
+            10 => Some(ProcessStat {
+                parent: 1,
+                start_time: 100,
+            }),
+            11 => Some(ProcessStat {
+                parent: 10,
+                start_time: 101,
+            }),
+            _ => None,
+        };
+        assert!(!peer_allowed_with(
+            PeerCredentials::new(None, 1000, 1002),
+            1000,
+            &[root],
+            stat,
+        ));
+        assert!(!peer_allowed_with(
+            PeerCredentials::new(Some(11), 1001, 1002),
+            1000,
+            &[root],
+            stat,
+        ));
+        assert!(peer_allowed_with(
+            PeerCredentials::new(Some(11), 1000, 1002),
+            1000,
+            &[root],
+            stat,
+        ));
+        assert!(!peer_allowed_with(
+            PeerCredentials::new(Some(99), 1000, 1002),
+            1000,
+            &[root],
+            stat,
+        ));
         let (_root, capability, listener) = fixture()?;
         assert_eq!(
             capability.serve_ping(&listener, || Some("run-1".to_owned())),
@@ -910,6 +1079,89 @@ mod tests {
         let _idle = UnixStream::connect(capability.socket())?;
         assert_eq!(join_server(server)?, Err(RunCapabilityError::CannotRead));
         Ok(())
+    }
+
+    #[test]
+    fn launch_root_requires_live_descendant_and_matching_start_time() {
+        let root = LaunchRoot {
+            pid: 10,
+            start_time: 100,
+        };
+        let live_tree = |pid| match pid {
+            10 => Some(ProcessStat {
+                parent: 1,
+                start_time: 100,
+            }),
+            11 => Some(ProcessStat {
+                parent: 10,
+                start_time: 101,
+            }),
+            12 => Some(ProcessStat {
+                parent: 11,
+                start_time: 102,
+            }),
+            _ => None,
+        };
+        assert!(process_descends_from(10, root, live_tree));
+        assert!(process_descends_from(12, root, live_tree));
+        assert!(!process_descends_from(12, root, |pid| match pid {
+            10 => Some(ProcessStat {
+                parent: 1,
+                start_time: 999,
+            }),
+            11 => Some(ProcessStat {
+                parent: 10,
+                start_time: 101,
+            }),
+            12 => Some(ProcessStat {
+                parent: 11,
+                start_time: 102,
+            }),
+            _ => None,
+        }));
+        assert!(!process_descends_from(12, root, |pid| match pid {
+            10 => Some(ProcessStat {
+                parent: 1,
+                start_time: 100,
+            }),
+            11 => Some(ProcessStat {
+                parent: 1,
+                start_time: 101,
+            }),
+            12 => Some(ProcessStat {
+                parent: 11,
+                start_time: 102,
+            }),
+            _ => None,
+        }));
+        assert!(!process_descends_from(12, root, |pid| match pid {
+            10 => Some(ProcessStat {
+                parent: 11,
+                start_time: 100,
+            }),
+            11 => Some(ProcessStat {
+                parent: 10,
+                start_time: 101,
+            }),
+            12 => Some(ProcessStat {
+                parent: 11,
+                start_time: 102,
+            }),
+            _ => None,
+        }));
+    }
+
+    #[test]
+    fn proc_stat_parser_uses_final_command_delimiter() {
+        let stat = "42 (worker ) with spaces) S 7 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1234 0";
+        assert_eq!(
+            parse_process_stat(stat),
+            Some(ProcessStat {
+                parent: 7,
+                start_time: 1234,
+            })
+        );
+        assert_eq!(parse_process_stat("42 (worker) Z 7 0"), None);
     }
 
     #[test]
@@ -968,7 +1220,7 @@ mod tests {
         write_frame(
             &mut stream,
             &RequestFrame::CreateChild {
-                token: capability.token.clone(),
+                token: String::new(),
                 request_id: "create-1".to_owned(),
                 agent: "parent".to_owned(),
                 session: "session-1".to_owned(),
@@ -990,11 +1242,8 @@ mod tests {
 
         send_raw(
             capability.socket(),
-            format!(
-                "{{\"op\":\"agent.create\",\"token\":\"{}\",\"request_id\":\"create-2\",\"agent\":\"parent\",\"session\":\"session-1\",\"run\":\"run-1\",\"child\":\"child\",\"child_session\":\"child-session\",\"input\":\"work\"}}\n",
-                capability.token
-            )
-            .as_bytes(),
+            br#"{"op":"agent.create","request_id":"create-2","agent":"parent","session":"session-1","run":"run-1","child":"child","child_session":"child-session","input":"work"}
+"#,
         )?;
         assert_eq!(capability.ping("request-after-invalid"), Ok(()));
         shutdown.store(true, Ordering::Release);
@@ -1010,7 +1259,7 @@ mod tests {
         write_frame(
             &mut zero_stream,
             &RequestFrame::CreateChild {
-                token: capability.token.clone(),
+                token: String::new(),
                 request_id: "create-zero".to_owned(),
                 agent: "parent".to_owned(),
                 session: "session-1".to_owned(),
@@ -1038,7 +1287,7 @@ mod tests {
         let server_shutdown = Arc::clone(&shutdown);
         let calls = Arc::new(AtomicUsize::new(0));
         let server_calls = Arc::clone(&calls);
-        let windows = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let windows = Arc::new(Mutex::new(Vec::new()));
         let server_windows = Arc::clone(&windows);
         let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
         let server_capability = Arc::clone(&capability);
@@ -1154,7 +1403,7 @@ mod tests {
         let (_root, capability, listener) = fixture()?;
         let shutdown = Arc::new(AtomicBool::new(false));
         let server_shutdown = Arc::clone(&shutdown);
-        let updates = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let updates = Arc::new(Mutex::new(Vec::new()));
         let server_updates = Arc::clone(&updates);
         let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
         let server_capability = Arc::clone(&capability);
@@ -1190,7 +1439,7 @@ mod tests {
         write_frame(
             &mut raw_stream,
             &RequestFrame::UpdatePrompt {
-                token: capability.token.clone(),
+                token: String::new(),
                 request_id: "update-raw-agent".to_owned(),
                 agent: "sibling".to_owned(),
                 session: "session-1".to_owned(),

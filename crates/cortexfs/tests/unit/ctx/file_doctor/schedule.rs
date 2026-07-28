@@ -161,7 +161,7 @@ fn schedule_advance_materializes_implicit_worker_handoff() {
     assert_eq!(
         schedule_handoff_agent_details(&root, "worker"),
         Ok((
-            "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+            "openai/gpt-5.6".to_owned(),
             "temp".to_owned(),
             "agent:coder".to_owned()
         ))
@@ -633,7 +633,7 @@ fn schedule_handoff_agent_model_rejects_invalid_model_reference() {
 }
 
 #[test]
-fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
+fn schedule_handoff_agent_model_defaults_missing_worker_model_to_default_worker_model() {
     let root = clean_test_dir("ctx-schedule-missing-worker-model");
     assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
@@ -643,7 +643,7 @@ fn schedule_handoff_agent_model_defaults_missing_worker_model_to_spark() {
     assert_eq!(
         schedule_handoff_agent_details(&root, "worker"),
         Ok((
-            "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+            "openai/gpt-5.6".to_owned(),
             "temp".to_owned(),
             "agent:coder".to_owned()
         ))

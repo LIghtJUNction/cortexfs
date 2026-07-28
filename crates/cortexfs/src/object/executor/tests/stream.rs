@@ -249,13 +249,13 @@ fn provider_usage_accepts_openai_and_anthropic_shapes() {
 
 #[test]
 fn openai_request_bodies_include_non_auto_effort() {
-    let chat = openai_chat_body("gpt-5.5", "hello", false, cortexfs::ModelEffort::High);
-    let responses = openai_responses_body("gpt-5.5", "hello", true, cortexfs::ModelEffort::XHigh);
+    let chat = openai_chat_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::High);
+    let responses = openai_responses_body("gpt-5.6", "hello", true, cortexfs::ModelEffort::XHigh);
 
     assert!(chat.contains(r#""reasoning":{"effort":"high"}"#));
     assert!(responses.contains(r#""reasoning":{"effort":"xhigh"}"#));
     assert!(
-        !openai_chat_body("gpt-5.5", "hello", false, cortexfs::ModelEffort::Auto)
+        !openai_chat_body("gpt-5.6", "hello", false, cortexfs::ModelEffort::Auto)
             .contains("reasoning")
     );
 }
@@ -263,7 +263,7 @@ fn openai_request_bodies_include_non_auto_effort() {
 #[test]
 fn openai_agent_chat_body_declares_tsh_tool() {
     let body = openai_chat_body_with_agent_tools(
-        "gpt-5.5",
+        "gpt-5.6",
         "what tools?",
         true,
         cortexfs::ModelEffort::Auto,

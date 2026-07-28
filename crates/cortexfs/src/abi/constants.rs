@@ -45,7 +45,7 @@ pub(crate) const DEFAULT_MODEL_ALIAS: &str = "main";
 pub(crate) const HELPER_MODEL_ALIAS: &str = "helper";
 /// Canonical model aliases exposed directly below `/ctx/model`.
 pub const MODEL_ALIASES: &[&str] = &["main", "helper", "fast", "reason", "code", "vision"];
-pub const DEFAULT_WORKER_MODEL: &str = "api.lmm.best/gpt-5.3-codex-spark";
+pub const DEFAULT_WORKER_MODEL: &str = "openai/gpt-5.6";
 
 /// Returns whether a name is a canonical model alias.
 #[must_use]
@@ -75,7 +75,7 @@ pub fn is_dedicated_worker_agent_name(agent_name: &str) -> bool {
     agent_name.starts_with("executor-") || agent_name.starts_with("worker-")
 }
 pub(crate) const DEFAULT_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.6";
-pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/codex-auto-review";
+pub(crate) const HELPER_MODEL_ALIAS_TARGET: &str = "/ctx/model/openai/gpt-5.6-sol";
 /// Host directory containing system-wide provider configuration files.
 pub const SYSTEM_PROVIDER_CONFIG_DIR: &str = "/etc/cortexfs/providers.d";
 pub(crate) const SYSTEM_PROVIDER_MODEL_CACHE_DIR: &str = "/var/lib/cortexfs/provider-models";

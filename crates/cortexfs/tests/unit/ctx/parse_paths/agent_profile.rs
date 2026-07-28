@@ -7,7 +7,7 @@ name: reviewer
 description: review helper
 instructions: |
   Be careful.
-model: openai/gpt-4o
+model: openai/gpt-5.6
 tools:
   - fs.read
 parent: agent:architect
@@ -27,7 +27,7 @@ mounts:
     assert_eq!(profile.name.as_deref(), Some("reviewer"));
     assert_eq!(profile.description.as_deref(), Some("review helper"));
     assert_eq!(profile.instructions.as_deref(), Some("Be careful."));
-    assert_eq!(profile.models, vec!["openai/gpt-4o".to_owned()]);
+    assert_eq!(profile.models, vec!["openai/gpt-5.6".to_owned()]);
     assert_eq!(profile.tools, vec!["fs.read".to_owned()]);
     assert_eq!(profile.parent.as_deref(), Some("agent:architect"));
     assert_eq!(profile.label.as_deref(), Some("reviewer_t"));
@@ -46,7 +46,7 @@ fn parse_microsoft_agentschema_subset() {
 name: analyst
 description: financial analyst
 instructions: You analyze markets.
-model: openai/gpt-4o
+model: openai/gpt-5.6
 ";
     let profile = parse_agent_profile_text(text);
     assert!(profile.is_ok());
@@ -54,7 +54,7 @@ model: openai/gpt-4o
         return;
     };
     assert_eq!(profile.name.as_deref(), Some("analyst"));
-    assert_eq!(profile.models, vec!["openai/gpt-4o".to_owned()]);
+    assert_eq!(profile.models, vec!["openai/gpt-5.6".to_owned()]);
     assert_eq!(
         profile.instructions.as_deref(),
         Some("You analyze markets.")
@@ -68,7 +68,7 @@ name: sample-manifest
 template:
   name: nested-agent
   instructions: Nested instructions.
-  model: openai/gpt-4o
+  model: openai/gpt-5.6
 ";
     let profile = parse_agent_profile_text(text);
     assert!(profile.is_ok());
@@ -80,7 +80,7 @@ template:
         profile.instructions.as_deref(),
         Some("Nested instructions.")
     );
-    assert_eq!(profile.models, vec!["openai/gpt-4o".to_owned()]);
+    assert_eq!(profile.models, vec!["openai/gpt-5.6".to_owned()]);
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn parse_rejects_hosted_container_profile() {
 name: boxed
 kind: hosted
 image: example.azurecr.io/agent:1
-model: openai/gpt-4o
+model: openai/gpt-5.6
 ";
     let error = parse_agent_profile_text(text);
     assert!(error.is_err());
@@ -112,7 +112,7 @@ schema: cortexfs.agent.profile/v1
 name: reviewer
 description: code review agent
 instructions: Review diffs carefully.
-model: openai/gpt-4o
+model: openai/gpt-5.6
 tools:
   - fs.read
 parent: agent:architect
@@ -134,7 +134,7 @@ parent: agent:architect
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
     assert_eq!(
         fs::read_to_string(root.join("agent/reviewer.d/model")).unwrap_or_default(),
-        "openai/gpt-4o\n"
+        "openai/gpt-5.6\n"
     );
     assert_eq!(
         fs::read_to_string(root.join("agent/reviewer.d/system.md")).unwrap_or_default(),
@@ -144,7 +144,7 @@ parent: agent:architect
     assert!(meta.contains("code review agent"));
     assert!(meta.contains("\"source\":\"profile\"") || meta.contains("\"source\": \"profile\""));
     let policy = fs::read_to_string(root.join("agent/reviewer.d/policy")).unwrap_or_default();
-    assert!(policy.contains("model:openai/gpt-4o"));
+    assert!(policy.contains("model:openai/gpt-5.6"));
     assert!(policy.contains("tool:fs.read"));
 }
 
@@ -230,7 +230,7 @@ fn agent_new_from_profile_cli_overrides_model() {
         &profile_path,
         "\
 name: coder
-model: openai/gpt-4o
+model: openai/gpt-5.6
 instructions: from profile
 ",
     )
@@ -243,18 +243,18 @@ instructions: from profile
         "--from".to_owned(),
         profile_path.to_string_lossy().into_owned(),
         "--model".to_owned(),
-        "openai/gpt-4o-mini".to_owned(),
+        "openai/gpt-5.6".to_owned(),
     ]);
     assert!(matches!(command, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = command else {
         return;
     };
-    assert_eq!(args.models, vec!["openai/gpt-4o-mini".to_owned()]);
+    assert_eq!(args.models, vec!["openai/gpt-5.6".to_owned()]);
     assert_eq!(args.instructions.as_deref(), Some("from profile"));
     assert_eq!(agent_new(&root, &args), Ok(ExitCode::SUCCESS));
     assert_eq!(
         fs::read_to_string(root.join("agent/coder.d/model")).unwrap_or_default(),
-        "openai/gpt-4o-mini\n"
+        "openai/gpt-5.6\n"
     );
 }
 
@@ -269,7 +269,7 @@ fn agent_apply_updates_existing_controls() {
         "--parent",
         "agent:architect",
         "--model",
-        "openai/gpt-4o"
+        "openai/gpt-5.6"
     );
     assert!(matches!(create, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
@@ -284,7 +284,7 @@ fn agent_apply_updates_existing_controls() {
 name: coder
 description: updated
 instructions: New persona.
-model: openai/gpt-4o
+model: openai/gpt-5.6
 tools:
   - fs.read
 ",
@@ -301,10 +301,10 @@ tools:
     );
     assert_eq!(
         fs::read_to_string(root.join("agent/coder.d/model")).unwrap_or_default(),
-        "openai/gpt-4o\n"
+        "openai/gpt-5.6\n"
     );
     let policy = fs::read_to_string(root.join("agent/coder.d/policy")).unwrap_or_default();
-    assert!(policy.contains("model:openai/gpt-4o"));
+    assert!(policy.contains("model:openai/gpt-5.6"));
     assert!(policy.contains("tool:fs.read"));
 }
 
@@ -313,7 +313,7 @@ fn agent_apply_creates_missing_optional_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-missing-optional");
     assert!(fs::create_dir_all(&root).is_ok());
     let Ok(Command::Agent(AgentArgs::New(args))) =
-        cmd!("agent", "new", "coder", "--model", "openai/gpt-4o")
+        cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6")
     else {
         return;
     };
@@ -370,7 +370,7 @@ fn agent_apply_preserves_controls_omitted_from_profile() {
         "new",
         "coder",
         "--model",
-        "openai/gpt-4o"
+        "openai/gpt-5.6"
     );
     assert!(matches!(create, Ok(Command::Agent(AgentArgs::New(_)))));
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
@@ -411,7 +411,7 @@ fn agent_apply_tools_failure_rolls_back_matching_policy_receipt() {
     let root = clean_test_dir("ctx-agent-apply-tools-failure");
     assert!(fs::create_dir_all(&root).is_ok());
     let Ok(Command::Agent(AgentArgs::New(args))) =
-        cmd!("agent", "new", "coder", "--model", "openai/gpt-4o")
+        cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6")
     else {
         return;
     };
@@ -432,7 +432,7 @@ fn agent_apply_tools_race_never_overwrites_foreign_policy() {
     let root = clean_test_dir("ctx-agent-apply-tools-race");
     assert!(fs::create_dir_all(&root).is_ok());
     let Ok(Command::Agent(AgentArgs::New(args))) =
-        cmd!("agent", "new", "coder", "--model", "openai/gpt-4o")
+        cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6")
     else {
         return;
     };
@@ -469,7 +469,7 @@ fn agent_apply_rejects_symlinked_control_directory_without_external_write() {
 fn agent_apply_invalid_model_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-invalid-model");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-4o");
+    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
@@ -491,7 +491,7 @@ fn agent_apply_invalid_model_does_not_change_controls() {
 fn agent_apply_invalid_mount_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-invalid-mount");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-4o");
+    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
@@ -513,7 +513,7 @@ fn agent_apply_invalid_mount_does_not_change_controls() {
 fn agent_apply_protected_mount_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-protected-mount");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-4o");
+    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
@@ -535,7 +535,7 @@ fn agent_apply_protected_mount_does_not_change_controls() {
 fn agent_apply_merges_meta_and_preserves_unknown_keys() {
     let root = clean_test_dir("ctx-agent-apply-profile-meta-merge");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-4o");
+    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
@@ -582,7 +582,7 @@ fn agent_apply_merges_meta_and_preserves_unknown_keys() {
 fn agent_apply_invalid_meta_does_not_change_controls() {
     let root = clean_test_dir("ctx-agent-apply-profile-invalid-meta");
     assert!(fs::create_dir_all(&root).is_ok());
-    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-4o");
+    let create = cmd!("agent", "new", "coder", "--model", "openai/gpt-5.6");
     let Ok(Command::Agent(AgentArgs::New(args))) = create else {
         return;
     };
@@ -658,7 +658,7 @@ fn resolve_agent_profile_prefers_agent_yaml_in_directory() {
         &profile,
         "\
 name: reviewer
-model: openai/gpt-4o
+model: openai/gpt-5.6
 instructions: from agent.yaml
 ",
     )
@@ -689,7 +689,7 @@ fn resolve_agent_profile_accepts_explicit_agent_yaml_file() {
         &profile,
         "\
 name: solo
-model: openai/gpt-4o
+model: openai/gpt-5.6
 ",
     )
     .is_ok());
@@ -714,7 +714,7 @@ schema: cortexfs.agent.profile/v1
 name: packbot
 description: packed agent
 instructions: Hello from agent.yaml
-model: openai/gpt-4o
+model: openai/gpt-5.6
 parent: agent:architect
 ",
     )

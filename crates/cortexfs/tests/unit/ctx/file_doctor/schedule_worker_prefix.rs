@@ -1,5 +1,5 @@
 #[test]
-fn schedule_handoff_agent_model_defaults_worker_prefixes_to_spark() {
+fn schedule_handoff_agent_model_defaults_worker_prefixes_to_default_worker_model() {
     let root = clean_test_dir("ctx-schedule-missing-worker-prefix-model");
     assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
@@ -19,7 +19,7 @@ fn schedule_handoff_agent_model_defaults_worker_prefixes_to_spark() {
         assert_eq!(
             schedule_handoff_agent_details(&root, agent),
             Ok((
-                "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+                "openai/gpt-5.6".to_owned(),
                 "temp".to_owned(),
                 "-".to_owned()
             ))
@@ -28,7 +28,7 @@ fn schedule_handoff_agent_model_defaults_worker_prefixes_to_spark() {
 }
 
 #[test]
-fn schedule_status_defaults_worker_prefix_to_spark_when_policy_allows_it() {
+fn schedule_status_defaults_worker_prefix_to_default_worker_model_when_policy_allows_it() {
     for agent in ["worker-fast", "executor-fast"] {
         let root = clean_test_dir(&format!("ctx-schedule-{agent}-status"));
         assert!(ensure_reference_tree(&root).is_ok());
@@ -83,7 +83,7 @@ fn schedule_status_defaults_worker_prefix_to_spark_when_policy_allows_it() {
             assert_schedule_status_rows(
                 &root,
                 &[&format!(
-                    "implement\treact\t{agent}\twork-123\tdefault\tapi.lmm.best/gpt-5.3-codex-spark\ttemp\tworker\t-\tready"
+                    "implement\treact\t{agent}\twork-123\tdefault\topenai/gpt-5.6\ttemp\tworker\t-\tready"
                 )],
             ),
             Ok(())

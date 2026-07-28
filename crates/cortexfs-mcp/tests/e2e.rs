@@ -16,7 +16,7 @@ fn config(path: &Path, observed: &Path) -> io::Result<()> {
 import json, os, sys
 secret=os.environ.get("MCP_SECRET","")
 with open(os.environ["OBSERVED_ENV"],"w") as f:
- json.dump({"control":os.environ.get("CTX_CONTROL_TOKEN"),"undeclared":os.environ.get("UNDECLARED_SECRET"),"declared":secret,"path":os.environ.get("PATH")},f)
+ json.dump({"undeclared":os.environ.get("UNDECLARED_SECRET"),"declared":secret,"path":os.environ.get("PATH")},f)
 for line in sys.stdin:
  r=json.loads(line)
  if "id" not in r: continue
@@ -142,7 +142,6 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
         .args(["list", "--config"])
         .arg(&config_path)
         .args(["--server", "demo"])
-        .env("CTX_CONTROL_TOKEN", UNDECLARED_SECRET)
         .env("UNDECLARED_SECRET", UNDECLARED_SECRET)
         .output()?;
     assert!(listed.status.success(), "{listed:?}");
@@ -150,7 +149,6 @@ fn project_and_install(root: &Path) -> Result<PathBuf, Box<dyn std::error::Error
     assert_no_secret(&listed.stderr);
     assert!(String::from_utf8_lossy(&listed.stdout).contains("demo.echo\tEcho safely"));
     let environment: Value = serde_json::from_slice(&fs::read(&observed)?)?;
-    assert_eq!(environment.get("control"), Some(&Value::Null));
     assert_eq!(environment.get("undeclared"), Some(&Value::Null));
     assert_eq!(
         environment.get("declared").and_then(Value::as_str),
@@ -234,7 +232,6 @@ fn call_tool(root: &Path, name: &str) -> Result<(std::process::Output, PathBuf),
         .env("CTX_RUN_ID", "mcp-e2e")
         .env("CTX_TOOL_MODE", "cli")
         .env("CTX_AUTHORIZED_OBJECT", grant.hit().path())
-        .env("CTX_CONTROL_TOKEN", UNDECLARED_SECRET)
         .env("UNDECLARED_SECRET", UNDECLARED_SECRET)
         .output()
         .map_err(|error| format!("authorized ctxmcp did not start: {error}"))?;
@@ -269,7 +266,7 @@ fn exercise_remote_tool(root: &Path, source: &Path) -> Result<(), Box<dyn std::e
     assert_no_secret(&called.stdout);
     assert_no_secret(&called.stderr);
     let environment: Value = serde_json::from_slice(&fs::read(root.join("observed.json"))?)?;
-    assert_eq!(environment.get("control"), Some(&Value::Null));
+    assert_eq!(environment.get("control"), None);
     assert_eq!(environment.get("undeclared"), Some(&Value::Null));
     let frames = cortexfs_tool_sdk::parse_jsonl_frames(&String::from_utf8(called.stdout)?)?;
     assert_eq!(

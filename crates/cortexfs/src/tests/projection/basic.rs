@@ -1343,19 +1343,19 @@ fn fuse_projection_exposes_reference_tree_ops() {
     );
     assert_eq!(
         projection.readlink("model/helper"),
-        Ok(PathBuf::from("/ctx/model/openai/codex-auto-review"))
+        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6-sol"))
     );
     assert!(
         projection
-            .set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4"))
+            .set_model_alias("model/main", Path::new("api.test/gpt-5.6"))
             .is_ok()
     );
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/api.lmm.best/gpt-5.4"))
+        Ok(PathBuf::from("/ctx/model/api.test/gpt-5.6"))
     );
     assert_eq!(
-        projection.set_model_alias("model/test", Path::new("api.lmm.best/gpt-5.4")),
+        projection.set_model_alias("model/test", Path::new("api.test/gpt-5.6")),
         Err(FuseError::NotControlFile)
     );
     assert_eq!(
@@ -1501,7 +1501,7 @@ fn fuse_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
 
     assert!(
         projection
-            .set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4"))
+            .set_model_alias("model/main", Path::new("api.test/gpt-5.6"))
             .is_ok()
     );
 
@@ -1511,7 +1511,7 @@ fn fuse_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
     ));
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/api.lmm.best/gpt-5.4"))
+        Ok(PathBuf::from("/ctx/model/api.test/gpt-5.6"))
     );
     let temp_leftovers = fs::read_dir(root.join("model")).map_or(usize::MAX, |entries| {
         entries
@@ -1535,7 +1535,7 @@ fn fuse_projection_renames_model_alias_symlink_atomically() {
 
     assert!(
         projection
-            .set_model_alias_symlink("model/tmp", Path::new("api.lmm.best/gpt-5.4"))
+            .set_model_alias_symlink("model/tmp", Path::new("api.test/gpt-5.6"))
             .is_ok()
     );
     assert!(
@@ -1546,7 +1546,7 @@ fn fuse_projection_renames_model_alias_symlink_atomically() {
 
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/api.lmm.best/gpt-5.4"))
+        Ok(PathBuf::from("/ctx/model/api.test/gpt-5.6"))
     );
     assert!(!root.join("model").join("tmp").exists());
 }
@@ -1567,7 +1567,7 @@ fn fuse_projection_model_alias_rejects_symlink_model_directory_without_touching_
         Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
     );
     assert_eq!(
-        projection.set_model_alias("model/main", Path::new("api.lmm.best/gpt-5.4")),
+        projection.set_model_alias("model/main", Path::new("api.test/gpt-5.6")),
         Err(FuseError::Io)
     );
     assert_eq!(

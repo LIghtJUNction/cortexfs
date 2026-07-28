@@ -78,8 +78,8 @@ fn detects_durable_session_instance_paths() {
         &[
             "home/1000/agent/coder/session/default",
             "shared/im-qq-dev/agent/bot/session/group-456",
-            "home/1000/model/openai/gpt-4o.d/session/default",
-            "shared/project-a/model/openai/gpt-4o.d/session/default",
+            "home/1000/model/openai/gpt-5.6.d/session/default",
+            "shared/project-a/model/openai/gpt-5.6.d/session/default",
         ],
         is_durable_session_instance_path,
         true,
@@ -88,7 +88,7 @@ fn detects_durable_session_instance_paths() {
         &[
             "home/1000/agent/coder/session",
             "home/1000/agent/coder/session/default/messages.jsonl",
-            "shared/project-a/model/openai/gpt-4o/session/default",
+            "shared/project-a/model/openai/gpt-5.6/session/default",
         ],
         is_durable_session_instance_path,
         false,
@@ -107,7 +107,7 @@ fn detects_session_control_paths() {
             Some(SessionControlKind::Cwd),
         ),
         (
-            "home/1000/model/openai/gpt-4o.d/session/default/meta.json",
+            "home/1000/model/openai/gpt-5.6.d/session/default/meta.json",
             Some(SessionControlKind::MetaJson),
         ),
         ("home/1000/agent/coder/session/default/messages.jsonl", None),
@@ -142,8 +142,8 @@ fn detects_private_and_shared_event_stream_paths() {
         &[
             "home/1000/agent/coder/session/default/events.jsonl",
             "shared/im-qq-dev/agent/bot/session/group-456/events.jsonl",
-            "home/1000/model/openai/gpt-4o.d/session/default/events.jsonl",
-            "shared/project-a/model/openai/gpt-4o.d/session/default/events.jsonl",
+            "home/1000/model/openai/gpt-5.6.d/session/default/events.jsonl",
+            "shared/project-a/model/openai/gpt-5.6.d/session/default/events.jsonl",
         ],
         is_session_events_path,
         true,
@@ -164,7 +164,7 @@ fn detects_private_and_shared_message_stream_paths() {
         &[
             "home/1000/agent/coder/session/default/messages.jsonl",
             "shared/im-qq-dev/agent/bot/session/group-456/messages.jsonl",
-            "home/1000/model/openai/gpt-4o.d/session/default/messages.jsonl",
+            "home/1000/model/openai/gpt-5.6.d/session/default/messages.jsonl",
         ],
         is_session_messages_path,
         true,
@@ -186,11 +186,11 @@ fn detects_context_jsonl_paths() {
             Some(ContextJsonlKind::Decisions),
         ),
         (
-            "home/1000/model/openai/gpt-4o.d/session/default/context/swap/index.jsonl",
+            "home/1000/model/openai/gpt-5.6.d/session/default/context/swap/index.jsonl",
             Some(ContextJsonlKind::SwapIndex),
         ),
         (
-            "shared/project-a/model/openai/gpt-4o.d/session/default/context/dedup/index.jsonl",
+            "shared/project-a/model/openai/gpt-5.6.d/session/default/context/dedup/index.jsonl",
             Some(ContextJsonlKind::DedupIndex),
         ),
         ("home/1000/agent/coder/session/default/context/pack.json", None),
@@ -234,8 +234,8 @@ fn detects_private_and_shared_session_index_paths() {
 fn detects_executable_object_paths() {
     for (path, expected) in [
         (
-            "model/openai/gpt-4o",
-            Some((ObjectClass::Model, "openai/gpt-4o".to_owned())),
+            "model/openai/gpt-5.6",
+            Some((ObjectClass::Model, "openai/gpt-5.6".to_owned())),
         ),
         ("agent/coder", Some((ObjectClass::Agent, "coder".to_owned()))),
         ("tool/fs.read", Some((ObjectClass::Tool, "fs.read".to_owned()))),
@@ -255,12 +255,12 @@ fn detects_executable_object_paths() {
 #[test]
 fn detects_model_capability_paths() {
     assert_path_matches(
-        &["model/openai/gpt-4o.d/cap", "model/google/gemini-2.5-pro.d/cap"],
+        &["model/openai/gpt-5.6.d/cap", "model/google/gemini-3.6-flash.d/cap"],
         is_model_capability_path,
         true,
     );
     assert_path_matches(
-        &["tool/fs.read.d/cap", "model/openai/gpt-4o/cap", "model/openai/gpt-4o.d/native"],
+        &["tool/fs.read.d/cap", "model/openai/gpt-5.6/cap", "model/openai/gpt-5.6.d/native"],
         is_model_capability_path,
         false,
     );
@@ -269,12 +269,12 @@ fn detects_model_capability_paths() {
 #[test]
 fn detects_model_driver_paths() {
     assert_path_matches(
-        &["model/openai/gpt-4o.d/driver", "model/anthropic/claude-sonnet-4.d/driver"],
+        &["model/openai/gpt-5.6.d/driver", "model/anthropic/claude-sonnet-5.d/driver"],
         is_model_driver_path,
         true,
     );
     assert_path_matches(
-        &["model/openai/gpt-4o/driver", "model/openai/gpt-4o.d/cap"],
+        &["model/openai/gpt-5.6/driver", "model/openai/gpt-5.6.d/cap"],
         is_model_driver_path,
         false,
     );
@@ -289,7 +289,7 @@ fn detects_tool_schema_paths() {
         true,
     );
     assert_path_matches(
-        &["tool/fs.read/schema", "model/openai/gpt-4o.d/schema", "tool/bad/name.d/schema"],
+        &["tool/fs.read/schema", "model/openai/gpt-5.6.d/schema", "tool/bad/name.d/schema"],
         is_tool_schema_path,
         false,
     );
@@ -338,7 +338,7 @@ fn detects_agent_control_paths_with_fixed_value_syntax() {
         ("agent/coder.d/life", Some(AgentControlKind::Life)),
         ("agent/rev-1.d/parent", Some(AgentControlKind::Parent)),
         ("agent/coder.d/label", None),
-        ("model/openai/gpt-4o.d/session", None),
+        ("model/openai/gpt-5.6.d/session", None),
         ("agent/bad/name.d/uid", None),
     ] {
         assert_path_kind!(path, agent_control_path_kind, expected);

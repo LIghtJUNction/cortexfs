@@ -15,17 +15,17 @@ There is only one model ABI:
 providers, `<provider>` is the original provider identity:
 
 ```text
-/ctx/model/openai/gpt-4o
-/ctx/model/anthropic/claude-sonnet-4
-/ctx/model/google/gemini-2.5-pro
+/ctx/model/openai/gpt-5.6
+/ctx/model/anthropic/claude-sonnet-5
+/ctx/model/google/gemini-3.6-flash
 ```
 
 For a custom domain base URL without a declared original provider mapping,
 `<provider>` is the normalized host name. For example,
-`https://api.lmm.best:9000/` projects models under:
+`https://models.example.test:9000/` projects models under:
 
 ```text
-/ctx/model/api.lmm.best/gpt-5.4-mini
+/ctx/model/models.example.test/compatible-model
 ```
 
 Address-like endpoints such as `127.0.0.1`, `::1`, or `localhost` MUST set an
@@ -37,13 +37,13 @@ name, not a transport address. For example:
 {
   "name": "local",
   "base_url": "http://127.0.0.1:8317/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "custom-model",
   "enabled": true,
   "formats": ["openai.chat", "openai.responses"]
 }
 ```
 
-This projects as `/ctx/model/local/gpt-5.4-mini`.
+This projects as `/ctx/model/local/custom-model`.
 
 The custom base URL is provider-adapter configuration, not a root ABI namespace.
 It may be shown in `model/<provider>/<model>.d/default` for inspection, but
@@ -60,12 +60,12 @@ Example:
 
 ```text
 /ctx/model/
-  main -> /ctx/model/openai/gpt-5.5
-  helper -> /ctx/model/openai/codex-auto-review
-  fast -> /ctx/model/openai/gpt-5.5
-  reason -> /ctx/model/openai/gpt-5.5
-  code -> /ctx/model/openai/gpt-5.5
-  vision -> /ctx/model/openai/gpt-5.5
+  main -> /ctx/model/openai/gpt-5.6
+  helper -> /ctx/model/openai/gpt-5.6-sol
+  fast -> /ctx/model/openai/gpt-5.6
+  reason -> /ctx/model/openai/gpt-5.6
+  code -> /ctx/model/openai/gpt-5.6
+  vision -> /ctx/model/openai/gpt-5.6
   debug/
     echo
     echo.d/
@@ -80,8 +80,8 @@ Example:
       status
       log
   openai/
-    gpt-4o
-    gpt-4o.d/
+    gpt-5.6
+    gpt-5.6.d/
       id
       driver
       cap
@@ -185,7 +185,7 @@ The host cache is bounded, versioned data with this shape:
 {
   "schema": "cortexfs.model-limits/v1",
   "models": {
-    "openai/gpt-5.5": 272000
+    "openai/gpt-5.6": 272000
   }
 }
 ```
@@ -202,8 +202,8 @@ the selected model in `model/<provider>/<model>.d/fallback`; each non-comment
 line is another stable provider/model reference, for example:
 
 ```text
-openai/codex-auto-review
-api.lmm.best/gpt-5.3-codex-spark
+openai/gpt-5.6
+models.example.test/compatible-model
 ```
 
 When the selected model is unavailable or fails before producing a successful
@@ -305,7 +305,7 @@ google     Gemini through Google's OpenAI-compatible endpoint; `gemini` is an al
 
 The `codex` alias installs the OpenAI preset and projects Codex-recommended
 OpenAI models under the canonical provider path, for example
-`/ctx/model/openai/gpt-5.5`. It does not create `/ctx/model/codex` or a second
+`/ctx/model/openai/gpt-5.6`. It does not create `/ctx/model/codex` or a second
 provider namespace.
 
 The Google preset uses Gemini's OpenAI-compatible endpoint. The Anthropic
@@ -337,8 +337,8 @@ are local debug metadata and do not imply a provider default.
 
 ```bash
 /ctx/model/debug/echo "hello"
-echo "hello" | /ctx/model/openai/gpt-4o
-echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-4o
+echo "hello" | /ctx/model/openai/gpt-5.6
+echo '{"messages":[{"role":"user","content":"hello"}]}' | /ctx/model/openai/gpt-5.6
 ```
 
 Semantics:

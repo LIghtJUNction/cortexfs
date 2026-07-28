@@ -9,7 +9,7 @@ const config: Config = {
   tagline: 'Models, agents, tools, and durable sessions under /ctx',
   url: 'https://lightjunction.github.io',
   baseUrl,
-  favicon: 'img/cortexfs-logo.svg',
+  favicon: 'img/cortexfs-favicon.svg',
   organizationName: 'LIghtJUNction',
   projectName: 'cortexfs',
   onBrokenLinks: 'throw',
@@ -65,9 +65,8 @@ const config: Config = {
       respectPrefersColorScheme: true,
     },
     navbar: {
-      title: 'CortexFS',
       logo: {
-        alt: 'CortexFS',
+        alt: '/ctx',
         src: 'img/cortexfs-logo.svg',
       },
       items: [

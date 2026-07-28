@@ -450,7 +450,7 @@ fn curl_config_quote_rejects_line_break_injection() {
 #[test]
 fn provider_json_body_escapes_prompt_newlines_before_curl_config() {
     let body = openai_chat_body(
-        "gpt-5.4",
+        "gpt-5.6",
         "first line\nsecond line",
         false,
         cortexfs::ModelEffort::Auto,
@@ -469,7 +469,7 @@ fn provider_route_selects_key_slot_by_model() {
         provider_route(
             &config,
             "fixture",
-            "gpt-5.4",
+            "gpt-5.6",
             Some("group(paid) -> direct, key(office)\nmodel(gpt-*) -> paid\nfallback: direct\n")
         ),
         Ok(ProviderRoute {

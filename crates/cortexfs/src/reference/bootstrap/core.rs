@@ -149,12 +149,8 @@ pub(crate) fn ensure_reference_model_aliases(
     models: &[ProjectedProviderModel],
 ) -> Result<(), ReferenceTreeError> {
     let main = reference_model_alias_target(root, DEFAULT_MODEL_ALIAS_TARGET, models, None);
-    let helper = reference_model_alias_target(
-        root,
-        HELPER_MODEL_ALIAS_TARGET,
-        models,
-        Some("codex-auto-review"),
-    );
+    let helper =
+        reference_model_alias_target(root, HELPER_MODEL_ALIAS_TARGET, models, Some("gpt-5.6-sol"));
     for (alias, target) in MODEL_ALIASES.iter().copied().map(|alias| {
         let target = match alias {
             DEFAULT_MODEL_ALIAS => main.clone(),
@@ -610,7 +606,7 @@ mod reference_model_tests {
             r#"{
   "name": "api.test",
   "base_url": "https://api.test/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "gpt-5.6-terra",
   "enabled": true,
   "formats": ["openai.chat", "openai.responses"]
 }
@@ -618,7 +614,7 @@ mod reference_model_tests {
         )?;
         fs::write(
             cache_dir.path().join("api.test.models.json"),
-            r#"{"models":["gpt-5.4-mini"]}"#,
+            r#"{"models":["gpt-5.6-terra"]}"#,
         )?;
 
         create_reference_root(root.path())
@@ -628,16 +624,16 @@ mod reference_model_tests {
         ensure_reference_provider_models_from(root.path(), config_dir.path(), cache_dir.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
-        assert!(root.path().join("model/api.test/gpt-5.4-mini").is_file());
+        assert!(root.path().join("model/api.test/gpt-5.6-terra").is_file());
         assert!(
             !root
                 .path()
-                .join("model/api.test/gpt-5.4-mini.d/hooks")
+                .join("model/api.test/gpt-5.6-terra.d/hooks")
                 .exists()
         );
         assert_eq!(
-            fs::read_to_string(root.path().join("model/api.test/gpt-5.4-mini.d/id"))?,
-            "api.test/gpt-5.4-mini\n"
+            fs::read_to_string(root.path().join("model/api.test/gpt-5.6-terra.d/id"))?,
+            "api.test/gpt-5.6-terra\n"
         );
         Ok(())
     }
@@ -665,7 +661,7 @@ mod reference_model_tests {
             },
             ProjectedProviderModel {
                 provider: "api.test".to_owned(),
-                model: "codex-auto-review".to_owned(),
+                model: "gpt-5.6-sol".to_owned(),
                 base_url: "https://api.test/v1".to_owned(),
                 driver: "default=openai-chat".to_owned(),
                 cap: "chat\nstream".to_owned(),
@@ -727,7 +723,7 @@ mod reference_model_tests {
         );
         assert_eq!(
             fs::read_link(root.path().join("model/helper"))?,
-            PathBuf::from("/ctx/model/api.test/codex-auto-review")
+            PathBuf::from("/ctx/model/api.test/gpt-5.6-sol")
         );
         for (alias, target) in [
             ("fast", "turbo-fast"),

@@ -1,7 +1,6 @@
 use super::*;
-use std::ffi::OsStr;
 use std::os::fd::{AsRawFd, RawFd};
-use std::os::unix::fs::FileTypeExt;
+use std::sync::Arc;
 
 pub(crate) struct AgentToolExecutionConfig<'a> {
     pub(crate) agent: &'a str,
@@ -9,16 +8,35 @@ pub(crate) struct AgentToolExecutionConfig<'a> {
     pub(crate) ctx_root: &'a Path,
     pub(crate) run: &'a str,
     pub(crate) session: &'a str,
-    pub(crate) inherit_control: bool,
     pub(crate) control: Option<AgentToolControl>,
     pub(crate) cancel: Option<(&'a Path, &'a str)>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct AgentToolControl {
     pub(crate) source: PathBuf,
     pub(crate) target: PathBuf,
-    pub(crate) token: OsString,
+    capability: Arc<crate::runtime::control::RunCapability>,
+}
+
+impl AgentToolControl {
+    pub(crate) fn new(
+        source: PathBuf,
+        target: PathBuf,
+        capability: Arc<crate::runtime::control::RunCapability>,
+    ) -> Self {
+        Self {
+            source,
+            target,
+            capability,
+        }
+    }
+
+    pub(crate) fn launch_gate(&self) -> Result<crate::runtime::control::LaunchGate, ExecError> {
+        self.capability
+            .launch_gate()
+            .map_err(|_error| ExecError::new("cannot create run control launch gate"))
+    }
 }
 
 pub(crate) fn execute_agent_tool_call_with(
@@ -36,6 +54,7 @@ pub(crate) struct PreparedAgentToolCall {
     name: String,
     approval: cortexfs::AgentApprovalMode,
     working_set: Option<(PathBuf, cortexfs::TshLoadedToolState, usize)>,
+    control_gate: Option<crate::runtime::control::LaunchGate>,
 }
 
 pub(crate) fn prepare_agent_tool_call(
@@ -109,8 +128,8 @@ pub(crate) fn prepare_agent_tool_call(
     let (home_dir, home_alias_dir) = open_agent_home_fds(&home_source)?;
     let mut command =
         crate::runtime::socket::command_for_agent_identity(BWRAP_PROGRAM, view.identity());
-    let inherited_control = inherited_agent_tool_control(config)?;
-    let control = config.control.as_ref().or(inherited_control.as_ref());
+    let control = config.control.as_ref();
+    let control_gate = control.map(AgentToolControl::launch_gate).transpose()?;
     command.args(agent_tool_bwrap_args(&AgentToolBwrapArgs {
         config,
         authorized_object: &authorized_object,
@@ -126,6 +145,9 @@ pub(crate) fn prepare_agent_tool_call(
         home_target: &home_target,
         ctx_home_target: &ctx_home_target,
         control,
+        control_gate: control_gate
+            .as_ref()
+            .map(crate::runtime::control::LaunchGate::block_fd),
     }));
     Ok(PreparedAgentToolCall {
         command,
@@ -149,6 +171,7 @@ pub(crate) fn prepare_agent_tool_call(
                 tsh_working_set_limit(&view),
             )
         }),
+        control_gate,
     })
 }
 
@@ -168,19 +191,6 @@ fn open_agent_home_fds(home_source: &Path) -> Result<(fs::File, fs::File), ExecE
         ExecError::new(format!("cannot preserve agent home alias fd: {error:?}"))
     })?;
     Ok((home_dir, home_alias_dir))
-}
-
-fn inherited_agent_tool_control(
-    config: &AgentToolExecutionConfig<'_>,
-) -> Result<Option<AgentToolControl>, ExecError> {
-    if config.inherit_control {
-        nested_control_environment(
-            env::var_os("CTX_CONTROL_SOCKET"),
-            env::var_os("CTX_CONTROL_TOKEN"),
-        )
-    } else {
-        Ok(None)
-    }
 }
 
 fn tsh_working_set_limit(view: &cortexfs::AgentRuntimeView) -> usize {
@@ -204,13 +214,11 @@ impl PreparedAgentToolCall {
         mut self,
         config: &AgentToolExecutionConfig<'_>,
     ) -> Result<String, ExecError> {
-        let output = if let Some((session_dir, run)) = config.cancel {
-            run_agent_tool_process_cancellable(&mut self.command, || {
-                crate::agent_run_cancelled(session_dir, run)
-            })
-        } else {
-            run_agent_tool_process(&mut self.command)
-        }
+        let output = run_prepared_agent_tool(
+            &mut self.command,
+            self.control_gate.as_mut(),
+            config.cancel,
+        )
         .map_err(|error| ExecError::new(format!("cannot run tool:{}: {error}", self.name)))?;
         drop(self.home_dir);
         drop(self.home_alias_dir);
@@ -391,6 +399,7 @@ pub(crate) struct AgentToolBwrapArgs<'a> {
     pub(crate) home_target: &'a Path,
     pub(crate) ctx_home_target: &'a Path,
     pub(crate) control: Option<&'a AgentToolControl>,
+    pub(crate) control_gate: Option<RawFd>,
 }
 
 pub(crate) fn authorized_tool_target(source: &Path, hit: &cortexfs::ToolHit) -> PathBuf {
@@ -412,57 +421,6 @@ fn prepare_optional_agent_tool_sandbox(
     } else {
         prepare_agent_tool_sandbox(view, source)
     }
-}
-
-pub(crate) fn nested_control_environment(
-    socket: Option<OsString>,
-    token: Option<OsString>,
-) -> Result<Option<AgentToolControl>, ExecError> {
-    match (socket, token) {
-        (None, None) => Ok(None),
-        (Some(socket), Some(token)) => {
-            validate_nested_control_values(&socket, &token)?;
-            let socket = PathBuf::from(socket);
-            let metadata = fs::symlink_metadata(&socket).map_err(|error| {
-                ExecError::new(format!("cannot inspect CTX_CONTROL_SOCKET: {error}"))
-            })?;
-            if !nested_control_socket_is_plain(&metadata) {
-                return Err(ExecError::new("CTX_CONTROL_SOCKET is not a plain socket"));
-            }
-            Ok(Some(AgentToolControl {
-                source: socket.clone(),
-                target: socket,
-                token,
-            }))
-        }
-        _ => Err(ExecError::new(
-            "incomplete CTX_CONTROL_SOCKET/CTX_CONTROL_TOKEN pair",
-        )),
-    }
-}
-
-pub(crate) fn nested_control_socket_is_plain(metadata: &fs::Metadata) -> bool {
-    metadata.file_type().is_socket() && !metadata.file_type().is_symlink()
-}
-
-pub(crate) fn validate_nested_control_values(
-    socket: &OsStr,
-    token: &OsStr,
-) -> Result<(), ExecError> {
-    if socket != OsStr::new(crate::runtime::socket::SOCKET_RUN_CONTROL_PATH) {
-        return Err(ExecError::new(
-            "CTX_CONTROL_SOCKET is not the fixed runtime control path",
-        ));
-    }
-    let token = token
-        .to_str()
-        .ok_or_else(|| ExecError::new("CTX_CONTROL_TOKEN is not ASCII hex"))?;
-    if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(ExecError::new(
-            "CTX_CONTROL_TOKEN is not a 32-byte hex token",
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) fn prepare_agent_tool_sandbox(
@@ -544,6 +502,12 @@ pub(crate) fn agent_tool_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsS
             OsString::from("--bind"),
             control.source.as_os_str().to_owned(),
             control.target.as_os_str().to_owned(),
+        ]);
+    }
+    if let Some(gate) = request.control_gate {
+        args.extend([
+            OsString::from("--block-fd"),
+            OsString::from(gate.to_string()),
         ]);
     }
     args.extend(bwrap_source_root_bind_args(request.config.source));
@@ -645,14 +609,10 @@ fn agent_tool_env_bwrap_args(request: &AgentToolBwrapArgs<'_>) -> Vec<OsString> 
     ]);
     if let Some(control) = request.control {
         let socket = &control.target;
-        let token = &control.token;
         args.extend([
             OsString::from("--setenv"),
             OsString::from("CTX_CONTROL_SOCKET"),
             socket.as_os_str().to_owned(),
-            OsString::from("--setenv"),
-            OsString::from("CTX_CONTROL_TOKEN"),
-            token.clone(),
         ]);
     }
     if let Some(rustup_home) = rustup_home() {
@@ -837,6 +797,30 @@ pub(crate) fn run_agent_tool_process_cancellable(
         command,
         Duration::from_secs(agent_tool_timeout_seconds()),
         &mut cancelled,
+        None,
+    )
+}
+
+fn run_prepared_agent_tool(
+    command: &mut Command,
+    gate: Option<&mut crate::runtime::control::LaunchGate>,
+    cancel: Option<(&Path, &str)>,
+) -> Result<std::process::Output, ExecError> {
+    if gate.is_none() {
+        return match cancel {
+            Some((session_dir, run)) => run_agent_tool_process_cancellable(command, || {
+                crate::agent_run_cancelled(session_dir, run)
+            }),
+            None => run_agent_tool_process(command),
+        };
+    }
+    let mut cancelled =
+        || cancel.is_some_and(|(session_dir, run)| crate::agent_run_cancelled(session_dir, run));
+    run_agent_tool_process_with_timeout_and_cancel(
+        command,
+        Duration::from_secs(agent_tool_timeout_seconds()),
+        &mut cancelled,
+        gate,
     )
 }
 
@@ -845,13 +829,14 @@ pub(crate) fn run_agent_tool_process_with_timeout(
     command: &mut Command,
     timeout: Duration,
 ) -> Result<std::process::Output, ExecError> {
-    run_agent_tool_process_with_timeout_and_cancel(command, timeout, &mut || false)
+    run_agent_tool_process_with_timeout_and_cancel(command, timeout, &mut || false, None)
 }
 
 fn run_agent_tool_process_with_timeout_and_cancel(
     command: &mut Command,
     timeout: Duration,
     cancelled: &mut impl FnMut() -> bool,
+    gate: Option<&mut crate::runtime::control::LaunchGate>,
 ) -> Result<std::process::Output, ExecError> {
     command
         .stdin(Stdio::null())
@@ -860,6 +845,13 @@ fn run_agent_tool_process_with_timeout_and_cancel(
         .process_group(0);
     let mut child =
         spawn_with_etxtbsy_retry(command).map_err(|error| ExecError::new(error.to_string()))?;
+    if let Some(gate) = gate
+        && gate.register_and_release(child.id()).is_err()
+    {
+        terminate_process_group(&mut child);
+        let _ignored = child.wait();
+        return Err(ExecError::new("cannot register run control launch root"));
+    }
     wait_capped_child_output(
         &mut child,
         CappedOutputWait {
