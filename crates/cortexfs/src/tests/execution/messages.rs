@@ -1038,68 +1038,7 @@ fn approval_allow_once(request: &str, call_id: &str) -> std::io::Result<String> 
         + "\n")
 }
 
-#[test]
-fn sdk_envelope_ask_allows_one_authorized_call_and_records_facts() {
-    let root = reference_tree("sdk-envelope-approval-allow");
-    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
-    write_text_file(&root.join("agent/coder.d/approval"), "ask\n");
-    let executable = root.join("agent/coder");
-    write_text_file(
-        &executable,
-        r#"#!/bin/sh
-IFS= read -r envelope
-case "$CTX_AGENT_STEP" in
-  0) printf '{"type":"tool_call","run":"%s","id":"approved-1","name":"tsh","arguments":{"args":["tools"]}}\n' "$CTX_RUN_ID" ;;
-  1) printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"approved complete"}]}\n' "$CTX_RUN_ID" ;;
-esac
-"#,
-    );
-    set_file_mode(&executable, 0o755);
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let (mut client, mut socket) = ok!(UnixStream::pair());
-    assert!(
-        client
-            .write_all(
-                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"approve\"}\n"
-            )
-            .is_ok()
-    );
-    assert!(client
-        .write_all(
-            b"{\"op\":\"approve\",\"run\":\"r1\",\"id\":\"approved-1\",\"decision\":\"allow_once\"}\n"
-        )
-        .is_ok());
-    assert!(client.shutdown(Shutdown::Write).is_ok());
-    let outcome_result = serve_agent_executable_socket_stream_once(
-        &mut socket,
-        None,
-        direct_agent_runtime(&root, &view, &session_root, &executable),
-    );
-    assert!(outcome_result.is_ok(), "{outcome_result:?}");
-    let outcome = ok!(outcome_result);
-    let jsonl = outcome.jsonl();
-    assert_eq!(jsonl.matches("approval_request").count(), 1, "{jsonl}");
-    assert_eq!(jsonl.matches("approval_result").count(), 1, "{jsonl}");
-    assert_eq!(jsonl.matches("tool_result").count(), 1, "{jsonl}");
-    assert!(jsonl.contains("approved complete"), "{jsonl}");
-    let events = ok!(fs::read_to_string(
-        session_root.join("default/events.jsonl")
-    ));
-    assert!(inspect_event_stream_jsonl(&events).is_ok(), "{events}");
-    assert_eq!(events.matches("approval_request").count(), 1, "{events}");
-    assert_eq!(events.matches("approval_result").count(), 1, "{events}");
-}
-
-#[test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "approval cancellation regression keeps the cross-thread protocol fixture explicit"
-)]
-fn sdk_envelope_cancel_after_approval_before_tool_spawn() {
-    use std::io::{BufRead, BufReader};
-
-    let root = reference_tree("sdk-envelope-approval-cancel-before-spawn");
+fn configure_marker_write_approval(root: &Path) {
     let control = root.join("agent/coder.d");
     write_text_file(&control.join("abi"), "sdk-envelope-v1\n");
     write_text_file(&control.join("approval"), "ask\n");
@@ -1122,12 +1061,96 @@ fn sdk_envelope_cancel_after_approval_before_tool_spawn() {
     );
 
     let tool = root.join("tool/marker.write");
-    write_text_file(&tool, "#!/bin/sh\nprintf ran > \"$HOME/cancel-marker\"\n");
+    write_text_file(
+        &tool,
+        "#!/bin/sh\nprintf ran > \"$HOME/marker-write-ran\"\n",
+    );
     set_file_mode(&tool, 0o755);
     write_text_file(
         &root.join("tool/marker.write.d/policy"),
         "allow coder_t tool:marker.write execute\n",
     );
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "approval regression keeps the cross-thread protocol fixture explicit"
+)]
+fn sdk_envelope_ask_allows_one_authorized_call_and_records_facts() {
+    use std::io::{BufRead, BufReader};
+
+    let root = reference_tree("sdk-envelope-approval-allow");
+    configure_marker_write_approval(&root);
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        r#"#!/bin/sh
+IFS= read -r envelope
+case "$CTX_AGENT_STEP" in
+  0) printf '{"type":"tool_call","run":"%s","id":"approved-1","name":"marker.write","arguments":{"args":[]}}\n' "$CTX_RUN_ID" ;;
+  1) printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"approved complete"}]}\n' "$CTX_RUN_ID" ;;
+esac
+"#,
+    );
+    set_file_mode(&executable, 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    set_stream_timeouts(&client, 5);
+    let mut reader = ok!(client.try_clone());
+    let responder = std::thread::spawn(move || -> std::io::Result<()> {
+        client.write_all(
+            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"approve\"}\n",
+        )?;
+        for line in BufReader::new(&mut reader).lines() {
+            let line = line?;
+            if line.contains("\"type\":\"approval_request\"") {
+                client.write_all(approval_allow_once(&line, "approved-1")?.as_bytes())?;
+                client.shutdown(Shutdown::Write)?;
+            }
+            if line.contains("\"type\":\"approval_result\"") {
+                return Ok(());
+            }
+        }
+        Err(std::io::Error::other("missing approval result"))
+    });
+    let outcome_result = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    );
+    assert!(outcome_result.is_ok(), "{outcome_result:?}");
+    let outcome = ok!(outcome_result);
+    let responder_result = responder.join();
+    assert!(
+        matches!(responder_result, Ok(Ok(()))),
+        "{responder_result:?}"
+    );
+    let jsonl = outcome.jsonl();
+    assert_eq!(jsonl.matches("approval_request").count(), 1, "{jsonl}");
+    assert_eq!(jsonl.matches("approval_result").count(), 1, "{jsonl}");
+    assert_eq!(jsonl.matches("tool_result").count(), 1, "{jsonl}");
+    assert!(jsonl.contains("approved complete"), "{jsonl}");
+    assert!(agent_home(&root, "coder").join("marker-write-ran").exists());
+    let events = ok!(fs::read_to_string(
+        session_root.join("default/events.jsonl")
+    ));
+    assert!(inspect_event_stream_jsonl(&events).is_ok(), "{events}");
+    assert_eq!(events.matches("approval_request").count(), 1, "{events}");
+    assert_eq!(events.matches("approval_result").count(), 1, "{events}");
+}
+
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "approval cancellation regression keeps the cross-thread protocol fixture explicit"
+)]
+fn sdk_envelope_cancel_after_approval_before_tool_spawn() {
+    use std::io::{BufRead, BufReader};
+
+    let root = reference_tree("sdk-envelope-approval-cancel-before-spawn");
+    configure_marker_write_approval(&root);
 
     let executable = root.join("agent/coder");
     write_text_file(
@@ -1198,22 +1221,21 @@ esac
         session_root.join("default/messages.jsonl")
     ));
     assert!(!messages.contains("tool_result"), "{messages}");
-    assert!(!agent_home(&root, "coder").join("cancel-marker").exists());
+    assert!(!agent_home(&root, "coder").join("marker-write-ran").exists());
     assert!(!root.join("next-step").exists());
 }
 
 #[test]
 fn sdk_envelope_approval_write_shutdown_records_denial() {
     let root = reference_tree("sdk-envelope-approval-write-shutdown");
-    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
-    write_text_file(&root.join("agent/coder.d/approval"), "ask\n");
+    configure_marker_write_approval(&root);
     let executable = root.join("agent/coder");
     write_text_file(
         &executable,
         r#"#!/bin/sh
 IFS= read -r envelope
 case "$CTX_AGENT_STEP" in
-  0) printf '{"type":"tool_call","run":"%s","id":"disconnect-1","name":"tsh","arguments":{"args":["tools"]}}\n' "$CTX_RUN_ID" ;;
+  0) printf '{"type":"tool_call","run":"%s","id":"disconnect-1","name":"marker.write","arguments":{"args":[]}}\n' "$CTX_RUN_ID" ;;
   1) printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"disconnect complete"}]}\n' "$CTX_RUN_ID" ;;
 esac
 "#,
@@ -1245,6 +1267,7 @@ esac
     assert_eq!(messages.matches("tool_result").count(), 1, "{messages}");
     assert!(events.contains("\"decision\":\"deny\""), "{events}");
     assert!(messages.contains("ERROR:"), "{messages}");
+    assert!(!agent_home(&root, "coder").join("marker-write-ran").exists());
 }
 
 #[test]
