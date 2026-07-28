@@ -1,4 +1,5 @@
 static FIXTURE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FIXTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {
@@ -9,7 +10,7 @@ mod tests {
     use std::os::unix::net::UnixStream;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Output, Stdio};
-    use std::sync::atomic::Ordering;
+    use std::sync::{MutexGuard, atomic::Ordering};
 
     use cortexfs::object::install::{InstallTier, install_object};
     use cortexfs::{
@@ -66,6 +67,7 @@ mod tests {
         );
 
         let durable = fs::read_to_string(session_root.join("default/messages.jsonl"))?;
+        drop(root);
         let mut tool_results = durable
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -94,6 +96,7 @@ mod tests {
                 "legacy invocation {run} was accepted"
             );
         }
+        drop(root);
         Ok(())
     }
 
@@ -102,6 +105,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let root = install_fixture_tool()?;
         let output = run_installed_tool(&root, &["hello", "world"], b"", "cli-argv")?;
+        drop(root);
 
         assert_eq!(
             (
@@ -128,6 +132,7 @@ mod tests {
     {
         let root = install_fixture_tool()?;
         let output = run_installed_tool(&root, &[], b"from stdin", "cli-stdin")?;
+        drop(root);
 
         assert_eq!(
             (
@@ -154,6 +159,7 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let root = install_fixture_tool()?;
         let output = run_installed_tool(&root, &["__error__"], b"", "cli-error")?;
+        drop(root);
 
         assert_eq!(
             (
@@ -181,6 +187,7 @@ mod tests {
         let root = install_fixture_tool()?;
         let stdin = vec![b'x'; 1024 * 1024 + 1];
         let output = run_installed_tool(&root, &[], &stdin, "cli-oversized")?;
+        drop(root);
 
         assert_eq!(
             (output.status.code(), output.stdout, output.stderr),
@@ -353,10 +360,16 @@ mod tests {
         Ok(())
     }
 
-    struct FixtureRoot(PathBuf);
+    struct FixtureRoot {
+        path: PathBuf,
+        _lock: MutexGuard<'static, ()>,
+    }
 
     impl FixtureRoot {
         fn new() -> Result<Self, std::io::Error> {
+            let lock = FIXTURE_LOCK
+                .lock()
+                .map_err(|_error| std::io::Error::other("SDK fixture lock poisoned"))?;
             for _attempt in 0..32 {
                 let id = FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
                 let path = std::env::temp_dir().join(format!(
@@ -364,7 +377,7 @@ mod tests {
                     std::process::id()
                 ));
                 match fs::DirBuilder::new().create(&path) {
-                    Ok(()) => return Ok(Self(path)),
+                    Ok(()) => return Ok(Self { path, _lock: lock }),
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(error) => return Err(error),
                 }
@@ -376,13 +389,13 @@ mod tests {
         }
 
         fn path(&self) -> &Path {
-            &self.0
+            &self.path
         }
     }
 
     impl Drop for FixtureRoot {
         fn drop(&mut self) {
-            let _ignored = fs::remove_dir_all(&self.0);
+            let _ignored = fs::remove_dir_all(&self.path);
         }
     }
 }

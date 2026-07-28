@@ -11,8 +11,9 @@ fail() {
 
 [ "$(uname -s 2>/dev/null || true)" = "Linux" ] ||
     fail "Linux with systemd is required; macOS and Windows are not supported."
-[ -r /dev/tty ] && [ -w /dev/tty ] ||
+if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
     fail "a controlling terminal is required for explicit confirmation."
+fi
 command -v bash >/dev/null 2>&1 || fail "bash is required."
 
 case "$0" in
@@ -57,9 +58,11 @@ curl -fL --retry 3 --connect-timeout 15 -o "$TMP_DIR/source.tar.gz" "$ARCHIVE_UR
 printf '→ Unpacking snapshot...\n'
 tar -xzf "$TMP_DIR/source.tar.gz" -C "$TMP_DIR/source"
 set -- "$TMP_DIR/source"/*
-[ "$#" -eq 1 ] && [ -d "$1" ] ||
+if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
     fail "the repository archive did not contain one source directory."
-[ -f "$1/Cargo.toml" ] && [ -f "$1/scripts/install-linux.sh" ] ||
+fi
+if [ ! -f "$1/Cargo.toml" ] || [ ! -f "$1/scripts/install-linux.sh" ]; then
     fail "the downloaded snapshot is incomplete."
+fi
 
 bash "$1/scripts/install-linux.sh" --source "$1"
