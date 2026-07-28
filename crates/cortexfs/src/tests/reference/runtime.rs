@@ -229,7 +229,7 @@ fn provider_projection_preserves_concurrent_directory_replacement() -> std::io::
     })));
     let result = reconcile_provider_model_tree(&root, &providers, &cache);
     let _previous = crate::support::receipt::set_park_hook(previous);
-    assert_eq!(result, Err(ReferenceTreeError::CannotCreate));
+    assert!(matches!(result, Err(ReferenceTreeError::CannotCreate)));
     assert_eq!(
         fs::read_to_string(root.join("model/local/foreign"))?,
         "keep"

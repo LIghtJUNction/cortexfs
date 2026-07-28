@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::ProjectedProviderModel;
+use super::{ProjectedProviderModel, ProviderSnapshot};
 use crate::{
     DEFAULT_MODEL_ALIAS, DEFAULT_MODEL_ALIAS_TARGET, HELPER_MODEL_ALIAS, HELPER_MODEL_ALIAS_TARGET,
 };
@@ -8,8 +8,9 @@ use crate::{
 pub fn current_model_alias_target(
     alias: &str,
     existing: Option<&Path>,
-    models: &[ProjectedProviderModel],
+    snapshot: &ProviderSnapshot,
 ) -> PathBuf {
+    let models = snapshot.models();
     if let Some(existing) = existing.filter(|target| is_current_model_alias_target(target, models))
     {
         return existing.to_path_buf();
@@ -19,11 +20,15 @@ pub fn current_model_alias_target(
         HELPER_MODEL_ALIAS => Some(HELPER_MODEL_ALIAS_TARGET),
         _ => None,
     };
-    let selected = preferred
-        .and_then(|target| {
-            models
-                .iter()
-                .find(|model| model_target(model) == Path::new(target))
+    let selected = (alias == DEFAULT_MODEL_ALIAS)
+        .then(|| configured_default_model(snapshot))
+        .flatten()
+        .or_else(|| {
+            preferred.and_then(|target| {
+                models
+                    .iter()
+                    .find(|model| model_target(model) == Path::new(target))
+            })
         })
         .or_else(|| {
             (alias == HELPER_MODEL_ALIAS)
@@ -33,6 +38,29 @@ pub fn current_model_alias_target(
         .or_else(|| capability_model(alias, models))
         .or_else(|| models.first());
     selected.map_or_else(|| PathBuf::from("/ctx/model/debug/echo"), model_target)
+}
+
+fn configured_default_model(snapshot: &ProviderSnapshot) -> Option<&ProjectedProviderModel> {
+    snapshot
+        .configs()
+        .iter()
+        .filter(|entry| entry.1.enabled)
+        .filter_map(|entry| {
+            let provider = &entry.0;
+            let config = &entry.1;
+            let default = config.default_model.as_deref()?;
+            snapshot
+                .models()
+                .iter()
+                .find(|model| model.provider == *provider && model.model == default)
+                .map(|model| (provider, model))
+        })
+        .min_by(|left, right| {
+            left.0
+                .cmp(right.0)
+                .then_with(|| left.1.model.cmp(&right.1.model))
+        })
+        .map(|(_provider, model)| model)
 }
 
 pub fn is_current_model_alias_target(target: &Path, models: &[ProjectedProviderModel]) -> bool {

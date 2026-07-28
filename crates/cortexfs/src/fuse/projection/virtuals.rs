@@ -386,7 +386,7 @@ impl FuseProjection {
         Ok(current_model_alias_target(
             alias,
             existing.as_deref(),
-            snapshot.models(),
+            snapshot,
         ))
     }
 }

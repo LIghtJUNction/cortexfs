@@ -197,7 +197,7 @@ pub(crate) const fn should_repair_reference_owner(effective_uid: u32) -> bool {
 pub(crate) fn ensure_reference_model_alias(
     path: &Path,
     alias: &str,
-    models: &[ProjectedProviderModel],
+    snapshot: &ProviderSnapshot,
 ) -> Result<(), ReferenceTreeError> {
     let parent = path.parent().ok_or(ReferenceTreeError::CannotLink)?;
     create_reference_dir(parent)?;
@@ -210,7 +210,7 @@ pub(crate) fn ensure_reference_model_alias(
         match support::receipt::receipt_at(&parent_dir, name, support::receipt::EntryKind::Symlink)
         {
             Ok(None) => {
-                let target = current_model_alias_target(alias, None, models);
+                let target = current_model_alias_target(alias, None, snapshot);
                 match nix::unistd::symlinkat(&target, &parent_dir, name) {
                     Ok(()) => {
                         return parent_dir
@@ -224,7 +224,7 @@ pub(crate) fn ensure_reference_model_alias(
             Ok(Some(receipt)) => {
                 let existing = read_reference_symlink(path)
                     .map_err(|_error| ReferenceTreeError::CannotLink)?;
-                let target = current_model_alias_target(alias, Some(&existing), models);
+                let target = current_model_alias_target(alias, Some(&existing), snapshot);
                 if target == existing {
                     if support::receipt::receipt_at(
                         &parent_dir,

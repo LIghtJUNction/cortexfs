@@ -13,7 +13,7 @@ pub fn reconcile_provider_model_tree(
     root: &Path,
     config_dir: &Path,
     cache_dir: &Path,
-) -> Result<Vec<ProjectedProviderModel>, ReferenceTreeError> {
+) -> Result<ProviderSnapshot, ReferenceTreeError> {
     let _lock = lock_provider_reconciliation(cache_dir)?;
     let snapshot = ProviderSnapshot::load(config_dir, cache_dir)
         .map_err(|_error| ReferenceTreeError::CannotCreate)?;
@@ -47,5 +47,5 @@ pub fn reconcile_provider_model_tree(
             active.contains(&provider),
         )?;
     }
-    Ok(models.to_vec())
+    Ok(snapshot)
 }

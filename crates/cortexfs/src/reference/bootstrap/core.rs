@@ -54,8 +54,9 @@ pub fn ensure_runtime_models_from(
     cache_dir: &Path,
 ) -> Result<(), ReferenceTreeError> {
     ensure_reference_debug_model(root)?;
-    let models = reference::reconcile::reconcile_provider_model_tree(root, config_dir, cache_dir)?;
-    ensure_reference_model_aliases(root, &models)
+    let snapshot =
+        reference::reconcile::reconcile_provider_model_tree(root, config_dir, cache_dir)?;
+    ensure_reference_model_aliases(root, &snapshot)
 }
 
 pub(crate) struct ReferenceAgentSpec {
@@ -111,39 +112,12 @@ pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceT
     .map_err(ReferenceTreeError::Object)
 }
 
-#[cfg(test)]
-pub(crate) fn ensure_reference_provider_model(
-    root: &Path,
-    model: &ProjectedProviderModel,
-) -> Result<(), ReferenceTreeError> {
-    let name = format!("{}/{}", model.provider, model.model);
-    let controls = MODEL_CONTROL_FILES
-        .iter()
-        .filter_map(|file| {
-            provider::projected_control_content(model, file).map(|content| (*file, content))
-        })
-        .collect::<Vec<_>>();
-    let overrides = controls
-        .iter()
-        .map(|entry| (entry.0, entry.1.as_str()))
-        .collect::<Vec<_>>();
-    install_executable_object_wrapper(
-        root,
-        ObjectClass::Model,
-        &name,
-        REFERENCE_OBJECT_RUNNER,
-        &overrides,
-    )
-    .map(|_object| ())
-    .map_err(ReferenceTreeError::Object)
-}
-
 pub(crate) fn ensure_reference_model_aliases(
     root: &Path,
-    models: &[ProjectedProviderModel],
+    snapshot: &ProviderSnapshot,
 ) -> Result<(), ReferenceTreeError> {
     for alias in MODEL_ALIASES {
-        ensure_reference_model_alias(&root.join("model").join(alias), alias, models)?;
+        ensure_reference_model_alias(&root.join("model").join(alias), alias, snapshot)?;
     }
     Ok(())
 }
@@ -582,73 +556,16 @@ mod reference_model_tests {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         ensure_reference_debug_model(root.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        let models = vec![
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "gpt-main".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "gpt-5.6-sol".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "turbo-fast".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "deep".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nreasoning".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "code-pro".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nstream".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-            ProjectedProviderModel {
-                provider: "api.test".to_owned(),
-                model: "multimodal".to_owned(),
-                base_url: "https://api.test/v1".to_owned(),
-                driver: "default=openai-chat".to_owned(),
-                cap: "chat\nvision".to_owned(),
-                effort: "auto".to_owned(),
-                fallback: String::new(),
-                limit: ModelContextLimit::Unknown,
-            },
-        ];
-        for model in &models {
-            ensure_reference_provider_model(root.path(), model)
+        let config_dir = tempfile::tempdir()?;
+        let cache_dir = tempfile::tempdir()?;
+        fs::write(
+            config_dir.path().join("api.test.json"),
+            r#"{"name":"api.test","base_url":"https://api.test/v1","default_model":"gpt-main","models":["gpt-5.6-sol","turbo-fast","deep","code-pro","multimodal"]}"#,
+        )?;
+        let snapshot =
+            reconcile_provider_model_tree(root.path(), config_dir.path(), cache_dir.path())
                 .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        }
-        ensure_reference_model_aliases(root.path(), &models)
+        ensure_reference_model_aliases(root.path(), &snapshot)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
         assert_eq!(
@@ -659,12 +576,7 @@ mod reference_model_tests {
             fs::read_link(root.path().join("model/helper"))?,
             PathBuf::from("/ctx/model/api.test/gpt-5.6-sol")
         );
-        for (alias, target) in [
-            ("fast", "turbo-fast"),
-            ("reason", "deep"),
-            ("code", "code-pro"),
-            ("vision", "multimodal"),
-        ] {
+        for (alias, target) in [("fast", "turbo-fast"), ("code", "code-pro")] {
             assert_eq!(
                 fs::read_link(root.path().join("model").join(alias))?,
                 PathBuf::from(format!("/ctx/model/api.test/{target}"))
@@ -674,7 +586,7 @@ mod reference_model_tests {
     }
 
     #[test]
-    fn runtime_model_aliases_fall_back_to_debug_model_without_provider_models()
+    fn runtime_model_aliases_fall_back_without_projected_provider_default()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
         create_reference_root(root.path())
@@ -683,7 +595,20 @@ mod reference_model_tests {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         ensure_reference_debug_model(root.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        ensure_reference_model_aliases(root.path(), &[])
+        let config_dir = tempfile::tempdir()?;
+        let cache_dir = tempfile::tempdir()?;
+        fs::write(
+            config_dir.path().join("missing.json"),
+            r#"{"name":"missing","base_url":"https://missing.test/v1"}"#,
+        )?;
+        fs::write(
+            config_dir.path().join("disabled.json"),
+            r#"{"name":"disabled","base_url":"https://disabled.test/v1","default_model":"ignored","enabled":false}"#,
+        )?;
+        let snapshot =
+            reconcile_provider_model_tree(root.path(), config_dir.path(), cache_dir.path())
+                .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        ensure_reference_model_aliases(root.path(), &snapshot)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
         assert_eq!(

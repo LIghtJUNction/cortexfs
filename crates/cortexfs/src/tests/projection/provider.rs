@@ -132,7 +132,7 @@ fn fuse_provider_fallback_uses_the_virtual_lookup_snapshot() {
 }
 
 #[test]
-fn fuse_projection_projects_configured_provider_models() {
+fn fuse_projection_projects_configured_provider_models() -> std::io::Result<()> {
     let root = reference_tree("fuse-provider-model");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
@@ -153,6 +153,10 @@ fn fuse_projection_projects_configured_provider_models() {
     let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
+    let virtual_main = projection.readlink("model/main");
+    crate::ensure_runtime_models_from(&root, &providers, &cache)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    assert_eq!(virtual_main, Ok(fs::read_link(root.join("model/main"))?));
 
     assert_model_entries(
         &projection,
@@ -241,6 +245,7 @@ fn fuse_projection_projects_configured_provider_models() {
     );
     let attr = projection.getattr("model/api.test/gpt-5.6-terra");
     assert!(matches!(attr, Ok(ref attr) if attr.mode() & 0o777 == 0o555));
+    Ok(())
 }
 
 #[test]
