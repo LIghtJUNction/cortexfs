@@ -78,22 +78,13 @@ mod tests {
         fs::create_dir_all(&providers)?;
         fs::create_dir_all(&cache)?;
         command
-            .args([
-                "--tmpfs",
-                "/etc/cortexfs",
-                "--dir",
-                "/etc/cortexfs/providers.d",
-                "--bind",
-            ])
+            .args(["--tmpfs", "/etc", "--dir", "/etc/profile.d"])
+            .args(["--dir", "/etc/cortexfs"])
+            .args(["--dir", "/etc/cortexfs/providers.d", "--bind"])
             .arg(&providers)
             .arg("/etc/cortexfs/providers.d")
-            .args([
-                "--tmpfs",
-                "/var/lib/cortexfs",
-                "--dir",
-                "/var/lib/cortexfs/provider-models",
-                "--bind",
-            ])
+            .args(["--tmpfs", "/var/lib", "--dir", "/var/lib/cortexfs"])
+            .args(["--dir", "/var/lib/cortexfs/provider-models", "--bind"])
             .arg(&cache)
             .arg("/var/lib/cortexfs/provider-models");
         Ok(())

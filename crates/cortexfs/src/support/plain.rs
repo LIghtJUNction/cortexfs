@@ -340,8 +340,7 @@ pub fn create_plain_dir_with(path: &Path, messages: CreatePlainDirMessages) -> R
     }
 
     let mut missing = Vec::new();
-    let mut cursor = Some(path);
-    while let Some(current) = cursor {
+    for current in path.ancestors() {
         match fs::symlink_metadata(current) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() => {
                 return Err(std::io::Error::new(
@@ -352,21 +351,20 @@ pub fn create_plain_dir_with(path: &Path, messages: CreatePlainDirMessages) -> R
             Ok(_metadata) => break,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 missing.push(current.to_path_buf());
-                cursor = current.parent();
             }
             Err(error) => return Err(error),
         }
     }
-
-    let existing_parent = missing
-        .last()
-        .and_then(|path| path.parent())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                messages.invalid_name_message,
-            )
-        })?;
+    let existing_parent = match missing.last() {
+        Some(path) => path.parent(),
+        None => return sync_plain_dir(path),
+    }
+    .ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            messages.invalid_name_message,
+        )
+    })?;
     let mut parent_dir = open_plain_directory(existing_parent)?;
     for directory in missing.iter().rev() {
         let name = plain_file_name(directory).map_err(|_error| {
