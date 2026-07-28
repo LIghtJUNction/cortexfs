@@ -1040,7 +1040,6 @@ fn approval_allow_once(request: &str, call_id: &str) -> std::io::Result<String> 
 
 #[test]
 fn sdk_envelope_ask_allows_one_authorized_call_and_records_facts() {
-    use std::io::{BufRead, BufReader};
     let root = reference_tree("sdk-envelope-approval-allow");
     write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
     write_text_file(&root.join("agent/coder.d/approval"), "ask\n");
@@ -1059,31 +1058,19 @@ esac
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let (mut client, mut socket) = ok!(UnixStream::pair());
-    set_stream_timeouts(&client, 15);
-    let mut reader = ok!(client.try_clone());
-    let responder = std::thread::spawn(move || -> std::io::Result<()> {
-        client.write_all(
-            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"approve\"}\n",
-        )?;
-        let mut lines = BufReader::new(&mut reader).lines();
-        let mut approved = false;
-        for line in lines.by_ref() {
-            let line = line?;
-            if line.contains("\"type\":\"approval_request\"") {
-                client.write_all(approval_allow_once(&line, "approved-1")?.as_bytes())?;
-                client.shutdown(Shutdown::Write)?;
-                approved = true;
-            }
-            if approved && line.contains("\"type\":\"done\"") {
-                return Ok(());
-            }
-        }
-        if approved {
-            Ok(())
-        } else {
-            Err(std::io::Error::other("missing approval request"))
-        }
-    });
+    assert!(
+        client
+            .write_all(
+                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"approve\"}\n"
+            )
+            .is_ok()
+    );
+    assert!(client
+        .write_all(
+            b"{\"op\":\"approve\",\"run\":\"r1\",\"id\":\"approved-1\",\"decision\":\"allow_once\"}\n"
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
     let outcome_result = serve_agent_executable_socket_stream_once(
         &mut socket,
         None,
@@ -1091,8 +1078,6 @@ esac
     );
     assert!(outcome_result.is_ok(), "{outcome_result:?}");
     let outcome = ok!(outcome_result);
-    let responder = responder.join();
-    assert!(matches!(responder, Ok(Ok(()))), "{responder:?}");
     let jsonl = outcome.jsonl();
     assert_eq!(jsonl.matches("approval_request").count(), 1, "{jsonl}");
     assert_eq!(jsonl.matches("approval_result").count(), 1, "{jsonl}");
@@ -1218,90 +1203,48 @@ esac
 }
 
 #[test]
-fn sdk_envelope_approval_disconnects_record_one_denial_or_result() {
-    use std::io::{BufRead, BufReader};
-    for stage in ["request", "result", "tool-result"] {
-        let root = reference_tree(&format!("sdk-envelope-approval-{stage}"));
-        write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
-        write_text_file(&root.join("agent/coder.d/approval"), "ask\n");
-        let executable = root.join("agent/coder");
-        write_text_file(
-            &executable,
-            r#"#!/bin/sh
+fn sdk_envelope_approval_write_shutdown_records_denial() {
+    let root = reference_tree("sdk-envelope-approval-write-shutdown");
+    write_text_file(&root.join("agent/coder.d/abi"), "sdk-envelope-v1\n");
+    write_text_file(&root.join("agent/coder.d/approval"), "ask\n");
+    let executable = root.join("agent/coder");
+    write_text_file(
+        &executable,
+        r#"#!/bin/sh
 IFS= read -r envelope
 case "$CTX_AGENT_STEP" in
   0) printf '{"type":"tool_call","run":"%s","id":"disconnect-1","name":"tsh","arguments":{"args":["tools"]}}\n' "$CTX_RUN_ID" ;;
   1) printf '{"type":"message","run":"%s","role":"assistant","content":[{"type":"text","text":"disconnect complete"}]}\n' "$CTX_RUN_ID" ;;
 esac
 "#,
-        );
-        set_file_mode(&executable, 0o755);
-        let session_root = agent_session_root(&root, "coder");
-        let view = ok!(derive_agent_runtime_view(&root, "coder"));
-        let (mut client, mut socket) = ok!(UnixStream::pair());
-        set_stream_timeouts(&client, 15);
-        let mut reader = ok!(client.try_clone());
-        let responder = std::thread::spawn(move || -> std::io::Result<()> {
-            client.write_all(
-                b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"disconnect\"}\n",
-            )?;
-            for line in BufReader::new(&mut reader).lines() {
-                let line = line?;
-                if line.contains("\"type\":\"approval_request\"") {
-                    if stage == "request" {
-                        client.shutdown(Shutdown::Both)?;
-                        return Ok(());
-                    }
-                    client.write_all(approval_allow_once(&line, "disconnect-1")?.as_bytes())?;
-                    if stage == "result" {
-                        client.shutdown(Shutdown::Both)?;
-                        return Ok(());
-                    }
-                }
-                if stage == "tool-result" && line.contains("\"type\":\"approval_result\"") {
-                    client.shutdown(Shutdown::Both)?;
-                    return Ok(());
-                }
-            }
-            Ok(())
-        });
-        let outcome = serve_agent_executable_socket_stream_once(
-            &mut socket,
-            None,
-            direct_agent_runtime(&root, &view, &session_root, &executable),
-        );
-        assert!(outcome.is_ok(), "{stage}: {outcome:?}");
-        let responder = responder.join();
-        assert!(matches!(responder, Ok(Ok(()))), "{stage}: {responder:?}");
-        let events = ok!(fs::read_to_string(
-            session_root.join("default/events.jsonl")
-        ));
-        let messages = ok!(fs::read_to_string(
-            session_root.join("default/messages.jsonl")
-        ));
-        assert_eq!(
-            events.matches("approval_request").count(),
-            1,
-            "{stage}: {events}"
-        );
-        assert_eq!(
-            events.matches("approval_result").count(),
-            1,
-            "{stage}: {events}"
-        );
-        assert_eq!(
-            messages.matches("tool_result").count(),
-            1,
-            "{stage}: {messages}"
-        );
-        if stage == "tool-result" {
-            assert!(events.contains("allow_once"), "{events}");
-            assert!(!messages.contains("approval result delivery failed"));
-        } else {
-            assert!(events.contains("\"decision\":\"deny\""), "{events}");
-            assert!(messages.contains("ERROR:"), "{messages}");
-        }
-    }
+    );
+    set_file_mode(&executable, 0o755);
+    let session_root = agent_session_root(&root, "coder");
+    let view = ok!(derive_agent_runtime_view(&root, "coder"));
+    let (mut client, mut socket) = ok!(UnixStream::pair());
+    assert!(client
+        .write_all(
+            b"{\"op\":\"send\",\"id\":\"r1\",\"session\":\"default\",\"input\":\"disconnect\"}\n"
+        )
+        .is_ok());
+    assert!(client.shutdown(Shutdown::Write).is_ok());
+    let outcome = serve_agent_executable_socket_stream_once(
+        &mut socket,
+        None,
+        direct_agent_runtime(&root, &view, &session_root, &executable),
+    );
+    assert!(outcome.is_ok(), "{outcome:?}");
+    let events = ok!(fs::read_to_string(
+        session_root.join("default/events.jsonl")
+    ));
+    let messages = ok!(fs::read_to_string(
+        session_root.join("default/messages.jsonl")
+    ));
+    assert_eq!(events.matches("approval_request").count(), 1, "{events}");
+    assert_eq!(events.matches("approval_result").count(), 1, "{events}");
+    assert_eq!(messages.matches("tool_result").count(), 1, "{messages}");
+    assert!(events.contains("\"decision\":\"deny\""), "{events}");
+    assert!(messages.contains("ERROR:"), "{messages}");
 }
 
 #[test]

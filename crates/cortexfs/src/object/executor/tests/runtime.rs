@@ -222,21 +222,32 @@ fn provider_curl_output_rejects_oversized_stdout() -> Result<(), Box<dyn std::er
 #[test]
 fn provider_curl_output_kills_child_after_oversized_stdout()
 -> Result<(), Box<dyn std::error::Error>> {
-    let started = Instant::now();
+    use std::os::unix::process::CommandExt;
+
+    let root = unique_temp_dir("provider-oversized-stdout")?;
+    let trigger = root.join("continue");
+    let marker = root.join("survived");
     let child = std::process::Command::new("sh")
         .arg("-c")
         .arg(format!(
-            "yes x | head -c {}; sleep 10",
+            "sh -c 'while [ ! -f \"$GO\" ]; do sleep 1; done; printf survived > \"$MARKER\"' & head -c {} /dev/zero; wait",
             MAX_PROVIDER_RESPONSE_BYTES.saturating_add(1)
         ))
+        .env("GO", &trigger)
+        .env("MARKER", &marker)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .process_group(0)
         .spawn()?;
 
     let result = wait_for_curl_json_output(child);
+    fs::write(&trigger, [])?;
+    thread::sleep(Duration::from_secs(2));
+    let marker_written = marker.exists();
+    fs::remove_dir_all(root)?;
 
     assert!(matches!(result, Err(ref error) if error.contains("provider response exceeds")));
-    assert!(started.elapsed() < Duration::from_secs(8));
+    assert!(!marker_written, "oversized provider child survived cleanup");
     Ok(())
 }
 
