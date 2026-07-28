@@ -211,8 +211,35 @@ fn create_complete_agent_control(root: &Path, name: &str) {
 }
 
 fn ensure_runtime_model_fixture(root: &Path) {
-    let models = ensure_runtime_models(root);
-    assert!(models.is_ok(), "{models:?}");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    assert!(fs::create_dir_all(&providers).is_ok());
+    assert!(fs::create_dir_all(&cache).is_ok());
+    let debug = install_executable_object_wrapper(
+        root,
+        ObjectClass::Model,
+        "debug/echo",
+        "/ctx/bin/cortexfs-object-runner",
+        &[
+            ("id", "debug/echo"),
+            ("driver", "default=debug\nexec=debug\nagent=debug"),
+            ("cap", "chat\nstream"),
+            ("effort", "auto"),
+            ("limit", "unknown"),
+            ("default", ""),
+            ("fallback", ""),
+            ("session", "none"),
+            ("status", "idle"),
+            ("log", ""),
+        ],
+    );
+    assert!(debug.is_ok(), "{debug:?}");
+    for alias in cortexfs::MODEL_ALIASES {
+        let path = root.join("model").join(alias);
+        if fs::symlink_metadata(&path).is_err() {
+            assert!(std::os::unix::fs::symlink("/ctx/model/debug/echo", path).is_ok());
+        }
+    }
     for model in [DEFAULT_WORKER_MODEL, NEUTRAL_FIXTURE_MODEL] {
         let model = Path::new(model);
         let limit = root

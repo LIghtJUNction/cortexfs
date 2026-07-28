@@ -422,16 +422,17 @@ fn provider_partial_eof_is_nonfallback_without_retry() -> Result<(), Box<dyn std
 fn brokered_external_provider_stops_all_openai_drivers_before_request()
 -> Result<(), Box<dyn std::error::Error>> {
     const CHILD_ENV: &str = "CORTEXFS_TEST_BROKERED_PROVIDER_AUTH";
-    const PROVIDER: &str = "zztestegressauth";
+    const PROVIDER_ENV: &str = "CORTEXFS_TEST_BROKERED_PROVIDER_NAME";
     if std::env::var_os(CHILD_ENV).is_some() {
+        let provider = std::env::var(PROVIDER_ENV)?;
         assert!(matches!(
-            cortexfs::read_provider_system_secret(PROVIDER, "default"),
-            Ok(None)
+            cortexfs::read_provider_system_secret(&provider, "default"),
+            Ok(None) | Err(cortexfs::ProviderSystemSecretError::CannotRead)
         ));
         reset_provider_request_attempts();
         let mut output = Vec::new();
         let result = runner::provider_chat_completion(
-            &format!("{PROVIDER}/model"),
+            &format!("{provider}/model"),
             "hello",
             "run-1",
             &mut output,
@@ -441,7 +442,7 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
         };
         assert_eq!(
             error.message,
-            format!("missing provider credential: {PROVIDER}")
+            format!("missing provider credential: {provider}")
         );
         assert_eq!(provider_request_attempts(), 0);
         return Ok(());
@@ -449,13 +450,20 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
 
     let root = unique_temp_dir("runner-brokered-provider-auth")?;
     let providers = root.join("providers.d");
-    let control = root.join(format!("model/{PROVIDER}/model.d"));
+    let provider = format!(
+        "zztestegressauth{}{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    );
+    let control = root.join(format!("model/{provider}/model.d"));
     fs::create_dir_all(&providers)?;
     fs::create_dir_all(&control)?;
     fs::write(
-        providers.join(format!("{PROVIDER}.json")),
+        providers.join(format!("{provider}.json")),
         format!(
-            "{{\"name\":\"{PROVIDER}\",\"base_url\":\"https://api.example.test/v1\",\"formats\":[\"openai.chat\",\"openai.responses\"]}}\n"
+            "{{\"name\":\"{provider}\",\"base_url\":\"https://api.example.test/v1\",\"formats\":[\"openai.chat\",\"openai.responses\"]}}\n"
         ),
     )?;
     fs::write(
@@ -466,6 +474,7 @@ fn brokered_external_provider_stops_all_openai_drivers_before_request()
         .arg("brokered_external_provider_stops_all_openai_drivers_before_request")
         .arg("--nocapture")
         .env(CHILD_ENV, "1")
+        .env(PROVIDER_ENV, &provider)
         .env("CTX_PROVIDER_CONFIG_DIR", &providers)
         .env("CTX_ROOT", &root)
         .env(

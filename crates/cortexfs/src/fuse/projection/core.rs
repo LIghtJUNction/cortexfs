@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::support::plain::{
-    create_plain_dir, open_plain_directory, open_plain_file, path_metadata_no_follow,
-    plain_file_name, read_symlink_target,
+    open_plain_directory, open_plain_file, path_metadata_no_follow, plain_file_name,
+    read_symlink_target,
 };
 
 #[cfg(test)]
@@ -69,10 +69,11 @@ impl FuseProjection {
     /// Projects `getattr`.
     pub fn getattr(&self, abi_path: &str) -> Result<FuseAttr, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(attr) = self.virtual_object_attr(&normalized)? {
+        let snapshot = self.provider_snapshot_for_operation(&normalized)?;
+        if let Some(attr) = self.virtual_object_attr(&normalized, snapshot.as_ref())? {
             return Ok(attr);
         }
-        let path = self.resolve(&normalized)?;
+        let path = self.resolve_with_snapshot(&normalized, snapshot.as_ref())?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
         let mode = projected_metadata_mode(&normalized, &metadata);
         let size = if metadata.is_file() {
@@ -145,11 +146,14 @@ impl FuseProjection {
     /// Projects `readdir`.
     pub fn readdir(&self, abi_path: &str) -> Result<Vec<FuseDirEntry>, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(mut entries) = self.virtual_model_readdir(&normalized)? {
+        let snapshot = self.provider_snapshot_for_operation(&normalized)?;
+        if let Some(snapshot) = snapshot.as_ref()
+            && let Some(mut entries) = self.virtual_model_readdir(&normalized, snapshot)?
+        {
             entries.retain(|entry| !Self::is_generated_hidden_child(&normalized, entry.name()));
             return Ok(entries);
         }
-        let path = self.resolve(&normalized)?;
+        let path = self.resolve_with_snapshot(&normalized, snapshot.as_ref())?;
         let metadata = fs::symlink_metadata(&path).map_err(|error| fuse_metadata_error(&error))?;
         if !metadata.is_dir() {
             return Err(FuseError::NotDirectory);
@@ -198,10 +202,11 @@ impl FuseProjection {
     /// Projects a small text `read`.
     pub fn read_to_string(&self, abi_path: &str) -> Result<String, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(content) = self.virtual_object_content(&normalized)? {
+        let snapshot = self.provider_snapshot_for_operation(&normalized)?;
+        if let Some(content) = self.virtual_object_content(&normalized, snapshot.as_ref())? {
             return Ok(content);
         }
-        let path = self.resolve(&normalized)?;
+        let path = self.resolve_with_snapshot(&normalized, snapshot.as_ref())?;
         let metadata =
             path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
         if !metadata.is_file() {
@@ -230,10 +235,11 @@ impl FuseProjection {
     /// Projects an offset `read`.
     pub fn read_at(&self, abi_path: &str, offset: u64, size: usize) -> Result<Vec<u8>, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if let Some(content) = self.virtual_object_content(&normalized)? {
+        let snapshot = self.provider_snapshot_for_operation(&normalized)?;
+        if let Some(content) = self.virtual_object_content(&normalized, snapshot.as_ref())? {
             return read_bytes_at(content.as_bytes(), offset, size);
         }
-        let path = self.resolve(&normalized)?;
+        let path = self.resolve_with_snapshot(&normalized, snapshot.as_ref())?;
         let metadata =
             path_metadata_no_follow(&path).map_err(|error| fuse_metadata_error(&error))?;
         if !metadata.is_file() {
@@ -256,10 +262,11 @@ impl FuseProjection {
     /// Projects a symlink target.
     pub fn readlink(&self, abi_path: &str) -> Result<PathBuf, FuseError> {
         let normalized = normalize_fuse_abi_path(abi_path)?;
+        let snapshot = self.provider_snapshot_for_operation(&normalized)?;
         if let Some(alias) = model_alias_name(&normalized) {
-            return self.default_model_alias_target(alias);
+            return self.default_model_alias_target(alias, snapshot.as_ref().ok_or(FuseError::Io)?);
         }
-        let path = self.resolve(&normalized)?;
+        let path = self.resolve_with_snapshot(&normalized, snapshot.as_ref())?;
         read_symlink_target(&path).map_err(|error| fuse_readlink_error(&error))
     }
 
@@ -344,48 +351,55 @@ impl FuseProjection {
             return Err(FuseError::TooLarge);
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
-        if Self::is_session_store_path(&normalized) {
+        let snapshot = self.provider_snapshot_for_operation(&normalized)?;
+        self.write_control_file_at_with_snapshot(&normalized, offset, content, snapshot.as_ref())
+    }
+
+    fn write_control_file_at_with_snapshot(
+        &self,
+        normalized: &str,
+        offset: u64,
+        content: &[u8],
+        snapshot: Option<&ProviderSnapshot>,
+    ) -> Result<(), FuseError> {
+        if Self::is_session_store_path(normalized) {
             return Err(FuseError::NotFound);
         }
-        if Self::is_session_append_path(&normalized) {
-            return self.append_session_history_at(&normalized, offset, content);
+        if Self::is_session_append_path(normalized) {
+            return self.append_session_history_at(normalized, offset, content);
         }
         if offset != 0 {
-            if Self::is_agent_log_control_path(&normalized) {
-                return self.append_plain_file_at_end(&normalized, offset, content);
+            if Self::is_agent_log_control_path(normalized) {
+                return self.append_plain_file_at_end(normalized, offset, content);
             }
             return Err(FuseError::InvalidOffset);
         }
-        if Self::is_session_replace_path(&normalized) {
-            return self.replace_session_plain_file(&normalized, content);
+        if Self::is_session_replace_path(normalized) {
+            return self.replace_session_plain_file(normalized, content);
         }
-        if let Some(target) = Self::layout_atomic_temp_target(&normalized)
+        if let Some(target) = Self::layout_atomic_temp_target(normalized)
             && (Self::is_session_replace_path(&target) || Self::is_session_append_path(&target))
         {
-            return self.replace_session_plain_file(&normalized, content);
+            return self.replace_session_plain_file(normalized, content);
         }
         if normalized == format!("model/{MODEL_ROUTE_FILE}") {
-            let path = self.resolve(&normalized)?;
+            let path = self.resolve_with_snapshot(normalized, snapshot)?;
             let content =
                 std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
             return atomic_replace_text(&path, content).map_err(|_error| FuseError::Io);
         }
-        if !is_fuse_writable_control_path(&normalized) {
+        if snapshot
+            .and_then(|snapshot| projected_provider_model_control_file(snapshot, normalized))
+            .is_some()
+        {
+            return Err(FuseError::ReadOnly);
+        }
+        if !is_fuse_writable_control_path(normalized) {
             return Err(FuseError::NotControlFile);
         }
-        let path = self.resolve(&normalized)?;
+        let path = self.resolve_with_snapshot(normalized, snapshot)?;
         let content = std::str::from_utf8(content).map_err(|_error| FuseError::InvalidContent)?;
-        validate_model_control_write(&normalized, content)?;
-        if projected_provider_model_control_file(
-            &self.provider_config_dir,
-            &self.provider_model_cache_dir,
-            &normalized,
-        )?
-        .is_some()
-            && let Some(parent) = path.parent()
-        {
-            create_plain_dir(parent).map_err(|_error| FuseError::Io)?;
-        }
+        validate_model_control_write(normalized, content)?;
         atomic_replace_text(&path, content).map_err(|_error| FuseError::Io)
     }
 
@@ -402,6 +416,7 @@ impl FuseProjection {
             return Err(FuseError::TooLarge);
         }
         let normalized = normalize_fuse_abi_path(abi_path)?;
+        let snapshot = self.provider_snapshot_for_operation(&normalized)?;
         if Self::is_session_store_path(&normalized) {
             return Err(FuseError::NotFound);
         }
@@ -419,7 +434,12 @@ impl FuseProjection {
             {
                 self.authorize_layout_path(&normalized, uid)?;
             }
-            return self.write_control_file_at(&normalized, offset, content);
+            return self.write_control_file_at_with_snapshot(
+                &normalized,
+                offset,
+                content,
+                snapshot.as_ref(),
+            );
         }
         if Self::is_session_replace_path(&normalized) {
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
@@ -434,7 +454,12 @@ impl FuseProjection {
             if let Some((agent, control)) = Self::agent_control_target(&target)
                 && matches!(control, "model" | "window")
             {
-                self.validate_agent_window_pair(agent, control, content)?;
+                self.validate_agent_window_pair(
+                    agent,
+                    control,
+                    content,
+                    snapshot.as_ref().ok_or(FuseError::Io)?,
+                )?;
             }
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
@@ -447,12 +472,21 @@ impl FuseProjection {
             if let Some((agent, control)) = Self::agent_control_target(&normalized)
                 && matches!(control, "model" | "window")
             {
-                self.validate_agent_window_pair(agent, control, content)?;
+                self.validate_agent_window_pair(
+                    agent,
+                    control,
+                    content,
+                    snapshot.as_ref().ok_or(FuseError::Io)?,
+                )?;
             }
             return self.replace_session_plain_file_for_owner(&normalized, content, uid, gid);
         }
-        self.write_control_file_at(&normalized, 0, content)?;
-        Self::chown_fuse_plain_path(&self.resolve(&normalized)?, uid, gid)
+        self.write_control_file_at_with_snapshot(&normalized, 0, content, snapshot.as_ref())?;
+        Self::chown_fuse_plain_path(
+            &self.resolve_with_snapshot(&normalized, snapshot.as_ref())?,
+            uid,
+            gid,
+        )
     }
 
     pub(crate) fn append_plain_file_at_end(
@@ -648,14 +682,15 @@ impl FuseProjection {
     ) -> Result<(), FuseError> {
         let from = normalize_fuse_abi_path(from)?;
         let to = normalize_fuse_abi_path(to)?;
+        let snapshot = self.provider_snapshot_for_operation(&to)?;
         if Self::layout_atomic_temp_target(&from).as_deref() != Some(to.as_str()) {
             return Err(FuseError::NotControlFile);
         }
         let no_replace = no_replace || Self::is_session_append_path(&to);
         self.authorize_layout_path(&from, uid)?;
         self.authorize_layout_path(&to, uid)?;
-        let from_path = self.resolve(&from)?;
-        let to_path = self.resolve(&to)?;
+        let from_path = self.resolve_with_snapshot(&from, snapshot.as_ref())?;
+        let to_path = self.resolve_with_snapshot(&to, snapshot.as_ref())?;
         let parent = from_path.parent().ok_or(FuseError::InvalidPath)?;
         if to_path.parent() != Some(parent) {
             return Err(FuseError::InvalidPath);
@@ -684,7 +719,12 @@ impl FuseProjection {
             )
             .map_err(|_error| FuseError::Io)?;
             Self::validate_agent_layout_content(&to, content.as_bytes(), uid)?;
-            self.validate_agent_window_pair(agent, control, content.as_bytes())?;
+            self.validate_agent_window_pair(
+                agent,
+                control,
+                content.as_bytes(),
+                snapshot.as_ref().ok_or(FuseError::Io)?,
+            )?;
         }
         let renamed = if no_replace {
             nix::fcntl::renameat2(
@@ -837,6 +877,7 @@ impl FuseProjection {
         agent: &str,
         candidate_control: &str,
         candidate: &[u8],
+        snapshot: &ProviderSnapshot,
     ) -> Result<(), FuseError> {
         let candidate =
             std::str::from_utf8(candidate).map_err(|_error| FuseError::InvalidContent)?;
@@ -875,7 +916,7 @@ impl FuseProjection {
             .filter(|model| abi::path::is_model_reference(model))
             .ok_or(FuseError::InvalidContent)?;
         let model_name = if is_model_alias(model) {
-            let target = self.default_model_alias_target(model)?;
+            let target = self.default_model_alias_target(model, snapshot)?;
             target
                 .to_str()
                 .and_then(|target| target.strip_prefix("/ctx/model/"))
@@ -890,7 +931,7 @@ impl FuseProjection {
             .ok_or(FuseError::InvalidContent)?;
         let limit_path = format!("model/{provider}/{model}.d/limit");
         let limit_content = self
-            .virtual_model_content(&limit_path)?
+            .virtual_model_content(&limit_path, snapshot)?
             .ok_or(FuseError::InvalidContent)?;
         let limit =
             ModelContextLimit::parse_control(&limit_content).ok_or(FuseError::InvalidContent)?;
@@ -1231,10 +1272,37 @@ impl FuseProjection {
     }
 
     pub(crate) fn resolve(&self, abi_path: &str) -> Result<PathBuf, FuseError> {
-        if Self::is_session_store_path(abi_path) {
+        let snapshot = self.provider_snapshot_for_operation(abi_path)?;
+        self.resolve_with_snapshot(abi_path, snapshot.as_ref())
+    }
+
+    pub(crate) fn resolve_with_snapshot(
+        &self,
+        abi_path: &str,
+        snapshot: Option<&ProviderSnapshot>,
+    ) -> Result<PathBuf, FuseError> {
+        if Self::is_session_store_path(abi_path) || self.hides_model_residue(abi_path, snapshot)? {
             return Err(FuseError::NotFound);
         }
         resolve_fuse_abi_path(&self.root, abi_path)
+    }
+
+    fn provider_snapshot_for_operation(
+        &self,
+        abi_path: &str,
+    ) -> Result<Option<ProviderSnapshot>, FuseError> {
+        let target =
+            Self::layout_atomic_temp_target(abi_path).unwrap_or_else(|| abi_path.to_owned());
+        let provider_dependent = target == "model"
+            || target.starts_with("model/")
+            || Self::agent_control_target(&target)
+                .is_some_and(|(_agent, control)| matches!(control, "model" | "window"));
+        if !provider_dependent {
+            return Ok(None);
+        }
+        ProviderSnapshot::load(&self.provider_config_dir, &self.provider_model_cache_dir)
+            .map(Some)
+            .map_err(provider_error)
     }
 }
 

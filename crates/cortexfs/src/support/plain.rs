@@ -23,6 +23,12 @@ pub(crate) fn read_symlink_target(path: &Path) -> Result<PathBuf> {
         .map_err(std::io::Error::from)
 }
 
+pub(crate) fn read_symlink_target_at(parent: &fs::File, name: &str) -> Result<PathBuf> {
+    nix::fcntl::readlinkat(parent, name)
+        .map(PathBuf::from)
+        .map_err(std::io::Error::from)
+}
+
 #[doc(hidden)]
 pub fn read_small_text_file(path: &Path, max_bytes: u64) -> Result<String> {
     let file = open_plain_file(path)?;

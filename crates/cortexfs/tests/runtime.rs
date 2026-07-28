@@ -72,28 +72,80 @@ mod tests {
         Ok(())
     }
 
+    fn add_provider_fixture(command: &mut Command, fixture: &Path) -> std::io::Result<()> {
+        let providers = fixture.join("providers.d");
+        let cache = fixture.join("provider-models");
+        fs::create_dir_all(&providers)?;
+        fs::create_dir_all(&cache)?;
+        command
+            .args([
+                "--tmpfs",
+                "/etc/cortexfs",
+                "--dir",
+                "/etc/cortexfs/providers.d",
+                "--bind",
+            ])
+            .arg(&providers)
+            .arg("/etc/cortexfs/providers.d")
+            .args([
+                "--tmpfs",
+                "/var/lib/cortexfs",
+                "--dir",
+                "/var/lib/cortexfs/provider-models",
+                "--bind",
+            ])
+            .arg(&cache)
+            .arg("/var/lib/cortexfs/provider-models");
+        Ok(())
+    }
+
+    fn bootstrap_fixture(
+        fixture: &Path,
+        ctx: &str,
+        source: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut command = Command::new("/usr/bin/bwrap");
+        command.args(["--bind", "/", "/"]);
+        add_provider_fixture(&mut command, fixture)?;
+        let bootstrap = command
+            .args(["--", ctx, "bootstrap"])
+            .arg(source)
+            .output()?;
+        if !bootstrap.status.success() {
+            return Err(String::from_utf8_lossy(&bootstrap.stderr)
+                .into_owned()
+                .into());
+        }
+        Ok(())
+    }
+
     fn spawn_activation(
+        fixture: &Path,
         source: &Path,
         socket: &Path,
         runtime: &str,
         agent: &str,
     ) -> std::io::Result<ChildGuard> {
-        Command::new("/usr/bin/bwrap")
+        let mut command = Command::new("/usr/bin/bwrap");
+        command.args([
+            "--bind",
+            "/",
+            "/",
+            "--proc",
+            "/proc",
+            "--dev-bind",
+            "/dev",
+            "/dev",
+            "--tmpfs",
+            "/run",
+            "--dir",
+            "/run/cortexfs",
+            "--dir",
+            "/run/cortexfs/control",
+        ]);
+        add_provider_fixture(&mut command, fixture)?;
+        command
             .args([
-                "--bind",
-                "/",
-                "/",
-                "--proc",
-                "/proc",
-                "--dev-bind",
-                "/dev",
-                "/dev",
-                "--tmpfs",
-                "/run",
-                "--dir",
-                "/run/cortexfs",
-                "--dir",
-                "/run/cortexfs/control",
                 "--",
                 "/usr/bin/systemd-socket-activate",
                 "-l",
@@ -152,14 +204,7 @@ mod tests {
             require_program(Path::new(program))?;
         }
 
-        let bootstrap = Command::new(ctx)
-            .args(["bootstrap", source.to_str().ok_or("source")?])
-            .output()?;
-        if !bootstrap.status.success() {
-            return Err(String::from_utf8_lossy(&bootstrap.stderr)
-                .into_owned()
-                .into());
-        }
+        bootstrap_fixture(root.path(), ctx, &source)?;
         let agent = source.join("agent/coder");
         fs::write(
             &agent,
@@ -181,7 +226,7 @@ mod tests {
             "allow coder_t model:debug/echo use\nallow coder_t tool:tsh execute\n",
         )?;
 
-        let mut activation = spawn_activation(&source, &socket, runtime, "coder")?;
+        let mut activation = spawn_activation(root.path(), &source, &socket, runtime, "coder")?;
         wait_for_socket(&mut activation, &socket)?;
         let mut stream = UnixStream::connect(&socket).map_err(|error| {
             let stderr = activation.terminate_with_stderr();
@@ -227,14 +272,7 @@ mod tests {
         ] {
             require_program(Path::new(program))?;
         }
-        let bootstrap = Command::new(ctx)
-            .args(["bootstrap", source.to_str().ok_or("source")?])
-            .output()?;
-        if !bootstrap.status.success() {
-            return Err(String::from_utf8_lossy(&bootstrap.stderr)
-                .into_owned()
-                .into());
-        }
+        bootstrap_fixture(root.path(), ctx, &source)?;
         // Wrappers exec /ctx/bin/cortexfs-object-runner; plant the workspace-built
         // runner so envelope ABI matches this tree (system /usr/bin may lag).
         let runner = env!("CARGO_BIN_EXE_cortexfs-object-runner");
@@ -257,7 +295,8 @@ mod tests {
 
         for attempt in 1..=7 {
             let socket = root.path().join(format!("coder-{attempt}.sock"));
-            let mut activation = spawn_activation(&source, &socket, runtime, "reviewer")?;
+            let mut activation =
+                spawn_activation(root.path(), &source, &socket, runtime, "reviewer")?;
             wait_for_socket(&mut activation, &socket)?;
             let mut stream = UnixStream::connect(&socket)?;
             writeln!(

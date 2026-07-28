@@ -14,7 +14,7 @@ mod tests {
     use cortexfs::object::install::{InstallTier, install_object};
     use cortexfs::{
         AgentExecutableSocketExecution, AgentExecutableSocketRuntime, ObjectClass,
-        derive_agent_runtime_view, ensure_reference_tree, ensure_runtime_models,
+        derive_agent_runtime_view, ensure_reference_tree, ensure_runtime_models_from,
         inspect_object_layout, serve_agent_executable_socket_stream_once,
     };
     use serde_json::{Value, json};
@@ -237,11 +237,17 @@ mod tests {
 
     fn install_fixture_agent() -> Result<FixtureRoot, Box<dyn std::error::Error>> {
         let root = install_fixture_tool()?;
-        ensure_runtime_models(root.path()).map_err(|error| {
-            std::io::Error::other(format!(
-                "cannot materialize fixture runtime models: {error:?}"
-            ))
-        })?;
+        let provider_config = root.path().join("provider-config");
+        let provider_cache = root.path().join("provider-cache");
+        fs::create_dir_all(&provider_config)?;
+        fs::create_dir_all(&provider_cache)?;
+        ensure_runtime_models_from(root.path(), &provider_config, &provider_cache).map_err(
+            |error| {
+                std::io::Error::other(format!(
+                    "cannot materialize fixture runtime models: {error:?}"
+                ))
+            },
+        )?;
         let package = root.path().join("package");
         let agent = Path::new(env!("CARGO_BIN_EXE_cortexfs-sdk-fixture-agent"));
         let reference = root.path().join("agent/coder.d");

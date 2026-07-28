@@ -1517,6 +1517,7 @@ pub(crate) fn prompt_quoted(value: &str) -> String {
 #[cfg(test)]
 mod completion_tests {
     use super::*;
+    use crate::reference::bootstrap::ensure_runtime_models_from;
     use std::ffi::OsString;
     use std::io;
     use std::net::{Shutdown, TcpListener};
@@ -1694,31 +1695,38 @@ mod completion_tests {
         address: std::net::SocketAddr,
     ) -> io::Result<()> {
         ensure_reference_tree(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
-        ensure_runtime_models(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
+        let providers = root.join("providers.d");
+        let cache = root.join("provider-models");
+        fs::create_dir_all(&providers)?;
+        fs::create_dir_all(&cache)?;
+        fs::write(
+            providers.join("fixture.json"),
+            format!(
+                "{{\"name\":\"fixture\",\"base_url\":\"http://{address}/custom\",\"models\":[\"chat\"],\"model_limits\":{{\"chat\":8192}},\"formats\":[\"openai.chat\"]}}\n"
+            ),
+        )?;
+        ensure_runtime_models_from(root, &providers, &cache)
+            .map_err(|error| io::Error::other(format!("{error:?}")))?;
         fs::copy(runner, root.join("bin/cortexfs-object-runner"))?;
         fs::set_permissions(
             root.join("bin/cortexfs-object-runner"),
             fs::Permissions::from_mode(0o755),
         )?;
-        let model = root.join("model/fixture/chat");
-        let control = root.join("model/fixture/chat.d");
-        fs::create_dir_all(&control)?;
-        fs::write(
-            &model,
-            "#!/ctx/bin/cortexfs-object-runner\n# cortexfs.object=model\n# cortexfs.name=fixture/chat\n",
-        )?;
-        fs::set_permissions(&model, fs::Permissions::from_mode(0o755))?;
-        fs::write(
-            control.join("default"),
-            format!("base_url=http://{address}/custom\n"),
-        )?;
-        fs::write(control.join("driver"), "agent=openai-chat\n")?;
-        fs::write(control.join("limit"), "8192\n")?;
         fs::write(root.join("agent/coder.d/model"), "fixture/chat\n")?;
         fs::write(
             root.join("agent/coder.d/policy"),
             "allow coder_t model:fixture/chat use\n",
         )
+    }
+
+    fn prepare_empty_reference_fixture(root: &Path) -> io::Result<()> {
+        ensure_reference_tree(root).map_err(|error| io::Error::other(format!("{error:?}")))?;
+        let providers = root.join("providers.d");
+        let cache = root.join("provider-models");
+        fs::create_dir_all(&providers)?;
+        fs::create_dir_all(&cache)?;
+        ensure_runtime_models_from(root, &providers, &cache)
+            .map_err(|error| io::Error::other(format!("{error:?}")))
     }
 
     #[test]
@@ -1825,8 +1833,7 @@ mod completion_tests {
     fn owned_child_channel_uses_canonical_parent_home() {
         let root = completion_root("canonical-child-channel");
         let _ignored = fs::remove_dir_all(&root);
-        assert!(ensure_reference_tree(&root).is_ok());
-        assert!(ensure_runtime_models(&root).is_ok());
+        assert!(prepare_empty_reference_fixture(&root).is_ok());
         let parent = derive_agent_runtime_view(&root, "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {
@@ -1848,8 +1855,7 @@ mod completion_tests {
     fn owned_child_channel_rejects_parent_owner_mismatch() {
         let root = completion_root("child-channel-owner-mismatch");
         let _ignored = fs::remove_dir_all(&root);
-        assert!(ensure_reference_tree(&root).is_ok());
-        assert!(ensure_runtime_models(&root).is_ok());
+        assert!(prepare_empty_reference_fixture(&root).is_ok());
         let parent = derive_agent_runtime_view(&root, "coder");
         assert!(parent.is_ok());
         let Ok(parent) = parent else {

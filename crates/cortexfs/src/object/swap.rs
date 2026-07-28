@@ -1,7 +1,7 @@
-use super::install::{InstallError, rename_noreplace};
-use super::receipt::{EntryKind, EntryReceipt, entry_matches};
+use super::install::InstallError;
 #[cfg(test)]
 use crate::support::plain::proc_fd_path;
+use crate::support::receipt::{EntryKind, EntryReceipt, entry_matches, park_entry, restore_entry};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -132,17 +132,25 @@ pub(super) fn move_exact(
     receipt: EntryReceipt,
     kind: EntryKind,
 ) -> Result<(), String> {
-    require_entry(source, source_name, receipt, kind)?;
-    rename_noreplace(source, source_name, target, target_name)
-        .map_err(|error| format!("cannot quarantine object entry: {error}"))?;
-    #[cfg(test)]
-    recreate_source(source, source_name)?;
-    verify_moved(source, source_name, target, target_name, receipt, kind)
+    park_entry(source, source_name, target, target_name, receipt, kind)
+        .map_err(|error| format!("cannot quarantine object entry: {error}"))
 }
 
 #[cfg(test)]
 pub(super) fn set_recreated_source(name: Option<&'static str>) -> Option<&'static str> {
-    RECREATED_SOURCE.with(|fault| fault.replace(name))
+    let previous = RECREATED_SOURCE.with(|fault| fault.replace(name));
+    let hook = name.map(|_| -> crate::support::receipt::ParkHook { Box::new(recreate_hook) });
+    crate::support::receipt::set_park_hook(hook);
+    previous
+}
+
+#[cfg(test)]
+fn recreate_hook(source: &fs::File, source_name: &str) -> std::io::Result<()> {
+    if RECREATED_SOURCE.with(Cell::get) != Some(source_name) {
+        let _previous = crate::support::receipt::set_park_hook(Some(Box::new(recreate_hook)));
+        return Ok(());
+    }
+    recreate_source(source, source_name).map_err(std::io::Error::other)
 }
 
 #[cfg(test)]
@@ -163,40 +171,6 @@ fn recreate_source(source: &fs::File, source_name: &str) -> Result<(), String> {
         .map_err(|error| format!("cannot recreate moved stage source: {error}"))
 }
 
-fn verify_moved(
-    source: &fs::File,
-    source_name: &str,
-    target: &fs::File,
-    target_name: &str,
-    receipt: EntryReceipt,
-    kind: EntryKind,
-) -> Result<(), String> {
-    if entry_matches(target, target_name, receipt, kind)
-        && require_missing(source, source_name).is_ok()
-    {
-        return Ok(());
-    }
-    let detail = "quarantined object entry did not match its retained receipt";
-    match restore_exact(target, target_name, source, source_name, receipt, kind) {
-        Ok(()) => Err(format!("{detail}; restored moved entry")),
-        Err(error) => {
-            let sync = sync_dirs(source, target)
-                .err()
-                .map_or_else(String::new, |sync| format!("; {sync}"));
-            let disposition = if entry_matches(target, target_name, receipt, kind) {
-                format!("; matching receipt retained as {target_name}")
-            } else if entry_matches(source, source_name, receipt, kind) {
-                format!("; matching receipt restored as {source_name}")
-            } else {
-                "; quarantine receipt no longer matches".to_owned()
-            };
-            Err(format!(
-                "{detail}; restore failed: {error}{disposition}{sync}"
-            ))
-        }
-    }
-}
-
 pub(super) fn restore_exact(
     source: &fs::File,
     source_name: &str,
@@ -207,11 +181,8 @@ pub(super) fn restore_exact(
 ) -> Result<(), String> {
     require_entry(source, source_name, receipt, kind)?;
     require_missing(target, target_name)?;
-    rename_noreplace(source, source_name, target, target_name)
-        .map_err(|error| format!("cannot restore quarantined object entry: {error}"))?;
-    require_entry(target, target_name, receipt, kind)?;
-    require_missing(source, source_name)?;
-    sync_dirs(source, target)
+    restore_entry(source, source_name, target, target_name, receipt, kind)
+        .map_err(|error| format!("cannot restore quarantined object entry: {error}"))
 }
 
 pub(super) fn require_entry(

@@ -39,7 +39,23 @@ pub fn ensure_reference_tree(root: &Path) -> Result<ReferenceTreeBootstrap, Refe
 /// backing source tree aligned for runtime execution without making the pure
 /// reference-tree bootstrap depend on host provider state.
 pub fn ensure_runtime_models(root: &Path) -> Result<(), ReferenceTreeError> {
-    ensure_reference_models(root)
+    ensure_runtime_models_from(
+        root,
+        Path::new(SYSTEM_PROVIDER_CONFIG_DIR),
+        Path::new(SYSTEM_PROVIDER_MODEL_CACHE_DIR),
+    )
+}
+
+/// Materializes runtime-visible model wrappers from explicit provider
+/// configuration and cache directories.
+pub fn ensure_runtime_models_from(
+    root: &Path,
+    config_dir: &Path,
+    cache_dir: &Path,
+) -> Result<(), ReferenceTreeError> {
+    ensure_reference_debug_model(root)?;
+    let models = reference::reconcile::reconcile_provider_model_tree(root, config_dir, cache_dir)?;
+    ensure_reference_model_aliases(root, &models)
 }
 
 pub(crate) struct ReferenceAgentSpec {
@@ -72,16 +88,6 @@ pub(crate) const REFERENCE_AGENTS: &[ReferenceAgentSpec] = &[
 ];
 pub(crate) const REFERENCE_OBJECT_RUNNER: &str = "/ctx/bin/cortexfs-object-runner";
 
-pub(crate) fn ensure_reference_models(root: &Path) -> Result<(), ReferenceTreeError> {
-    ensure_reference_debug_model(root)?;
-    let models = ensure_reference_provider_models_from(
-        root,
-        Path::new(SYSTEM_PROVIDER_CONFIG_DIR),
-        Path::new(SYSTEM_PROVIDER_MODEL_CACHE_DIR),
-    )?;
-    ensure_reference_model_aliases(root, &models)
-}
-
 pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceTreeError> {
     install_executable_object_wrapper(
         root,
@@ -105,19 +111,7 @@ pub(crate) fn ensure_reference_debug_model(root: &Path) -> Result<(), ReferenceT
     .map_err(ReferenceTreeError::Object)
 }
 
-pub(crate) fn ensure_reference_provider_models_from(
-    root: &Path,
-    config_dir: &Path,
-    cache_dir: &Path,
-) -> Result<Vec<ProjectedProviderModel>, ReferenceTreeError> {
-    let models = projected_provider_models(config_dir, cache_dir)
-        .map_err(|_error| ReferenceTreeError::CannotCreate)?;
-    for model in &models {
-        ensure_reference_provider_model(root, model)?;
-    }
-    Ok(models)
-}
-
+#[cfg(test)]
 pub(crate) fn ensure_reference_provider_model(
     root: &Path,
     model: &ProjectedProviderModel,
@@ -126,7 +120,7 @@ pub(crate) fn ensure_reference_provider_model(
     let controls = MODEL_CONTROL_FILES
         .iter()
         .filter_map(|file| {
-            provider_model_control_content(model, file).map(|content| (*file, content))
+            provider::projected_control_content(model, file).map(|content| (*file, content))
         })
         .collect::<Vec<_>>();
     let overrides = controls
@@ -148,71 +142,10 @@ pub(crate) fn ensure_reference_model_aliases(
     root: &Path,
     models: &[ProjectedProviderModel],
 ) -> Result<(), ReferenceTreeError> {
-    let main = reference_model_alias_target(root, DEFAULT_MODEL_ALIAS_TARGET, models, None);
-    let helper =
-        reference_model_alias_target(root, HELPER_MODEL_ALIAS_TARGET, models, Some("gpt-5.6-sol"));
-    for (alias, target) in MODEL_ALIASES.iter().copied().map(|alias| {
-        let target = match alias {
-            DEFAULT_MODEL_ALIAS => main.clone(),
-            HELPER_MODEL_ALIAS => helper.clone(),
-            alias => capability_model_alias_target(alias, models).unwrap_or_else(|| main.clone()),
-        };
-        (alias, target)
-    }) {
-        ensure_reference_model_alias(&root.join("model").join(alias), Path::new(&target))?;
+    for alias in MODEL_ALIASES {
+        ensure_reference_model_alias(&root.join("model").join(alias), alias, models)?;
     }
     Ok(())
-}
-
-fn capability_model_alias_target(alias: &str, models: &[ProjectedProviderModel]) -> Option<String> {
-    models
-        .iter()
-        .find(|model| match alias {
-            "fast" => model_name_has_word(&model.model, "fast"),
-            "reason" => model.cap.lines().any(|cap| cap.trim() == "reasoning"),
-            "code" => ["code", "coder", "coding"]
-                .iter()
-                .any(|word| model_name_has_word(&model.model, word)),
-            "vision" => model
-                .cap
-                .lines()
-                .any(|cap| matches!(cap.trim(), "vision" | "image_input")),
-            _ => false,
-        })
-        .map(|model| format!("/ctx/model/{}/{}", model.provider, model.model))
-}
-
-fn model_name_has_word(model: &str, expected: &str) -> bool {
-    model
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .any(|word| word.eq_ignore_ascii_case(expected))
-}
-
-pub(crate) fn reference_model_alias_target(
-    root: &Path,
-    preferred: &str,
-    models: &[ProjectedProviderModel],
-    preferred_model: Option<&str>,
-) -> String {
-    if reference_model_target_exists(root, preferred) {
-        return preferred.to_owned();
-    }
-    if let Some(model_name) = preferred_model
-        && let Some(model) = models.iter().find(|model| model.model == model_name)
-    {
-        return format!("/ctx/model/{}/{}", model.provider, model.model);
-    }
-    models.first().map_or_else(
-        || format!("/ctx/model/{DEBUG_ECHO_MODEL}"),
-        |model| format!("/ctx/model/{}/{}", model.provider, model.model),
-    )
-}
-
-pub(crate) fn reference_model_target_exists(root: &Path, target: &str) -> bool {
-    let Some(model) = target.strip_prefix("/ctx/model/") else {
-        return false;
-    };
-    fs::symlink_metadata(root.join("model").join(model)).is_ok_and(|metadata| metadata.is_file())
 }
 
 pub(crate) fn ensure_reference_docs(root: &Path) -> Result<(), ReferenceTreeError> {
@@ -574,6 +507,7 @@ pub(crate) fn ensure_reference_global_tools(root: &Path) -> Result<(), Reference
 #[cfg(test)]
 mod reference_model_tests {
     use super::*;
+    use crate::reference::reconcile::reconcile_provider_model_tree;
 
     #[test]
     fn user_manager_status_groups_require_matching_identity() {
@@ -621,7 +555,7 @@ mod reference_model_tests {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         ensure_reference_bin(root.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
-        ensure_reference_provider_models_from(root.path(), config_dir.path(), cache_dir.path())
+        reconcile_provider_model_tree(root.path(), config_dir.path(), cache_dir.path())
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
 
         assert!(root.path().join("model/api.test/gpt-5.6-terra").is_file());

@@ -15,6 +15,8 @@ pub enum ProviderNameError {
     MissingNameForAddress,
     /// The configured provider name is not a `CortexFS` object name.
     InvalidName,
+    /// The configured provider name collides with a reserved `/ctx/model` entry.
+    ReservedName,
 }
 
 /// Returns the stable `CortexFS` provider name for a provider config.
@@ -29,18 +31,27 @@ pub fn provider_name_from_config(
 ) -> Result<String, ProviderNameError> {
     let host = provider_host_from_base_url(base_url).ok_or(ProviderNameError::MissingHost)?;
     if let Some(name) = name.map(str::trim).filter(|value| !value.is_empty()) {
-        return if is_object_name(name) {
-            Ok(name.to_owned())
-        } else {
-            Err(ProviderNameError::InvalidName)
-        };
+        if !is_object_name(name) {
+            return Err(ProviderNameError::InvalidName);
+        }
+        return (!is_reserved_provider_name(name))
+            .then(|| name.to_owned())
+            .ok_or(ProviderNameError::ReservedName);
     }
 
     if provider_host_requires_name(&host) {
         return Err(ProviderNameError::MissingNameForAddress);
     }
 
-    Ok(canonical_provider_name_from_host(&host).to_owned())
+    let name = canonical_provider_name_from_host(&host);
+    (!is_reserved_provider_name(name))
+        .then(|| name.to_owned())
+        .ok_or(ProviderNameError::ReservedName)
+}
+
+/// Returns whether a provider name would shadow a built-in model namespace.
+pub(crate) fn is_reserved_provider_name(name: &str) -> bool {
+    name == DEBUG_ECHO_PROVIDER || MODEL_ALIASES.contains(&name) || name == MODEL_ROUTE_FILE
 }
 
 /// Returns the stable `CortexFS` provider name for a provider base URL.

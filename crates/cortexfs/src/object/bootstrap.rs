@@ -249,3 +249,35 @@ pub fn executable_wrapper_script(class: ObjectClass, name: &str, wrapper_target:
         shell_single_quote(wrapper_target)
     )
 }
+
+/// Writes one provider-model executable/control pair into an isolated stage.
+/// The caller publishes the enclosing provider directory as one transaction.
+pub(crate) fn stage_generated_model_pair(
+    provider_dir: &fs::File,
+    model: &str,
+    id: &str,
+    wrapper_target: &str,
+    control_overrides: &[(&str, &str)],
+) -> Result<(), ObjectBootstrapError> {
+    if !is_object_name(model) || !is_object_name_for_class(ObjectClass::Model, id) {
+        return Err(ObjectBootstrapError::InvalidObjectName);
+    }
+    if !is_valid_wrapper_target(wrapper_target) {
+        return Err(ObjectBootstrapError::InvalidWrapperTarget);
+    }
+    validate_control_overrides(ObjectClass::Model, control_overrides)?;
+    let control_name = format!("{model}.d");
+    let control = support::plain::create_plain_dir_at(provider_dir, &control_name, 0o700)
+        .map_err(|_error| ObjectBootstrapError::CannotCreate)?;
+    for file in MODEL_CONTROL_FILES {
+        let content = object_control_content(ObjectClass::Model, id, file, control_overrides)?;
+        support::plain::write_text_file_at(&control, file, &content, 0o644)
+            .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
+    }
+    let wrapper = executable_wrapper_script(ObjectClass::Model, id, wrapper_target);
+    support::plain::write_text_file_at(provider_dir, model, &wrapper, 0o755)
+        .map_err(|_error| ObjectBootstrapError::CannotRecord)?;
+    provider_dir
+        .sync_all()
+        .map_err(|_error| ObjectBootstrapError::CannotRecord)
+}

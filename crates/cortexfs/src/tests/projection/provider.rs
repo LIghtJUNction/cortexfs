@@ -10,7 +10,7 @@ fn assert_model_entries(projection: &FuseProjection, path: &str, expected: &[&st
 }
 
 #[test]
-fn fuse_projection_prefers_provider_backing_control_content() {
+fn fuse_projection_ignores_provider_backing_control_content() -> std::io::Result<()> {
     let root = clean_test_dir("fuse-provider-backing-control");
     let providers = root.join("providers.d");
     write_text_file(
@@ -22,11 +22,112 @@ fn fuse_projection_prefers_provider_backing_control_content() {
 
     assert_eq!(
         projection.read_to_string("model/local/chat.d/effort"),
-        Ok("high\n".to_owned())
+        Ok("auto\n".to_owned())
     );
     assert!(matches!(
         projection.getattr("model/local/chat.d/effort"),
-        Ok(ref attr) if attr.size() == 5 && attr.mode() == 0o644
+        Ok(ref attr) if attr.size() == 5 && attr.mode() == 0o444
+    ));
+    assert_eq!(
+        projection.write_control_file("model/local/chat.d/effort", "high\n"),
+        Err(FuseError::ReadOnly)
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("model/local/chat.d/effort"))?,
+        "high\n"
+    );
+    Ok(())
+}
+
+#[test]
+fn fuse_projection_hides_reserved_and_inactive_wrong_kind_residue() -> std::io::Result<()> {
+    let root = clean_test_dir("fuse-provider-reserved-residue");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    fs::create_dir_all(&providers)?;
+    fs::create_dir_all(&cache)?;
+    fs::create_dir_all(root.join("model/debug"))?;
+    write_text_file(&root.join("model/debug/foreign"), "hidden\n");
+    fs::DirBuilder::new().create(root.join("model/route"))?;
+    fs::DirBuilder::new().create(root.join("model/main"))?;
+    symlink("debug", root.join("model/inactive"))?;
+    let projection = FuseProjection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    assert_model_entries(&projection, "model/debug", &["echo", "echo.d"]);
+    for path in ["model/debug/foreign", "model/inactive"] {
+        assert_eq!(projection.getattr(path), Err(FuseError::NotFound));
+        assert_eq!(projection.read_to_string(path), Err(FuseError::NotFound));
+        assert_eq!(projection.readdir(path), Err(FuseError::NotFound));
+    }
+    assert!(matches!(
+        projection.getattr("model/route"),
+        Ok(ref attr) if attr.file_type() == FuseFileType::Regular
+    ));
+    assert_eq!(
+        projection.read_to_string("model/route"),
+        Ok(crate::DEFAULT_MODEL_ROUTE.to_owned())
+    );
+    assert!(matches!(
+        projection.getattr("model/main"),
+        Ok(ref attr) if attr.file_type() == FuseFileType::Symlink
+    ));
+    assert_eq!(
+        projection.readlink("model/main"),
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
+    );
+    Ok(())
+}
+
+#[test]
+fn fuse_provider_readdir_uses_one_config_snapshot() {
+    let root = clean_test_dir("fuse-provider-one-snapshot");
+    let providers = root.join("providers.d");
+    let config = providers.join("local.json");
+    write_text_file(
+        &config,
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["old"]}"#,
+    );
+    let replacement = config;
+    let previous = crate::provider::set_load_hook(Some(Box::new(move || {
+        write_text_file(
+            &replacement,
+            r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["new"]}"#,
+        );
+    })));
+    let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
+
+    assert_model_entries(&projection, "model/local", &["old", "old.d"]);
+    let _previous = crate::provider::set_load_hook(previous);
+    assert_model_entries(&projection, "model/local", &["new", "new.d"]);
+}
+
+#[test]
+fn fuse_provider_fallback_uses_the_virtual_lookup_snapshot() {
+    let root = clean_test_dir("fuse-provider-fallback-snapshot");
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    let config = providers.join("local.json");
+    write_text_file(
+        &config,
+        r#"{"name":"local","base_url":"http://127.0.0.1/v1","models":["chat"]}"#,
+    );
+    write_text_file(&root.join("model/offline"), "#!/bin/sh\n");
+    assert!(fs::create_dir_all(&cache).is_ok());
+    let replacement = config;
+    let previous = crate::provider::set_load_hook(Some(Box::new(move || {
+        write_text_file(&replacement, "{");
+    })));
+    let projection = FuseProjection::new(&root)
+        .with_provider_config_dir(&providers)
+        .with_provider_model_cache_dir(&cache);
+
+    let attr = projection.getattr("model/offline");
+    let _previous = crate::provider::set_load_hook(previous);
+    assert!(matches!(
+        attr,
+        Ok(ref attr) if attr.file_type() == FuseFileType::Regular
     ));
 }
 
@@ -130,14 +231,13 @@ fn fuse_projection_projects_configured_provider_models() {
         projection.read_to_string("model/api.test/gpt-5.6-terra.d/fallback"),
         Ok("api.test/gpt-5.6\napi.test/gpt-5.6-sol\napi.test/gpt-5.6-luna\n".to_owned())
     );
-    assert!(
-        projection
-            .write_control_file("model/api.test/gpt-5.6-terra.d/effort", "high\n")
-            .is_ok()
+    assert_eq!(
+        projection.write_control_file("model/api.test/gpt-5.6-terra.d/effort", "high\n"),
+        Err(FuseError::ReadOnly)
     );
     assert_eq!(
         projection.read_to_string("model/api.test/gpt-5.6-terra.d/effort"),
-        Ok("high\n".to_owned())
+        Ok("auto\n".to_owned())
     );
     let attr = projection.getattr("model/api.test/gpt-5.6-terra");
     assert!(matches!(attr, Ok(ref attr) if attr.mode() & 0o777 == 0o555));
@@ -234,7 +334,7 @@ fn fuse_projection_uses_unknown_limit_without_catalog_cache() {
 }
 
 #[test]
-fn fuse_projection_skips_provider_with_invalid_local_limits() {
+fn fuse_projection_rejects_provider_with_invalid_local_limits() {
     for (case, limits) in [("zero", r#"{"chat":0}"#), ("foreign", r#"{"other":32768}"#)] {
         let root = reference_tree(&format!("fuse-provider-invalid-limit-{case}"));
         let providers = root.join("providers.d");
@@ -246,42 +346,42 @@ fn fuse_projection_skips_provider_with_invalid_local_limits() {
         );
         let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
-        assert_eq!(projection.getattr("model/local"), Err(FuseError::NotFound));
+        assert_eq!(
+            projection.getattr("model/local"),
+            Err(FuseError::InvalidContent)
+        );
     }
 }
 
 #[test]
-fn fuse_projection_keeps_debug_hook_dirs_disk_backed() {
+fn fuse_projection_hides_noncanonical_debug_hook_dirs() {
     let root = clean_test_dir("fuse-debug-model-hooks");
     assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/pre.d")).is_ok());
     assert!(fs::create_dir_all(root.join("model/debug/echo.d/hooks/post.d")).is_ok());
     let projection = FuseProjection::new(&root);
 
-    for path in [
-        "model/debug",
-        "model/debug/echo.d",
-        "model/debug/echo.d/hooks",
-        "model/debug/echo.d/hooks/pre.d",
-        "model/debug/echo.d/hooks/post.d",
-    ] {
+    for path in ["model/debug", "model/debug/echo.d"] {
         let attr = projection.getattr(path);
         assert!(matches!(
             attr,
             Ok(ref attr) if attr.file_type() == FuseFileType::Directory
         ));
     }
-    let hook_entries = projection.readdir("model/debug/echo.d/hooks");
+    for path in [
+        "model/debug/echo.d/hooks",
+        "model/debug/echo.d/hooks/pre.d",
+        "model/debug/echo.d/hooks/post.d",
+    ] {
+        assert_eq!(projection.getattr(path), Err(FuseError::NotFound));
+    }
     assert_eq!(
-        hook_entries.map(|entries| entries
-            .into_iter()
-            .map(|entry| entry.name().to_owned())
-            .collect::<Vec<_>>()),
-        Ok(vec!["post.d".to_owned(), "pre.d".to_owned()])
+        projection.readdir("model/debug/echo.d/hooks"),
+        Err(FuseError::NotFound)
     );
 }
 
 #[test]
-fn fuse_projection_rejects_symlink_provider_model_control_dir() {
+fn fuse_projection_does_not_touch_symlink_provider_model_control_dir() {
     let root = reference_tree("fuse-provider-model-control-symlink");
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
@@ -314,7 +414,7 @@ fn fuse_projection_rejects_symlink_provider_model_control_dir() {
 
     assert_eq!(
         projection.write_control_file("model/api.test/gpt-5.6-terra.d/effort", "high\n"),
-        Err(FuseError::Io)
+        Err(FuseError::ReadOnly)
     );
     assert!(!outside.join("effort").exists());
     assert!(
@@ -382,7 +482,7 @@ fn fuse_projection_uses_configured_provider_name_for_address_provider() {
 }
 
 #[test]
-fn fuse_projection_ignores_symlink_provider_configs() {
+fn fuse_projection_rejects_symlink_provider_configs() {
     let root = reference_tree("fuse-symlink-provider-config");
     let providers = root.join("providers.d");
     let outside = root.join("outside-provider.json");
@@ -401,20 +501,11 @@ fn fuse_projection_ignores_symlink_provider_configs() {
     assert!(symlink(&outside, providers.join("local.json")).is_ok());
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
-    let model_entries = projection.readdir("model");
-    assert!(model_entries.is_ok());
-    let model_names = model_entries
-        .unwrap_or_default()
-        .into_iter()
-        .map(|entry| entry.name().to_owned())
-        .collect::<Vec<_>>();
+    assert_eq!(projection.readdir("model"), Err(FuseError::InvalidContent));
     assert_eq!(
-        model_names,
-        [
-            "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
-        ]
+        projection.getattr("model/local"),
+        Err(FuseError::InvalidContent)
     );
-    assert_eq!(projection.getattr("model/local"), Err(FuseError::NotFound));
 }
 
 #[test]
@@ -566,6 +657,8 @@ fn fuse_projection_skips_disabled_provider_models() {
 }
 "#,
     );
+    write_text_file(&root.join("model/api.test/gpt-5.6-terra"), "stale\n");
+    write_text_file(&root.join("model/offline"), "flat\n");
     let projection = FuseProjection::new(&root).with_provider_config_dir(&providers);
 
     let model_entries = projection.readdir("model");
@@ -578,12 +671,20 @@ fn fuse_projection_skips_disabled_provider_models() {
     assert_eq!(
         model_names,
         [
-            "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
+            "code", "debug", "fast", "helper", "main", "offline", "reason", "route", "vision"
         ]
     );
-    assert_eq!(
+    assert!(matches!(
         projection.getattr("model/api.test"),
         Err(FuseError::NotFound)
+    ));
+    assert!(matches!(
+        projection.read_to_string("model/api.test/gpt-5.6-terra"),
+        Err(FuseError::NotFound)
+    ));
+    assert_eq!(
+        projection.read_to_string("model/offline").as_deref(),
+        Ok("flat\n")
     );
 }
 use super::*;

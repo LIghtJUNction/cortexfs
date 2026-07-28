@@ -88,6 +88,10 @@ pub mod support;
 pub use abi::authority::*;
 pub use abi::request::*;
 pub use provider::discovery::*;
+pub(crate) use provider::{
+    ProjectedProviderModel, ProviderConfig, ProviderModelCache, ProviderSnapshot,
+    current_model_alias_target, is_current_model_alias_target,
+};
 pub use support::control::ControlLineIssue;
 pub use support::jsonl::{JsonlLineShape, for_each_jsonl_line, parse_jsonl_line};
 pub use support::layout::{LayoutPathRole, PathLayoutIssue};

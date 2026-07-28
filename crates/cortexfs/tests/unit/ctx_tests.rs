@@ -63,7 +63,7 @@ use cortexfs::{
     DEFAULT_WORKER_MODEL, EventStreamIssue, MessageStreamIssue, ModelCapabilityIssue,
     ModelDriverRouteError, SESSION_REQUIRED_FILES, SessionControlKind, SessionIndexKind,
     ToolSchemaIssue, columnar, derive_agent_runtime_view, ensure_reference_tree,
-    ensure_runtime_models, install_executable_object_wrapper, parse_abi_path,
+    install_executable_object_wrapper, parse_abi_path,
 };
 use std::cell::Cell;
 use std::fs;

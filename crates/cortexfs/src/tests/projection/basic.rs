@@ -1327,7 +1327,8 @@ fn fuse_projection_exposes_reference_tree_ops() {
     assert_eq!(
         model_names,
         [
-            "code", "debug", "fast", "helper", "main", "reason", "route", "vision"
+            "code", "debug", "fast", "helper", "main", "qwen", "qwen.d", "reason", "route",
+            "vision"
         ]
     );
     let main_node = projection.lookup(&model_node, "main");
@@ -1339,20 +1340,19 @@ fn fuse_projection_exposes_reference_tree_ops() {
     ));
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
     assert_eq!(
         projection.readlink("model/helper"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6-sol"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
-    assert!(
-        projection
-            .set_model_alias("model/main", Path::new("api.test/gpt-5.6"))
-            .is_ok()
+    assert_eq!(
+        projection.set_model_alias("model/main", Path::new("api.test/gpt-5.6")),
+        Err(FuseError::InvalidPath)
     );
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/api.test/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
     assert_eq!(
         projection.set_model_alias("model/test", Path::new("api.test/gpt-5.6")),
@@ -1365,7 +1365,7 @@ fn fuse_projection_exposes_reference_tree_ops() {
     assert!(projection.remove_model_alias("model/main").is_ok());
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/debug/echo"))
     );
     let debug_node = projection.lookup(&model_node, "debug");
     assert!(matches!(
@@ -1492,8 +1492,7 @@ fn fuse_projection_inspection_never_executes_object_wrapper() {
 #[test]
 fn fuse_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
     let root = reference_tree("fuse-model-alias-temp");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let projection = configured_alias_projection(&root);
     let old_predictable_temp = root
         .join("model")
         .join(format!(".main.tmp.{}", std::process::id()));
@@ -1530,8 +1529,7 @@ fn fuse_projection_model_alias_does_not_reuse_predictable_temp_symlink() {
 #[test]
 fn fuse_projection_renames_model_alias_symlink_atomically() {
     let root = reference_tree("fuse-model-alias-rename");
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let projection = configured_alias_projection(&root);
 
     assert!(
         projection
@@ -1559,12 +1557,11 @@ fn fuse_projection_model_alias_rejects_symlink_model_directory_without_touching_
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(symlink(&outside, root.join("model")).is_ok());
     assert!(symlink("/ctx/model/keep", outside.join("main")).is_ok());
-    let projection =
-        FuseProjection::new(&root).with_provider_config_dir(root.join("missing-providers.d"));
+    let projection = configured_alias_projection(&root);
 
     assert_eq!(
         projection.readlink("model/main"),
-        Ok(PathBuf::from("/ctx/model/openai/gpt-5.6"))
+        Ok(PathBuf::from("/ctx/model/api.test/gpt-5.6"))
     );
     assert_eq!(
         projection.set_model_alias("model/main", Path::new("api.test/gpt-5.6")),
@@ -1590,6 +1587,19 @@ fn fuse_projection_model_alias_rejects_symlink_model_directory_without_touching_
             .count()
     });
     assert_eq!(temp_leftovers, 0);
+}
+
+fn configured_alias_projection(root: &Path) -> FuseProjection {
+    let providers = root.join("providers.d");
+    let cache = root.join("provider-models");
+    write_text_file(
+        &providers.join("api.test.json"),
+        r#"{"base_url":"https://api.test/v1","models":["gpt-5.6"]}"#,
+    );
+    assert!(fs::create_dir_all(&cache).is_ok());
+    FuseProjection::new(root)
+        .with_provider_config_dir(providers)
+        .with_provider_model_cache_dir(cache)
 }
 
 #[test]

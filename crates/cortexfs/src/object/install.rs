@@ -3,10 +3,10 @@ use crate::object::bootstrap::validate_object_control_content;
 use crate::object::metadata::tool_exec_metadata;
 use crate::object::present;
 use crate::object::receipt::{
-    EntryKind, EntryReceipt, InstallReceiptData, entry_matches, receipt_for, verify_executable,
-    write_install_receipt,
+    InstallReceiptData, receipt_for, verify_executable, write_install_receipt,
 };
 use crate::support::plain::{open_plain_directory, open_plain_file, write_text_file_at};
+use crate::support::receipt::{EntryKind, EntryReceipt, entry_matches};
 use crate::{
     AgentWindowSetting, MountTable, ObjectClass, PolicyV0, is_model_alias, is_model_name,
     is_object_name, policy_subject_from_label,
