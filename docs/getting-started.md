@@ -11,14 +11,25 @@ then move on to agents, tools, and extension points.
 
 ## Install
 
-Arch Linux users can install the AUR package directly:
+The one-command installer supports current Arch-, Debian/Ubuntu-, Fedora/RHEL-,
+and openSUSE/SLES-family Linux distributions booted with systemd when their
+enabled repositories supply the required packages:
 
 ```bash
-paru -S cortexfs-git
-sudo systemctl enable --now cortexfs.service
-ctx doctor
-ctx --help
+curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
 ```
+
+It checks the distribution, systemd, FUSE, bubblewrap 0.10+, and Rust MSRV
+before building the downloaded source snapshot locally with `Cargo.lock`.
+Every persistent mutation has an exact typed confirmation. Re-running is
+idempotent: program and unit files are updated while storage, secrets, provider
+configuration, existing environment files, and `/ctx` user state are
+preserved. A genuine first install chooses a language from the system locale
+and offers optional OpenAI, Codex, Anthropic, or Google onboarding through the
+existing provider commands.
+
+Arch users may alternatively install `cortexfs-git` from the AUR, enable
+`cortexfs.service`, and run `ctx doctor`.
 
 `ctx doctor` should report whether the mount, base directories, default model
 alias, and agent runtime state are available. `ctx --help` lists the

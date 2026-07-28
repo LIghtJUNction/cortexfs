@@ -184,13 +184,20 @@ through the filesystem boundary and see what is happening inside agent software.
 
 ## Quick Start
 
-Install the AUR package and start the system mount:
+On a current Arch-, Debian/Ubuntu-, Fedora/RHEL-, or openSUSE/SLES-family Linux
+system booted with systemd and supported packages in its enabled repositories,
+run:
 
 ```bash
-paru -S cortexfs-git
-sudo systemctl enable --now cortexfs.service
-ctx doctor
+curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
 ```
+
+The installer builds the downloaded source snapshot locally with `Cargo.lock`.
+It audits systemd, FUSE, bubblewrap 0.10+, and Rust first, shows every planned
+mutation, and proceeds only after exact typed confirmations. Re-running it
+updates binaries and units without replacing CortexFS data, secrets, provider
+configuration, or existing environment files. The first successful install
+follows the system language and offers optional AI provider onboarding.
 
 Then take a quick look around:
 

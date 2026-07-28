@@ -8,6 +8,22 @@
 
 CortexFS 是一个通过受限 `/ctx` 文件系统 ABI 暴露 agent 的 FUSE 运行时。
 
+## 快速开始
+
+在使用 systemd，且已启用仓库能提供所需软件包的当前 Arch、Debian/Ubuntu、
+Fedora/RHEL 或 openSUSE/SLES 系 Linux 上运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LIghtJUNction/cortexfs/main/scripts/install.sh | sh
+```
+
+安装器会在本机使用 `Cargo.lock` 构建下载的源码快照，并先审计 systemd、
+FUSE、bubblewrap 0.10+ 与 Rust。每个持久化变更都会展示计划，只有输入精确确认
+指令后才会执行。重复运行只更新二进制和 unit，不覆盖数据、密钥、provider 配置
+或现有环境文件。首次成功安装会默认跟随系统语言，并提供可跳过的 AI 接入引导。
+
+安装完成后可运行 `ctx status`、`ctx ls`、`ctx doctor` 和 `ctx --help`。
+
 ## 项目介绍
 
 <p align="center">

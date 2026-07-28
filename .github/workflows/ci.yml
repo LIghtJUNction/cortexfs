@@ -24,6 +24,19 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  shell:
+    name: shell
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check Linux installer
+        run: |
+          shellcheck scripts/install.sh scripts/install-linux.sh scripts/install-test.sh
+          bash scripts/install-test.sh
+
   rust:
     name: rust
     runs-on: ubuntu-latest
