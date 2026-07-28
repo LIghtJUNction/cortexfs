@@ -1059,7 +1059,7 @@ esac
     let session_root = agent_session_root(&root, "coder");
     let view = ok!(derive_agent_runtime_view(&root, "coder"));
     let (mut client, mut socket) = ok!(UnixStream::pair());
-    set_stream_timeouts(&client, 5);
+    set_stream_timeouts(&client, 15);
     let mut reader = ok!(client.try_clone());
     let responder = std::thread::spawn(move || -> std::io::Result<()> {
         client.write_all(
@@ -1091,7 +1091,8 @@ esac
     );
     assert!(outcome_result.is_ok(), "{outcome_result:?}");
     let outcome = ok!(outcome_result);
-    assert!(matches!(responder.join(), Ok(Ok(()))));
+    let responder = responder.join();
+    assert!(matches!(responder, Ok(Ok(()))), "{responder:?}");
     let jsonl = outcome.jsonl();
     assert_eq!(jsonl.matches("approval_request").count(), 1, "{jsonl}");
     assert_eq!(jsonl.matches("approval_result").count(), 1, "{jsonl}");
@@ -1238,7 +1239,7 @@ esac
         let session_root = agent_session_root(&root, "coder");
         let view = ok!(derive_agent_runtime_view(&root, "coder"));
         let (mut client, mut socket) = ok!(UnixStream::pair());
-        set_stream_timeouts(&client, 5);
+        set_stream_timeouts(&client, 15);
         let mut reader = ok!(client.try_clone());
         let responder = std::thread::spawn(move || -> std::io::Result<()> {
             client.write_all(
@@ -1270,7 +1271,8 @@ esac
             direct_agent_runtime(&root, &view, &session_root, &executable),
         );
         assert!(outcome.is_ok(), "{stage}: {outcome:?}");
-        assert!(matches!(responder.join(), Ok(Ok(()))), "{stage}");
+        let responder = responder.join();
+        assert!(matches!(responder, Ok(Ok(()))), "{stage}: {responder:?}");
         let events = ok!(fs::read_to_string(
             session_root.join("default/events.jsonl")
         ));

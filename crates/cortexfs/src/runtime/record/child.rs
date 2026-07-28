@@ -4,6 +4,8 @@ use std::os::unix::fs::MetadataExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static CHILD_STAGE_ID: AtomicU64 = AtomicU64::new(0);
+const CHILD_RECEIPT_FILE: &str = ".receipt";
+const CHILD_RECEIPT_BYTES: usize = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ChildHandoffStage {
@@ -53,6 +55,57 @@ enum ReplacePoint {
 fn same_file(stat: &libc::stat, receipt: &libc::stat) -> bool {
     stat.st_mode & libc::S_IFMT == libc::S_IFREG
         && (stat.st_dev, stat.st_ino) == (receipt.st_dev, receipt.st_ino)
+}
+
+fn read_child_receipt_guard(child: &fs::File) -> Result<Option<String>, ChildContextRecordError> {
+    let max_bytes = u64::try_from(CHILD_RECEIPT_BYTES * 2 + 1)
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let before = match nix::sys::stat::fstatat(
+        child,
+        CHILD_RECEIPT_FILE,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    ) {
+        Ok(stat) => stat,
+        Err(nix::errno::Errno::ENOENT) => return Ok(None),
+        Err(_) => return Err(ChildContextRecordError::CannotRecord),
+    };
+    let value = support::plain::read_small_text_file_at(
+        child,
+        CHILD_RECEIPT_FILE,
+        max_bytes,
+        "invalid child receipt",
+    )
+    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let after = nix::sys::stat::fstatat(
+        child,
+        CHILD_RECEIPT_FILE,
+        nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
+    )
+    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    let Some(value) = value.strip_suffix('\n') else {
+        return Err(ChildContextRecordError::CannotRecord);
+    };
+    if !same_file(&before, &after)
+        || value.len() != CHILD_RECEIPT_BYTES * 2
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
+        return Err(ChildContextRecordError::CannotRecord);
+    }
+    Ok(Some(value.to_owned()))
+}
+
+fn verify_child_receipt_guard(
+    child: &fs::File,
+    receipt: &ChildHandoffReceipt,
+) -> Result<(), ChildContextRecordError> {
+    if let Some(expected) = receipt.guard.as_deref()
+        && read_child_receipt_guard(child)?.as_deref() != Some(expected)
+    {
+        return Err(ChildContextRecordError::CannotRecord);
+    }
+    Ok(())
 }
 
 pub(crate) fn is_plain_channel_directory(stat: &libc::stat) -> bool {
@@ -380,7 +433,6 @@ impl Drop for ChildPrivilegeLease<'_> {
 
 /// Opens a fresh plain child channel and binds an inode receipt to it.
 pub fn child_handoff_receipt(path: &Path) -> Result<ChildHandoffReceipt, ChildContextRecordError> {
-    use std::os::unix::fs::MetadataExt;
     let directory =
         open_plain_directory(path).map_err(|_error| ChildContextRecordError::CannotRecord)?;
     let metadata = directory
@@ -390,6 +442,7 @@ pub fn child_handoff_receipt(path: &Path) -> Result<ChildHandoffReceipt, ChildCo
         path: path.to_owned(),
         dev: metadata.dev(),
         ino: metadata.ino(),
+        guard: read_child_receipt_guard(&directory)?,
     })
 }
 
@@ -425,6 +478,7 @@ fn open_child_channel(
     if (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino) {
         return Err(ChildContextRecordError::CannotRecord);
     }
+    verify_child_receipt_guard(&child, receipt)?;
     Ok((parent, name, child))
 }
 
@@ -547,14 +601,7 @@ pub fn child_context_lease_status(
 pub fn acquire_child_context_lease(
     receipt: &ChildHandoffReceipt,
 ) -> Result<ChildContextLease, ChildContextRecordError> {
-    let child = open_plain_directory(&receipt.path)
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    let metadata = child
-        .metadata()
-        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
-    if (metadata.dev(), metadata.ino()) != (receipt.dev, receipt.ino) {
-        return Err(ChildContextRecordError::CannotRecord);
-    }
+    let (_, _, child) = open_child_channel(receipt)?;
     let child = nix::fcntl::Flock::lock(child, nix::fcntl::FlockArg::LockExclusive)
         .map_err(|(_file, _error)| ChildContextRecordError::CannotRecord)?;
     Ok(ChildContextLease { child })
@@ -638,6 +685,7 @@ fn verify_child_context_lease(
     {
         return Err(ChildContextRecordError::CannotRecord);
     }
+    verify_child_receipt_guard(&lease.child, receipt)?;
     Ok(())
 }
 
@@ -961,8 +1009,17 @@ pub(crate) fn publish_child_handoff_with_hook(
     );
     let stage = child_parent.join(&stage_name);
     hook(ChildHandoffStage::Staging)?;
+    let guard = support::receipt::random_hex::<CHILD_RECEIPT_BYTES>()
+        .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     let stage_fd = support::plain::create_plain_dir_exclusive(&stage, 0o700)
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
+    support::plain::write_text_file_at(
+        &stage_fd,
+        CHILD_RECEIPT_FILE,
+        &ensure_trailing_newline(&guard),
+        0o600,
+    )
+    .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     let stage_metadata = stage_fd
         .metadata()
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
@@ -970,6 +1027,7 @@ pub(crate) fn publish_child_handoff_with_hook(
         path: stage,
         dev: stage_metadata.dev(),
         ino: stage_metadata.ino(),
+        guard: Some(guard.clone()),
     };
     let result = (|| {
         hook(ChildHandoffStage::Artifact)?;
@@ -997,13 +1055,7 @@ pub(crate) fn publish_child_handoff_with_hook(
             .map_err(|_error| ChildContextRecordError::CannotRecord)?;
         }
         hook(ChildHandoffStage::Publish)?;
-        let stage_matches = nix::sys::stat::fstatat(
-            &parent,
-            stage_name.as_str(),
-            nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
-        )
-        .is_ok_and(|stat| (stat.st_dev, stat.st_ino) == (stage_receipt.dev, stage_receipt.ino));
-        if !stage_matches {
+        if open_child_channel(&stage_receipt).is_err() {
             return Err(ChildContextRecordError::CannotRecord);
         }
         nix::fcntl::renameat2(
@@ -1015,13 +1067,11 @@ pub(crate) fn publish_child_handoff_with_hook(
         )
         .map_err(|_error| ChildContextRecordError::CannotRecord)?;
         let path = child_parent.join(child_name);
-        let metadata =
-            fs::symlink_metadata(&path).map_err(|_error| ChildContextRecordError::CannotRecord)?;
-        Ok(ChildHandoffReceipt {
-            path,
-            dev: metadata.dev(),
-            ino: metadata.ino(),
-        })
+        let receipt = child_handoff_receipt(&path)?;
+        if receipt.guard.as_deref() != Some(guard.as_str()) {
+            return Err(ChildContextRecordError::CannotRecord);
+        }
+        Ok(receipt)
     })();
     if result.is_err() {
         let _rollback = rollback_child_handoff(&stage_receipt);
@@ -1033,6 +1083,9 @@ pub(crate) fn publish_child_handoff_with_hook(
 pub fn rollback_child_handoff(
     receipt: &ChildHandoffReceipt,
 ) -> Result<(), ChildContextRecordError> {
+    if receipt.guard.is_none() {
+        return Err(ChildContextRecordError::CannotRecord);
+    }
     let parent_path = receipt
         .path
         .parent()
@@ -1058,8 +1111,12 @@ pub fn rollback_child_handoff(
     )
     .map_err(|_error| ChildContextRecordError::CannotRecord)?;
     let quarantine_path = parent_path.join(&quarantine);
-    let matches = fs::symlink_metadata(&quarantine_path).is_ok_and(|metadata| {
-        metadata.is_dir() && (metadata.dev(), metadata.ino()) == (receipt.dev, receipt.ino)
+    let matches = open_plain_directory(&quarantine_path).is_ok_and(|child| {
+        child.metadata().is_ok_and(|metadata| {
+            metadata.is_dir()
+                && (metadata.dev(), metadata.ino()) == (receipt.dev, receipt.ino)
+                && verify_child_receipt_guard(&child, receipt).is_ok()
+        })
     });
     if !matches {
         let _ignored = nix::fcntl::renameat2(

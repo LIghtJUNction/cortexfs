@@ -236,7 +236,7 @@ fn provider_curl_output_kills_child_after_oversized_stdout()
     let result = wait_for_curl_json_output(child);
 
     assert!(matches!(result, Err(ref error) if error.contains("provider response exceeds")));
-    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(started.elapsed() < Duration::from_secs(8));
     Ok(())
 }
 

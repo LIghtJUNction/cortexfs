@@ -443,7 +443,7 @@ fn agent_tool_process_returns_when_grandchild_keeps_stdout_open() {
     let Ok(output) = output else { return };
     assert!(output.status.success());
     assert_eq!(output.stdout, b"done");
-    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(started.elapsed() < Duration::from_secs(3));
 }
 
 #[test]

@@ -228,6 +228,7 @@ pub struct ChildHandoffReceipt {
     pub(crate) path: PathBuf,
     pub(crate) dev: u64,
     pub(crate) ino: u64,
+    pub(crate) guard: Option<String>,
 }
 
 impl ChildHandoffReceipt {

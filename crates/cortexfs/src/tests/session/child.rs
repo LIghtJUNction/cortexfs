@@ -531,7 +531,7 @@ fn child_stage_replacement_is_not_published_or_removed() {
                 let Some(entry) = entry else {
                     return Err(ChildContextRecordError::CannotRecord);
                 };
-                fs::remove_dir(entry.path())
+                fs::remove_dir_all(entry.path())
                     .map_err(|_error| ChildContextRecordError::CannotRecord)?;
                 fs::create_dir_all(entry.path())
                     .map_err(|_error| ChildContextRecordError::CannotRecord)?;
