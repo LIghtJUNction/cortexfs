@@ -89,6 +89,8 @@ mod tests {
                 "/dev",
                 "/dev",
                 "--tmpfs",
+                "/run",
+                "--dir",
                 "/run/cortexfs",
                 "--dir",
                 "/run/cortexfs/control",
