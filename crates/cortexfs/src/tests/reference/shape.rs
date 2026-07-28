@@ -67,8 +67,8 @@ fn abi_paths_classify_by_stable_shape() {
     for model in [
         "openai/gpt-5.6",
         "openai/gpt-4.1",
-        "anthropic/claude-sonnet-4",
-        "google/gemini-2.5-pro",
+        "anthropic/claude-sonnet-5",
+        "google/gemini-3.6-flash",
         "meta-llama/llama-4-maverick",
         "x-ai/grok-4",
     ] {

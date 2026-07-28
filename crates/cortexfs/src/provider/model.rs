@@ -426,15 +426,18 @@ mod tests {
     #[test]
     fn model_fallback_parses_one_model_per_line() {
         let (fallback, report) =
-            parse_model_fallback("\n# comment\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\n");
+            parse_model_fallback("\n# comment\nopenai/gpt-5.6\nopenai/gpt-5.6-terra\n");
         assert!(report.is_ok());
-        assert_eq!(fallback.models(), ["openai/gpt-5.4", "openai/gpt-5.4-mini"]);
+        assert_eq!(
+            fallback.models(),
+            ["openai/gpt-5.6", "openai/gpt-5.6-terra"]
+        );
     }
 
     #[test]
     fn model_fallback_rejects_duplicate_or_invalid_model() {
         let (_fallback, report) =
-            parse_model_fallback("openai/gpt-5.4\nbad/name/extra\nopenai/gpt-5.4\n");
+            parse_model_fallback("openai/gpt-5.6\nbad/name/extra\nopenai/gpt-5.6\n");
         assert_eq!(
             report.issues(),
             &[
@@ -444,7 +447,7 @@ mod tests {
                 },
                 ModelFallbackIssue::DuplicateModel {
                     line: 3,
-                    value: "openai/gpt-5.4".to_owned()
+                    value: "openai/gpt-5.6".to_owned()
                 },
             ]
         );

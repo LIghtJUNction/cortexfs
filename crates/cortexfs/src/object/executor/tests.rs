@@ -1,7 +1,6 @@
 use super::exec::{
-    AgentToolBwrapArgs, AgentToolSandbox, agent_tool_bwrap_args, nested_control_environment,
-    nested_control_socket_is_plain, run_agent_tool_process_with_timeout,
-    validate_nested_control_values, visible_workspace_source,
+    AgentToolBwrapArgs, AgentToolSandbox, agent_tool_bwrap_args,
+    run_agent_tool_process_with_timeout, visible_workspace_source,
 };
 use super::{
     AgentModelRunConfig, AgentToolCall, BWRAP_PROGRAM, ExecError, MAX_AGENT_MODEL_FRAME_BYTES,
@@ -102,7 +101,6 @@ pub(super) fn test_agent_tool_config(
         ctx_root: &config.ctx_root,
         run: &config.run,
         session: "default",
-        inherit_control: true,
         control: None,
         cancel: None,
     }

@@ -215,7 +215,8 @@ pub(crate) fn agent_create_passes_lifecycle_and_tool_path_to_runtime()
         identity.uid(),
         identity.gid(),
     )?;
-    let environment = capability.environment(capability.socket());
+    capability.register_launch_root(std::process::id())?;
+    let environment = crate::runtime::control::RunCapability::environment(capability.socket());
     let shutdown = Arc::new(AtomicBool::new(false));
     let server_shutdown = Arc::clone(&shutdown);
     let (startup_sender, _startup_receiver) = std::sync::mpsc::sync_channel(1);
@@ -260,7 +261,6 @@ pub(crate) fn agent_create_passes_lifecycle_and_tool_path_to_runtime()
             .env("CTX_SESSION", "default")
             .env("CTX_RUN_ID", "run-1")
             .env(&environment[0].0, &environment[0].1)
-            .env(&environment[1].0, &environment[1].1)
             .output()?;
         assert!(output.status.success(), "{output:?}");
     }

@@ -78,7 +78,7 @@ This is the normative stable shape. Concrete object names such as `debug/echo`,
 
   model/
     main -> /ctx/model/openai/gpt-5.6
-    helper -> /ctx/model/openai/codex-auto-review
+    helper -> /ctx/model/openai/gpt-5.6-sol
     fast -> /ctx/model/openai/gpt-5.6
     reason -> /ctx/model/openai/gpt-5.6
     code -> /ctx/model/openai/gpt-5.6

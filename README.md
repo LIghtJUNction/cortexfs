@@ -1,7 +1,7 @@
 # CortexFS
 
 <p align="center">
-  <img src="docs/assets/cortexfs-hero.svg" alt="CortexFS: a FUSE filesystem interface for agent runtimes" width="900">
+  <img src="docs/assets/cortexfs-hero.svg" alt="/ctx" width="900">
 </p>
 
 <p align="center">
@@ -314,8 +314,8 @@ Models live under `/ctx/model/<provider>/<model>`:
 ```text
 /ctx/model/debug/echo
 /ctx/model/openai/gpt-5.6
-/ctx/model/anthropic/claude-sonnet-4
-/ctx/model/google/gemini-2.5-pro
+/ctx/model/anthropic/claude-sonnet-5
+/ctx/model/google/gemini-3.6-flash
 ```
 
 They are executable files. You can call a model path directly for one-shot
@@ -770,8 +770,10 @@ Current proofs cover the stable object-name ABI predicate; see
   - `crates/cortexfs-tool-sdk/src/lib.rs`
 
 ### Spec references
-- [Model Context Protocol (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
-- [Model Context Protocol (2025-03-26)](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
+- [Model Context Protocol (2025-11-25)](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+- Historical compatibility references:
+  - [Model Context Protocol (2025-06-18)](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+  - [Model Context Protocol (2025-03-26)](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports)
 - [Linux FUSE documentation](https://www.kernel.org/doc/html/latest/filesystems/fuse/fuse.html)
 - [mount.fuse page](https://manpages.ubuntu.com/manpages/jammy/man8/mount.fuse.8.html)
 - [MCP security and authorization](https://modelcontextprotocol.io/docs/tutorials/security/authorization)

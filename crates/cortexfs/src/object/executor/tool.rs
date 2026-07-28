@@ -90,13 +90,7 @@ pub(crate) fn run_passthrough_tool(name: &str, args: &[OsString]) -> Result<(), 
 }
 
 pub(crate) fn tsh_passthrough_capability_env_keys() -> &'static [&'static str] {
-    &[
-        "CTX_CONTROL_SOCKET",
-        "CTX_CONTROL_TOKEN",
-        "CTX_HOME",
-        "CTX_PATH",
-        "HOME",
-    ]
+    &["CTX_CONTROL_SOCKET", "CTX_HOME", "CTX_PATH", "HOME"]
 }
 
 pub(crate) fn passthrough_tool_runtime_env_keys() -> &'static [&'static str] {

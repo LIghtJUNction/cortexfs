@@ -14,6 +14,25 @@ fn assert_provider_egress_args(args: &[String], host_dir: &str) {
     ));
 }
 
+fn assert_control_environment(args: &[String]) {
+    assert!(contains_arg_triplet(
+        args,
+        "--setenv",
+        "CTX_CONTROL_SOCKET",
+        "/run/cortexfs/control.sock"
+    ));
+    let control_keys = args
+        .windows(3)
+        .filter_map(|entry| match *entry {
+            [ref flag, ref key, _] if flag == "--setenv" && key.starts_with("CTX_CONTROL_") => {
+                Some(key.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(control_keys, ["CTX_CONTROL_SOCKET"]);
+}
+
 fn assert_agent_sandbox_args(args: &[String], root: &Path, session_root: &Path) {
     let agent_home = session_root.parent().unwrap_or(session_root);
     assert_eq!(args.first().map(String::as_str), Some("--clearenv"));
@@ -198,13 +217,10 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         },
     };
     let environment = [("CTX_AGENT".to_owned(), "coder".to_owned())];
-    let control_environment = [
-        (
-            "CTX_CONTROL_SOCKET".to_owned(),
-            "/run/cortexfs/control.sock".to_owned(),
-        ),
-        ("CTX_CONTROL_TOKEN".to_owned(), "control-token".to_owned()),
-    ];
+    let control_environment = [(
+        "CTX_CONTROL_SOCKET".to_owned(),
+        "/run/cortexfs/control.sock".to_owned(),
+    )];
     let args = agent_executable_socket_bwrap_args(&BwrapAgentExecutableArgs {
         runtime,
         mount_table: view.mount_table(),
@@ -218,9 +234,9 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         environment: &environment,
         control_socket: Some(Path::new("/run/cortexfs/control/source.sock")),
         control_environment: Some(&control_environment),
+        control_gate: None,
         provider_egress: Some(Path::new("/run/cortexfs/egress-run-1")),
     });
-
     assert_agent_sandbox_args(&args, &root, &session_root);
     assert!(contains_arg_triplet(
         &args,
@@ -228,19 +244,7 @@ fn agent_executable_socket_bwrap_args_apply_agent_sandbox() {
         "CTX_AGENT",
         "coder"
     ));
-    assert!(contains_arg_triplet(
-        &args,
-        "--setenv",
-        "CTX_CONTROL_SOCKET",
-        "/run/cortexfs/control.sock"
-    ));
-    assert!(contains_arg_triplet(
-        &args,
-        "--setenv",
-        "CTX_CONTROL_TOKEN",
-        "control-token"
-    ));
-
+    assert_control_environment(&args);
     let opened = ok!(open_agent_executable_no_follow(&agent_executable));
     let request = AgentExecutableRunRequest {
         run_id: "run-1",
@@ -445,6 +449,7 @@ fn provider_egress_guard_cleans_up_when_agent_spawn_fails() {
         },
         &envelope,
         0,
+        None,
     );
 
     assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
@@ -496,6 +501,7 @@ fn debug_alias_does_not_create_provider_egress() {
         },
         &envelope,
         0,
+        None,
     );
 
     assert_eq!(result, Err(SocketRuntimeError::CannotRunAgent));
@@ -599,6 +605,7 @@ fn agent_executable_socket_bwrap_args_preserve_network_when_policy_allows() {
         environment: &[],
         control_socket: None,
         control_environment: None,
+        control_gate: None,
         provider_egress: None,
     });
 
@@ -653,6 +660,7 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         environment: &[],
         control_socket: None,
         control_environment: None,
+        control_gate: None,
         provider_egress: None,
     });
 
@@ -669,65 +677,87 @@ fn agent_executable_socket_bwrap_args_preserve_explicit_workspace_mount() {
         "/workspace"
     ));
 }
+
 use super::*;
 
-#[test]
-#[ignore = "subprocess entrypoint for capability integration test"]
-fn capability_subprocess_helper() {
-    let result = crate::runtime::control::ping_from_environment("coder");
+const BWRAP_CAPABILITY_PROBE: &str = r#"#!/bin/sh
+IFS= read -r envelope || exit 2
+[ "$(env | grep -c '^CTX_CONTROL_')" = 1 ] || exit 3
+/usr/bin/python3 - <<'PY' || exit 4
+import json, os, socket, sys
+run = os.environ["CTX_RUN_ID"]
+stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+stream.connect(os.environ["CTX_CONTROL_SOCKET"])
+stream.sendall((json.dumps({"op":"ping", "request_id":"startup-" + run, "agent":"coder", "session":"default", "run":run}) + "\n").encode())
+reply_bytes = b""
+while not reply_bytes.endswith(b"\n"):
+    chunk = stream.recv(16384)
+    if not chunk:
+        sys.exit(4)
+    reply_bytes += chunk
+reply = json.loads(reply_bytes.decode())
+if reply.get("type") != "pong" or reply.get("request_id") != "startup-" + run:
+    sys.exit(4)
+PY
+printf '{"type":"delta","run":"%s","text":"capability-ok"}\n' "$CTX_RUN_ID"
+"#;
+
+fn assert_unregistered_bwrap_capability_client_is_denied(
+    capability: &std::sync::Arc<crate::runtime::control::RunCapability>,
+    identity: &crate::AgentUnixIdentity,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut sibling =
+        crate::runtime::socket::command_for_agent_identity("/usr/bin/python3", identity);
+    sibling
+        .args([
+            "-c",
+            "import os, socket, sys; s=socket.socket(socket.AF_UNIX); s.connect(os.environ['CTX_CONTROL_SOCKET']); s.sendall(b'{\"op\":\"ping\",\"request_id\":\"sibling\",\"agent\":\"coder\",\"session\":\"default\",\"run\":\"run-1\"}\\n');\ntry: reply=s.recv(1)\nexcept OSError: reply=b''\nsys.exit(1 if reply else 0)",
+        ])
+        .env("CTX_CONTROL_SOCKET", capability.socket());
+    let output = sibling.output()?;
     assert!(
-        result.is_ok(),
-        "{result:?} socket={:?} exists={}",
-        std::env::var_os("CTX_CONTROL_SOCKET"),
-        std::env::var_os("CTX_CONTROL_SOCKET").is_some_and(|path| Path::new(&path).exists())
+        output.status.success(),
+        "unregistered same-UID client unexpectedly received: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
+    Ok(())
 }
 
-#[test]
-fn agent_executable_command_capability_subprocess_roundtrip() {
-    let root = reference_tree("agent-capability-subprocess");
-    let session_root = agent_session_root(&root, "coder");
-    let view = ok!(derive_agent_runtime_view(&root, "coder"));
-    let executable = root.join("agent").join("coder");
-    let current_exe = ok!(std::env::current_exe());
-    write_text_file(
-        &executable,
-        &format!(
-            "#!/bin/sh\nexec '{}' --exact tests::execution::sandbox::capability_subprocess_helper --ignored\n",
-            current_exe.display()
-        ),
-    );
-    set_file_mode(&executable, 0o755);
-    let control_dir = std::env::temp_dir().join(format!("cfs-cap-{}", std::process::id()));
-    assert!(fs::create_dir_all(&control_dir).is_ok());
-    assert!(fs::set_permissions(&control_dir, fs::Permissions::from_mode(0o711)).is_ok());
-    let (capability, listener) = ok!(crate::runtime::control::RunCapability::create(
-        &control_dir,
-        "coder",
-        "default",
-        "msg-1",
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+fn run_registered_bwrap_capability_probe(
+    root: &Path,
+    view: &crate::AgentRuntimeView,
+    session_root: &Path,
+    executable: &Path,
+    control_dir: &Path,
+    capability: &std::sync::Arc<crate::runtime::control::RunCapability>,
+) -> Result<std::process::Output, Box<dyn std::error::Error>> {
+    let environment = crate::runtime::control::RunCapability::environment(Path::new(
+        crate::runtime::socket::SOCKET_RUN_CONTROL_PATH,
     ));
-    let environment = capability.environment(capability.socket());
-    let capability_socket = capability.socket().to_owned();
-    let opened = ok!(open_agent_executable_no_follow(&executable));
+    let gate = capability.launch_gate()?;
+    let opened = open_agent_executable_no_follow(executable)
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
     let runtime = AgentExecutableSocketRuntime {
-        ctx_root: &root,
-        source_root: &root,
+        ctx_root: root,
+        source_root: root,
         identity: view.identity(),
         env: view.env(),
-        session_root: &session_root,
+        session_root,
         default_cwd: "/workspace",
         model: Some("debug/echo"),
         network_allowed: false,
         agent_name: "coder",
-        agent_executable: &executable,
-        execution: AgentExecutableSocketExecution::Direct,
+        agent_executable: executable,
+        execution: AgentExecutableSocketExecution::Bwrap {
+            program: Path::new("/usr/bin/bwrap"),
+            mount_table: view.mount_table(),
+            control_dir: Some(control_dir),
+        },
     };
     let request = AgentExecutableRunRequest {
-        run_id: "msg-1",
-        cancellation_id: "msg-1",
+        run_id: "run-1",
+        cancellation_id: "run-1",
         session: "default",
         cwd: None,
         input: "ignored",
@@ -735,39 +765,90 @@ fn agent_executable_command_capability_subprocess_roundtrip() {
         tool_context: "",
         debug: None,
     };
-    let (mut command, _fds) = ok!(agent_executable_socket_command(
+    let (mut command, agent_executable_fds) = agent_executable_socket_command(
         runtime,
         &opened,
         request,
         0,
-        Some((capability.socket(), environment.as_slice())),
+        Some((capability.socket(), environment.as_slice(), gate.block_fd())),
         None,
-    ));
+    )
+    .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    assert!(
+        command
+            .get_args()
+            .filter_map(|arg| arg.to_str())
+            .any(|arg| arg == "--block-fd")
+    );
+    let mut child = command.spawn()?;
+    let mut gate = gate;
+    gate.register_and_release(child.id())?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| std::io::Error::other("agent stdin unavailable"))?;
+    stdin.write_all(agent_envelope("run-1").as_bytes())?;
+    drop(stdin);
+    let output = child.wait_with_output()?;
+    drop(agent_executable_fds);
+    Ok(output)
+}
+
+#[test]
+fn agent_bwrap_capability_allows_only_registered_launch_roots()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = reference_tree("agent-bwrap-capability");
+    let session_root = agent_session_root(&root, "coder");
+    let view = derive_agent_runtime_view(&root, "coder")
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+    let executable = root.join("agent").join("coder");
+    write_text_file(&executable, BWRAP_CAPABILITY_PROBE);
+    set_file_mode(&executable, 0o755);
+    let control_dir = root.join("runtime");
+    fs::create_dir_all(&control_dir)?;
+    fs::set_permissions(&control_dir, fs::Permissions::from_mode(0o711))?;
+    let (capability, listener) = crate::runtime::control::RunCapability::create_with_source(
+        &control_dir,
+        &root,
+        "coder",
+        "default",
+        "run-1",
+        view.identity().uid(),
+        view.identity().gid(),
+    )?;
+    let capability = std::sync::Arc::new(capability);
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = std::sync::Arc::clone(&shutdown);
     let (startup_sender, startup_receiver) = std::sync::mpsc::sync_channel(1);
+    let server_capability = std::sync::Arc::clone(&capability);
     let server = std::thread::spawn(move || {
-        let result = capability.serve_run(&listener, &server_shutdown, &startup_sender, || {
-            Some("msg-1".to_owned())
-        });
-        let cleanup = capability.cleanup();
-        result.and(cleanup)
+        server_capability.serve_run(&listener, &server_shutdown, &startup_sender, || {
+            Some("run-1".to_owned())
+        })
     });
-    let output = ok!(command.output());
+
+    assert_unregistered_bwrap_capability_client_is_denied(&capability, view.identity())?;
+    let output = run_registered_bwrap_capability_probe(
+        &root,
+        &view,
+        &session_root,
+        &executable,
+        &control_dir,
+        &capability,
+    )?;
     assert!(
         output.status.success(),
-        "subprocess failed: {} {}",
+        "bwrap capability process failed: {} {}",
         String::from_utf8_lossy(&output.stderr),
         String::from_utf8_lossy(&output.stdout)
     );
-    assert!(matches!(startup_receiver.recv(), Ok(Ok(()))));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("capability-ok"));
+    assert!(matches!(
+        startup_receiver.recv_timeout(Duration::from_secs(1)),
+        Ok(Ok(()))
+    ));
     shutdown.store(true, std::sync::atomic::Ordering::Release);
     assert!(matches!(server.join(), Ok(Ok(()))));
-    assert!(!capability_socket.exists());
-    assert!(fs::remove_dir(&control_dir).is_ok());
-
-    let (mut command, _fds) = ok!(agent_executable_socket_command(
-        runtime, &opened, request, 0, None, None
-    ));
-    assert!(ok!(command.output()).status.success());
+    capability.cleanup()?;
+    Ok(())
 }

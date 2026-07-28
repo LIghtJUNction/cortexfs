@@ -15,6 +15,7 @@ thread_local! {
 struct RunControlServer {
     shutdown: Arc<AtomicBool>,
     startup: mpsc::Receiver<Result<(), runtime::control::RunCapabilityError>>,
+    startup_confirmed: bool,
     join: Option<thread::JoinHandle<Result<(), runtime::control::RunCapabilityError>>>,
 }
 
@@ -38,10 +39,37 @@ impl Drop for RunControlServer {
     }
 }
 
-struct StartedRunControl {
+pub(crate) struct StartedRunControl {
     tool: object::executor::exec::AgentToolControl,
-    environment: [(String, String); 2],
+    environment: [(String, String); 1],
     server: RunControlServer,
+}
+
+impl StartedRunControl {
+    fn launch_gate(&self) -> Result<runtime::control::LaunchGate, SocketRuntimeError> {
+        self.tool
+            .launch_gate()
+            .map_err(|_error| SocketRuntimeError::CannotRunAgent)
+    }
+
+    fn await_startup(&mut self) -> Result<(), SocketRuntimeError> {
+        if self.server.startup_confirmed {
+            return Ok(());
+        }
+        match self.server.startup.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => {
+                self.server.startup_confirmed = true;
+                Ok(())
+            }
+            Ok(Err(_)) | Err(_) => Err(SocketRuntimeError::CannotRunAgent),
+        }
+    }
+
+    fn finish(&mut self) -> Result<(), SocketRuntimeError> {
+        self.server
+            .finish()
+            .map_err(|_error| SocketRuntimeError::CannotRunAgent)
+    }
 }
 
 fn start_run_control(
@@ -69,13 +97,14 @@ fn start_run_control(
         runtime.identity.gid(),
     )
     .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
+    let capability = Arc::new(capability);
     let target = Path::new(SOCKET_RUN_CONTROL_PATH);
-    let environment = capability.environment(target);
-    let tool = object::executor::exec::AgentToolControl {
-        source: capability.socket().to_path_buf(),
-        target: target.to_path_buf(),
-        token: OsString::from(&environment[1].1),
-    };
+    let environment = runtime::control::RunCapability::environment(target);
+    let tool = object::executor::exec::AgentToolControl::new(
+        capability.socket().to_path_buf(),
+        target.to_path_buf(),
+        Arc::clone(&capability),
+    );
     let source_root = runtime.source_root.to_path_buf();
     let ctx_root = runtime.ctx_root.to_path_buf();
     let request_run = run.to_owned();
@@ -104,6 +133,7 @@ fn start_run_control(
         server: RunControlServer {
             shutdown,
             startup,
+            startup_confirmed: false,
             join: Some(join),
         },
     }))
@@ -403,7 +433,6 @@ fn handle_agent_tsh_request(
         ctx_root: runtime.ctx_root,
         run: &run,
         session,
-        inherit_control: false,
         control: Some(control.tool.clone()),
         cancel: None,
     };
@@ -580,6 +609,24 @@ fn run_agent_envelope_loop(
     runtime: AgentExecutableSocketRuntime<'_>,
     request: AgentExecutableRunRequest<'_>,
 ) -> Result<AgentRunOutcome, SocketRuntimeError> {
+    let mut control = start_run_control(runtime, request.session, request.run_id)?;
+    let result = run_agent_envelope_loop_with_control(stream, runtime, request, control.as_mut());
+    if let Some(control) = control.as_mut() {
+        control.finish()?;
+    }
+    result
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "hosted agent loop keeps ordered protocol state transitions auditable"
+)]
+fn run_agent_envelope_loop_with_control(
+    stream: &mut UnixStream,
+    runtime: AgentExecutableSocketRuntime<'_>,
+    request: AgentExecutableRunRequest<'_>,
+    mut control: Option<&mut StartedRunControl>,
+) -> Result<AgentRunOutcome, SocketRuntimeError> {
     const MAX_CALLS: u8 = 8;
     let mut frames = Vec::new();
     let mut seen = HashSet::new();
@@ -612,28 +659,34 @@ fn run_agent_envelope_loop(
                 process: AgentProcessOutcome::Error,
             });
         }
-        let outcome =
-            match run_agent_executable_streaming(stream, runtime, request, &envelope, step) {
-                Ok(outcome) => outcome,
-                Err(SocketRuntimeError::CannotRunAgent) => {
-                    frames.extend(agent_process_failed_frames(
-                        request.run_id,
-                        "agent request failed",
-                    ));
-                    return Ok(AgentRunOutcome {
-                        frames,
-                        process: AgentProcessOutcome::Error,
-                    });
-                }
-                Err(SocketRuntimeError::InvalidAgentOutput) => {
-                    frames.extend(agent_invalid_output_frames(request.run_id));
-                    return Ok(AgentRunOutcome {
-                        frames,
-                        process: AgentProcessOutcome::Error,
-                    });
-                }
-                Err(error) => return Err(error),
-            };
+        let outcome = match run_agent_executable_streaming(
+            stream,
+            runtime,
+            request,
+            &envelope,
+            step,
+            control.as_deref_mut(),
+        ) {
+            Ok(outcome) => outcome,
+            Err(SocketRuntimeError::CannotRunAgent) => {
+                frames.extend(agent_process_failed_frames(
+                    request.run_id,
+                    "agent request failed",
+                ));
+                return Ok(AgentRunOutcome {
+                    frames,
+                    process: AgentProcessOutcome::Error,
+                });
+            }
+            Err(SocketRuntimeError::InvalidAgentOutput) => {
+                frames.extend(agent_invalid_output_frames(request.run_id));
+                return Ok(AgentRunOutcome {
+                    frames,
+                    process: AgentProcessOutcome::Error,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         frames.extend(outcome.frames.clone());
         if outcome.process == AgentProcessOutcome::Cancelled {
             return Ok(AgentRunOutcome {
@@ -699,8 +752,7 @@ fn run_agent_envelope_loop(
             ctx_root: runtime.ctx_root,
             run: request.run_id,
             session: request.session,
-            inherit_control: false,
-            control: None,
+            control: control.as_ref().map(|entry| entry.tool.clone()),
             cancel: Some((&cancel_dir, request.cancellation_id)),
         };
         let (content, status) =
@@ -1084,6 +1136,7 @@ pub(crate) fn run_agent_executable_streaming(
     request: AgentExecutableRunRequest<'_>,
     envelope: &str,
     step: u8,
+    control: Option<&mut StartedRunControl>,
 ) -> Result<AgentRunOutcome, SocketRuntimeError> {
     let mut client_connected = true;
     let agent_executable = open_agent_executable_no_follow(runtime.agent_executable)?;
@@ -1116,43 +1169,43 @@ pub(crate) fn run_agent_executable_streaming(
             None
         }
     };
-    let mut control = start_run_control(runtime, request.session, request.run_id)?;
+    let mut gate = control
+        .as_ref()
+        .map(|entry| entry.launch_gate())
+        .transpose()?;
+    let command_control = match (control.as_ref(), gate.as_ref()) {
+        (Some(entry), Some(gate)) => Some((
+            entry.tool.source.as_path(),
+            entry.environment.as_slice(),
+            gate.block_fd(),
+        )),
+        (None, None) => None,
+        _ => return Err(SocketRuntimeError::CannotRunAgent),
+    };
     let command_result = agent_executable_socket_command(
         runtime,
         &agent_executable,
         request,
         step,
-        control
-            .as_ref()
-            .map(|entry| (entry.tool.source.as_path(), entry.environment.as_slice())),
+        command_control,
         provider_egress
             .as_ref()
             .map(runtime::egress::ProviderEgress::host_dir),
     );
-    let (mut command, agent_executable_fd) = match command_result {
-        Ok(command) => command,
-        Err(error) => {
-            if let Some(mut control) = control {
-                control
-                    .server
-                    .finish()
-                    .map_err(|_cleanup| SocketRuntimeError::CannotRunAgent)?;
-            }
-            return Err(error);
-        }
-    };
+    let (mut command, agent_executable_fd) = command_result?;
     apply_socket_debug_timing_env(&mut command, request.debug);
     command.stderr(Stdio::piped());
-    let mut control_server = control.take().map(|entry| entry.server);
     let mut child = match command.spawn() {
         Ok(child) => child,
-        Err(_error) => {
-            if let Some(mut server) = control_server {
-                let _ignored = server.finish();
-            }
-            return Err(SocketRuntimeError::CannotRunAgent);
-        }
+        Err(_error) => return Err(SocketRuntimeError::CannotRunAgent),
     };
+    if let Some(gate) = gate.as_mut()
+        && gate.register_and_release(child.id()).is_err()
+    {
+        terminate_agent_process_group(&mut child);
+        let _ignored = child.wait();
+        return Err(SocketRuntimeError::CannotRunAgent);
+    }
     let mut stdin = child
         .stdin
         .take()
@@ -1168,11 +1221,8 @@ pub(crate) fn run_agent_executable_streaming(
     }
     drop(stdin);
     drop(agent_executable_fd);
-    if let Some(server) = control_server.as_ref()
-        && !matches!(
-            server.startup.recv_timeout(Duration::from_secs(5)),
-            Ok(Ok(()))
-        )
+    if let Some(control) = control
+        && control.await_startup().is_err()
     {
         terminate_agent_process_group(&mut child);
         let _ignored = child.wait();
@@ -1289,11 +1339,6 @@ pub(crate) fn run_agent_executable_streaming(
         .wait()
         .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
     let _stderr = stderr_reader.join();
-    if let Some(server) = control_server.as_mut() {
-        server
-            .finish()
-            .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    }
     if cancelled {
         return Ok(AgentRunOutcome {
             frames,

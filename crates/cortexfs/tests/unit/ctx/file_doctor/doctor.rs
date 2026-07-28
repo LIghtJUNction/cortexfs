@@ -100,7 +100,7 @@ fn file_check_validates_shared_and_model_session_layouts() {
     let model_session = fixture_path(
         &root,
         &[
-            "home", "1000", "model", "openai", "gpt-4o.d", "session", "default",
+            "home", "1000", "model", "openai", "gpt-5.6.d", "session", "default",
         ],
     );
     create_complete_session_layout(&shared_agent);
@@ -109,14 +109,14 @@ fn file_check_validates_shared_and_model_session_layouts() {
     assert!(file_check(&root, "shared/im-qq-dev/agent/bot/session/group-456").is_ok());
     assert!(file_check(
         &root,
-        "home/1000/model/openai/gpt-4o.d/session/default"
+        "home/1000/model/openai/gpt-5.6.d/session/default"
     )
     .is_ok());
 
     assert!(fs::remove_file(model_session.join("messages.jsonl")).is_ok());
     assert_file_check_error_contains(
         &root,
-        "home/1000/model/openai/gpt-4o.d/session/default",
+        "home/1000/model/openai/gpt-5.6.d/session/default",
         &["missing file messages.jsonl"],
     );
 }
@@ -240,9 +240,9 @@ fn formats_object_layout_issues_for_file_check() {
     assert_eq!(
         format_object_layout_issues(&[
             PathLayoutIssue::missing("agent/coder".to_owned(), LayoutPathRole::Executable),
-            PathLayoutIssue::invalid_value("model/openai/gpt-4o.d/session".to_owned(), "native_thread".to_owned()),
+            PathLayoutIssue::invalid_value("model/openai/gpt-5.6.d/session".to_owned(), "native_thread".to_owned()),
         ]),
-        "missing executable agent/coder, invalid value model/openai/gpt-4o.d/session=native_thread"
+        "missing executable agent/coder, invalid value model/openai/gpt-5.6.d/session=native_thread"
     );
 }
 

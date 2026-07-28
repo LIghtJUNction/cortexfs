@@ -6,7 +6,7 @@ use std::os::fd::RawFd;
 const SOCKET_AGENT_EXECUTABLE_PATH: &str = "/run/cortexfs/agent-executable";
 /// Fixed sandbox path for the receipt-bound per-run control socket.
 pub const SOCKET_RUN_CONTROL_PATH: &str = "/run/cortexfs/control.sock";
-pub(crate) type RunControlCommand<'a> = (&'a Path, &'a [(String, String)]);
+pub(crate) type RunControlCommand<'a> = (&'a Path, &'a [(String, String)], RawFd);
 
 pub(crate) fn agent_executable_socket_command(
     runtime: AgentExecutableSocketRuntime<'_>,
@@ -17,9 +17,9 @@ pub(crate) fn agent_executable_socket_command(
     provider_egress: Option<&Path>,
 ) -> Result<(Command, Option<Vec<InheritedFd>>), SocketRuntimeError> {
     let environment = agent_executable_socket_env(runtime, request, step);
-    let (control_socket, control_environment) = match control {
-        Some((socket, environment)) => (Some(socket), Some(environment)),
-        None => (None, None),
+    let (control_socket, control_environment, control_gate) = match control {
+        Some((socket, environment, gate)) => (Some(socket), Some(environment), Some(gate)),
+        None => (None, None, None),
     };
     match runtime.execution {
         AgentExecutableSocketExecution::Direct => {
@@ -64,6 +64,7 @@ pub(crate) fn agent_executable_socket_command(
                     environment: &environment,
                     control_socket,
                     control_environment,
+                    control_gate,
                     provider_egress,
                 },
             ));
@@ -99,6 +100,7 @@ pub(crate) struct BwrapAgentExecutableArgs<'a> {
     pub environment: &'a [(String, String)],
     pub control_socket: Option<&'a Path>,
     pub control_environment: Option<&'a [(String, String)]>,
+    pub control_gate: Option<RawFd>,
     pub provider_egress: Option<&'a Path>,
 }
 
@@ -211,6 +213,9 @@ pub(crate) fn agent_executable_socket_bwrap_args(
             SOCKET_RUN_CONTROL_PATH.to_owned(),
         ]);
     }
+    if let Some(gate) = request.control_gate {
+        bwrap.extend(["--block-fd".to_owned(), gate.to_string()]);
+    }
     if let Some(timing) = request.debug {
         bwrap.extend([
             "--setenv".to_owned(),
@@ -267,7 +272,7 @@ fn append_bwrap_agent_environment(
     }
     for entry in control_environment.unwrap_or_default() {
         let (name, value) = (&entry.0, &entry.1);
-        if matches!(name.as_str(), "CTX_CONTROL_SOCKET" | "CTX_CONTROL_TOKEN") {
+        if name == "CTX_CONTROL_SOCKET" {
             bwrap.extend(["--setenv".to_owned(), name.clone(), value.clone()]);
         }
     }

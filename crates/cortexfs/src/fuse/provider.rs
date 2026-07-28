@@ -384,13 +384,7 @@ pub(crate) fn default_provider_model_fallback(
     provider: &str,
     default_model: Option<&str>,
 ) -> String {
-    let requested = [
-        "gpt-5.6",
-        "codex-auto-review",
-        "gpt-5.3-codex-spark",
-        "gpt-5.4",
-        "gpt-5.4-mini",
-    ];
+    let requested = ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
     let mut fallback = String::new();
     for model in requested {
         if default_model == Some(model) {

@@ -45,6 +45,9 @@ pub fn fresh_request_id(prefix: &str) -> Result<String, RuntimeClientError> {
 pub enum RequestFrame {
     #[serde(rename = "ping")]
     Ping {
+        /// Deprecated compatibility input. The runtime ignores this field and
+        /// newly generated frames omit it.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
         request_id: String,
         agent: String,
@@ -53,6 +56,9 @@ pub enum RequestFrame {
     },
     #[serde(rename = "agent.create")]
     CreateChild {
+        /// Deprecated compatibility input. The runtime ignores this field and
+        /// newly generated frames omit it.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
         request_id: String,
         agent: String,
@@ -73,6 +79,9 @@ pub enum RequestFrame {
     },
     #[serde(rename = "agent.update")]
     UpdatePrompt {
+        /// Deprecated compatibility input. The runtime ignores this field and
+        /// newly generated frames omit it.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         token: String,
         request_id: String,
         agent: String,
@@ -221,7 +230,7 @@ pub fn request(socket: &Path, frame: &RequestFrame) -> Result<ResponseFrame, Run
 
 pub fn ping(
     socket: &Path,
-    token: &str,
+    _token: &str,
     request_id: &str,
     agent: &str,
     session: &str,
@@ -230,7 +239,7 @@ pub fn ping(
     match request(
         socket,
         &RequestFrame::Ping {
-            token: token.to_owned(),
+            token: String::new(),
             request_id: request_id.to_owned(),
             agent: agent.to_owned(),
             session: session.to_owned(),
@@ -251,7 +260,7 @@ pub fn ping(
 )]
 pub fn create_child(
     socket: &Path,
-    token: &str,
+    _token: &str,
     request_id: &str,
     agent: &str,
     session: &str,
@@ -269,7 +278,7 @@ pub fn create_child(
     match request(
         socket,
         &RequestFrame::CreateChild {
-            token: token.to_owned(),
+            token: String::new(),
             request_id: request_id.to_owned(),
             agent: agent.to_owned(),
             session: session.to_owned(),
@@ -296,7 +305,7 @@ pub fn create_child(
 )]
 pub fn update_prompt(
     socket: &Path,
-    token: &str,
+    _token: &str,
     request_id: &str,
     agent: &str,
     session: &str,
@@ -310,7 +319,7 @@ pub fn update_prompt(
     match request(
         socket,
         &RequestFrame::UpdatePrompt {
-            token: token.to_owned(),
+            token: String::new(),
             request_id: request_id.to_owned(),
             agent: agent.to_owned(),
             session: session.to_owned(),
@@ -339,15 +348,13 @@ pub fn update_prompt_from_environment(
     request: UpdatePromptEnvironmentRequest<'_>,
 ) -> Result<(), RuntimeClientError> {
     let socket = env::var_os("CTX_CONTROL_SOCKET").ok_or(RuntimeClientError::InvalidEnvironment)?;
-    let token =
-        env::var("CTX_CONTROL_TOKEN").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     let agent = env::var("CTX_AGENT").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     let session =
         env::var("CTX_SESSION").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     let run = env::var("CTX_RUN_ID").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     update_prompt(
         &PathBuf::from(socket),
-        &token,
+        "",
         request.request_id,
         &agent,
         &session,
@@ -364,15 +371,13 @@ pub fn create_child_from_environment(
         return Err(RuntimeClientError::InvalidEnvironment);
     }
     let socket = env::var_os("CTX_CONTROL_SOCKET").ok_or(RuntimeClientError::InvalidEnvironment)?;
-    let token =
-        env::var("CTX_CONTROL_TOKEN").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     let agent = env::var("CTX_AGENT").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     let session =
         env::var("CTX_SESSION").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     let run = env::var("CTX_RUN_ID").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
     create_child(
         &PathBuf::from(socket),
-        &token,
+        "",
         request.request_id,
         &agent,
         &session,
@@ -390,18 +395,16 @@ pub fn ping_from_environment(
     agent: &str,
 ) -> Result<Option<RuntimeSourceReceipt>, RuntimeClientError> {
     let socket = env::var_os("CTX_CONTROL_SOCKET");
-    let token = env::var("CTX_CONTROL_TOKEN").ok();
-    match (socket, token) {
-        (None, None) => Ok(None),
-        (Some(_), None) | (None, Some(_)) => Err(RuntimeClientError::InvalidEnvironment),
-        (Some(socket), Some(token)) => {
+    match socket {
+        None => Ok(None),
+        Some(socket) => {
             let session =
                 env::var("CTX_SESSION").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
             let run =
                 env::var("CTX_RUN_ID").map_err(|_error| RuntimeClientError::InvalidEnvironment)?;
             ping(
                 &PathBuf::from(socket),
-                &token,
+                "",
                 &format!("startup-{run}"),
                 agent,
                 &session,
@@ -705,27 +708,45 @@ mod tests {
         );
     }
 
-    /// 在局部子进程里复现部分环境变量缺失分支，保持与主进程调用一致的闭环行为。
+    /// 在局部子进程里复现无 socket 环境，保持与主进程调用一致的闭环行为。
     #[test]
     #[ignore = "subprocess entrypoint for environment isolation"]
-    fn partial_environment_subprocess() {
-        assert_eq!(
-            ping_from_environment("agent"),
-            Err(RuntimeClientError::InvalidEnvironment)
-        );
+    fn socketless_environment_is_inert_subprocess() {
+        assert_eq!(ping_from_environment("agent"), Ok(None));
     }
 
-    /// 子进程级别复用 `partial_environment_subprocess`，避免环境脏状态污染主测试进程。
+    /// 子进程级别复用 socketless 环境语义，避免环境脏状态污染主测试进程。
     #[test]
-    fn partial_environment_fails_closed() -> Result<(), Box<dyn std::error::Error>> {
+    fn socketless_environment_is_inert() -> Result<(), Box<dyn std::error::Error>> {
         let status = Command::new(env::current_exe()?)
             .arg("--exact")
-            .arg("tests::partial_environment_subprocess")
+            .arg("tests::socketless_environment_is_inert_subprocess")
             .arg("--ignored")
-            .env("CTX_CONTROL_TOKEN", "partial")
             .env_remove("CTX_CONTROL_SOCKET")
             .status()?;
         assert!(status.success());
+        Ok(())
+    }
+
+    #[test]
+    fn tokenless_frames_omit_token_and_legacy_token_is_accepted() -> Result<(), serde_json::Error> {
+        let tokenless = serde_json::to_value(RequestFrame::Ping {
+            token: String::new(),
+            request_id: "request-1".to_owned(),
+            agent: "agent".to_owned(),
+            session: "session".to_owned(),
+            run: "run".to_owned(),
+        })?;
+        assert!(tokenless.get("token").is_none());
+        let legacy = serde_json::from_value::<RequestFrame>(serde_json::json!({
+            "op": "ping",
+            "token": "legacy",
+            "request_id": "request-1",
+            "agent": "agent",
+            "session": "session",
+            "run": "run"
+        }))?;
+        assert!(matches!(legacy, RequestFrame::Ping { token, .. } if token == "legacy"));
         Ok(())
     }
 }

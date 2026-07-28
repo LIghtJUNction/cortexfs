@@ -248,6 +248,7 @@ fn executable_agent_rejects_non_authoritative_tool_frames() {
             },
             &envelope,
             0,
+            None,
         );
         assert_eq!(result, Err(SocketRuntimeError::InvalidAgentOutput));
     }

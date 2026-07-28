@@ -366,7 +366,7 @@ pub(crate) fn persistent_context_path(root: &Path) -> Result<Option<PathBuf>, Ts
     let Some(agent) = env::var("CTX_AGENT").ok() else {
         return Ok(None);
     };
-    let Some((socket, token)) = tsh_control_environment_from_env()? else {
+    let Some(socket) = tsh_control_environment_from_env()? else {
         if env::var_os("CTX_SESSION").is_none()
             && env::var_os("CTX_RUN_ID").is_none()
             && env::var_os("CTX_SOURCE").is_none()
@@ -377,24 +377,20 @@ pub(crate) fn persistent_context_path(root: &Path) -> Result<Option<PathBuf>, Ts
             "persistent cache requires authenticated runtime capability",
         ));
     };
-    persistent_context_path_with_capability(root, &agent, &socket, &token)
+    persistent_context_path_with_capability(root, &agent, &socket)
 }
 
 fn persistent_context_path_with_capability(
     root: &Path,
     agent: &str,
     socket: &std::ffi::OsStr,
-    token: &std::ffi::OsStr,
 ) -> Result<Option<PathBuf>, TshError> {
     let runtime = validated_tsh_runtime_context_from_env(root, agent)?;
-    let token = token
-        .to_str()
-        .ok_or_else(|| TshError::unavailable("invalid runtime token"))?;
     let request_id = cortexfs_runtime_client::fresh_request_id("tsh-cache")
         .map_err(|_error| TshError::unavailable("cannot create persistent cache request id"))?;
     let receipt = cortexfs_runtime_client::ping(
         Path::new(&socket),
-        token,
+        "",
         &request_id,
         &runtime.agent,
         &runtime.session,
@@ -492,10 +488,8 @@ pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<E
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some((ref socket, ref token)) = control {
-        command
-            .env("CTX_CONTROL_SOCKET", socket)
-            .env("CTX_CONTROL_TOKEN", token);
+    if let Some(ref socket) = control {
+        command.env("CTX_CONTROL_SOCKET", socket);
     }
     if validated_tsh_runtime_context_from_env(root, &runtime.agent)? != runtime
         || tsh_control_environment_from_env()? != control
@@ -513,20 +507,16 @@ pub(crate) fn run_tool(root: &Path, name: &str, args: Vec<OsString>) -> Result<E
         .map_or_else(|| ExitCode::from(1), ExitCode::from))
 }
 
-pub(crate) fn tsh_control_environment_from_env() -> Result<Option<(OsString, OsString)>, TshError> {
-    validate_tsh_control_environment(
-        env::var_os("CTX_CONTROL_SOCKET"),
-        env::var_os("CTX_CONTROL_TOKEN"),
-    )
+pub(crate) fn tsh_control_environment_from_env() -> Result<Option<OsString>, TshError> {
+    validate_tsh_control_environment(env::var_os("CTX_CONTROL_SOCKET"))
 }
 
 pub(crate) fn validate_tsh_control_environment(
     socket: Option<OsString>,
-    token: Option<OsString>,
-) -> Result<Option<(OsString, OsString)>, TshError> {
-    match (socket, token) {
-        (None, None) => Ok(None),
-        (Some(socket), Some(token)) => {
+) -> Result<Option<OsString>, TshError> {
+    match socket {
+        None => Ok(None),
+        Some(socket) => {
             if socket
                 != std::ffi::OsStr::new(cortexfs::runtime::socket::bwrap::SOCKET_RUN_CONTROL_PATH)
             {
@@ -534,19 +524,8 @@ pub(crate) fn validate_tsh_control_environment(
                     "CTX_CONTROL_SOCKET is not the fixed runtime control path",
                 ));
             }
-            let Some(token_text) = token.to_str() else {
-                return Err(TshError::unavailable("CTX_CONTROL_TOKEN is not ASCII hex"));
-            };
-            if token_text.len() != 64 || !token_text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(TshError::unavailable(
-                    "CTX_CONTROL_TOKEN is not a 32-byte hex token",
-                ));
-            }
-            Ok(Some((socket, token)))
+            Ok(Some(socket))
         }
-        _ => Err(TshError::unavailable(
-            "incomplete CTX_CONTROL_SOCKET/CTX_CONTROL_TOKEN runtime capability",
-        )),
     }
 }
 

@@ -242,7 +242,7 @@ fn file_check_validates_session_control_files() {
     assert!(fs::write(session.join("cwd"), "/work\n").is_ok());
     assert!(fs::write(
         session.join("meta.json"),
-        "{\"client\":\"ctx\",\"model\":\"openai/gpt-4o\",\"scope\":\"private\"}\n"
+        "{\"client\":\"ctx\",\"model\":\"openai/gpt-5.6\",\"scope\":\"private\"}\n"
     )
     .is_ok());
 
@@ -338,29 +338,29 @@ fn file_check_rejects_by_cwd_symlink_index_entries() {
 #[test]
 fn file_check_validates_model_capability_files() {
     let root = clean_test_dir("ctx-model-cap-check");
-    let cap = fixture_path(&root, &["model", "openai", "gpt-4o.d", "cap"]);
+    let cap = fixture_path(&root, &["model", "openai", "gpt-5.6.d", "cap"]);
     write_text_file(&cap, "chat\nopenai_responses\n");
 
     assert_file_check_error_contains(
         &root,
-        "model/openai/gpt-4o.d/cap",
+        "model/openai/gpt-5.6.d/cap",
         &["provider private capability"],
     );
 
     write_text_file(&cap, "chat\nstream\n");
-    let checked = file_check(&root, "model/openai/gpt-4o.d/cap");
+    let checked = file_check(&root, "model/openai/gpt-5.6.d/cap");
     assert!(checked.is_ok());
 }
 
 #[test]
 fn file_check_validates_model_driver_route_files() {
     let root = clean_test_dir("ctx-model-driver-check");
-    let driver = fixture_path(&root, &["model", "openai", "gpt-4o.d", "driver"]);
+    let driver = fixture_path(&root, &["model", "openai", "gpt-5.6.d", "driver"]);
     write_text_file(&driver, "agent=/bin/sh\n");
 
     assert_file_check_error_contains(
         &root,
-        "model/openai/gpt-4o.d/driver",
+        "model/openai/gpt-5.6.d/driver",
         &["invalid driver name"],
     );
 
@@ -368,7 +368,7 @@ fn file_check_validates_model_driver_route_files() {
         &driver,
         "default=openai-chat\nexec=openai-chat\nagent=openai-responses,openai-chat\n"
     );
-    let checked = file_check(&root, "model/openai/gpt-4o.d/driver");
+    let checked = file_check(&root, "model/openai/gpt-5.6.d/driver");
     assert!(checked.is_ok());
 }
 
@@ -459,7 +459,7 @@ fn file_check_validates_event_stream_files() {
             "project-a",
             "model",
             "openai",
-            "gpt-4o.d",
+            "gpt-5.6.d",
             "session",
             "default",
             "events.jsonl",
@@ -472,7 +472,7 @@ fn file_check_validates_event_stream_files() {
     write_text_file(&model_events.with_file_name("messages.jsonl"), "");
     assert!(file_check(
         &root,
-        "shared/project-a/model/openai/gpt-4o.d/session/default/events.jsonl"
+        "shared/project-a/model/openai/gpt-5.6.d/session/default/events.jsonl"
     )
     .is_ok());
 }

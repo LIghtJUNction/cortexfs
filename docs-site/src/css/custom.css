@@ -76,9 +76,11 @@ video:focus-visible {
 }
 
 .navbar__logo img {
-  background: #ffffff;
-  border-radius: 6px;
+  background: transparent;
+  border-radius: 0;
+  height: 38px;
   object-fit: contain;
+  width: 127px;
 }
 
 .navbar__title {
@@ -200,29 +202,14 @@ video:focus-visible {
 .cortexBrandLockup {
   align-items: center;
   display: inline-flex;
-  gap: 12px;
   margin-bottom: 44px;
 }
 
 .cortexBrandLockup img {
-  background: #ffffff;
-  border: 1px solid var(--cortex-line);
-  border-radius: 6px;
-  height: 42px;
+  display: block;
+  height: 64px;
   object-fit: contain;
-  width: 42px;
-}
-
-.cortexBrandLockup span {
-  font-family: Georgia, "Times New Roman", ui-serif, serif;
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.cortexBrandLockup i {
-  color: var(--cortex-mint);
-  font-style: italic;
+  width: 213px;
 }
 
 .cortexHero h1 {

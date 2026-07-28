@@ -10,7 +10,7 @@ fn parses_agent_lifecycle_commands() {
         "--label",
         "reviewer_t",
         "--model",
-        "openai/gpt-4o",
+        "openai/gpt-5.6",
         "--tool",
         "fs.read",
         "--shared",
@@ -26,7 +26,7 @@ fn parses_agent_lifecycle_commands() {
             if args.name == "reviewer"
                 && args.temporary
                 && args.label.as_deref() == Some("reviewer_t")
-                && args.models == ["openai/gpt-4o".to_owned()]
+                && args.models == ["openai/gpt-5.6".to_owned()]
                 && args.tools == ["fs.read".to_owned()]
                 && args.shared.len() == 1
                 && args.mounts.len() == 1
@@ -125,7 +125,7 @@ fn agent_new_request_json_matches_lifecycle_tool_shape() {
         "--label",
         "reviewer_t",
         "--model",
-        "openai/gpt-4o",
+        "openai/gpt-5.6",
         "--tool",
         "fs.read",
         "--shared",
@@ -142,7 +142,7 @@ fn agent_new_request_json_matches_lifecycle_tool_shape() {
     assert_eq!(
         agent_new_request_json(&args),
         Ok(
-            "{\"name\":\"reviewer\",\"label\":\"reviewer_t\",\"model\":[\"openai/gpt-4o\"],\"tools\":[\"fs.read\"],\"shared\":{\"project-a\":[\"read\"]},\"mount\":[[\"/work\",\"/work\",\"ro\"]]}".to_owned()
+            "{\"name\":\"reviewer\",\"label\":\"reviewer_t\",\"model\":[\"openai/gpt-5.6\"],\"tools\":[\"fs.read\"],\"shared\":{\"project-a\":[\"read\"]},\"mount\":[[\"/work\",\"/work\",\"ro\"]]}".to_owned()
         )
     );
 }
@@ -244,7 +244,7 @@ fn agent_new_host_fallback_creates_spark_worker_when_lifecycle_tool_is_absent() 
         "--label",
         "worker_t",
         "--model",
-        "api.lmm.best/gpt-5.3-codex-spark",
+        "api.test/gpt-5.6",
         "--tool",
         "tsh.config",
     );
@@ -299,12 +299,12 @@ fn agent_new_host_fallback_creates_spark_worker_when_lifecycle_tool_is_absent() 
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/model"))
             .unwrap_or_default(),
-        "api.lmm.best/gpt-5.3-codex-spark\n"
+        "api.test/gpt-5.6\n"
     );
     assert_eq!(
         fs::read_to_string(root.join("agent/worker.d/policy"))
             .unwrap_or_default(),
-        "allow worker_t model:api.lmm.best/gpt-5.3-codex-spark use\nallow worker_t tool:tsh execute\nallow worker_t network:default connect\nallow worker_t tool:tsh.config execute\n"
+        "allow worker_t model:api.test/gpt-5.6 use\nallow worker_t tool:tsh execute\nallow worker_t network:default connect\nallow worker_t tool:tsh.config execute\n"
     );
     let home = ctx_home(&root).unwrap_or_default();
     assert!(home.join("agent/worker/root").is_dir());

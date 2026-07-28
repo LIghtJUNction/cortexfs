@@ -177,14 +177,14 @@ fn child_agent_authority_attenuates_worker_prefix_model_policy() {
     let child_identity = AgentUnixIdentity::new(1000, 100, [10]);
     let parent_policy = PolicyV0::parse(
         "\
-allow coder_t model:api.lmm.best/gpt-5.3-codex-spark use
+allow coder_t model:api.test/gpt-5.6 use
 allow coder_t tool:fs.read execute
 ",
     );
     let parent_policy = ok!(parent_policy);
     let child_policy = PolicyV0::parse(
         "\
-allow worker-fast_t model:api.lmm.best/gpt-5.3-codex-spark use
+allow worker-fast_t model:api.test/gpt-5.6 use
 allow worker-fast_t tool:fs.read execute
 ",
     );

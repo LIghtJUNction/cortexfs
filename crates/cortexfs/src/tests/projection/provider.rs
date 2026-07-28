@@ -36,18 +36,18 @@ fn fuse_projection_projects_configured_provider_models() {
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
     write_text_file(
-        &providers.join("api.lmm.best.json"),
+        &providers.join("api.test.json"),
         r#"{
-  "base_url": "https://api.lmm.best:9000/",
-  "default_model": "gpt-5.4-mini",
+  "base_url": "https://api.test:9000/",
+  "default_model": "gpt-5.6-terra",
   "enabled": true,
   "formats": ["openai.chat", "openai.responses"]
 }
 "#,
     );
     write_text_file(
-        &cache.join("api.lmm.best.models.json"),
-        r#"{"models":["gpt-5.4","gpt-5.4-mini","gpt-5.6","bad/name"]}"#,
+        &cache.join("api.test.models.json"),
+        r#"{"models":["gpt-5.6","gpt-5.6-terra","gpt-5.6-sol","bad/name"]}"#,
     );
     let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
@@ -57,15 +57,7 @@ fn fuse_projection_projects_configured_provider_models() {
         &projection,
         "model",
         &[
-            "api.lmm.best",
-            "code",
-            "debug",
-            "fast",
-            "helper",
-            "main",
-            "reason",
-            "route",
-            "vision",
+            "api.test", "code", "debug", "fast", "helper", "main", "reason", "route", "vision",
         ],
     );
     let route = projection.read_to_string("model/route");
@@ -84,47 +76,45 @@ fn fuse_projection_projects_configured_provider_models() {
 
     assert_model_entries(
         &projection,
-        "model/api.lmm.best",
+        "model/api.test",
         &[
-            "gpt-5.4",
-            "gpt-5.4-mini",
-            "gpt-5.4-mini.d",
-            "gpt-5.4.d",
             "gpt-5.6",
+            "gpt-5.6-sol",
+            "gpt-5.6-sol.d",
+            "gpt-5.6-terra",
+            "gpt-5.6-terra.d",
             "gpt-5.6.d",
         ],
     );
 
-    let metadata = projection.read_to_string("model/api.lmm.best/gpt-5.4-mini");
+    let metadata = projection.read_to_string("model/api.test/gpt-5.6-terra");
     assert!(matches!(
         metadata,
         Ok(ref content)
             if content.starts_with(&format!("#!{CORTEXFS_OBJECT_RUNNER}\n"))
-                && content.contains("# cortexfs.name=api.lmm.best/gpt-5.4-mini\n")
+                && content.contains("# cortexfs.name=api.test/gpt-5.6-terra\n")
                 && content.contains("# cortexfs.driver.default=openai-chat\n")
                 && content.contains("# cortexfs.driver.agent=openai-responses,openai-chat\n")
     ));
     assert_eq!(
-        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/driver"),
+        projection.read_to_string("model/api.test/gpt-5.6-terra.d/driver"),
         Ok(
             "default=openai-chat\nexec=openai-chat\nagent=openai-responses,openai-chat\n"
                 .to_owned()
         )
     );
     assert_eq!(
-        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/default"),
-        Ok("base_url=https://api.lmm.best:9000/\n".to_owned())
+        projection.read_to_string("model/api.test/gpt-5.6-terra.d/default"),
+        Ok("base_url=https://api.test:9000/\n".to_owned())
     );
-    assert!(fs::create_dir_all(root.join("model/api.lmm.best/gpt-5.4-mini.d/hooks/pre.d")).is_ok());
-    assert!(
-        fs::create_dir_all(root.join("model/api.lmm.best/gpt-5.4-mini.d/hooks/post.d")).is_ok()
-    );
-    let hooks_attr = projection.getattr("model/api.lmm.best/gpt-5.4-mini.d/hooks");
+    assert!(fs::create_dir_all(root.join("model/api.test/gpt-5.6-terra.d/hooks/pre.d")).is_ok());
+    assert!(fs::create_dir_all(root.join("model/api.test/gpt-5.6-terra.d/hooks/post.d")).is_ok());
+    let hooks_attr = projection.getattr("model/api.test/gpt-5.6-terra.d/hooks");
     assert!(matches!(
         hooks_attr,
         Ok(ref attr) if attr.file_type() == FuseFileType::Directory
     ));
-    let hook_entries = projection.readdir("model/api.lmm.best/gpt-5.4-mini.d/hooks");
+    let hook_entries = projection.readdir("model/api.test/gpt-5.6-terra.d/hooks");
     assert_eq!(
         hook_entries.map(|entries| entries
             .into_iter()
@@ -133,23 +123,23 @@ fn fuse_projection_projects_configured_provider_models() {
         Ok(vec!["post.d".to_owned(), "pre.d".to_owned()])
     );
     assert_eq!(
-        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/effort"),
+        projection.read_to_string("model/api.test/gpt-5.6-terra.d/effort"),
         Ok("auto\n".to_owned())
     );
-    assert!(matches!(
-        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/fallback"),
-        Ok(ref content) if content.contains("api.lmm.best/gpt-5.6\n")
-    ));
+    assert_eq!(
+        projection.read_to_string("model/api.test/gpt-5.6-terra.d/fallback"),
+        Ok("api.test/gpt-5.6\napi.test/gpt-5.6-sol\napi.test/gpt-5.6-luna\n".to_owned())
+    );
     assert!(
         projection
-            .write_control_file("model/api.lmm.best/gpt-5.4-mini.d/effort", "high\n")
+            .write_control_file("model/api.test/gpt-5.6-terra.d/effort", "high\n")
             .is_ok()
     );
     assert_eq!(
-        projection.read_to_string("model/api.lmm.best/gpt-5.4-mini.d/effort"),
+        projection.read_to_string("model/api.test/gpt-5.6-terra.d/effort"),
         Ok("high\n".to_owned())
     );
-    let attr = projection.getattr("model/api.lmm.best/gpt-5.4-mini");
+    let attr = projection.getattr("model/api.test/gpt-5.6-terra");
     assert!(matches!(attr, Ok(ref attr) if attr.mode() & 0o777 == 0o555));
 }
 
@@ -297,26 +287,24 @@ fn fuse_projection_rejects_symlink_provider_model_control_dir() {
     let cache = root.join("provider-models");
     let outside = clean_test_dir("fuse-provider-model-control-symlink-outside");
     write_text_file(
-        &providers.join("api.lmm.best.json"),
+        &providers.join("api.test.json"),
         r#"{
-  "base_url": "https://api.lmm.best:9000/",
+  "base_url": "https://api.test:9000/",
   "enabled": true,
   "formats": ["openai.chat"]
 }
 "#,
     );
     write_text_file(
-        &cache.join("api.lmm.best.models.json"),
-        r#"{"models":["gpt-5.4-mini"]}"#,
+        &cache.join("api.test.models.json"),
+        r#"{"models":["gpt-5.6-terra"]}"#,
     );
-    assert!(fs::create_dir_all(root.join("model").join("api.lmm.best")).is_ok());
+    assert!(fs::create_dir_all(root.join("model").join("api.test")).is_ok());
     assert!(fs::create_dir_all(&outside).is_ok());
     assert!(
         symlink(
             &outside,
-            root.join("model")
-                .join("api.lmm.best")
-                .join("gpt-5.4-mini.d")
+            root.join("model").join("api.test").join("gpt-5.6-terra.d")
         )
         .is_ok()
     );
@@ -325,14 +313,14 @@ fn fuse_projection_rejects_symlink_provider_model_control_dir() {
         .with_provider_model_cache_dir(&cache);
 
     assert_eq!(
-        projection.write_control_file("model/api.lmm.best/gpt-5.4-mini.d/effort", "high\n"),
+        projection.write_control_file("model/api.test/gpt-5.6-terra.d/effort", "high\n"),
         Err(FuseError::Io)
     );
     assert!(!outside.join("effort").exists());
     assert!(
         root.join("model")
-            .join("api.lmm.best")
-            .join("gpt-5.4-mini.d")
+            .join("api.test")
+            .join("gpt-5.6-terra.d")
             .symlink_metadata()
             .is_ok_and(|metadata| metadata.file_type().is_symlink())
     );
@@ -346,7 +334,7 @@ fn fuse_projection_requires_name_for_address_provider() {
         &providers.join("local.json"),
         r#"{
   "base_url": "http://127.0.0.1:8317/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "gpt-5.6-terra",
   "enabled": true,
   "formats": ["openai.chat"]
 }
@@ -366,7 +354,7 @@ fn fuse_projection_uses_configured_provider_name_for_address_provider() {
         r#"{
   "name": "local",
   "base_url": "http://127.0.0.1:8317/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "gpt-5.6-terra",
   "enabled": true,
   "formats": ["openai.chat"]
 }
@@ -388,7 +376,7 @@ fn fuse_projection_uses_configured_provider_name_for_address_provider() {
         ]
     );
     assert_eq!(
-        projection.read_to_string("model/local/gpt-5.4-mini.d/default"),
+        projection.read_to_string("model/local/gpt-5.6-terra.d/default"),
         Ok("base_url=http://127.0.0.1:8317/v1\n".to_owned())
     );
 }
@@ -403,7 +391,7 @@ fn fuse_projection_ignores_symlink_provider_configs() {
         r#"{
   "name": "local",
   "base_url": "http://127.0.0.1:8317/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "gpt-5.6-terra",
   "enabled": true,
   "formats": ["openai.chat"]
 }
@@ -439,7 +427,7 @@ fn fuse_projection_rejects_symlink_provider_config_dir() {
         r#"{
   "name": "local",
   "base_url": "http://127.0.0.1:8317/v1",
-  "default_model": "gpt-5.4-mini",
+  "default_model": "gpt-5.6-terra",
   "enabled": true,
   "formats": ["openai.chat"]
 }
@@ -536,10 +524,10 @@ fn fuse_projection_ignores_oversized_provider_model_cache() {
     let providers = root.join("providers.d");
     let cache = root.join("provider-models");
     write_text_file(
-        &providers.join("api.lmm.best.json"),
+        &providers.join("api.test.json"),
         r#"{
-  "base_url": "https://api.lmm.best:9000/",
-  "default_model": "gpt-5.4-mini",
+  "base_url": "https://api.test:9000/",
+  "default_model": "gpt-5.6-terra",
   "enabled": true,
   "formats": ["openai.chat"]
 }
@@ -547,21 +535,21 @@ fn fuse_projection_ignores_oversized_provider_model_cache() {
     );
     let oversized_padding = "x".repeat(1024 * 1024);
     write_text_file(
-        &cache.join("api.lmm.best.models.json"),
+        &cache.join("api.test.models.json"),
         &format!(r#"{{"models":["gpt-cache"],"padding":"{oversized_padding}"}}"#),
     );
     let projection = FuseProjection::new(&root)
         .with_provider_config_dir(&providers)
         .with_provider_model_cache_dir(&cache);
 
-    let provider_entries = projection.readdir("model/api.lmm.best");
+    let provider_entries = projection.readdir("model/api.test");
     assert!(provider_entries.is_ok());
     let provider_names = provider_entries
         .unwrap_or_default()
         .into_iter()
         .map(|entry| entry.name().to_owned())
         .collect::<Vec<_>>();
-    assert_eq!(provider_names, ["gpt-5.4-mini", "gpt-5.4-mini.d"]);
+    assert_eq!(provider_names, ["gpt-5.6-terra", "gpt-5.6-terra.d"]);
 }
 
 #[test]
@@ -569,10 +557,10 @@ fn fuse_projection_skips_disabled_provider_models() {
     let root = reference_tree("fuse-disabled-provider-model");
     let providers = root.join("providers.d");
     write_text_file(
-        &providers.join("api.lmm.best.json"),
+        &providers.join("api.test.json"),
         r#"{
-  "base_url": "https://api.lmm.best:9000/",
-  "default_model": "gpt-5.4-mini",
+  "base_url": "https://api.test:9000/",
+  "default_model": "gpt-5.6-terra",
   "enabled": false,
   "formats": ["openai.chat"]
 }
@@ -594,7 +582,7 @@ fn fuse_projection_skips_disabled_provider_models() {
         ]
     );
     assert_eq!(
-        projection.getattr("model/api.lmm.best"),
+        projection.getattr("model/api.test"),
         Err(FuseError::NotFound)
     );
 }

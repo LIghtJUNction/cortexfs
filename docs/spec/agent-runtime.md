@@ -385,8 +385,18 @@ An agent iterates itself through the `agent.update` tool. The tool sends one
 `agent.update` frame over the receipt-bound run capability socket:
 
 ```json
-{"op":"agent.update","token":"...","request_id":"tool-1","agent":"coder","session":"default","run":"run-1","control":"system.md","content":"..."}
+{"op":"agent.update","request_id":"tool-1","agent":"coder","session":"default","run":"run-1","control":"system.md","content":"..."}
 ```
+
+The sandbox receives exactly `CTX_CONTROL_SOCKET=/run/cortexfs/control.sock` for
+this channel, never a bearer credential. Before each bwrap launch, the host
+records that host PID and `/proc/<pid>/stat` start time, then releases its
+one-use `--block-fd` gate. The socket accepts only the owner UID whose kernel
+peer PID is that registered launch root or a live descendant; missing process
+state, PID reuse, reparenting, cycles, and excessive ancestry depth deny the
+request. Legacy JSON `token` input remains parseable for wire migration but is
+ignored; new clients omit it and must never derive authority from an
+environment value.
 
 The frame's `agent`, `session`, and `run` must equal the capability's own
 identity, so the operation is self-only by construction. `control` accepts

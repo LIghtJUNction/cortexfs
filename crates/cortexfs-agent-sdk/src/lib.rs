@@ -546,7 +546,9 @@ mod tests {
             identity.uid(),
             identity.gid(),
         )?;
-        let environment = capability.environment(capability.socket());
+        capability.register_launch_root(std::process::id())?;
+        let environment =
+            cortexfs::runtime::control::RunCapability::environment(capability.socket());
         let shutdown = Arc::new(AtomicBool::new(false));
         let server_shutdown = Arc::clone(&shutdown);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
@@ -565,7 +567,6 @@ mod tests {
             .env("CTX_AGENT_LAUNCH", AGENT_LAUNCH_ABI)
             .env("CTX_AGENT_STEP", "0")
             .env(&environment[0].0, &environment[0].1)
-            .env(&environment[1].0, &environment[1].1)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()?;
@@ -601,7 +602,9 @@ mod tests {
             identity.uid(),
             identity.gid(),
         )?;
-        let environment = capability.environment(capability.socket());
+        capability.register_launch_root(std::process::id())?;
+        let environment =
+            cortexfs::runtime::control::RunCapability::environment(capability.socket());
         let shutdown = Arc::new(AtomicBool::new(false));
         let server_shutdown = Arc::clone(&shutdown);
         let (startup_tx, _startup_rx) = mpsc::sync_channel(1);
@@ -641,7 +644,6 @@ mod tests {
             .env("CTX_SESSION", "default")
             .env("CTX_RUN_ID", "run-1")
             .env(&environment[0].0, &environment[0].1)
-            .env(&environment[1].0, &environment[1].1)
             .output()?;
         assert!(output.status.success(), "{output:?}");
         let handoffs = [handoff_rx.recv()?, handoff_rx.recv()?];
@@ -685,8 +687,7 @@ mod tests {
                 .env("TEST_AGENT_ARG", arg)
                 .env("CTX_AGENT", "echo-agent")
                 .env("CTX_RUN_ID", "run-1")
-                .env_remove("CTX_CONTROL_SOCKET")
-                .env_remove("CTX_CONTROL_TOKEN");
+                .env_remove("CTX_CONTROL_SOCKET");
             if let Some(launch) = launch {
                 command.env("CTX_AGENT_LAUNCH", launch);
             } else {

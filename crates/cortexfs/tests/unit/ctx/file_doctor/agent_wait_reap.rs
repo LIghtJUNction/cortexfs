@@ -49,7 +49,7 @@ fn agent_wait_reaps_active_child_when_backing_worker_is_dead() {
             session: "default".to_owned(),
             parent_session: Some("default".to_owned()),
             parent_run: Some("r1".to_owned()),
-            model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+            model: "openai/gpt-5.6".to_owned(),
             life: "temp".to_owned(),
             agent_status: "dead".to_owned(),
             ppid: Some(pid),
@@ -94,7 +94,7 @@ fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
                 session: "default".to_owned(),
                 parent_session: Some("default".to_owned()),
                 parent_run: Some("r1".to_owned()),
-                model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+                model: "openai/gpt-5.6".to_owned(),
                 life: "temp".to_owned(),
                 agent_status: "dead".to_owned(),
                 ppid: None,
@@ -114,7 +114,7 @@ fn agent_wait_reaps_worker_prefix_child_with_spark_default() {
 }
 
 #[test]
-fn agent_child_rows_default_missing_worker_model_to_spark() {
+fn agent_child_rows_default_missing_worker_model_to_default_worker_model() {
     let root = clean_test_dir("ctx-child-row-missing-worker-model");
     assert!(ensure_reference_tree(&root).is_ok());
     enable_dynamic_worker_fixture(&root);
@@ -140,7 +140,7 @@ fn agent_child_rows_default_missing_worker_model_to_spark() {
             session: "default".to_owned(),
             parent_session: None,
             parent_run: None,
-            model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+            model: "openai/gpt-5.6".to_owned(),
             life: "temp".to_owned(),
             agent_status: "idle".to_owned(),
             ppid: None,
@@ -339,7 +339,7 @@ fn agent_wait_reaps_active_child_when_backing_worker_pid_is_stale() {
             session: "default".to_owned(),
             parent_session: Some("default".to_owned()),
             parent_run: Some("r1".to_owned()),
-            model: "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+            model: "openai/gpt-5.6".to_owned(),
             life: "temp".to_owned(),
             agent_status: "dead".to_owned(),
             ppid: None,

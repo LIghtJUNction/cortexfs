@@ -11,6 +11,8 @@ fn unique_test_dir(name: &str) -> PathBuf {
 
 struct TestDir(PathBuf);
 
+const NEUTRAL_FIXTURE_MODEL: &str = "api.test/gpt-5.6";
+
 impl std::ops::Deref for TestDir {
     type Target = Path;
 
@@ -211,19 +213,21 @@ fn create_complete_agent_control(root: &Path, name: &str) {
 fn ensure_runtime_model_fixture(root: &Path) {
     let models = ensure_runtime_models(root);
     assert!(models.is_ok(), "{models:?}");
-    let worker_model = Path::new(DEFAULT_WORKER_MODEL);
-    let worker_limit = root
-        .join("model")
-        .join(worker_model.parent().unwrap_or_else(|| Path::new("")))
-        .join(format!(
-            "{}.d",
-            worker_model
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-        ))
-        .join("limit");
-    write_text_file(&worker_limit, "unknown\n");
+    for model in [DEFAULT_WORKER_MODEL, NEUTRAL_FIXTURE_MODEL] {
+        let model = Path::new(model);
+        let limit = root
+            .join("model")
+            .join(model.parent().unwrap_or_else(|| Path::new("")))
+            .join(format!(
+                "{}.d",
+                model
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+            ))
+            .join("limit");
+        write_text_file(&limit, "unknown\n");
+    }
 }
 
 fn enable_dynamic_worker_fixture(root: &Path) {
@@ -254,7 +258,7 @@ fn enable_dynamic_worker_fixture(root: &Path) {
             ("prompt.template.md", "{{agent_instructions}}\n"),
             (
                 "policy",
-                "allow worker_t model:api.lmm.best/gpt-5.3-codex-spark use\nallow worker_t tool:tsh execute\nallow worker_t tool:fs.read execute\nallow worker_t tool:fs.write execute\nallow worker_t tool:shell.exec execute\n",
+                "allow worker_t model:openai/gpt-5.6 use\nallow worker_t tool:tsh execute\nallow worker_t tool:fs.read execute\nallow worker_t tool:fs.write execute\nallow worker_t tool:shell.exec execute\n",
             ),
             ("status", "idle"),
             ("pid", ""),
@@ -287,10 +291,10 @@ fn complete_agent_control_value(file: &str, name: &str) -> String {
         "env" => "LD_PRELOAD=/tmp/ignored".to_owned(),
         "path" => "/ctx/tool:/ctx/home/1000/tool".to_owned(),
         "mount" => "/ctx\t/ctx\tro\trbind,nosuid,nodev".to_owned(),
-        "model" => "api.lmm.best/gpt-5.3-codex-spark".to_owned(),
+        "model" => NEUTRAL_FIXTURE_MODEL.to_owned(),
         "abi" => "sdk-envelope-v1".to_owned(),
         "window" => "auto".to_owned(),
-        "policy" => format!("allow {subject} model:api.lmm.best/gpt-5.3-codex-spark use"),
+        "policy" => format!("allow {subject} model:{NEUTRAL_FIXTURE_MODEL} use"),
         "status" => "idle".to_owned(),
         "meta.json" => "{}".to_owned(),
         _ => "ok".to_owned(),
@@ -301,7 +305,7 @@ fn session_file_fixture_value(file: &str) -> &'static str {
     match file {
         "state" => "idle\n",
         "cwd" => "/work\n",
-        "meta.json" => "{\"client\":\"ctx\",\"model\":\"openai/gpt-4o\",\"scope\":\"private\"}\n",
+        "meta.json" => "{\"client\":\"ctx\",\"model\":\"openai/gpt-5.6\",\"scope\":\"private\"}\n",
         _ => "ok\n",
     }
 }

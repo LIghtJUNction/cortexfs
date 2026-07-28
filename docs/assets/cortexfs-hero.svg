@@ -1,66 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
-  <title id="title">CortexFS — Agents, as files.</title>
-  <desc id="desc">A warm paper editorial hero for CortexFS, showing three executable object classes under /ctx: model, agent, and tool. Durable sessions are stored under user agent homes.</desc>
-  <defs>
-    <style>
-      .serif{font-family:Georgia,"Times New Roman",serif}.sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.ink{fill:#111312}.slate{fill:#66716c}.mint{fill:#2a8f73}.paper{fill:#fffdfa}.coal-muted{fill:#fffdfa;fill-opacity:.68}.line{stroke:#ded8ca}
-    </style>
-  </defs>
-
-  <rect width="1200" height="520" fill="#f7f5f1"/>
-  <path d="M56 48H1144M56 472H1144" class="line" stroke-width="1"/>
-
-  <g transform="translate(72 72)">
-    <g aria-label="CortexFS">
-      <rect width="52" height="52" rx="6" fill="#fff" stroke="#ded8ca"/>
-      <path class="ink" d="M12 15h15l4 5h10v11H12V15Zm0 21h11v11H12V36Zm24 2h11v5h-3v4h-5v-4h-3v-5Z"/>
-      <path class="mint" d="M31 9h6L22 43h-6L31 9Z"/>
-      <text class="serif ink" x="68" y="38" font-size="34" font-weight="700">Cor</text>
-      <text class="serif mint" x="126" y="38" font-size="34" font-weight="700" font-style="italic">TeX</text>
-      <text class="serif ink" x="184" y="38" font-size="34" font-weight="700">fs</text>
-    </g>
-
-    <text class="sans mint" y="120" font-size="12" font-weight="900" letter-spacing="2.4">FUSE FILESYSTEM INTERFACE</text>
-    <text class="serif ink" y="193" font-size="68" font-weight="600">Agents, as files.</text>
-    <text class="sans slate" y="239" font-size="17">A small Unix ABI for durable agent runtimes.</text>
-
-    <g transform="translate(0 291)">
-      <path d="M0 0H428" class="line"/>
-      <text class="mono ink" y="32" font-size="13" font-weight="800">write request</text>
-      <text class="mono mint" x="124" y="32" font-size="13" font-weight="900">→</text>
-      <text class="mono ink" x="154" y="32" font-size="13" font-weight="800">atomic rename</text>
-      <text class="mono mint" x="285" y="32" font-size="13" font-weight="900">→</text>
-      <text class="mono ink" x="315" y="32" font-size="13" font-weight="800">read result</text>
-    </g>
-  </g>
-
-  <g transform="translate(654 64)">
-    <rect width="474" height="392" rx="8" fill="#181b19"/>
-    <path d="M0 56H474" stroke="#fffdfa" stroke-opacity=".12"/>
-    <circle cx="28" cy="28" r="4" fill="#d8ff66"/>
-    <text class="mono paper" x="46" y="33" font-size="13" font-weight="850">/ctx</text>
-    <text class="mono coal-muted" x="390" y="33" font-size="12">mounted</text>
-
-    <g class="mono" font-size="14" font-weight="800">
-      <text class="paper" x="34" y="92">/ctx</text>
-      <text class="coal-muted" x="34" y="121">├── <tspan class="paper">status</tspan></text>
-      <text class="coal-muted" x="34" y="150">├── <tspan class="paper">bin/</tspan></text>
-      <text class="coal-muted" x="34" y="179">├── <tspan class="paper">model/</tspan></text>
-      <text class="coal-muted" x="34" y="208">├── <tspan class="paper">agent/</tspan></text>
-      <text class="coal-muted" x="34" y="237">├── <tspan class="paper">tool/</tspan></text>
-      <text class="coal-muted" x="34" y="266">├── <tspan class="paper">home/</tspan></text>
-      <text class="coal-muted" x="34" y="295">└── <tspan class="paper">shared/</tspan></text>
-    </g>
-
-    <path d="M270 91V290" stroke="#fffdfa" stroke-opacity=".12"/>
-    <text class="sans coal-muted" x="304" y="109" font-size="12" font-weight="900" letter-spacing="1.6">UNIX-NATIVE</text>
-    <text class="serif paper" x="304" y="158" font-size="26" font-weight="600">Inspect.</text>
-    <text class="serif paper" x="304" y="194" font-size="26" font-weight="600">Script.</text>
-    <text class="serif paper" x="304" y="230" font-size="26" font-weight="600">Compose.</text>
-
-    <path d="M34 320H440" stroke="#fffdfa" stroke-opacity=".12"/>
-    <text class="mono coal-muted" x="34" y="355" font-size="12">$</text>
-    <text class="mono paper" x="54" y="355" font-size="12" font-weight="800">ls /ctx/agent</text>
-    <rect x="170" y="346" width="7" height="12" fill="#d8ff66"/>
-  </g>
+  <title id="title">/ctx</title>
+  <desc id="desc">CortexFS path wordmark.</desc>
+  <rect width="1200" height="520" fill="#BCD1CA"/>
+  <path fill="#F9F4E8" d="M112 102c3-27 25-43 60-40l832 14c46 1 71 21 66 59l-12 252c-2 43-35 70-82 67L190 440c-54-2-80-28-75-69l14-143c3-29-23-48-17-126Z"/>
+  <text x="275" y="341" fill="#141413" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="226" font-weight="700" letter-spacing="-20">/</text>
+  <text x="449" y="336" fill="#C65E40" font-family="Avenir Next, Inter, ui-sans-serif, sans-serif" font-size="205" font-weight="900" letter-spacing="-4">ctx</text>
 </svg>
