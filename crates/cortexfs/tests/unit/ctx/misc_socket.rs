@@ -210,6 +210,21 @@ fn terminal_socket_exists_rejects_plain_file() {
 #[test]
 fn agent_chat_request_socket_prefers_runtime_socket_over_visible_socket()
 -> Result<(), Box<dyn std::error::Error>> {
+    const ISOLATED: &str = "CORTEXFS_TEST_AGENT_CHAT_RUNTIME_SOCKET";
+    if std::env::var_os(ISOLATED).is_none() {
+        let runtime = tempfile::Builder::new().prefix("cfs-rt-").tempdir()?;
+        let status = std::process::Command::new(std::env::current_exe()?)
+            .arg("tests::agent_chat_request_socket_prefers_runtime_socket_over_visible_socket")
+            .arg("--exact")
+            .env(ISOLATED, "1")
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .status()?;
+        if !status.success() {
+            return Err("isolated runtime socket preference test failed".into());
+        }
+        return Ok(());
+    }
+
     let root = clean_test_dir("ctx-agent-chat-request-prefers-runtime");
     let visible_parent = root.join("agent");
     fs::create_dir_all(&visible_parent)?;

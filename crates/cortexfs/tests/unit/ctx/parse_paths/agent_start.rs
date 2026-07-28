@@ -843,32 +843,16 @@ fn agent_start_systemd_command_uses_sanitized_environment() {
 }
 
 #[test]
-fn agent_start_process_command_uses_clean_runtime_environment() {
+fn agent_start_process_command_rejects_unavailable_user_manager() {
     let command = AgentLaunchCommand {
         program: "/usr/bin/systemd-run".to_owned(),
         args: vec!["--user".to_owned(), "/usr/bin/env".to_owned()],
     };
-    let identity = AgentUnixIdentity::new(
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
-        nix::unistd::getgroups()
-            .unwrap_or_default()
-            .into_iter()
-            .map(nix::unistd::Gid::as_raw),
-    );
+    let identity = AgentUnixIdentity::new(u32::MAX, u32::MAX, []);
     let result = agent_start_process_command(&identity, &command);
-    assert!(result.is_ok(), "current user manager must be valid");
-    let process = result.unwrap_or_else(|_error| std::process::Command::new("/usr/bin/false"));
-    assert_eq!(process.get_program(), "/usr/bin/env");
-    let args = process
-        .get_args()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    assert!(args.iter().any(|arg| arg == "PATH=/usr/bin:/bin"));
-    assert!(args.iter().any(|arg| arg.starts_with("XDG_RUNTIME_DIR=")));
     assert!(
-        args.iter()
-            .any(|arg| arg.starts_with("DBUS_SESSION_BUS_ADDRESS=unix:path="))
+        matches!(result, Err(ref error) if error.kind() == std::io::ErrorKind::NotFound),
+        "unavailable manager must fail closed: {result:?}"
     );
 }
 
