@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=121595
-prod=77608
+all=121646
+prod=77657
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -21,7 +21,7 @@ prod=77608
 403 crates/cortexfs/src/abi/path.rs
 432 crates/cortexfs/src/abi/request.rs
 13 crates/cortexfs/src/agent.rs
-295 crates/cortexfs/src/agent/child.rs
+296 crates/cortexfs/src/agent/child.rs
 225 crates/cortexfs/src/agent/control.rs
 527 crates/cortexfs/src/agent/create.rs
 2322 crates/cortexfs/src/agent/createop.rs
@@ -233,14 +233,14 @@ prod=77608
 322 crates/cortexfs/src/runtime/egress.rs
 527 crates/cortexfs/src/runtime/egress/http.rs
 11 crates/cortexfs/src/runtime/record.rs
-1645 crates/cortexfs/src/runtime/record/child.rs
+1702 crates/cortexfs/src/runtime/record/child.rs
 169 crates/cortexfs/src/runtime/record/context.rs
 1140 crates/cortexfs/src/runtime/record/session.rs
 322 crates/cortexfs/src/runtime/record/socket.rs
 376 crates/cortexfs/src/runtime/socket.rs
 304 crates/cortexfs/src/runtime/socket/bwrap.rs
 389 crates/cortexfs/src/runtime/socket/events.rs
-2069 crates/cortexfs/src/runtime/socket/exec.rs
+2060 crates/cortexfs/src/runtime/socket/exec.rs
 157 crates/cortexfs/src/runtime/socket/session.rs
 120 crates/cortexfs/src/runtime/socket/stream.rs
 138 crates/cortexfs/src/runtime/socket/stream/timing.rs

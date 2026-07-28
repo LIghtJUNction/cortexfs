@@ -1,6 +1,5 @@
 use super::*;
 use std::ffi::OsString;
-use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -982,16 +981,8 @@ fn record_owned_child_completion(
         parent_session,
         runtime.agent_name,
     )?;
-    let metadata =
-        fs::symlink_metadata(&channel).map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(SocketRuntimeError::CannotRunAgent);
-    }
-    let receipt = ChildHandoffReceipt {
-        path: channel,
-        dev: metadata.dev(),
-        ino: metadata.ino(),
-    };
+    let receipt =
+        child_handoff_receipt(&channel).map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
     let (status, result) = compact_child_outcome(run_id, outcome);
     let _ = control_dir;
     let finish = finish_child_result_exclusive(
