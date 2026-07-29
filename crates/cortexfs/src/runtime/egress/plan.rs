@@ -2,13 +2,13 @@ use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 
+use super::ProviderEgressError;
 use super::secret::provider_egress_credential;
 use super::target::{ProviderTarget, insert_target};
-use super::ProviderEgressError;
+use crate::is_object_name;
 use crate::object::executor::{
     MAX_RUNNER_CONTROL_BYTES, model_candidates, model_default_base_url, read_small_plain_text_file,
 };
-use crate::is_object_name;
 
 pub(crate) struct ProviderEgressPlan {
     pub(super) run: String,
@@ -36,10 +36,7 @@ impl ProviderEgressPlan {
     }
 }
 
-pub(crate) fn is_provider_model(
-    ctx_root: &Path,
-    model: &str,
-) -> Result<bool, ProviderEgressError> {
+pub(crate) fn is_provider_model(ctx_root: &Path, model: &str) -> Result<bool, ProviderEgressError> {
     let candidates =
         model_candidates(ctx_root, model).map_err(|_error| ProviderEgressError::InvalidModel)?;
     Ok(candidates

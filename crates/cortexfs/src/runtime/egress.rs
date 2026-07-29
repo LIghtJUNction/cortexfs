@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crate::support::receipt::{EmptyDirReceipt, SocketReceipt};
 use crate::peer_credentials;
+use crate::support::receipt::{EmptyDirReceipt, SocketReceipt};
 
-pub(crate) use plan::{ProviderEgressPlan, is_provider_model};
 #[cfg(test)]
 use plan::plan_targets;
+pub(crate) use plan::{ProviderEgressPlan, is_provider_model};
 #[cfg(test)]
 use secret::ProviderEgressCredential;
 use target::ProviderTarget;

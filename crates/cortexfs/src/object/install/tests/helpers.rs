@@ -1,9 +1,6 @@
 use super::super::*;
 
-pub(super) fn create_test_executable(
-    class: &fs::File,
-    name: &str,
-) -> Result<(), InstallError> {
+pub(super) fn create_test_executable(class: &fs::File, name: &str) -> Result<(), InstallError> {
     let fd = nix::fcntl::openat(
         class,
         name,

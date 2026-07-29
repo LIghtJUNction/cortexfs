@@ -423,9 +423,7 @@ fn schedule_permissions_accept_replaceable_policy_evaluators() {
         ]
       }]
     }"#;
-    assert!(
-        inspect_agent_schedule_json(schedule, "custom_t", &FixedSchedulePolicy(true)).is_ok()
-    );
+    assert!(inspect_agent_schedule_json(schedule, "custom_t", &FixedSchedulePolicy(true)).is_ok());
     assert!(
         !inspect_agent_schedule_json(schedule, "custom_t", &FixedSchedulePolicy(false)).is_ok()
     );
