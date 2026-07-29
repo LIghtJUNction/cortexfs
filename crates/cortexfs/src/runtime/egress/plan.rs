@@ -1,3 +1,5 @@
+#![expect(clippy::redundant_pub_crate, reason = "re-exported by egress facade")]
+
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;

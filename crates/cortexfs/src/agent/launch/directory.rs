@@ -1,3 +1,5 @@
+#![expect(clippy::redundant_pub_crate, reason = "re-exported by launch facade")]
+
 use std::fs;
 use std::io;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};

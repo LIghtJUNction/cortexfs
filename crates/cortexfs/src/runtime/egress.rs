@@ -175,7 +175,7 @@ fn cleanup_receipts(sockets: &BTreeMap<String, SocketReceipt>, directory: &Empty
 }
 
 mod http;
-pub(crate) mod plan;
+mod plan;
 mod secret;
 mod target;
 #[cfg(test)]
