@@ -81,9 +81,7 @@ pub fn completed_agent_schedule_nodes_from_parent_context(
     Ok(completed)
 }
 
-pub fn parent_session_name(
-    parent_session_dir: &Path,
-) -> Result<String, AgentScheduleRecordError> {
+pub fn parent_session_name(parent_session_dir: &Path) -> Result<String, AgentScheduleRecordError> {
     let name = parent_session_dir
         .file_name()
         .and_then(|name| name.to_str())
