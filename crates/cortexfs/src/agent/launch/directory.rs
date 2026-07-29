@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::AgentUnixIdentity;
 
-pub fn ensure_terminal_runtime_dir(
+pub(crate) fn ensure_terminal_runtime_dir(
     runtime: &Path,
     agent: &str,
     session: &str,

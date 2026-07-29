@@ -12,7 +12,7 @@ use std::time::Duration;
 use crate::agent::create::AgentRollbackConflict;
 use crate::{AgentUnixIdentity, ChildContextRecordError};
 
-mod directory;
+pub(crate) mod directory;
 mod meta;
 
 pub(crate) use directory::ensure_terminal_runtime_dir;
