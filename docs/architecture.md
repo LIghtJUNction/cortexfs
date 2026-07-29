@@ -50,6 +50,8 @@ Child agents are owned by their parent unless explicitly detached by policy.
 Owned children die when the parent dies.
 Prompt text and skill metadata never grant authority.
 Policy, path, mount, uid/gid, and mode bits grant authority.
+Mechanism enforces principal, path, mount, and Linux constraints; an injected
+policy evaluator may only further restrict that authority.
 ```
 
 ## Where things live

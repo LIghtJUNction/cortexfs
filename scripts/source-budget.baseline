@@ -1,6 +1,6 @@
 # cortexfs source-budget baseline
-all=123130
-prod=78627
+all=123207
+prod=78658
 [files]
 25 crates/cortexfs-agent-sdk/examples/echo_agent.rs
 924 crates/cortexfs-agent-sdk/src/lib.rs
@@ -138,7 +138,7 @@ prod=78627
 263 crates/cortexfs/src/context/jsonl.rs
 87 crates/cortexfs/src/context/pack.rs
 140 crates/cortexfs/src/context/source.rs
-119 crates/cortexfs/src/exports.rs
+121 crates/cortexfs/src/exports.rs
 6 crates/cortexfs/src/fuse.rs
 206 crates/cortexfs/src/fuse/alias.rs
 119 crates/cortexfs/src/fuse/path.rs
@@ -206,7 +206,8 @@ prod=78627
 71 crates/cortexfs/src/object/runner/types.rs
 262 crates/cortexfs/src/object/swap.rs
 209 crates/cortexfs/src/object/uninstall.rs
-275 crates/cortexfs/src/policy.rs
+277 crates/cortexfs/src/policy.rs
+29 crates/cortexfs/src/policy/evaluator.rs
 18 crates/cortexfs/src/policy/subject.rs
 32 crates/cortexfs/src/provider.rs
 97 crates/cortexfs/src/provider/alias.rs
@@ -268,7 +269,7 @@ prod=78627
 91 crates/cortexfs/src/support/manuals.rs
 167 crates/cortexfs/src/support/message.rs
 17 crates/cortexfs/src/support/path.rs
-492 crates/cortexfs/src/support/plain.rs
+490 crates/cortexfs/src/support/plain.rs
 309 crates/cortexfs/src/support/process.rs
 25 crates/cortexfs/src/support/queue.rs
 555 crates/cortexfs/src/support/receipt.rs

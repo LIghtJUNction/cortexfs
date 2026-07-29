@@ -194,6 +194,20 @@ L8  bin/*                process entrypoints; may use L0–L7, not the reverse
 | `exports.rs` | Public ABI-facing re-exports only; not an internal kitchen sink. |
 | Glob imports in production | Forbidden (workspace lint); tests keep documented exceptions only. |
 
+### 4.4 Mechanism and policy
+
+Authority enforcement is split across two boundaries:
+
+| Boundary | Owns | Must not |
+| --- | --- | --- |
+| Mechanism (`authority`) | principal class, path lookup, Linux identity and mode bits, mount visibility/options, stable denial mapping | parse policy formats or assume one policy implementation |
+| Policy (`policy`) | subject/object/permission decisions through `PolicyEvaluator`; v0 text parsing through `PolicyV0` | bypass mechanism checks or grant from prompts, schemas, skills, or model output |
+
+`PolicyV0` is the built-in evaluator, not part of the enforcement mechanism.
+Alternative evaluators must be injected as already-loaded, host-owned policy
+state. A positive policy decision never bypasses principal, path, Linux, or
+mount checks, and any refusal still refuses.
+
 ---
 
 ## 5. Error architecture

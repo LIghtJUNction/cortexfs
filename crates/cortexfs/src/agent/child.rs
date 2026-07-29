@@ -90,7 +90,7 @@ pub struct ChildAgentAuthority<'a> {
     pub(crate) parent_agent: &'a str,
     pub(crate) identity: &'a AgentUnixIdentity,
     pub(crate) subject: &'a str,
-    pub(crate) effective_policy: &'a PolicyV0,
+    pub(crate) effective_policy: &'a dyn PolicyEvaluator,
     pub(crate) visible_mounts: &'a MountTable,
     pub(crate) tool_path: &'a ToolPath,
 }
@@ -102,7 +102,7 @@ impl<'a> ChildAgentAuthority<'a> {
         parent_agent: &'a str,
         identity: &'a AgentUnixIdentity,
         subject: &'a str,
-        effective_policy: &'a PolicyV0,
+        effective_policy: &'a dyn PolicyEvaluator,
         visible_mounts: &'a MountTable,
         tool_path: &'a ToolPath,
     ) -> Self {
