@@ -215,14 +215,7 @@ fn create_preserves_receipts_owner_and_replacement() -> Result<(), Box<dyn std::
         nix::unistd::geteuid().as_raw(),
         nix::unistd::getegid().as_raw(),
     );
-    let egress = create_egress(
-        &control,
-        root.path(),
-        "fixture/chat",
-        &[],
-        owner,
-        "run1",
-    )?;
+    let egress = create_egress(&control, root.path(), "fixture/chat", &[], owner, "run1")?;
     let directory = egress.host_dir().to_owned();
     let socket = egress.socket("fixture").ok_or("missing socket")?.to_owned();
     let metadata = fs::symlink_metadata(&socket)?;
@@ -253,14 +246,7 @@ fn run_directory_keeps_runtime_owner_when_agent_differs_if_root()
     } else {
         runtime
     };
-    let egress = create_egress(
-        &control,
-        root.path(),
-        "fixture/chat",
-        &[],
-        agent,
-        "run1",
-    )?;
+    let egress = create_egress(&control, root.path(), "fixture/chat", &[], agent, "run1")?;
     let directory = fs::symlink_metadata(egress.host_dir())?;
     let socket = fs::symlink_metadata(egress.socket("fixture").ok_or("missing socket")?)?;
     assert_eq!((directory.uid(), directory.gid()), runtime);
