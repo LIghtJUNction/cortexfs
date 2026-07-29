@@ -239,7 +239,7 @@ impl PolicyV0 {
     #[must_use]
     pub fn is_exact_subset_of(&self, parent: &dyn PolicyEvaluator) -> bool {
         self.rules.iter().all(|rule| {
-            parent.allows(
+            parent.evaluate(
                 rule.subject_type(),
                 rule.object_class(),
                 rule.object_name(),
@@ -266,7 +266,7 @@ impl PolicyV0 {
             && is_object_name(parent_subject)
             && self.rules.iter().all(|rule| {
                 rule.subject_type() == child_subject
-                    && parent.allows(
+                    && parent.evaluate(
                         parent_subject,
                         rule.object_class(),
                         rule.object_name(),

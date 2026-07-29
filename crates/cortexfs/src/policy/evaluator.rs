@@ -7,7 +7,7 @@ use super::{PolicyObjectClass, PolicyPermission, PolicyV0};
 /// mount, path, and principal constraints independently.
 pub trait PolicyEvaluator: std::fmt::Debug {
     /// Returns whether one concrete policy request is allowed.
-    fn allows(
+    fn evaluate(
         &self,
         subject_type: &str,
         object_class: PolicyObjectClass,
@@ -17,7 +17,7 @@ pub trait PolicyEvaluator: std::fmt::Debug {
 }
 
 impl PolicyEvaluator for PolicyV0 {
-    fn allows(
+    fn evaluate(
         &self,
         subject_type: &str,
         object_class: PolicyObjectClass,
