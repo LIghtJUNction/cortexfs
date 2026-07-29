@@ -79,8 +79,8 @@ pub struct ToolExecutionAuthority<'a> {
     pub(crate) identity: &'a AgentUnixIdentity,
     pub(crate) mount_table: &'a MountTable,
     pub(crate) agent_subject: &'a str,
-    pub(crate) agent_policy: &'a PolicyV0,
-    pub(crate) tool_policy: &'a PolicyV0,
+    pub(crate) agent_policy: &'a dyn PolicyEvaluator,
+    pub(crate) tool_policy: &'a dyn PolicyEvaluator,
 }
 
 impl<'a> ToolExecutionAuthority<'a> {
@@ -90,8 +90,8 @@ impl<'a> ToolExecutionAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         agent_subject: &'a str,
-        agent_policy: &'a PolicyV0,
-        tool_policy: &'a PolicyV0,
+        agent_policy: &'a dyn PolicyEvaluator,
+        tool_policy: &'a dyn PolicyEvaluator,
     ) -> Self {
         Self {
             principal: ToolExecutionPrincipal::Agent,
@@ -110,8 +110,8 @@ impl<'a> ToolExecutionAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         model_subject: &'a str,
-        agent_policy: &'a PolicyV0,
-        tool_policy: &'a PolicyV0,
+        agent_policy: &'a dyn PolicyEvaluator,
+        tool_policy: &'a dyn PolicyEvaluator,
     ) -> Self {
         Self {
             principal: ToolExecutionPrincipal::Model,
@@ -242,7 +242,7 @@ pub struct SharedAccessAuthority<'a> {
     pub(crate) identity: &'a AgentUnixIdentity,
     pub(crate) mount_table: &'a MountTable,
     pub(crate) agent_subject: &'a str,
-    pub(crate) policy: &'a PolicyV0,
+    pub(crate) policy: &'a dyn PolicyEvaluator,
 }
 
 impl<'a> SharedAccessAuthority<'a> {
@@ -252,7 +252,7 @@ impl<'a> SharedAccessAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         agent_subject: &'a str,
-        policy: &'a PolicyV0,
+        policy: &'a dyn PolicyEvaluator,
     ) -> Self {
         Self {
             identity,
@@ -269,7 +269,7 @@ pub struct SessionAccessAuthority<'a> {
     pub(crate) identity: &'a AgentUnixIdentity,
     pub(crate) mount_table: &'a MountTable,
     pub(crate) agent_subject: &'a str,
-    pub(crate) policy: &'a PolicyV0,
+    pub(crate) policy: &'a dyn PolicyEvaluator,
 }
 
 impl<'a> SessionAccessAuthority<'a> {
@@ -279,7 +279,7 @@ impl<'a> SessionAccessAuthority<'a> {
         identity: &'a AgentUnixIdentity,
         mount_table: &'a MountTable,
         agent_subject: &'a str,
-        policy: &'a PolicyV0,
+        policy: &'a dyn PolicyEvaluator,
     ) -> Self {
         Self {
             identity,

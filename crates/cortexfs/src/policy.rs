@@ -1,6 +1,8 @@
+pub mod evaluator;
 pub mod subject;
 
 use crate::{abi, is_object_name};
+pub use evaluator::PolicyEvaluator;
 
 /// Policy syntax error for the fixed v0 allowlist.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -232,10 +234,10 @@ impl PolicyV0 {
         &self.rules
     }
 
-    /// Returns whether every rule is also present in `parent` with the same
-    /// subject, object, and permission.
+    /// Returns whether `parent` allows every rule with the same subject,
+    /// object, and permission.
     #[must_use]
-    pub fn is_exact_subset_of(&self, parent: &Self) -> bool {
+    pub fn is_exact_subset_of(&self, parent: &dyn PolicyEvaluator) -> bool {
         self.rules.iter().all(|rule| {
             parent.allows(
                 rule.subject_type(),
@@ -256,7 +258,7 @@ impl PolicyV0 {
     #[must_use]
     pub fn is_authority_subset_of(
         &self,
-        parent: &Self,
+        parent: &dyn PolicyEvaluator,
         child_subject: &str,
         parent_subject: &str,
     ) -> bool {

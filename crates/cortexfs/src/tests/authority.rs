@@ -1,3 +1,18 @@
+#[derive(Debug)]
+struct FixedPolicy(bool);
+
+impl crate::policy::PolicyEvaluator for FixedPolicy {
+    fn allows(
+        &self,
+        _subject_type: &str,
+        _object_class: PolicyObjectClass,
+        _object_name: &str,
+        _permission: PolicyPermission,
+    ) -> bool {
+        self.0
+    }
+}
+
 #[test]
 fn tool_listing_ignores_non_executable_and_control_entries() {
     let root = clean_test_dir("tool-list");
@@ -83,6 +98,46 @@ fn tool_execution_authority_requires_all_layers() {
 
     let grant = authorize_tool_execution(&tool_path, "fs.read", authority);
     assert!(matches!(grant, Ok(ref grant) if grant.hit().path() == tools.join("fs.read")));
+}
+
+#[test]
+fn tool_mechanism_accepts_replaceable_policy_evaluators() {
+    let root = clean_test_dir("tool-authority-policy-boundary");
+    let tools = root.join("tool");
+    assert!(fs::create_dir_all(&tools).is_ok());
+    write_fixture_file(&tools.join("fs.read"), 0o755);
+
+    let identity = ok!(unix_identity_for(&tools.join("fs.read")));
+    let mounts = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev");
+    let noexec = mount_table_for_target(&tools, "rw", "bind,nosuid,nodev,noexec");
+    let tool_path = ToolPath::new([tools]);
+    let allow = FixedPolicy(true);
+    let deny = FixedPolicy(false);
+
+    assert!(
+        authorize_tool_execution(
+            &tool_path,
+            "fs.read",
+            ToolExecutionAuthority::new(&identity, &mounts, "custom_t", &allow, &allow),
+        )
+        .is_ok()
+    );
+    assert_eq!(
+        authorize_tool_execution(
+            &tool_path,
+            "fs.read",
+            ToolExecutionAuthority::new(&identity, &mounts, "custom_t", &deny, &allow),
+        ),
+        Err(ToolExecutionDenial::AgentPolicy)
+    );
+    assert_eq!(
+        authorize_tool_execution(
+            &tool_path,
+            "fs.read",
+            ToolExecutionAuthority::new(&identity, &noexec, "custom_t", &allow, &allow),
+        ),
+        Err(ToolExecutionDenial::NoExecMount)
+    );
 }
 
 #[test]

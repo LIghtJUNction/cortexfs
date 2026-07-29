@@ -44,7 +44,9 @@ pub use context::pack::{
     validate_context_pack_source,
 };
 pub use mount::table::{MountEntry, MountError, MountMode, MountOption, MountTable};
-pub use policy::{PolicyError, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0};
+pub use policy::{
+    PolicyError, PolicyEvaluator, PolicyObjectClass, PolicyPermission, PolicyRule, PolicyV0,
+};
 pub use provider::model::{
     Capability, ModelCapabilities, ModelCapabilityIssue, ModelCapabilityRegistry,
     ModelCapabilityReport, ModelContextLimit, ModelDriverRouteError, ModelDriverRoutingTable,
