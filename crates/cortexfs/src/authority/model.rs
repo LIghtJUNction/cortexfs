@@ -1,7 +1,7 @@
 use crate::{PolicyEvaluator, PolicyObjectClass, PolicyPermission};
 
 /// Policy input for one selected model decision.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ModelUseAuthority<'a> {
     subject: &'a str,
     policy: &'a dyn PolicyEvaluator,

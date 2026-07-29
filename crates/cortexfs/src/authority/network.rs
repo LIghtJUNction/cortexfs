@@ -1,7 +1,7 @@
 use crate::{PolicyEvaluator, PolicyObjectClass, PolicyPermission, is_object_name};
 
 /// Policy input for one named network connection class.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct NetworkConnectAuthority<'a> {
     subject: &'a str,
     policy: &'a dyn PolicyEvaluator,
