@@ -395,6 +395,7 @@ allow planner_t agent:executor create
 }
 use super::*;
 
+#[derive(Debug)]
 struct FixedSchedulePolicy(bool);
 
 impl crate::PolicyEvaluator for FixedSchedulePolicy {

@@ -282,7 +282,7 @@ fn publish_stage(
     let fault = take_install_fault();
     if fault == 1 {
         #[cfg(test)]
-        replace_published_control_for_test(class, control_name)?;
+        testhelpers::replace_published_control_for_test(class, control_name)?;
     }
     if !entry_matches(class, control_name, control_receipt, EntryKind::Directory) {
         return Err(InstallError::unavailable(
@@ -291,7 +291,7 @@ fn publish_stage(
     }
     if fault == 5 {
         #[cfg(test)]
-        replace_published_control_for_test(class, control_name)?;
+        testhelpers::replace_published_control_for_test(class, control_name)?;
     }
     let exec_result = if matches!(fault, 0 | 1 | 5 | 6 | 7) {
         rename_noreplace(&staged.directory, "executable", class, executable_name)
@@ -312,7 +312,7 @@ fn publish_stage(
     }
     if matches!(fault, 6 | 7) {
         #[cfg(test)]
-        replace_published_executable_for_test(class, executable_name)?;
+        testhelpers::replace_published_executable_for_test(class, executable_name)?;
     }
     if !entry_matches(
         class,
@@ -781,7 +781,7 @@ fn rollback_control(
 ) -> Result<(), InstallError> {
     if fault == 2 {
         #[cfg(test)]
-        replace_published_control_for_test(class, name)?;
+        testhelpers::replace_published_control_for_test(class, name)?;
     }
     rename_noreplace(class, name, stage, "rolled-back-control").map_err(|error| {
         InstallError::unavailable(format!(
@@ -790,7 +790,7 @@ fn rollback_control(
     })?;
     if fault == 3 {
         #[cfg(test)]
-        replace_parked_control_for_test(stage)?;
+        testhelpers::replace_parked_control_for_test(stage)?;
     }
     if entry_matches(stage, "rolled-back-control", receipt, EntryKind::Directory) {
         return Ok(());
@@ -815,7 +815,7 @@ fn rollback_executable(
     })?;
     if fault == 7 {
         #[cfg(test)]
-        create_test_executable(class, name)?;
+        testhelpers::create_test_executable(class, name)?;
         #[cfg(test)]
         rename_noreplace(class, name, stage, "recreated-executable").map_err(|error| {
             InstallError::unavailable(format!(
@@ -845,16 +845,16 @@ fn install_collision(error: &io::Error) -> InstallError {
 }
 
 #[cfg(test)]
+#[path = "install/tests/helpers.rs"]
+mod testhelpers;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::object::metadata::tool_exec_metadata;
     use crate::object::receipt::inspect_object;
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;
-    use std::io::Write as _;
-
-    mod helpers;
-    use helpers::*;
 
     fn fixture() -> Result<(tempfile::TempDir, PathBuf, String), Box<dyn std::error::Error>> {
         let root = tempfile::tempdir()?;
