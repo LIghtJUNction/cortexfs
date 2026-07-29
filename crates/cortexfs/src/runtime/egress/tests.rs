@@ -29,6 +29,19 @@ fn write_model(root: &Path, model: &str, base_url: &str) -> io::Result<()> {
     fs::write(control.join("default"), format!("base_url={base_url}\n"))
 }
 
+fn create_egress(
+    control: &Path,
+    root: &Path,
+    model: &str,
+    environment: &[(String, String)],
+    uid: u32,
+    gid: u32,
+    run: &str,
+) -> Result<ProviderEgress, ProviderEgressError> {
+    let plan = ProviderEgressPlan::from_controls(root, model, environment, run)?;
+    ProviderEgress::create(control, plan, uid, gid)
+}
+
 #[test]
 fn plan_keeps_validated_fixed_base_without_dns() -> Result<(), Box<dyn std::error::Error>> {
     let root = tempfile::tempdir()?;
@@ -102,7 +115,7 @@ fn plan_rejects_provider_base_conflicts_before_resources() -> Result<(), Box<dyn
         root.path().join("model/fixture/primary.d/fallback"),
         "fixture/fallback\n",
     )?;
-    let result = ProviderEgress::create(
+    let result = create_egress(
         &control,
         root.path(),
         "fixture/primary",
@@ -163,7 +176,7 @@ fn plan_skips_orphan_fallback_but_requires_primary_control()
         "orphan/missing\n",
     )?;
     assert_eq!(plan_targets(root.path(), "fixture/primary")?.len(), 1);
-    let result = ProviderEgress::create(
+    let result = create_egress(
         &control,
         root.path(),
         "orphan/missing",
@@ -199,7 +212,7 @@ fn create_preserves_receipts_owner_and_replacement() -> Result<(), Box<dyn std::
         nix::unistd::geteuid().as_raw(),
         nix::unistd::getegid().as_raw(),
     );
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",
@@ -238,7 +251,7 @@ fn run_directory_keeps_runtime_owner_when_agent_differs_if_root()
     } else {
         runtime
     };
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",
@@ -274,7 +287,7 @@ fn root_agent_uid_can_use_http_adapter() -> Result<(), Box<dyn std::error::Error
         let _read = stream.read(&mut input)?;
         stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
     });
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",
@@ -354,7 +367,7 @@ fn connection_headers_never_reach_curl_or_upstream() -> Result<(), Box<dyn std::
         "fixture/chat",
         &format!("http://{}/v1", tcp.local_addr()?),
     )?;
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",
@@ -404,7 +417,7 @@ fn drop_stops_continuous_curl_within_one_second() -> Result<(), Box<dyn std::err
             thread::sleep(Duration::from_millis(10));
         }
     });
-    let egress = ProviderEgress::create(
+    let egress = create_egress(
         &control,
         root.path(),
         "fixture/chat",

@@ -14,6 +14,49 @@ impl crate::policy::PolicyEvaluator for FixedPolicy {
 }
 
 #[test]
+fn model_selection_accepts_replaceable_policy_evaluators() {
+    let allow = FixedPolicy(true);
+    let deny = FixedPolicy(false);
+
+    assert_eq!(
+        crate::authorize_model_use(
+            "main",
+            "openai/gpt",
+            "openai/gpt",
+            crate::ModelUseAuthority::new("custom_t", &allow),
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        crate::authorize_model_use(
+            "main",
+            "openai/gpt",
+            "openai/gpt",
+            crate::ModelUseAuthority::new("custom_t", &deny),
+        ),
+        Err(crate::ModelUseDenial::PrimaryFallback)
+    );
+}
+
+#[test]
+fn network_gate_accepts_replaceable_policy_evaluators() {
+    assert_eq!(
+        crate::authorize_network_connect(
+            "default",
+            crate::NetworkConnectAuthority::new("custom_t", &FixedPolicy(true)),
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        crate::authorize_network_connect(
+            "default",
+            crate::NetworkConnectAuthority::new("custom_t", &FixedPolicy(false)),
+        ),
+        Err(crate::NetworkConnectDenial::Policy)
+    );
+}
+
+#[test]
 fn tool_listing_ignores_non_executable_and_control_entries() {
     let root = clean_test_dir("tool-list");
     let tools = root.join("tool");

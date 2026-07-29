@@ -1143,15 +1143,19 @@ pub(crate) fn run_agent_executable_streaming(
     let provider_egress = match runtime.execution {
         AgentExecutableSocketExecution::Bwrap { control_dir, .. } if provider_model => {
             let control_dir = control_dir.ok_or(SocketRuntimeError::CannotRunAgent)?;
+            let plan = runtime::egress::ProviderEgressPlan::from_controls(
+                runtime.ctx_root,
+                runtime.model.ok_or(SocketRuntimeError::CannotRunAgent)?,
+                runtime.env,
+                request.run_id,
+            )
+            .map_err(|_error| SocketRuntimeError::CannotRunAgent)?;
             Some(
                 runtime::egress::ProviderEgress::create(
                     control_dir,
-                    runtime.ctx_root,
-                    runtime.model.ok_or(SocketRuntimeError::CannotRunAgent)?,
-                    runtime.env,
+                    plan,
                     runtime.identity.uid(),
                     runtime.identity.gid(),
-                    request.run_id,
                 )
                 .map_err(|_error| SocketRuntimeError::CannotRunAgent)?,
             )

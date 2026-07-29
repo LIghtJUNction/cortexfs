@@ -73,12 +73,11 @@ pub(crate) fn prepare_agent_tool_call(
         .join(view.agent_name());
     let context_path =
         cortexfs::tsh_context_state_path(&home_source.join("session").join(config.session));
-    let network_allowed = view.policy().allows(
-        view.policy_subject(),
-        PolicyObjectClass::Network,
+    let network_allowed = authorize_network_connect(
         "default",
-        PolicyPermission::Connect,
-    );
+        NetworkConnectAuthority::new(view.policy_subject(), view.policy()),
+    )
+    .is_ok();
     if tool_call.name == "tsh" {
         validate_agent_tsh_args(&tool_call.args)?;
     } else if !view.declared_tools().contains(&tool_call.name)
