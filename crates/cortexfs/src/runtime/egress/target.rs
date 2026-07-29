@@ -15,7 +15,7 @@ pub(super) struct ProviderTarget {
 pub(super) fn insert_target(
     targets: &mut BTreeMap<String, ProviderTarget>,
     provider: &str,
-    canonical: reqwest::Url,
+    canonical: &reqwest::Url,
     authority: String,
     base_path: String,
 ) -> Result<(), ProviderEgressError> {

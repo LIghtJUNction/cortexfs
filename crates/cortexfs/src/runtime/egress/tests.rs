@@ -34,12 +34,11 @@ fn create_egress(
     root: &Path,
     model: &str,
     environment: &[(String, String)],
-    uid: u32,
-    gid: u32,
+    identity: (u32, u32),
     run: &str,
 ) -> Result<ProviderEgress, ProviderEgressError> {
     let plan = ProviderEgressPlan::from_controls(root, model, environment, run)?;
-    ProviderEgress::create(control, plan, uid, gid)
+    ProviderEgress::create(control, plan, identity.0, identity.1)
 }
 
 #[test]
@@ -120,8 +119,10 @@ fn plan_rejects_provider_base_conflicts_before_resources() -> Result<(), Box<dyn
         root.path(),
         "fixture/primary",
         &[],
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     );
     assert!(matches!(
@@ -181,8 +182,10 @@ fn plan_skips_orphan_fallback_but_requires_primary_control()
         root.path(),
         "orphan/missing",
         &[],
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     );
     assert!(matches!(result, Err(ProviderEgressError::MissingControl)));
@@ -217,8 +220,7 @@ fn create_preserves_receipts_owner_and_replacement() -> Result<(), Box<dyn std::
         root.path(),
         "fixture/chat",
         &[],
-        owner.0,
-        owner.1,
+        owner,
         "run1",
     )?;
     let directory = egress.host_dir().to_owned();
@@ -256,8 +258,7 @@ fn run_directory_keeps_runtime_owner_when_agent_differs_if_root()
         root.path(),
         "fixture/chat",
         &[],
-        agent.0,
-        agent.1,
+        agent,
         "run1",
     )?;
     let directory = fs::symlink_metadata(egress.host_dir())?;
@@ -292,8 +293,7 @@ fn root_agent_uid_can_use_http_adapter() -> Result<(), Box<dyn std::error::Error
         root.path(),
         "fixture/chat",
         &[],
-        65_534,
-        65_534,
+        (65_534, 65_534),
         "run1",
     )?;
     let status = Command::new(std::env::current_exe()?)
@@ -372,8 +372,10 @@ fn connection_headers_never_reach_curl_or_upstream() -> Result<(), Box<dyn std::
         root.path(),
         "fixture/chat",
         &[],
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     )?;
     for connection in [
@@ -422,8 +424,10 @@ fn drop_stops_continuous_curl_within_one_second() -> Result<(), Box<dyn std::err
         root.path(),
         "fixture/chat",
         &[],
-        nix::unistd::geteuid().as_raw(),
-        nix::unistd::getegid().as_raw(),
+        (
+            nix::unistd::geteuid().as_raw(),
+            nix::unistd::getegid().as_raw(),
+        ),
         "run1",
     )?;
     let mut client = UnixStream::connect(egress.socket("fixture").ok_or("missing socket")?)?;

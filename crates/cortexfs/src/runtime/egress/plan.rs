@@ -10,13 +10,13 @@ use crate::object::executor::{
     MAX_RUNNER_CONTROL_BYTES, model_candidates, model_default_base_url, read_small_plain_text_file,
 };
 
-pub(crate) struct ProviderEgressPlan {
+pub struct ProviderEgressPlan {
     pub(super) run: String,
     pub(super) targets: Vec<ProviderTarget>,
 }
 
 impl ProviderEgressPlan {
-    pub(crate) fn from_controls(
+    pub fn from_controls(
         ctx_root: &Path,
         model: &str,
         runtime_env: &[(String, String)],
@@ -36,7 +36,7 @@ impl ProviderEgressPlan {
     }
 }
 
-pub(crate) fn is_provider_model(ctx_root: &Path, model: &str) -> Result<bool, ProviderEgressError> {
+pub fn is_provider_model(ctx_root: &Path, model: &str) -> Result<bool, ProviderEgressError> {
     let candidates =
         model_candidates(ctx_root, model).map_err(|_error| ProviderEgressError::InvalidModel)?;
     Ok(candidates
@@ -82,7 +82,7 @@ pub(super) fn plan_targets(
         }
         let mut canonical = url;
         canonical.set_path(&base_path);
-        insert_target(&mut targets, provider, canonical, authority, base_path)?;
+        insert_target(&mut targets, provider, &canonical, authority, base_path)?;
     }
     Ok(targets.into_values().collect())
 }
