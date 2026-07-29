@@ -41,7 +41,7 @@ pub fn authorize_tool_execution(
         return Err(ToolExecutionDenial::NoExecMount);
     }
 
-    if !authority.agent_policy.allows(
+    if !authority.agent_policy.evaluate(
         authority.agent_subject,
         PolicyObjectClass::Tool,
         tool_name,
@@ -50,7 +50,7 @@ pub fn authorize_tool_execution(
         return Err(ToolExecutionDenial::AgentPolicy);
     }
 
-    if !authority.tool_policy.allows(
+    if !authority.tool_policy.evaluate(
         authority.agent_subject,
         PolicyObjectClass::Tool,
         tool_name,
@@ -96,7 +96,7 @@ pub fn authorize_shared_access(
         return Err(SharedAccessDenial::LinuxPermission);
     }
 
-    if !authority.policy.allows(
+    if !authority.policy.evaluate(
         authority.agent_subject,
         PolicyObjectClass::Shared,
         shared_name,
@@ -141,7 +141,7 @@ pub fn authorize_session_access(
     }
 
     if let Some(shared_name) = session.shared_name()
-        && !authority.policy.allows(
+        && !authority.policy.evaluate(
             authority.agent_subject,
             PolicyObjectClass::Shared,
             shared_name,
@@ -151,7 +151,7 @@ pub fn authorize_session_access(
         return Err(SessionAccessDenial::SharedPolicy);
     }
 
-    if !authority.policy.allows(
+    if !authority.policy.evaluate(
         authority.agent_subject,
         PolicyObjectClass::Session,
         session.session_name(),

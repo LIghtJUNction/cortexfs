@@ -2,7 +2,7 @@
 struct FixedPolicy(bool);
 
 impl crate::policy::PolicyEvaluator for FixedPolicy {
-    fn allows(
+    fn evaluate(
         &self,
         _subject_type: &str,
         _object_class: PolicyObjectClass,
